@@ -2,7 +2,7 @@
 // (<t:1618953630>, shown there as "Tuesday, April 20, 2021 at 16:20" etc. for a
 // reader in US Central time), converted to the English (US) 12-hour clock.
 // Unix values were computed independently with Python's zoneinfo.
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, url }) => {
   const text = sel => page.locator(sel).textContent();
   const item = style => page.locator(`.dts-item[data-style="${style}"]`);
   const preview = async style => (await item(style).locator('.dts-preview').textContent()).trim();
@@ -186,6 +186,77 @@ module.exports = async ({ page, open, assert }) => {
   await page.waitForFunction(() => document.querySelector('#dts-decode-msg').textContent.length > 0);
   assert.equal(await page.locator('.dts-dec-item').count(), 0);
   assert.equal(await page.locator('#dts-decode-actions').isHidden(), true);
+
+  // Regression: typing a message into the decoder fired the role=alert "No
+  // timestamp found. Paste a code like ..." after almost every keystroke (18
+  // alerts, 1,728 characters) and re-announced the whole decoded block. Now
+  // one short summary is announced once typing pauses.
+  await page.evaluate(() => {
+    window.__said = [];
+    new MutationObserver(ms => ms.forEach(m => {
+      const el = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const region = el && el.closest('[aria-live]:not([aria-live="off"]), [role="alert"], [role="status"], [role="log"]');
+      const added = m.type === 'characterData' ? m.target.data : [...m.addedNodes].map(n => n.textContent).join('');
+      if (region && added.trim()) window.__said.push(added.trim());
+    })).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  const said = () => page.evaluate(() => window.__said.splice(0));
+  const status = want => page.waitForFunction(w => document.querySelector('#dts-decode-status').textContent === w, want);
+  for (const sel of ['#dts-decode-out', '#dts-decode-msg']) {
+    assert.equal(await page.locator(sel).evaluate(el => !!el.closest('[aria-live]:not([aria-live="off"]), [role="alert"], [role="status"]')), false, `${sel} is not live`);
+  }
+  await status('No timestamp found.'); // from "hello there"
+  await page.fill('#dts-decode', '');
+  await page.waitForTimeout(900);
+  await said();
+  await page.type('#dts-decode', 'at <t:1618953630:R> ok', { delay: 150 });
+  await status('1 timestamp found: 3 hours ago');
+  await page.waitForTimeout(300);
+  assert.deepEqual(await said(), ['1 timestamp found: 3 hours ago']);
+  await page.fill('#dts-decode', 'Raid <t:1618953630:F> (<t:1618953630:R>)');
+  await status('2 timestamps found. First: Tuesday, April 20, 2021 at 4:20 PM');
+  await page.fill('#dts-decode', '1618953630123');
+  await status('Looks like milliseconds; Discord needs seconds, so use 1618953630: April 20, 2021 at 4:20 PM');
+  await page.fill('#dts-decode', '175928847299117063');
+  await status('Discord ID created Saturday, April 30, 2016 at 6:18 AM');
+
+  // The privacy line is in every page's footer; this slot answers a real question.
+  const faqs = await page.locator('.faq summary').allTextContents();
+  assert.ok(!faqs.some(q => /uploaded|sent to a server/i.test(q)), faqs.join(' | '));
+  assert.ok(faqs.some(q => /plain text/.test(q)), faqs.join(' | '));
+
+  // Regression: the time zone menu was filled at load, one Intl.DateTimeFormat
+  // per zone (about 420), which blocked the main thread for about 400 ms on a
+  // throttled phone. Now it starts with the local zone and UTC and fills in
+  // small idle-time batches, or at once when first used.
+  await page.addInitScript(() => {
+    // Most DateTimeFormat constructions in one uninterrupted run of page JS
+    // (the test clock's idle callbacks report no time left, so every idle
+    // batch is the minimum size; the old page built about 440 in one go).
+    let run = 0;
+    window.__dtfMax = 0;
+    const count = () => { if (!run++) queueMicrotask(() => { window.__dtfMax = Math.max(window.__dtfMax, run); run = 0; }); };
+    Intl.DateTimeFormat = new Proxy(Intl.DateTimeFormat, {
+      construct(t, a, nt) { count(); return Reflect.construct(t, a, nt); },
+      apply(t, self, a) { count(); return Reflect.apply(t, self, a); },
+    });
+    if (location.search === '?no-idle') window.requestIdleCallback = () => 0; // the browser never goes idle
+  });
+  const zoneValues = () => page.$$eval('#dts-zone option', os => os.map(o => o.value));
+  await page.goto(url + '?no-idle');
+  assert.deepEqual(await zoneValues(), ['America/Chicago', 'UTC']);
+  assert.equal(await page.inputValue('#dts-zone'), 'America/Chicago');
+  await page.selectOption('#dts-zone', 'UTC');
+  await page.focus('#dts-zone'); // first use completes the menu at once
+  const all = await zoneValues();
+  assert.ok(all.length > 300 && all.includes('Asia/Kolkata') && all[0] === 'UTC', `${all.length} zones`);
+  assert.equal(await page.inputValue('#dts-zone'), 'UTC', 'the choice made before the list filled is kept');
+  assert.equal(await page.locator('#dts-zone option[value="America/Chicago"]').textContent(), 'America/Chicago (UTC\u221205:00) · local');
+  await open();
+  await page.waitForFunction(() => document.querySelector('#dts-zone').options.length > 300);
+  const dtfMax = await page.evaluate(() => window.__dtfMax);
+  assert.ok(dtfMax < 100, `${dtfMax} DateTimeFormats built in one go`);
+  assert.equal(await page.inputValue('#dts-zone'), 'America/Chicago');
 
   await cdp.send('Emulation.setTimezoneOverride', { timezoneId: '' }).catch(() => {});
 };

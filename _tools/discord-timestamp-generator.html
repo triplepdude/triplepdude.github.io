@@ -78,8 +78,8 @@ faq:
     a: Yes. A relative timestamp such as "in 2 hours" is recalculated by the reader's app, so it counts down and then switches to "ago" once the moment has passed. The preview here updates live in the same way.
   - q: Can I choose a 12-hour or 24-hour clock?
     a: Not in the code itself. Each reader sees the clock style that goes with their own Discord language, for example 4:20 PM in English (US) or 16:20 in English (UK).
-  - q: Is anything I enter sent to a server?
-    a: No. The generator and decoder run entirely in your browser. Nothing you type or paste is uploaded or stored.
+  - q: Why does my timestamp show up as plain text in Discord?
+    a: Discord only converts the exact form `<t:1618953630>` or `<t:1618953630:R>`, with no spaces, a whole number of seconds and one of the style letters in the table above. Anything else, such as a decimal point, a space after the colon or an unknown letter, is shown exactly as typed, and so is a code inside backticks or a code block. Copy the code from the generator and paste it outside any formatting.
 ---
 <style>
 .tool-page:has(#dts-list) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
@@ -167,10 +167,13 @@ faq:
 <h2 class="dts-h">Decode a timestamp</h2>
 <div class="field">
   <label for="dts-decode">Paste a Discord timestamp, a message, a Unix time or a Discord ID</label>
-  <input type="text" id="dts-decode" class="mono" autocomplete="off" spellcheck="false" placeholder="<t:1618953630:R> or 1618953630">
+  <input type="text" id="dts-decode" class="mono" autocomplete="off" spellcheck="false" placeholder="<t:1618953630:R> or 1618953630" aria-describedby="dts-decode-msg">
 </div>
-<p class="msg error" id="dts-decode-msg" role="alert"></p>
-<div id="dts-decode-out" aria-live="polite"></div>
+<p class="msg error" id="dts-decode-msg"></p>
+<!-- The decoded block is redrawn as you type, so it is not a live region; a
+     one-line summary is announced here once typing pauses. -->
+<p class="visually-hidden" id="dts-decode-status" role="status"></p>
+<div id="dts-decode-out"></div>
 <div class="actions dts-actions" id="dts-decode-actions" hidden>
   <button class="btn secondary small" type="button" id="dts-decode-load">Load into generator</button>
 </div>
@@ -266,7 +269,14 @@ faq:
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
 
-  function buildZoneSelect(sel) {
+  // The menu lists every zone the browser knows (about 420), each labelled
+  // with its current UTC offset. Each offset needs its own
+  // Intl.DateTimeFormat, and building them all at load blocked the main thread
+  // for about 400 ms on a throttled phone. So the menu starts with just the
+  // local zone and UTC; the full list is built in small batches while the
+  // browser is idle and swapped in when complete, or finished at once if the
+  // menu is focused or pressed before then.
+  function zoneList() {
     var zones = [];
     try { zones = Intl.supportedValuesOf('timeZone').slice(); } catch (e) { zones = []; }
     if (!zones.length) zones = ['America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney', 'Pacific/Auckland'];
@@ -278,18 +288,55 @@ faq:
     }).sort();
     zones.unshift('UTC');
     if (zones.indexOf(LOCAL_TZ) < 0) zones.unshift(LOCAL_TZ);
-    var now = Date.now(), frag = document.createDocumentFragment();
-    zones.forEach(function (z) {
-      var label;
-      try { label = z.replace(/_/g, ' ') + ' (' + offsetLabel(offsetMs(now, z)) + ')'; } catch (e) { return; }
+    return zones;
+  }
+  var ZONE_EVENTS = ['focus', 'pointerdown', 'mousedown', 'touchstart'];
+  function zoneMenu(sel) {
+    var now = Date.now(), zones = null, next = 0, done = false;
+    var full = document.createDocumentFragment();
+    function option(z) {
       var o = document.createElement('option');
       o.value = z;
-      o.textContent = label + (z === LOCAL_TZ ? ' · local' : '');
-      frag.appendChild(o);
+      o.textContent = z.replace(/_/g, ' ') + ' (' + offsetLabel(offsetMs(now, z)) + ')' + (z === LOCAL_TZ ? ' · local' : '');
+      return o;
+    }
+    function build(n) { // adds up to n zones to the full list; true once it is complete
+      if (!zones) zones = zoneList();
+      for (var end = Math.min(zones.length, next + n); next < end; next++) {
+        try { full.appendChild(option(zones[next])); } catch (e) { /* a zone this browser cannot format */ }
+      }
+      return next >= zones.length;
+    }
+    function complete() {
+      if (done) return;
+      done = true;
+      build(Infinity);
+      var keep = sel.value;
+      sel.textContent = '';
+      sel.appendChild(full);
+      sel.value = keep;
+      ZONE_EVENTS.forEach(function (t) { sel.removeEventListener(t, complete); });
+    }
+    function later(fn) {
+      if (window.requestIdleCallback) requestIdleCallback(fn, { timeout: 1000 });
+      else setTimeout(fn, 16);
+    }
+    function work(deadline) {
+      if (done) return;
+      // Always a small batch (an idle period can report no time left), then
+      // more while the browser stays idle.
+      var fin = build(20);
+      while (!fin && deadline && deadline.timeRemaining && deadline.timeRemaining() > 5) fin = build(10);
+      if (fin) complete(); else later(work);
+    }
+    [LOCAL_TZ, 'UTC'].forEach(function (z, i) {
+      if (i && z === LOCAL_TZ) return;
+      try { sel.appendChild(option(z)); } catch (e) { /* a zone this browser cannot format */ }
     });
-    sel.appendChild(frag);
     sel.value = LOCAL_TZ;
     if (sel.value !== LOCAL_TZ) sel.value = 'UTC';
+    ZONE_EVENTS.forEach(function (t) { sel.addEventListener(t, complete, { passive: true }); });
+    later(work);
   }
 
   // ---------- Discord-style formatting (English, US; viewer's local zone) ----------
@@ -523,6 +570,13 @@ faq:
     return box;
   }
 
+  // Screen readers hear one short line per decode, once typing pauses.
+  var statusEl = $('#dts-decode-status'), statusTimer = null;
+  function sayDecoded(text) {
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () { if (statusEl.textContent !== text) statusEl.textContent = text; }, 600);
+  }
+
   function runDecode() {
     var raw = $('#dts-decode').value;
     var out = $('#dts-decode-out'), msg = $('#dts-decode-msg');
@@ -531,78 +585,88 @@ faq:
     decoded = null;
     $('#dts-decode-actions').hidden = true;
     var text = raw.trim();
-    if (!text) return;
-    var frag = document.createDocumentFragment(), wrap = document.createElement('div');
-    wrap.className = 'dts-dec';
-    var tokens = [], m;
-    TOKEN.lastIndex = 0;
-    while ((m = TOKEN.exec(raw)) !== null) tokens.push({ index: m.index, len: m[0].length, sec: +m[1], style: m[2] || '', src: m[0] });
-    try {
-      if (tokens.length) {
-        var bad = tokens.filter(function (t) { return !isFinite(new Date(t.sec * 1000).getTime()); });
-        if (bad.length) { msg.textContent = bad[0].src + ' is outside the range of dates a browser can show.'; return; }
-        var rest = raw.replace(TOKEN, '').trim();
-        if (rest) {
-          var p = document.createElement('div');
-          p.className = 'dts-message';
-          var pos = 0, cut = Math.min(raw.length, PREVIEW_MAX);
-          tokens.forEach(function (t) { if (t.index < cut && t.index + t.len > cut) cut = t.index; });
-          tokens.forEach(function (t) {
-            if (t.index + t.len > cut) return;
-            p.appendChild(document.createTextNode(raw.slice(pos, t.index)));
-            var ch = chip(render(t.style, t.sec));
-            if (t.style === 'R') ch.setAttribute('data-rel', String(t.sec));
-            p.appendChild(ch);
-            pos = t.index + t.len;
-          });
-          p.appendChild(document.createTextNode(raw.slice(pos, cut) + (cut < raw.length ? ' …' : '')));
-          var lbl = document.createElement('p');
-          lbl.className = 'label';
-          lbl.textContent = 'Message preview' + (cut < raw.length ? ' (first ' + PREVIEW_MAX.toLocaleString('en-US') + ' characters)' : '');
-          frag.appendChild(lbl);
-          frag.appendChild(p);
-        }
-        tokens.slice(0, 20).forEach(function (t) { wrap.appendChild(decodeItem(t.src, t.sec, t.style, '')); });
-        decoded = tokens[0].sec;
-      } else if (/^-?\d+$/.test(text)) {
-        var digits = text.replace('-', '');
-        if (digits.length >= 17 && text[0] !== '-') {
-          var id = BigInt(text);
-          if (id >= (1n << 64n)) { msg.textContent = 'That number is too large to be a Discord ID.'; return; }
-          var msv = Number((id >> 22n) + DISCORD_EPOCH);
-          var secv = Math.floor(msv / 1000);
-          var created = new Date(msv).toISOString().replace('T', ' ').replace('Z', ' UTC');
-          wrap.appendChild(decodeItem(text, secv, null, 'Discord ID created ' + created));
-          wrap.appendChild(decodeItem(code('F', secv), secv, 'F', ''));
-          decoded = secv;
-        } else {
-          var n = Number(text), note = '';
-          if (Math.abs(n) >= 1e14) {
-            n = Math.floor(n / 1e6);
-            note = 'Looks like microseconds; Discord needs seconds, so use ' + n;
-          } else if (Math.abs(n) >= 1e11) {
-            n = Math.floor(n / 1000);
-            note = 'Looks like milliseconds; Discord needs seconds, so use ' + n;
-          }
-          if (!isFinite(new Date(n * 1000).getTime())) { msg.textContent = 'That number is outside the range of dates a browser can show.'; return; }
-          ['f', 'R'].forEach(function (s, i) { wrap.appendChild(decodeItem(code(s, n), n, s, i === 0 ? note : '')); });
-          decoded = n;
-        }
-      } else {
-        msg.textContent = 'No timestamp found. Paste a code like <t:1618953630:F>, a Unix time in seconds, or a Discord ID.';
-        return;
-      }
-    } catch (e) {
+    var summary = '';
+    try { summary = decode(raw, text, out, msg); } catch (e) {
+      out.textContent = '';
+      decoded = null;
       msg.textContent = 'That input could not be decoded.';
-      return;
     }
-    frag.appendChild(wrap);
-    out.appendChild(frag);
+    sayDecoded(msg.textContent ? msg.textContent.replace(/^(.*?\.)\s.*$/, '$1') : summary);
     $('#dts-decode-actions').hidden = decoded === null;
   }
 
+  // Fills the decoder output (or msg) and returns a one-line summary of it.
+  function decode(raw, text, out, msg) {
+    if (!text) return '';
+    var frag = document.createDocumentFragment(), wrap = document.createElement('div');
+    wrap.className = 'dts-dec';
+    var tokens = [], m, summary;
+    TOKEN.lastIndex = 0;
+    while ((m = TOKEN.exec(raw)) !== null) tokens.push({ index: m.index, len: m[0].length, sec: +m[1], style: m[2] || '', src: m[0] });
+    if (tokens.length) {
+      var bad = tokens.filter(function (t) { return !isFinite(new Date(t.sec * 1000).getTime()); });
+      if (bad.length) { msg.textContent = bad[0].src + ' is outside the range of dates a browser can show.'; return ''; }
+      var rest = raw.replace(TOKEN, '').trim();
+      if (rest) {
+        var p = document.createElement('div');
+        p.className = 'dts-message';
+        var pos = 0, cut = Math.min(raw.length, PREVIEW_MAX);
+        tokens.forEach(function (t) { if (t.index < cut && t.index + t.len > cut) cut = t.index; });
+        tokens.forEach(function (t) {
+          if (t.index + t.len > cut) return;
+          p.appendChild(document.createTextNode(raw.slice(pos, t.index)));
+          var ch = chip(render(t.style, t.sec));
+          if (t.style === 'R') ch.setAttribute('data-rel', String(t.sec));
+          p.appendChild(ch);
+          pos = t.index + t.len;
+        });
+        p.appendChild(document.createTextNode(raw.slice(pos, cut) + (cut < raw.length ? ' …' : '')));
+        var lbl = document.createElement('p');
+        lbl.className = 'label';
+        lbl.textContent = 'Message preview' + (cut < raw.length ? ' (first ' + PREVIEW_MAX.toLocaleString('en-US') + ' characters)' : '');
+        frag.appendChild(lbl);
+        frag.appendChild(p);
+      }
+      tokens.slice(0, 20).forEach(function (t) { wrap.appendChild(decodeItem(t.src, t.sec, t.style, '')); });
+      decoded = tokens[0].sec;
+      summary = tokens.length + (tokens.length === 1 ? ' timestamp found: ' : ' timestamps found. First: ') + render(tokens[0].style, tokens[0].sec);
+    } else if (/^-?\d+$/.test(text)) {
+      var digits = text.replace('-', '');
+      if (digits.length >= 17 && text[0] !== '-') {
+        var id = BigInt(text);
+        if (id >= (1n << 64n)) { msg.textContent = 'That number is too large to be a Discord ID.'; return ''; }
+        var msv = Number((id >> 22n) + DISCORD_EPOCH);
+        var secv = Math.floor(msv / 1000);
+        var created = new Date(msv).toISOString().replace('T', ' ').replace('Z', ' UTC');
+        wrap.appendChild(decodeItem(text, secv, null, 'Discord ID created ' + created));
+        wrap.appendChild(decodeItem(code('F', secv), secv, 'F', ''));
+        decoded = secv;
+        summary = 'Discord ID created ' + render('F', secv);
+      } else {
+        var n = Number(text), note = '';
+        if (Math.abs(n) >= 1e14) {
+          n = Math.floor(n / 1e6);
+          note = 'Looks like microseconds; Discord needs seconds, so use ' + n;
+        } else if (Math.abs(n) >= 1e11) {
+          n = Math.floor(n / 1000);
+          note = 'Looks like milliseconds; Discord needs seconds, so use ' + n;
+        }
+        if (!isFinite(new Date(n * 1000).getTime())) { msg.textContent = 'That number is outside the range of dates a browser can show.'; return ''; }
+        ['f', 'R'].forEach(function (s, i) { wrap.appendChild(decodeItem(code(s, n), n, s, i === 0 ? note : '')); });
+        decoded = n;
+        summary = (note || 'Unix time ' + n) + ': ' + render('f', n);
+      }
+    } else {
+      msg.textContent = 'No timestamp found. Paste a code like <t:1618953630:F>, a Unix time in seconds, or a Discord ID.';
+      return '';
+    }
+    frag.appendChild(wrap);
+    out.appendChild(frag);
+    return summary;
+  }
+
   // ---------- Wiring ----------
-  buildZoneSelect(zoneEl);
+  zoneMenu(zoneEl);
   function userEdit() { pinned = null; update(); }
   [dateEl, timeEl].forEach(function (el) { el.addEventListener('input', userEdit); el.addEventListener('change', userEdit); });
   zoneEl.addEventListener('change', userEdit);

@@ -9,8 +9,9 @@ title: Free Online Tools
 <main class="wrap">
   <section class="hero">
     <h1>Free online tools that run in your browser</h1>
-    <p class="lede">{{ site.tools.size }} fast, private utilities for developers and everyday tasks. No sign-up, no uploads, no limits.</p>
+    <p class="lede">{{ site.tools.size }} fast, private utilities for developers and everyday tasks. No sign-up, no uploads, no daily limits.</p>
     <input id="tool-search" class="search" type="search" placeholder="Search {{ site.tools.size }} tools…" aria-label="Search tools" autocomplete="off">
+    <p id="search-status" class="visually-hidden" role="status"></p>
   </section>
 
   <div id="all-tools">
@@ -49,6 +50,13 @@ title: Free Online Tools
   var items = TT.$$('#all-tools li[data-search]');
   var sections = TT.$$('#all-tools .category');
   var none = document.getElementById('no-results');
+  var status = document.getElementById('search-status');
+  // Screen readers hear the result count once typing pauses, not per key.
+  var announce = TT.debounce(function (query, shown) {
+    status.textContent = !query ? 'Showing all ' + items.length + ' tools.' :
+      shown === 0 ? 'No tools match that search.' :
+      shown === 1 ? '1 tool matches.' : shown + ' tools match.';
+  }, 400);
   input.addEventListener('input', function () {
     var terms = input.value.toLowerCase().trim().split(/\s+/).filter(Boolean);
     var shown = 0;
@@ -62,6 +70,7 @@ title: Free Online Tools
       s.hidden = !s.querySelector('li:not([hidden])');
     });
     none.hidden = shown !== 0;
+    announce(terms.join(' '), shown);
   });
 })();
 </script>

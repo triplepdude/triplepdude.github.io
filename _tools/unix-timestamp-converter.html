@@ -78,8 +78,8 @@ faq:
     a: No. Unix time treats every day as exactly 86,400 seconds. During a leap second, systems repeat or smear a second, so a leap second itself has no Unix timestamp of its own.
   - q: Why is my converted time off by a few hours?
     a: The timestamp itself is always UTC-based. An offset of whole hours usually means the date was read or written in the wrong time zone. Check the UTC row and the time zone selector.
-  - q: Is anything I enter uploaded?
-    a: No. All conversions happen in your browser with JavaScript. Nothing you type is sent to a server or stored.
+  - q: How do I convert a Unix timestamp to a date in Excel or Google Sheets?
+    a: Spreadsheets count days rather than seconds, so divide by 86,400 and add the epoch with `=A2/86400 + DATE(1970,1,1)`, then format the cell as a date and time. For milliseconds, divide by 86,400,000 instead. The result is UTC; for a local time add the offset in days, such as `-5/24` for UTC−5. The reverse is `=(A2 - DATE(1970,1,1)) * 86400`. Google Sheets also has `=EPOCHTODATE(A2)`, which returns the UTC date and time directly.
 ---
 <style>
 .tool-page:has(#ut-results) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
@@ -88,10 +88,11 @@ faq:
 @media (max-width: 480px) { .tool-page:has(#ut-results) .prose th, .tool-page:has(#ut-results) .prose td { padding: 6px 6px; font-size: 14px; } }
 .ut-h { margin: 28px 0 12px; font-size: 1.1rem; }
 .ut-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
-.ut-now { grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+/* min(100%, ...) so a single column never grows wider than the card on a 320px phone. */
+.ut-now { grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); }
 .ut-now .stat b { font-family: var(--mono); font-size: clamp(1.4rem, 4.5vw, 1.9rem); font-variant-numeric: tabular-nums; }
 .ut-stat-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
-.ut-stats { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.ut-stats { grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
 .ut-stats .stat b { font-family: var(--mono); font-size: 1rem; }
 .row > .field.ut-grow { flex: 2 1 240px; }
 .ut-results th { width: 13rem; }
@@ -128,7 +129,7 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
 <div class="row">
   <div class="field ut-grow">
     <label for="ut-ts">Unix timestamp</label>
-    <input type="text" id="ut-ts" class="mono" autocomplete="off" spellcheck="false" placeholder="e.g. 1700000000 or 1700000000000">
+    <input type="text" id="ut-ts" class="mono" autocomplete="off" spellcheck="false" placeholder="e.g. 1700000000 or 1700000000000" aria-describedby="ut-ts-msg">
   </div>
   <div class="field">
     <label for="ut-unit">Unit</label>
@@ -152,15 +153,16 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
   <button class="btn secondary small" type="button" data-example="-14182940">&minus;14182940</button>
   <button class="btn secondary small" type="button" data-example="2147483647">2147483647 (2038 limit)</button>
 </div>
-<p class="msg error" id="ut-ts-msg" role="alert"></p>
-<div aria-live="polite">
-  <p class="hint" id="ut-detected"></p>
-  <p class="msg ut-info" id="ut-note"></p>
-  <div class="table-wrap">
-    <table class="data ut-results">
-      <tbody id="ut-results"></tbody>
-    </table>
-  </div>
+<p class="msg error" id="ut-ts-msg"></p>
+<!-- The results are rebuilt on every keystroke, so they are not a live region;
+     a short summary is announced here once typing pauses. -->
+<p class="visually-hidden" id="ut-ts-status" role="status"></p>
+<p class="hint" id="ut-detected"></p>
+<p class="msg ut-info" id="ut-note"></p>
+<div class="table-wrap">
+  <table class="data ut-results">
+    <tbody id="ut-results"></tbody>
+  </table>
 </div>
 
 <hr class="ut-sep">
@@ -189,10 +191,11 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
 
 <div class="field">
   <label for="ut-parse">Or paste a date string <span class="hint">ISO 8601, RFC 2822, HTTP or JavaScript date</span></label>
-  <input type="text" id="ut-parse" class="mono" autocomplete="off" spellcheck="false" placeholder="2001-09-09T01:46:40Z">
+  <input type="text" id="ut-parse" class="mono" autocomplete="off" spellcheck="false" placeholder="2001-09-09T01:46:40Z" aria-describedby="ut-parse-msg">
 </div>
-<p class="msg error" id="ut-parse-msg" role="alert"></p>
-<div class="output" id="ut-parse-out" aria-live="polite" hidden></div>
+<p class="msg error" id="ut-parse-msg"></p>
+<p class="visually-hidden" id="ut-parse-status" role="status"></p>
+<div class="output" id="ut-parse-out" hidden></div>
 
 <script>
 (function () {
@@ -273,35 +276,98 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
     var h = Math.floor(a / 3600), m = Math.floor(a % 3600 / 60), s = a % 60;
     return (off < 0 ? (minus || '-') : '+') + pad(h) + sep + pad(m) + (s ? sep + pad(s) : '');
   }
-  var zoneOptions = null;
-  function fillZoneSelect(sel) {
-    if (!zoneOptions) {
-      var zones = [];
-      try { zones = Intl.supportedValuesOf('timeZone').slice(); } catch (e) { zones = []; }
-      if (!zones.length) zones = ['America/Los_Angeles', 'America/Chicago', 'America/New_York', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Tokyo', 'Australia/Sydney'];
-      var seen = {};
-      zones = zones.map(modern).filter(function (z) {
-        if (z === 'UTC' || seen[z]) return false;
-        seen[z] = true;
-        return true;
-      }).sort();
-      zones.unshift('UTC');
-      if (zones.indexOf(LOCAL_TZ) < 0) zones.unshift(LOCAL_TZ);
-      var now = Date.now();
-      zoneOptions = document.createDocumentFragment();
-      zones.forEach(function (z) {
-        var label;
-        try { label = z.replace(/_/g, ' ') + ' (UTC' + offsetStr(offsetMs(now, z), ':', '\u2212') + ')'; } catch (e) { return; }
-        var o = document.createElement('option');
-        o.value = z;
-        o.textContent = label + (z === LOCAL_TZ ? ' \u00b7 local' : '');
-        zoneOptions.appendChild(o);
+  // The time zone menus list every zone the browser knows (about 420), each
+  // labelled with its current UTC offset. Each offset needs its own
+  // Intl.DateTimeFormat, and building them all at load blocked the main thread
+  // for about 400 ms on a throttled phone. So the menus start with just the
+  // local zone and UTC; the full list is built in small batches while the
+  // browser is idle and swapped in when complete, or finished at once if a
+  // menu is focused or pressed before then.
+  function zoneList() {
+    var zones = [];
+    try { zones = Intl.supportedValuesOf('timeZone').slice(); } catch (e) { zones = []; }
+    if (!zones.length) zones = ['America/Los_Angeles', 'America/Chicago', 'America/New_York', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Tokyo', 'Australia/Sydney'];
+    var seen = {};
+    zones = zones.map(modern).filter(function (z) {
+      if (z === 'UTC' || seen[z]) return false;
+      seen[z] = true;
+      return true;
+    }).sort();
+    zones.unshift('UTC');
+    if (zones.indexOf(LOCAL_TZ) < 0) zones.unshift(LOCAL_TZ);
+    return zones;
+  }
+  var ZONE_EVENTS = ['focus', 'pointerdown', 'mousedown', 'touchstart'];
+  function zoneMenus(sels) {
+    var now = Date.now(), zones = null, next = 0, done = false;
+    var full = document.createDocumentFragment();
+    function option(z) {
+      var o = document.createElement('option');
+      o.value = z;
+      o.textContent = z.replace(/_/g, ' ') + ' (UTC' + offsetStr(offsetMs(now, z), ':', '\u2212') + ')' + (z === LOCAL_TZ ? ' \u00b7 local' : '');
+      return o;
+    }
+    function build(n) { // adds up to n zones to the full list; true once it is complete
+      if (!zones) zones = zoneList();
+      for (var end = Math.min(zones.length, next + n); next < end; next++) {
+        try { full.appendChild(option(zones[next])); } catch (e) { /* a zone this browser cannot format */ }
+      }
+      return next >= zones.length;
+    }
+    function complete() {
+      if (done) return;
+      done = true;
+      build(Infinity);
+      sels.forEach(function (sel) {
+        var keep = sel.value;
+        sel.textContent = '';
+        sel.appendChild(full.cloneNode(true));
+        sel.value = keep;
+        ZONE_EVENTS.forEach(function (t) { sel.removeEventListener(t, complete); });
       });
     }
-    sel.appendChild(zoneOptions.cloneNode(true));
-    sel.value = LOCAL_TZ;
-    if (sel.value !== LOCAL_TZ) sel.value = 'UTC';
+    function later(fn) {
+      if (window.requestIdleCallback) requestIdleCallback(fn, { timeout: 1000 });
+      else setTimeout(fn, 16);
+    }
+    function work(deadline) {
+      if (done) return;
+      // Always a small batch (an idle period can report no time left), then
+      // more while the browser stays idle.
+      var fin = build(20);
+      while (!fin && deadline && deadline.timeRemaining && deadline.timeRemaining() > 5) fin = build(10);
+      if (fin) complete(); else later(work);
+    }
+    sels.forEach(function (sel) {
+      [LOCAL_TZ, 'UTC'].forEach(function (z, i) {
+        if (i && z === LOCAL_TZ) return;
+        try { sel.appendChild(option(z)); } catch (e) { /* a zone this browser cannot format */ }
+      });
+      sel.value = LOCAL_TZ;
+      if (sel.value !== LOCAL_TZ) sel.value = 'UTC';
+      ZONE_EVENTS.forEach(function (t) { sel.addEventListener(t, complete, { passive: true }); });
+    });
+    later(work);
   }
+
+  // ---------- Screen reader summaries ----------
+  // The fields convert as you type. Their results are not live regions:
+  // announcing every intermediate result, or "not a number" for a half-typed
+  // value, buried the answer. Each field has one short status line instead,
+  // set once typing pauses, or straight away after a click or menu change.
+  function speaker(el) {
+    var timer = null;
+    return function (text, now) {
+      clearTimeout(timer);
+      if (now) {
+        el.textContent = '';
+        timer = setTimeout(function () { el.textContent = text; }, 50);
+      } else {
+        timer = setTimeout(function () { if (el.textContent !== text) el.textContent = text; }, 700);
+      }
+    };
+  }
+  function firstSentence(t) { var m = /^.*?[.!?](?=\s|$)/.exec(t); return m ? m[0] : t; }
 
   // ---------- Formatting ----------
   var fmtCache = {};
@@ -401,6 +467,7 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
   // ---------- Timestamp -> date ----------
   var tsEl = $('#ut-ts'), unitEl = $('#ut-unit'), viewZone = $('#ut-view-zone'), results = $('#ut-results');
   var shown = null; // { ms, subNs } currently displayed
+  var sayTs = speaker($('#ut-ts-status'));
 
   var ROWS = [
     ['utc', 'UTC'],
@@ -446,20 +513,25 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
     $('#ut-note').textContent = '';
   }
 
-  function convert() {
+  // trigger: 'type' (announce once typing pauses), 'click', 'unit' or 'zone'
+  // (announce now), or nothing (page load: stay quiet).
+  function convert(trigger) {
     var msg = $('#ut-ts-msg');
     var raw = tsEl.value;
-    if (!raw.trim()) { msg.textContent = ''; clearResults(); $('#ut-detected').textContent = 'Enter a Unix timestamp to convert it.'; return; }
+    function fail(text) {
+      clearResults();
+      msg.textContent = text;
+      if (trigger) sayTs(firstSentence(text), trigger !== 'type');
+    }
+    if (!raw.trim()) { msg.textContent = ''; clearResults(); $('#ut-detected').textContent = 'Enter a Unix timestamp to convert it.'; if (trigger) sayTs(''); return; }
     var num = parseDecimal(raw);
-    if (!num) { clearResults(); msg.textContent = 'That is not a number. Enter digits, optionally with a minus sign or decimal point, e.g. 1700000000.'; return; }
+    if (!num) return fail('That is not a number. Enter digits, optionally with a minus sign or decimal point, e.g. 1700000000.');
     var unit = unitEl.value === 'auto' ? detectUnit(num) : unitEl.value;
     var ns = toNs(num, unit);
-    if (ns === null) { clearResults(); msg.textContent = 'That number is far too large to be a date.'; return; }
+    if (ns === null) return fail('That number is far too large to be a date.');
     var msBig = floorDiv(ns, 1000000n);
     if (msBig > BigInt(MAX_MS) || msBig < -BigInt(MAX_MS)) {
-      clearResults();
-      msg.textContent = 'Out of range: dates can only be shown up to 8.64 \u00d7 10^15 milliseconds (about 275,000 years) either side of 1970. Check the unit.';
-      return;
+      return fail('Out of range: dates can only be shown up to 8.64 \u00d7 10^15 milliseconds (about 275,000 years) either side of 1970. Check the unit.');
     }
     msg.textContent = '';
     var ms = Number(msBig), subNs = Number(ns - msBig * 1000000n);
@@ -501,6 +573,8 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
     else if (sec < -2147483648n) note = 'This is before 1901-12-13T20:45:52Z, below the signed 32-bit range (min -2,147,483,648 seconds). Software that stores time in 32 bits cannot represent it.';
     else if (sec < 0n) note = 'Negative timestamp: this moment is before the Unix epoch, 1970-01-01T00:00:00Z.';
     $('#ut-note').textContent = note;
+    if (trigger === 'zone') sayTs(tz.replace(/_/g, ' ') + ': ' + values.local, true);
+    else if (trigger) sayTs(UNIT_NAME[unit].charAt(0).toUpperCase() + UNIT_NAME[unit].slice(1) + ': ' + values.utc, trigger !== 'type');
   }
 
   // ---------- Date -> timestamp ----------
@@ -590,33 +664,32 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
     return null;
   }
 
-  function parseString() {
+  var sayParse = speaker($('#ut-parse-status'));
+  // trigger: 'type' (announce once typing pauses) or 'zone' (announce now).
+  function parseString(trigger) {
     var raw = $('#ut-parse').value.trim(), msg = $('#ut-parse-msg'), out = $('#ut-parse-out');
+    function fail(text) {
+      msg.textContent = text;
+      if (trigger) sayParse(firstSentence(text), trigger !== 'type');
+    }
     msg.textContent = '';
     out.hidden = true;
     out.textContent = '';
-    if (!raw) return;
-    if (/^[+-]?\d+(\.\d+)?$/.test(raw)) {
-      msg.textContent = 'That looks like a Unix timestamp. Paste it into the "Timestamp to date" box above.';
-      return;
-    }
+    if (!raw) { if (trigger) sayParse(''); return; }
+    if (/^[+-]?\d+(\.\d+)?$/.test(raw)) return fail('That looks like a Unix timestamp. Paste it into the "Timestamp to date" box above.');
     var f = parseFields(raw);
     var dowIdx = f && f.dow ? DOW3.indexOf(f.dow.slice(0, 3).toLowerCase()) : -1;
     if (!f || !f.mo || (f.dow && (dowIdx < 0 || f.dow.length > 3 && DOW_LONG[dowIdx].toLowerCase() !== f.dow.toLowerCase()))) {
-      msg.textContent = 'Could not read that date. Use ISO 8601 (2001-09-09T01:46:40Z), RFC 2822 (Sun, 09 Sep 2001 01:46:40 +0000) or an HTTP date (Sun, 09 Sep 2001 01:46:40 GMT).';
-      return;
+      return fail('Could not read that date. Use ISO 8601 (2001-09-09T01:46:40Z), RFC 2822 (Sun, 09 Sep 2001 01:46:40 +0000) or an HTTP date (Sun, 09 Sep 2001 01:46:40 GMT).');
     }
     if (f.s === 60 && f.mo <= 12 && f.h <= 23 && f.mi <= 59) {
-      msg.textContent = 'Unix time has no separate value for a leap second (:60). Use :59 or the next second instead.';
-      return;
+      return fail('Unix time has no separate value for a leap second (:60). Use :59 or the next second instead.');
     }
     if (f.d < 1 || f.mo > 12 || f.d > daysInMonth(f.y, f.mo) || f.h > 23 || f.mi > 59 || f.s > 59) {
-      msg.textContent = 'That date or time does not exist. Check the month, day, hours (00 to 23), minutes and seconds (00 to 59).';
-      return;
+      return fail('That date or time does not exist. Check the month, day, hours (00 to 23), minutes and seconds (00 to 59).');
     }
     if (f.off !== undefined && isNaN(f.off)) {
-      msg.textContent = '"' + f.offText + '" is not a valid time zone. Use Z, GMT, UTC or an offset from -23:59 to +23:59.';
-      return;
+      return fail('"' + f.offText + '" is not a valid time zone. Use Z, GMT, UTC or an offset from -23:59 to +23:59.');
     }
     var ms, how, tz = zoneEl.value || LOCAL_TZ;
     try {
@@ -632,13 +705,13 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
       }
     } catch (e) { ms = NaN; }
     if (!isFinite(ms) || Math.abs(ms) > MAX_MS) {
-      msg.textContent = 'That date is outside the range a browser can handle (about 275,000 years either side of 1970).';
-      return;
+      return fail('That date is outside the range a browser can handle (about 275,000 years either side of 1970).');
     }
     var realDow = ((daysFromCivil(f.y, f.mo, f.d) % 7) + 11) % 7; // 1970-01-01 was a Thursday
     if (f.dow && dowIdx !== realDow) how += ' Note: the text says ' + DOW_LONG[dowIdx] + ', but that date is a ' + DOW_LONG[realDow] + '.';
     out.textContent = 'Seconds:       ' + Math.floor(ms / 1000) + '\nMilliseconds:  ' + ms + '\nISO 8601 UTC:  ' + isoUtc(ms, 0) + '\n' + how;
     out.hidden = false;
+    if (trigger) sayParse('Unix time ' + Math.floor(ms / 1000) + ' seconds, ' + isoUtc(ms, 0), trigger !== 'type');
   }
 
   // ---------- Live clock ----------
@@ -654,18 +727,17 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
   }
 
   // ---------- Wiring ----------
-  fillZoneSelect(viewZone);
-  fillZoneSelect(zoneEl);
-  tsEl.addEventListener('input', convert);
-  unitEl.addEventListener('change', convert);
-  viewZone.addEventListener('change', convert);
-  $('#ut-use-now').addEventListener('click', function () { tsEl.value = String(Math.floor(Date.now() / 1000)); unitEl.value = 'auto'; convert(); });
+  zoneMenus([viewZone, zoneEl]);
+  tsEl.addEventListener('input', function () { convert('type'); });
+  unitEl.addEventListener('change', function () { convert('unit'); });
+  viewZone.addEventListener('change', function () { convert('zone'); });
+  $('#ut-use-now').addEventListener('click', function () { tsEl.value = String(Math.floor(Date.now() / 1000)); unitEl.value = 'auto'; convert('click'); });
   TT.$$('[data-example]').forEach(function (b) {
-    b.addEventListener('click', function () { tsEl.value = b.getAttribute('data-example'); unitEl.value = 'auto'; convert(); });
+    b.addEventListener('click', function () { tsEl.value = b.getAttribute('data-example'); unitEl.value = 'auto'; convert('click'); });
   });
   [dateEl, timeEl].forEach(function (el) { el.addEventListener('input', toTimestamp); el.addEventListener('change', toTimestamp); });
-  zoneEl.addEventListener('change', function () { toTimestamp(); parseString(); });
-  $('#ut-parse').addEventListener('input', parseString);
+  zoneEl.addEventListener('change', function () { toTimestamp(); parseString('zone'); });
+  $('#ut-parse').addEventListener('input', function () { parseString('type'); });
 
   var start = Date.now();
   tsEl.value = String(Math.floor(start / 1000));

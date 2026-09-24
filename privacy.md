@@ -3,6 +3,7 @@ layout: page
 title: Privacy Policy
 description: How TripleP Tools handles your data. The tools run entirely in your browser, so text, files, and device input never leave your device.
 permalink: /privacy/
+last_modified_at: 2026-09-24
 ---
 {%- assign ea = site.ads.ethicalads_publisher | default: "" | strip -%}
 {%- assign adsense = site.ads.adsense_client | default: "" | strip -%}
@@ -21,9 +22,9 @@ has no accounts, no sign-up, and no database.
 - **Camera, microphone, and location** are only requested when you press a
   button that needs them. Your browser asks for permission first, the stream is
   used only on the page, and it stops when you press Stop or leave the page.
-- **Settings** you change may be remembered in your browser's local storage so
-  they persist between visits. You can clear them at any time by clearing this
-  site's data in your browser.
+- **Nothing is stored.** The tools do not save what you enter. They use no
+  cookies, local storage, or any other browser storage, so nothing is kept
+  once you close the page.
 
 This site does not use its own cookies or analytics.
 
@@ -41,6 +42,8 @@ This site is supported by [EthicalAds](https://www.ethicalads.io/), an ad
 network that targets ads by page content, not by tracking you. EthicalAds does
 not use tracking cookies or build a profile of you. See the
 [EthicalAds privacy policy](https://www.ethicalads.io/privacy-policy/).
+
+Ads never block a tool, and every tool works the same with an ad blocker.
 {%- elsif adsense != "" -%}
 This site shows ads served by Google AdSense to keep the tools free.
 
@@ -51,19 +54,19 @@ This site shows ads served by Google AdSense to keep the tools free.
 - You may opt out of personalized advertising by visiting
   [Google Ads Settings](https://adssettings.google.com/). You can also opt out
   of some third-party vendors' use of cookies for personalized advertising at
-  [aboutads.info](https://www.aboutads.info/choices/).
+  [aboutads.info](https://optout.aboutads.info/).
 - Learn more in [How Google uses information from sites or apps that use its
   services](https://policies.google.com/technologies/partner-sites).
 
 Visitors in the European Economic Area, the United Kingdom, and Switzerland are
 asked for consent before personalized ads are shown, and can change their
 choice at any time from the privacy link in the consent message.
+
+Ads never block a tool, and every tool works the same with an ad blocker.
 {%- else -%}
 This site does not currently show ads. If advertising is added in the future,
 this section will describe it before any ads appear.
 {%- endif %}
-
-Ads never block a tool, and every tool works the same with an ad blocker.
 
 ## Children
 

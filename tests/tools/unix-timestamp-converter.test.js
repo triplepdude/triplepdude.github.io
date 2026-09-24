@@ -1,7 +1,7 @@
 // Known answers were computed independently with Python
 // (datetime.fromtimestamp(..., timezone.utc) and zoneinfo), not copied from
 // the page. The browser runs in Europe/Rome with a fixed clock.
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, url }) => {
   const text = sel => page.locator(sel).textContent();
   const r = id => text('#ut-r-' + id);
   const conv = async (value, unit = 'auto') => {
@@ -242,6 +242,104 @@ module.exports = async ({ page, open, assert }) => {
   await page.selectOption('#ut-zone', 'UTC');
   await page.fill('#ut-parse', '1700000000');
   assert.match(await text('#ut-parse-msg'), /Unix timestamp/);
+
+  // Regression: the results table was inside a live region and rebuilt on
+  // every keystroke (about 150 announcements, 3,300 characters, for one typed
+  // timestamp, plus "N seconds ago" every second), and half-typed values fired
+  // role=alert errors. Now each field has one short status line, set once
+  // typing pauses.
+  await page.evaluate(() => {
+    window.__said = [];
+    new MutationObserver(ms => ms.forEach(m => {
+      const el = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const region = el && el.closest('[aria-live]:not([aria-live="off"]), [role="alert"], [role="status"], [role="log"]');
+      const added = m.type === 'characterData' ? m.target.data : [...m.addedNodes].map(n => n.textContent).join('');
+      if (region && added.trim()) window.__said.push(added.trim());
+    })).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  const said = () => page.evaluate(() => window.__said.splice(0));
+  const status = (sel, want) => page.waitForFunction(([s, w]) => document.querySelector(s).textContent === w, [sel, want]);
+  for (const sel of ['#ut-results', '#ut-ts-msg', '#ut-parse-out', '#ut-parse-msg']) {
+    assert.equal(await page.locator(sel).evaluate(el => !!el.closest('[aria-live]:not([aria-live="off"]), [role="alert"], [role="status"]')), false, `${sel} is not live`);
+  }
+  await page.fill('#ut-ts', '');
+  await page.waitForTimeout(800);
+  await said();
+  await page.type('#ut-ts', '-1700000000', { delay: 120 }); // "-" alone is not a number yet (Python: 1916-02-18T01:46:40Z)
+  await status('#ut-ts-status', 'Seconds: Friday, February 18, 1916 at 1:46:40 AM UTC');
+  await page.waitForTimeout(300);
+  let heard = await said();
+  assert.deepEqual(heard, ['Seconds: Friday, February 18, 1916 at 1:46:40 AM UTC']);
+  await page.waitForTimeout(1500); // the ticking relative time is not announced
+  assert.deepEqual(await said(), []);
+  await page.fill('#ut-ts', '12x');
+  await status('#ut-ts-status', 'That is not a number.');
+  await page.click('button[data-example="0"]');
+  await status('#ut-ts-status', 'Seconds: Thursday, January 1, 1970 at 12:00:00 AM UTC');
+  await page.selectOption('#ut-view-zone', 'Asia/Kathmandu');
+  await status('#ut-ts-status', 'Asia/Kathmandu: Thursday, January 1, 1970 at 5:30:00 AM GMT+5:30');
+  await page.selectOption('#ut-view-zone', 'Europe/Rome');
+  await page.fill('#ut-parse', '');
+  await page.waitForTimeout(800);
+  await said();
+  await page.type('#ut-parse', '2001-09-09T01:46:40Z', { delay: 60 });
+  await status('#ut-parse-status', 'Unix time 1000000000 seconds, 2001-09-09T01:46:40Z');
+  await page.waitForTimeout(300);
+  heard = await said();
+  assert.deepEqual(heard, ['Unix time 1000000000 seconds, 2001-09-09T01:46:40Z']);
+  await page.fill('#ut-parse', 'hello 1');
+  await status('#ut-parse-status', 'Could not read that date.');
+
+  // The privacy line is in every page's footer; this slot answers a real question.
+  const faqs = await page.locator('.faq summary').allTextContents();
+  assert.ok(!faqs.some(q => /uploaded|sent to a server/i.test(q)), faqs.join(' | '));
+  assert.ok(faqs.some(q => /Excel or Google Sheets/.test(q)), faqs.join(' | '));
+  // The FAQ's spreadsheet formula =A2/86400 + DATE(1970,1,1): DATE(1970,1,1) is
+  // serial 25569 in Excel's 1900 system, and 1e9 s gives 2001-09-09 01:46:40.
+  const serial = 1e9 / 86400 + 25569;
+  const excelEpoch = Date.UTC(1899, 11, 30); // serial 0 for dates after 1900-02-28
+  assert.equal(new Date(excelEpoch + Math.round(serial * 864e5)).toISOString(), '2001-09-09T01:46:40.000Z');
+
+  // Regression: at 320px the "current time" cards were 3px wider than the page.
+  await page.setViewportSize({ width: 320, height: 800 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 1, 'no sideways scroll at 320px');
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Regression: both time zone menus were filled at load, one
+  // Intl.DateTimeFormat per zone (about 420), which blocked the main thread
+  // for about 400 ms on a throttled phone. Now they start with the local zone
+  // and UTC and fill in small idle-time batches, or at once when first used.
+  await page.addInitScript(() => {
+    // Most DateTimeFormat constructions in one uninterrupted run of page JS
+    // (the test clock's idle callbacks report no time left, so every idle
+    // batch is the minimum size; the old page built about 440 in one go).
+    let run = 0;
+    window.__dtfMax = 0;
+    const count = () => { if (!run++) queueMicrotask(() => { window.__dtfMax = Math.max(window.__dtfMax, run); run = 0; }); };
+    Intl.DateTimeFormat = new Proxy(Intl.DateTimeFormat, {
+      construct(t, a, nt) { count(); return Reflect.construct(t, a, nt); },
+      apply(t, self, a) { count(); return Reflect.apply(t, self, a); },
+    });
+    if (location.search === '?no-idle') window.requestIdleCallback = () => 0; // the browser never goes idle
+  });
+  const zoneValues = sel => page.$$eval(sel + ' option', os => os.map(o => o.value));
+  await page.goto(url + '?no-idle');
+  assert.deepEqual(await zoneValues('#ut-view-zone'), ['Europe/Rome', 'UTC']);
+  assert.deepEqual(await zoneValues('#ut-zone'), ['Europe/Rome', 'UTC']);
+  assert.equal(await page.inputValue('#ut-zone'), 'Europe/Rome');
+  await page.selectOption('#ut-zone', 'UTC');
+  await page.focus('#ut-zone'); // first use completes both menus at once
+  assert.ok((await zoneValues('#ut-zone')).length > 300);
+  assert.ok((await zoneValues('#ut-view-zone')).length > 300);
+  assert.ok((await zoneValues('#ut-zone')).includes('Asia/Kathmandu'));
+  assert.equal(await page.inputValue('#ut-zone'), 'UTC', 'the choice made before the list filled is kept');
+  assert.equal(await page.inputValue('#ut-view-zone'), 'Europe/Rome');
+  assert.equal(await page.locator('#ut-view-zone option:checked').textContent(), 'Europe/Rome (UTC+02:00) · local');
+  await open();
+  await page.waitForFunction(() => ['#ut-zone', '#ut-view-zone'].every(s => document.querySelector(s).options.length > 300));
+  const dtfMax = await page.evaluate(() => window.__dtfMax);
+  assert.ok(dtfMax < 100, `${dtfMax} DateTimeFormats built in one go`);
+  assert.equal(await page.inputValue('#ut-view-zone'), 'Europe/Rome');
 
   await cdp.send('Emulation.setTimezoneOverride', { timezoneId: '' }).catch(() => {});
 };

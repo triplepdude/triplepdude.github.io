@@ -11,8 +11,12 @@
  * tests/fixtures/<slug>/ for any sample files the test needs. The browser
  * has a fake camera and microphone, and clipboard/camera/mic permissions. On top of each tool's own
  * assertions the runner checks, for every page: no JS errors, no requests to
- * other hosts, a single <h1>, a meta description, and no horizontal scroll
- * at phone width.
+ * other hosts, a single <h1>, a meta description, no horizontal scroll at
+ * phone width, nothing saved in cookies or browser storage, empty .msg live
+ * regions still rendered, and valid JSON-LD with no blog-post markup.
+ *
+ * A full run (no slugs) also runs siteChecks: the homepage, About, Privacy and
+ * 404 pages, the sitemap, related-tool links, and the shared colour tokens.
  *
  * Needs `jekyll` (or $JEKYLL) and the `playwright` package on the module path.
  */
@@ -115,6 +119,166 @@ async function commonChecks(page, problems) {
   const desc = await page.locator('meta[name="description"]').getAttribute('content').catch(() => null);
   if (!desc || desc.length < 50) problems.push('meta description missing or shorter than 50 chars');
   if (desc && desc.length > 170) problems.push(`meta description is ${desc.length} chars (keep it <= 160)`);
+
+  // An empty message must stay rendered: a live region that is display: none
+  // until its text arrives is often not announced (see .msg:empty in
+  // _includes/style.css). An explicit hidden attribute is the page's choice.
+  const removed = await page.$$eval('.msg:empty:not([hidden])', els => els
+    .filter(e => getComputedStyle(e).display === 'none' && e.style.display !== 'none')
+    .map(e => '#' + e.id));
+  if (removed.length) problems.push(`empty .msg elements are display: none, so not in the accessibility tree: ${removed.join(', ')}`);
+
+  // Structured data must parse, and a tool page is not a blog post.
+  for (const text of await page.$$eval('script[type="application/ld+json"]', els => els.map(e => e.textContent))) {
+    try {
+      if (JSON.stringify(JSON.parse(text)).includes('"BlogPosting"')) problems.push('JSON-LD marks the page as a BlogPosting');
+    } catch (e) {
+      problems.push(`JSON-LD does not parse: ${e.message}`);
+    }
+  }
+  const ogType = await page.locator('meta[property="og:type"]').getAttribute('content').catch(() => null);
+  if (ogType !== 'website') problems.push(`og:type is ${ogType}, expected website`);
+  if (await page.locator('meta[property^="article:"]').count()) problems.push('page has article:* meta tags');
+
+  // privacy.md promises that nothing is stored. Each test has a fresh browser
+  // context, so anything found here was written by the page.
+  const stored = await page.evaluate(async () => {
+    const idb = indexedDB.databases ? (await indexedDB.databases()).map(d => d.name) : [];
+    const cache = self.caches ? await caches.keys() : [];
+    return { local: Object.keys(localStorage), session: Object.keys(sessionStorage), cookie: document.cookie, idb, cache };
+  }).catch(() => null);
+  if (stored && (stored.local.length || stored.session.length || stored.cookie || stored.idb.length || stored.cache.length)) {
+    problems.push(`page stored data in the browser, which privacy.md says never happens: ${JSON.stringify(stored)}`);
+  }
+}
+
+function frontMatter(file) {
+  return fs.readFileSync(file, 'utf8').split(/^---\s*$/m)[1] || '';
+}
+
+function luminance(rgb) {
+  const c = rgb.match(/[\d.]+/g).slice(0, 3).map(v => v / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+
+function contrast(a, b) {
+  const [x, y] = [luminance(a), luminance(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+// Checks of the shared pages and files, run once on a full build.
+async function siteChecks(browser, base, problems) {
+  const slugs = fs.readdirSync(path.join(ROOT, '_tools')).map(f => f.replace(/\.(html|md)$/, ''));
+  const { context, page } = await newPage(browser, base, { width: 1280, height: 900 }, problems);
+  const get = async p => {
+    const resp = await page.request.get(base + p);
+    assert.equal(resp.status(), 200, `GET ${p} returned ${resp.status()}`);
+    return resp.text();
+  };
+
+  for (const p of ['/', '/about/', '/privacy/', '/404.html']) {
+    await page.goto(base + p, { waitUntil: 'load' });
+    const before = problems.length;
+    await commonChecks(page, problems);
+    for (let i = before; i < problems.length; i++) problems[i] = `${p}: ${problems[i]}`;
+    // Styles and TT are inlined; a blocking request in <head> costs a round trip before first paint.
+    const blocking = await page.$$eval('head link[rel="stylesheet"], head script[src]:not([async]):not([defer])', els => els.map(e => e.getAttribute('href') || e.getAttribute('src')));
+    if (blocking.length) problems.push(`${p}: render-blocking resources in <head>: ${blocking.join(', ')}`);
+    if (!(await page.evaluate(() => window.TT && typeof TT.copy === 'function'))) problems.push(`${p}: window.TT is missing`);
+  }
+  // Old cached pages still link these.
+  assert.match(await get('/assets/css/style.css'), /--field-border/);
+  assert.match(await get('/assets/js/common.js'), /window\.TT = /);
+
+  // Homepage search results are announced (WCAG 4.1.3).
+  await page.goto(base + '/', { waitUntil: 'load' });
+  assert.equal(await page.getAttribute('#search-status', 'role'), 'status');
+  const status = () => page.textContent('#search-status');
+  await page.fill('#tool-search', 'zzzz-no-such-tool');
+  await page.waitForFunction(() => document.getElementById('search-status').textContent !== '');
+  assert.equal(await status(), 'No tools match that search.');
+  await page.fill('#tool-search', 'image');
+  const matches = await page.$$eval('#all-tools li[data-search]:not([hidden])', l => l.length);
+  assert.ok(matches > 1 && matches < slugs.length, `"image" matched ${matches} tools`);
+  await page.waitForFunction(n => document.getElementById('search-status').textContent === `${n} tools match.`, matches);
+  await page.fill('#tool-search', '');
+  await page.waitForFunction(n => document.getElementById('search-status').textContent === `Showing all ${n} tools.`, slugs.length);
+
+  // Field outlines need 3:1 and placeholder text 4.5:1 against the surfaces
+  // fields sit on, in both colour schemes (WCAG 1.4.11, 1.4.3).
+  for (const colorScheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme });
+    const c = await page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement('div'));
+      const out = {};
+      for (const v of ['--field-border', '--bg', '--surface', '--surface-2']) {
+        probe.style.color = `var(${v})`;
+        out[v] = getComputedStyle(probe).color;
+      }
+      probe.remove();
+      const search = document.getElementById('tool-search');
+      out.searchBorder = getComputedStyle(search).borderTopColor;
+      out.placeholder = getComputedStyle(search, '::placeholder').color;
+      return out;
+    });
+    assert.equal(c.searchBorder, c['--field-border'], 'the search box uses --field-border');
+    for (const bg of ['--bg', '--surface', '--surface-2']) {
+      const r = contrast(c['--field-border'], c[bg]);
+      if (r < 3) problems.push(`${colorScheme}: --field-border is ${r.toFixed(2)}:1 against ${bg} (needs 3:1)`);
+      const pr = contrast(c.placeholder, c[bg]);
+      if (pr < 4.5) problems.push(`${colorScheme}: placeholder text is ${pr.toFixed(2)}:1 against ${bg} (needs 4.5:1)`);
+    }
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+
+  // Phone width for the non-tool pages.
+  const mobile = await newPage(browser, base, { width: 390, height: 844 }, problems);
+  for (const p of ['/', '/about/', '/privacy/', '/404.html']) {
+    await mobile.page.goto(base + p, { waitUntil: 'load' });
+    const overflow = await mobile.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (overflow > 1) problems.push(`${p}: horizontal scroll at 390px wide (${overflow}px overflow)`);
+  }
+  await mobile.context.close();
+
+  // About and Privacy agree on whether the site shows ads, and the ad-blocker
+  // promise only appears when there are ads.
+  const text = async p => { await page.goto(base + p); return page.textContent('main'); };
+  const about = await text('/about/');
+  const privacy = await text('/privacy/');
+  const noAds = /does not currently show ads/.test(privacy);
+  if (/kept free by advertising/.test(about) === noAds) problems.push('About and Privacy disagree about whether the site shows ads');
+  if (noAds && /Ads never block/.test(privacy)) problems.push('Privacy promises ads never block a tool right after saying there are no ads');
+
+  // <lastmod> only for pages that set a date. Jekyll dates every tool with
+  // the build time, which must never be published as a modification date.
+  const sitemap = await get('/sitemap.xml');
+  const urls = new Map([...sitemap.matchAll(/<url>\s*<loc>([^<]+)<\/loc>\s*(?:<lastmod>([^<]+)<\/lastmod>)?/g)].map(m => [new URL(m[1]).pathname, m[2]]));
+  for (const p of ['/', '/about/', '/privacy/']) if (!urls.has(p)) problems.push(`sitemap.xml is missing ${p}`);
+  if (urls.has('/404.html')) problems.push('sitemap.xml lists /404.html');
+  for (const slug of slugs) {
+    const dated = /^(last_modified_at|date):/m.test(frontMatter(toolFile(slug)));
+    if (!urls.has(`/${slug}/`)) problems.push(`sitemap.xml is missing /${slug}/`);
+    else if (!!urls.get(`/${slug}/`) !== dated) {
+      problems.push(`sitemap.xml: /${slug}/ ${dated ? 'has no <lastmod> although its front matter sets a date' : `has <lastmod> ${urls.get(`/${slug}/`)} but its front matter sets no date`}`);
+    }
+  }
+  assert.match(await get('/robots.txt'), /Sitemap: .*\/sitemap\.xml/);
+
+  // "More free tools" rotates, so every tool is linked from several others
+  // rather than the alphabetically first ones from every page.
+  const inbound = Object.fromEntries(slugs.map(s => [s, 0]));
+  for (const slug of slugs) {
+    const section = ((await get(`/${slug}/`)).match(/<section class="related">([\s\S]*?)<\/section>/) || [])[1] || '';
+    const links = [...section.matchAll(/href="\/([^"/]+)\/"/g)].map(m => m[1]);
+    if (links.length !== Math.min(6, slugs.length - 1)) problems.push(`/${slug}/ lists ${links.length} related tools`);
+    if (links.includes(slug) || new Set(links).size !== links.length) problems.push(`/${slug}/ related tools repeat or include itself: ${links.join(' ')}`);
+    for (const l of links) if (l in inbound) inbound[l]++;
+  }
+  if (slugs.length >= 7) {
+    const few = Object.entries(inbound).filter(([, n]) => n < 3);
+    if (few.length) problems.push(`tools linked from fewer than 3 related-tool lists: ${few.map(([s, n]) => `${s} (${n})`).join(', ')}`);
+  }
+  await context.close();
 }
 
 async function main() {
@@ -131,6 +295,7 @@ async function main() {
     ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
   });
   let failed = 0;
+  let total = testFiles.length;
 
   for (const t of testFiles) {
     const problems = [];
@@ -161,10 +326,26 @@ async function main() {
     }
   }
 
+  if (!only.length) {
+    total++;
+    const problems = [];
+    try {
+      await siteChecks(browser, server.base, problems);
+    } catch (e) {
+      problems.push(`site checks failed: ${e && e.stack ? e.stack.split('\n').slice(0, 4).join('\n') : e}`);
+    }
+    if (problems.length) {
+      failed++;
+      console.log(`FAIL (site)\n  - ${problems.join('\n  - ')}`);
+    } else {
+      console.log('ok   (site)');
+    }
+  }
+
   await browser.close();
   server.close();
   fs.rmSync(work, { recursive: true, force: true });
-  console.log(`\n${testFiles.length - failed}/${testFiles.length} passed`);
+  console.log(`\n${total - failed}/${total} passed`);
   process.exit(failed ? 1 : 0);
 }
 

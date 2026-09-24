@@ -36,7 +36,16 @@ module.exports = async ({ page, open, assert }) => {
     assert.equal(await text('#wn-date-iso'), iso, `ISO week date of ${d}`);
     assert.equal(await text('#wn-date-us'), us, `US week of ${d}`);
     assert.equal(await text('#wn-date-doy'), doy, `day of year of ${d}`);
+    // The FAQ's spreadsheet formula for the week-year, =YEAR(A2 - WEEKDAY(A2, 2) + 4),
+    // where WEEKDAY(..., 2) counts Monday = 1 to Sunday = 7.
+    const t = new Date(d + 'T00:00:00Z');
+    const weekday2 = (t.getUTCDay() + 6) % 7 + 1;
+    assert.equal(String(new Date(t.getTime() + (4 - weekday2) * 864e5).getUTCFullYear()), iso.slice(0, 4), `FAQ week-year formula for ${d}`);
   }
+  // The privacy line is in every page's footer; this FAQ slot answers a real question.
+  const faqs = await page.locator('.faq summary').allTextContents();
+  assert.ok(!faqs.some(q => /uploaded|sent to a server/i.test(q)), faqs.join(' | '));
+  assert.ok(faqs.some(q => /ISO week number in Excel or Google Sheets/.test(q)), faqs.join(' | '));
   await page.fill('#wn-date', '2021-01-03');
   const line = await text('#wn-date-range');
   assert.ok(line.includes('Monday, December 28, 2020 to Sunday, January 3, 2021'), line);
