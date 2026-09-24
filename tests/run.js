@@ -71,6 +71,8 @@ const TYPES = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.txt': 'text/plain',
   '.xml': 'application/xml', '.wasm': 'application/wasm', '.ico': 'image/x-icon', '.webp': 'image/webp',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.pdf': 'application/pdf',
+  '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.woff2': 'font/woff2',
 };
 
 function serve(dir) {
