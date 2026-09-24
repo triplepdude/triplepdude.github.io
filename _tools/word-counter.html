@@ -1,0 +1,93 @@
+---
+title: Word Counter
+description: Count words, characters, sentences, paragraphs, and reading time as you type. Free, instant, and private. Your text never leaves your browser.
+category: Text
+keywords: [word count, character count, character counter, letter counter, reading time, sentence counter]
+howto: |
+  ## How to use the word counter
+
+  Type or paste your text into the box. The counts update instantly as you type,
+  so you can watch a tweet, essay, or meta description stay within its limit.
+
+  - **Words** are runs of letters or numbers separated by spaces or punctuation.
+    Hyphenated words like *well-known* and contractions like *don't* count as one word.
+  - **Characters** counts every character, including spaces and line breaks.
+    **Characters (no spaces)** leaves out all whitespace.
+  - **Reading time** assumes 238 words per minute, the average silent reading
+    speed for adults. **Speaking time** assumes 150 words per minute.
+
+  ## Common length limits
+
+  | Where | Limit |
+  |---|---|
+  | X (Twitter) post | 280 characters |
+  | Google title tag | about 60 characters |
+  | Meta description | about 155 characters |
+  | SMS message | 160 characters (GSM-7) |
+  | College essay (Common App) | 650 words |
+faq:
+  - q: Is my text uploaded anywhere?
+    a: No. The counting happens entirely in your browser with JavaScript. Nothing you type is sent to a server or stored.
+  - q: How are words counted?
+    a: A word is any run of letters, digits, apostrophes, or hyphens. That matches how Microsoft Word and Google Docs count in almost every case.
+  - q: Does it count emoji and accented characters correctly?
+    a: Yes. Characters are counted as user-perceived characters, so an emoji or an accented letter counts as one character even when it is stored as several code units.
+---
+<div class="field">
+  <label for="wc-input">Your text</label>
+  <textarea id="wc-input" rows="10" placeholder="Start typing or paste your text here…"></textarea>
+</div>
+
+<div class="stats" aria-live="polite">
+  <div class="stat"><b id="wc-words">0</b><span>Words</span></div>
+  <div class="stat"><b id="wc-chars">0</b><span>Characters</span></div>
+  <div class="stat"><b id="wc-chars-ns">0</b><span>Characters (no spaces)</span></div>
+  <div class="stat"><b id="wc-sentences">0</b><span>Sentences</span></div>
+  <div class="stat"><b id="wc-paragraphs">0</b><span>Paragraphs</span></div>
+  <div class="stat"><b id="wc-reading">0 sec</b><span>Reading time</span></div>
+  <div class="stat"><b id="wc-speaking">0 sec</b><span>Speaking time</span></div>
+</div>
+
+<div class="actions">
+  <button class="btn secondary small" type="button" data-copy-target="#wc-input">Copy text</button>
+  <button class="btn secondary small" type="button" id="wc-clear">Clear</button>
+</div>
+
+<script>
+(function () {
+  var input = TT.$('#wc-input');
+  var seg = window.Intl && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+
+  function graphemes(s) {
+    if (!seg) return Array.from(s).length;
+    var n = 0;
+    for (var _ of seg.segment(s)) n++;
+    return n;
+  }
+
+  function duration(words, wpm) {
+    var secs = Math.round(words / wpm * 60);
+    if (secs < 60) return secs + ' sec';
+    var m = Math.floor(secs / 60), s = secs % 60;
+    return m + ' min' + (s ? ' ' + s + ' sec' : '');
+  }
+
+  function update() {
+    var text = input.value;
+    var words = (text.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu) || []).length;
+    var sentences = text.trim() ? (text.match(/[^.!?…]*[\p{L}\p{N}][^.!?…]*(?:[.!?…]+|$)/gu) || []).length : 0;
+    var paragraphs = text.split(/\n\s*\n/).filter(function (p) { return p.trim(); }).length;
+    TT.$('#wc-words').textContent = words.toLocaleString();
+    TT.$('#wc-chars').textContent = graphemes(text).toLocaleString();
+    TT.$('#wc-chars-ns').textContent = graphemes(text.replace(/\s+/g, '')).toLocaleString();
+    TT.$('#wc-sentences').textContent = sentences.toLocaleString();
+    TT.$('#wc-paragraphs').textContent = paragraphs.toLocaleString();
+    TT.$('#wc-reading').textContent = duration(words, 238);
+    TT.$('#wc-speaking').textContent = duration(words, 150);
+  }
+
+  input.addEventListener('input', update);
+  TT.$('#wc-clear').addEventListener('click', function () { input.value = ''; update(); input.focus(); });
+  update();
+})();
+</script>
