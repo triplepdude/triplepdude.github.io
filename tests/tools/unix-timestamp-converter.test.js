@@ -97,6 +97,40 @@ module.exports = async ({ page, open, assert }) => {
   await conv('1700000000.5');
   assert.equal(await r('iso'), '2023-11-14T22:13:20.500Z');
 
+  // Regression: the "with offset" row used Date arithmetic that overflowed at
+  // the end of the Date range and printed NaN. Rome's rule puts 13 September
+  // in summer time (+02:00); at the other end Rome is on local mean time
+  // (+00:49:56 in tzdata).
+  await conv('8640000000000000', 'ms');
+  assert.equal(await r('iso'), '+275760-09-13T00:00:00Z');
+  assert.equal(await r('isolocal'), '+275760-09-13T02:00:00+02:00');
+  assert.equal(await r('http'), 'Not defined for years outside 0000 to 9999');
+  await conv('-8640000000000000', 'ms');
+  assert.equal(await r('iso'), '-271821-04-20T00:00:00Z');
+  assert.equal(await r('isolocal'), '-271821-04-20T00:49:56+00:49:56');
+  await conv('8640000000000001', 'ms');
+  assert.match(await text('#ut-ts-msg'), /Out of range/);
+
+  // RFC 5322 dates start in 1900 (section 3.3); HTTP dates need 4-digit years.
+  await conv('-2208988800');
+  assert.equal(await r('rfc2822'), 'Mon, 01 Jan 1900 00:00:00 +0000');
+  await conv('-2208988801');
+  assert.equal(await r('rfc2822'), 'Not defined for years before 1900');
+  assert.equal(await page.locator('#ut-r-rfc2822 + td button').isDisabled(), true);
+  assert.equal(await r('http'), 'Sun, 31 Dec 1899 23:59:59 GMT');
+
+  // Regression: relative time used numeric:'auto', which called 45 hours ago
+  // "yesterday" and 693 days ahead "next year".
+  const nowS = Number(await text('#ut-now-s'));
+  await conv(String(nowS - 45 * 3600));
+  assert.equal(await r('rel'), '1 day ago');
+  await conv(String(nowS + 36 * 3600));
+  assert.equal(await r('rel'), 'in 1 day');
+  await conv(String(nowS + 693 * 86400 + 60));
+  assert.equal(await r('rel'), 'in 1 year (693 days)');
+  await conv(String(nowS - 400 * 86400 - 60));
+  assert.equal(await r('rel'), '1 year ago (400 days)');
+
   // Manual unit override.
   await conv('1700000000', 'ms');
   assert.equal(await r('iso'), '1970-01-20T16:13:20Z');
@@ -167,6 +201,45 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.locator('#ut-parse-out').isHidden(), true);
   await page.fill('#ut-parse', 'not a date');
   assert.ok((await text('#ut-parse-msg')).length > 0);
+
+  // Regression: the old fallback to Date.parse read junk such as "hello 1" as
+  // 2001-01-01 in Chrome. Only well-defined formats are accepted now.
+  for (const junk of ['hello 1', 'Test 5 3', '1/2/3', 'June 2021', 'Foo, 09 Sep 2001 01:46:40 GMT']) {
+    await page.fill('#ut-parse', junk);
+    assert.match(await text('#ut-parse-msg'), /Could not read/, junk);
+    assert.equal(await page.locator('#ut-parse-out').isHidden(), true, junk);
+  }
+  // Regression: offsets outside -23:59..+23:59 were accepted.
+  for (const bad of ['2001-09-09T01:46:40+25:00', '2001-09-09T01:46:40+05:99', 'Sun, 09 Sep 2001 01:46:40 XYZ']) {
+    await page.fill('#ut-parse', bad);
+    assert.match(await text('#ut-parse-msg'), /not a valid time zone/, bad);
+  }
+  await page.fill('#ut-parse', '2001-09-09T23:59:60Z');
+  assert.match(await text('#ut-parse-msg'), /leap second/);
+  // Other standard forms (values from Python's email.utils and datetime).
+  const forms = {
+    '2001-09-09T01:46:40+05:30': '999980200',
+    'Tue, 1 Jul 2003 10:52:37 +0200 (CEST)': '1057049557',
+    'Sunday, 09-Sep-01 01:46:40 GMT': '1000000000', // RFC 850
+    'Sun Sep  9 01:46:40 2001': '1000000000', // asctime, read in the selected zone (UTC)
+    'Sun, 09 Sep 2001 01:46:40 EDT': '1000014400',
+    'Sun Sep 09 2001 03:46:40 GMT+0200 (Central European Summer Time)': '1000000000',
+    '+275760-09-13T00:00:00Z': '8640000000000',
+  };
+  for (const [str, want] of Object.entries(forms)) {
+    await page.fill('#ut-parse', str);
+    assert.equal(await text('#ut-parse-msg'), '', str);
+    assert.match(await text('#ut-parse-out'), new RegExp('^Seconds:\\s+' + want + '\\n'), str);
+  }
+  await page.fill('#ut-parse', 'Mon, 09 Sep 2001 01:46:40 GMT');
+  assert.match(await text('#ut-parse-out'), /says Monday, but that date is a Sunday/);
+  await page.fill('#ut-parse', '+275760-09-13T00:00:00-01:00');
+  assert.match(await text('#ut-parse-msg'), /outside the range/);
+  // Ambiguous local times get a note (New York, fall back: first occurrence).
+  await page.selectOption('#ut-zone', 'America/New_York');
+  await page.fill('#ut-parse', '2026-11-01T01:30:00');
+  assert.match(await text('#ut-parse-out'), /Seconds:\s+1793511000\n[\s\S]*happens twice/);
+  await page.selectOption('#ut-zone', 'UTC');
   await page.fill('#ut-parse', '1700000000');
   assert.match(await text('#ut-parse-msg'), /Unix timestamp/);
 

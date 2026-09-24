@@ -177,4 +177,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await page.textContent('.wq-print-root .wq-card'), /Guest Wi-Fi[\s\S]*Home[\s\S]*hunter2hunter2/);
   await page.emulateMedia({ media: 'screen' });
   assert.equal(await page.isVisible('.wq-print-root'), false);
+  // Without a valid code, printing falls back to the normal page.
+  await page.fill('#wq-ssid', '');
+  await page.emulateMedia({ media: 'print' });
+  assert.equal(await page.isVisible('h1'), true);
+  assert.equal(await page.locator('.wq-print-root .wq-card').count(), 0);
+  await page.emulateMedia({ media: 'screen' });
 };

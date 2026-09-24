@@ -41,8 +41,18 @@ module.exports = async ({ page, open, assert }) => {
   const line = await text('#wn-date-range');
   assert.ok(line.includes('Monday, December 28, 2020 to Sunday, January 3, 2021'), line);
   assert.ok(line.includes('week-year 2020'), line);
+  // An empty field is a prompt, not an error.
   await page.fill('#wn-date', '');
-  assert.ok((await text('#wn-date-msg')).length > 0);
+  assert.equal(await text('#wn-date-msg'), '');
+  assert.match(await text('#wn-date-range'), /Pick a date/);
+  assert.equal(await text('#wn-date-week'), '–');
+  // Extremes of the supported range (Python: date(1,1,1).isocalendar() == (1, 1, 1),
+  // date(9999,12,31).isocalendar() == (9999, 52, 5)).
+  await page.fill('#wn-date', '0001-01-01');
+  assert.equal(await text('#wn-date-iso'), '0001-W01-1');
+  await page.fill('#wn-date', '9999-12-31');
+  assert.equal(await text('#wn-date-iso'), '9999-W52-5');
+  assert.equal(await text('#wn-date-doy'), '365');
   await page.click('#wn-date-today');
   assert.equal(await text('#wn-date-iso'), '2026-W39-4');
 
@@ -139,5 +149,27 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#wn-today-iso'), '2026-W11-1');
   await page.fill('#wn-date', '2026-03-08');
   assert.equal(await text('#wn-date-iso'), '2026-W10-7');
+
+  // Around New Year the ISO week-year and the calendar year differ. On Monday
+  // 2024-12-30 (2025-W01, US week 53 of 2024) "This year" must follow the
+  // numbering: ISO shows 2025, US shows 2024, each with the current week marked.
+  await page.clock.setSystemTime(new Date('2024-12-30T17:00:00Z'));
+  await page.reload();
+  assert.equal(await text('#wn-today-iso'), '2025-W01-1');
+  assert.equal(await text('#wn-today-us'), '53');
+  assert.equal(await page.inputValue('#wn-year'), '2025');
+  assert.match(await page.locator('#wn-table tbody tr.wn-current th').textContent(), /^1/);
+  await page.selectOption('#wn-system', 'us');
+  assert.equal(await page.inputValue('#wn-year'), '2024');
+  assert.equal(await rows.count(), 53);
+  assert.match(await page.locator('#wn-table tbody tr.wn-current th').textContent(), /^53/);
+  await page.fill('#wn-year', '2000'); // leap year starting on Saturday: 54 US weeks
+  assert.equal(await rows.count(), 54);
+  await page.click('#wn-this');
+  assert.equal(await page.inputValue('#wn-year'), '2024');
+  await page.selectOption('#wn-system', 'iso');
+  assert.equal(await page.inputValue('#wn-year'), '2025');
+  assert.equal(await page.locator('#wn-table tbody tr.wn-current').count(), 1);
+
   await cdp.send('Emulation.setTimezoneOverride', { timezoneId: '' }).catch(() => {});
 };

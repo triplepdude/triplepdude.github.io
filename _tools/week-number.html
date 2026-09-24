@@ -74,7 +74,7 @@ faq:
   - q: How many weeks are in a year?
     a: A year has 52 ISO weeks, or 53 when it starts on a Thursday (or on a Wednesday in a leap year). With US numbering, where partial weeks count, a year has 53 weeks and sometimes 54.
   - q: Should I use ISO or US week numbers?
-    a: Use ISO week numbers for anything shared internationally. They are the European standard and the default in most planning and ERP software. Use the US system only when your calendar or spreadsheet already counts weeks from Sunday.
+    a: Use ISO week numbers for anything shared internationally. They are defined by the ISO 8601 standard, are the usual convention in Europe, and are what ISOWEEKNUM, Python's isocalendar() and PostgreSQL's EXTRACT(WEEK) return. Use the US system only when your calendar or spreadsheet already counts weeks from Sunday.
   - q: Is anything I enter sent to a server?
     a: No. Every calculation runs in your browser with JavaScript. The page does not upload the dates you enter or store them anywhere.
 ---
@@ -100,11 +100,13 @@ faq:
 .wn-scroll table.data tbody th { color: var(--text); font-variant-numeric: tabular-nums; }
 .wn-badge { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 700; line-height: 18px; vertical-align: 1px; }
 .wn-dim { color: var(--muted); }
+.wn-d { white-space: nowrap; }
 .wn-row-num > .field { flex: 1 1 110px; }
 .stat b.wn-nowrap { font-size: 1.15rem; line-height: 1.55; white-space: nowrap; overflow-wrap: normal; }
 .output.wn-out { font-family: inherit; font-size: 15px; }
 @media (max-width: 480px) {
   .wn-scroll table.data th, .wn-scroll table.data td { padding: 7px 8px; white-space: normal; }
+  .wn-dim { display: block; }
   .wn-badge { display: block; width: max-content; margin: 2px 0 0; }
 }
 </style>
@@ -233,9 +235,13 @@ faq:
 
   function isoDate(z) { var c = civil(z); return pad(c.y, 4) + '-' + pad(c.m, 2) + '-' + pad(c.d, 2); }
   function isoWeekStr(y, w) { return pad(y, 4) + '-W' + pad(w, 2); }
-  function fmtShort(z, ctxYear) {
-    var c = civil(z);
-    return DAYS[isoDow(z) - 1].slice(0, 3) + ', ' + MONTHS[c.m - 1].slice(0, 3) + ' ' + c.d + (c.y !== ctxYear ? ', ' + c.y : '');
+  // "Mon, Dec 29" stays on one line; a year from another year may wrap below it on phones.
+  function dateCell(td, z, ctxYear) {
+    var c = civil(z), span = document.createElement('span');
+    span.className = 'wn-d';
+    span.textContent = DAYS[isoDow(z) - 1].slice(0, 3) + ', ' + MONTHS[c.m - 1].slice(0, 3) + ' ' + c.d + (c.y !== ctxYear ? ',' : '');
+    td.appendChild(span);
+    if (c.y !== ctxYear) td.appendChild(document.createTextNode(' ' + c.y));
   }
   function fmtLong(z, withYear) {
     var c = civil(z);
@@ -288,9 +294,10 @@ faq:
     var z = parseDate(dateInput.value);
     var ids = ['#wn-date-week', '#wn-date-iso', '#wn-date-doy', '#wn-date-us'];
     if (z === null) {
-      msg.textContent = dateInput.value ? 'Enter a valid date between the years 1 and 9999.' : 'Pick a date to see its week number.';
+      // An empty field is not an error; only a bad value gets the red message.
+      msg.textContent = dateInput.value ? 'Enter a valid date between the years 1 and 9999.' : '';
       ids.forEach(function (id) { $(id).textContent = '–'; });
-      $('#wn-date-range').textContent = '';
+      $('#wn-date-range').textContent = dateInput.value ? '' : 'Pick a date to see its week number.';
       return;
     }
     msg.textContent = '';
@@ -386,8 +393,8 @@ faq:
         currentRow = tr;
       }
       var td1 = document.createElement('td'), td2 = document.createElement('td');
-      td1.textContent = fmtShort(r.start, y);
-      td2.textContent = fmtShort(r.end, y);
+      dateCell(td1, r.start, y);
+      dateCell(td2, r.end, y);
       if (r.days < 7) {
         var note = document.createElement('span');
         note.className = 'wn-dim';
@@ -424,6 +431,9 @@ faq:
     yearInput.value = y;
     renderTable(true);
   }
+  // The year that contains today: the ISO week-year, or the calendar year for
+  // US numbering. They differ for a few days around New Year.
+  function currentYear(sys) { return sys === 'us' ? civil(today).y : isoWeek(today).year; }
 
   // ----- Wiring -----
   dateInput.addEventListener('input', renderDate);
@@ -432,10 +442,16 @@ faq:
   $('#wn-find-year').addEventListener('input', renderFind);
   $('#wn-find-week').addEventListener('input', renderFind);
   yearInput.addEventListener('input', function () { renderTable(true); });
-  systemSel.addEventListener('change', function () { renderTable(true); });
+  var lastSys = systemSel.value;
+  systemSel.addEventListener('change', function () {
+    // If the table was showing "this year", keep showing the year that holds today.
+    if (parseYear(yearInput.value) === currentYear(lastSys)) yearInput.value = currentYear(systemSel.value);
+    lastSys = systemSel.value;
+    renderTable(true);
+  });
   $('#wn-prev').addEventListener('click', function () { var y = parseYear(yearInput.value); setYear(y === null ? civil(today).y : Math.max(1, y - 1)); });
   $('#wn-next').addEventListener('click', function () { var y = parseYear(yearInput.value); setYear(y === null ? civil(today).y : Math.min(9999, y + 1)); });
-  $('#wn-this').addEventListener('click', function () { setYear(isoWeek(today).year); });
+  $('#wn-this').addEventListener('click', function () { setYear(currentYear(systemSel.value)); });
   $('#wn-csv').addEventListener('click', downloadCsv);
 
   var tw = isoWeek(today);

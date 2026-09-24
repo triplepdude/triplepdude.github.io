@@ -1,0 +1,617 @@
+---
+title: "Hash Generator: MD5, SHA-1, SHA-256, SHA-512"
+description: Generate MD5, SHA-1, SHA-256, SHA-384 and SHA-512 hashes of text or files in hex or Base64, and check a download against its expected checksum.
+category: Security & Network
+keywords: [hash generator, md5 hash generator, sha256 hash generator, sha512 generator, sha1 hash, file checksum, checksum calculator, verify file hash]
+howto: |
+  ## How to use the hash generator
+
+  Type or paste text, or switch to **File** and choose or drop a file. All five
+  hashes appear at once, in hexadecimal and in Base64. Tick **Uppercase hex** if
+  the checksum you compare against is written in capitals.
+
+  To check a download, paste the checksum published next to it into **Compare
+  with expected hash**. The page tells you which algorithm matches, or that none
+  does. Besides a bare hash it accepts a line copied from `sha256sum` output
+  (`hash  filename`), the BSD format `SHA256 (file) = hash`, and Subresource
+  Integrity values such as `sha384-oqVu…`.
+
+  Text is hashed as UTF-8, the encoding used by nearly every command-line tool
+  and programming language. Set **Input is** to *Hex bytes* or *Base64* to hash
+  raw bytes instead, for example a key or a value copied from a packet dump.
+
+  ## How it works
+
+  The SHA hashes come from the Web Crypto API (`crypto.subtle.digest`), the
+  browser's native cryptography code. Web Crypto does not offer MD5, so this page
+  computes MD5 with its own JavaScript implementation of RFC 1321. Files are
+  read with the File API in 4 MB pieces: MD5 is updated piece by piece, a
+  progress bar tracks big files, and the page stays responsive. Nothing is
+  uploaded.
+
+  MD5 is specified in RFC 1321; SHA-1 and the SHA-2 family (SHA-256, SHA-384,
+  SHA-512) in NIST's FIPS 180-4.
+
+  | Algorithm | Digest size | Collision resistance |
+  |---|---|---|
+  | MD5 | 128 bits, 32 hex characters | Broken |
+  | SHA-1 | 160 bits, 40 hex characters | Broken |
+  | SHA-256 | 256 bits, 64 hex characters | Secure |
+  | SHA-384 | 384 bits, 96 hex characters | Secure |
+  | SHA-512 | 512 bits, 128 hex characters | Secure |
+
+  Hex and Base64 are the same bytes written two ways: the 16 bytes of an MD5
+  digest become 32 hex characters or 24 Base64 characters ending in `==`.
+
+  ## Which hash to use
+
+  To detect a download that was cut short or corrupted, any of them works: use
+  the one the publisher lists. When someone might swap the file on purpose,
+  rely on SHA-256 or longer. MD5 collisions (two different files with the same
+  hash) take seconds on an ordinary computer, and a practical SHA-1 collision
+  was published in 2017. SHA-384 and SHA-512 are also faster than SHA-256 on
+  most 64-bit processors, because they work on 64-bit words.
+
+  None of these is suitable on its own for storing passwords. They are designed
+  to be fast, which helps anyone guessing passwords. Use a deliberately slow
+  password hash such as Argon2id, scrypt or bcrypt.
+
+  ## Why a hash might not match
+
+  - **Trailing newline.** `echo "abc" | sha256sum` hashes `abc` plus a line
+    feed. Use `printf '%s' "abc"` or `echo -n` to get the value shown here.
+  - **Line endings.** A browser text box turns every line break into a single
+    line feed (LF). If the original text used Windows CRLF line breaks, hash the
+    file itself rather than pasting its contents.
+  - **Encoding.** The same characters stored as UTF-16 or Latin-1 are different
+    bytes, and so give a different hash.
+  - **Invisible characters.** A copied string can carry a leading space, a
+    non-breaking space or a zero-width character. The byte count under the text
+    box helps you spot them.
+faq:
+  - q: Is my text or file uploaded anywhere?
+    a: No. The hashes are calculated in your browser with JavaScript and the Web Crypto API. Your text and files never leave your device, and nothing is stored.
+  - q: Why is my hash different from the one my terminal prints?
+    a: Usually because `echo` adds a newline. `echo "hello" | md5sum` hashes six bytes, not five. Run `printf '%s' "hello" | md5sum` instead, or hash the file itself here.
+  - q: Can a hash be decrypted back to the original text?
+    a: No. A hash is a one-way fingerprint, not encryption. Short or common inputs can still be found by guessing and comparing, which is why unsalted fast hashes should never protect passwords.
+  - q: How large a file can I hash?
+    a: Hundreds of megabytes work on a typical computer. Web Crypto needs the whole file in memory for the SHA hashes, so a file of several gigabytes can exceed what the browser allows; the page shows a message if that happens.
+  - q: Is MD5 still safe to use?
+    a: For spotting accidental corruption, yes. For anything security-related, no. Anyone can create two different files with the same MD5 hash, so use SHA-256 when tampering is a concern.
+---
+<style>
+.hg-seg { display: inline-flex; gap: 2px; margin: 0 0 16px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.hg-seg label { position: relative; display: block; cursor: pointer; }
+.hg-seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.hg-seg span { display: block; min-width: 72px; padding: 6px 16px; border-radius: 7px; color: var(--muted); font-size: 14px; font-weight: 600; text-align: center; }
+.hg-seg input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+.hg-seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hg-textrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: -8px 0 16px; }
+.hg-textrow .field { display: flex; align-items: center; gap: 8px; margin: 0; }
+.hg-textrow select { width: auto; min-height: 36px; padding: 4px 10px; }
+.hg-pick { position: relative; margin: 0 0 16px; }
+.hg-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.hg-drop {
+  display: grid; place-items: center; gap: 4px; min-height: 116px; padding: 18px 16px;
+  border: 2px dashed var(--border); border-radius: 10px; background: var(--surface-2);
+  text-align: center; cursor: pointer; transition: border-color 0.15s ease;
+}
+.hg-drop:hover, .hg-drop.is-over { border-color: var(--accent); }
+.hg-input:focus-visible + .hg-drop { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hg-drop strong { font-size: 1.05rem; overflow-wrap: anywhere; }
+.hg-drop strong span { color: var(--accent); text-decoration: underline; }
+.hg-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; }
+.hg-progress progress { flex: 1 1 200px; height: 10px; accent-color: var(--accent); }
+.hg-progress .hint { min-width: 9em; font-variant-numeric: tabular-nums; }
+.hg-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin: 0 0 10px; }
+.hg-bar .label { overflow-wrap: anywhere; }
+.hg-bar .check { font-size: 14px; }
+.hg-list { display: grid; gap: 8px; margin: 0 0 16px; }
+.hg-item {
+  display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: 4px 12px; padding: 10px 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.hg-item.is-match { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.hg-alg { grid-row: span 2; display: flex; flex-direction: column; justify-content: center; line-height: 1.3; }
+.hg-alg b { font-size: 15px; }
+.hg-alg small { color: var(--muted); font-size: 12px; }
+.hg-alg em { display: none; margin-top: 2px; color: var(--accent); font-size: 12px; font-style: normal; font-weight: 700; }
+.hg-item.is-match .hg-alg em { display: block; }
+.hg-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.hg-line code { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 14px; line-height: 1.45; word-break: break-all; }
+.hg-line.hg-b64 code { color: var(--muted); font-size: 13px; }
+.hg-line .hg-k { flex: none; width: 3.6rem; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.hg-line .btn.small { flex: none; min-height: 30px; padding: 0 10px; font-size: 13px; }
+.hg-list[data-busy="1"] code { opacity: 0.45; }
+#hg-text { min-height: 140px; }
+@media (max-width: 560px) {
+  .hg-item { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .hg-alg { grid-row: auto; flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 8px; }
+  .hg-alg em { margin: 0; }
+  .hg-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; }
+  .hg-line .hg-k { grid-column: 1 / -1; width: auto; }
+}
+</style>
+
+<div class="hg-seg" role="radiogroup" aria-label="What to hash">
+  <label><input type="radio" name="hg-src" value="text" checked><span>Text</span></label>
+  <label><input type="radio" name="hg-src" value="file"><span>File</span></label>
+</div>
+
+<div id="hg-text-pane">
+  <div class="field">
+    <label for="hg-text">Text to hash</label>
+    <textarea id="hg-text" class="mono" rows="6" spellcheck="false" autocomplete="off" placeholder="Type or paste text here. Hashes update as you type."></textarea>
+  </div>
+  <div class="hg-textrow">
+    <div class="field">
+      <label for="hg-enc" class="label">Input is</label>
+      <select id="hg-enc">
+        <option value="utf8" selected>Text (UTF-8)</option>
+        <option value="hex">Hex bytes</option>
+        <option value="base64">Base64</option>
+      </select>
+    </div>
+    <span class="hint" id="hg-bytes">0 bytes</span>
+  </div>
+</div>
+
+<div id="hg-file-pane" hidden>
+  <div class="hg-pick">
+    <input type="file" id="hg-file" class="hg-input">
+    <label class="hg-drop" for="hg-file" id="hg-drop">
+      <strong id="hg-drop-title"><span>Choose a file</span> or drop it here</strong>
+      <span class="hint" id="hg-drop-hint">Any file type. It is read on your device and never uploaded.</span>
+    </label>
+  </div>
+  <div class="hg-progress" id="hg-progress-wrap" hidden>
+    <progress id="hg-progress" max="1" value="0" aria-label="Hashing progress"></progress>
+    <span class="hint" id="hg-progress-text" aria-live="polite">Reading…</span>
+    <button class="btn secondary small" type="button" id="hg-cancel">Cancel</button>
+  </div>
+</div>
+
+<p class="msg error" id="hg-msg" role="alert"></p>
+
+<div class="hg-bar">
+  <span class="label" id="hg-summary">Hashes of an empty input</span>
+  <label class="check"><input type="checkbox" id="hg-upper"> Uppercase hex</label>
+</div>
+
+<div class="hg-list" id="hg-results" aria-live="polite">
+  <div class="hg-item" data-alg="md5">
+    <div class="hg-alg"><b>MD5</b><small>128 bits</small><em>Match</em></div>
+    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-md5-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-md5-hex" aria-label="Copy MD5 hex">Copy</button></div>
+    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-md5-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-md5-b64" aria-label="Copy MD5 Base64">Copy</button></div>
+  </div>
+  <div class="hg-item" data-alg="sha1">
+    <div class="hg-alg"><b>SHA-1</b><small>160 bits</small><em>Match</em></div>
+    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-sha1-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha1-hex" aria-label="Copy SHA-1 hex">Copy</button></div>
+    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-sha1-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha1-b64" aria-label="Copy SHA-1 Base64">Copy</button></div>
+  </div>
+  <div class="hg-item" data-alg="sha256">
+    <div class="hg-alg"><b>SHA-256</b><small>256 bits</small><em>Match</em></div>
+    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-sha256-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha256-hex" aria-label="Copy SHA-256 hex">Copy</button></div>
+    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-sha256-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha256-b64" aria-label="Copy SHA-256 Base64">Copy</button></div>
+  </div>
+  <div class="hg-item" data-alg="sha384">
+    <div class="hg-alg"><b>SHA-384</b><small>384 bits</small><em>Match</em></div>
+    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-sha384-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha384-hex" aria-label="Copy SHA-384 hex">Copy</button></div>
+    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-sha384-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha384-b64" aria-label="Copy SHA-384 Base64">Copy</button></div>
+  </div>
+  <div class="hg-item" data-alg="sha512">
+    <div class="hg-alg"><b>SHA-512</b><small>512 bits</small><em>Match</em></div>
+    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-sha512-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha512-hex" aria-label="Copy SHA-512 hex">Copy</button></div>
+    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-sha512-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha512-b64" aria-label="Copy SHA-512 Base64">Copy</button></div>
+  </div>
+</div>
+
+<div class="actions">
+  <button class="btn secondary small" type="button" id="hg-copy-all">Copy all (hex)</button>
+  <button class="btn secondary small" type="button" id="hg-clear">Clear</button>
+</div>
+
+<div class="field">
+  <label for="hg-expected">Compare with expected hash <span class="hint">hex or Base64, e.g. from a download page</span></label>
+  <input type="text" id="hg-expected" class="mono" autocomplete="off" spellcheck="false" placeholder="Paste a checksum to check it">
+</div>
+<p class="msg" id="hg-compare" aria-live="polite"></p>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const ALGS = [
+    { id: 'md5', name: 'MD5', hexLen: 32 },
+    { id: 'sha1', name: 'SHA-1', hexLen: 40, subtle: 'SHA-1' },
+    { id: 'sha256', name: 'SHA-256', hexLen: 64, subtle: 'SHA-256' },
+    { id: 'sha384', name: 'SHA-384', hexLen: 96, subtle: 'SHA-384' },
+    { id: 'sha512', name: 'SHA-512', hexLen: 128, subtle: 'SHA-512' }
+  ];
+  const CHUNK = 4 * 1024 * 1024;
+  const PROGRESS_FROM = 8 * 1024 * 1024;
+  const subtle = window.crypto && window.crypto.subtle && typeof window.crypto.subtle.digest === 'function' ? window.crypto.subtle : null;
+
+  // ---------- MD5 (RFC 1321), incremental ----------
+  const K = new Int32Array([
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
+  ]);
+  const S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+
+  class Md5 {
+    constructor() {
+      this.h = new Int32Array([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476]);
+      this.tail = new Uint8Array(64);
+      this.tailLen = 0;
+      this.total = 0;
+      this.w = new Int32Array(16);
+    }
+    block(m, o) {
+      const w = this.w, h = this.h;
+      for (let i = 0; i < 16; i++, o += 4) w[i] = m[o] | (m[o + 1] << 8) | (m[o + 2] << 16) | (m[o + 3] << 24);
+      let a = h[0], b = h[1], c = h[2], d = h[3], t, s, i;
+      for (i = 0; i < 16; i++) {
+        s = S[i & 3];
+        t = (a + ((b & c) | (~b & d)) + K[i] + w[i]) | 0; a = d; d = c; c = b;
+        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
+      }
+      for (; i < 32; i++) {
+        s = S[4 + (i & 3)];
+        t = (a + ((d & b) | (~d & c)) + K[i] + w[(5 * i + 1) & 15]) | 0; a = d; d = c; c = b;
+        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
+      }
+      for (; i < 48; i++) {
+        s = S[8 + (i & 3)];
+        t = (a + (b ^ c ^ d) + K[i] + w[(3 * i + 5) & 15]) | 0; a = d; d = c; c = b;
+        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
+      }
+      for (; i < 64; i++) {
+        s = S[12 + (i & 3)];
+        t = (a + (c ^ (b | ~d)) + K[i] + w[(7 * i) & 15]) | 0; a = d; d = c; c = b;
+        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
+      }
+      h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+    }
+    update(bytes) {
+      const n = bytes.length;
+      let o = 0;
+      this.total += n;
+      if (this.tailLen) {
+        const take = Math.min(64 - this.tailLen, n);
+        this.tail.set(bytes.subarray(0, take), this.tailLen);
+        this.tailLen += take;
+        o = take;
+        if (this.tailLen < 64) return this;
+        this.block(this.tail, 0);
+        this.tailLen = 0;
+      }
+      for (; o + 64 <= n; o += 64) this.block(bytes, o);
+      if (o < n) { this.tail.set(bytes.subarray(o), 0); this.tailLen = n - o; }
+      return this;
+    }
+    digest() {
+      const total = this.total, bits = total * 8;
+      const pad = new Uint8Array((this.tailLen < 56 ? 56 : 120) - this.tailLen + 8);
+      pad[0] = 0x80;
+      const lo = bits % 4294967296, hi = Math.floor(bits / 4294967296), p = pad.length - 8;
+      for (let i = 0; i < 4; i++) { pad[p + i] = (lo >>> (8 * i)) & 255; pad[p + 4 + i] = (hi >>> (8 * i)) & 255; }
+      this.update(pad);
+      this.total = total;
+      const out = new Uint8Array(16);
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) out[i * 4 + j] = (this.h[i] >>> (8 * j)) & 255;
+      return out;
+    }
+  }
+
+  // ---------- Encoding helpers ----------
+  function toHex(u8) {
+    let s = '';
+    for (let i = 0; i < u8.length; i++) s += (u8[i] < 16 ? '0' : '') + u8[i].toString(16);
+    return s;
+  }
+  function toB64(u8) {
+    let s = '';
+    for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+    return btoa(s);
+  }
+  function fmtBytes(n) {
+    if (n < 1024) return n.toLocaleString() + (n === 1 ? ' byte' : ' bytes');
+    const u = ['KB', 'MB', 'GB', 'TB'];
+    let v = n, i = -1;
+    do { v /= 1024; i++; } while (v >= 1024 && i < u.length - 1);
+    return v.toFixed(v < 10 ? 2 : 1) + ' ' + u[i] + ' (' + n.toLocaleString() + ' bytes)';
+  }
+  function parseHexInput(s) {
+    const clean = s.replace(/0x/gi, '').replace(/[\s:,_-]/g, '');
+    if (/[^0-9a-f]/i.test(clean)) {
+      const bad = clean.match(/[^0-9a-f]/i)[0];
+      throw new Error('"' + bad + '" is not a hex digit. Hex input may contain 0-9, a-f, spaces and colons.');
+    }
+    if (clean.length % 2) throw new Error('Hex input needs an even number of digits (two per byte); it has ' + clean.length + '.');
+    const out = new Uint8Array(clean.length / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
+    return out;
+  }
+  function parseB64Input(s) {
+    let clean = s.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(clean)) throw new Error('This is not valid Base64. Only A-Z, a-z, 0-9, +, / (or - and _) and trailing = are allowed.');
+    clean = clean.replace(/=+$/, '');
+    if (clean.length % 4 === 1) throw new Error('This Base64 text has an impossible length; a character is probably missing.');
+    clean += '===='.slice(0, (4 - clean.length % 4) % 4);
+    let bin;
+    try { bin = atob(clean); } catch (e) { throw new Error('This is not valid Base64.'); }
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  // ---------- Hashing ----------
+  const nextFrame = () => new Promise(r => setTimeout(r, 0));
+
+  // src is a Uint8Array or a Blob/File. isLive() returns false once the job is stale.
+  async function hashAll(src, isLive, onProgress) {
+    const isBlob = !(src instanceof Uint8Array);
+    const size = isBlob ? src.size : src.length;
+    let all = isBlob ? null : src;
+    if (isBlob) {
+      try { all = new Uint8Array(size); } catch (e) {
+        throw new Error('This file (' + fmtBytes(size) + ') is too large for your browser to hold in memory, which Web Crypto needs for the SHA hashes.');
+      }
+    }
+    const md5 = new Md5();
+    for (let off = 0; off < size || (off === 0 && size === 0); off += CHUNK) {
+      let piece;
+      if (isBlob) {
+        piece = new Uint8Array(await src.slice(off, off + CHUNK).arrayBuffer());
+        if (!isLive()) return null;
+        all.set(piece, off);
+      } else {
+        piece = src.subarray(off, off + CHUNK);
+      }
+      md5.update(piece);
+      if (size === 0) break;
+      if (off + CHUNK < size) {
+        if (onProgress) onProgress(off + piece.length, size, 'Reading');
+        await nextFrame();
+        if (!isLive()) return null;
+      }
+    }
+    const res = { md5: md5.digest(), size: size };
+    for (const a of ALGS) {
+      if (!a.subtle) continue;
+      if (!subtle) { res[a.id] = null; continue; }
+      if (onProgress) onProgress(size, size, 'Computing ' + a.name);
+      res[a.id] = new Uint8Array(await subtle.digest(a.subtle, all));
+      if (!isLive()) return null;
+    }
+    return res;
+  }
+
+  // ---------- State and rendering ----------
+  const textEl = $('#hg-text'), encEl = $('#hg-enc'), upperEl = $('#hg-upper'), expEl = $('#hg-expected');
+  const fileEl = $('#hg-file'), drop = $('#hg-drop'), msgEl = $('#hg-msg'), listEl = $('#hg-results');
+  const state = { src: 'text', results: { text: null, file: null }, summary: { text: '', file: 'Choose a file to see its hashes' }, error: { text: '', file: '' }, textJob: 0, fileJob: 0 };
+
+  function hexOf(d) { const h = toHex(d); return upperEl.checked ? h.toUpperCase() : h; }
+
+  function render() {
+    const r = state.results[state.src];
+    msgEl.textContent = state.error[state.src];
+    $('#hg-summary').textContent = state.summary[state.src];
+    ALGS.forEach(a => {
+      const hexEl = $('#hg-' + a.id + '-hex'), b64El = $('#hg-' + a.id + '-b64');
+      if (!r) { hexEl.textContent = '–'; b64El.textContent = '–'; return; }
+      const d = r[a.id];
+      if (!d) { hexEl.textContent = 'Unavailable: Web Crypto needs a secure (https) page'; b64El.textContent = '–'; return; }
+      hexEl.textContent = hexOf(d);
+      b64El.textContent = toB64(d);
+    });
+    compare();
+  }
+
+  // Pull the hash out of what people paste: bare values, "hash  file" (sha256sum),
+  // "SHA256 (file) = hash" (BSD), "sha256-BASE64" (Subresource Integrity), "0x..." and grouped hex.
+  function extractExpected(raw) {
+    const s = raw.trim();
+    if (!s) return '';
+    const squashed = s.replace(/[\s:]/g, '');
+    if (/^(0x)?[0-9a-f]+$/i.test(squashed) && ALGS.some(a => a.hexLen === squashed.replace(/^0x/i, '').length)) return squashed.replace(/^0x/i, '');
+    const bsd = s.match(/^[\w-]+\s*\(.*\)\s*=\s*(\S+)$/);
+    let v = bsd ? bsd[1] : s.split(/\s+/)[0];
+    v = v.replace(/^\*/, '').replace(/^(md5|sha-?1|sha-?256|sha-?384|sha-?512)[:=-]/i, '').replace(/^0x/i, '');
+    return v;
+  }
+
+  function compare() {
+    const out = $('#hg-compare');
+    TT.$$('.hg-item').forEach(el => el.classList.remove('is-match'));
+    out.className = 'msg';
+    out.textContent = '';
+    const v = extractExpected(expEl.value);
+    if (!v) return;
+    const r = state.results[state.src];
+    if (!r) {
+      out.className = 'msg error';
+      out.textContent = state.src === 'file' ? 'Choose a file first, then the expected hash is compared with its hashes.' : 'Enter valid input first.';
+      return;
+    }
+    let match = null;
+    const isHex = /^[0-9a-f]+$/i.test(v);
+    if (isHex) {
+      const lower = v.toLowerCase();
+      match = ALGS.find(a => r[a.id] && toHex(r[a.id]) === lower);
+    }
+    if (!match) {
+      const b = v.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+      match = ALGS.find(a => r[a.id] && toB64(r[a.id]).replace(/=+$/, '') === b);
+    }
+    if (match) {
+      out.className = 'msg ok';
+      out.textContent = 'Match: this is the ' + match.name + ' hash of the ' + (state.src === 'file' ? 'file' : 'input') + '.';
+      const item = $('.hg-item[data-alg="' + match.id + '"]');
+      if (item) item.classList.add('is-match');
+      return;
+    }
+    out.className = 'msg error';
+    if (isHex) {
+      const alg = ALGS.find(a => a.hexLen === v.length);
+      if (alg) {
+        out.textContent = 'No match. A ' + v.length + '-character hex value is normally a ' + alg.name + ' hash, and the ' + alg.name +
+          ' of this ' + (state.src === 'file' ? 'file' : 'input') + ' is different. The data is not the same as what the checksum was made from.';
+      } else {
+        out.textContent = 'No match. The expected value has ' + v.length + ' hex characters, but MD5, SHA-1, SHA-256, SHA-384 and SHA-512 have 32, 40, 64, 96 and 128. Check that it was copied completely.';
+      }
+    } else {
+      out.textContent = 'No match. The value was read as Base64 and does not equal any of the hashes above.';
+    }
+  }
+
+  // ---------- Text ----------
+  async function hashText() {
+    const job = ++state.textJob;
+    let bytes;
+    const mode = encEl.value;
+    try {
+      if (mode === 'hex') bytes = parseHexInput(textEl.value);
+      else if (mode === 'base64') bytes = parseB64Input(textEl.value);
+      else bytes = new TextEncoder().encode(textEl.value);
+    } catch (e) {
+      state.error.text = e.message;
+      state.results.text = null;
+      state.summary.text = 'Fix the input to see its hashes';
+      $('#hg-bytes').textContent = '';
+      if (state.src === 'text') render();
+      return;
+    }
+    state.error.text = '';
+    const n = bytes.length;
+    $('#hg-bytes').textContent = n.toLocaleString() + (n === 1 ? ' byte' : ' bytes') + (mode === 'utf8' ? ' in UTF-8' : '');
+    if (n > CHUNK) listEl.dataset.busy = '1';
+    try {
+      const res = await hashAll(bytes, () => job === state.textJob);
+      if (!res) return;
+      state.results.text = res;
+      state.summary.text = n === 0 ? 'Hashes of an empty input' : 'Hashes of ' + n.toLocaleString() + (n === 1 ? ' byte' : ' bytes') + (mode === 'utf8' ? ' of text' : '');
+    } catch (e) {
+      state.results.text = null;
+      state.error.text = 'Could not compute the hashes: ' + (e && e.message ? e.message : e);
+    }
+    if (job === state.textJob) listEl.dataset.busy = '';
+    if (state.src === 'text') render();
+  }
+
+  // ---------- File ----------
+  function showProgress(done, total, stage) {
+    const wrap = $('#hg-progress-wrap');
+    if (total < PROGRESS_FROM) return;
+    wrap.hidden = false;
+    $('#hg-progress').value = total ? done / total : 1;
+    $('#hg-progress-text').textContent = stage === 'Reading' ? 'Reading… ' + Math.floor(done / total * 100) + '%' : stage + '…';
+  }
+
+  async function hashFile(file) {
+    const job = ++state.fileJob;
+    setSource('file');
+    $('#hg-drop-title').textContent = file.name || 'Unnamed file';
+    $('#hg-drop-hint').textContent = fmtBytes(file.size) + '. Choose or drop another file to replace it.';
+    state.error.file = '';
+    state.results.file = null;
+    state.summary.file = 'Hashing ' + (file.name || 'file') + '…';
+    listEl.dataset.busy = '1';
+    render();
+    try {
+      const res = await hashAll(file, () => job === state.fileJob, showProgress);
+      if (!res) return;
+      state.results.file = res;
+      state.summary.file = 'Hashes of ' + (file.name || 'the file') + ' (' + fmtBytes(file.size).replace(/ \(.*\)$/, '') + ')';
+    } catch (e) {
+      if (job !== state.fileJob) return;
+      state.results.file = null;
+      state.summary.file = 'Choose a file to see its hashes';
+      state.error.file = e && e.name === 'NotReadableError'
+        ? 'The file could not be read. It may have been moved, or the browser lost permission to read it. Choose it again.'
+        : (e && e.message ? e.message : 'The file could not be hashed.');
+    }
+    if (job !== state.fileJob) return;
+    $('#hg-progress-wrap').hidden = true;
+    listEl.dataset.busy = '';
+    render();
+  }
+
+  function setSource(src) {
+    state.src = src;
+    TT.$$('input[name="hg-src"]').forEach(r => { r.checked = r.value === src; });
+    $('#hg-text-pane').hidden = src !== 'text';
+    $('#hg-file-pane').hidden = src !== 'file';
+    render();
+  }
+
+  TT.$$('input[name="hg-src"]').forEach(r => r.addEventListener('change', () => { if (r.checked) setSource(r.value); }));
+  textEl.addEventListener('input', hashText);
+  encEl.addEventListener('change', hashText);
+  upperEl.addEventListener('change', render);
+  expEl.addEventListener('input', compare);
+  fileEl.addEventListener('change', () => { if (fileEl.files && fileEl.files[0]) hashFile(fileEl.files[0]); });
+  $('#hg-cancel').addEventListener('click', () => {
+    state.fileJob++;
+    $('#hg-progress-wrap').hidden = true;
+    listEl.dataset.busy = '';
+    state.summary.file = 'Hashing cancelled. Choose a file to start again.';
+    fileEl.value = '';
+    render();
+  });
+
+  // Dropping a file anywhere on the tool hashes it (and keeps the browser from opening it).
+  const card = listEl.closest('.tool-card') || document.body;
+  const hasFiles = e => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
+  ['dragenter', 'dragover'].forEach(t => card.addEventListener(t, e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    drop.classList.add('is-over');
+  }));
+  ['dragleave', 'dragend'].forEach(t => card.addEventListener(t, e => { if (!card.contains(e.relatedTarget)) drop.classList.remove('is-over'); }));
+  card.addEventListener('drop', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    drop.classList.remove('is-over');
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) hashFile(f);
+  });
+
+  $('#hg-copy-all').addEventListener('click', e => {
+    const r = state.results[state.src];
+    if (!r) { TT.flash(e.currentTarget, 'Nothing to copy'); return; }
+    const lines = ALGS.filter(a => r[a.id]).map(a => a.name + ': ' + hexOf(r[a.id]));
+    TT.copy(lines.join('\n'), e.currentTarget);
+  });
+  $('#hg-clear').addEventListener('click', () => {
+    expEl.value = '';
+    if (state.src === 'text') {
+      textEl.value = '';
+      hashText();
+      textEl.focus();
+    } else {
+      state.fileJob++;
+      fileEl.value = '';
+      state.results.file = null;
+      state.error.file = '';
+      state.summary.file = 'Choose a file to see its hashes';
+      $('#hg-progress-wrap').hidden = true;
+      listEl.dataset.busy = '';
+      $('#hg-drop-title').innerHTML = '<span>Choose a file</span> or drop it here';
+      $('#hg-drop-hint').textContent = 'Any file type. It is read on your device and never uploaded.';
+      render();
+    }
+  });
+
+  hashText();
+})();
+</script>

@@ -1,0 +1,641 @@
+---
+title: "MGRS Converter: Lat/Long to MGRS & UTM"
+description: Convert lat/long to MGRS grid references and UTM coordinates, or MGRS and UTM back to lat/long. Accepts DMS and handles the Norway and Svalbard zones.
+category: Maps & Coordinates
+keywords: [mgrs converter, lat long to mgrs, mgrs to lat long, utm converter, mgrs coordinates, military grid reference system, utm to lat long, dms to mgrs]
+howto: |
+  ## How to use the MGRS converter
+
+  Choose what you are converting from, then type or paste the coordinates. The
+  result updates as you type and shows the same point as MGRS, UTM, decimal
+  degrees, degrees-minutes-seconds and degrees with decimal minutes, each with
+  a copy button. **Use my location** asks your browser for your current
+  position. The MGRS precision menu sets how many digits the grid reference
+  has.
+
+  | Input | Example |
+  |---|---|
+  | Decimal degrees | `40.74844, -73.98566` |
+  | Degrees and decimal minutes | `40°44.906' N, 73°59.140' W` |
+  | Degrees, minutes, seconds | `40°44'54.4"N 73°59'08.4"W` |
+  | MGRS | `18T WL 85631 11326` or `18TWL8563111326` |
+  | UTM | zone 18, north, easting 585631, northing 4511327 |
+
+  Latitude comes first unless you label the values with N, S, E or W. South
+  and west can be written with a minus sign instead of a letter.
+
+  ## How an MGRS grid reference is built
+
+  Take `18T WL 85631 11326`. **18T** is the grid zone: UTM zone 18 and
+  latitude band T. Bands are 8° tall and lettered C (80°S) to X, which is 12°
+  tall and runs from 72°N to 84°N; I and O are skipped. **WL** names a
+  100 km square: the column letter comes from the easting and the row letter
+  from the northing, in cycles that repeat so that neighbouring zones use
+  different letters. **85631 11326** are the easting and northing inside that
+  square.
+
+  | Digits | Precision |
+  |---|---|
+  | 10 (5 + 5) | 1 m |
+  | 8 | 10 m |
+  | 6 | 100 m |
+  | 4 | 1 km |
+  | 2 | 10 km |
+
+  The digits are truncated, not rounded: a reference names the square the
+  point lies in, measured from its south-west corner. That is why the last
+  MGRS digit can be one lower than the rounded UTM value. When you convert an
+  MGRS reference back to latitude and longitude, you get the centre of its
+  square.
+
+  ## UTM zones and their exceptions
+
+  UTM splits the world into 60 zones, each 6° of longitude wide, numbered
+  eastward from 180°W. Each zone is a transverse Mercator projection with a
+  scale factor of 0.9996 on its central meridian, a false easting of
+  500,000 m, and a false northing of 10,000,000 m in the southern hemisphere.
+  Two areas break the pattern, and the converter applies both:
+
+  - **Norway:** zone 32V is widened to run from 3°E to 12°E between 56°N and
+    64°N, so zone 31V is only 3° wide there.
+  - **Svalbard:** between 72°N and 84°N, zones 31X, 33X, 35X and 37X are
+    widened to 9° or 12°, and zones 32X, 34X and 36X are not used.
+
+  ## Accuracy and limits
+
+  The math uses the WGS84 ellipsoid and Krüger's series for the transverse
+  Mercator projection, the method used by GeographicLib and PROJ. Results
+  agree with PROJ to well under a millimetre. MGRS and UTM cover 80°S to
+  84°N only; the polar regions use the Universal Polar Stereographic (UPS)
+  grid with bands A, B, Y and Z, which this converter does not support.
+  If your coordinates come from an old paper map, check its datum: NAD27,
+  ED50 and other local datums put the same point tens to hundreds of metres
+  away from WGS84.
+faq:
+  - q: Is my location sent anywhere?
+    a: No. All conversions run in your browser. "Use my location" asks your browser for your position, and it stays on your device; nothing is uploaded or stored.
+  - q: What is the difference between MGRS and UTM?
+    a: They are the same grid. UTM gives a zone number and two large numbers in metres. MGRS adds a latitude band letter and replaces the leading digits of the easting and northing with two letters for the 100 km square, which makes references shorter and harder to misread.
+  - q: Why do my last digits differ from another app?
+    a: MGRS digits are truncated to the square the point lies in, while UTM values are usually rounded, so they can differ by one in the last place. Apps that round MGRS, or use a datum other than WGS84, can also give slightly different digits.
+  - q: Can I convert coordinates near the North or South Pole?
+    a: Not here. MGRS north of 84°N and south of 80°S uses the Universal Polar Stereographic grid, which this converter does not handle. It tells you when a point falls in that area.
+---
+<style>
+.mg-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.mg-seg label { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-right: 1px solid var(--border); font-size: 15px; cursor: pointer; }
+.mg-seg label:last-child { border-right: 0; }
+.mg-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.mg-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.mg-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mg-modes { min-width: 0; margin: 0 0 16px; padding: 0; border: 0; }
+.mg-modes legend { padding: 0; margin-bottom: 6px; }
+.row > .field.mg-grow { flex: 3 1 280px; }
+.row > .field.mg-zone { flex: 0 1 90px; }
+.row > .field.mg-hemi { flex: 1 1 120px; }
+.mg-locate { flex: 0 0 auto; }
+.mg-examples { align-items: center; margin-top: -4px; }
+.mg-panel > p.hint { margin: -8px 0 12px; }
+.row > .field.mg-precf { flex: 0 1 260px; }
+.mg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 14px; }
+.mg-head .result-big { margin: 0; font-family: var(--mono); letter-spacing: 0.02em; }
+.msg.mg-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.mg-list { margin: 0 0 16px; border-top: 1px solid var(--border); }
+.mg-item { display: grid; grid-template-columns: minmax(0, 13rem) minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.mg-item dt { color: var(--muted); font-size: 14px; font-weight: 600; }
+.mg-item dd { margin: 0; min-width: 0; }
+.mg-val { font-family: var(--mono); font-size: 15px; overflow-wrap: anywhere; }
+.mg-item small { display: block; color: var(--muted); font-size: 13px; }
+.mg-item .btn { justify-self: end; }
+@media (max-width: 560px) {
+  .mg-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .mg-item dt { grid-column: 1 / -1; }
+  .mg-seg label { padding: 0 11px; font-size: 14px; }
+}
+</style>
+
+<fieldset class="mg-modes">
+  <legend class="label">Convert from</legend>
+  <div class="mg-seg">
+    <label><input type="radio" name="mg-mode" value="ll" checked>Latitude / longitude</label>
+    <label><input type="radio" name="mg-mode" value="mgrs">MGRS</label>
+    <label><input type="radio" name="mg-mode" value="utm">UTM</label>
+  </div>
+</fieldset>
+
+<div class="mg-panel" id="mg-panel-ll">
+  <div class="row">
+    <div class="field mg-grow">
+      <label for="mg-ll">Latitude and longitude</label>
+      <input type="text" id="mg-ll" class="mono" value="40.748440, -73.985664" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="40.748440, -73.985664">
+    </div>
+    <button class="btn secondary mg-locate" type="button" id="mg-locate">Use my location</button>
+  </div>
+  <p class="hint">Decimal degrees, degrees and minutes, or degrees, minutes and seconds. Use N, S, E, W or a minus sign for south and west.</p>
+  <div class="actions mg-examples">
+    <span class="hint">Try:</span>
+    <button class="btn secondary small" type="button" data-example="-33.8568, 151.2153">Sydney</button>
+    <button class="btn secondary small" type="button" data-example="60°23'34.8&quot;N 5°19'26.9&quot;E">Bergen (zone 32V)</button>
+    <button class="btn secondary small" type="button" data-example="78.2232 N, 15.6267 E">Svalbard (zone 33X)</button>
+    <button class="btn secondary small" type="button" data-example="22°57.115' S, 43°12.629' W">Rio (DDM)</button>
+  </div>
+</div>
+
+<div class="mg-panel" id="mg-panel-mgrs" hidden>
+  <div class="field">
+    <label for="mg-mgrs">MGRS grid reference</label>
+    <input type="text" id="mg-mgrs" class="mono" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="18T WL 85631 11326">
+  </div>
+  <p class="hint">Spaces are optional. After the two square letters, give 2 to 10 digits: half easting, half northing.</p>
+</div>
+
+<div class="mg-panel" id="mg-panel-utm" hidden>
+  <div class="row">
+    <div class="field mg-zone">
+      <label for="mg-zone">Zone</label>
+      <input type="number" id="mg-zone" min="1" max="60" step="1" inputmode="numeric" placeholder="18">
+    </div>
+    <div class="field mg-hemi">
+      <label for="mg-hemi">Hemisphere</label>
+      <select id="mg-hemi">
+        <option value="N">North</option>
+        <option value="S">South</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="mg-east">Easting (m)</label>
+      <input type="text" id="mg-east" class="mono" inputmode="decimal" autocomplete="off" placeholder="585631">
+    </div>
+    <div class="field">
+      <label for="mg-north">Northing (m)</label>
+      <input type="text" id="mg-north" class="mono" inputmode="decimal" autocomplete="off" placeholder="4511327">
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="field mg-precf">
+    <label for="mg-prec">MGRS precision</label>
+    <select id="mg-prec">
+      <option value="5" selected>1 m (10 digits)</option>
+      <option value="4">10 m (8 digits)</option>
+      <option value="3">100 m (6 digits)</option>
+      <option value="2">1 km (4 digits)</option>
+      <option value="1">10 km (2 digits)</option>
+    </select>
+  </div>
+</div>
+
+<p class="msg error" id="mg-error" role="alert"></p>
+<p class="msg mg-note" id="mg-note" aria-live="polite"></p>
+
+<div id="mg-out">
+  <div class="mg-head">
+    <p class="result-big" id="mg-big" aria-live="polite">&nbsp;</p>
+    <button class="btn" type="button" data-copy-target="#mg-r-mgrs" aria-label="Copy MGRS grid reference">Copy MGRS</button>
+  </div>
+  <dl class="mg-list">
+    <div class="mg-item">
+      <dt>MGRS</dt>
+      <dd><span class="mg-val" id="mg-r-mgrs"></span><small id="mg-r-mgrs-sub"></small></dd>
+      <dd><button class="btn secondary small" type="button" data-copy-target="#mg-r-mgrs" aria-label="Copy MGRS">Copy</button></dd>
+    </div>
+    <div class="mg-item">
+      <dt>UTM</dt>
+      <dd><span class="mg-val" id="mg-r-utm"></span><small id="mg-r-utm-sub"></small></dd>
+      <dd><button class="btn secondary small" type="button" data-copy-target="#mg-r-utm" aria-label="Copy UTM">Copy</button></dd>
+    </div>
+    <div class="mg-item">
+      <dt>Decimal degrees</dt>
+      <dd><span class="mg-val" id="mg-r-dd"></span></dd>
+      <dd><button class="btn secondary small" type="button" data-copy-target="#mg-r-dd" aria-label="Copy decimal degrees">Copy</button></dd>
+    </div>
+    <div class="mg-item">
+      <dt>Degrees, minutes, seconds</dt>
+      <dd><span class="mg-val" id="mg-r-dms"></span></dd>
+      <dd><button class="btn secondary small" type="button" data-copy-target="#mg-r-dms" aria-label="Copy degrees, minutes, seconds">Copy</button></dd>
+    </div>
+    <div class="mg-item">
+      <dt>Degrees, decimal minutes</dt>
+      <dd><span class="mg-val" id="mg-r-ddm"></span></dd>
+      <dd><button class="btn secondary small" type="button" data-copy-target="#mg-r-ddm" aria-label="Copy degrees and decimal minutes">Copy</button></dd>
+    </div>
+    <div class="mg-item">
+      <dt>Grid zone</dt>
+      <dd><span id="mg-r-gzd"></span></dd>
+    </div>
+  </dl>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- WGS84 transverse Mercator: Krueger series to n^6 (Karney 2011) ----------
+  var A = 6378137, F = 1 / 298.257223563, K0 = 0.9996;
+  var N = F / (2 - F), E2 = F * (2 - F), E = Math.sqrt(E2);
+  var N2 = N * N, N3 = N2 * N, N4 = N3 * N, N5 = N4 * N, N6 = N5 * N;
+  var AA = A / (1 + N) * (1 + N2 / 4 + N4 / 64 + N6 / 256);
+  var ALPHA = [0,
+    N / 2 - 2 * N2 / 3 + 5 * N3 / 16 + 41 * N4 / 180 - 127 * N5 / 288 + 7891 * N6 / 37800,
+    13 * N2 / 48 - 3 * N3 / 5 + 557 * N4 / 1440 + 281 * N5 / 630 - 1983433 * N6 / 1935360,
+    61 * N3 / 240 - 103 * N4 / 140 + 15061 * N5 / 26880 + 167603 * N6 / 181440,
+    49561 * N4 / 161280 - 179 * N5 / 168 + 6601661 * N6 / 7257600,
+    34729 * N5 / 80640 - 3418889 * N6 / 1995840,
+    212378941 * N6 / 319334400];
+  var BETA = [0,
+    N / 2 - 2 * N2 / 3 + 37 * N3 / 96 - N4 / 360 - 81 * N5 / 512 + 96199 * N6 / 604800,
+    N2 / 48 + N3 / 15 - 437 * N4 / 1440 + 46 * N5 / 105 - 1118711 * N6 / 3870720,
+    17 * N3 / 480 - 37 * N4 / 840 - 209 * N5 / 4480 + 5569 * N6 / 90720,
+    4397 * N4 / 161280 - 11 * N5 / 504 - 830251 * N6 / 7257600,
+    4583 * N5 / 161280 - 108847 * N6 / 3991680,
+    20648693 * N6 / 638668800];
+  var RAD = Math.PI / 180;
+
+  function centralMeridian(zone) { return zone * 6 - 183; }
+
+  function tmForward(lat, lon, zone) {
+    var phi = lat * RAD, lam = (lon - centralMeridian(zone)) * RAD;
+    if (lam > Math.PI) lam -= 2 * Math.PI;
+    if (lam < -Math.PI) lam += 2 * Math.PI;
+    var tau = Math.tan(phi);
+    var sigma = Math.sinh(E * Math.atanh(E * tau / Math.sqrt(1 + tau * tau)));
+    var taup = tau * Math.sqrt(1 + sigma * sigma) - sigma * Math.sqrt(1 + tau * tau);
+    var cl = Math.cos(lam);
+    var xip = Math.atan2(taup, cl);
+    var etap = Math.asinh(Math.sin(lam) / Math.sqrt(taup * taup + cl * cl));
+    var xi = xip, eta = etap;
+    for (var j = 1; j <= 6; j++) {
+      xi += ALPHA[j] * Math.sin(2 * j * xip) * Math.cosh(2 * j * etap);
+      eta += ALPHA[j] * Math.cos(2 * j * xip) * Math.sinh(2 * j * etap);
+    }
+    return { easting: K0 * AA * eta + 500000, northing: K0 * AA * xi + (lat < 0 ? 10000000 : 0) };
+  }
+
+  function tmInverse(easting, northing, zone, south) {
+    var eta = (easting - 500000) / (K0 * AA), xi = (south ? northing - 10000000 : northing) / (K0 * AA);
+    var xip = xi, etap = eta;
+    for (var j = 1; j <= 6; j++) {
+      xip -= BETA[j] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta);
+      etap -= BETA[j] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta);
+    }
+    var sh = Math.sinh(etap), sx = Math.sin(xip), cx = Math.cos(xip);
+    var taup = sx / Math.sqrt(sh * sh + cx * cx), tau = taup;
+    for (var i = 0; i < 10; i++) {
+      var sigma = Math.sinh(E * Math.atanh(E * tau / Math.sqrt(1 + tau * tau)));
+      var taui = tau * Math.sqrt(1 + sigma * sigma) - sigma * Math.sqrt(1 + tau * tau);
+      var d = (taup - taui) / Math.sqrt(1 + taui * taui) * (1 + (1 - E2) * tau * tau) / ((1 - E2) * Math.sqrt(1 + tau * tau));
+      tau += d;
+      if (Math.abs(d) < 1e-14) break;
+    }
+    var lon = Math.atan2(sh, cx) / RAD + centralMeridian(zone);
+    if (lon > 180) lon -= 360;
+    if (lon < -180) lon += 360;
+    return { lat: Math.atan(tau) / RAD, lon: lon };
+  }
+
+  // ---------- UTM zones, bands and MGRS ----------
+  var BANDS = 'CDEFGHJKLMNPQRSTUVWX';
+  var COLS = ['ABCDEFGH', 'JKLMNPQR', 'STUVWXYZ'];
+  var ROWS = 'ABCDEFGHJKLMNPQRSTUV';
+
+  function bandIndex(lat) { return Math.min(19, Math.floor((lat + 80) / 8)); }
+
+  function zoneFor(lat, lon) {
+    if (lon >= 180) lon -= 360;
+    var zone = Math.floor((lon + 180) / 6) + 1;
+    if (lat >= 56 && lat < 64 && lon >= 3 && lon < 12) zone = 32;
+    if (lat >= 72 && lon >= 0 && lon < 42) zone = lon < 9 ? 31 : lon < 21 ? 33 : lon < 33 ? 35 : 37;
+    return zone;
+  }
+
+  // Longitude span of a grid zone, with the Norway and Svalbard exceptions.
+  function zoneSpan(zone, band) {
+    var w = centralMeridian(zone) - 3, e = w + 6, note = '';
+    if (band === 'V' && zone === 31) { e = 3; note = 'narrowed for the Norway exception'; }
+    if (band === 'V' && zone === 32) { w = 3; note = 'widened for the Norway exception'; }
+    if (band === 'X' && zone >= 31 && zone <= 37 && zone % 2) {
+      w = { 31: 0, 33: 9, 35: 21, 37: 33 }[zone];
+      e = { 31: 9, 33: 21, 35: 33, 37: 42 }[zone];
+      note = 'widened for the Svalbard exception';
+    }
+    return { w: w, e: e, note: note };
+  }
+
+  function checkRange(lat) {
+    if (lat > 84 || lat < -80) {
+      throw new Error('This point is ' + (lat > 0 ? 'north of 84\u00B0N' : 'south of 80\u00B0S') + ', in the polar region. MGRS uses the Universal Polar Stereographic (UPS) grid there, which this converter does not support.');
+    }
+  }
+
+  function toUTM(lat, lon) {
+    checkRange(lat);
+    var zone = zoneFor(lat, lon);
+    var p = tmForward(lat, lon, zone);
+    return { zone: zone, band: BANDS[bandIndex(lat)], south: lat < 0, easting: p.easting, northing: p.northing };
+  }
+
+  // MGRS truncates to the square containing the point. The 1 micrometre tolerance keeps
+  // exact grid values (such as a typed UTM easting) from dropping a digit through rounding error.
+  function toMGRS(u, digits) {
+    var E0 = u.easting + 1e-6, N0 = u.northing + 1e-6;
+    var e100 = Math.floor(E0 / 100000), n100 = Math.floor(N0 / 100000);
+    var col = COLS[(u.zone - 1) % 3][e100 - 1];
+    var row = ROWS[(n100 + (u.zone % 2 === 0 ? 5 : 0)) % 20];
+    if (!col) throw new Error('This point is too far from the centre of its zone for an MGRS reference.');
+    var unit = Math.pow(10, 5 - digits);
+    var e = Math.floor((E0 - e100 * 100000) / unit);
+    var n = Math.floor((N0 - n100 * 100000) / unit);
+    return {
+      gzd: u.zone + u.band,
+      square: col + row,
+      e: String(e).padStart(digits, '0'),
+      n: String(n).padStart(digits, '0')
+    };
+  }
+
+  function parseMGRS(input) {
+    var s = String(input).toUpperCase().replace(/\s+/g, '');
+    if (!s) throw new Error('Enter an MGRS grid reference, for example 18T WL 85631 11326.');
+    var m = /^(\d{1,2})([A-Z])([A-Z])([A-Z])(\d*)$/.exec(s);
+    if (!m) {
+      if (/^(\d{1,2})?[ABYZ]/.test(s)) throw new Error('Polar MGRS references (bands A, B, Y and Z) use the UPS grid, which this converter does not support.');
+      throw new Error('That doesn\u2019t look like an MGRS reference. It should be a zone number, three letters and an even number of digits, like 18T WL 85631 11326.');
+    }
+    var zone = +m[1], band = m[2], colL = m[3], rowL = m[4], digits = m[5];
+    if (/[ABYZ]/.test(band)) throw new Error('Polar MGRS references (bands A, B, Y and Z) use the UPS grid, which this converter does not support.');
+    if (zone < 1 || zone > 60) throw new Error('The zone number must be between 1 and 60.');
+    if (/[IO]/.test(band + colL + rowL)) throw new Error('MGRS never uses the letters I and O. Check whether you meant 1 or 0.');
+    if (band === 'X' && (zone === 32 || zone === 34 || zone === 36)) throw new Error('Zone ' + zone + 'X does not exist: around Svalbard only zones 31X, 33X, 35X and 37X are used.');
+    if (digits.length % 2) throw new Error('The easting and northing need the same number of digits, for example 85631 11326. You gave ' + digits.length + ' digits.');
+    if (digits.length > 10) throw new Error('Use at most 10 digits (5 for the easting and 5 for the northing), which is 1 m precision.');
+    var set = COLS[(zone - 1) % 3];
+    var col = set.indexOf(colL);
+    if (col < 0) throw new Error('Column letter ' + colL + ' is not used in zone ' + zone + ', whose 100 km columns are lettered ' + set[0] + ' to ' + set[7] + '.');
+    var rowIdx = ROWS.indexOf(rowL);
+    if (rowIdx < 0) throw new Error('Row letter ' + rowL + ' is not valid. MGRS row letters run from A to V.');
+    var p = digits.length / 2, unit = Math.pow(10, 5 - p);
+    var bIdx = BANDS.indexOf(band), south = bIdx < 10, latS = bIdx * 8 - 80;
+    var cm = centralMeridian(zone);
+    // The lowest northing in the band picks which 2,000 km cycle the row letter belongs to.
+    var minN = Math.min(tmForward(latS, cm, zone).northing, tmForward(latS, cm + 6, zone).northing);
+    var n = (rowIdx - (zone % 2 === 0 ? 5 : 0) + 20) % 20 * 100000;
+    var base = Math.floor(minN / 100000) * 100000;
+    while (n < base) n += 2000000;
+    var easting = (col + 1) * 100000 + (p ? +digits.slice(0, p) * unit : 0) + unit / 2;
+    var northing = n + (p ? +digits.slice(p) * unit : 0) + unit / 2;
+    return { zone: zone, band: band, south: south, easting: easting, northing: northing, digits: p, unit: unit };
+  }
+
+  // ---------- Latitude / longitude parsing ----------
+  function parseLatLon(input) {
+    var s = String(input).trim();
+    if (!s) throw new Error('Enter a latitude and longitude, for example 40.7484, -73.9857.');
+    s = s.replace(/\b(?:latitude|longitude|lat|long|lon|lng)\b\s*[:=]?/gi, ' ')
+      .replace(/[\u2032\u2019\u2018\u00B4`]/g, "'")
+      .replace(/[\u2033\u201D\u201C]|''/g, '"')
+      .replace(/[\u00BA\u02DA]/g, '\u00B0')
+      .replace(/[\u2212\u2013\u2014]/g, '-');
+    var re = /\s*(?:([NSEW])|([+-]?(?:\d+(?:\.\d*)?|\.\d+))|(\u00B0|d(?:eg(?:rees?)?)?(?![a-z]))|(')|(")|([,;\/])|(\S))/gyi;
+    var toks = [], m;
+    while (re.lastIndex < s.length && (m = re.exec(s))) {
+      if (m[7]) throw new Error('Unexpected "' + m[7] + '" in the coordinates. Use numbers, \u00B0 \' " and N, S, E or W.');
+      if (m[1]) toks.push({ t: 'h', v: m[1].toUpperCase() });
+      else if (m[2]) toks.push({ t: 'n', v: m[2] });
+      else if (m[3]) toks.push({ t: 'deg' });
+      else if (m[6]) toks.push({ t: 'sep' });
+    }
+    var prefixStyle = toks.length && toks[0].t === 'h';
+    var groups = [], cur = null, sawSep = false, sawHemi = false;
+    function close() { if (cur && (cur.nums.length || cur.hemi)) groups.push(cur); cur = null; }
+    function ensure() { if (!cur) cur = { hemi: null, nums: [], sign: 1 }; return cur; }
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i];
+      if (t.t === 'sep') { sawSep = true; close(); continue; }
+      if (t.t === 'h') {
+        sawHemi = true;
+        if (cur && cur.nums.length && !prefixStyle && !cur.hemi) { cur.hemi = t.v; close(); continue; }
+        close();
+        ensure().hemi = t.v;
+        continue;
+      }
+      if (t.t === 'n') {
+        var signed = /^[+-]/.test(t.v), next = toks[i + 1];
+        if (cur && cur.nums.length && (signed || (next && next.t === 'deg'))) close();
+        var g = ensure();
+        if (t.v[0] === '-') g.sign = -1;
+        g.nums.push(Math.abs(parseFloat(t.v)));
+      }
+    }
+    close();
+    if (groups.length === 1 && !sawSep && !sawHemi) {
+      var nums = groups[0].nums, half = nums.length / 2;
+      if (nums.length === 2 || nums.length === 4 || nums.length === 6) {
+        groups = [{ hemi: null, sign: groups[0].sign, nums: nums.slice(0, half) }, { hemi: null, sign: 1, nums: nums.slice(half) }];
+      }
+    }
+    if (groups.length !== 2) throw new Error('Enter exactly two coordinates, latitude and longitude, for example 40.7484, -73.9857.');
+    var vals = groups.map(function (g) {
+      if (!g.nums.length) throw new Error('A coordinate is missing its number.');
+      if (g.nums.length > 3) throw new Error('Too many numbers in one coordinate. Use degrees, minutes and seconds at most.');
+      var d = g.nums[0], mi = g.nums[1] || 0, se = g.nums[2] || 0;
+      if (g.nums.length > 1 && d % 1) throw new Error('Degrees must be a whole number when minutes follow.');
+      if (g.nums.length > 2 && mi % 1) throw new Error('Minutes must be a whole number when seconds follow.');
+      if (mi >= 60 || se >= 60) throw new Error('Minutes and seconds must be less than 60.');
+      var v = d + mi / 60 + se / 3600;
+      if (g.sign < 0 || g.hemi === 'S' || g.hemi === 'W') v = -v;
+      return { v: v, hemi: g.hemi };
+    });
+    var h0 = vals[0].hemi, h1 = vals[1].hemi;
+    var isLat = function (h) { return h === 'N' || h === 'S'; };
+    var isLon = function (h) { return h === 'E' || h === 'W'; };
+    if ((isLat(h0) && isLat(h1)) || (isLon(h0) && isLon(h1))) {
+      throw new Error('Both coordinates are ' + (isLat(h0) ? 'latitudes (N/S)' : 'longitudes (E/W)') + '. Give one latitude and one longitude.');
+    }
+    var latIdx = isLon(h0) || isLat(h1) ? 1 : 0;
+    var lat = vals[latIdx].v, lon = vals[1 - latIdx].v;
+    if (Math.abs(lat) > 90) throw new Error('Latitude must be between -90 and 90 degrees. If you typed longitude first, add N/S and E/W letters.');
+    if (Math.abs(lon) > 180) throw new Error('Longitude must be between -180 and 180 degrees.');
+    if (lon === 180) lon = -180;
+    return { lat: lat, lon: lon };
+  }
+
+  function parseMetres(v, name) {
+    var s = String(v).trim().replace(/[\s,_]/g, '').replace(/m$/i, '');
+    if (!s) throw new Error('Enter the ' + name + ' in metres.');
+    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(s)) throw new Error('The ' + name + ' must be a number of metres, like 585631.');
+    return parseFloat(s);
+  }
+
+  // ---------- Formatting ----------
+  function dms(v, pos, neg) {
+    var h = Math.round(Math.abs(v) * 360000);
+    var d = Math.floor(h / 360000), m = Math.floor(h % 360000 / 6000), s = (h % 6000) / 100;
+    return d + '\u00B0' + String(m).padStart(2, '0') + "'" + s.toFixed(2).padStart(5, '0') + '"' + (v < 0 ? neg : pos);
+  }
+  function ddm(v, pos, neg) {
+    var t = Math.round(Math.abs(v) * 600000);
+    var d = Math.floor(t / 600000), m = (t % 600000) / 10000;
+    return d + '\u00B0' + m.toFixed(4).padStart(7, '0') + "'" + (v < 0 ? neg : pos);
+  }
+  function fmtDeg(v) { return Math.abs(v) + '\u00B0' + (v < 0 ? 'S' : 'N'); }
+  function fmtLon(v) { return Math.abs(v) + '\u00B0' + (v < 0 ? 'W' : 'E'); }
+  function metres(v) { return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' m'; }
+
+  // ---------- UI ----------
+  var errorBox = TT.$('#mg-error'), noteBox = TT.$('#mg-note'), out = TT.$('#mg-out');
+  var prec = TT.$('#mg-prec'), llInput = TT.$('#mg-ll'), mgrsInput = TT.$('#mg-mgrs');
+  var zoneInput = TT.$('#mg-zone'), hemiInput = TT.$('#mg-hemi'), eastInput = TT.$('#mg-east'), northInput = TT.$('#mg-north');
+  var locateBtn = TT.$('#mg-locate');
+  var current = null, followInput = false;
+
+  function mode() { return TT.$('input[name="mg-mode"]:checked').value; }
+
+  function setText(id, text) { TT.$(id).textContent = text; }
+
+  function render(lat, lon, notes) {
+    var u = toUTM(lat, lon);
+    var digits = +prec.value;
+    var g = toMGRS(u, digits);
+    var spaced = g.gzd + ' ' + g.square + (digits ? ' ' + g.e + ' ' + g.n : '');
+    var compact = g.gzd + g.square + g.e + g.n;
+    var unitLabel = ['', '10 km', '1 km', '100 m', '10 m', '1 m'][digits];
+    setText('#mg-big', spaced);
+    setText('#mg-r-mgrs', spaced);
+    setText('#mg-r-mgrs-sub', 'Without spaces: ' + compact + ' \u00B7 ' + unitLabel + ' square');
+    setText('#mg-r-utm', u.zone + u.band + ' ' + Math.round(u.easting) + ' ' + Math.round(u.northing));
+    setText('#mg-r-utm-sub', 'Zone ' + u.zone + ', ' + (u.south ? 'southern' : 'northern') + ' hemisphere \u00B7 easting ' + metres(u.easting) + ' \u00B7 northing ' + metres(u.northing));
+    setText('#mg-r-dd', lat.toFixed(6) + ', ' + lon.toFixed(6));
+    setText('#mg-r-dms', dms(lat, 'N', 'S') + ' ' + dms(lon, 'E', 'W'));
+    setText('#mg-r-ddm', ddm(lat, 'N', 'S') + ' ' + ddm(lon, 'E', 'W'));
+    var bi = bandIndex(lat), latS = bi * 8 - 80, latN = bi === 19 ? 84 : latS + 8;
+    var span = zoneSpan(u.zone, u.band);
+    setText('#mg-r-gzd', u.zone + u.band + ': zone ' + u.zone + ' covers ' + fmtLon(span.w) + ' to ' + fmtLon(span.e) +
+      (span.note ? ' (' + span.note + ')' : '') + ', band ' + u.band + ' covers ' + fmtDeg(latS) + ' to ' + fmtDeg(latN) + '.');
+    current = { lat: lat, lon: lon, utm: u, mgrs: compact };
+    out.hidden = false;
+    noteBox.textContent = notes.join(' ');
+  }
+
+  function convert() {
+    errorBox.textContent = '';
+    try {
+      var m = mode(), notes = [];
+      if (m === 'll') {
+        var p = parseLatLon(llInput.value);
+        render(p.lat, p.lon, notes);
+      } else if (m === 'mgrs') {
+        var r = parseMGRS(mgrsInput.value);
+        if (followInput && r.digits) prec.value = String(r.digits);
+        var ll = tmInverse(r.easting, r.northing, r.zone, r.south);
+        checkRange(ll.lat);
+        if (r.digits < 5) notes.push('This reference names a ' + (r.unit >= 1000 ? r.unit / 1000 + ' km' : r.unit + ' m') + ' square; the latitude and longitude are its centre.');
+        else notes.push('Latitude and longitude are the centre of the 1 m square.');
+        if (r.digits >= 2 && BANDS[bandIndex(ll.lat)] !== r.band) notes.push('Check the letters: this point lies in latitude band ' + BANDS[bandIndex(ll.lat)] + ', not ' + r.band + '.');
+        else if (r.digits >= 2 && zoneFor(ll.lat, ll.lon) !== r.zone) notes.push('This point lies outside zone ' + r.zone + r.band + '; the standard grid zone is ' + zoneFor(ll.lat, ll.lon) + BANDS[bandIndex(ll.lat)] + '.');
+        render(ll.lat, ll.lon, notes);
+      } else {
+        var zs = String(zoneInput.value).trim();
+        if (!/^\d{1,2}$/.test(zs) || +zs < 1 || +zs > 60) throw new Error('The UTM zone must be a whole number from 1 to 60.');
+        var zone = +zs, south = hemiInput.value === 'S';
+        var e = parseMetres(eastInput.value, 'easting'), n = parseMetres(northInput.value, 'northing');
+        if (e < 100000 || e > 900000) throw new Error('UTM eastings lie between about 160,000 and 840,000 m (500,000 m is the zone\u2019s central meridian). Check the easting.');
+        if (n < 0 || n > 10000000) throw new Error('UTM northings run from 0 to 10,000,000 m. Check the northing.');
+        var pt = tmInverse(e, n, zone, south);
+        checkRange(pt.lat);
+        var std = zoneFor(pt.lat, pt.lon);
+        if (std !== zone) notes.push('This point lies in standard UTM zone ' + std + ', so the UTM and MGRS results below use zone ' + std + '.');
+        render(pt.lat, pt.lon, notes);
+      }
+    } catch (err) {
+      errorBox.textContent = err && err.message ? err.message : String(err);
+      noteBox.textContent = '';
+      out.hidden = true;
+      current = null;
+    }
+  }
+
+  function showPanel() {
+    var m = mode();
+    ['ll', 'mgrs', 'utm'].forEach(function (k) { TT.$('#mg-panel-' + k).hidden = k !== m; });
+  }
+
+  // Switching input type carries the current point over to the new fields.
+  TT.$$('input[name="mg-mode"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      var m = mode();
+      if (current) {
+        if (m === 'll') llInput.value = current.lat.toFixed(6) + ', ' + current.lon.toFixed(6);
+        if (m === 'mgrs') mgrsInput.value = TT.$('#mg-r-mgrs').textContent;
+        if (m === 'utm') {
+          zoneInput.value = current.utm.zone;
+          hemiInput.value = current.utm.south ? 'S' : 'N';
+          eastInput.value = Math.round(current.utm.easting);
+          northInput.value = Math.round(current.utm.northing);
+        }
+      }
+      showPanel();
+      convert();
+    });
+  });
+
+  llInput.addEventListener('input', convert);
+  // A typed MGRS reference sets the output precision to its own.
+  mgrsInput.addEventListener('input', function () {
+    followInput = true;
+    convert();
+    followInput = false;
+  });
+  [zoneInput, hemiInput, eastInput, northInput].forEach(function (el) {
+    el.addEventListener('input', convert);
+    el.addEventListener('change', convert);
+  });
+  prec.addEventListener('change', convert);
+
+  TT.$$('[data-example]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      TT.$('input[name="mg-mode"][value="ll"]').checked = true;
+      showPanel();
+      llInput.value = btn.getAttribute('data-example');
+      convert();
+    });
+  });
+
+  locateBtn.addEventListener('click', function () {
+    errorBox.textContent = '';
+    if (!('geolocation' in navigator)) {
+      errorBox.textContent = 'Your browser does not support location lookup. Type the coordinates instead.';
+      return;
+    }
+    if (!window.isSecureContext) {
+      errorBox.textContent = 'Your browser only shares location over a secure (https) connection.';
+      return;
+    }
+    locateBtn.disabled = true;
+    locateBtn.textContent = 'Locating\u2026';
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      locateBtn.disabled = false;
+      locateBtn.textContent = 'Use my location';
+      TT.$('input[name="mg-mode"][value="ll"]').checked = true;
+      showPanel();
+      llInput.value = pos.coords.latitude.toFixed(6) + ', ' + pos.coords.longitude.toFixed(6);
+      convert();
+      if (current && isFinite(pos.coords.accuracy)) {
+        noteBox.textContent = ('Your browser reports this position as accurate to about \u00B1' + Math.round(pos.coords.accuracy).toLocaleString('en-US') + ' m. ' + noteBox.textContent).trim();
+      }
+    }, function (err) {
+      locateBtn.disabled = false;
+      locateBtn.textContent = 'Use my location';
+      var msgs = {
+        1: 'Location access was denied. To use it, allow location for this site in your browser settings, or type the coordinates instead.',
+        2: 'Your device could not work out its position. Try again, or type the coordinates instead.',
+        3: 'Finding your position took too long. Try again, or type the coordinates instead.'
+      };
+      errorBox.textContent = msgs[err && err.code] || 'Your location is not available. Type the coordinates instead.';
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  });
+
+  showPanel();
+  convert();
+})();
+</script>

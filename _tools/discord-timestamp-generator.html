@@ -43,7 +43,9 @@ howto: |
   ## How it works
 
   A Discord timestamp stores a single moment as the number of seconds since
-  1 January 1970 UTC, known as Unix time. The code carries no time zone at all:
+  1 January 1970 UTC, known as Unix time. Earlier moments are negative
+  numbers: the Moon landing, 20 July 1969 at 20:17:40 UTC, is
+  `<t:-14182940:F>`. The code carries no time zone at all:
   each reader's app formats that moment in their own time zone. The time zone
   you choose here is only used to turn the clock time you typed into that
   number.
@@ -127,7 +129,7 @@ faq:
 <div class="row dts-inputs">
   <div class="field">
     <label for="dts-date">Date</label>
-    <input type="date" id="dts-date" min="1970-01-01" max="9999-12-31">
+    <input type="date" id="dts-date" min="0001-01-01" max="9999-12-31">
   </div>
   <div class="field">
     <label for="dts-time">Time</label>
@@ -240,8 +242,9 @@ faq:
     return utcMs(p.y, p.mo, p.d, p.h, p.mi, p.s) - Math.floor(ms / 1000) * 1000;
   }
   // Wall-clock time in a zone -> epoch ms. Repeated times use the earlier
-  // instant; skipped times move forward by the gap (like Temporal "compatible").
-  function fromZoned(y, mo, d, h, mi, s, tz) {
+  // instant unless `prefer` is one of the two; skipped times move forward by
+  // the gap (like Temporal "compatible").
+  function fromZoned(y, mo, d, h, mi, s, tz, prefer) {
     var wall = utcMs(y, mo, d, h, mi, s);
     var before = offsetMs(wall - 864e5, tz), after = offsetMs(wall + 864e5, tz);
     var found = [];
@@ -250,7 +253,10 @@ faq:
       if (offsetMs(t, tz) === off && found.indexOf(t) < 0) found.push(t);
     });
     found.sort(function (a, b) { return a - b; });
-    if (found.length) return { ms: found[0], repeated: found.length > 1 };
+    if (found.length) {
+      var pick = found.indexOf(prefer) >= 0 ? prefer : found[0];
+      return { ms: pick, repeated: found.length > 1, later: pick !== found[0] };
+    }
     return { ms: wall - before, skipped: true };
   }
   function offsetLabel(off) {
@@ -336,6 +342,10 @@ faq:
   var dateEl = $('#dts-date'), timeEl = $('#dts-time'), zoneEl = $('#dts-zone');
   var list = $('#dts-list');
   var current = null; // seconds
+  // When the page itself fills the fields (Now, +/-1 hour, Load), this is the
+  // exact instant meant, so a repeated clock time (DST fall-back) keeps the
+  // right occurrence. Typing in the fields clears it.
+  var pinned = null;
   var rows = {};
 
   STYLES.forEach(function (st) {
@@ -423,34 +433,35 @@ faq:
     if (!dm) return { error: 'Enter a date.' };
     if (!tm) return { error: 'Enter a time.' };
     var y = +dm[1], mo = +dm[2], d = +dm[3], h = +tm[1], mi = +tm[2], s = tm[3] ? +tm[3] : 0;
-    if (y < 1970 || y > 9999) return { error: 'Choose a year from 1970 to 9999.' };
+    if (y < 1 || y > 9999) return { error: 'Choose a year from 1 to 9999.' };
     var tz = zoneEl.value || LOCAL_TZ;
-    var r = fromZoned(y, mo, d, h, mi, s, tz);
+    var r = fromZoned(y, mo, d, h, mi, s, tz, pinned);
     r.tz = tz;
     r.wall = dateEl.value + ' ' + pad(h) + ':' + pad(mi) + ':' + pad(s);
     return r;
+  }
+
+  function showError(text) {
+    $('#dts-msg').textContent = text;
+    $('#dts-note').textContent = '';
+    current = null;
+    $('#dts-unix').textContent = '–';
+    $('#dts-utc').textContent = '–';
+    $('#dts-local').textContent = '–';
+    renderRows();
   }
 
   function update() {
     var msg = $('#dts-msg'), note = $('#dts-note');
     var r;
     try { r = parseInputs(); } catch (e) { r = { error: 'That date or time zone could not be converted.' }; }
-    if (r.error) {
-      msg.textContent = r.error;
-      note.textContent = '';
-      current = null;
-      $('#dts-unix').textContent = '–';
-      $('#dts-utc').textContent = '–';
-      $('#dts-local').textContent = '–';
-      renderRows();
-      return;
-    }
+    if (r.error) { showError(r.error); return; }
     msg.textContent = '';
     current = Math.floor(r.ms / 1000);
     var off = offsetLabel(offsetMs(r.ms, r.tz));
     var parts = [];
     if (r.skipped) parts.push('That clock time does not exist in ' + r.tz + ' because the clocks jump forward for daylight saving time, so the next valid time was used.');
-    if (r.repeated) parts.push('That clock time happens twice in ' + r.tz + ' because the clocks go back; the first occurrence was used.');
+    if (r.repeated) parts.push('That clock time happens twice in ' + r.tz + ' because the clocks go back; the ' + (r.later ? 'second' : 'first') + ' occurrence (' + off + ') was used.');
     if (r.tz !== LOCAL_TZ) parts.push(r.tz.replace(/_/g, ' ') + ' is ' + off + ' at that moment.');
     note.textContent = parts.join(' ');
     $('#dts-unix').textContent = String(current);
@@ -461,7 +472,14 @@ faq:
 
   function setFromSeconds(sec) {
     var tz = zoneEl.value || LOCAL_TZ;
-    var p = zoneParts(sec * 1000, tz);
+    var p = null;
+    try { p = zoneParts(sec * 1000, tz); } catch (e) { p = null; }
+    if (!p || !(p.y >= 1 && p.y <= 9999)) {
+      pinned = null;
+      showError('That moment is outside the years 1 to 9999 that the date picker supports.');
+      return;
+    }
+    pinned = sec * 1000;
     dateEl.value = String(p.y).padStart(4, '0') + '-' + pad(p.mo) + '-' + pad(p.d);
     timeEl.value = pad(p.h) + ':' + pad(p.mi) + ':' + pad(p.s);
     update();
@@ -469,6 +487,9 @@ faq:
 
   // ---------- Decoder ----------
   var TOKEN = /<t:(-?\d{1,17})(?::([tTdDfFsSR]))?>/g;
+  // Discord messages are at most 4,000 characters; a longer paste is still
+  // decoded, but only this much of it is rendered as a message preview.
+  var PREVIEW_MAX = 20000;
   var DISCORD_EPOCH = 1420070400000n;
   var decoded = null;
 
@@ -524,18 +545,20 @@ faq:
         if (rest) {
           var p = document.createElement('div');
           p.className = 'dts-message';
-          var pos = 0;
+          var pos = 0, cut = Math.min(raw.length, PREVIEW_MAX);
+          tokens.forEach(function (t) { if (t.index < cut && t.index + t.len > cut) cut = t.index; });
           tokens.forEach(function (t) {
+            if (t.index + t.len > cut) return;
             p.appendChild(document.createTextNode(raw.slice(pos, t.index)));
             var ch = chip(render(t.style, t.sec));
             if (t.style === 'R') ch.setAttribute('data-rel', String(t.sec));
             p.appendChild(ch);
             pos = t.index + t.len;
           });
-          p.appendChild(document.createTextNode(raw.slice(pos)));
+          p.appendChild(document.createTextNode(raw.slice(pos, cut) + (cut < raw.length ? ' …' : '')));
           var lbl = document.createElement('p');
           lbl.className = 'label';
-          lbl.textContent = 'Message preview';
+          lbl.textContent = 'Message preview' + (cut < raw.length ? ' (first ' + PREVIEW_MAX.toLocaleString('en-US') + ' characters)' : '');
           frag.appendChild(lbl);
           frag.appendChild(p);
         }
@@ -580,8 +603,9 @@ faq:
 
   // ---------- Wiring ----------
   buildZoneSelect(zoneEl);
-  [dateEl, timeEl].forEach(function (el) { el.addEventListener('input', update); el.addEventListener('change', update); });
-  zoneEl.addEventListener('change', update);
+  function userEdit() { pinned = null; update(); }
+  [dateEl, timeEl].forEach(function (el) { el.addEventListener('input', userEdit); el.addEventListener('change', userEdit); });
+  zoneEl.addEventListener('change', userEdit);
   $('#dts-now').addEventListener('click', function () { setFromSeconds(Math.floor(Date.now() / 1000)); });
   TT.$$('[data-add]').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -597,6 +621,7 @@ faq:
       var dt = new Date(0);
       dt.setUTCFullYear(+dm[1], +dm[2] - 1, +dm[3] + Number(b.getAttribute('data-add-days')));
       dateEl.value = String(dt.getUTCFullYear()).padStart(4, '0') + '-' + pad(dt.getUTCMonth() + 1) + '-' + pad(dt.getUTCDate());
+      pinned = null;
       update();
     });
   });

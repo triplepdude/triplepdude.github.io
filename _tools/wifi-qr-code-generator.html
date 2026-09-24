@@ -128,8 +128,8 @@ faq:
   .wq-card-qr { flex-basis: auto; width: 180px; margin: 0 auto; }
 }
 @media print {
-  body > :not(.wq-print-root) { display: none !important; }
-  .wq-print-root { display: block !important; padding-top: 10mm; }
+  html.wq-can-print body > :not(.wq-print-root) { display: none !important; }
+  html.wq-can-print .wq-print-root { display: block !important; padding-top: 10mm; }
   .wq-print-root .wq-card { flex-direction: column; align-items: center; width: 110mm; max-width: none; margin: 0 auto; padding: 10mm; text-align: center; background: #fff; color: #000; border: 0.6mm solid #000; border-radius: 5mm; }
   .wq-print-root .wq-card-body { display: contents; }
   .wq-print-root .wq-card-title { order: 1; margin-bottom: 1mm; }
@@ -177,7 +177,7 @@ faq:
   </div>
 
   <div class="wq-preview">
-    <div class="wq-qr" id="wq-qr" aria-live="polite"></div>
+    <div class="wq-qr" id="wq-qr"></div>
     <p class="wq-meta" id="wq-meta" aria-live="polite"></p>
     <div class="row">
       <div class="field">
@@ -412,6 +412,11 @@ faq:
   }
 
   function update() {
+    refresh();
+    syncPrint();
+  }
+
+  function refresh() {
     var o = readOptions();
     passEl.disabled = o.security === 'nopass';
     toggleBtn.disabled = passEl.disabled;
@@ -452,16 +457,17 @@ faq:
     metaEl.textContent = 'Version ' + version + ', ' + n + ' × ' + n + ' modules, error correction ' +
       eclEl.value + ' (' + ECL_PCT[eclEl.value] + '%), ' + bytes(payload) + ' bytes';
     pngBtn.disabled = svgBtn.disabled = printBtn.disabled = false;
-    syncPrint();
   }
 
   // A copy of the card sits directly under <body> so print CSS can hide everything else.
+  // Without a valid code the page prints normally.
   var printRoot = document.createElement('div');
   printRoot.className = 'wq-print-root';
   printRoot.setAttribute('aria-hidden', 'true');
   document.body.appendChild(printRoot);
   function syncPrint() {
     printRoot.innerHTML = '';
+    document.documentElement.classList.toggle('wq-can-print', !!current);
     if (!current) return;
     var clone = $('#wq-card').cloneNode(true);
     clone.removeAttribute('id');

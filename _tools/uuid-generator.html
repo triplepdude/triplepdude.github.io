@@ -1,0 +1,417 @@
+---
+title: UUID Generator (v4 & v7) and Decoder
+description: Generate random v4 or time-ordered v7 UUIDs in bulk, uppercase, without hyphens or in braces, and decode any UUID's version, variant and timestamp.
+category: Developer
+keywords: [uuid generator, uuid v4 generator, uuid v7 generator, guid generator, bulk uuid generator, uuid decoder, uuid validator, uuid timestamp]
+howto: |
+  ## How to use it
+
+  Pick a version, choose how many UUIDs you need (up to 1,000) and press
+  **Generate**. Tick the boxes for uppercase, no hyphens or curly braces;
+  changing the format re-formats the same list rather than making new IDs.
+  **Copy** puts the whole list on your clipboard and **Download .txt** saves
+  it with one UUID per line.
+
+  To look inside an existing UUID, paste it into **Decode a UUID**. It
+  accepts the usual forms: with or without hyphens, in braces, upper or
+  lower case, or as a `urn:uuid:` name. You get the version, the variant,
+  the 128-bit value as an integer, and for time-based versions the moment it
+  was made.
+
+  ## v4 or v7?
+
+  A **v4** UUID is 122 random bits plus the version and variant markers. This
+  page makes them with the browser's `crypto.randomUUID()`, which draws on
+  the operating system's cryptographic random number generator.
+
+  A **v7** UUID starts with a 48-bit count of milliseconds since
+  1970-01-01 UTC, followed by 74 random bits, so v7 IDs sort by creation
+  time. As database primary keys they keep B-tree indexes append-mostly,
+  which usually means faster inserts and less index bloat than random v4
+  keys. The trade-off is that anyone holding the ID can read when it was
+  created.
+
+  | Bits | v7 field | Contents |
+  |---|---|---|
+  | 0–47 | `unix_ts_ms` | milliseconds since the Unix epoch |
+  | 48–51 | `ver` | always `0111` (7) |
+  | 52–63 | `rand_a` | random |
+  | 64–65 | `var` | always `10` |
+  | 66–127 | `rand_b` | random |
+
+  In text form the version is the first digit of the third group and the
+  variant shows in the first digit of the fourth group, which is 8, 9, a or
+  b for standard UUIDs: `xxxxxxxx-xxxx-7xxx-9xxx-xxxxxxxxxxxx`.
+
+  ## Keeping v7 in order
+
+  Many v7 IDs can share one millisecond. Following RFC 9562 section 6.2
+  (method 2, "monotonic random"), the generator treats the 74 random bits as
+  a counter: the first ID in a millisecond gets fresh random bits, and each
+  later one adds a random amount of up to 2<sup>32</sup>. A batch of 1,000
+  therefore sorts in exactly the order it was made while staying hard to
+  guess. If the computer's clock steps backwards, the last timestamp is
+  reused so the order still holds.
+
+  ## Versions at a glance
+
+  | Version | Built from | Timestamp |
+  |---|---|---|
+  | 1 | time and node (often a MAC address) | 100 ns steps since 1582-10-15 |
+  | 2 | like v1, with a POSIX user or group ID | coarse, low bits replaced |
+  | 3, 5 | MD5 or SHA-1 hash of a namespace and a name | none |
+  | 4 | random bits | none |
+  | 6 | v1's fields reordered to sort by time | as v1 |
+  | 7 | Unix milliseconds and random bits | milliseconds since 1970 |
+  | 8 | a vendor-defined layout | depends |
+
+  The **nil UUID** is all zeros and the **max UUID** is all `f`. Both are
+  valid special values, often used as "none" and "any".
+
+  A **GUID** is Microsoft's name for the same 128-bit identifier. The
+  registry style wraps it in braces and uses capitals, as in
+  `{0F8FAD5B-D9CB-469F-A165-70867728950E}`. When you handle raw bytes,
+  note that Windows and .NET store the first three groups little-endian, so
+  the byte order differs from the text even though the text form is
+  identical.
+faq:
+  - q: Can two generated UUIDs ever be the same?
+    a: In theory yes, in practice no. A v4 UUID has 122 random bits, so you would need to make about 2.7 quintillion (2.7 × 10<sup>18</sup>) of them for a 50% chance of a single repeat. v7 adds the millisecond timestamp, which makes a clash even less likely.
+  - q: Is a GUID the same as a UUID?
+    a: Yes. GUID is Microsoft's term for a UUID. The text format is the same; Windows tools often show it in capitals and curly braces, which the checkboxes above reproduce.
+  - q: Can I find out when a UUID was created?
+    a: Only for versions that store a time, which are 1, 6 and 7 (and 2, roughly). Paste one into the decoder to see the date. Version 4 is pure randomness, and versions 3 and 5 are hashes, so they contain no date.
+  - q: Should I use v4 or v7 for database keys?
+    a: v7 is usually the better choice for primary keys because new rows land at the end of the index. Use v4 when the ID must not reveal when the record was created.
+  - q: Are these UUIDs generated on a server?
+    a: No. They are created in your browser with the Web Crypto API, and the decoder also runs locally. Nothing is uploaded, logged or stored.
+---
+<style>
+.tool-page:has(#uu-out) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
+.tool-page:has(#uu-out) .prose th, .tool-page:has(#uu-out) .prose td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.tool-page:has(#uu-out) .prose th { color: var(--muted); font-weight: 600; }
+.uu-h { margin: 0 0 14px; font-size: 1.15rem; }
+.uu-sep { margin: 28px 0 20px; border: 0; border-top: 1px solid var(--border); }
+.uu-gen .row > .field { flex: 1 1 180px; }
+textarea.mono.uu-out { min-height: 0; font-size: clamp(12px, 3.3vw, 15px); line-height: 1.6; white-space: pre; overflow-wrap: normal; overflow-x: auto; resize: vertical; background: var(--surface-2); }
+input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
+.uu-gen .row select, .uu-gen .row input { height: 44px; padding-top: 0; padding-bottom: 0; }
+.uu-examples { align-items: center; }
+.uu-info th { width: 11rem; color: var(--muted); }
+.uu-info td { font-family: var(--mono); overflow-wrap: anywhere; }
+.uu-info td.uu-text { font-family: inherit; }
+.uu-info td small { display: block; color: var(--muted); font-family: system-ui, sans-serif; font-size: 13px; }
+.uu-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-family: system-ui, sans-serif; font-size: 14px; font-weight: 600; }
+.uu-badge.ok { background: var(--accent-soft); color: var(--accent); }
+.uu-badge.warn { background: var(--danger-soft); color: var(--danger); }
+@media (max-width: 560px) {
+  table.data.uu-info, .uu-info tbody, .uu-info tr, table.data.uu-info th, table.data.uu-info td { display: block; width: auto; }
+  table.data.uu-info tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  table.data.uu-info th, table.data.uu-info td { padding: 0; border: 0; }
+  table.data.uu-info th { font-size: 13px; }
+}
+</style>
+
+<div class="uu-gen">
+  <h2 class="uu-h">Generate UUIDs</h2>
+  <div class="row">
+    <div class="field">
+      <label for="uu-ver">Version</label>
+      <select id="uu-ver">
+        <option value="4" selected>v4, random</option>
+        <option value="7">v7, time-ordered</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="uu-count">How many <span class="hint">1 to 1,000</span></label>
+      <input type="number" id="uu-count" min="1" max="1000" step="1" value="1" inputmode="numeric">
+    </div>
+  </div>
+  <div class="checks">
+    <label class="check"><input type="checkbox" id="uu-upper"> Uppercase</label>
+    <label class="check"><input type="checkbox" id="uu-nohyph"> No hyphens</label>
+    <label class="check"><input type="checkbox" id="uu-braces"> Braces { }</label>
+  </div>
+  <p class="msg error" id="uu-gen-err" role="alert"></p>
+  <div class="field">
+    <label for="uu-out">Result <span class="hint" id="uu-summary" aria-live="polite"></span></label>
+    <textarea id="uu-out" class="mono uu-out" rows="1" readonly spellcheck="false" autocapitalize="off"></textarea>
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" id="uu-gen">Generate</button>
+    <button class="btn secondary" type="button" data-copy-target="#uu-out">Copy</button>
+    <button class="btn secondary" type="button" id="uu-dl">Download .txt</button>
+  </div>
+</div>
+
+<hr class="uu-sep">
+<h2 class="uu-h">Decode a UUID</h2>
+<div class="field">
+  <label for="uu-in">UUID to inspect</label>
+  <input type="text" id="uu-in" class="mono uu-in" value="017f22e2-79b0-7cc3-98c4-dc0c0c07398f" autocomplete="off" autocapitalize="off" spellcheck="false">
+</div>
+<div class="actions uu-examples">
+  <span class="hint">RFC 9562 examples:</span>
+  <button class="btn secondary small" type="button" data-uuid="C232AB00-9414-11EC-B3C8-9F6BDECED846">v1</button>
+  <button class="btn secondary small" type="button" data-uuid="919108F7-52D1-4320-9BAC-F847DB4148A8">v4</button>
+  <button class="btn secondary small" type="button" data-uuid="1EC9414C-232A-6B00-B3C8-9F6BDECED846">v6</button>
+  <button class="btn secondary small" type="button" data-uuid="017F22E2-79B0-7CC3-98C4-DC0C0C07398F">v7</button>
+  <button class="btn secondary small" type="button" data-uuid="2489E9AD-2EE2-8E00-8EC9-32D5F69181C0">v8</button>
+  <button class="btn secondary small" type="button" data-uuid="00000000-0000-0000-0000-000000000000">Nil</button>
+  <button class="btn secondary small" type="button" data-uuid="FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF">Max</button>
+</div>
+<p class="msg error" id="uu-in-err" role="alert"></p>
+<div class="table-wrap" aria-live="polite">
+  <table class="data uu-info">
+    <tbody id="uu-info"></tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var out = $('#uu-out'), countIn = $('#uu-count'), verSel = $('#uu-ver');
+  var genErr = $('#uu-gen-err'), inp = $('#uu-in'), inErr = $('#uu-in-err');
+
+  // ---------- Generation ----------
+  function hexOf(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+    return s;
+  }
+  function dashed(h) { return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20); }
+  function randomBytes(n) { var b = new Uint8Array(n); crypto.getRandomValues(b); return b; }
+  function randomBig(bits) {
+    var b = randomBytes(Math.ceil(bits / 8)), v = 0n;
+    for (var i = 0; i < b.length; i++) v = (v << 8n) | BigInt(b[i]);
+    return v & ((1n << BigInt(bits)) - 1n);
+  }
+
+  function uuid4() {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    var b = randomBytes(16);
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    return dashed(hexOf(b));
+  }
+
+  // RFC 9562 section 6.2, method 2: the 74 random bits double as a counter
+  // within one millisecond, incremented by a random amount (1 to 2^32).
+  var R74 = 1n << 74n, M62 = (1n << 62n) - 1n;
+  var last = { ms: -1, r: 0n };
+  function uuid7() {
+    var now = Date.now();
+    if (now > last.ms) {
+      last.ms = now;
+      last.r = randomBig(73); // top bit clear leaves room to count up
+    } else {
+      last.r += randomBig(32) + 1n;
+      if (last.r >= R74) { last.ms += 1; last.r = randomBig(73); }
+    }
+    var hi = (BigInt(last.ms) << 16n) | (7n << 12n) | (last.r >> 62n);
+    var lo = (2n << 62n) | (last.r & M62);
+    return dashed(hi.toString(16).padStart(16, '0') + lo.toString(16).padStart(16, '0'));
+  }
+
+  var list = [];
+  function formatted() {
+    var upper = $('#uu-upper').checked, nohyph = $('#uu-nohyph').checked, braces = $('#uu-braces').checked;
+    return list.map(function (u) {
+      var s = nohyph ? u.replace(/-/g, '') : u;
+      if (upper) s = s.toUpperCase();
+      return braces ? '{' + s + '}' : s;
+    });
+  }
+  function render() {
+    out.value = formatted().join('\n');
+    out.rows = Math.min(Math.max(list.length, 1), 10);
+    var v = list.length && list[0].charAt(14);
+    $('#uu-summary').textContent = list.length ? list.length.toLocaleString('en-US') + ' UUID' + (list.length === 1 ? '' : 's') + ', version ' + v : '';
+    $('#uu-dl').disabled = !list.length;
+  }
+  function readCount() {
+    var s = String(countIn.value).trim();
+    if (!/^\d+$/.test(s)) return null;
+    var n = parseInt(s, 10);
+    return n >= 1 && n <= 1000 ? n : null;
+  }
+  function generate() {
+    var n = readCount();
+    if (n === null) {
+      genErr.textContent = 'Enter a whole number from 1 to 1,000.';
+      countIn.setAttribute('aria-invalid', 'true');
+      return;
+    }
+    genErr.textContent = '';
+    countIn.setAttribute('aria-invalid', 'false');
+    var make = verSel.value === '7' ? uuid7 : uuid4, fresh = [];
+    try {
+      for (var i = 0; i < n; i++) fresh.push(make());
+    } catch (e) {
+      genErr.textContent = 'This browser could not generate secure random numbers.';
+      return;
+    }
+    list = fresh;
+    render();
+  }
+
+  $('#uu-gen').addEventListener('click', generate);
+  verSel.addEventListener('change', generate);
+  countIn.addEventListener('input', generate);
+  ['#uu-upper', '#uu-nohyph', '#uu-braces'].forEach(function (id) { $(id).addEventListener('change', render); });
+  $('#uu-dl').addEventListener('click', function () {
+    if (!list.length) return;
+    TT.download('uuids-v' + list[0].charAt(14) + '.txt', formatted().join('\n') + '\n', 'text/plain;charset=utf-8');
+  });
+
+  // ---------- Decoding ----------
+  var VERSIONS = {
+    1: 'Gregorian time-based', 2: 'DCE Security', 3: 'Name-based, MD5 hash', 4: 'Random',
+    5: 'Name-based, SHA-1 hash', 6: 'Reordered Gregorian time-based', 7: 'Unix Epoch time-based', 8: 'Custom, vendor-specific'
+  };
+  var GREGORIAN_OFFSET = 0x01B21DD213814000n; // 100 ns intervals from 1582-10-15 to 1970-01-01
+
+  function parse(raw) {
+    var s = raw.trim().replace(/^urn:uuid:/i, '');
+    if (!s) return { empty: true };
+    if (s.charAt(0) === '{' && s.charAt(s.length - 1) === '}') s = s.slice(1, -1).trim();
+    var bad = /[^0-9a-fA-F-]/.exec(s);
+    if (bad) return { error: '"' + bad[0] + '" is not a hexadecimal digit. A UUID uses only 0-9 and a-f, plus hyphens.' };
+    var h = s.replace(/-/g, '');
+    if (h.length !== 32) return { error: 'A UUID has 32 hex digits, but this has ' + h.length + '.' };
+    if (s.indexOf('-') >= 0 && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) {
+      return { error: 'The hyphens are in the wrong places. The standard layout is 8-4-4-4-12 digits.' };
+    }
+    return { hex: h.toLowerCase() };
+  }
+
+  function isoFrom100ns(unix100ns) {
+    var sec = unix100ns / 10000000n, frac = unix100ns % 10000000n;
+    if (frac < 0n) { frac += 10000000n; sec -= 1n; }
+    var d = new Date(Number(sec) * 1000);
+    return d.toISOString().replace(/\.\d{3}Z$/, '.' + frac.toString().padStart(7, '0') + 'Z');
+  }
+  function localTime(ms) {
+    try {
+      return new Date(ms).toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' });
+    } catch (e) { return new Date(ms).toString(); }
+  }
+  function variantOf(b8) {
+    if ((b8 & 0x80) === 0) return { rfc: false, bits: '0xxx', name: 'NCS, reserved for backward compatibility' };
+    if ((b8 & 0xc0) === 0x80) return { rfc: true, bits: '10xx', name: 'RFC 9562 (OSF DCE, formerly RFC 4122)' };
+    if ((b8 & 0xe0) === 0xc0) return { rfc: false, bits: '110x', name: 'Microsoft, reserved for backward compatibility' };
+    return { rfc: false, bits: '111x', name: 'Reserved for future definition' };
+  }
+  function node(h) {
+    var mac = h.slice(20).match(/../g).join(':');
+    var multicast = parseInt(h.slice(20, 22), 16) & 1;
+    return [mac, multicast ? 'Multicast bit set: a random node ID, not a network address.' : 'Usually the MAC address of the machine that made it.'];
+  }
+
+  function rowsFor(h) {
+    var rows = [], big = BigInt('0x' + h);
+    var b8 = parseInt(h.slice(16, 18), 16), ver = parseInt(h.charAt(12), 16);
+    var canonical = dashed(h);
+    if (/^0{32}$/.test(h) || /^f{32}$/.test(h)) {
+      var nil = h.charAt(0) === '0';
+      rows.push(['Status', { badge: 'Valid UUID', ok: true }]);
+      rows.push(['Standard form', canonical]);
+      rows.push(['Type', nil ? 'Nil UUID: all 128 bits are zero (RFC 9562, section 5.9).' : 'Max UUID: all 128 bits are one (RFC 9562, section 5.10).', 'text']);
+      rows.push(['As an integer', big.toString(10)]);
+      return rows;
+    }
+    var v = variantOf(b8);
+    var known = v.rfc && VERSIONS[ver];
+    rows.push(['Status', known ? { badge: 'Valid UUID', ok: true } : { badge: v.rfc ? 'Unknown version' : 'Non-standard variant', ok: false }]);
+    rows.push(['Standard form', canonical]);
+    rows.push(['Variant', v.name, 'text', 'Bits ' + v.bits + ', from the first digit of the fourth group (' + h.charAt(16) + ').']);
+    if (!v.rfc) {
+      rows.push(['Version', 'Not applicable to this variant', 'text', 'The version digit reads ' + ver + ', but only RFC 9562 UUIDs define versions.']);
+    } else if (!known) {
+      rows.push(['Version', ver + ': not defined', 'text', 'RFC 9562 defines versions 1 to 8.']);
+    } else {
+      rows.push(['Version', ver + ': ' + VERSIONS[ver], 'text']);
+    }
+    if (v.rfc && (ver === 1 || ver === 6 || ver === 2)) {
+      var t;
+      if (ver === 6) t = (BigInt('0x' + h.slice(0, 8)) << 28n) | (BigInt('0x' + h.slice(8, 12)) << 12n) | BigInt('0x' + h.slice(13, 16));
+      else t = (BigInt('0x' + h.slice(13, 16)) << 48n) | (BigInt('0x' + h.slice(8, 12)) << 32n) | BigInt('0x' + h.slice(0, 8));
+      if (ver === 2) {
+        t = t & ~0xffffffffn;
+        var dom = parseInt(h.slice(18, 20), 16);
+        rows.push(['Local domain', dom + (dom === 0 ? ' (person, POSIX UID)' : dom === 1 ? ' (group, POSIX GID)' : dom === 2 ? ' (organization)' : ''), 'text']);
+        rows.push(['Local ID', String(parseInt(h.slice(0, 8), 16))]);
+      }
+      var u100 = t - GREGORIAN_OFFSET;
+      var ms = Number(u100 / 10000n);
+      rows.push([ver === 2 ? 'Timestamp, UTC (approx.)' : 'Timestamp, UTC', isoFrom100ns(u100), '', ver === 2 ? 'The low 32 bits hold the local ID, so the real time is up to 7 minutes 9.5 seconds later.' : '100-nanosecond precision, counted from 1582-10-15.']);
+      rows.push(['Your local time', localTime(ms), 'text']);
+      var cs = ver === 2 ? (b8 & 0x3f) : ((b8 & 0x3f) << 8) | parseInt(h.slice(18, 20), 16);
+      rows.push(['Clock sequence', cs + ' (0x' + cs.toString(16) + ')']);
+      var n = node(h);
+      rows.push(['Node', n[0], '', n[1]]);
+    } else if (v.rfc && ver === 7) {
+      var unixMs = parseInt(h.slice(0, 12), 16);
+      rows.push(['Timestamp, UTC', new Date(unixMs).toISOString(), '', 'Millisecond precision.']);
+      rows.push(['Your local time', localTime(unixMs), 'text']);
+      rows.push(['Unix time (ms)', String(unixMs)]);
+      rows.push(['Random bits', 'rand_a ' + h.slice(13, 16) + ', rand_b ' + ((b8 & 0x3f).toString(16).padStart(2, '0') + h.slice(18)), '', '74 bits in total; within one millisecond some generators use them as a counter.']);
+    } else if (v.rfc && ver === 4) {
+      rows.push(['Contents', '122 random bits. There is no date or machine information in it.', 'text']);
+    } else if (v.rfc && (ver === 3 || ver === 5)) {
+      rows.push(['Contents', (ver === 3 ? 'MD5' : 'SHA-1') + ' hash of a namespace UUID and a name. The same inputs always give the same UUID, and the hash cannot be reversed.', 'text']);
+    } else if (v.rfc && ver === 8) {
+      rows.push(['Contents', 'Apart from the version and variant bits, the layout is defined by whoever made it.', 'text']);
+    }
+    rows.push(['As an integer', big.toString(10)]);
+    return rows;
+  }
+
+  function inspect() {
+    var body = $('#uu-info');
+    body.textContent = '';
+    var r;
+    try { r = parse(inp.value); } catch (e) { r = { error: 'This value could not be read.' }; }
+    inErr.textContent = r.error || '';
+    inp.setAttribute('aria-invalid', r.error ? 'true' : 'false');
+    if (r.error || r.empty) return;
+    rowsFor(r.hex).forEach(function (row) {
+      var tr = document.createElement('tr');
+      var th = document.createElement('th');
+      th.scope = 'row';
+      th.textContent = row[0];
+      var td = document.createElement('td');
+      if (row[1] && row[1].badge) {
+        var span = document.createElement('span');
+        span.className = 'uu-badge ' + (row[1].ok ? 'ok' : 'warn');
+        span.textContent = row[1].badge;
+        td.appendChild(span);
+      } else {
+        td.appendChild(document.createTextNode(row[1]));
+      }
+      if (row[2] === 'text' || (row[1] && row[1].badge)) td.className = 'uu-text';
+      if (row[3]) {
+        var small = document.createElement('small');
+        small.textContent = row[3];
+        td.appendChild(small);
+      }
+      tr.id = 'uu-row-' + row[0].toLowerCase().replace(/[^a-z]+/g, '-').replace(/-$/, '');
+      tr.appendChild(th);
+      tr.appendChild(td);
+      body.appendChild(tr);
+    });
+  }
+
+  inp.addEventListener('input', inspect);
+  TT.$$('[data-uuid]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      inp.value = btn.getAttribute('data-uuid');
+      inspect();
+    });
+  });
+
+  generate();
+  inspect();
+})();
+</script>

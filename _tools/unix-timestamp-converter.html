@@ -16,7 +16,10 @@ howto: |
   - **Date to timestamp:** choose a date, a time and the time zone that time
     is in. You can also paste a date string such as `2001-09-09T01:46:40Z` or
     `Sun, 09 Sep 2001 01:46:40 GMT`. A string without an offset is read in the
-    time zone you selected.
+    time zone you selected. The parser accepts ISO 8601, RFC 2822 email dates,
+    HTTP dates (including the old RFC 850 and asctime forms) and JavaScript's
+    `Date.toString()` output. Anything else is rejected rather than guessed,
+    because some browsers read text like `hello 1` as a date.
 
   ## What Unix time is
 
@@ -92,7 +95,7 @@ faq:
 .ut-stats .stat b { font-family: var(--mono); font-size: 1rem; }
 .row > .field.ut-grow { flex: 2 1 240px; }
 .ut-results th { width: 13rem; }
-.ut-results th, .ut-results td { vertical-align: middle; }
+table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
 .ut-results td.ut-val { font-family: var(--mono); overflow-wrap: anywhere; }
 .ut-results td.ut-val.ut-human { font-family: inherit; font-size: 15px; }
 .ut-results td.ut-copy { width: 1%; white-space: nowrap; text-align: right; }
@@ -185,7 +188,7 @@ faq:
 </div>
 
 <div class="field">
-  <label for="ut-parse">Or paste a date string <span class="hint">ISO 8601, RFC 2822 or HTTP date</span></label>
+  <label for="ut-parse">Or paste a date string <span class="hint">ISO 8601, RFC 2822, HTTP or JavaScript date</span></label>
   <input type="text" id="ut-parse" class="mono" autocomplete="off" spellcheck="false" placeholder="2001-09-09T01:46:40Z">
 </div>
 <p class="msg error" id="ut-parse-msg" role="alert"></p>
@@ -237,12 +240,16 @@ faq:
     if (/^B/.test(o.era || '')) y = 1 - y;
     return { y: y, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, s: +o.second };
   }
-  function utcMs(y, mo, d, h, mi, s) {
-    var dt = new Date(0);
-    dt.setUTCFullYear(y, mo - 1, d);
-    dt.setUTCHours(h, mi, s, 0);
-    return dt.getTime();
+  // Proleptic Gregorian day count (days since 1970-01-01). Plain arithmetic,
+  // so it also works right at the edge of the Date range.
+  function daysFromCivil(y, m, d) {
+    y -= m <= 2 ? 1 : 0;
+    var era = Math.floor(y / 400), yoe = y - era * 400;
+    var doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+    return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy - 719468;
   }
+  function daysInMonth(y, m) { return m === 12 ? 31 : daysFromCivil(y, m + 1, 1) - daysFromCivil(y, m, 1); }
+  function utcMs(y, mo, d, h, mi, s) { return ((daysFromCivil(y, mo, d) * 24 + h) * 60 + mi) * 60000 + s * 1000; }
   function offsetMs(ms, tz) {
     var p = zoneParts(ms, tz);
     return utcMs(p.y, p.mo, p.d, p.h, p.mi, p.s) - Math.floor(ms / 1000) * 1000;
@@ -324,19 +331,26 @@ faq:
   }
   function isoUtc(ms, subNs) { return isoParts(new Date(ms)) + fraction(ms, subNs || 0) + 'Z'; }
   function isoZoned(ms, subNs, tz) {
-    var off = offsetMs(ms, tz);
-    return isoParts(new Date(ms + off)) + fraction(ms, subNs || 0) + (tz === 'UTC' ? 'Z' : offsetStr(off, ':'));
+    if (tz === 'UTC') return isoUtc(ms, subNs);
+    var p = zoneParts(ms, tz), off = utcMs(p.y, p.mo, p.d, p.h, p.mi, p.s) - Math.floor(ms / 1000) * 1000;
+    return yearStr(p.y) + '-' + pad(p.mo) + '-' + pad(p.d) + 'T' + pad(p.h) + ':' + pad(p.mi) + ':' + pad(p.s) +
+      fraction(ms, subNs || 0) + offsetStr(off, ':');
   }
-  function mailDate(ms, zone) {
+  // RFC 5322 section 3.3 allows years from 1900 up (4 or more digits); the HTTP
+  // IMF-fixdate of RFC 9110 has exactly 4 digits.
+  function mailDate(ms, zone, minYear, maxYear) {
     var d = new Date(ms), y = d.getUTCFullYear();
-    if (y < 0 || y > 9999) return null;
+    if (y < minYear || y > maxYear) return null;
     return DOW[d.getUTCDay()] + ', ' + pad(d.getUTCDate()) + ' ' + MON[d.getUTCMonth()] + ' ' + pad(y, 4) + ' ' +
       pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) + ' ' + zone;
   }
-  var RTF = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+  // numeric: 'always', because 'auto' says "yesterday" or "next year" for
+  // spans that are really 45 hours or 23 months away.
+  var RTF = new Intl.RelativeTimeFormat('en', { numeric: 'always' });
   var REL_UNITS = [['year', 31556952], ['month', 2629746], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]];
   function relTime(ms, now) {
     var diff = (ms - now) / 1000, a = Math.abs(diff);
+    if (a < 1) return 'now';
     for (var i = 0; i < REL_UNITS.length; i++) {
       var u = REL_UNITS[i];
       if (a >= u[1] || u[0] === 'second') {
@@ -461,14 +475,14 @@ faq:
     zoneLabel.textContent = tz.replace(/_/g, ' ');
     cells.local.th.appendChild(zoneLabel);
 
-    var rfc = mailDate(ms, '+0000'), http = mailDate(ms, 'GMT');
+    var rfc = mailDate(ms, '+0000', 1900, Infinity), http = mailDate(ms, 'GMT', 0, 9999);
     var values = {
       utc: human(ms, 'UTC'),
       local: human(ms, tz),
       iso: isoUtc(ms, subNs),
       isolocal: isoZoned(ms, subNs, tz),
-      rfc2822: rfc || 'Not available for years outside 0000 to 9999',
-      http: http || 'Not available for years outside 0000 to 9999',
+      rfc2822: rfc || 'Not defined for years before 1900',
+      http: http || 'Not defined for years outside 0000 to 9999',
       rel: relTime(ms, Date.now()),
       s: decimalOf(ns, 9),
       ms: decimalOf(ns, 6),
@@ -516,45 +530,113 @@ faq:
   }
 
   // ---------- Date string parser ----------
-  var ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?)?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+  // Strict on purpose: a browser's Date.parse turns text like "hello 1" into a
+  // date, so only well-defined formats are accepted.
+  var MON3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  var DOW3 = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  var DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  // RFC 5322 section 3.3 zone names (minutes east of UTC).
+  var NAMED_ZONES = { ut: 0, utc: 0, gmt: 0, z: 0, est: -300, edt: -240, cst: -360, cdt: -300, mst: -420, mdt: -360, pst: -480, pdt: -420 };
+  // ISO 8601 / RFC 3339, including expanded years such as +275760.
+  var ISO_RE = /^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?)?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+  // RFC 5322/2822 email and RFC 850 dates: [Sun,] 09 Sep 2001 01:46:40 +0000
+  // (a trailing comment such as "(CEST)" is allowed, as in email headers).
+  var MAIL_RE = /^(?:([a-z]+),?\s+)?(\d{1,2})[\s-]+([a-z]{3,9})[\s-]+(\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([+-]\d{4}|[a-z]{1,3}))?(?:\s*\([^()]*\))?$/i;
+  // C asctime (an HTTP date form) and Unix `date`: Sun Sep  9 01:46:40 [UTC] 2001
+  var CTIME_RE = /^([a-z]{3})\s+([a-z]{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})(?:\s+([a-z]{1,3}))?\s+(\d{4})$/i;
+  // JavaScript Date.prototype.toString(): Sun Sep 09 2001 03:46:40 GMT+0200 (Central European Summer Time)
+  var JS_RE = /^([a-z]{3})\s+([a-z]{3})\s+(\d{2})\s+(-?\d{4,6})\s+(\d{2}):(\d{2}):(\d{2})\s+GMT([+-]\d{4})(?:\s+\([^)]*\))?$/i;
+
+  function numOffset(str) { // "+0200", "-05:30", "+05" -> minutes, or NaN when out of range
+    var om = /^([+-])(\d{2}):?(\d{2})?$/.exec(str);
+    if (!om || +om[2] > 23 || (om[3] && +om[3] > 59)) return NaN;
+    return (+om[2] * 60 + (om[3] ? +om[3] : 0)) * (om[1] === '-' ? -1 : 1);
+  }
+  function zoneOffset(str) { // numeric or RFC 5322 named zone; undefined when absent
+    if (!str) return undefined;
+    if (/^[+-]/.test(str)) return numOffset(str);
+    var k = str.toLowerCase();
+    return Object.prototype.hasOwnProperty.call(NAMED_ZONES, k) ? NAMED_ZONES[k] : NaN;
+  }
+  var MON_LONG = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  function monthNum(name) { // "Sep" or "September" -> 9, anything else -> 0
+    var n = String(name).toLowerCase();
+    return (n.length === 3 ? MON3.indexOf(n) : MON_LONG.indexOf(n)) + 1;
+  }
+
+  // Returns the fields of a date string, { error } for a recognised but invalid
+  // one, or null when no format matches.
+  function parseFields(raw) {
+    var m;
+    if ((m = ISO_RE.exec(raw))) {
+      return { fmt: 'ISO 8601', y: +m[1], mo: +m[2], d: +m[3], h: +(m[4] || 0), mi: +(m[5] || 0), s: +(m[6] || 0),
+        frac: m[7] ? +(m[7] + '00').slice(0, 3) : 0, off: m[8] ? (m[8].toUpperCase() === 'Z' ? 0 : numOffset(m[8])) : undefined, offText: m[8] };
+    }
+    if ((m = MAIL_RE.exec(raw))) {
+      var y = +m[4];
+      if (m[4].length === 2) y += y < 50 ? 2000 : 1900; // RFC 5322 section 4.3
+      else if (m[4].length === 3) y += 1900;
+      return { fmt: 'RFC 2822 / HTTP date', dow: m[1], y: y, mo: monthNum(m[3]), d: +m[2], h: +m[5], mi: +m[6], s: +(m[7] || 0),
+        frac: 0, off: zoneOffset(m[8]), offText: m[8] };
+    }
+    if ((m = CTIME_RE.exec(raw))) {
+      return { fmt: 'asctime date', dow: m[1], y: +m[8], mo: monthNum(m[2]), d: +m[3], h: +m[4], mi: +m[5], s: +m[6],
+        frac: 0, off: zoneOffset(m[7]), offText: m[7] };
+    }
+    if ((m = JS_RE.exec(raw))) {
+      return { fmt: 'JavaScript Date string', dow: m[1], y: +m[4], mo: monthNum(m[2]), d: +m[3], h: +m[5], mi: +m[6], s: +m[7],
+        frac: 0, off: numOffset(m[8]), offText: m[8] };
+    }
+    return null;
+  }
+
   function parseString() {
     var raw = $('#ut-parse').value.trim(), msg = $('#ut-parse-msg'), out = $('#ut-parse-out');
     msg.textContent = '';
     out.hidden = true;
     out.textContent = '';
     if (!raw) return;
-    var ms = NaN, how = '', m = ISO_RE.exec(raw);
-    try {
-      if (m) {
-        var y = +m[1], mo = +m[2], d = +m[3], h = m[4] ? +m[4] : 0, mi = m[5] ? +m[5] : 0, s = m[6] ? +m[6] : 0;
-        var frac = m[7] ? +(m[7] + '00').slice(0, 3) : 0;
-        var check = new Date(utcMs(y, mo, d, h, mi, s));
-        if (mo < 1 || mo > 12 || check.getUTCDate() !== d || h > 23 || mi > 59 || s > 59) throw new Error('bad');
-        if (m[8]) {
-          var off = 0;
-          if (m[8].toUpperCase() !== 'Z') {
-            var om = /^([+-])(\d{2}):?(\d{2})?$/.exec(m[8]);
-            off = (+om[2] * 60 + (om[3] ? +om[3] : 0)) * 60000 * (om[1] === '-' ? -1 : 1);
-          }
-          ms = utcMs(y, mo, d, h, mi, s) - off + frac;
-          how = 'ISO 8601 with ' + (off ? 'offset ' + m[8] : 'UTC (Z)') + '.';
-        } else {
-          var tz = zoneEl.value || LOCAL_TZ;
-          ms = fromZoned(y, mo, d, h, mi, s, tz).ms + frac;
-          how = 'ISO 8601 without an offset, read as ' + tz + ' (the time zone selected above).';
-        }
-      } else if (/^[+-]?\d+(\.\d+)?$/.test(raw)) {
-        msg.textContent = 'That looks like a Unix timestamp. Paste it into the "Timestamp to date" box above.';
-        return;
-      } else {
-        ms = Date.parse(raw);
-        how = 'Read by your browser\'s date parser' + (/(gmt|utc|z\b|[+-]\d{4})/i.test(raw) ? '.' : '; without a zone it uses your local time zone.');
-      }
-    } catch (e) { ms = NaN; }
-    if (!isFinite(ms)) {
-      msg.textContent = 'Could not read that date. Try ISO 8601 (2001-09-09T01:46:40Z) or RFC 2822 (Sun, 09 Sep 2001 01:46:40 GMT).';
+    if (/^[+-]?\d+(\.\d+)?$/.test(raw)) {
+      msg.textContent = 'That looks like a Unix timestamp. Paste it into the "Timestamp to date" box above.';
       return;
     }
+    var f = parseFields(raw);
+    var dowIdx = f && f.dow ? DOW3.indexOf(f.dow.slice(0, 3).toLowerCase()) : -1;
+    if (!f || !f.mo || (f.dow && (dowIdx < 0 || f.dow.length > 3 && DOW_LONG[dowIdx].toLowerCase() !== f.dow.toLowerCase()))) {
+      msg.textContent = 'Could not read that date. Use ISO 8601 (2001-09-09T01:46:40Z), RFC 2822 (Sun, 09 Sep 2001 01:46:40 +0000) or an HTTP date (Sun, 09 Sep 2001 01:46:40 GMT).';
+      return;
+    }
+    if (f.s === 60 && f.mo <= 12 && f.h <= 23 && f.mi <= 59) {
+      msg.textContent = 'Unix time has no separate value for a leap second (:60). Use :59 or the next second instead.';
+      return;
+    }
+    if (f.d < 1 || f.mo > 12 || f.d > daysInMonth(f.y, f.mo) || f.h > 23 || f.mi > 59 || f.s > 59) {
+      msg.textContent = 'That date or time does not exist. Check the month, day, hours (00 to 23), minutes and seconds (00 to 59).';
+      return;
+    }
+    if (f.off !== undefined && isNaN(f.off)) {
+      msg.textContent = '"' + f.offText + '" is not a valid time zone. Use Z, GMT, UTC or an offset from -23:59 to +23:59.';
+      return;
+    }
+    var ms, how, tz = zoneEl.value || LOCAL_TZ;
+    try {
+      if (f.off !== undefined) {
+        ms = utcMs(f.y, f.mo, f.d, f.h, f.mi, f.s) - f.off * 60000 + f.frac;
+        how = f.fmt + (f.off === 0 ? ' in UTC.' : ' with UTC offset ' + offsetStr(f.off * 60000, ':') + '.');
+      } else {
+        var r = fromZoned(f.y, f.mo, f.d, f.h, f.mi, f.s, tz);
+        ms = r.ms + f.frac;
+        how = f.fmt + ' without an offset, read as ' + tz + ' time (the time zone selected above).';
+        if (r.skipped) how += ' That clock time does not exist there (daylight saving jump), so the next valid time was used.';
+        if (r.repeated) how += ' That clock time happens twice there (clocks go back); the first occurrence was used.';
+      }
+    } catch (e) { ms = NaN; }
+    if (!isFinite(ms) || Math.abs(ms) > MAX_MS) {
+      msg.textContent = 'That date is outside the range a browser can handle (about 275,000 years either side of 1970).';
+      return;
+    }
+    var realDow = ((daysFromCivil(f.y, f.mo, f.d) % 7) + 11) % 7; // 1970-01-01 was a Thursday
+    if (f.dow && dowIdx !== realDow) how += ' Note: the text says ' + DOW_LONG[dowIdx] + ', but that date is a ' + DOW_LONG[realDow] + '.';
     out.textContent = 'Seconds:       ' + Math.floor(ms / 1000) + '\nMilliseconds:  ' + ms + '\nISO 8601 UTC:  ' + isoUtc(ms, 0) + '\n' + how;
     out.hidden = false;
   }

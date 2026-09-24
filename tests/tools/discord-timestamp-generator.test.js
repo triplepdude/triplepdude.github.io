@@ -89,6 +89,43 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('button[data-add-days="7"]');
   assert.equal(await text('#dts-unix'), '1794205800');
 
+  // Regression: +/-1 hour must step through the repeated hour, not snap back
+  // to its first occurrence (Python zoneinfo: 00:30 EDT 1793507400, 01:30 EDT
+  // 1793511000, 01:30 EST 1793514600, 02:30 EST 1793518200).
+  await page.fill('#dts-date', '2026-11-01');
+  await page.fill('#dts-time', '00:30:00');
+  assert.equal(await text('#dts-unix'), '1793507400');
+  for (const want of ['1793511000', '1793514600', '1793518200']) {
+    await page.click('button[data-add="3600"]');
+    assert.equal(await text('#dts-unix'), want);
+  }
+  assert.equal(await page.inputValue('#dts-time'), '02:30:00');
+  await page.click('button[data-add="-3600"]');
+  assert.equal(await text('#dts-unix'), '1793514600');
+  assert.equal(await page.inputValue('#dts-time'), '01:30:00');
+  assert.match(await text('#dts-note'), /second occurrence \(UTC\u221205:00\) was used/);
+  await page.click('button[data-add="-3600"]');
+  assert.equal(await text('#dts-unix'), '1793511000');
+  assert.match(await text('#dts-note'), /first occurrence \(UTC\u221204:00\) was used/);
+  // Typing a time again means the default, first occurrence.
+  await page.click('button[data-add="3600"]');
+  assert.equal(await text('#dts-unix'), '1793514600');
+  await page.fill('#dts-time', '01:30:00');
+  assert.equal(await text('#dts-unix'), '1793511000');
+
+  // Regression: dates before 1970 give negative Unix times, which Discord accepts.
+  await page.fill('#dts-date', '1969-07-20');
+  await page.fill('#dts-time', '16:17:40');
+  assert.equal(await text('#dts-msg'), '');
+  assert.equal(await text('#dts-unix'), '-14182940');
+  assert.equal(await text('#dts-utc'), '1969-07-20 20:17:40 UTC');
+  assert.equal(await codeOf('F'), '<t:-14182940:F>');
+  assert.equal(await preview('F'), 'Sunday, July 20, 1969 at 3:17 PM'); // viewer in Chicago (CDT)
+  await page.fill('#dts-date', '9999-12-31');
+  await page.click('button[data-add-days="1"]');
+  assert.match(await text('#dts-msg'), /year from 1 to 9999/);
+  assert.equal(await text('#dts-unix'), '–');
+
   // Error path: an empty date shows a message and disables copying.
   await page.fill('#dts-date', '');
   assert.equal(await text('#dts-msg'), 'Enter a date.');
@@ -115,6 +152,36 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#dts-decode', '175928847299117063');
   await page.waitForFunction(() => /Discord ID/.test(document.querySelector('#dts-decode-out').textContent));
   assert.match(await page.locator('#dts-decode-out').textContent(), /2016-04-30 11:18:25\.796 UTC/);
+
+  // Regression: loading keeps the exact instant, in the repeated DST hour and before 1970.
+  await page.selectOption('#dts-zone', 'America/New_York');
+  await page.fill('#dts-decode', '<t:1793514600:t>');
+  await page.waitForFunction(() => document.querySelector('#dts-decode-out').textContent.includes('<t:1793514600:t>'));
+  await page.click('#dts-decode-load');
+  assert.equal(await text('#dts-unix'), '1793514600');
+  assert.equal(await page.inputValue('#dts-time'), '01:30:00');
+  await page.selectOption('#dts-zone', 'America/Chicago');
+  await page.fill('#dts-decode', '0');
+  await page.waitForFunction(() => document.querySelector('#dts-decode-out').textContent.includes('<t:0:f>'));
+  await page.click('#dts-decode-load');
+  assert.equal(await text('#dts-msg'), '');
+  assert.equal(await text('#dts-unix'), '0');
+  assert.equal(await page.inputValue('#dts-date'), '1969-12-31');
+  assert.equal(await page.inputValue('#dts-time'), '18:00:00');
+  // Beyond what the date picker can hold: a friendly message, no exception.
+  await page.fill('#dts-decode', '<t:8640000000000:R>');
+  await page.waitForFunction(() => document.querySelector('#dts-decode-out').textContent.includes('<t:8640000000000:R>'));
+  await page.click('#dts-decode-load');
+  assert.match(await text('#dts-msg'), /outside the years 1 to 9999/);
+  assert.equal(await text('#dts-unix'), '–');
+  // A huge paste only previews the first 20,000 characters but still decodes every code.
+  const big = 'x'.repeat(19990) + ' <t:1618953630:R> ' + 'y'.repeat(100);
+  await page.fill('#dts-decode', big);
+  await page.waitForFunction(() => /first 20,000/.test(document.querySelector('#dts-decode-out').textContent));
+  const shown = await text('.dts-message');
+  assert.ok(shown.endsWith(' …') && shown.length < 20000, `preview length ${shown.length}`);
+  assert.equal(await page.locator('.dts-dec-item').count(), 1);
+
   await page.fill('#dts-decode', 'hello there');
   await page.waitForFunction(() => document.querySelector('#dts-decode-msg').textContent.length > 0);
   assert.equal(await page.locator('.dts-dec-item').count(), 0);
