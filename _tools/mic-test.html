@@ -1,0 +1,640 @@
+---
+title: "Mic Test: Check Your Microphone Online"
+description: Test your microphone online with a live level meter and waveform. Check peak dBFS, switch mics, and record a short clip to hear how you sound.
+category: Device Tests
+keywords: [mic test, microphone test, test my mic, online mic test, microphone level meter, mic volume test, record and play back mic]
+howto: |
+  ## How to test your microphone
+
+  1. Choose a microphone if you have more than one, then press **Start**.
+     Your browser asks for permission the first time; allow it.
+  2. Speak at your normal distance. The bar moves, the waveform draws your
+     voice, and a green message confirms that sound is reaching the browser.
+  3. Press **Record** to capture a 5-second clip (or 10 or 30 seconds). It
+     plays back automatically when it finishes, so you hear exactly what a
+     call or recording app receives.
+  4. Press **Stop** when you are done. The page stops every audio track, so
+     the browser's recording indicator switches off.
+
+  Device names only appear after you grant access, because browsers hide
+  them from pages that have no permission. If the level stays flat, try the
+  other entries in the list: laptops often expose a built-in array, a headset
+  and a "communications" device separately.
+
+  ## Reading the meter
+
+  Levels are shown in dBFS, decibels relative to full scale. 0 dBFS is the
+  largest value digital audio can hold, so every reading is zero or negative.
+  **Peak** is the loudest single sample in the last 2,048 samples (about 43 ms
+  at 48 kHz), and **Level (RMS)** is the average power over the same window.
+  For a steady sine wave the RMS reading sits 3 dB below the peak; for speech
+  the gap is usually 10 to 20 dB. **Peak hold** keeps the loudest peak since
+  you pressed Start, which is the number to check before recording.
+
+  | Peak while you talk | What it means |
+  |---|---|
+  | Below −50 dBFS | Barely audible: muted, wrong device, or input volume near zero |
+  | −50 to −25 dBFS | Quiet: raise the input volume or move closer |
+  | −25 to −6 dBFS | A good range for calls and voice recording |
+  | Above −6 dBFS | Loud: little headroom, plosives may distort |
+  | Clipping | Samples hit full scale and are flattened; lower the input gain |
+  {: .data .mict-gt}
+
+  The fill colour follows the same bands: green up to −18 dBFS, amber to
+  −6 dBFS, and red above.
+
+  ## Echo cancellation, noise suppression and auto gain
+
+  Browsers process microphone audio by default with the same WebRTC filters
+  used for video calls. They are exposed as the `echoCancellation`,
+  `noiseSuppression` and `autoGainControl` constraints of the W3C Media
+  Capture and Streams specification, and the checkboxes above switch them on
+  or off. Automatic gain slowly raises quiet input and lowers loud input, so
+  turn it off when you want to judge the real volume set in your operating
+  system. Turning all three off gives the rawest signal the browser allows,
+  which is what music and podcast apps usually request.
+
+  ## When the microphone will not start
+
+  - **Permission denied:** click the icon at the left of the address bar,
+    allow the microphone for this site and press Start again.
+  - **Blocked by the system:** on Windows open Settings, Privacy & security,
+    Microphone; on macOS open System Settings, Privacy & Security, Microphone,
+    and allow your browser.
+  - **In use:** another app may hold the device exclusively. Close call apps
+    and other tabs that use the microphone.
+  - **Not secure:** browsers only allow microphones on https pages and on
+    localhost.
+faq:
+  - q: Is my voice recorded or uploaded anywhere?
+    a: No. The audio is analysed by your browser's Web Audio engine on your own device. The test clip is kept in memory only until you record again, press Stop or close the tab, and it leaves your computer only if you press Download.
+  - q: The meter moves here, but people cannot hear me in Zoom or Teams. Why?
+    a: Call apps pick their own input device. Open the app's audio settings and choose the same microphone that works here, and check that it is not muted inside the app or by a headset mute button.
+  - q: What is a good microphone level?
+    a: For speech, aim for peaks between about −25 and −6 dBFS at your normal speaking distance. Peaks near 0 dBFS or the clipping warning mean the input is too loud and will distort.
+  - q: Why does my recording sound different from the live meter?
+    a: The clip is compressed with the Opus codec (or AAC in Safari) and includes whatever echo cancellation and noise suppression are switched on. Turn the filters off and record again to hear the raw input.
+  - q: Why is the microphone list empty or showing generic names?
+    a: Browsers only reveal device names after you allow microphone access for the page. Press Start once and the list fills in; if it stays empty, the system does not see any input device.
+---
+<style>
+.mict-gt { margin: 0 0 16px; }
+.mict-meter {
+  position: relative; height: 24px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: linear-gradient(90deg, var(--accent) 0 70%, #d99a00 70% 90%, var(--danger) 90% 100%);
+}
+.mict-cover { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--surface-2); }
+.mict-mark { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--text); opacity: 0; }
+.mict-scale { position: relative; height: 18px; margin: 3px 0 16px; color: var(--muted); font-size: 12px; }
+.mict-scale span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.mict-scale span:first-child { transform: none; }
+.mict-scale span:last-child { transform: translateX(-100%); }
+.mict-canvas {
+  display: block; width: 100%; max-width: 100%; height: 140px; margin: 0 0 6px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.mict-canvas.is-hist { height: 72px; }
+.mict-cap { margin: 0 0 14px; }
+.mict-h { margin: 24px 0 10px; font-size: 1.05rem; }
+.mict-progress { height: 6px; margin: 0 0 10px; overflow: hidden; background: var(--surface-2); border-radius: 3px; }
+.mict-progress div { width: 0; height: 100%; background: var(--danger); }
+.mict-audio { display: block; width: 100%; max-width: 480px; margin: 0 0 12px; }
+#mict-audio[hidden], #mict-dl[hidden] { display: none; }
+.mict-row-btns { display: flex; gap: 10px; }
+.mict-stat-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
+.mict-stat-head .label { margin: 0; }
+</style>
+
+<div class="row">
+  <div class="field">
+    <label for="mict-device">Microphone</label>
+    <select id="mict-device"><option value="">Default microphone</option></select>
+  </div>
+  <div class="mict-row-btns">
+    <button class="btn" type="button" id="mict-start">Start</button>
+    <button class="btn secondary" type="button" id="mict-stop" disabled>Stop</button>
+  </div>
+</div>
+<p class="hint" id="mict-device-hint">Press Start and allow microphone access when your browser asks. Device names appear after that.</p>
+
+<div class="checks">
+  <label class="check"><input type="checkbox" id="mict-ec" checked> Echo cancellation</label>
+  <label class="check"><input type="checkbox" id="mict-ns" checked> Noise suppression</label>
+  <label class="check"><input type="checkbox" id="mict-agc" checked> Auto gain control</label>
+  <label class="check"><input type="checkbox" id="mict-monitor"> Hear yourself (use headphones)</label>
+</div>
+
+<p class="msg error" id="mict-error" role="alert"></p>
+<p class="msg ok" id="mict-status" aria-live="polite"></p>
+
+<p class="label" id="mict-meter-label">Input level (peak, dBFS)</p>
+<div class="mict-meter" id="mict-meter" role="meter" aria-labelledby="mict-meter-label" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60" aria-valuetext="No signal">
+  <div class="mict-cover" id="mict-cover"></div>
+  <div class="mict-mark" id="mict-mark"></div>
+</div>
+<div class="mict-scale" aria-hidden="true">
+  <span style="left:0%">-60</span><span style="left:16.667%">-50</span><span style="left:33.333%">-40</span><span style="left:50%">-30</span><span style="left:66.667%">-20</span><span style="left:83.333%">-10</span><span style="left:100%">0</span>
+</div>
+
+<canvas class="mict-canvas" id="mict-wave" aria-label="Live waveform of the microphone signal" role="img"></canvas>
+<p class="hint mict-cap">Waveform: the last 43 ms of audio.</p>
+<canvas class="mict-canvas is-hist" id="mict-hist" aria-label="Level history for the last several seconds" role="img"></canvas>
+<p class="hint mict-cap">Level history: newest on the right, lines at −20 and −40 dBFS.</p>
+
+<div class="mict-stat-head">
+  <span class="label">Measurements</span>
+  <button class="btn secondary small" type="button" id="mict-reset-peak">Reset peak hold</button>
+</div>
+<div class="stats">
+  <div class="stat"><b id="mict-rms">–</b><span>Level (RMS), dBFS</span></div>
+  <div class="stat"><b id="mict-peak">–</b><span>Peak, dBFS</span></div>
+  <div class="stat"><b id="mict-hold">–</b><span>Peak hold, dBFS</span></div>
+  <div class="stat"><b id="mict-clip">–</b><span>Clipping</span></div>
+  <div class="stat"><b id="mict-rate">–</b><span>Sample rate</span></div>
+  <div class="stat"><b id="mict-ch">–</b><span>Channels</span></div>
+</div>
+
+<h2 class="mict-h">Record and play back</h2>
+<div class="row">
+  <div class="field">
+    <label for="mict-len">Clip length</label>
+    <select id="mict-len">
+      <option value="5" selected>5 seconds</option>
+      <option value="10">10 seconds</option>
+      <option value="30">30 seconds</option>
+    </select>
+  </div>
+  <button class="btn" type="button" id="mict-rec" disabled>Record</button>
+</div>
+<div class="mict-progress" aria-hidden="true"><div id="mict-rec-bar"></div></div>
+<p class="hint" id="mict-rec-status" aria-live="polite">Start the microphone to record a test clip.</p>
+<audio class="mict-audio" id="mict-audio" controls hidden></audio>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="mict-dl" hidden>Download recording</button>
+</div>
+
+<div id="mict-settings-wrap" hidden>
+  <h2 class="mict-h">Track settings reported by the browser</h2>
+  <div class="table-wrap">
+    <table class="data"><tbody id="mict-settings"></tbody></table>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const sel = $('#mict-device'), startBtn = $('#mict-start'), stopBtn = $('#mict-stop');
+  const errEl = $('#mict-error'), okEl = $('#mict-status');
+  const wave = $('#mict-wave'), hist = $('#mict-hist');
+  const recBtn = $('#mict-rec'), recStatus = $('#mict-rec-status'), recBar = $('#mict-rec-bar');
+  const audio = $('#mict-audio'), dlBtn = $('#mict-dl');
+  const ec = $('#mict-ec'), ns = $('#mict-ns'), agc = $('#mict-agc'), mon = $('#mict-monitor');
+  const MIN_DB = -60, HEARD_DB = -45, CLIP = 0.99;
+  const st = {
+    stream: null, ctx: null, src: null, an: null, monitor: null, buf: null, raf: 0, starting: false, gen: 0,
+    peakHold: -Infinity, clipCount: 0, clipping: false, meterDb: MIN_DB, markDb: -Infinity, markT: 0, lastT: 0,
+    heard: false, startT: 0, warned: false, textT: 0, histMax: -Infinity, histT: 0, history: [],
+    recorder: null, recTimer: 0, recStart: 0, recLen: 5, recBlob: null, recUrl: null, recExt: 'webm'
+  };
+  let colors = {};
+
+  // ---------- Messages ----------
+  function setError(text) { errEl.textContent = text || ''; }
+  function setOk(text) { okEl.textContent = text || ''; }
+
+  function insecureReason() {
+    if (window.isSecureContext === false) {
+      return 'Microphone access needs a secure connection. Open this page over https:// (or on localhost); browsers disable microphones on plain http pages.';
+    }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      return 'This browser does not support microphone access (navigator.mediaDevices is missing). Try a current version of Chrome, Edge, Firefox or Safari.';
+    }
+    return '';
+  }
+
+  function explain(e) {
+    const name = (e && e.name) || '';
+    const msg = (e && e.message) || '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      if (/system/i.test(msg)) {
+        return 'Your operating system is blocking microphone access for this browser. On Windows open Settings > Privacy & security > Microphone; on macOS open System Settings > Privacy & Security > Microphone. Allow your browser, then press Start again.';
+      }
+      return 'Permission denied: microphone access is blocked for this page. Click the icon at the left of the address bar, allow the microphone, then press Start again.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return 'No microphone found. Plug one in, or check that it is enabled in your system sound settings, then press Start again.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return 'The microphone is in use by another app or could not be started. Close apps that may be using it (Zoom, Teams, Discord, OBS or another browser tab), or unplug and reconnect it, then press Start again.';
+    }
+    if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+      return 'The selected microphone is no longer available. Choose another one from the list and press Start.';
+    }
+    if (name === 'SecurityError') {
+      return 'The browser blocked microphone access for security reasons. Make sure the page is opened over https:// and is not inside a frame that disallows the microphone.';
+    }
+    if (name === 'AbortError') {
+      return 'The browser stopped the microphone from starting. Press Start again; if it keeps happening, restart the browser.';
+    }
+    return 'Could not start the microphone: ' + (msg || name || 'unknown error') + '.';
+  }
+
+  // ---------- Helpers ----------
+  const toDb = x => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+  const fmtDb = v => (v === -Infinity || v < -120 ? '-∞' : v.toFixed(1));
+
+  function readColors() {
+    const cs = getComputedStyle(document.body);
+    colors = {};
+    ['--accent', '--muted', '--border', '--danger', '--text'].forEach(n => { colors[n] = cs.getPropertyValue(n).trim() || '#888'; });
+  }
+
+  function fitCanvas(c) {
+    const r = c.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    return dpr;
+  }
+
+  function drawWave(data) {
+    const dpr = fitCanvas(wave);
+    const g = wave.getContext('2d'), w = wave.width, h = wave.height;
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = colors['--border']; g.lineWidth = dpr;
+    g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
+    if (!data) return;
+    g.strokeStyle = colors['--accent']; g.lineWidth = 1.5 * dpr; g.lineJoin = 'round';
+    g.beginPath();
+    const n = data.length, step = Math.max(1, Math.floor(n / w));
+    for (let i = 0; i < n; i += step) {
+      const x = (i / (n - 1)) * w;
+      const v = Math.max(-1, Math.min(1, data[i]));
+      const y = (1 - v) * h / 2;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+
+  function drawHistory() {
+    const dpr = fitCanvas(hist);
+    const g = hist.getContext('2d'), w = hist.width, h = hist.height;
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = colors['--border']; g.lineWidth = dpr;
+    g.fillStyle = colors['--muted']; g.font = (10 * dpr) + 'px system-ui, sans-serif';
+    [-20, -40].forEach(db => {
+      const y = Math.round(h - (db - MIN_DB) / -MIN_DB * h) + 0.5;
+      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+      g.fillText(db + ' dB', 4 * dpr, y - 3 * dpr);
+    });
+    const bw = 3 * dpr, count = Math.floor(w / bw);
+    const hs = st.history.slice(-count);
+    for (let i = 0; i < hs.length; i++) {
+      const v = hs[i];
+      const frac = Math.max(0, Math.min(1, (v - MIN_DB) / -MIN_DB));
+      if (frac <= 0) continue;
+      g.fillStyle = v > -6 ? colors['--danger'] : colors['--accent'];
+      const x = w - (hs.length - i) * bw;
+      g.fillRect(x, h - frac * h, bw - dpr, frac * h);
+    }
+  }
+
+  function setMeter(db, markDb) {
+    const pct = Math.max(0, Math.min(100, (db - MIN_DB) / -MIN_DB * 100));
+    $('#mict-cover').style.width = (100 - pct) + '%';
+    const mark = $('#mict-mark');
+    if (markDb > MIN_DB) {
+      mark.style.opacity = '0.85';
+      mark.style.left = Math.min(100, (markDb - MIN_DB) / -MIN_DB * 100) + '%';
+    } else mark.style.opacity = '0';
+  }
+
+  function resetStats() {
+    st.peakHold = -Infinity; st.clipCount = 0; st.clipping = false;
+    st.meterDb = MIN_DB; st.markDb = -Infinity; st.history = []; st.histMax = -Infinity;
+    ['#mict-rms', '#mict-peak', '#mict-hold', '#mict-clip'].forEach(s => { $(s).textContent = '–'; });
+  }
+
+  // ---------- Devices ----------
+  async function refreshDevices(activeId) {
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return;
+    let devs = [];
+    try { devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput'); } catch (e) { return; }
+    const want = activeId || sel.value;
+    const labelled = devs.some(d => d.label);
+    sel.innerHTML = '';
+    if (!devs.length || !labelled) {
+      sel.add(new Option('Default microphone', ''));
+    }
+    if (labelled) {
+      devs.forEach((d, i) => { if (d.deviceId) sel.add(new Option(d.label || 'Microphone ' + (i + 1), d.deviceId)); });
+    }
+    if (want && Array.from(sel.options).some(o => o.value === want)) sel.value = want;
+    $('#mict-device-hint').textContent = !devs.length
+      ? 'No microphone detected yet. Press Start to check again.'
+      : labelled ? devs.length + ' microphone' + (devs.length === 1 ? '' : 's') + ' found.'
+        : 'Press Start and allow microphone access when your browser asks. Device names appear after that.';
+  }
+
+  // ---------- Start / stop ----------
+  function updateButtons() {
+    const running = !!st.stream;
+    startBtn.disabled = running || st.starting || !!insecureReason();
+    stopBtn.disabled = !running;
+    const recording = !!(st.recorder && st.recorder.state === 'recording');
+    recBtn.disabled = !running && !recording;
+    recBtn.textContent = recording ? 'Stop recording' : 'Record ' + $('#mict-len').value + ' s clip';
+  }
+
+  function releaseStream() {
+    st.gen++;
+    if (st.recorder && st.recorder.state !== 'inactive') { try { st.recorder.stop(); } catch (e) { /* already stopped */ } }
+    clearTimeout(st.recTimer);
+    if (st.stream) st.stream.getTracks().forEach(t => { t.onended = null; t.onmute = null; t.onunmute = null; t.stop(); });
+    st.stream = null;
+    cancelAnimationFrame(st.raf);
+    if (st.ctx) { st.ctx.close().catch(() => {}); }
+    st.ctx = null; st.src = null; st.an = null; st.monitor = null;
+  }
+
+  function stop(message) {
+    releaseStream();
+    setMeter(MIN_DB, -Infinity);
+    drawWave(null);
+    $('#mict-meter').setAttribute('aria-valuenow', String(MIN_DB));
+    $('#mict-meter').setAttribute('aria-valuetext', 'No signal');
+    setOk(message === undefined ? 'Microphone released. The browser is no longer using it.' : message);
+    updateButtons();
+  }
+
+  async function start() {
+    const bad = insecureReason();
+    if (bad) { setError(bad); updateButtons(); return; }
+    if (st.starting) return;
+    setError(''); setOk('');
+    releaseStream();
+    st.starting = true;
+    updateButtons();
+    const gen = st.gen;
+    const audioC = { echoCancellation: ec.checked, noiseSuppression: ns.checked, autoGainControl: agc.checked };
+    if (sel.value) audioC.deviceId = { exact: sel.value };
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioC });
+    } catch (e) {
+      st.starting = false;
+      setError(explain(e));
+      updateButtons();
+      refreshDevices();
+      return;
+    }
+    st.starting = false;
+    if (gen !== st.gen) { stream.getTracks().forEach(t => t.stop()); updateButtons(); return; }
+    const track = stream.getAudioTracks()[0];
+    if (!track) { stream.getTracks().forEach(t => t.stop()); setError('No microphone found. The browser returned no audio track.'); updateButtons(); return; }
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AC();
+      if (ctx.state === 'suspended' && ctx.resume) ctx.resume().catch(() => {});
+      const src = ctx.createMediaStreamSource(stream);
+      const an = ctx.createAnalyser();
+      an.fftSize = 2048;
+      src.connect(an);
+      Object.assign(st, { stream, ctx, src, an, buf: new Float32Array(an.fftSize) });
+    } catch (e) {
+      stream.getTracks().forEach(t => t.stop());
+      st.stream = null;
+      setError('Your browser could not analyse the audio: ' + (e && e.message ? e.message : e) + '.');
+      updateButtons();
+      return;
+    }
+    resetStats();
+    st.heard = false; st.warned = false; st.startT = performance.now(); st.textT = 0; st.lastT = 0; st.histT = 0;
+    setOk('Listening. Say something or tap the microphone.');
+    track.onended = () => { stop(''); setError('The microphone was disconnected or turned off by the system.'); refreshDevices(); };
+    track.onmute = () => setError('The system has muted this microphone. Check a mute switch or your sound settings.');
+    track.onunmute = () => setError('');
+    applyMonitor();
+    showSettings(track);
+    updateButtons();
+    const s = track.getSettings ? track.getSettings() : {};
+    refreshDevices(s.deviceId);
+    st.raf = requestAnimationFrame(frame);
+  }
+
+  function applyMonitor() {
+    if (!st.ctx || !st.src) return;
+    if (mon.checked && !st.monitor) {
+      st.monitor = st.ctx.createGain();
+      st.src.connect(st.monitor);
+      st.monitor.connect(st.ctx.destination);
+    } else if (!mon.checked && st.monitor) {
+      try { st.src.disconnect(st.monitor); st.monitor.disconnect(); } catch (e) { /* already disconnected */ }
+      st.monitor = null;
+    }
+  }
+
+  function showSettings(track) {
+    const s = track.getSettings ? track.getSettings() : {};
+    const yesNo = v => (v === true ? 'On' : v === false ? 'Off' : 'Not reported');
+    const rate = s.sampleRate || (st.ctx && st.ctx.sampleRate);
+    const rows = [
+      ['Device', track.label || 'Unnamed microphone'],
+      ['Sample rate', s.sampleRate ? s.sampleRate.toLocaleString() + ' Hz' : 'Not reported'],
+      ['Sample size', s.sampleSize ? s.sampleSize + ' bit' : 'Not reported'],
+      ['Channels', s.channelCount || 'Not reported'],
+      ['Echo cancellation', yesNo(s.echoCancellation)],
+      ['Noise suppression', yesNo(s.noiseSuppression)],
+      ['Auto gain control', yesNo(s.autoGainControl)],
+      ['Latency', typeof s.latency === 'number' ? (s.latency * 1000).toFixed(1) + ' ms' : 'Not reported'],
+      ['Analysis sample rate', st.ctx ? st.ctx.sampleRate.toLocaleString() + ' Hz' : 'Not reported']
+    ];
+    const tb = $('#mict-settings');
+    tb.innerHTML = '';
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th'); th.scope = 'row'; th.textContent = r[0];
+      const td = document.createElement('td'); td.textContent = String(r[1]);
+      tr.append(th, td); tb.append(tr);
+    });
+    $('#mict-settings-wrap').hidden = false;
+    $('#mict-rate').textContent = rate ? (rate / 1000).toLocaleString() + ' kHz' : '–';
+    $('#mict-ch').textContent = s.channelCount ? String(s.channelCount) : '–';
+  }
+
+  // ---------- Analysis loop ----------
+  function frame(now) {
+    if (!st.an) return;
+    st.raf = requestAnimationFrame(frame);
+    const buf = st.buf;
+    st.an.getFloatTimeDomainData(buf);
+    let peak = 0, sum = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const x = buf[i];
+      const a = x < 0 ? -x : x;
+      if (a > peak) peak = a;
+      sum += x * x;
+    }
+    const pDb = toDb(peak), rDb = toDb(Math.sqrt(sum / buf.length));
+    const dt = st.lastT ? Math.min(0.2, (now - st.lastT) / 1000) : 0;
+    st.lastT = now;
+    if (pDb > st.peakHold) st.peakHold = pDb;
+    if (peak >= CLIP) { if (!st.clipping) st.clipCount++; st.clipping = true; } else st.clipping = false;
+
+    // Fast attack, 24 dB/s release for the bar; 1 s hold for the marker.
+    st.meterDb = Math.max(pDb, st.meterDb - 24 * dt, MIN_DB);
+    if (pDb >= st.markDb) { st.markDb = pDb; st.markT = now; }
+    else if (now - st.markT > 1000) st.markDb = Math.max(pDb, st.markDb - 20 * dt);
+    setMeter(st.meterDb, st.markDb);
+    drawWave(buf);
+
+    if (rDb > st.histMax) st.histMax = rDb;
+    if (now - st.histT >= 50) {
+      st.history.push(st.histMax);
+      if (st.history.length > 2000) st.history.splice(0, st.history.length - 2000);
+      st.histMax = -Infinity; st.histT = now;
+    }
+    drawHistory();
+
+    if (!st.heard && pDb > HEARD_DB) {
+      st.heard = true;
+      setError('');
+      setOk('Your microphone is working: sound is reaching the browser.');
+    } else if (!st.heard && !st.warned && now - st.startT > 4000) {
+      st.warned = true;
+      setError(st.peakHold === -Infinity
+        ? 'The microphone is connected but sends pure silence. It may be muted in your system settings, by a hardware switch, or blocked by privacy settings. Try another device in the list.'
+        : 'Very little sound detected (peak ' + fmtDb(st.peakHold) + ' dBFS). Speak up, move closer, raise the input volume in your system settings, or choose another microphone.');
+    }
+
+    if (now - st.textT >= 100) {
+      st.textT = now;
+      $('#mict-rms').textContent = fmtDb(rDb);
+      $('#mict-peak').textContent = fmtDb(pDb);
+      $('#mict-hold').textContent = fmtDb(st.peakHold);
+      $('#mict-clip').textContent = st.clipCount ? st.clipCount + (st.clipCount === 1 ? ' time' : ' times') : 'None';
+      const meter = $('#mict-meter');
+      meter.setAttribute('aria-valuenow', String(Math.round(Math.max(MIN_DB, pDb))));
+      meter.setAttribute('aria-valuetext', pDb === -Infinity ? 'Silent' : fmtDb(pDb) + ' dBFS');
+      if (st.recorder && st.recorder.state === 'recording') {
+        const el = (now - st.recStart) / 1000;
+        recBar.style.width = Math.min(100, el / st.recLen * 100) + '%';
+        recStatus.textContent = 'Recording… ' + Math.min(el, st.recLen).toFixed(1) + ' s of ' + st.recLen + ' s';
+      }
+    }
+  }
+
+  // ---------- Recording ----------
+  function pickMime() {
+    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') return '';
+    return ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+  }
+
+  function record() {
+    if (st.recorder && st.recorder.state === 'recording') { st.recorder.stop(); return; }
+    if (!st.stream) return;
+    if (typeof MediaRecorder === 'undefined') {
+      recStatus.textContent = 'This browser cannot record audio (MediaRecorder is not supported). The live meter still works.';
+      return;
+    }
+    const mime = pickMime();
+    let rec;
+    try { rec = new MediaRecorder(st.stream, mime ? { mimeType: mime } : undefined); } catch (e) {
+      recStatus.textContent = 'Recording failed to start: ' + (e && e.message ? e.message : e) + '.';
+      return;
+    }
+    const chunks = [];
+    st.recLen = Number($('#mict-len').value) || 5;
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onerror = e => { recStatus.textContent = 'Recording error: ' + ((e && e.error && e.error.message) || 'unknown') + '.'; };
+    rec.onstop = () => {
+      clearTimeout(st.recTimer);
+      const secs = Math.min((performance.now() - st.recStart) / 1000, st.recLen);
+      if (st.recorder === rec) st.recorder = null;
+      recBar.style.width = '0%';
+      updateButtons();
+      const type = rec.mimeType || mime || 'audio/webm';
+      const blob = new Blob(chunks, { type });
+      if (!blob.size) { recStatus.textContent = 'The recording came back empty. Try again.'; return; }
+      showClip(blob, secs, type);
+    };
+    try { rec.start(1000); } catch (e) {
+      recStatus.textContent = 'Recording failed to start: ' + (e && e.message ? e.message : e) + '.';
+      return;
+    }
+    st.recorder = rec;
+    st.recStart = performance.now();
+    st.recTimer = setTimeout(() => { if (rec.state === 'recording') rec.stop(); }, st.recLen * 1000);
+    recStatus.textContent = 'Recording… 0.0 s of ' + st.recLen + ' s';
+    updateButtons();
+  }
+
+  function showClip(blob, secs, type) {
+    if (st.recUrl) URL.revokeObjectURL(st.recUrl);
+    st.recBlob = blob;
+    st.recUrl = URL.createObjectURL(blob);
+    st.recExt = /mp4|aac/.test(type) ? 'm4a' : /ogg/.test(type) ? 'ogg' : 'webm';
+    audio.hidden = false;
+    audio.src = st.recUrl;
+    dlBtn.hidden = false;
+    const codec = /opus/.test(type) ? 'Opus' : /mp4|aac/.test(type) ? 'AAC' : type;
+    recStatus.textContent = 'Recorded a ' + secs.toFixed(1) + ' s clip (' + Math.max(1, Math.round(blob.size / 1024)) + ' KB, ' + codec + '). Playing it back now.';
+    const p = audio.play();
+    if (p && p.catch) p.catch(() => { recStatus.textContent = recStatus.textContent.replace('Playing it back now.', 'Press play to listen.'); });
+  }
+
+  // Chrome writes WebM files without a duration; seeking to the end makes it compute one.
+  audio.addEventListener('loadedmetadata', () => {
+    if (audio.duration === Infinity) {
+      const wasPlaying = !audio.paused;
+      const back = () => { audio.removeEventListener('durationchange', back); audio.currentTime = 0; if (wasPlaying) audio.play().catch(() => {}); };
+      audio.addEventListener('durationchange', back);
+      audio.currentTime = 1e101;
+    }
+  });
+
+  dlBtn.addEventListener('click', () => {
+    if (!st.recBlob) return;
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    const stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    TT.download('mic-test-' + stamp + '.' + st.recExt, st.recBlob);
+  });
+
+  // ---------- Wiring ----------
+  startBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click', () => stop());
+  recBtn.addEventListener('click', record);
+  $('#mict-len').addEventListener('change', updateButtons);
+  $('#mict-reset-peak').addEventListener('click', () => { st.peakHold = -Infinity; st.clipCount = 0; st.markDb = -Infinity; $('#mict-hold').textContent = '–'; $('#mict-clip').textContent = st.stream ? 'None' : '–'; });
+  sel.addEventListener('change', () => { if (st.stream) start(); });
+  [ec, ns, agc].forEach(c => c.addEventListener('change', () => { if (st.stream) start(); }));
+  mon.addEventListener('change', applyMonitor);
+  window.addEventListener('pagehide', () => releaseStream());
+  window.addEventListener('resize', TT.debounce(() => { if (!st.stream) { drawWave(null); drawHistory(); } }, 100));
+  if (window.matchMedia) {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onScheme = () => { readColors(); if (!st.stream) { drawWave(null); drawHistory(); } };
+    if (mq.addEventListener) mq.addEventListener('change', onScheme);
+  }
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => refreshDevices());
+  }
+
+  readColors();
+  drawWave(null);
+  drawHistory();
+  updateButtons();
+  const bad = insecureReason();
+  if (bad) setError(bad);
+  else {
+    refreshDevices();
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'microphone' }).then(p => {
+        if (p.state === 'denied' && !st.stream) setError(explain({ name: 'NotAllowedError' }));
+      }).catch(() => {});
+    }
+  }
+})();
+</script>

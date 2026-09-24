@@ -1,0 +1,572 @@
+---
+title: Compress Image to a Target Size in KB
+description: Compress a JPG, PNG or WebP image to a set size such as 20, 50 or 100 KB, or by quality, then compare before and after. Runs in your browser, no upload.
+category: Image & PDF
+keywords: [compress image, compress image to 50kb, compress jpeg to 100kb, reduce image size in kb, image compressor, compress photo to 20kb, resize image to kb]
+howto: |
+  ## How to compress an image to a specific size
+
+  1. Choose, drop or paste an image. JPG, PNG and WebP work, plus any other
+     format your browser can open.
+  2. Pick the output: **JPG** works everywhere, **WebP** is smaller and keeps
+     transparency.
+  3. Type the maximum size in KB, or tap a common limit. The tool finds the
+     highest quality that fits. To set the quality yourself, switch to
+     **A quality level**.
+  4. Drag across the preview to compare the original (left) with the
+     compressed version (right). Tick **Actual size** to inspect detail,
+     then press **Download**.
+
+  ## How the target size is found
+
+  Browsers encode JPG and WebP at a quality from 1 to 100, but the resulting
+  file size depends on the picture: a clear sky compresses far better than
+  foliage or text. There is no formula from kilobytes to quality, so the tool
+  searches. It first encodes at 30% quality. If that fits, it narrows the
+  range between 30% and 95% with a few rounds of trial encodes, guessing each
+  next step from the sizes seen so far and running several trials at once,
+  and keeps the highest quality that is still under the limit.
+
+  If even 30% is too large, the pixel dimensions have to shrink. File size
+  grows roughly with the number of pixels, so the tool scales both sides by
+  about the square root of the overshoot, tries again, and tells you the new
+  size. Below about 30%, JPG shows blocky 8×8 artefacts, and a slightly
+  smaller image at a sensible quality looks better than a full-size one
+  covered in them. To keep every pixel anyway, switch to **A quality level**
+  and set it yourself.
+
+  ## KB means 1,000 bytes here
+
+  Some systems count 1 KB as 1,000 bytes and others as 1,024; Windows shows
+  sizes in 1,024-byte units but labels them KB. This tool uses 1,000, the
+  stricter reading, so a file made for a 50 KB limit is at most 50,000 bytes
+  and also passes a checker that allows 51,200. The exact byte count is shown
+  under the results.
+
+  | Limit | 1 KB = 1,000 bytes | 1 KB = 1,024 bytes |
+  |---|---|---|
+  | 20 KB | 20,000 | 20,480 |
+  | 50 KB | 50,000 | 51,200 |
+  | 100 KB | 100,000 | 102,400 |
+  | 1 MB | 1,000,000 | 1,048,576 |
+  {: .data .cmpi-table}
+
+  ## What else changes when an image is compressed
+
+  - **Transparency:** JPG has no alpha channel, so transparent areas of a
+    PNG or WebP are filled with white. Choose WebP to keep them.
+  - **Metadata:** re-encoding drops EXIF data, including the GPS location.
+    The rotation a phone recorded is applied to the pixels first, so the
+    photo stays upright.
+  - **Colour:** wide-gamut photos are converted to sRGB, the colour space
+    most screens and websites assume.
+  - **Animation:** only the first frame of an animated GIF or WebP is kept.
+
+  If your original is already small, a re-encoded copy can come out larger.
+  The tool warns you when that happens, and the original is then the better
+  file to use.
+faq:
+  - q: Is my image uploaded to a server?
+    a: No. The image is decoded and re-encoded by your own browser with the Canvas API. It never leaves your device, and the page keeps working offline once loaded.
+  - q: Why did the width and height change?
+    a: The target could not be reached even at 30% quality, so the image was scaled down until it fits. To keep more pixels, raise the size limit, choose WebP, which is usually smaller at the same quality, or set a lower quality yourself.
+  - q: What quality setting should I use?
+    a: For photos, 70 to 85% is hard to tell from the original and much smaller. Below about 40% blocky artefacts appear around edges and in smooth gradients. Use the compare slider to judge.
+  - q: Can I compress a PNG and keep it as PNG?
+    a: Not here. PNG is lossless, so it cannot be squeezed to a chosen size the way JPG and WebP can. Save as WebP to keep transparency at a fraction of the size.
+  - q: Is the result exactly the size I typed?
+    a: It is the largest quality step that stays at or under your limit, usually within a few percent of it. It never goes over.
+---
+<style>
+.cmpi-table { margin: 0 0 18px; }
+.cmpi-pick { position: relative; margin: 0 0 16px; }
+.cmpi-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.cmpi-drop {
+  display: grid; place-items: center; gap: 4px; min-height: 120px; padding: 18px 16px;
+  border: 2px dashed var(--border); border-radius: 10px; background: var(--surface-2);
+  text-align: center; cursor: pointer; transition: border-color 0.15s ease;
+}
+.cmpi-drop:hover, .cmpi-drop.is-over { border-color: var(--accent); }
+.cmpi-input:focus-visible + .cmpi-drop { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cmpi-drop strong { font-size: 1.05rem; overflow-wrap: anywhere; }
+.cmpi-drop strong span { color: var(--accent); text-decoration: underline; }
+.cmpi-mode { margin: 0 0 4px; padding: 0; border: 0; min-width: 0; }
+.cmpi-mode legend { padding: 0; margin-bottom: 2px; }
+.cmpi-mode .checks { margin-bottom: 8px; }
+.cmpi-target-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cmpi-target-row input { width: 130px; flex: none; }
+.cmpi-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.cmpi-presets .btn.is-on { border-color: var(--accent); color: var(--accent); }
+#cmpi-target-field[hidden], #cmpi-quality-field[hidden], #cmpi-maxpx-field[hidden], #cmpi-result[hidden] { display: none; }
+.cmpi-qlabel { display: flex; justify-content: space-between; gap: 8px; }
+.cmpi-qlabel output { font-variant-numeric: tabular-nums; }
+#cmpi-result .stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-bottom: 8px; }
+#cmpi-result .stat b { font-size: 1.2rem; }
+#cmpi-result[data-state="working"] .stats { opacity: 0.55; }
+.cmpi-bytes { min-height: 1.5em; margin: 0 0 14px; }
+#cmpi-result[data-state="working"] .cmpi-bytes { color: var(--accent); }
+.cmpi-stage { margin: 0 0 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.cmpi-stage.is-zoom { max-height: 70vh; overflow: auto; }
+.cmpi-compare {
+  --pos: 50%; --ar: 1.5;
+  position: relative; width: min(100%, calc(65vh * var(--ar))); margin: 0 auto; line-height: 0;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px;
+  cursor: ew-resize; touch-action: pan-y; user-select: none; -webkit-user-select: none;
+}
+.cmpi-stage.is-zoom .cmpi-compare { margin: 0; max-width: none; touch-action: auto; }
+.cmpi-compare img { display: block; width: 100%; height: auto; max-width: none; pointer-events: none; }
+.cmpi-compare .cmpi-before { position: absolute; top: 0; left: 0; height: 100%; clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+.cmpi-line { position: absolute; top: 0; bottom: 0; left: var(--pos); width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35); pointer-events: none; }
+.cmpi-tag {
+  position: absolute; top: 8px; padding: 2px 8px; border-radius: 6px; background: rgb(0 0 0 / 0.62); color: #fff;
+  font: 600 12px/1.5 system-ui, sans-serif; pointer-events: none;
+}
+.cmpi-tag.is-l { left: 8px; }
+.cmpi-tag.is-r { right: 8px; }
+.cmpi-split { margin-bottom: 0; }
+</style>
+
+<div class="cmpi-pick">
+  <input class="cmpi-input" type="file" id="cmpi-file" accept="image/*">
+  <label class="cmpi-drop" for="cmpi-file" id="cmpi-drop">
+    <strong id="cmpi-drop-title"><span>Choose an image</span> or drop it here</strong>
+    <span class="hint" id="cmpi-drop-hint">JPG, PNG, WebP or any image your browser opens. You can also paste one with Ctrl+V.</span>
+  </label>
+</div>
+
+<div class="row">
+  <div class="field">
+    <label for="cmpi-format">Save as</label>
+    <select id="cmpi-format">
+      <option value="image/jpeg" selected>JPG (works everywhere)</option>
+      <option value="image/webp">WebP (smaller, keeps transparency)</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="cmpi-resize">Maximum width or height</label>
+    <select id="cmpi-resize">
+      <option value="0" selected>Keep original size</option>
+      <option value="3840">3840 px (4K)</option>
+      <option value="2560">2560 px</option>
+      <option value="1920">1920 px (Full HD)</option>
+      <option value="1600">1600 px</option>
+      <option value="1280">1280 px</option>
+      <option value="1024">1024 px</option>
+      <option value="800">800 px</option>
+      <option value="640">640 px</option>
+      <option value="custom">Custom…</option>
+    </select>
+  </div>
+  <div class="field" id="cmpi-maxpx-field" hidden>
+    <label for="cmpi-maxpx">Custom maximum (px)</label>
+    <input type="number" id="cmpi-maxpx" min="16" max="20000" step="1" value="1200" inputmode="numeric">
+  </div>
+</div>
+
+<fieldset class="cmpi-mode">
+  <legend class="label">Compress to</legend>
+  <div class="checks">
+    <label class="check"><input type="radio" name="cmpi-mode" value="target" checked> A target file size</label>
+    <label class="check"><input type="radio" name="cmpi-mode" value="quality"> A quality level</label>
+  </div>
+</fieldset>
+
+<div class="field" id="cmpi-target-field">
+  <label for="cmpi-target">Maximum file size (KB)</label>
+  <div class="cmpi-target-row">
+    <input type="number" id="cmpi-target" min="1" max="100000" step="any" value="100" inputmode="decimal">
+    <div class="cmpi-presets" role="group" aria-label="Common size limits">
+      <button class="btn secondary small" type="button" data-kb="20">20 KB</button>
+      <button class="btn secondary small" type="button" data-kb="50">50 KB</button>
+      <button class="btn secondary small" type="button" data-kb="100">100 KB</button>
+      <button class="btn secondary small" type="button" data-kb="200">200 KB</button>
+      <button class="btn secondary small" type="button" data-kb="500">500 KB</button>
+      <button class="btn secondary small" type="button" data-kb="1000">1 MB</button>
+    </div>
+  </div>
+  <span class="hint">The file will be at most this size, counting 1 KB as 1,000 bytes.</span>
+</div>
+
+<div class="field" id="cmpi-quality-field" hidden>
+  <label class="cmpi-qlabel" for="cmpi-quality"><span>Quality</span><output id="cmpi-quality-out" for="cmpi-quality">75%</output></label>
+  <input type="range" id="cmpi-quality" min="1" max="100" step="1" value="75">
+  <span class="hint">70 to 85% suits most photos. Lower values give smaller files with visible blocks.</span>
+</div>
+
+<p class="msg error" id="cmpi-error" role="alert"></p>
+
+<div id="cmpi-result" data-state="idle" hidden>
+  <p class="msg ok" id="cmpi-note"></p>
+  <div class="stats" aria-live="polite">
+    <div class="stat"><b id="cmpi-orig">–</b><span>Original</span></div>
+    <div class="stat"><b id="cmpi-size">–</b><span>Compressed</span></div>
+    <div class="stat"><b id="cmpi-saved">–</b><span>Saved</span></div>
+    <div class="stat"><b id="cmpi-dims">–</b><span>Dimensions</span></div>
+    <div class="stat"><b id="cmpi-q">–</b><span>Quality</span></div>
+  </div>
+  <p class="hint cmpi-bytes" id="cmpi-bytes" aria-live="polite"></p>
+  <div class="actions">
+    <button class="btn" type="button" id="cmpi-download" disabled>Download</button>
+    <label class="check"><input type="checkbox" id="cmpi-zoom"> Actual size (100%)</label>
+  </div>
+  <div class="cmpi-stage" id="cmpi-stage">
+    <div class="cmpi-compare" id="cmpi-compare">
+      <img id="cmpi-after" alt="Compressed image">
+      <img class="cmpi-before" id="cmpi-before" alt="Original image">
+      <span class="cmpi-line" aria-hidden="true"></span>
+      <span class="cmpi-tag is-l" aria-hidden="true">Original</span>
+      <span class="cmpi-tag is-r" aria-hidden="true">Compressed</span>
+    </div>
+  </div>
+  <div class="field cmpi-split">
+    <label for="cmpi-split">Divider: original on the left, compressed on the right</label>
+    <input type="range" id="cmpi-split" min="0" max="100" step="1" value="50">
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const MIN_Q = 30, MAX_Q = 95, PIXEL_CAP = 50e6, SAFE_PIXELS = 16777216;
+  const fileInput = $('#cmpi-file'), drop = $('#cmpi-drop'), fmtSel = $('#cmpi-format'), resizeSel = $('#cmpi-resize'), maxPxEl = $('#cmpi-maxpx');
+  const targetEl = $('#cmpi-target'), qualityEl = $('#cmpi-quality'), qualityOut = $('#cmpi-quality-out');
+  const errEl = $('#cmpi-error'), noteEl = $('#cmpi-note'), progressEl = $('#cmpi-bytes'), result = $('#cmpi-result');
+  const dlBtn = $('#cmpi-download'), before = $('#cmpi-before'), after = $('#cmpi-after');
+  const stage = $('#cmpi-stage'), compare = $('#cmpi-compare'), split = $('#cmpi-split'), zoom = $('#cmpi-zoom');
+  const CANCEL = { cancelled: true };
+  const st = { src: null, w: 0, h: 0, name: '', type: '', size: 0, alpha: false, origUrl: '', outUrl: '', out: null, run: 0, loadRun: 0, cache: null, pxCap: PIXEL_CAP };
+
+  function fail(msg) { const e = new Error(msg); e.friendly = true; return e; }
+  function fmtBytes(n) {
+    if (n < 1000) return n + ' bytes';
+    if (n < 1e6) return (n / 1000).toFixed(n < 1e5 ? 1 : 0) + ' KB';
+    return (n / 1e6).toFixed(2) + ' MB';
+  }
+  const mode = () => (document.querySelector('input[name="cmpi-mode"]:checked') || {}).value || 'target';
+  function setState(s) { result.setAttribute('data-state', s); }
+
+  // WebP encoding is missing in some browsers (they silently return PNG).
+  (function checkWebp() {
+    let ok = false;
+    try { const c = document.createElement('canvas'); c.width = c.height = 1; ok = c.toDataURL('image/webp').indexOf('data:image/webp') === 0; } catch (e) { ok = false; }
+    if (!ok) {
+      const o = fmtSel.querySelector('option[value="image/webp"]');
+      o.disabled = true;
+      o.textContent = 'WebP (not supported by this browser)';
+    }
+  })();
+
+  // ---------- Loading ----------
+  async function decode(file) {
+    if (typeof createImageBitmap === 'function') {
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* use <img> below */ }
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      if (!img.naturalWidth || !img.naturalHeight) throw new Error('empty');
+      return img;
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+  }
+  function hasAlpha(src, w, h) {
+    try {
+      const s = Math.min(1, 256 / Math.max(w, h));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(src, 0, 0, c.width, c.height);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      for (let i = 3; i < d.length; i += 4) if (d[i] < 255) return true;
+    } catch (e) { /* assume opaque */ }
+    return false;
+  }
+
+  async function load(file) {
+    if (!file) return;
+    errEl.textContent = '';
+    const run = ++st.loadRun;
+    st.run++; // cancel any compression still running for the previous image
+    result.hidden = false;
+    setState('working');
+    dlBtn.disabled = true;
+    progressEl.textContent = 'Opening ' + (file.name || 'image') + '…';
+    let src;
+    try {
+      src = await decode(file);
+    } catch (e) {
+      if (run !== st.loadRun) return;
+      showError('This file could not be opened as an image. Your browser may not support its format (HEIC photos, for example, only open in Safari). Try a JPG, PNG or WebP.');
+      return;
+    }
+    if (run !== st.loadRun) { if (src.close) src.close(); return; }
+    if (st.src && st.src.close) st.src.close();
+    freeCache();
+    st.src = src;
+    st.w = src.naturalWidth || src.width;
+    st.h = src.naturalHeight || src.height;
+    st.name = file.name || 'image';
+    st.type = file.type || '';
+    st.size = file.size;
+    st.pxCap = PIXEL_CAP;
+    st.alpha = st.type !== 'image/jpeg' && hasAlpha(src, st.w, st.h);
+    if (st.origUrl) URL.revokeObjectURL(st.origUrl);
+    st.origUrl = URL.createObjectURL(file);
+    before.src = st.origUrl;
+    compare.style.setProperty('--ar', (st.w / st.h).toFixed(4));
+    $('#cmpi-drop-title').textContent = st.name;
+    $('#cmpi-drop-hint').textContent = st.w + ' × ' + st.h + ' px · ' + fmtBytes(st.size) + '. Choose or drop another image to replace it.';
+    $('#cmpi-orig').textContent = fmtBytes(st.size);
+    applyZoom();
+    compress();
+  }
+
+  // ---------- Encoding ----------
+  function freeCache() {
+    if (st.cache) { st.cache.canvas.width = st.cache.canvas.height = 0; st.cache = null; }
+  }
+  function canvasFor(scale, fmt) {
+    const w = Math.max(1, Math.round(st.w * scale)), h = Math.max(1, Math.round(st.h * scale));
+    const key = w + 'x' + h + fmt;
+    if (st.cache && st.cache.key === key) return st.cache.canvas;
+    freeCache();
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    if (!g) throw fail('TOO_BIG');
+    if (fmt === 'image/jpeg') { g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h); }
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(st.src, 0, 0, w, h);
+    st.cache = { key, canvas: c };
+    return c;
+  }
+  function toBlob(c, fmt, q) {
+    return new Promise((resolve, reject) => {
+      c.toBlob(b => (b && b.size ? resolve(b) : reject(fail('Your browser could not encode this image. It may be too large; try a smaller maximum width.'))), fmt, q);
+    });
+  }
+
+  async function compress() {
+    if (!st.src) return;
+    const run = ++st.run;
+    const fmt = fmtSel.value, m = mode();
+    setState('working');
+    dlBtn.disabled = true;
+    errEl.textContent = '';
+    const notes = [];
+    const longest = Math.max(st.w, st.h);
+    let maxSide = Number(resizeSel.value) || 0;
+    if (resizeSel.value === 'custom') {
+      maxSide = Math.round(Number(maxPxEl.value));
+      if (!(maxSide >= 16 && maxSide <= 20000)) { showError('Enter a maximum width or height between 16 and 20,000 px.'); return; }
+    }
+    let scale = maxSide && longest > maxSide ? maxSide / longest : 1, capped = false;
+    if (st.w * st.h * scale * scale > st.pxCap) { scale = Math.sqrt(st.pxCap / (st.w * st.h)); capped = true; }
+    const enc = async (s, q, label) => {
+      if (label) progressEl.textContent = label;
+      let c;
+      for (;;) {
+        if (st.w * st.h * s * s > st.pxCap) { s = Math.sqrt(st.pxCap / (st.w * st.h)); capped = true; }
+        try { c = canvasFor(s, fmt); break; } catch (e) {
+          if (e.message !== 'TOO_BIG' || st.pxCap <= SAFE_PIXELS) throw fail('This image is too large for your browser to process. Choose a smaller maximum width.');
+          st.pxCap = SAFE_PIXELS;
+        }
+      }
+      const b = await toBlob(c, fmt, q / 100);
+      if (run !== st.run) throw CANCEL;
+      return { blob: b, w: c.width, h: c.height, q, s };
+    };
+    // Bracket search on quality. File size grows (almost always) with quality, so keep lo = the
+    // highest quality known to fit and hi = the lowest known not to, and probe inside the bracket
+    // by interpolating on log(size). The probes of a round are encoded in parallel.
+    const search = async (first, limit) => {
+      const seen = new Map([[first.q, first]]);
+      const round = async qs => {
+        qs = Array.from(new Set(qs)).filter(q => q >= MIN_Q && q <= MAX_Q && !seen.has(q)).sort((a, b) => a - b);
+        if (!qs.length) return;
+        progressEl.textContent = 'Trying ' + qs.join('%, ') + '% quality…';
+        const jobs = [];
+        for (const q of qs) { // start one encode per task so the canvas read-backs do not pile up
+          const job = enc(first.s, q);
+          job.catch(() => {});
+          jobs.push(job);
+          await new Promise(r => setTimeout(r, 0));
+        }
+        (await Promise.all(jobs)).forEach(r => seen.set(r.q, r));
+      };
+      const bracket = () => {
+        let lo = first, hi = null;
+        seen.forEach(r => { if (r.blob.size <= limit && r.q > lo.q) lo = r; });
+        seen.forEach(r => { if (r.blob.size > limit && r.q > lo.q && (!hi || r.q < hi.q)) hi = r; });
+        return [lo, hi];
+      };
+      await round([45, 70, MAX_Q]);
+      for (let i = 0; i < 10; i++) {
+        const [lo, hi] = bracket(), gap = hi ? hi.q - lo.q : 0;
+        if (gap <= 1) return lo;
+        const all = [];
+        if (gap <= 4) {
+          for (let q = lo.q + 1; q < hi.q; q++) all.push(q);
+        } else {
+          const t = (Math.log(limit) - Math.log(lo.blob.size)) / (Math.log(hi.blob.size) - Math.log(lo.blob.size));
+          const g = Math.round(lo.q + (isFinite(t) ? t : 0.5) * gap), d = Math.max(1, Math.round(gap / 8));
+          [g - d, g, g + d].forEach(q => all.push(Math.min(hi.q - 1, Math.max(lo.q + 1, q))));
+        }
+        await round(all);
+      }
+      return bracket()[0];
+    };
+    try {
+      let best;
+      if (m === 'quality') {
+        const q = Number(qualityEl.value) || 75;
+        best = await enc(scale, q, 'Compressing at ' + q + '% quality…');
+      } else {
+        const kb = parseFloat(targetEl.value);
+        if (!(kb >= 1) || kb > 100000) throw fail('Enter a target size between 1 and 100,000 KB.');
+        const limit = Math.floor(kb * 1000);
+        const startW = Math.round(st.w * scale), startH = Math.round(st.h * scale);
+        best = await enc(scale, MIN_Q, 'Checking the smallest size at ' + MIN_Q + '% quality…');
+        for (let i = 0; best.blob.size > limit; i++) {
+          const f = Math.min(0.9, Math.max(0.25, Math.sqrt(limit / best.blob.size) * 0.95));
+          scale = best.s * f;
+          if (i > 25 || Math.round(st.w * scale) < 8 || Math.round(st.h * scale) < 8) {
+            throw fail('Even a tiny version of this image is larger than ' + kb + ' KB. Choose a larger target size.');
+          }
+          best = await enc(scale, MIN_Q, 'Too big at ' + MIN_Q + '% quality, trying ' + Math.round(st.w * scale) + ' × ' + Math.round(st.h * scale) + ' px…');
+        }
+        best = await search(best, limit);
+        if (best.w < startW) {
+          notes.push('Even ' + MIN_Q + '% quality was over ' + kb + ' KB at ' + startW + ' × ' + startH + ' px, so the image was also scaled down to ' + best.w + ' × ' + best.h + ' px.');
+        } else if (best.q === MAX_Q) {
+          notes.push('Reached ' + MAX_Q + '% quality, the highest this tool uses, well under your limit.');
+        }
+      }
+      if (fmt === 'image/jpeg' && st.alpha) notes.unshift('This image has transparent areas. JPG cannot store transparency, so they are filled with white. Choose WebP to keep them transparent.');
+      if (capped) notes.push('The image was reduced to ' + best.w + ' × ' + best.h + ' px to fit your browser’s canvas size limit.');
+      if (best.blob.size >= st.size) {
+        notes.push('The result is ' + (best.blob.size > st.size ? 'larger than' : 'the same size as') + ' your original (' + fmtBytes(st.size) + '), which is already well compressed. Use the original, or lower the ' + (m === 'quality' ? 'quality' : 'limit') + '.');
+      }
+      show(best, fmt, notes, m === 'target' ? Math.floor(parseFloat(targetEl.value) * 1000) : 0);
+    } catch (e) {
+      if (e === CANCEL) return;
+      if (run !== st.run) return;
+      showError(e && e.friendly ? e.message : 'Compression failed: ' + ((e && e.message) || 'unknown error') + '.');
+    }
+  }
+
+  function show(r, fmt, notes, limit) {
+    st.out = { blob: r.blob, fmt, w: r.w, h: r.h, q: r.q };
+    if (st.outUrl) URL.revokeObjectURL(st.outUrl);
+    st.outUrl = URL.createObjectURL(r.blob);
+    after.src = st.outUrl;
+    const saved = Math.round((1 - r.blob.size / st.size) * 100);
+    $('#cmpi-orig').textContent = fmtBytes(st.size);
+    $('#cmpi-size').textContent = fmtBytes(r.blob.size);
+    $('#cmpi-saved').textContent = saved > 0 ? saved + '%' : 'None';
+    $('#cmpi-dims').textContent = r.w + ' × ' + r.h;
+    $('#cmpi-q').textContent = r.q + '%';
+    $('#cmpi-bytes').textContent = 'Compressed ' + (fmt === 'image/webp' ? 'WebP' : 'JPG') + ': ' + r.blob.size.toLocaleString('en-US') + ' bytes' +
+      (limit ? ' (limit ' + limit.toLocaleString('en-US') + ' bytes)' : '') + '. Original: ' + st.size.toLocaleString('en-US') + ' bytes, ' + st.w + ' × ' + st.h + ' px.';
+    noteEl.textContent = notes.join(' ');
+    dlBtn.disabled = false;
+    setState('done');
+  }
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    progressEl.textContent = '';
+    noteEl.textContent = '';
+    dlBtn.disabled = true;
+    setState('error');
+  }
+
+  // ---------- Compare view ----------
+  function setSplit(p) {
+    p = Math.max(0, Math.min(100, p));
+    compare.style.setProperty('--pos', p + '%');
+    split.value = String(Math.round(p));
+  }
+  function applyZoom() {
+    const on = zoom.checked && st.w > 0;
+    stage.classList.toggle('is-zoom', on);
+    compare.style.width = on ? st.w + 'px' : '';
+  }
+  let dragging = false;
+  compare.addEventListener('pointerdown', e => {
+    if (stage.classList.contains('is-zoom') && e.pointerType !== 'mouse') return;
+    dragging = true;
+    try { compare.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    const r = compare.getBoundingClientRect();
+    setSplit((e.clientX - r.left) / r.width * 100);
+  });
+  compare.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const r = compare.getBoundingClientRect();
+    setSplit((e.clientX - r.left) / r.width * 100);
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => compare.addEventListener(t, () => { dragging = false; }));
+  split.addEventListener('input', () => setSplit(Number(split.value)));
+  zoom.addEventListener('change', applyZoom);
+
+  // ---------- Controls ----------
+  const later = TT.debounce(compress, 350);
+  function pending() { if (st.src) { st.run++; setState('working'); dlBtn.disabled = true; later(); } }
+  function syncMode() {
+    const t = mode() === 'target';
+    $('#cmpi-target-field').hidden = !t;
+    $('#cmpi-quality-field').hidden = t;
+  }
+  function syncPresets() {
+    TT.$$('.cmpi-presets [data-kb]').forEach(b => {
+      const on = Number(b.getAttribute('data-kb')) === Number(targetEl.value);
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  TT.$$('input[name="cmpi-mode"]').forEach(r => r.addEventListener('change', () => { syncMode(); if (st.src) compress(); }));
+  fmtSel.addEventListener('change', () => { if (st.src) compress(); });
+  resizeSel.addEventListener('change', () => {
+    $('#cmpi-maxpx-field').hidden = resizeSel.value !== 'custom';
+    if (st.src) compress();
+  });
+  maxPxEl.addEventListener('input', pending);
+  targetEl.addEventListener('input', () => { syncPresets(); pending(); });
+  qualityEl.addEventListener('input', () => { qualityOut.textContent = qualityEl.value + '%'; pending(); });
+  TT.$$('.cmpi-presets [data-kb]').forEach(b => b.addEventListener('click', () => {
+    targetEl.value = b.getAttribute('data-kb');
+    syncPresets();
+    if (st.src) compress();
+  }));
+  dlBtn.addEventListener('click', () => {
+    if (!st.out) return;
+    const base = st.name.replace(/\.[^.]+$/, '') || 'image';
+    TT.download(base + '-compressed.' + (st.out.fmt === 'image/webp' ? 'webp' : 'jpg'), st.out.blob);
+  });
+
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    load(f);
+  });
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('is-over'); }));
+  ['dragleave', 'dragend'].forEach(t => drop.addEventListener(t, () => drop.classList.remove('is-over')));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('is-over');
+    const f = e.dataTransfer && Array.from(e.dataTransfer.files || []).find(x => /^image\//.test(x.type)) || (e.dataTransfer && e.dataTransfer.files[0]);
+    if (f) load(f);
+  });
+  document.addEventListener('paste', e => {
+    const f = e.clipboardData && Array.from(e.clipboardData.files || []).find(x => /^image\//.test(x.type));
+    if (f) { e.preventDefault(); load(f); }
+  });
+  syncMode();
+  syncPresets();
+})();
+</script>

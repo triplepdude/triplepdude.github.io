@@ -1,0 +1,525 @@
+---
+title: "Webcam Test: Check Your Camera Online"
+description: Test your webcam online with a live preview, real resolution, frame rate, aspect ratio and measured FPS. Switch cameras and save PNG snapshots.
+category: Device Tests
+keywords: [webcam test, camera test, test my webcam, webcam resolution test, webcam fps test, online camera test, webcam mirror]
+howto: |
+  ## How to test your webcam
+
+  1. Pick a camera and, if you like, a resolution and frame rate, then press
+     **Start**. Allow camera access when the browser asks.
+  2. The preview appears with the delivered resolution and frame rate in the
+     corner. The figures below it update every half second.
+  3. Press **Take snapshot** to capture a full-resolution still, then
+     **Download PNG** to save it.
+  4. Press **Stop** to release the camera. The webcam light should switch off
+     within a second; if it stays on, another app or tab is still using it.
+
+  Camera names only appear once you have granted access, because browsers
+  hide device labels from pages without permission.
+
+  ## What the numbers mean
+
+  **Resolution**, **Frame rate** and **Aspect ratio** come from
+  `MediaStreamTrack.getSettings()`, which reports the mode the camera is
+  actually running in, not the maximum printed on the box. **Measured FPS**
+  counts the frames the page really displays, using
+  `requestVideoFrameCallback` where the browser supports it. If it is well
+  below the reported rate, the camera is dropping frames. The usual cause is
+  low light: auto-exposure lengthens each exposure, and a 1/15 s exposure
+  cannot deliver more than 15 frames per second. **Brightness** is the
+  average luma of the picture from 0 to 100%. A near-zero value with the
+  camera running usually means a closed privacy shutter or a covered lens.
+
+  | Resolution | Common name | Aspect | MP |
+  |---|---|---|---|
+  | 640 × 480 | VGA | 4:3 | 0.31 |
+  | 1280 × 720 | HD, 720p | 16:9 | 0.92 |
+  | 1920 × 1080 | Full HD, 1080p | 16:9 | 2.07 |
+  | 2560 × 1440 | QHD, 1440p | 16:9 | 3.69 |
+  | 3840 × 2160 | 4K UHD | 16:9 | 8.29 |
+  {: .data .wct-gt}
+
+  ## Why you may not get the resolution you picked
+
+  The resolution and frame rate menus send *ideal* constraints, as defined in
+  the W3C Media Capture and Streams specification. The browser then chooses
+  the closest mode the camera supports instead of failing, and the page shows
+  what you really got. Common reasons for a lower result: the camera tops out
+  lower, a USB 2.0 connection lacks the bandwidth for high resolutions at
+  high frame rates, or another app already has the camera open in a
+  different mode. Chrome can also crop and scale frames to reach a requested
+  size; the **Resize mode** row shows `crop-and-scale` when that happened.
+  The **Maximum resolution** row lists the largest size the camera reports
+  it can deliver, where the browser exposes it.
+
+  ## Mirroring and snapshots
+
+  The preview is mirrored by default, so moving your right hand moves the
+  image on the right, as in a bathroom mirror. Most call apps mirror only
+  your self-view and send the unmirrored picture to others. Snapshots follow
+  the preview: with **Mirror** on they are saved mirrored, with it off they
+  match what other people see. Snapshots are saved at the camera's full
+  delivered resolution as lossless PNG files.
+
+  ## If the camera will not start
+
+  - **Permission denied:** click the icon at the left of the address bar,
+    allow the camera and press Start again.
+  - **Blocked by the system:** on Windows open Settings, Privacy & security,
+    Camera; on macOS open System Settings, Privacy & Security, Camera.
+  - **In use:** on Windows a camera usually works in only one app at a time.
+    Close video call apps, OBS and other tabs.
+  - **Not secure:** cameras only work on https pages and on localhost.
+faq:
+  - q: Is my video recorded or uploaded?
+    a: No. The camera feed goes straight from your device to the video element on this page. Nothing is recorded or sent anywhere, and snapshots stay in your browser until you choose Download PNG.
+  - q: Why is my webcam picture mirrored?
+    a: The preview is flipped horizontally so it behaves like a mirror, which feels natural when you look at yourself. Untick Mirror to see the picture the way other people see it in a call.
+  - q: Why is the measured frame rate lower than my camera's rating?
+    a: Webcams lower their frame rate in dim light to get a brighter exposure. Add light in front of you, close other apps using the camera, and connect it directly to the computer rather than through a hub.
+  - q: It says my camera is in use. What do I do?
+    a: Another program has the camera open. Quit video call apps, streaming software and other browser tabs that use the camera, then press Start again. Restarting the browser clears a stuck tab.
+  - q: How do I test the back camera on my phone?
+    a: After you allow access, open the Camera list and choose the rear camera; phones usually list it as back or environment facing. Press Start again if it does not switch automatically.
+---
+<style>
+.wct-gt { margin: 0 0 16px; }
+.wct-stage {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 100%; max-height: 70vh; aspect-ratio: 16 / 9; margin: 0 0 12px; overflow: hidden;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.wct-stage video { display: block; width: 100%; height: 100%; max-width: 100%; object-fit: contain; }
+.wct-stats .stat b { font-size: 1.15rem; }
+.wct-stage video.is-mirrored { transform: scaleX(-1); }
+.wct-stage video[hidden] { display: none; }
+.wct-stage:fullscreen { max-height: none; border-radius: 0; border: 0; background: #000; }
+.wct-placeholder { padding: 16px; color: var(--muted); text-align: center; }
+.wct-badge {
+  position: absolute; top: 10px; left: 10px; padding: 3px 8px; border-radius: 6px;
+  background: rgb(0 0 0 / 0.6); color: #fff; font: 600 13px/1.4 var(--mono);
+}
+.wct-badge:empty { display: none; }
+.wct-row-btns { display: flex; gap: 10px; }
+.wct-h { margin: 24px 0 10px; font-size: 1.05rem; }
+.wct-snap { display: block; width: auto; max-width: 100%; max-height: 360px; margin: 0 0 10px; border: 1px solid var(--border); border-radius: 8px; }
+#wct-snap-wrap[hidden], #wct-fullscreen[hidden] { display: none; }
+</style>
+
+<div class="row">
+  <div class="field">
+    <label for="wct-device">Camera</label>
+    <select id="wct-device"><option value="">Default camera</option></select>
+  </div>
+  <div class="field">
+    <label for="wct-res">Resolution</label>
+    <select id="wct-res">
+      <option value="">Camera default</option>
+      <option value="640x480">640 × 480 (VGA)</option>
+      <option value="1280x720">1280 × 720 (HD)</option>
+      <option value="1920x1080">1920 × 1080 (Full HD)</option>
+      <option value="2560x1440">2560 × 1440 (QHD)</option>
+      <option value="3840x2160">3840 × 2160 (4K)</option>
+      <option value="max">Highest available</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="wct-fps">Frame rate</label>
+    <select id="wct-fps">
+      <option value="">Camera default</option>
+      <option value="15">15 fps</option>
+      <option value="30">30 fps</option>
+      <option value="60">60 fps</option>
+    </select>
+  </div>
+  <div class="wct-row-btns">
+    <button class="btn" type="button" id="wct-start">Start</button>
+    <button class="btn secondary" type="button" id="wct-stop" disabled>Stop</button>
+  </div>
+</div>
+<p class="hint" id="wct-device-hint">Press Start and allow camera access when your browser asks. Camera names appear after that.</p>
+
+<p class="msg error" id="wct-error" role="alert"></p>
+<p class="msg ok" id="wct-status" aria-live="polite"></p>
+
+<div class="wct-stage" id="wct-stage">
+  <video id="wct-video" class="is-mirrored" playsinline muted autoplay hidden aria-label="Camera preview"></video>
+  <p class="wct-placeholder" id="wct-placeholder">Press Start to see your camera preview.</p>
+  <span class="wct-badge" id="wct-badge" aria-hidden="true"></span>
+</div>
+
+<div class="actions">
+  <button class="btn" type="button" id="wct-snap" disabled>Take snapshot</button>
+  <button class="btn secondary" type="button" id="wct-fullscreen" disabled>Full screen</button>
+  <label class="check"><input type="checkbox" id="wct-mirror" checked> Mirror</label>
+</div>
+
+<div class="stats wct-stats">
+  <div class="stat"><b id="wct-resolution">–</b><span>Resolution</span></div>
+  <div class="stat"><b id="wct-aspect">–</b><span>Aspect ratio</span></div>
+  <div class="stat"><b id="wct-rate">–</b><span>Frame rate (reported)</span></div>
+  <div class="stat"><b id="wct-measured">–</b><span>Measured FPS</span></div>
+  <div class="stat"><b id="wct-mp">–</b><span>Megapixels</span></div>
+  <div class="stat"><b id="wct-bright">–</b><span>Brightness</span></div>
+</div>
+
+<div id="wct-snap-wrap" hidden>
+  <h2 class="wct-h">Snapshot</h2>
+  <canvas class="wct-snap" id="wct-canvas" role="img" aria-label="Last snapshot"></canvas>
+  <p class="hint" id="wct-snap-info"></p>
+  <div class="actions">
+    <button class="btn secondary" type="button" id="wct-download">Download PNG</button>
+  </div>
+</div>
+
+<div id="wct-details-wrap" hidden>
+  <h2 class="wct-h">Camera details</h2>
+  <div class="table-wrap">
+    <table class="data"><tbody id="wct-details"></tbody></table>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const sel = $('#wct-device'), resSel = $('#wct-res'), fpsSel = $('#wct-fps');
+  const startBtn = $('#wct-start'), stopBtn = $('#wct-stop'), snapBtn = $('#wct-snap'), fsBtn = $('#wct-fullscreen');
+  const video = $('#wct-video'), stage = $('#wct-stage'), mirror = $('#wct-mirror');
+  const errEl = $('#wct-error'), okEl = $('#wct-status');
+  const canvas = $('#wct-canvas');
+  const st = { stream: null, starting: false, gen: 0, timer: 0, vfc: 0, samples: [], frames: 0, darkSince: 0, darkWarned: false, lastQ: null, snapName: '' };
+  const RATIOS = [[4, 3], [16, 9], [16, 10], [3, 2], [5, 4], [1, 1], [21, 9], [9, 16], [3, 4]];
+
+  function setError(t) { errEl.textContent = t || ''; }
+  function setOk(t) { okEl.textContent = t || ''; }
+
+  function insecureReason() {
+    if (window.isSecureContext === false) {
+      return 'Camera access needs a secure connection. Open this page over https:// (or on localhost); browsers disable cameras on plain http pages.';
+    }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      return 'This browser does not support camera access (navigator.mediaDevices is missing). Try a current version of Chrome, Edge, Firefox or Safari.';
+    }
+    return '';
+  }
+
+  function explain(e) {
+    const name = (e && e.name) || '';
+    const msg = (e && e.message) || '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      if (/system/i.test(msg)) {
+        return 'Your operating system is blocking camera access for this browser. On Windows open Settings > Privacy & security > Camera; on macOS open System Settings > Privacy & Security > Camera. Allow your browser, then press Start again.';
+      }
+      return 'Permission denied: camera access is blocked for this page. Click the icon at the left of the address bar, allow the camera, then press Start again.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return 'No camera found. Connect a webcam, or check that it is enabled in your system settings (and not switched off with a keyboard key or privacy switch), then press Start again.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return 'The camera is in use by another app or could not be started. Close apps that may be using it (Zoom, Teams, Skype, OBS or another browser tab), or unplug and reconnect it, then press Start again.';
+    }
+    if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+      return 'The selected camera is no longer available or cannot provide that mode. Choose another camera or resolution and press Start.';
+    }
+    if (name === 'SecurityError') {
+      return 'The browser blocked camera access for security reasons. Make sure the page is opened over https:// and is not inside a frame that disallows the camera.';
+    }
+    if (name === 'AbortError') {
+      return 'The browser stopped the camera from starting. Press Start again; if it keeps happening, restart the browser.';
+    }
+    return 'Could not start the camera: ' + (msg || name || 'unknown error') + '.';
+  }
+
+  function gcd(a, b) { while (b) { const t = b; b = a % b; a = t; } return a; }
+
+  function aspectText(w, h) {
+    if (!w || !h) return '–';
+    const g = gcd(w, h), rw = w / g, rh = h / g, dec = (w / h).toFixed(2);
+    if (rw <= 32 && rh <= 32) return rw + ':' + rh + ' (' + dec + ')';
+    let best = null, bestErr = 1;
+    RATIOS.forEach(r => { const err = Math.abs(w / h - r[0] / r[1]) / (r[0] / r[1]); if (err < bestErr) { bestErr = err; best = r; } });
+    return bestErr < 0.01 ? '≈' + best[0] + ':' + best[1] + ' (' + dec + ')' : dec + ':1';
+  }
+
+  function fmtRate(r) { return typeof r === 'number' && r > 0 ? (Math.abs(r - Math.round(r)) < 0.01 ? String(Math.round(r)) : r.toFixed(2)) + ' fps' : '–'; }
+
+  // ---------- Devices ----------
+  async function refreshDevices(activeId) {
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return;
+    let devs = [];
+    try { devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch (e) { return; }
+    const want = activeId || sel.value;
+    const labelled = devs.some(d => d.label);
+    sel.innerHTML = '';
+    if (!devs.length || !labelled) sel.add(new Option('Default camera', ''));
+    if (labelled) devs.forEach((d, i) => { if (d.deviceId) sel.add(new Option(d.label || 'Camera ' + (i + 1), d.deviceId)); });
+    if (want && Array.from(sel.options).some(o => o.value === want)) sel.value = want;
+    $('#wct-device-hint').textContent = !devs.length
+      ? 'No camera detected yet. Press Start to check again.'
+      : labelled ? devs.length + ' camera' + (devs.length === 1 ? '' : 's') + ' found.'
+        : 'Press Start and allow camera access when your browser asks. Camera names appear after that.';
+  }
+
+  // ---------- Start / stop ----------
+  function updateButtons() {
+    const running = !!st.stream;
+    startBtn.disabled = running || st.starting || !!insecureReason();
+    stopBtn.disabled = !running;
+    snapBtn.disabled = !running;
+    fsBtn.disabled = !running;
+  }
+
+  function constraints() {
+    const v = {};
+    if (sel.value) v.deviceId = { exact: sel.value };
+    const r = resSel.value;
+    if (r === 'max') { v.width = { ideal: 4096 }; v.height = { ideal: 2160 }; }
+    else if (r) { const p = r.split('x').map(Number); v.width = { ideal: p[0] }; v.height = { ideal: p[1] }; }
+    if (fpsSel.value) v.frameRate = { ideal: Number(fpsSel.value) };
+    return { audio: false, video: Object.keys(v).length ? v : true };
+  }
+
+  function release() {
+    st.gen++;
+    clearInterval(st.timer);
+    if (st.vfc && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(st.vfc);
+    st.vfc = 0;
+    if (st.stream) st.stream.getTracks().forEach(t => { t.onended = null; t.onmute = null; t.onunmute = null; t.stop(); });
+    st.stream = null;
+    video.srcObject = null;
+  }
+
+  function stop(message) {
+    release();
+    video.hidden = true;
+    $('#wct-placeholder').hidden = false;
+    $('#wct-placeholder').textContent = 'Camera stopped. Press Start to turn it back on.';
+    $('#wct-badge').textContent = '';
+    stage.style.aspectRatio = '';
+    $('#wct-measured').textContent = '–';
+    $('#wct-bright').textContent = '–';
+    if (document.fullscreenElement === stage && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    setOk(message === undefined ? 'Camera released. The browser is no longer using it.' : message);
+    updateButtons();
+  }
+
+  async function start() {
+    const bad = insecureReason();
+    if (bad) { setError(bad); updateButtons(); return; }
+    if (st.starting) return;
+    setError(''); setOk('');
+    release(); // the old stream must be closed first, or the camera keeps its current mode
+    st.starting = true;
+    updateButtons();
+    const gen = st.gen;
+    const c = constraints();
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(c);
+    } catch (e) {
+      st.starting = false;
+      setError(explain(e));
+      updateButtons();
+      refreshDevices();
+      return;
+    }
+    st.starting = false;
+    if (gen !== st.gen) { stream.getTracks().forEach(t => t.stop()); updateButtons(); return; }
+    const track = stream.getVideoTracks()[0];
+    if (!track) { stream.getTracks().forEach(t => t.stop()); setError('No camera found. The browser returned no video track.'); updateButtons(); return; }
+    st.stream = stream;
+    st.samples = []; st.frames = 0; st.darkSince = 0; st.darkWarned = false; st.lastQ = null;
+    track.onended = () => { stop(''); setError('The camera was disconnected or turned off by the system.'); refreshDevices(); };
+    track.onmute = () => setError('The camera stopped sending video. Another app or the system may have taken it over.');
+    track.onunmute = () => setError('');
+    video.srcObject = stream;
+    video.hidden = false;
+    $('#wct-placeholder').hidden = true;
+    const p = video.play();
+    if (p && p.catch) p.catch(() => {});
+    updateButtons();
+    const s = track.getSettings ? track.getSettings() : {};
+    refreshDevices(s.deviceId);
+    const waitMeta = video.readyState >= 1 ? Promise.resolve() : new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
+    await Promise.race([waitMeta, new Promise(r => setTimeout(r, 3000))]);
+    if (gen !== st.gen) return;
+    showInfo(true);
+    startFpsCounter();
+    st.timer = setInterval(tick, 500);
+  }
+
+  // ---------- Measurements ----------
+  function startFpsCounter() {
+    if (typeof video.requestVideoFrameCallback === 'function') {
+      const gen = st.gen;
+      const onFrame = (now, meta) => {
+        if (gen !== st.gen) return;
+        st.samples.push([now, meta && typeof meta.presentedFrames === 'number' ? meta.presentedFrames : ++st.frames]);
+        while (st.samples.length > 2 && now - st.samples[0][0] > 1500) st.samples.shift();
+        st.vfc = video.requestVideoFrameCallback(onFrame);
+      };
+      st.vfc = video.requestVideoFrameCallback(onFrame);
+    }
+  }
+
+  function measuredFps() {
+    const s = st.samples;
+    if (s.length >= 2) {
+      const a = s[0], b = s[s.length - 1];
+      if (performance.now() - b[0] > 1500) return 0;
+      return b[0] > a[0] ? (b[1] - a[1]) / (b[0] - a[0]) * 1000 : null;
+    }
+    if (typeof video.getVideoPlaybackQuality === 'function') {
+      const q = video.getVideoPlaybackQuality(), now = performance.now();
+      const prev = st.lastQ;
+      st.lastQ = [now, q.totalVideoFrames];
+      if (prev && now > prev[0]) return (q.totalVideoFrames - prev[1]) / (now - prev[0]) * 1000;
+    }
+    return null;
+  }
+
+  const probe = document.createElement('canvas');
+  probe.width = 32; probe.height = 18;
+  function brightness() {
+    if (!video.videoWidth) return null;
+    try {
+      const g = probe.getContext('2d', { willReadFrequently: true });
+      g.drawImage(video, 0, 0, probe.width, probe.height);
+      const d = g.getImageData(0, 0, probe.width, probe.height).data;
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      return sum / (d.length / 4) / 255;
+    } catch (e) { return null; }
+  }
+
+  function dims() {
+    const t = st.stream && st.stream.getVideoTracks()[0];
+    const s = t && t.getSettings ? t.getSettings() : {};
+    return { t, s, w: s.width || video.videoWidth, h: s.height || video.videoHeight };
+  }
+
+  function showInfo(full) {
+    const { t, s, w, h } = dims();
+    if (!t) return;
+    $('#wct-resolution').textContent = w && h ? w + ' × ' + h : '–';
+    $('#wct-aspect').textContent = aspectText(w, h);
+    $('#wct-rate').textContent = fmtRate(s.frameRate);
+    $('#wct-mp').textContent = w && h ? (w * h / 1e6).toFixed(2) + ' MP' : '–';
+    $('#wct-badge').textContent = w && h ? w + '×' + h + (s.frameRate ? ' · ' + fmtRate(s.frameRate) : '') : '';
+    if (video.videoWidth && video.videoHeight) stage.style.aspectRatio = video.videoWidth + ' / ' + video.videoHeight;
+    if (!full) return;
+    const caps = t.getCapabilities ? t.getCapabilities() : null;
+    const range = r => (r && typeof r.max === 'number' ? r : null);
+    const cw = caps && range(caps.width), ch = caps && range(caps.height), cf = caps && range(caps.frameRate);
+    const req = resSel.value;
+    const rows = [
+      ['Camera', t.label || 'Unnamed camera'],
+      ['Delivered resolution', w && h ? w + ' × ' + h : 'Not reported'],
+      ['Requested resolution', req === 'max' ? 'Highest available' : req ? req.replace('x', ' × ') : 'Camera default'],
+      ['Frame rate (reported)', fmtRate(s.frameRate)],
+      ['Aspect ratio', aspectText(w, h)],
+      ['Maximum resolution', cw && ch ? cw.max + ' × ' + ch.max : 'Not reported by this browser'],
+      ['Frame rate range', cf ? +(cf.min || 0).toFixed(2) + ' to ' + +cf.max.toFixed(2) + ' fps' : 'Not reported by this browser'],
+      ['Facing mode', s.facingMode || 'Not reported'],
+      ['Resize mode', s.resizeMode || 'Not reported'],
+      ['Preview frame size', video.videoWidth ? video.videoWidth + ' × ' + video.videoHeight : 'Not available yet']
+    ];
+    const tb = $('#wct-details');
+    tb.innerHTML = '';
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th'); th.scope = 'row'; th.textContent = r[0];
+      const td = document.createElement('td'); td.textContent = String(r[1]);
+      tr.append(th, td); tb.append(tr);
+    });
+    $('#wct-details-wrap').hidden = false;
+    if (req && req !== 'max' && w && h) {
+      const p = req.split('x').map(Number);
+      setOk(p[0] === w && p[1] === h
+        ? 'Your camera is working at the requested ' + w + ' × ' + h + '.'
+        : 'Your camera is working. It delivered ' + w + ' × ' + h + ' instead of the requested ' + p[0] + ' × ' + p[1] + ', the closest mode it offers.');
+    } else {
+      setOk('Your camera is working' + (w && h ? ' at ' + w + ' × ' + h : '') + '.');
+    }
+  }
+
+  function tick() {
+    if (!st.stream) return;
+    showInfo(false);
+    const f = measuredFps();
+    if (f !== null) $('#wct-measured').textContent = f.toFixed(1);
+    const b = brightness();
+    if (b !== null) {
+      $('#wct-bright').textContent = Math.round(b * 100) + '%';
+      const now = performance.now();
+      if (b < 0.03) {
+        if (!st.darkSince) st.darkSince = now;
+        if (!st.darkWarned && now - st.darkSince > 2500) {
+          st.darkWarned = true;
+          setError('The picture is almost completely black. Check for a privacy shutter or lens cover, or turn on a light.');
+        }
+      } else {
+        st.darkSince = 0;
+        if (st.darkWarned) { st.darkWarned = false; setError(''); }
+      }
+    }
+  }
+
+  // ---------- Snapshot ----------
+  function snapshot() {
+    const w = video.videoWidth, h = video.videoHeight;
+    if (!st.stream || !w || !h) { setError('No video frame is available yet. Wait for the preview to appear, then try again.'); return; }
+    canvas.width = w; canvas.height = h;
+    const g = canvas.getContext('2d');
+    g.save();
+    if (mirror.checked) { g.translate(w, 0); g.scale(-1, 1); }
+    g.drawImage(video, 0, 0, w, h);
+    g.restore();
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    st.snapName = 'webcam-snapshot-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '.png';
+    $('#wct-snap-info').textContent = w + ' × ' + h + ' PNG' + (mirror.checked ? ', mirrored like the preview' : ', not mirrored') + '.';
+    $('#wct-snap-wrap').hidden = false;
+  }
+
+  function downloadSnap() {
+    if (!canvas.width) return;
+    canvas.toBlob(blob => {
+      if (!blob) { setError('Your browser could not create the PNG file.'); return; }
+      TT.download(st.snapName || 'webcam-snapshot.png', blob);
+    }, 'image/png');
+  }
+
+  // ---------- Wiring ----------
+  startBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click', () => stop());
+  snapBtn.addEventListener('click', snapshot);
+  $('#wct-download').addEventListener('click', downloadSnap);
+  mirror.addEventListener('change', () => video.classList.toggle('is-mirrored', mirror.checked));
+  [sel, resSel, fpsSel].forEach(el => el.addEventListener('change', () => { if (st.stream) start(); }));
+  video.addEventListener('resize', () => { if (st.stream) showInfo(true); });
+  if (stage.requestFullscreen) {
+    fsBtn.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else stage.requestFullscreen().catch(() => setError('Full screen was blocked by the browser.'));
+    });
+  } else fsBtn.hidden = true;
+  window.addEventListener('pagehide', release);
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => refreshDevices());
+  }
+
+  updateButtons();
+  const bad = insecureReason();
+  if (bad) setError(bad);
+  else {
+    refreshDevices();
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'camera' }).then(p => {
+        if (p.state === 'denied' && !st.stream) setError(explain({ name: 'NotAllowedError' }));
+      }).catch(() => {});
+    }
+  }
+})();
+</script>

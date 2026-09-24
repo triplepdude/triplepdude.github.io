@@ -1,0 +1,514 @@
+---
+title: Crop Image to a Circle (Transparent PNG)
+description: Crop an image into a circle online. Drag and zoom to frame it, add a border or background colour, and download a round transparent PNG. No upload.
+category: Image & PDF
+keywords: [crop image to circle, circle crop image, round image maker, circular profile picture, circle png, crop photo in circle, round avatar maker]
+howto: |
+  ## How to crop an image into a circle
+
+  1. Choose, drop or paste an image. A sample picture is shown until you do.
+  2. Drag the picture to position it inside the circle. Zoom with the
+     slider, the mouse wheel or a two-finger pinch. With the crop area
+     focused, the arrow keys move it (hold Shift for bigger steps), + and −
+     zoom, and 0 resets.
+  3. Choose the output size, and optionally a border and a background colour.
+     The small preview shows the exact file you will get.
+  4. Press **Download PNG**, or **Copy image** to paste it straight into
+     another app.
+
+  ## Why the result is a PNG
+
+  Every image file is a rectangle; a round picture is a square one whose
+  corners are fully transparent. That needs an alpha channel, which JPG does
+  not have, so the tool saves PNG. The edge of the circle is anti-aliased:
+  pixels on the rim are partly transparent, so the outline looks smooth on
+  any background instead of jagged. If a site does not accept transparent
+  images, choose **Colour, square image** as the background to fill the
+  corners with a solid colour.
+
+  ## How the crop is calculated
+
+  At 100% zoom the shorter side of your image exactly spans the circle, so
+  the circle is always filled. Dragging is limited so you cannot pull the
+  image away from the circle's edge. Zooming out below 100% shrinks the
+  whole picture inside the circle; the uncovered area stays transparent or
+  takes the background colour, which is handy for logos. The crop is stored
+  relative to the circle, not in screen pixels, so the downloaded file
+  matches the preview at every output size.
+
+  The editor shows a lighter copy of large photos to stay fast, but the
+  download is drawn from the original pixels with high-quality resampling.
+  If the circle covers fewer source pixels than the output size, the image
+  has to be enlarged and will look soft; the tool tells you when that
+  happens.
+
+  ## Choosing a size
+
+  Profile photo slots are small on screen but are shown at two or three
+  times the resolution on phones and high-density displays, so bigger files
+  stay sharper.
+
+  | Output | Good for |
+  |---|---|
+  | 256 px | icons, forum and chat avatars |
+  | 512 px | most profile pictures |
+  | 1024 px | high-resolution profiles, small prints |
+  | 2048 px | larger prints, further editing |
+  {: .data .circ-table}
+
+  A border is drawn inside the circle, so the file stays exactly the size
+  you chose. Its width is in pixels of the downloaded file; for a 512 px
+  image, 8 to 16 px gives a clear ring.
+faq:
+  - q: Is my photo uploaded anywhere?
+    a: No. The image is loaded and cropped by your browser on this page. Nothing is sent to a server, and the download is created locally.
+  - q: Why does my circle image have a white or black background in some apps?
+    a: The corners are transparent, and some apps or older viewers show transparency as white or black. Websites that support PNG will show it round. To get a fixed colour instead, choose Colour, square image as the background.
+  - q: Can I save it as a JPG?
+    a: JPG cannot store transparency, so a round JPG would have filled corners. Choose Colour, square image to fill them with a colour of your choice; the PNG is then fully opaque and any site will accept it.
+  - q: Does it keep the photo's EXIF data?
+    a: No. The PNG is drawn fresh from the pixels, so camera details and GPS location from the original are not copied. The photo's rotation is applied first, so it appears upright.
+---
+<style>
+.circ-table { margin: 0 0 18px; }
+.circ-pick { position: relative; margin: 0 0 16px; }
+.circ-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.circ-drop {
+  display: grid; place-items: center; gap: 2px; min-height: 84px; padding: 14px 16px;
+  border: 2px dashed var(--border); border-radius: 10px; background: var(--surface-2);
+  text-align: center; cursor: pointer; transition: border-color 0.15s ease;
+}
+.circ-drop:hover, .circ-drop.is-over { border-color: var(--accent); }
+.circ-input:focus-visible + .circ-drop { outline: 2px solid var(--accent); outline-offset: 2px; }
+.circ-drop strong { overflow-wrap: anywhere; }
+.circ-drop strong span { color: var(--accent); text-decoration: underline; }
+.circ-cols { align-items: start; gap: 20px; }
+.circ-cols > div { min-width: 0; }
+.circ-editor {
+  display: block; width: 100%; max-width: 480px; height: auto; aspect-ratio: 1 / 1; margin: 0 auto 8px;
+  border: 1px solid var(--border); border-radius: 10px; cursor: grab; touch-action: none;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 20px 20px;
+}
+.circ-editor:active { cursor: grabbing; }
+.circ-editor:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.circ-help { max-width: 480px; margin: 0 auto; text-align: center; }
+.circ-zlabel { display: flex; justify-content: space-between; gap: 8px; }
+.circ-zlabel output { font-variant-numeric: tabular-nums; }
+.circ-cols .row { align-items: flex-start; }
+.circ-color input[type="color"] {
+  display: block; width: 100%; height: calc(1.6em + 22px); min-height: 44px; padding: 5px; font: inherit;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg); cursor: pointer;
+}
+.circ-color input[type="color"]:disabled { opacity: 0.45; cursor: not-allowed; }
+.circ-color input[type="color"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.circ-out { display: flex; align-items: center; gap: 14px; margin: 0 0 16px; padding: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+.circ-preview {
+  flex: none; width: 120px; height: 120px; border-radius: 6px;
+  background: repeating-conic-gradient(var(--border) 0 25%, var(--surface) 0 50%) 0 0 / 12px 12px;
+}
+.circ-out-info { margin: 0 0 4px; font-weight: 600; }
+.circ-out .hint { margin: 0; }
+.circ-status { margin-bottom: 0; }
+</style>
+
+<div class="circ-pick">
+  <input class="circ-input" type="file" id="circ-file" accept="image/*">
+  <label class="circ-drop" for="circ-file" id="circ-drop">
+    <strong id="circ-drop-title"><span>Choose an image</span> or drop it here</strong>
+    <span class="hint" id="circ-drop-hint">Showing a sample picture. You can also paste an image with Ctrl+V.</span>
+  </label>
+</div>
+<p class="msg error" id="circ-error" role="alert"></p>
+
+<div class="cols circ-cols">
+  <div>
+    <canvas class="circ-editor" id="circ-editor" tabindex="0" width="480" height="480" aria-label="Crop area. Drag to move the image, scroll or pinch to zoom. Arrow keys move it, plus and minus zoom." aria-describedby="circ-help"></canvas>
+    <p class="hint circ-help" id="circ-help">Drag to position. Scroll, pinch or use the slider to zoom. Arrow keys and + / − also work.</p>
+  </div>
+  <div>
+    <div class="field">
+      <label class="circ-zlabel" for="circ-zoom"><span>Zoom</span><output id="circ-zoom-out" for="circ-zoom">100%</output></label>
+      <input type="range" id="circ-zoom" min="50" max="1000" step="1" value="100">
+    </div>
+    <div class="actions">
+      <button class="btn secondary small" type="button" id="circ-rotate">Rotate 90°</button>
+      <button class="btn secondary small" type="button" id="circ-reset">Reset position</button>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="circ-size">Output size</label>
+        <select id="circ-size">
+          <option value="128">128 × 128 px</option>
+          <option value="256">256 × 256 px</option>
+          <option value="400">400 × 400 px</option>
+          <option value="512" selected>512 × 512 px</option>
+          <option value="800">800 × 800 px</option>
+          <option value="1024">1024 × 1024 px</option>
+          <option value="2048">2048 × 2048 px</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="circ-border">Border width (px)</label>
+        <input type="number" id="circ-border" min="0" max="512" step="1" value="0" inputmode="numeric">
+      </div>
+      <div class="field circ-color">
+        <label for="circ-border-color">Border colour</label>
+        <input type="color" id="circ-border-color" value="#ffffff">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="circ-bg">Background</label>
+        <select id="circ-bg">
+          <option value="none" selected>Transparent</option>
+          <option value="inside">Colour inside the circle</option>
+          <option value="all">Colour, square image</option>
+        </select>
+      </div>
+      <div class="field circ-color">
+        <label for="circ-bg-color">Background colour</label>
+        <input type="color" id="circ-bg-color" value="#dbe9ff" disabled>
+      </div>
+    </div>
+    <div class="circ-out">
+      <canvas class="circ-preview" id="circ-preview" width="120" height="120" role="img" aria-label="Preview of the round image"></canvas>
+      <div>
+        <p class="circ-out-info" id="circ-out-info" aria-live="polite">512 × 512 px PNG</p>
+        <p class="hint" id="circ-out-hint"></p>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" type="button" id="circ-download">Download PNG</button>
+      <button class="btn secondary" type="button" id="circ-copy">Copy image</button>
+    </div>
+    <p class="msg ok circ-status" id="circ-status" aria-live="polite"></p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const RING = 0.82; // circle diameter as a share of the editor width
+  const VIEW_MAX = 2048;
+  const editor = $('#circ-editor'), preview = $('#circ-preview'), zoomEl = $('#circ-zoom'), zoomOut = $('#circ-zoom-out');
+  const sizeSel = $('#circ-size'), borderEl = $('#circ-border'), borderColor = $('#circ-border-color');
+  const bgSel = $('#circ-bg'), bgColor = $('#circ-bg-color'), errEl = $('#circ-error'), okEl = $('#circ-status');
+  // Crop state. cx/cy: image centre relative to the circle centre, in circle diameters.
+  // z: zoom where 1 means the image's shorter side exactly spans the circle.
+  const st = { img: null, view: null, iw: 0, ih: 0, rot: 0, z: 1, cx: 0, cy: 0, name: 'image', sample: true, loadRun: 0 };
+
+  function fail(msg) { const e = new Error(msg); e.friendly = true; return e; }
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const dims = () => (st.rot % 2 ? [st.ih, st.iw] : [st.iw, st.ih]);
+  function zMin() { const [w, h] = dims(); return Math.max(0.05, Math.min(1, Math.min(w, h) / Math.max(w, h)) * 0.5); }
+  const Z_MAX = 10;
+  function opts() {
+    const n = Number(sizeSel.value) || 512;
+    let b = Math.round(Number(borderEl.value));
+    if (!isFinite(b) || b < 0) b = 0;
+    b = Math.min(b, Math.floor(n / 2));
+    return { n, border: b, borderColor: borderColor.value || '#ffffff', bg: bgSel.value, bgColor: bgColor.value || '#ffffff' };
+  }
+
+  function clampPan() {
+    const [w, h] = dims(), k = st.z / Math.min(w, h);
+    const mx = Math.abs(w * k - 1) / 2, my = Math.abs(h * k - 1) / 2;
+    st.cx = clamp(st.cx, -mx, mx);
+    st.cy = clamp(st.cy, -my, my);
+  }
+
+  // Draws the image for a circle of diameter d centred at (ox, oy).
+  function drawImage(g, src, d, ox, oy) {
+    const [w, h] = dims(), s = d * st.z / Math.min(w, h);
+    g.save();
+    g.translate(ox + st.cx * d, oy + st.cy * d);
+    g.rotate(st.rot * Math.PI / 2);
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(src, -st.iw * s / 2, -st.ih * s / 2, st.iw * s, st.ih * s);
+    g.restore();
+  }
+
+  // The finished round image on a canvas of n x n pixels.
+  function render(c, n, src, o) {
+    c.width = n; c.height = n;
+    const g = c.getContext('2d');
+    if (!g) throw fail('Your browser could not create the image.');
+    const r = n / 2, scale = n / o.n;
+    g.clearRect(0, 0, n, n);
+    drawImage(g, src, n, r, r);
+    g.globalCompositeOperation = 'destination-in';
+    g.beginPath(); g.arc(r, r, r, 0, Math.PI * 2); g.fill();
+    if (o.bg === 'inside') {
+      g.globalCompositeOperation = 'destination-over';
+      g.fillStyle = o.bgColor;
+      g.beginPath(); g.arc(r, r, r, 0, Math.PI * 2); g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+    const b = o.border * scale;
+    if (b > 0) {
+      g.strokeStyle = o.borderColor;
+      g.lineWidth = b;
+      g.beginPath(); g.arc(r, r, Math.max(0, r - b / 2), 0, Math.PI * 2); g.stroke();
+    }
+    if (o.bg === 'all') {
+      g.globalCompositeOperation = 'destination-over';
+      g.fillStyle = o.bgColor;
+      g.fillRect(0, 0, n, n);
+      g.globalCompositeOperation = 'source-over';
+    }
+    return c;
+  }
+
+  // ---------- Drawing ----------
+  let frame = 0;
+  function draw() {
+    if (frame) return;
+    frame = requestAnimationFrame(() => { frame = 0; paint(); });
+  }
+  function paint() {
+    if (!st.view) return;
+    const o = opts();
+    const rect = editor.getBoundingClientRect();
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    const size = Math.max(100, Math.round((rect.width || 480) * dpr));
+    if (editor.width !== size) { editor.width = size; editor.height = size; }
+    const g = editor.getContext('2d');
+    const c = size / 2, d = size * RING, r = d / 2;
+    g.clearRect(0, 0, size, size);
+    if (o.bg === 'all') { g.fillStyle = o.bgColor; g.fillRect(0, 0, size, size); }
+    else if (o.bg === 'inside') { g.fillStyle = o.bgColor; g.beginPath(); g.arc(c, c, r, 0, Math.PI * 2); g.fill(); }
+    drawImage(g, st.view, d, c, c);
+    // Dim everything outside the circle.
+    g.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    g.beginPath(); g.rect(0, 0, size, size); g.arc(c, c, r, 0, Math.PI * 2, true); g.fill('evenodd');
+    const b = o.border * d / o.n;
+    if (b > 0) {
+      g.strokeStyle = o.borderColor; g.lineWidth = b;
+      g.beginPath(); g.arc(c, c, Math.max(0, r - b / 2), 0, Math.PI * 2); g.stroke();
+    }
+    g.strokeStyle = 'rgba(255, 255, 255, 0.9)'; g.lineWidth = Math.max(1, dpr);
+    g.setLineDash([6 * dpr, 5 * dpr]);
+    g.beginPath(); g.arc(c, c, r, 0, Math.PI * 2); g.stroke();
+    g.setLineDash([]);
+
+    const pn = Math.round(120 * dpr);
+    render(preview, pn, st.view, o);
+
+    zoomOut.textContent = Math.round(st.z * 100) + '%';
+    const [w, h] = dims(), srcPx = Math.min(w, h) / st.z;
+    $('#circ-out-info').textContent = o.n + ' × ' + o.n + ' px PNG, ' + (o.bg === 'all' ? 'square with coloured corners' : 'transparent corners');
+    $('#circ-out-hint').textContent = o.n > srcPx * 1.05
+      ? 'The circle covers about ' + Math.round(srcPx) + ' px of your image, so it will be enlarged and may look soft.'
+      : 'Taken from about ' + Math.round(srcPx) + ' × ' + Math.round(srcPx) + ' px of your image.';
+  }
+
+  function syncZoomSlider() {
+    zoomEl.min = String(Math.floor(zMin() * 100));
+    zoomEl.value = String(Math.round(st.z * 100));
+  }
+  function zoomTo(z, px, py) {
+    z = clamp(z, zMin(), Z_MAX);
+    px = px || 0; py = py || 0;
+    const f = z / st.z;
+    st.cx = px - (px - st.cx) * f;
+    st.cy = py - (py - st.cy) * f;
+    st.z = z;
+    clampPan();
+    syncZoomSlider();
+    draw();
+  }
+  function reset() { st.z = 1; st.cx = 0; st.cy = 0; syncZoomSlider(); draw(); }
+
+  // ---------- Loading ----------
+  function makeView(src, w, h) {
+    const s = Math.min(1, VIEW_MAX / Math.max(w, h));
+    if (s === 1) return src;
+    const c = document.createElement('canvas');
+    c.width = Math.round(w * s); c.height = Math.round(h * s);
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(src, 0, 0, c.width, c.height);
+    return c;
+  }
+  function setImage(src, w, h, name, sample) {
+    if (st.img && st.img.close && st.img !== src) st.img.close();
+    st.img = src; st.iw = w; st.ih = h; st.name = name; st.sample = sample;
+    st.view = makeView(src, w, h);
+    st.rot = 0;
+    reset();
+  }
+  async function decode(file) {
+    if (typeof createImageBitmap === 'function') {
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* try <img> */ }
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      if (!img.naturalWidth || !img.naturalHeight) throw new Error('empty');
+      return img;
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
+  }
+  async function load(file) {
+    if (!file) return;
+    const run = ++st.loadRun;
+    errEl.textContent = '';
+    okEl.textContent = '';
+    let src;
+    try { src = await decode(file); } catch (e) {
+      if (run === st.loadRun) errEl.textContent = 'This file could not be opened as an image. Try a JPG, PNG, WebP or GIF; HEIC photos only open in Safari.';
+      return;
+    }
+    if (run !== st.loadRun) return;
+    const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
+    setImage(src, w, h, (file.name || 'image').replace(/\.[^.]+$/, '') || 'image', false);
+    $('#circ-drop-title').textContent = file.name || 'Pasted image';
+    $('#circ-drop-hint').textContent = w + ' × ' + h + ' px. Choose or drop another image to replace it.';
+  }
+  function sample() {
+    const c = document.createElement('canvas');
+    c.width = 900; c.height = 600;
+    const g = c.getContext('2d');
+    const sky = g.createLinearGradient(0, 0, 0, 600);
+    sky.addColorStop(0, '#2a4b8d'); sky.addColorStop(0.6, '#f3a15f'); sky.addColorStop(1, '#f7d488');
+    g.fillStyle = sky; g.fillRect(0, 0, 900, 600);
+    g.fillStyle = '#ffe9b0'; g.beginPath(); g.arc(450, 330, 95, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#3b3561'; g.beginPath(); g.moveTo(0, 600); g.lineTo(0, 400); g.lineTo(210, 300); g.lineTo(380, 420); g.lineTo(560, 320); g.lineTo(760, 430); g.lineTo(900, 360); g.lineTo(900, 600); g.fill();
+    g.fillStyle = '#1f1d3a'; g.beginPath(); g.moveTo(0, 600); g.lineTo(0, 500); g.lineTo(300, 440); g.lineTo(620, 510); g.lineTo(900, 450); g.lineTo(900, 600); g.fill();
+    setImage(c, 900, 600, 'sample', true);
+  }
+
+  // ---------- Pointer, wheel and keyboard ----------
+  const pointers = new Map();
+  let pinch = null;
+  function local(e) {
+    const r = editor.getBoundingClientRect(), d = r.width * RING;
+    return { x: (e.clientX - r.left - r.width / 2) / d, y: (e.clientY - r.top - r.height / 2) / d };
+  }
+  function pinchInfo() {
+    const p = Array.from(pointers.values());
+    return { dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y), mid: { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 } };
+  }
+  editor.addEventListener('pointerdown', e => {
+    if (!st.view) return;
+    e.preventDefault();
+    editor.focus({ preventScroll: true });
+    try { editor.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    pointers.set(e.pointerId, local(e));
+    if (pointers.size === 2) pinch = pinchInfo();
+  });
+  editor.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    const prev = pointers.get(e.pointerId), cur = local(e);
+    pointers.set(e.pointerId, cur);
+    if (pointers.size === 1) {
+      st.cx += cur.x - prev.x;
+      st.cy += cur.y - prev.y;
+      clampPan();
+      draw();
+    } else if (pointers.size === 2 && pinch) {
+      const now = pinchInfo();
+      st.cx += now.mid.x - pinch.mid.x;
+      st.cy += now.mid.y - pinch.mid.y;
+      if (pinch.dist > 0) zoomTo(st.z * now.dist / pinch.dist, now.mid.x, now.mid.y);
+      else { clampPan(); draw(); }
+      pinch = now;
+    }
+  });
+  function endPointer(e) {
+    pointers.delete(e.pointerId);
+    pinch = pointers.size === 2 ? pinchInfo() : null;
+  }
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => editor.addEventListener(t, endPointer));
+  editor.addEventListener('wheel', e => {
+    if (!st.view) return;
+    e.preventDefault();
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+    const p = local(e);
+    zoomTo(st.z * Math.exp(-clamp(dy, -200, 200) * 0.0015), p.x, p.y);
+  }, { passive: false });
+  editor.addEventListener('keydown', e => {
+    const step = e.shiftKey ? 0.05 : 0.01;
+    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (moves[e.key]) { st.cx += moves[e.key][0]; st.cy += moves[e.key][1]; clampPan(); draw(); }
+    else if (e.key === '+' || e.key === '=') zoomTo(st.z * 1.1);
+    else if (e.key === '-' || e.key === '_') zoomTo(st.z / 1.1);
+    else if (e.key === '0') reset();
+    else return;
+    e.preventDefault();
+  });
+
+  // ---------- Controls ----------
+  zoomEl.addEventListener('input', () => zoomTo(Number(zoomEl.value) / 100));
+  $('#circ-reset').addEventListener('click', reset);
+  $('#circ-rotate').addEventListener('click', () => {
+    st.rot = (st.rot + 1) % 4;
+    const x = st.cx;
+    st.cx = -st.cy; st.cy = x; // the image turns about the circle centre
+    st.z = Math.max(st.z, zMin());
+    clampPan();
+    syncZoomSlider();
+    draw();
+  });
+  [sizeSel, borderEl, borderColor, bgColor].forEach(el => el.addEventListener('input', draw));
+  sizeSel.addEventListener('change', draw);
+  bgSel.addEventListener('change', () => { bgColor.disabled = bgSel.value === 'none'; draw(); });
+
+  function exportBlob() {
+    const o = opts();
+    const c = render(document.createElement('canvas'), o.n, st.img, o);
+    return new Promise((resolve, reject) => c.toBlob(b => (b ? resolve(b) : reject(fail('Your browser could not create the PNG.'))), 'image/png'));
+  }
+  $('#circ-download').addEventListener('click', async () => {
+    if (!st.img) return;
+    errEl.textContent = '';
+    try {
+      const b = await exportBlob();
+      TT.download(st.name + '-circle-' + opts().n + '.png', b);
+      okEl.textContent = 'Saved ' + st.name + '-circle-' + opts().n + '.png (' + (b.size / 1000).toFixed(1) + ' KB).';
+    } catch (e) { errEl.textContent = e.friendly ? e.message : 'Could not create the PNG.'; }
+  });
+  $('#circ-copy').addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    errEl.textContent = '';
+    if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem !== 'function') {
+      errEl.textContent = 'Your browser cannot copy images to the clipboard. Use Download PNG instead.';
+      return;
+    }
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': exportBlob() })]);
+      TT.flash(btn, 'Copied!');
+      okEl.textContent = 'Copied a ' + opts().n + ' × ' + opts().n + ' px PNG. Paste it into any app that accepts images.';
+    } catch (err) {
+      errEl.textContent = 'The browser blocked copying the image. Use Download PNG instead.';
+    }
+  });
+
+  const fileInput = $('#circ-file'), drop = $('#circ-drop');
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    load(f);
+  });
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('is-over'); }));
+  ['dragleave', 'dragend'].forEach(t => drop.addEventListener(t, () => drop.classList.remove('is-over')));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('is-over');
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) load(f);
+  });
+  document.addEventListener('paste', e => {
+    const f = e.clipboardData && Array.from(e.clipboardData.files || []).find(x => /^image\//.test(x.type));
+    if (f) { e.preventDefault(); load(f); }
+  });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(draw).observe(editor);
+  window.addEventListener('resize', draw);
+  sample();
+})();
+</script>

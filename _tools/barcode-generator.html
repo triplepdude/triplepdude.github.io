@@ -1,0 +1,691 @@
+---
+title: Barcode Generator (EAN, UPC, Code 128)
+description: Create Code 128, EAN-13, EAN-8, UPC-A, Code 39 and ITF-14 barcodes with check digits calculated and verified. Download SVG or PNG, free and private.
+category: Generators
+keywords: [barcode generator, free barcode generator, ean-13 barcode generator, upc barcode generator, code 128 generator, code 39 barcode, itf-14 barcode, check digit calculator]
+howto: |
+  ## How to make a barcode
+
+  1. Pick the **barcode type**. Retail products use EAN-13 (most of the world)
+     or UPC-A (North America), small packs use EAN-8, and shipping cartons use
+     ITF-14. For your own labels, such as stock, asset tags or tickets, use
+     Code 128.
+  2. Type the data. For the numeric retail types you can leave off the last
+     digit and the check digit is calculated for you. If you type the full
+     number, the check digit is verified, and a wrong one is reported with the
+     correct value.
+  3. Adjust the bar width, height and colours, then download an **SVG** for
+     print work or a **PNG** for documents and web pages.
+
+  ## Which type to choose
+
+  | Type | Data | Typical use |
+  |---|---|---|
+  | EAN-13 | 12 digits + check digit | Retail products worldwide, ISBNs (978/979) |
+  | UPC-A | 11 digits + check digit | Retail products in the US and Canada |
+  | EAN-8 | 7 digits + check digit | Very small retail packs |
+  | ITF-14 | 13 digits + check digit | Outer cartons and cases (GTIN-14) |
+  | Code 128 | Any ASCII text | Warehouse, shipping and asset labels |
+  | Code 39 | Capitals, digits, `- . $ / + %` and space | Older industrial and ID systems |
+
+  Retail numbers must be real GTINs licensed from GS1 if the product will be
+  sold in shops. A made-up EAN or UPC scans correctly but may collide with
+  someone else's product.
+
+  ## How the check digit works
+
+  EAN, UPC and ITF-14 all use the GS1 modulo-10 check. Starting from the
+  rightmost digit before the check digit, multiply the digits alternately by
+  3 and 1, add them up, and take the amount needed to reach the next multiple
+  of 10. For `400638133393` the weighted sum is 89, so the check digit is 1
+  and the full EAN-13 is `4006381333931`.
+
+  Code 128 always carries a hidden modulo-103 checksum, added automatically.
+  Code 39 has an optional modulo-43 check character; only turn it on if the
+  system reading the labels expects one, because it becomes part of the data.
+
+  ## How the encoding works
+
+  Every bar and space is a whole number of *modules*, the narrowest width in
+  the symbol. An EAN-13 is 95 modules wide: start guard `101`, six digits of 7
+  modules each, a centre guard `01010`, six more digits and an end guard.
+  The first digit is not drawn as bars at all; it sets which of two patterns
+  (odd or even parity) each of the next six digits uses. Code 128 has three
+  code sets: A (capitals and control characters), B (upper and lower case)
+  and C (pairs of digits). This generator searches for the mix of code sets
+  that gives the fewest symbols, so long runs of digits are packed two per
+  symbol and the barcode stays short.
+
+  ## Printing tips
+
+  - Keep the white margins (quiet zones). Scanners need at least 10 modules of
+    space on each side, and 11 on the left of an EAN-13.
+  - Dark bars on a light background scan best. Red bars are invisible to many
+    laser scanners, which use red light.
+  - Do not stretch the image sideways in a layout program. Resize it here with
+    the bar width setting, or use the SVG, which scales without blurring.
+  - Test a printed sample with the scanner or phone app that will actually
+    read it.
+faq:
+  - q: Are the barcodes free to use commercially?
+    a: Yes. The barcode images you make here are yours to use on products, labels and documents with no attribution. Note that retail EAN and UPC numbers themselves must be licensed from GS1 if you sell through shops.
+  - q: Is my data uploaded?
+    a: No. The barcode is drawn by JavaScript in your browser and the files are created on your device. Nothing you type is sent to a server.
+  - q: Why does it say my check digit is wrong?
+    a: The last digit of an EAN, UPC or ITF-14 number is calculated from the others, so a typo anywhere usually makes it wrong. Check the number against the original, or leave the last digit off and the generator adds the correct one.
+  - q: What is the difference between Code 128 and Code 39?
+    a: Code 128 encodes all ASCII characters and packs digits two per symbol, so it is much more compact. Code 39 only has capitals, digits and a few symbols, but it is self-checking and still used by older systems. Choose Code 128 unless your scanner or software requires Code 39.
+  - q: Can I make an ISBN barcode?
+    a: Yes. An ISBN-13 is an EAN-13 starting with 978 or 979. Enter the ISBN without hyphens and choose EAN-13. Books often also carry a separate 5-digit price add-on, which this tool does not create.
+---
+<style>
+.bc-top { align-items: flex-start; }
+.bc-top > .field:first-child { flex: 0 1 200px; }
+.bc-top > .field:last-child { flex: 3 1 240px; }
+.bc-preview { display: flex; align-items: center; justify-content: center; min-height: 160px; margin: 0 0 16px; padding: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.bc-preview svg { display: block; max-width: 100%; height: auto; }
+.bc-preview.bc-transparent { background-color: #ffffff; background-image: linear-gradient(45deg, #e3e6ea 25%, transparent 25%, transparent 75%, #e3e6ea 75%), linear-gradient(45deg, #e3e6ea 25%, transparent 25%, transparent 75%, #e3e6ea 75%); background-size: 16px 16px; background-position: 0 0, 8px 8px; }
+.bc-preview.bc-empty { color: var(--muted); font-size: 14px; text-align: center; }
+.bc-fix-wrap { margin: -8px 0 16px; }
+.bc-options { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--border); }
+.bc-options h2 { margin: 0 0 12px; font-size: 1.05rem; }
+.bc-options .row > .field { flex: 1 1 130px; }
+.bc-color { display: flex; align-items: center; gap: 8px; }
+.bc-color input[type="color"] { width: 44px; height: 44px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; flex: 0 0 auto; }
+.bc-color input[type="text"] { min-width: 0; }
+.bc-warn { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
+.bc-stats .stat b { font-size: 1.05rem; font-family: var(--mono); }
+</style>
+
+<div class="row bc-top">
+  <div class="field">
+    <label for="bc-type">Barcode type</label>
+    <select id="bc-type">
+      <option value="code128" selected>Code 128</option>
+      <option value="ean13">EAN-13</option>
+      <option value="upca">UPC-A</option>
+      <option value="ean8">EAN-8</option>
+      <option value="code39">Code 39</option>
+      <option value="itf14">ITF-14</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="bc-data">Data to encode</label>
+    <input type="text" id="bc-data" class="mono" value="SKU-10492-B" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="120" aria-describedby="bc-data-hint">
+    <span class="hint" id="bc-data-hint"></span>
+  </div>
+</div>
+
+<div class="msg error" id="bc-error" role="alert"></div>
+<div class="bc-fix-wrap" id="bc-fix-wrap" hidden>
+  <button class="btn secondary small" type="button" id="bc-fix"></button>
+</div>
+<div class="msg bc-warn" id="bc-warn" aria-live="polite"></div>
+
+<div class="bc-preview" id="bc-preview" aria-live="polite"></div>
+
+<div class="stats bc-stats" aria-live="polite">
+  <div class="stat"><b id="bc-encoded">–</b><span>Encoded data</span></div>
+  <div class="stat"><b id="bc-check">–</b><span id="bc-check-label">Check digit</span></div>
+  <div class="stat"><b id="bc-size">–</b><span>Image size (px)</span></div>
+  <div class="stat" id="bc-sets-stat" hidden><b id="bc-sets">–</b><span>Code sets used</span></div>
+</div>
+
+<div class="actions">
+  <button class="btn" type="button" id="bc-svg">Download SVG</button>
+  <button class="btn" type="button" id="bc-png">Download PNG</button>
+  <button class="btn secondary" type="button" id="bc-copy">Copy SVG code</button>
+</div>
+
+<section class="bc-options" aria-labelledby="bc-options-h">
+  <h2 id="bc-options-h">Size and style</h2>
+  <div class="row">
+    <div class="field">
+      <label for="bc-width">Bar width (px per module)</label>
+      <select id="bc-width">
+        <option value="1">1</option>
+        <option value="2" selected>2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="bc-height">Bar height (px)</label>
+      <input type="number" id="bc-height" min="10" max="400" step="1" value="80" inputmode="numeric">
+    </div>
+    <div class="field">
+      <label for="bc-scale">PNG resolution</label>
+      <select id="bc-scale">
+        <option value="1" selected>1× (as shown)</option>
+        <option value="2">2×</option>
+        <option value="3">3×</option>
+        <option value="4">4× (print)</option>
+      </select>
+    </div>
+    <div class="field" id="bc-ratio-field" hidden>
+      <label for="bc-ratio">Wide-to-narrow ratio</label>
+      <select id="bc-ratio">
+        <option value="2">2 : 1</option>
+        <option value="2.5">2.5 : 1</option>
+        <option value="3" selected>3 : 1</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label for="bc-fg">Bar colour</label>
+      <div class="bc-color">
+        <input type="color" id="bc-fg" value="#000000" aria-label="Pick bar colour">
+        <input type="text" id="bc-fg-hex" class="mono" value="#000000" maxlength="7" aria-label="Bar colour hex code" spellcheck="false">
+      </div>
+    </div>
+    <div class="field">
+      <label for="bc-bg">Background colour</label>
+      <div class="bc-color">
+        <input type="color" id="bc-bg" value="#ffffff" aria-label="Pick background colour">
+        <input type="text" id="bc-bg-hex" class="mono" value="#ffffff" maxlength="7" aria-label="Background colour hex code" spellcheck="false">
+      </div>
+    </div>
+  </div>
+  <div class="checks">
+    <label class="check"><input type="checkbox" id="bc-text" checked> Show text under the bars</label>
+    <label class="check"><input type="checkbox" id="bc-transparent"> Transparent background</label>
+    <label class="check" id="bc-c39check-wrap" hidden><input type="checkbox" id="bc-c39check"> Add mod 43 check character</label>
+    <label class="check" id="bc-bearer-wrap" hidden><input type="checkbox" id="bc-bearer" checked> Bearer bar frame</label>
+  </div>
+</section>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+
+  // ---------- Symbology tables ----------
+  // Code 128 symbol values 0-106 as bar/space widths (bar first). 106 is Stop.
+  var C128 = ('212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 ' +
+    '221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 ' +
+    '221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 ' +
+    '212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 ' +
+    '231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 ' +
+    '231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 ' +
+    '314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 ' +
+    '112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 ' +
+    '111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 ' +
+    '214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 ' +
+    '114131 311141 411131 211412 211214 211232 2331112').split(' ');
+
+  // EAN/UPC digit patterns: L (odd parity), G (even parity), R (right half).
+  var EAN_L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+  var EAN_G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
+  var EAN_R = ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100'];
+  var EAN_PARITY = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+
+  // Code 39: nine elements (bar, space, bar, ...), 1 = wide. Order gives the mod 43 value.
+  var C39_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%';
+  var C39 = ('000110100 100100001 001100001 101100000 000110001 100110000 001110000 000100101 100100100 001100100 ' +
+    '100001001 001001001 101001000 000011001 100011000 001011000 000001101 100001100 001001100 000011100 ' +
+    '100000011 001000011 101000010 000010011 100010010 001010010 000000111 100000110 001000110 000010110 ' +
+    '110000001 011000001 111000000 010010001 110010000 011010000 010000101 110000100 011000100 010101000 ' +
+    '010100010 010001010 000101010').split(' ');
+  var C39_STAR = '010010100';
+
+  // Interleaved 2 of 5: five elements per digit, 1 = wide.
+  var ITF = ['00110', '10001', '01001', '11000', '00101', '10100', '01100', '00011', '10010', '01010'];
+
+  var TYPES = {
+    code128: { name: 'Code 128', example: 'SKU-10492-B', quiet: [10, 10], hint: 'Letters, digits and ASCII symbols. Code sets A, B and C are mixed automatically for the shortest barcode.' },
+    ean13: { name: 'EAN-13', example: '400638133393', digits: 13, quiet: [11, 7], hint: 'Enter 12 digits and the check digit is added, or all 13 to verify it.' },
+    upca: { name: 'UPC-A', example: '03600029145', digits: 12, quiet: [9, 9], hint: 'Enter 11 digits and the check digit is added, or all 12 to verify it.' },
+    ean8: { name: 'EAN-8', example: '9638507', digits: 8, quiet: [7, 7], hint: 'Enter 7 digits and the check digit is added, or all 8 to verify it.' },
+    code39: { name: 'Code 39', example: 'CODE-39', quiet: [10, 10], hint: 'Digits, capital letters, space and - . $ / + %. Lowercase letters are converted to capitals.' },
+    itf14: { name: 'ITF-14', example: '1540014128876', digits: 14, quiet: [10, 10], hint: 'Enter 13 digits and the check digit is added, or all 14 to verify it.' }
+  };
+
+  function InputError(message, fix) { this.message = message; this.fix = fix; }
+
+  // GS1 modulo 10: weights 3,1,3,... from the rightmost data digit.
+  function gs1Check(data) {
+    var sum = 0;
+    for (var i = 0; i < data.length; i++) {
+      sum += Number(data.charAt(data.length - 1 - i)) * (i % 2 === 0 ? 3 : 1);
+    }
+    return (10 - sum % 10) % 10;
+  }
+
+  function numeric(type, raw) {
+    var t = TYPES[type], s = raw.replace(/[\s-]/g, '');
+    if (!s) throw new InputError('Enter the ' + t.name + ' number.');
+    var bad = s.replace(/[0-9]/g, '');
+    if (bad) throw new InputError(t.name + ' codes contain digits only. Remove: ' + uniqueChars(bad) + '.');
+    var n = t.digits;
+    if (s.length === n - 1) {
+      var c = gs1Check(s);
+      return { digits: s + c, check: c, checkNote: 'added' };
+    }
+    if (s.length === n) {
+      var expected = gs1Check(s.slice(0, -1));
+      var given = Number(s.charAt(n - 1));
+      if (expected !== given) {
+        var fixed = s.slice(0, -1) + expected;
+        throw new InputError('The check digit should be ' + expected + ', not ' + given + '. The correct ' + t.name + ' is ' + fixed + '.', fixed);
+      }
+      return { digits: s, check: given, checkNote: 'verified' };
+    }
+    throw new InputError(t.name + ' needs ' + (n - 1) + ' digits (the check digit is added for you) or ' + n + ' digits. You entered ' + s.length + '.');
+  }
+
+  function uniqueChars(s) {
+    var seen = [];
+    Array.from(s).forEach(function (ch) {
+      var label = ch === ' ' ? 'space' : /[\x00-\x1f\x7f]/.test(ch) ? 'control character' : ch;
+      if (seen.indexOf(label) < 0) seen.push(label);
+    });
+    return seen.slice(0, 8).join(' ');
+  }
+
+  // ---------- Encoders: each returns { bars: [{x, w, long}], width, text } in module units ----------
+  function barsFromModules(bits, longBits) {
+    var bars = [], i = 0;
+    while (i < bits.length) {
+      if (bits.charAt(i) === '1') {
+        var s = i;
+        while (i < bits.length && bits.charAt(i) === '1' && (longBits ? longBits.charAt(i) === longBits.charAt(s) : true)) i++;
+        bars.push({ x: s, w: i - s, long: !!longBits && longBits.charAt(s) === '1' });
+      } else i++;
+    }
+    return { bars: bars, width: bits.length };
+  }
+
+  function barsFromElements(widths) {
+    var bars = [], x = 0;
+    widths.forEach(function (w, i) {
+      if (i % 2 === 0) bars.push({ x: x, w: w, long: false });
+      x += w;
+    });
+    return { bars: bars, width: x };
+  }
+
+  function repeat(ch, n) { return new Array(n + 1).join(ch); }
+
+  function encodeEan13(d) {
+    var parity = EAN_PARITY[Number(d.charAt(0))], bits = '101', i;
+    for (i = 1; i <= 6; i++) bits += (parity.charAt(i - 1) === 'L' ? EAN_L : EAN_G)[Number(d.charAt(i))];
+    bits += '01010';
+    for (i = 7; i <= 12; i++) bits += EAN_R[Number(d.charAt(i))];
+    bits += '101';
+    var longBits = '111' + repeat('0', 42) + '11111' + repeat('0', 42) + '111';
+    return barsFromModules(bits, longBits);
+  }
+
+  function encodeEan8(d) {
+    var bits = '101', i;
+    for (i = 0; i < 4; i++) bits += EAN_L[Number(d.charAt(i))];
+    bits += '01010';
+    for (i = 4; i < 8; i++) bits += EAN_R[Number(d.charAt(i))];
+    bits += '101';
+    return barsFromModules(bits, '111' + repeat('0', 28) + '11111' + repeat('0', 28) + '111');
+  }
+
+  function encodeUpca(d) {
+    var bits = '101', i;
+    for (i = 0; i < 6; i++) bits += EAN_L[Number(d.charAt(i))];
+    bits += '01010';
+    for (i = 6; i < 12; i++) bits += EAN_R[Number(d.charAt(i))];
+    bits += '101';
+    // In UPC-A the bars of the first and last digit are extended like the guards.
+    var longBits = repeat('1', 10) + repeat('0', 35) + '11111' + repeat('0', 35) + repeat('1', 10);
+    return barsFromModules(bits, longBits);
+  }
+
+  function encodeItf(d, ratio) {
+    var w = [1, 1, 1, 1];
+    for (var i = 0; i < d.length; i += 2) {
+      var a = ITF[Number(d.charAt(i))], b = ITF[Number(d.charAt(i + 1))];
+      for (var k = 0; k < 5; k++) {
+        w.push(a.charAt(k) === '1' ? ratio : 1, b.charAt(k) === '1' ? ratio : 1);
+      }
+    }
+    w.push(ratio, 1, 1);
+    return barsFromElements(w);
+  }
+
+  function encodeCode39(text, ratio) {
+    var w = [];
+    ('*' + text + '*').split('').forEach(function (ch, idx) {
+      var p = ch === '*' ? C39_STAR : C39[C39_CHARS.indexOf(ch)];
+      if (idx > 0) w.push(1); // narrow inter-character gap
+      for (var k = 0; k < 9; k++) w.push(p.charAt(k) === '1' ? ratio : 1);
+    });
+    return barsFromElements(w);
+  }
+
+  // Code 128 with the fewest symbols: dynamic programming over code sets A, B, C.
+  function code128Values(s) {
+    var n = s.length, A = 0, B = 1, C = 2, INF = 1e9;
+    var codes = [];
+    for (var i = 0; i < n; i++) codes.push(s.charCodeAt(i));
+    var inA = function (c) { return c < 96; };
+    var inB = function (c) { return c >= 32 && c < 128; };
+    var isDigit = function (k) { return k < n && codes[k] >= 48 && codes[k] <= 57; };
+    var cost = [], direct = [], how = [];
+    for (i = 0; i <= n; i++) { cost.push([0, 0, 0]); direct.push([INF, INF, INF]); how.push([null, null, null]); }
+    for (i = n - 1; i >= 0; i--) {
+      var c = codes[i];
+      direct[i][A] = inA(c) ? 1 + cost[i + 1][A] : inB(c) ? 2 + cost[i + 1][A] : INF;
+      direct[i][B] = inB(c) ? 1 + cost[i + 1][B] : inA(c) ? 2 + cost[i + 1][B] : INF;
+      direct[i][C] = isDigit(i) && isDigit(i + 1) ? 1 + cost[i + 2][C] : INF;
+      for (var set = 0; set < 3; set++) {
+        var best = direct[i][set], choice = set;
+        [B, C, A].forEach(function (to) {
+          if (to !== set && 1 + direct[i][to] < best) { best = 1 + direct[i][to]; choice = to; }
+        });
+        cost[i][set] = best;
+        how[i][set] = choice;
+      }
+    }
+    var start = B, bestStart = INF;
+    [B, C, A].forEach(function (set) { if (direct[0][set] < bestStart) { bestStart = direct[0][set]; start = set; } });
+    var values = [103 + start], sets = [start], cur = start;
+    var SWITCH = [[null, 100, 99], [101, null, 99], [101, 100, null]];
+    i = 0;
+    while (i < n) {
+      var next = how[i][cur];
+      if (next !== cur) { values.push(SWITCH[cur][next]); cur = next; sets.push(cur); }
+      c = codes[i];
+      if (cur === C) { values.push(Number(s.substr(i, 2))); i += 2; continue; }
+      if (cur === A) {
+        if (inA(c)) values.push(c >= 32 ? c - 32 : c + 64);
+        else values.push(98, c - 32); // Shift: one character from set B
+      } else {
+        if (inB(c)) values.push(c - 32);
+        else values.push(98, c + 64); // Shift: one character from set A
+      }
+      i++;
+    }
+    var sum = values[0];
+    for (i = 1; i < values.length; i++) sum += i * values[i];
+    values.push(sum % 103);
+    return { values: values, sets: sets.map(function (k) { return 'ABC'.charAt(k); }) };
+  }
+
+  function encodeCode128(values) {
+    var w = [];
+    values.concat([106]).forEach(function (v) {
+      C128[v].split('').forEach(function (ch) { w.push(Number(ch)); });
+    });
+    return barsFromElements(w);
+  }
+
+  // ---------- Build: validate input and produce symbol + text layout ----------
+  function build(type, raw, opts) {
+    var sym, info = {}, text = [];
+    if (type === 'code128') {
+      if (!raw) throw new InputError('Enter the text to encode.');
+      var nonAscii = raw.replace(/[\x00-\x7f]/g, '');
+      if (nonAscii) throw new InputError('Code 128 encodes ASCII characters only. Remove: ' + uniqueChars(nonAscii) + '.');
+      var enc = code128Values(raw);
+      sym = encodeCode128(enc.values);
+      info.encoded = raw;
+      info.check = String(enc.values[enc.values.length - 1]);
+      info.checkLabel = 'Checksum (mod 103)';
+      info.sets = enc.sets.join(' → ');
+      sym.text = [{ x: sym.width / 2, s: raw.replace(/[\x00-\x1f\x7f]/g, ' ') }];
+      sym.plain = true;
+    } else if (type === 'code39') {
+      if (!raw) throw new InputError('Enter the text to encode.');
+      var up = raw.toUpperCase();
+      var bad = up.replace(/[0-9A-Z\-. $\/+%]/g, '');
+      if (bad) throw new InputError('Code 39 cannot encode: ' + uniqueChars(bad) + '. Use Code 128 for other characters.');
+      var data = up;
+      if (opts.c39check) {
+        var sum = 0;
+        for (var i = 0; i < up.length; i++) sum += C39_CHARS.indexOf(up.charAt(i));
+        data += C39_CHARS.charAt(sum % 43);
+        info.check = C39_CHARS.charAt(sum % 43) === ' ' ? 'space' : C39_CHARS.charAt(sum % 43);
+        info.checkLabel = 'Check character (mod 43)';
+      } else {
+        info.check = 'none';
+        info.checkLabel = 'Check character';
+      }
+      sym = encodeCode39(data, opts.ratio);
+      info.encoded = data;
+      info.upper = up !== raw;
+      sym.text = [{ x: sym.width / 2, s: data }];
+      sym.plain = true;
+    } else {
+      var r = numeric(type, raw), d = r.digits;
+      info.encoded = d;
+      info.check = r.check + ' (' + r.checkNote + ')';
+      info.checkLabel = 'Check digit';
+      if (type === 'ean13') {
+        sym = encodeEan13(d);
+        sym.text = [{ x: -4, s: d.charAt(0) }];
+        for (i = 1; i <= 6; i++) sym.text.push({ x: 3 + 7 * (i - 1) + 3.5, s: d.charAt(i) });
+        for (i = 7; i <= 12; i++) sym.text.push({ x: 50 + 7 * (i - 7) + 3.5, s: d.charAt(i) });
+      } else if (type === 'ean8') {
+        sym = encodeEan8(d);
+        sym.text = [];
+        for (i = 0; i < 4; i++) sym.text.push({ x: 3 + 7 * i + 3.5, s: d.charAt(i) });
+        for (i = 4; i < 8; i++) sym.text.push({ x: 36 + 7 * (i - 4) + 3.5, s: d.charAt(i) });
+      } else if (type === 'upca') {
+        sym = encodeUpca(d);
+        sym.text = [{ x: -4.5, s: d.charAt(0), small: true }];
+        for (i = 1; i <= 5; i++) sym.text.push({ x: 3 + 7 * i + 3.5, s: d.charAt(i) });
+        for (i = 6; i <= 10; i++) sym.text.push({ x: 50 + 7 * (i - 6) + 3.5, s: d.charAt(i) });
+        sym.text.push({ x: 95 + 4.5, s: d.charAt(11), small: true });
+      } else {
+        sym = encodeItf(d, opts.ratio);
+        sym.text = [{ x: sym.width / 2, s: d }];
+        sym.plain = true;
+        sym.bearer = opts.bearer;
+      }
+    }
+    return { sym: sym, info: info };
+  }
+
+  // ---------- Layout in pixels, shared by SVG and PNG output ----------
+  var FONT = "'OCR-B', 'OCR B', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace";
+
+  function layout(type, sym, o) {
+    var X = o.barWidth, H = o.height, t = TYPES[type];
+    var pad = Math.max(10, 5 * X);
+    var bearer = sym.bearer ? 4 * X : 0;
+    var qL = t.quiet[0] * X, qR = t.quiet[1] * X;
+    var width = Math.ceil(bearer + qL + sym.width * X + qR + bearer);
+    var top = pad + bearer;
+    var retail = !sym.plain;
+    var font = retail ? Math.max(10, Math.round(9 * X)) : Math.max(10, Math.round(6 * X + 4));
+    var ext = o.showText && retail ? 5 * X : 0;
+    var rects = [];
+    sym.bars.forEach(function (b) {
+      rects.push({ x: bearer + qL + b.x * X, y: top, w: b.w * X, h: H + (b.long ? ext : 0) });
+    });
+    if (bearer) {
+      rects.push({ x: 0, y: pad, w: width, h: bearer });
+      rects.push({ x: 0, y: top + H, w: width, h: bearer });
+      rects.push({ x: 0, y: pad, w: bearer, h: H + 2 * bearer });
+      rects.push({ x: width - bearer, y: pad, w: bearer, h: H + 2 * bearer });
+    }
+    var texts = [], bottom = top + H + bearer;
+    if (o.showText) {
+      var baseline = retail ? top + H + X + Math.round(font * 0.8) : bottom + Math.round(font * 0.25) + Math.round(font * 0.8);
+      sym.text.forEach(function (tx) {
+        texts.push({ x: bearer + qL + tx.x * X, y: baseline, s: tx.s, size: tx.small ? Math.round(font * 0.75) : font });
+      });
+      bottom = baseline + Math.round(font * 0.2);
+    }
+    return { width: width, height: Math.ceil(bottom + pad), rects: rects, texts: texts, font: FONT };
+  }
+
+  function num(v) { return String(Math.round(v * 1000) / 1000); }
+  function xmlEscape(s) { return s.replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+
+  function toSvg(L, o, title) {
+    var out = '<svg xmlns="http://www.w3.org/2000/svg" width="' + L.width + '" height="' + L.height + '" viewBox="0 0 ' + L.width + ' ' + L.height + '">';
+    out += '<title>' + xmlEscape(title) + '</title>';
+    if (!o.transparent) out += '<rect width="100%" height="100%" fill="' + o.bg + '"/>';
+    out += '<g class="bc-bars" fill="' + o.fg + '" shape-rendering="crispEdges">';
+    L.rects.forEach(function (r) { out += '<rect x="' + num(r.x) + '" y="' + num(r.y) + '" width="' + num(r.w) + '" height="' + num(r.h) + '"/>'; });
+    out += '</g>';
+    if (L.texts.length) {
+      out += '<g fill="' + o.fg + '" font-family="' + xmlEscape(L.font) + '" text-anchor="middle">';
+      L.texts.forEach(function (t) { out += '<text x="' + num(t.x) + '" y="' + num(t.y) + '" font-size="' + t.size + '">' + xmlEscape(t.s) + '</text>'; });
+      out += '</g>';
+    }
+    return out + '</svg>';
+  }
+
+  function toPng(L, o, scale) {
+    var canvas = document.createElement('canvas');
+    canvas.width = Math.round(L.width * scale);
+    canvas.height = Math.round(L.height * scale);
+    var ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+    if (!o.transparent) { ctx.fillStyle = o.bg; ctx.fillRect(0, 0, L.width, L.height); }
+    ctx.fillStyle = o.fg;
+    L.rects.forEach(function (r) { ctx.fillRect(r.x, r.y, r.w, r.h); });
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    L.texts.forEach(function (t) { ctx.font = t.size + 'px ' + L.font; ctx.fillText(t.s, t.x, t.y); });
+    return new Promise(function (resolve) { canvas.toBlob(resolve, 'image/png'); });
+  }
+
+  // ---------- Colours ----------
+  function luminance(hex) {
+    var v = [1, 3, 5].map(function (i) {
+      var c = parseInt(hex.substr(i, 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function validHex(s) { return /^#[0-9a-fA-F]{6}$/.test(s); }
+
+  // ---------- UI ----------
+  var typeEl = $('#bc-type'), dataEl = $('#bc-data'), preview = $('#bc-preview');
+  var errEl = $('#bc-error'), warnEl = $('#bc-warn'), fixWrap = $('#bc-fix-wrap'), fixBtn = $('#bc-fix');
+  var svgBtn = $('#bc-svg'), pngBtn = $('#bc-png'), copyBtn = $('#bc-copy');
+  var fg = $('#bc-fg'), fgHex = $('#bc-fg-hex'), bg = $('#bc-bg'), bgHex = $('#bc-bg-hex');
+  var current = null, lastType = typeEl.value;
+
+  function options() {
+    var h = parseInt($('#bc-height').value, 10);
+    return {
+      barWidth: Number($('#bc-width').value) || 2,
+      height: isFinite(h) ? Math.min(400, Math.max(10, h)) : 80,
+      showText: $('#bc-text').checked,
+      transparent: $('#bc-transparent').checked,
+      fg: validHex(fgHex.value) ? fgHex.value.toLowerCase() : fg.value,
+      bg: validHex(bgHex.value) ? bgHex.value.toLowerCase() : bg.value,
+      ratio: Number($('#bc-ratio').value) || 3,
+      c39check: $('#bc-c39check').checked,
+      bearer: $('#bc-bearer').checked
+    };
+  }
+
+  function setDisabled(v) { svgBtn.disabled = pngBtn.disabled = copyBtn.disabled = v; }
+
+  function update() {
+    var type = typeEl.value, o = options();
+    $('#bc-data-hint').textContent = TYPES[type].hint;
+    $('#bc-ratio-field').hidden = !(type === 'code39' || type === 'itf14');
+    $('#bc-c39check-wrap').hidden = type !== 'code39';
+    $('#bc-bearer-wrap').hidden = type !== 'itf14';
+    preview.classList.toggle('bc-transparent', o.transparent);
+    fixWrap.hidden = true;
+    var warnings = [];
+    try {
+      var res = build(type, dataEl.value, o);
+      var L = layout(type, res.sym, o);
+      var svg = toSvg(L, o, TYPES[type].name + ' barcode: ' + res.info.encoded);
+      current = { type: type, svg: svg, L: L, o: o, encoded: res.info.encoded };
+      preview.classList.remove('bc-empty');
+      preview.innerHTML = svg;
+      var el = preview.firstElementChild;
+      el.setAttribute('role', 'img');
+      el.setAttribute('aria-label', TYPES[type].name + ' barcode for ' + res.info.encoded);
+      el.setAttribute('data-module', String(o.barWidth));
+      el.setAttribute('data-quiet', String(TYPES[type].quiet[0] * o.barWidth + (res.sym.bearer ? 4 * o.barWidth : 0)));
+      errEl.textContent = '';
+      $('#bc-encoded').textContent = res.info.encoded;
+      $('#bc-check').textContent = res.info.check;
+      $('#bc-check-label').textContent = res.info.checkLabel;
+      $('#bc-size').textContent = L.width + ' × ' + L.height;
+      if (res.info.upper) warnings.push('Code 39 has no lowercase letters, so the text was converted to capitals.');
+      $('#bc-sets-stat').hidden = !res.info.sets;
+      $('#bc-sets').textContent = res.info.sets || '–';
+      setDisabled(false);
+    } catch (e) {
+      if (!(e instanceof InputError)) e = new InputError('Something went wrong while drawing this barcode. Check the data and try again.');
+      current = null;
+      errEl.textContent = e.message;
+      if (e.fix) { fixBtn.textContent = 'Use ' + e.fix; fixBtn.setAttribute('data-fix', e.fix); fixWrap.hidden = false; }
+      preview.classList.add('bc-empty');
+      preview.textContent = 'Your barcode appears here.';
+      $('#bc-encoded').textContent = '–';
+      $('#bc-check').textContent = '–';
+      $('#bc-size').textContent = '–';
+      $('#bc-sets-stat').hidden = true;
+      setDisabled(true);
+    }
+    if (!o.transparent && luminance(o.fg) >= luminance(o.bg)) {
+      warnings.push('The bars are lighter than the background. Most scanners need dark bars on a light background.');
+    } else if ((Math.max(luminance(o.fg), luminance(o.bg)) + 0.05) / (Math.min(luminance(o.fg), luminance(o.bg)) + 0.05) < 3) {
+      warnings.push('The bar and background colours are close in brightness, which makes the barcode hard to scan.');
+    }
+    if (o.transparent && luminance(o.fg) > 0.4) warnings.push('Light bars on a transparent background only scan when placed on something darker.');
+    warnEl.textContent = warnings.join(' ');
+  }
+
+  function fileName(ext) {
+    var slug = current.encoded.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    return 'barcode-' + current.type + (slug ? '-' + slug : '') + '.' + ext;
+  }
+
+  typeEl.addEventListener('change', function () {
+    // Swap in the new type's example while the box still holds the previous example or is empty.
+    var v = dataEl.value.trim();
+    if (!v || v === TYPES[lastType].example) dataEl.value = TYPES[typeEl.value].example;
+    lastType = typeEl.value;
+    update();
+  });
+  dataEl.addEventListener('input', update);
+  ['#bc-width', '#bc-ratio', '#bc-scale'].forEach(function (s) { $(s).addEventListener('change', update); });
+  ['#bc-text', '#bc-transparent', '#bc-c39check', '#bc-bearer'].forEach(function (s) { $(s).addEventListener('change', update); });
+  $('#bc-height').addEventListener('input', update);
+
+  function pairColour(picker, hex) {
+    picker.addEventListener('input', function () { hex.value = picker.value; update(); });
+    hex.addEventListener('input', function () {
+      var v = hex.value.trim();
+      if (/^[0-9a-fA-F]{6}$/.test(v)) v = '#' + v;
+      if (validHex(v)) picker.value = v.toLowerCase();
+      update();
+    });
+  }
+  pairColour(fg, fgHex);
+  pairColour(bg, bgHex);
+
+  fixBtn.addEventListener('click', function () {
+    dataEl.value = fixBtn.getAttribute('data-fix') || dataEl.value;
+    update();
+    dataEl.focus();
+  });
+
+  svgBtn.addEventListener('click', function () {
+    if (current) TT.download(fileName('svg'), '<?xml version="1.0" encoding="UTF-8"?>\n' + current.svg + '\n', 'image/svg+xml');
+  });
+  pngBtn.addEventListener('click', function () {
+    if (!current) return;
+    var scale = Number($('#bc-scale').value) || 1, name = fileName('png');
+    toPng(current.L, current.o, scale).then(function (blob) {
+      if (blob) TT.download(name, blob);
+      else errEl.textContent = 'Your browser could not create the PNG. Try a smaller size or the SVG download.';
+    });
+  });
+  copyBtn.addEventListener('click', function () { if (current) TT.copy(current.svg, copyBtn); });
+
+  update();
+})();
+</script>

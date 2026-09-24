@@ -1,0 +1,1098 @@
+---
+title: "Remove EXIF Data: Photo Metadata Remover"
+description: Remove EXIF data and GPS location from JPEG, PNG and WebP photos without recompressing them. See what each photo reveals first. Nothing is uploaded.
+category: Image & PDF
+keywords: [remove exif data, exif remover, remove metadata from photo, remove gps location from photo, strip exif, photo metadata viewer, delete photo location]
+howto: |
+  ## How to remove EXIF data from a photo
+
+  1. Choose or drop one or more JPEG, PNG or WebP files. Nothing is uploaded;
+     the files are rewritten by this page in your browser.
+  2. Read the table for each photo: what was found, such as the GPS position,
+     the time it was taken and the camera's serial number, and whether each
+     item is kept or removed in the cleaned copy.
+  3. Press **Download** for each photo, or **Download all**. The cleaned
+     files are named after the originals with `-clean` added.
+
+  To check the result, open a cleaned file here again: it should report no
+  metadata, apart from the colour profile and orientation tag if you kept them.
+
+  ## Why the image quality stays exactly the same
+
+  Metadata does not live inside the pixels. Each format stores it in separate
+  blocks next to the compressed image, so the tool copies the image blocks
+  byte for byte and leaves the metadata blocks out. Nothing is decoded or
+  compressed again, so there is no quality loss, and the file usually gets a
+  little smaller.
+
+  | Format | Removed | Kept |
+  |---|---|---|
+  | JPEG | EXIF and XMP (APP1), IPTC (APP13), comments, other APP blocks, data after the image | JFIF header, Adobe colour marker, ICC profile if chosen, image data |
+  | PNG | tEXt, zTXt, iTXt, eXIf, tIME and unknown optional chunks | pixels, transparency, gamma and colour chunks, pixel density, animation, ICC if chosen |
+  | WebP | EXIF, XMP and unknown chunks | image data, alpha, animation, ICC if chosen |
+  {: .data .rexif-table}
+
+  The Adobe APP14 marker is kept on purpose: it records how the colours were
+  encoded, and some JPEGs decode with the wrong colours without it. Phone
+  photos often carry a second image after the end of the main JPEG, such as a
+  depth map, an HDR gain map or a motion photo clip. That data can have its
+  own EXIF block, so it is removed too.
+
+  ## The orientation tag
+
+  A camera sensor has a fixed orientation. When you hold the camera upright,
+  many devices store the pixels as the sensor saw them and set the EXIF
+  Orientation tag (values 1 to 8 in the EXIF standard) so viewers rotate the
+  picture when they show it. Delete that tag and the photo appears sideways.
+  The options above handle this:
+
+  - **Keep only that tag** writes a new EXIF block of a few dozen bytes that
+    holds nothing but the orientation value. It stays lossless and reveals nothing about you.
+  - **Remove it too** leaves no EXIF at all. Photos that relied on the tag
+    will display rotated or mirrored.
+  - **Rotate the pixels** re-encodes only the photos that need turning
+    (JPEG and WebP at 92% quality), converting colours to sRGB. Photos
+    without the tag are still cleaned losslessly.
+
+  ## What photo metadata can reveal
+
+  - **GPS position**, often accurate to a few metres, plus altitude and
+    sometimes the direction the camera faced.
+  - **Date and time** to the second, often with your time zone.
+  - **Serial numbers** of the camera body and lens, which can link photos
+    posted under different names to the same camera.
+  - **An embedded thumbnail** that some editors do not update, so it can
+    still show the uncropped original.
+  - **Names and edit history** in XMP and IPTC fields: author, copyright,
+    editing software, keywords and captions.
+
+  Photos often keep all of this when sent as a file in a messaging app,
+  attached to an email or shared through a cloud storage link. File names
+  such as `IMG_20240518_140732.jpg` also contain the date and time, so
+  rename the file if that matters.
+faq:
+  - q: Are my photos uploaded to a server?
+    a: No. The files are read and rewritten entirely in your browser. Nothing is sent over the network, which you can confirm by opening the page, going offline and using it.
+  - q: Does removing EXIF data reduce image quality?
+    a: No. The compressed image data is copied byte for byte and only the metadata blocks are left out. The one exception is the Rotate the pixels option, which re-encodes photos that carry an orientation tag.
+  - q: Why is my photo sideways after removing the metadata?
+    a: Its pixels are stored sideways and the EXIF orientation tag told viewers to rotate it. Choose Keep only that tag, which is the default, or Rotate the pixels, and download it again.
+  - q: Can I remove the location from iPhone HEIC photos?
+    a: HEIC is not supported here. Set Settings, Camera, Formats to Most Compatible to shoot JPEG, or turn off Location under Options on the iPhone share sheet before sending a photo.
+  - q: Does this also remove the location stored in XMP?
+    a: Yes. XMP, IPTC, comments and every other metadata block are removed along with EXIF, and the table flags XMP that contains GPS coordinates.
+---
+<style>
+.rexif-table { margin: 0 0 18px; }
+.rexif-pick { position: relative; margin: 0 0 16px; }
+.rexif-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.rexif-drop {
+  display: grid; place-items: center; gap: 4px; min-height: 132px; padding: 20px 16px;
+  border: 2px dashed var(--border); border-radius: 10px; background: var(--surface-2);
+  text-align: center; cursor: pointer; transition: border-color 0.15s ease;
+}
+.rexif-drop:hover, .rexif-drop.is-over { border-color: var(--accent); }
+.rexif-input:focus-visible + .rexif-drop { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rexif-drop strong { font-size: 1.05rem; }
+.rexif-drop strong span { color: var(--accent); text-decoration: underline; }
+.rexif-opts { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
+.rexif-opts legend { margin-bottom: 4px; padding: 0; }
+.rexif-opts .check { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; }
+.rexif-opts .check input { flex: none; margin-top: 3px; }
+.rexif-opts .hint { display: block; }
+.rexif-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 4px; color: var(--muted); font-size: 14px; }
+.rexif-card { margin: 0 0 14px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.rexif-card:last-child { margin-bottom: 0; }
+.rexif-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+.rexif-thumb {
+  flex: none; width: 64px; height: 64px; object-fit: contain; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.rexif-name { display: grid; flex: 1 1 160px; min-width: 0; }
+.rexif-name strong { overflow-wrap: anywhere; }
+.rexif-card .msg { margin-bottom: 12px; }
+.rexif-card .msg a { color: inherit; }
+.rexif-card .table-wrap { margin-bottom: 8px; }
+.rexif-card table.data td { overflow-wrap: anywhere; }
+.rexif-card table.data thead th:first-child { width: 28%; }
+.rexif-fate { white-space: nowrap; font-weight: 600; font-size: 13px; }
+.rexif-fate.is-kept { color: var(--accent); }
+.rexif-fate.is-gone { color: var(--muted); }
+.rexif-note { margin: 0; }
+#rexif-bulk[hidden], #rexif-empty[hidden], .rexif-thumb[hidden] { display: none; }
+.rexif-card table.data thead th:last-child { white-space: nowrap; }
+@media (max-width: 560px) {
+  .rexif-card { padding: 12px; }
+  /* Stack each row: label and status on one line, the value below. */
+  .rexif-card table.data, .rexif-card table.data tbody { display: block; }
+  .rexif-card table.data thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .rexif-card table.data tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .rexif-card table.data tbody th, .rexif-card table.data tbody td { width: auto; padding: 0; border: 0; }
+  .rexif-card table.data tbody td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .rexif-card table.data tbody td:nth-child(3) { grid-column: 2; grid-row: 1; }
+}
+</style>
+
+<div class="rexif-pick">
+  <input class="rexif-input" type="file" id="rexif-file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.jfif,.png,.webp">
+  <label class="rexif-drop" for="rexif-file" id="rexif-drop">
+    <strong><span>Choose photos</span> or drop them here</strong>
+    <span class="hint">JPEG, PNG or WebP. Add as many as you like. Nothing is uploaded.</span>
+  </label>
+</div>
+
+<fieldset class="rexif-opts">
+  <legend class="label">When a photo has a rotation (orientation) tag</legend>
+  <label class="check"><input type="radio" name="rexif-orient" value="keep" checked><span>Keep only that tag so the photo stays upright<span class="hint">Lossless. The tag holds no personal data. Recommended.</span></span></label>
+  <label class="check"><input type="radio" name="rexif-orient" value="strip"><span>Remove it too<span class="hint">Lossless, but the photo may then display sideways or mirrored.</span></span></label>
+  <label class="check"><input type="radio" name="rexif-orient" value="bake"><span>Rotate the pixels, then remove it<span class="hint">Re-encodes only those photos (92% quality, sRGB).</span></span></label>
+</fieldset>
+<div class="checks">
+  <label class="check"><input type="checkbox" id="rexif-icc" checked> Keep the colour profile (ICC)</label>
+</div>
+
+<p class="msg error" id="rexif-error" role="alert"></p>
+<p class="msg ok" id="rexif-status" aria-live="polite"></p>
+
+<div class="rexif-empty" id="rexif-empty">
+  <span>No photo to hand?</span>
+  <button class="btn secondary small" type="button" id="rexif-sample">Try a sample photo with GPS</button>
+</div>
+
+<div class="actions" id="rexif-bulk" hidden>
+  <button class="btn" type="button" id="rexif-all">Download all</button>
+  <button class="btn secondary" type="button" id="rexif-clear">Clear list</button>
+</div>
+
+<div id="rexif-list" data-busy="0"></div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const fileInput = $('#rexif-file'), drop = $('#rexif-drop'), list = $('#rexif-list');
+  const errEl = $('#rexif-error'), okEl = $('#rexif-status'), iccBox = $('#rexif-icc');
+  const entries = [];
+  let busyCount = 0, renderGen = 0;
+
+  const TYPES = {
+    jpeg: { label: 'JPEG', mime: 'image/jpeg', ext: 'jpg', exts: ['jpg', 'jpeg', 'jfif', 'jpe'] },
+    png: { label: 'PNG', mime: 'image/png', ext: 'png', exts: ['png'] },
+    webp: { label: 'WebP', mime: 'image/webp', ext: 'webp', exts: ['webp'] }
+  };
+  const ORIENT = {
+    1: 'Normal (1)',
+    2: 'Mirror horizontally (2)',
+    3: 'Rotate 180° (3)',
+    4: 'Mirror vertically (4)',
+    5: 'Mirror horizontally, rotate 270° clockwise (5)',
+    6: 'Rotate 90° clockwise (6)',
+    7: 'Mirror horizontally, rotate 90° clockwise (7)',
+    8: 'Rotate 270° clockwise (8)'
+  };
+
+  // ---------- Byte helpers ----------
+  const be16 = (u, o) => (u[o] << 8) | u[o + 1];
+  const be32 = (u, o) => ((u[o] << 24) >>> 0) + ((u[o + 1] << 16) | (u[o + 2] << 8) | u[o + 3]);
+  const le32 = (u, o) => ((u[o + 3] << 24) >>> 0) + ((u[o + 2] << 16) | (u[o + 1] << 8) | u[o]);
+  const le24 = (u, o) => u[o] | (u[o + 1] << 8) | (u[o + 2] << 16);
+  function ascii(u, o, n) {
+    let s = '';
+    for (let i = 0; i < n && o + i < u.length; i++) s += String.fromCharCode(u[o + i]);
+    return s;
+  }
+  const latin1 = new TextDecoder('latin1');
+  function decodeText(u) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(u); } catch (e) { return latin1.decode(u); }
+  }
+  function tidy(s) {
+    return String(s || '').replace(/\0+$/, '').replace(/\0+/g, ' / ')
+      .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').replace(/\s+/g, ' ').trim();
+  }
+  function short(s, n) { s = tidy(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function concat(parts) {
+    let n = 0;
+    parts.forEach(p => { n += p.length; });
+    const out = new Uint8Array(n);
+    let o = 0;
+    parts.forEach(p => { out.set(p, o); o += p.length; });
+    return out;
+  }
+  function fmtBytes(n) {
+    if (n < 1000) return n + ' bytes';
+    if (n < 1e6) return (n / 1000).toFixed(n < 1e4 ? 1 : 0) + ' KB';
+    return (n / 1e6).toFixed(2) + ' MB';
+  }
+  function fail(msg) { const e = new Error(msg); e.friendly = true; return e; }
+
+  const CRC = new Uint32Array(256).map((_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  function crc32(u) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < u.length; i++) c = CRC[(c ^ u[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  async function inflate(u, cap) {
+    if (typeof DecompressionStream !== 'function' || !u.length) return null;
+    cap = cap || 262144;
+    try {
+      const reader = new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate')).getReader();
+      const parts = [];
+      let n = 0;
+      for (;;) {
+        const r = await reader.read();
+        if (r.done) break;
+        parts.push(r.value);
+        n += r.value.length;
+        if (n >= cap) { reader.cancel().catch(() => {}); break; }
+      }
+      return concat(parts).subarray(0, cap);
+    } catch (e) { return null; }
+  }
+
+  // ---------- EXIF (TIFF) reader ----------
+  const TSIZE = [0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8];
+  function parseTiff(t) {
+    if (!t || t.length < 8) return null;
+    if (ascii(t, 0, 6) === 'Exif\0\0') t = t.subarray(6);
+    const le = t[0] === 0x49 && t[1] === 0x49;
+    if (!le && !(t[0] === 0x4D && t[1] === 0x4D)) return null;
+    const dv = new DataView(t.buffer, t.byteOffset, t.byteLength);
+    const u16 = o => dv.getUint16(o, le), u32 = o => dv.getUint32(o, le);
+    if (u16(2) !== 42) return null;
+    const seen = new Set();
+    function ifd(off) {
+      const map = new Map();
+      if (!off || off + 2 > t.length || seen.has(off)) return { map, next: 0 };
+      seen.add(off);
+      const n = Math.min(u16(off), Math.floor((t.length - off - 2) / 12));
+      for (let i = 0; i < n; i++) {
+        const e = off + 2 + i * 12;
+        const tag = u16(e), type = u16(e + 2), count = u32(e + 4);
+        const size = (TSIZE[type] || 0) * count;
+        if (!size || size > t.length) continue;
+        const vo = size <= 4 ? e + 8 : u32(e + 8);
+        if (vo + size > t.length) continue;
+        map.set(tag, { type, count, vo, size });
+      }
+      const nOff = off + 2 + n * 12;
+      return { map, next: nOff + 4 <= t.length ? u32(nOff) : 0 };
+    }
+    const str = e => (e && (e.type === 2 || e.type === 7 || e.type === 1) ? tidy(decodeText(t.subarray(e.vo, e.vo + e.size))) : '');
+    function num(e, i) {
+      i = i || 0;
+      if (!e || i >= e.count) return NaN;
+      const o = e.vo + i * TSIZE[e.type];
+      switch (e.type) {
+        case 1: case 7: return t[o];
+        case 3: return u16(o);
+        case 4: return u32(o);
+        case 8: return dv.getInt16(o, le);
+        case 9: return dv.getInt32(o, le);
+        case 5: { const d = u32(o + 4); return d ? u32(o) / d : NaN; }
+        case 10: { const d = dv.getInt32(o + 4, le); return d ? dv.getInt32(o, le) / d : NaN; }
+        default: return NaN;
+      }
+    }
+    const ucs2 = e => (e ? tidy(new TextDecoder('utf-16le').decode(t.subarray(e.vo, e.vo + e.size - (e.size & 1)))) : '');
+    function userComment(e) {
+      if (!e || e.size <= 8) return '';
+      const head = ascii(t, e.vo, 8), body = t.subarray(e.vo + 8, e.vo + e.size);
+      if (head.indexOf('UNICODE') === 0) return tidy(new TextDecoder(le ? 'utf-16le' : 'utf-16be').decode(body.subarray(0, body.length - (body.length & 1))));
+      return tidy(decodeText(body));
+    }
+
+    const d0 = ifd(u32(4)), m0 = d0.map;
+    const ex = m0.has(0x8769) ? ifd(num(m0.get(0x8769))).map : new Map();
+    const gd = m0.has(0x8825) ? ifd(num(m0.get(0x8825))).map : null;
+    const m1 = d0.next ? ifd(d0.next).map : new Map();
+    const info = {
+      make: str(m0.get(0x010F)), model: str(m0.get(0x0110)), orientation: num(m0.get(0x0112)) || 0,
+      software: str(m0.get(0x0131)), modified: str(m0.get(0x0132)), artist: str(m0.get(0x013B)),
+      copyright: str(m0.get(0x8298)), description: str(m0.get(0x010E)),
+      xpTitle: ucs2(m0.get(0x9C9B)), xpComment: ucs2(m0.get(0x9C9C)), xpAuthor: ucs2(m0.get(0x9C9D)), xpKeywords: ucs2(m0.get(0x9C9E)),
+      taken: str(ex.get(0x9003)) || str(ex.get(0x9004)), offset: str(ex.get(0x9011)) || str(ex.get(0x9010)),
+      exposure: num(ex.get(0x829A)), fnumber: num(ex.get(0x829D)), iso: num(ex.get(0x8827)), focal: num(ex.get(0x920A)),
+      lensMake: str(ex.get(0xA433)), lensModel: str(ex.get(0xA434)), serial: str(ex.get(0xA431)), lensSerial: str(ex.get(0xA435)),
+      owner: str(ex.get(0xA430)), uniqueId: str(ex.get(0xA420)), userComment: userComment(ex.get(0x9286)),
+      makerNote: ex.has(0x927C) ? ex.get(0x927C).size : 0,
+      thumb: m1.has(0x0202) ? num(m1.get(0x0202)) : 0,
+      tags: m0.size + ex.size + (gd ? gd.size : 0) + m1.size,
+      gps: null
+    };
+    if (gd && gd.size) {
+      const dms = e => (e && e.count >= 3 ? num(e, 0) + num(e, 1) / 60 + num(e, 2) / 3600 : num(e, 0));
+      let lat = dms(gd.get(2)), lon = dms(gd.get(4)), alt = num(gd.get(6));
+      if (/^S/i.test(str(gd.get(1)))) lat = -lat;
+      if (/^W/i.test(str(gd.get(3)))) lon = -lon;
+      if (num(gd.get(5)) === 1) alt = -alt;
+      const ok = isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && (lat !== 0 || lon !== 0);
+      const ts = gd.get(7);
+      let when = str(gd.get(0x1D)).replace(/:/g, '-');
+      if (ts && ts.count >= 3) {
+        const p = [num(ts, 0), num(ts, 1), num(ts, 2)].map(v => String(Math.floor(v || 0)).padStart(2, '0'));
+        when = (when ? when + ' ' : '') + p.join(':');
+      }
+      info.gps = { ok, lat, lon, alt: isFinite(alt) ? alt : NaN, dir: num(gd.get(0x11)), when, tags: gd.size };
+    }
+    return info;
+  }
+
+  // ---------- EXIF writer (orientation tag and the sample photo) ----------
+  const T = {
+    A: s => { const b = new TextEncoder().encode(s + '\0'); return { type: 2, count: b.length, bytes: b }; },
+    B: v => ({ type: 1, count: v.length, bytes: Uint8Array.from(v) }),
+    S: v => { const b = new Uint8Array(v.length * 2); v.forEach((x, i) => { b[i * 2] = x >> 8; b[i * 2 + 1] = x & 255; }); return { type: 3, count: v.length, bytes: b }; },
+    L: v => { const b = new Uint8Array(v.length * 4), d = new DataView(b.buffer); v.forEach((x, i) => d.setUint32(i * 4, x)); return { type: 4, count: v.length, bytes: b }; },
+    R: v => { const b = new Uint8Array(v.length * 8), d = new DataView(b.buffer); v.forEach((x, i) => { d.setUint32(i * 8, x[0]); d.setUint32(i * 8 + 4, x[1]); }); return { type: 5, count: v.length, bytes: b }; }
+  };
+  // Big-endian TIFF: IFD0 plus optional sub-IFDs [[pointerTag, entries], ...].
+  function makeTiff(ifd0, subs) {
+    subs = subs || [];
+    const dirs = [ifd0.slice()].concat(subs.map(s => s[1].slice()));
+    subs.forEach(s => dirs[0].push([s[0], T.L([0])]));
+    dirs.forEach(d => d.sort((a, b) => a[0] - b[0]));
+    let off = 8;
+    const dirOff = [], dataOff = [];
+    dirs.forEach((d, i) => {
+      dirOff[i] = off;
+      off += 2 + d.length * 12 + 4;
+      dataOff[i] = [];
+      d.forEach((e, j) => {
+        const n = e[1].bytes.length;
+        if (n > 4) { dataOff[i][j] = off; off += n + (n & 1); }
+      });
+    });
+    subs.forEach((s, k) => { dirs[0].find(e => e[0] === s[0])[1] = T.L([dirOff[k + 1]]); });
+    const out = new Uint8Array(off), dv = new DataView(out.buffer);
+    out.set([0x4D, 0x4D, 0, 42, 0, 0, 0, 8]);
+    dirs.forEach((d, i) => {
+      let p = dirOff[i];
+      dv.setUint16(p, d.length);
+      p += 2;
+      d.forEach((e, j) => {
+        const v = e[1];
+        dv.setUint16(p, e[0]); dv.setUint16(p + 2, v.type); dv.setUint32(p + 4, v.count);
+        if (v.bytes.length > 4) { dv.setUint32(p + 8, dataOff[i][j]); out.set(v.bytes, dataOff[i][j]); } else out.set(v.bytes, p + 8);
+        p += 12;
+      });
+      dv.setUint32(p, 0);
+    });
+    return out;
+  }
+  const orientationTiff = o => makeTiff([[0x0112, T.S([o])]]);
+
+  // ---------- Other metadata readers ----------
+  function readXmp(u) {
+    const s = decodeText(u.subarray(0, 2000000));
+    const m = /CreatorTool(?:="([^"]*)"|>([^<]*)<)/.exec(s);
+    return { size: u.length, gps: /GPSLatitude|GPSLongitude/.test(s), tool: m ? short(m[1] || m[2], 80) : '' };
+  }
+  const IIM = { 5: 'Title', 25: 'Keywords', 80: 'By-line', 85: 'By-line title', 90: 'City', 92: 'Sub-location', 95: 'State/Province', 101: 'Country', 105: 'Headline', 110: 'Credit', 115: 'Source', 116: 'Copyright', 118: 'Contact', 120: 'Caption', 122: 'Writer' };
+  function readIim(u) {
+    const fields = [];
+    let o = 0;
+    while (o + 5 <= u.length && fields.length < 200) {
+      if (u[o] !== 0x1C) { o++; continue; }
+      const rec = u[o + 1], ds = u[o + 2], len = be16(u, o + 3);
+      if (len & 0x8000) break;
+      if (rec === 2 && IIM[ds]) {
+        const v = short(decodeText(u.subarray(o + 5, o + 5 + len)), 120);
+        const prev = fields.find(f => f[0] === IIM[ds]);
+        if (prev) prev[1] += ', ' + v; else if (v) fields.push([IIM[ds], v]);
+      }
+      o += 5 + len;
+    }
+    return fields;
+  }
+  // Photoshop image resource blocks (JPEG APP13): IPTC lives in resource 0x0404.
+  function readIrb(u, r) {
+    let o = 0;
+    const out = { size: u.length, fields: [], thumb: false };
+    while (o + 12 <= u.length) {
+      const sig = ascii(u, o, 4);
+      if (sig !== '8BIM' && sig !== 'MeSa' && sig !== 'PHUT' && sig !== 'AgHg' && sig !== 'DCSR') break;
+      const id = be16(u, o + 4);
+      let p = o + 6;
+      const nameLen = u[p];
+      p += 1 + nameLen + ((nameLen + 1) & 1);
+      if (p + 4 > u.length) break;
+      const size = be32(u, p);
+      p += 4;
+      const data = u.subarray(p, Math.min(u.length, p + size));
+      if (id === 0x0404) out.fields = out.fields.concat(readIim(data));
+      if (id === 0x0409 || id === 0x040C) out.thumb = true;
+      o = p + size + (size & 1);
+    }
+    if (r) r.iptc = r.iptc ? { size: r.iptc.size + out.size, fields: r.iptc.fields.concat(out.fields), thumb: r.iptc.thumb || out.thumb } : out;
+    return out;
+  }
+  function iccName(p) {
+    try {
+      if (p.length < 132) return '';
+      const n = Math.min(be32(p, 128), 100);
+      for (let i = 0; i < n; i++) {
+        const e = 132 + i * 12;
+        if (e + 12 > p.length) break;
+        if (ascii(p, e, 4) !== 'desc') continue;
+        const off = be32(p, e + 4), type = ascii(p, off, 4);
+        if (type === 'desc') return short(latin1.decode(p.subarray(off + 12, off + 12 + Math.max(0, be32(p, off + 8) - 1))), 60);
+        if (type === 'mluc') {
+          const len = be32(p, off + 20), so = off + be32(p, off + 24);
+          return short(new TextDecoder('utf-16be').decode(p.subarray(so, so + len - (len & 1))), 60);
+        }
+      }
+    } catch (e) { /* unnamed profile */ }
+    return '';
+  }
+  function newReport(type) {
+    return { type, width: 0, height: 0, exif: null, exifSize: 0, xmp: null, iptc: null, icc: null, comments: [], texts: [], times: [], other: [], trailing: null };
+  }
+  function addExif(r, tiff, label) {
+    const info = parseTiff(tiff);
+    r.exifSize += tiff.length;
+    if (info && !r.exif) r.exif = info;
+    else if (!info) r.other.push(label || 'Unreadable EXIF block');
+  }
+  function addXmp(r, u) {
+    const x = readXmp(u);
+    r.xmp = r.xmp ? { size: r.xmp.size + x.size, gps: r.xmp.gps || x.gps, tool: r.xmp.tool || x.tool } : x;
+  }
+  function trailingKind(u, o) {
+    if (u[o] === 0xFF && u[o + 1] === 0xD8) return 'another JPEG image (a depth map, HDR gain map or preview)';
+    if (ascii(u, o + 4, 4) === 'ftyp') return 'a video clip (motion photo)';
+    return 'extra data';
+  }
+
+  // ---------- JPEG ----------
+  function walkJpeg(u) {
+    const segs = [];
+    let i = 2, end = -1;
+    while (i < u.length) {
+      if (u[i] !== 0xFF) { i = u.indexOf(0xFF, i); if (i < 0) break; continue; }
+      let j = i;
+      while (j < u.length && u[j] === 0xFF) j++;
+      if (j >= u.length) break;
+      const m = u[j];
+      if (m === 0xD9) { segs.push({ m, s: i, e: j + 1 }); end = j + 1; break; }
+      if (m === 0x01 || (m >= 0xD0 && m <= 0xD7) || m === 0x00) { segs.push({ m, s: i, e: j + 1 }); i = j + 1; continue; }
+      if (j + 2 >= u.length) throw fail('This JPEG file is truncated.');
+      const len = be16(u, j + 1);
+      if (len < 2) throw fail('This JPEG file is damaged (bad segment length).');
+      const pe = Math.min(u.length, j + 1 + len);
+      let e = pe;
+      if (m === 0xDA) {
+        let k = e;
+        for (;;) {
+          k = u.indexOf(0xFF, k);
+          if (k < 0 || k + 1 >= u.length) { k = u.length; break; }
+          const n = u[k + 1];
+          if (n === 0x00 || (n >= 0xD0 && n <= 0xD7) || n === 0xFF) { k += n === 0xFF ? 1 : 2; continue; }
+          break;
+        }
+        e = k;
+      }
+      segs.push({ m, s: i, p: j + 3, pe, e });
+      i = e;
+    }
+    return { segs, end: end < 0 ? u.length : end };
+  }
+  function jpegKind(m, p) {
+    if (m === 0xE0) return ascii(p, 0, 5) === 'JFIF\0' ? 'jfif' : ascii(p, 0, 5) === 'JFXX\0' ? 'jfxx' : 'app';
+    if (m === 0xE1) {
+      const h = ascii(p, 0, 6);
+      if (h === 'Exif\0\0' || h === 'Exif\0\xFF') return 'exif';
+      if (ascii(p, 0, 29) === 'http://ns.adobe.com/xap/1.0/\0') return 'xmp';
+      if (ascii(p, 0, 35) === 'http://ns.adobe.com/xmp/extension/\0') return 'xmpext';
+      return 'app';
+    }
+    if (m === 0xE2) return ascii(p, 0, 12) === 'ICC_PROFILE\0' ? 'icc' : ascii(p, 0, 4) === 'MPF\0' ? 'mpf' : 'app';
+    if (m === 0xEB) return 'jumbf';
+    if (m === 0xEC && ascii(p, 0, 5) === 'Ducky') return 'ducky';
+    if (m === 0xED && ascii(p, 0, 14) === 'Photoshop 3.0\0') return 'irb';
+    if (m === 0xEE && ascii(p, 0, 5) === 'Adobe') return 'adobe';
+    if (m === 0xFE) return 'com';
+    return 'app';
+  }
+  function analyzeJpeg(u) {
+    const w = walkJpeg(u), r = newReport('jpeg'), icc = [];
+    w.segs.forEach(s => {
+      const m = s.m;
+      if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC && !r.width && s.pe - s.p >= 5) {
+        r.height = be16(u, s.p + 1); r.width = be16(u, s.p + 3);
+      }
+      if (!((m >= 0xE0 && m <= 0xEF) || m === 0xFE)) return;
+      const p = u.subarray(s.p, s.pe), kind = jpegKind(m, p);
+      if (kind === 'exif') addExif(r, p.subarray(6));
+      else if (kind === 'xmp') addXmp(r, p.subarray(29));
+      else if (kind === 'xmpext') addXmp(r, p.subarray(75));
+      else if (kind === 'icc') icc.push([p[12], p.subarray(14)]);
+      else if (kind === 'irb') readIrb(p.subarray(14), r);
+      else if (kind === 'com') { const c = short(decodeText(p), 200); r.comments.push(c || '(empty comment)'); }
+      else if (kind === 'jfxx') r.other.push('JFIF extension thumbnail');
+      else if (kind === 'mpf') r.other.push('Multi-Picture index (MPF)');
+      else if (kind === 'jumbf') r.other.push('Content Credentials / JUMBF (APP11)');
+      else if (kind === 'ducky') r.other.push('Photoshop “Save for Web” block (APP12)');
+      else if (kind === 'jfif') { if (p.length > 14 && p[12] * p[13] > 0) r.other.push('JFIF thumbnail'); }
+      else if (kind === 'app') {
+        const id = tidy(ascii(p, 0, 12).split('\0')[0]).replace(/[^\x20-\x7E]/g, '');
+        r.other.push('APP' + (m - 0xE0) + ' block' + (id ? ' (' + id + ')' : ''));
+      }
+    });
+    if (icc.length) {
+      icc.sort((a, b) => a[0] - b[0]);
+      const prof = concat(icc.map(x => x[1]));
+      r.icc = { size: prof.length, name: iccName(prof) };
+    }
+    if (w.end < u.length) r.trailing = { size: u.length - w.end, what: trailingKind(u, w.end) };
+    r._walk = w;
+    return r;
+  }
+  function cleanJpeg(u, r, opt) {
+    const out = [new Uint8Array([0xFF, 0xD8])];
+    let exifAt = 1;
+    r._walk.segs.forEach(s => {
+      const m = s.m;
+      if ((m >= 0xE0 && m <= 0xEF) || m === 0xFE) {
+        const p = u.subarray(s.p, s.pe), kind = jpegKind(m, p);
+        if (kind === 'jfif') {
+          if (p.length > 14) { // drop the rarely used JFIF thumbnail, keep the density
+            const seg = new Uint8Array(18);
+            seg.set([0xFF, 0xE0, 0, 16]); seg.set(p.subarray(0, 12), 4);
+            out.push(seg);
+          } else out.push(u.subarray(s.s, s.e));
+          exifAt = out.length;
+        } else if (kind === 'adobe' || (kind === 'icc' && opt.keepIcc)) out.push(u.subarray(s.s, s.e));
+        return;
+      }
+      out.push(u.subarray(s.s, s.e));
+    });
+    if (opt.orientation) {
+      const t = orientationTiff(opt.orientation), seg = new Uint8Array(10 + t.length);
+      seg.set([0xFF, 0xE1, (8 + t.length) >> 8, (8 + t.length) & 255, 0x45, 0x78, 0x69, 0x66, 0, 0]);
+      seg.set(t, 10);
+      out.splice(exifAt, 0, seg);
+    }
+    return concat(out);
+  }
+
+  // ---------- PNG ----------
+  const PNG_KEEP = new Set(['tRNS', 'gAMA', 'cHRM', 'sRGB', 'cICP', 'mDCv', 'cLLi', 'sBIT', 'bKGD', 'hIST', 'pHYs', 'sPLT', 'acTL', 'fcTL', 'fdAT', 'oFFs', 'pCAL', 'sCAL', 'sTER']);
+  function walkPng(u) {
+    const chunks = [];
+    let o = 8, end = u.length;
+    while (o + 12 <= u.length) {
+      const len = be32(u, o), type = ascii(u, o + 4, 4);
+      if (!/^[A-Za-z]{4}$/.test(type) || o + 12 + len > u.length) throw fail('This PNG file is damaged or truncated.');
+      chunks.push({ type, s: o, d: o + 8, len, e: o + 12 + len });
+      o += 12 + len;
+      if (type === 'IEND') { end = o; break; }
+    }
+    if (!chunks.length || chunks[0].type !== 'IHDR') throw fail('This PNG file is damaged (no IHDR header).');
+    return { chunks, end };
+  }
+  function rawProfile(v) {
+    const m = /^\s*([\w-]+)\s+(\d+)\s+([0-9a-fA-F\s]+)$/.exec(v);
+    if (!m) return null;
+    const hex = m[3].replace(/\s+/g, ''), n = Math.min(hex.length >> 1, 4000000), b = new Uint8Array(n);
+    for (let i = 0; i < n; i++) b[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return { kind: m[1].toLowerCase(), bytes: b };
+  }
+  async function pngText(r, key, value) {
+    if (/^Raw profile type /i.test(key)) {
+      const rp = rawProfile(value);
+      if (rp && (rp.kind === 'exif' || rp.kind === 'app1')) { addExif(r, rp.bytes); return; }
+      if (rp && rp.kind === 'xmp') { addXmp(r, rp.bytes); return; }
+      if (rp && rp.kind === 'iptc') { readIrb(rp.bytes, r); if (!r.iptc.fields.length) r.iptc.fields = readIim(rp.bytes); return; }
+      if (rp && (rp.kind === 'icc' || rp.kind === 'icm')) { r.icc = { size: rp.bytes.length, name: iccName(rp.bytes), text: true }; return; }
+    }
+    if (key === 'XML:com.adobe.xmp') { addXmp(r, new TextEncoder().encode(value)); return; }
+    r.texts.push([short(key, 60), short(value, 200) || '(empty)']);
+  }
+  async function analyzePng(u) {
+    const w = walkPng(u), r = newReport('png');
+    const ih = w.chunks[0];
+    r.width = be32(u, ih.d); r.height = be32(u, ih.d + 4);
+    for (const c of w.chunks) {
+      const d = u.subarray(c.d, c.d + c.len), t = c.type;
+      if (t === 'tEXt') {
+        const z = d.indexOf(0);
+        await pngText(r, latin1.decode(d.subarray(0, z < 0 ? d.length : z)), z < 0 ? '' : latin1.decode(d.subarray(z + 1)));
+      } else if (t === 'zTXt') {
+        const z = d.indexOf(0), key = latin1.decode(d.subarray(0, z < 0 ? d.length : z));
+        const raw = z < 0 ? null : await inflate(d.subarray(z + 2), 4000000);
+        await pngText(r, key, raw ? latin1.decode(raw) : '(compressed text)');
+      } else if (t === 'iTXt') {
+        const z = d.indexOf(0);
+        if (z < 0) { r.texts.push(['iTXt', '(unreadable)']); continue; }
+        const key = latin1.decode(d.subarray(0, z)), comp = d[z + 1];
+        const l1 = d.indexOf(0, z + 3), l2 = l1 < 0 ? -1 : d.indexOf(0, l1 + 1);
+        let body = l2 < 0 ? new Uint8Array(0) : d.subarray(l2 + 1);
+        if (comp === 1) body = (await inflate(body, 4000000)) || new Uint8Array(0);
+        await pngText(r, key, new TextDecoder().decode(body));
+      } else if (t === 'eXIf') addExif(r, d);
+      else if (t === 'tIME' && d.length >= 7) {
+        const p = n => String(n).padStart(2, '0');
+        r.times.push(be16(d, 0) + '-' + p(d[2]) + '-' + p(d[3]) + ' ' + p(d[4]) + ':' + p(d[5]) + ':' + p(d[6]) + ' UTC');
+      } else if (t === 'iCCP') {
+        const z = d.indexOf(0), prof = z < 0 ? null : await inflate(d.subarray(z + 2), 4000000);
+        r.icc = { size: c.len, name: (prof && iccName(prof)) || short(latin1.decode(d.subarray(0, Math.max(0, z))), 60) };
+      } else if (!(t.charCodeAt(0) & 0x20) || PNG_KEEP.has(t)) { /* image data or rendering info: kept */ }
+      else r.other.push(t + ' chunk (' + fmtBytes(c.len) + ')');
+    }
+    if (w.end < u.length) r.trailing = { size: u.length - w.end, what: 'extra data' };
+    r._walk = w;
+    return r;
+  }
+  function pngChunk(type, data) {
+    const out = new Uint8Array(12 + data.length), dv = new DataView(out.buffer);
+    dv.setUint32(0, data.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    out.set(data, 8);
+    dv.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+    return out;
+  }
+  function cleanPng(u, r, opt) {
+    const out = [u.subarray(0, 8)];
+    r._walk.chunks.forEach(c => {
+      const t = c.type;
+      const keep = !(t.charCodeAt(0) & 0x20) || PNG_KEEP.has(t) || (t === 'iCCP' && opt.keepIcc);
+      if (keep) out.push(u.subarray(c.s, c.e));
+      if (t === 'IHDR' && opt.orientation) out.push(pngChunk('eXIf', orientationTiff(opt.orientation)));
+    });
+    return concat(out);
+  }
+
+  // ---------- WebP ----------
+  const WEBP_KEEP = new Set(['VP8X', 'VP8 ', 'VP8L', 'ALPH', 'ANIM', 'ANMF']);
+  function walkWebp(u) {
+    if (u.length < 20) throw fail('This WebP file is truncated.');
+    const end = Math.min(u.length, 8 + le32(u, 4)), chunks = [];
+    let o = 12;
+    while (o + 8 <= end) {
+      const type = ascii(u, o, 4), size = le32(u, o + 4);
+      if (o + 8 + size > u.length) throw fail('This WebP file is damaged or truncated.');
+      chunks.push({ type, s: o, d: o + 8, size, e: Math.min(u.length, o + 8 + size + (size & 1)) });
+      o += 8 + size + (size & 1);
+    }
+    return { chunks, end: Math.min(u.length, Math.max(o, end)) };
+  }
+  function analyzeWebp(u) {
+    const w = walkWebp(u), r = newReport('webp');
+    w.chunks.forEach(c => {
+      const d = u.subarray(c.d, c.d + c.size);
+      if (c.type === 'VP8X' && d.length >= 10) { r.width = le24(d, 4) + 1; r.height = le24(d, 7) + 1; }
+      else if (c.type === 'VP8 ' && !r.width && d.length >= 10 && d[3] === 0x9D && d[4] === 0x01 && d[5] === 0x2A) {
+        r.width = (d[6] | (d[7] << 8)) & 0x3FFF; r.height = (d[8] | (d[9] << 8)) & 0x3FFF;
+      } else if (c.type === 'VP8L' && !r.width && d.length >= 5 && d[0] === 0x2F) {
+        const b = le32(d, 1); r.width = (b & 0x3FFF) + 1; r.height = ((b >>> 14) & 0x3FFF) + 1;
+      } else if (c.type === 'EXIF') addExif(r, d);
+      else if (c.type === 'XMP ') addXmp(r, d);
+      else if (c.type === 'ICCP') r.icc = { size: d.length, name: iccName(d) };
+      else if (!WEBP_KEEP.has(c.type)) r.other.push('“' + c.type.trim() + '” chunk (' + fmtBytes(c.size) + ')');
+    });
+    if (w.end < u.length) r.trailing = { size: u.length - w.end, what: 'extra data' };
+    r._walk = w;
+    return r;
+  }
+  function cleanWebp(u, r, opt) {
+    const out = [u.subarray(0, 12)];
+    let vp8x = null, hasIcc = false;
+    r._walk.chunks.forEach(c => {
+      if (c.type === 'ICCP' && opt.keepIcc) { out.push(u.subarray(c.s, c.e)); hasIcc = true; }
+      else if (WEBP_KEEP.has(c.type)) {
+        const b = u.slice(c.s, c.e);
+        if (c.type === 'VP8X') vp8x = b;
+        out.push(b);
+      }
+    });
+    if (opt.orientation && vp8x) {
+      const t = orientationTiff(opt.orientation), ch = new Uint8Array(8 + t.length);
+      ch.set([0x45, 0x58, 0x49, 0x46, t.length & 255, t.length >> 8, 0, 0]);
+      ch.set(t, 8);
+      out.push(ch);
+    }
+    if (vp8x) {
+      let f = vp8x[8] & ~(0x08 | 0x04 | 0x20);
+      if (hasIcc) f |= 0x20;
+      if (opt.orientation) f |= 0x08;
+      vp8x[8] = f;
+    }
+    const res = concat(out);
+    new DataView(res.buffer).setUint32(4, res.length - 8, true);
+    return res;
+  }
+
+  // ---------- Pipeline ----------
+  function sniff(u) {
+    if (u.length > 3 && u[0] === 0xFF && u[1] === 0xD8 && u[2] === 0xFF) return 'jpeg';
+    if (u.length > 8 && be32(u, 0) === 0x89504E47 && be32(u, 4) === 0x0D0A1A0A) return 'png';
+    if (u.length > 12 && ascii(u, 0, 4) === 'RIFF' && ascii(u, 8, 4) === 'WEBP') return 'webp';
+    if (ascii(u, 4, 4) === 'ftyp') return /hei|hev|mif1|msf1/.test(ascii(u, 8, 4)) ? 'heic' : /avi/.test(ascii(u, 8, 4)) ? 'avif' : 'isobmff';
+    if (ascii(u, 0, 3) === 'GIF') return 'gif';
+    if (ascii(u, 0, 4) === 'II*\0' || ascii(u, 0, 4) === 'MM\0*') return 'tiff';
+    return '';
+  }
+  const UNSUPPORTED = {
+    heic: 'HEIC/HEIF photos are not supported. Export the photo as JPEG first (on iPhone: Settings, Camera, Formats, Most Compatible).',
+    avif: 'AVIF files are not supported yet. Convert the image to JPEG, PNG or WebP first.',
+    gif: 'GIF files are not supported. Only JPEG, PNG and WebP can be cleaned here.',
+    tiff: 'TIFF and camera RAW files are not supported. Export the photo as JPEG first.',
+    isobmff: 'This file type is not supported. Only JPEG, PNG and WebP can be cleaned here.'
+  };
+
+  function options() {
+    const mode = (document.querySelector('input[name="rexif-orient"]:checked') || {}).value || 'keep';
+    return { mode, keepIcc: iccBox.checked };
+  }
+
+  async function bake(bytes, mime, o) {
+    const bmp = await createImageBitmap(new Blob([bytes], { type: mime }));
+    const w = bmp.width, h = bmp.height, c = document.createElement('canvas');
+    c.width = o >= 5 ? h : w; c.height = o >= 5 ? w : h;
+    const g = c.getContext('2d');
+    if (!g) throw fail('This photo is too large for your browser to rotate. Choose another orientation option.');
+    const M = { 2: [-1, 0, 0, 1, w, 0], 3: [-1, 0, 0, -1, w, h], 4: [1, 0, 0, -1, 0, h], 5: [0, 1, 1, 0, 0, 0], 6: [0, 1, -1, 0, h, 0], 7: [0, -1, -1, 0, h, w], 8: [0, -1, 1, 0, 0, w] }[o];
+    if (M) g.transform.apply(g, M);
+    g.drawImage(bmp, 0, 0);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(res => c.toBlob(res, mime, 0.92));
+    if (!blob) throw fail('Your browser could not re-encode this photo.');
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: blob.type || mime, width: c.width, height: c.height };
+  }
+
+  async function analyze(entry) {
+    const u = entry.bytes, type = sniff(u);
+    entry.type = type;
+    if (!type) throw fail('This is not a JPEG, PNG or WebP image, or the file is damaged.');
+    if (UNSUPPORTED[type]) throw fail(UNSUPPORTED[type]);
+    entry.report = type === 'jpeg' ? analyzeJpeg(u) : type === 'png' ? await analyzePng(u) : analyzeWebp(u);
+  }
+
+  async function clean(entry) {
+    const r = entry.report, opt = options(), u = entry.bytes;
+    const o = r.exif && r.exif.orientation >= 2 && r.exif.orientation <= 8 ? r.exif.orientation : 0;
+    const cOpt = { keepIcc: opt.keepIcc, orientation: opt.mode === 'keep' ? o : 0 };
+    if (r.type === 'webp' && cOpt.orientation && !r._walk.chunks.some(c => c.type === 'VP8X')) cOpt.orientation = 0;
+    let bytes = r.type === 'jpeg' ? cleanJpeg(u, r, cOpt) : r.type === 'png' ? cleanPng(u, r, cOpt) : cleanWebp(u, r, cOpt);
+    let mime = TYPES[r.type].mime, width = r.width, height = r.height, baked = false;
+    if (opt.mode === 'bake' && o) {
+      const b = await bake(bytes, mime, o);
+      bytes = b.bytes; mime = b.mime; width = b.width; height = b.height; baked = true;
+    }
+    const type = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpeg';
+    const m = /^(.*?)(?:\.([^.]+))?$/.exec(entry.name);
+    const origExt = (m[2] || '').toLowerCase();
+    const ext = TYPES[type].exts.indexOf(origExt) >= 0 ? m[2] : TYPES[type].ext;
+    return {
+      bytes, blob: new Blob([bytes], { type: mime }), name: (m[1] || 'photo') + '-clean.' + ext,
+      width, height, baked, orientation: o, keptOrientation: !!cOpt.orientation, keepIcc: opt.keepIcc && !baked, mode: opt.mode
+    };
+  }
+
+  // ---------- Rendering ----------
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function dms(v, pos, neg) {
+    const a = Math.abs(v);
+    let d = Math.floor(a), mm = (a - d) * 60, m = Math.floor(mm), s = Math.round((mm - m) * 600) / 10;
+    if (s >= 60) { s = 0; m++; }
+    if (m >= 60) { m = 0; d++; }
+    return d + '°' + m + '′' + s.toFixed(1) + '″' + (v < 0 ? neg : pos);
+  }
+  function exposure(x) {
+    const p = [];
+    if (x.exposure > 0) p.push(x.exposure < 1 ? '1/' + Math.round(1 / x.exposure) + ' s' : +x.exposure.toFixed(1) + ' s');
+    if (x.fnumber > 0) p.push('f/' + +x.fnumber.toFixed(1));
+    if (x.iso > 0) p.push('ISO ' + x.iso);
+    if (x.focal > 0) p.push(+x.focal.toFixed(1) + ' mm');
+    return p.join(' · ');
+  }
+  const exifDate = s => s.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+
+  function rows(entry) {
+    const r = entry.report, out = entry.out, x = r.exif, R = [];
+    const add = (label, value, fate) => { if (value) R.push([label, value, fate || 'removed']); };
+    if (x) {
+      if (x.gps) {
+        const g = x.gps;
+        let v = g.ok ? g.lat.toFixed(6) + ', ' + g.lon.toFixed(6) + ' (' + dms(g.lat, 'N', 'S') + ' ' + dms(g.lon, 'E', 'W') + ')' : 'GPS fields present, but no position';
+        if (g.ok && isFinite(g.alt)) v += ', altitude ' + Math.round(g.alt) + ' m';
+        if (g.ok && isFinite(g.dir)) v += ', facing ' + Math.round(g.dir) + '°';
+        add('Location (GPS)', v);
+        if (g.when) add('GPS time (UTC)', exifDate(g.when));
+      }
+      add('Date taken', x.taken ? exifDate(x.taken) + (x.offset ? ' (UTC' + x.offset + ')' : '') : '');
+      const cam = x.model && x.make && x.model.toLowerCase().indexOf(x.make.toLowerCase()) === 0 ? x.model : [x.make, x.model].filter(Boolean).join(' ');
+      add('Camera', cam);
+      add('Lens', [x.lensMake, x.lensModel].filter(Boolean).join(' '));
+      add('Serial number', [x.serial && 'camera ' + x.serial, x.lensSerial && 'lens ' + x.lensSerial].filter(Boolean).join(', '));
+      add('Owner / author', Array.from(new Set([x.owner, x.artist, x.xpAuthor].filter(Boolean))).join(', '));
+      add('Copyright', x.copyright);
+      add('Description', Array.from(new Set([x.xpTitle, x.description, x.userComment, x.xpComment, x.xpKeywords].filter(Boolean))).join(' · '));
+      add('Software', x.software);
+      add('Last edited', x.modified ? exifDate(x.modified) : '');
+      add('Camera settings', exposure(x));
+      add('Image ID', x.uniqueId);
+      if (x.orientation >= 1 && x.orientation <= 8) {
+        const fate = !out ? 'removed' : out.keptOrientation ? 'kept' : out.baked ? 'applied' : 'removed';
+        add('Orientation', ORIENT[x.orientation], x.orientation === 1 ? 'removed' : fate);
+      }
+      if (x.thumb) add('Embedded thumbnail', fmtBytes(x.thumb) + ' preview image, which may still show the uncropped original');
+      if (x.makerNote) add('Maker notes', fmtBytes(x.makerNote) + ' of camera-maker data');
+      add('Other EXIF', x.tags ? 'All ' + x.tags + ' EXIF tags (' + fmtBytes(r.exifSize) + ')' : '');
+    } else if (r.exifSize) add('EXIF', fmtBytes(r.exifSize) + ' (could not be read)');
+    if (r.xmp) add('XMP', fmtBytes(r.xmp.size) + (r.xmp.gps ? ', includes GPS location' : '') + (r.xmp.tool ? ', made with ' + r.xmp.tool : ''));
+    if (r.iptc) add('IPTC', (r.iptc.fields.length ? r.iptc.fields.map(f => f[0] + ': ' + f[1]).join('; ') : 'Photoshop data block') + (r.iptc.thumb ? '; includes a thumbnail' : '') + ' (' + fmtBytes(r.iptc.size) + ')');
+    r.texts.forEach(t => add('Text: ' + t[0], t[1]));
+    r.times.forEach(t => add('Last modified', t));
+    r.comments.forEach(c => add('Comment', c));
+    if (r.icc) add('Colour profile (ICC)', (r.icc.name || 'Embedded profile') + ' (' + fmtBytes(r.icc.size) + ')', out && out.keepIcc && !r.icc.text ? 'kept' : out && out.baked ? 'srgb' : 'removed');
+    if (r.other.length) add('Other metadata', r.other.join('; '));
+    if (r.trailing) add('Data after the image', fmtBytes(r.trailing.size) + ': ' + r.trailing.what);
+    return R;
+  }
+
+  const FATE = { removed: ['Removed', 'is-gone'], kept: ['Kept', 'is-kept'], applied: ['Applied to pixels', 'is-kept'], srgb: ['Converted to sRGB', 'is-gone'] };
+
+  function render(entry) {
+    const card = entry.card;
+    card.textContent = '';
+    card.setAttribute('data-state', entry.state);
+    const head = el('div', 'rexif-head');
+    const thumb = el('img', 'rexif-thumb');
+    thumb.alt = '';
+    thumb.width = 64; thumb.height = 64;
+    if (entry.url) URL.revokeObjectURL(entry.url);
+    entry.url = entry.out ? URL.createObjectURL(entry.out.blob) : '';
+    if (entry.url) thumb.src = entry.url; else thumb.hidden = true;
+    const name = el('div', 'rexif-name');
+    name.appendChild(el('strong', '', entry.name));
+    const info = el('span', 'hint');
+    name.appendChild(info);
+    head.append(thumb, name);
+    card.appendChild(head);
+
+    if (entry.state === 'error') {
+      info.textContent = fmtBytes(entry.bytes ? entry.bytes.length : 0);
+      card.appendChild(el('p', 'msg error rexif-err', entry.error));
+      return;
+    }
+    const r = entry.report, out = entry.out;
+    if (!r) { info.textContent = 'Reading…'; return; }
+    const dimsTxt = out && out.width ? out.width + ' × ' + out.height + ' px · ' : '';
+    info.textContent = TYPES[out && out.baked ? (out.blob.type === 'image/png' ? 'png' : out.blob.type === 'image/webp' ? 'webp' : 'jpeg') : r.type].label + ' · ' + dimsTxt +
+      fmtBytes(entry.bytes.length) + (out ? ' → ' + fmtBytes(out.bytes.length) : '');
+    if (out) {
+      const dl = el('button', 'btn small', 'Download');
+      dl.type = 'button';
+      dl.setAttribute('data-rexif-dl', String(entries.indexOf(entry)));
+      dl.setAttribute('aria-label', 'Download cleaned ' + entry.name);
+      dl.addEventListener('click', () => TT.download(out.name, out.blob));
+      head.appendChild(dl);
+      thumb.alt = 'Cleaned ' + entry.name;
+    }
+
+    const x = r.exif;
+    const gps = x && x.gps && x.gps.ok ? x.gps : null;
+    if (gps || (r.xmp && r.xmp.gps)) {
+      const warn = el('p', 'msg error rexif-gps');
+      warn.appendChild(document.createTextNode(gps
+        ? 'This photo has its location embedded: ' + gps.lat.toFixed(6) + ', ' + gps.lon.toFixed(6) + '. Anyone who gets the original file can see where it was taken. '
+        : 'This photo has GPS coordinates in its XMP data. Anyone who gets the original file can see where it was taken. '));
+      if (gps) {
+        const a = el('a', '', 'See it on a map');
+        a.href = 'https://www.openstreetmap.org/?mlat=' + gps.lat.toFixed(6) + '&mlon=' + gps.lon.toFixed(6) + '#map=16/' + gps.lat.toFixed(5) + '/' + gps.lon.toFixed(5);
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        warn.appendChild(a);
+        warn.appendChild(document.createTextNode(' (opens OpenStreetMap). '));
+      }
+      warn.appendChild(document.createTextNode('The cleaned copy contains no location.'));
+      card.appendChild(warn);
+    }
+
+    const R = rows(entry);
+    if (!R.length) {
+      card.appendChild(el('p', 'msg ok rexif-none', 'No metadata found. This file was already clean, so the download matches the original.'));
+    } else {
+      const wrap = el('div', 'table-wrap'), table = el('table', 'data'), thead = el('thead'), tr = el('tr'), tb = el('tbody');
+      ['Found', 'Value', 'Cleaned file'].forEach(h => { const th = el('th', '', h); th.scope = 'col'; tr.appendChild(th); });
+      thead.appendChild(tr);
+      R.forEach(row => {
+        const t = el('tr');
+        const th = el('th', '', row[0]);
+        th.scope = 'row';
+        const f = FATE[row[2]] || FATE.removed;
+        t.append(th, el('td', '', row[1]), el('td', 'rexif-fate ' + f[1], f[0]));
+        tb.appendChild(t);
+      });
+      table.append(thead, tb);
+      wrap.appendChild(table);
+      card.appendChild(wrap);
+    }
+    if (out && x && out.orientation) {
+      const o = ORIENT[out.orientation].replace(/ \(\d\)$/, '').toLowerCase();
+      const note = out.keptOrientation
+        ? 'Kept only the orientation tag (' + o + ') so the photo still displays upright. Nothing else remains.'
+        : out.baked
+          ? 'Rotated the pixels (' + o + ') and re-encoded the photo, so it displays upright with no metadata at all.'
+          : 'Removed the orientation tag too. Apps will now show this photo ' + (out.orientation === 6 || out.orientation === 8 ? 'sideways' : out.orientation === 3 ? 'upside down' : 'mirrored') + ', as in the preview.';
+      card.appendChild(el('p', 'hint rexif-note', note));
+    }
+  }
+
+  function setBusy(d) {
+    busyCount = Math.max(0, busyCount + d);
+    list.setAttribute('data-busy', busyCount ? '1' : '0');
+  }
+
+  function summary() {
+    const done = entries.filter(e => e.state === 'done'), bad = entries.filter(e => e.state === 'error');
+    const withGps = done.filter(e => (e.report.exif && e.report.exif.gps && e.report.exif.gps.ok) || (e.report.xmp && e.report.xmp.gps)).length;
+    $('#rexif-bulk').hidden = !entries.length;
+    $('#rexif-all').disabled = !done.length;
+    $('#rexif-all').textContent = 'Download all (' + done.length + ')';
+    $('#rexif-empty').hidden = entries.length > 0;
+    if (!entries.length) { okEl.textContent = ''; errEl.textContent = ''; return; }
+    okEl.textContent = done.length
+      ? 'Cleaned ' + done.length + (done.length === 1 ? ' file' : ' files') + '.' + (withGps ? ' ' + withGps + ' of them had a GPS location, now removed.' : '')
+      : '';
+    errEl.textContent = bad.length ? bad.length + (bad.length === 1 ? ' file' : ' files') + ' could not be cleaned. See the message on ' + (bad.length === 1 ? 'it' : 'each') + ' below.' : '';
+  }
+
+  // Each run gets a token, so a slow older run (e.g. re-encoding) never overwrites a newer result.
+  async function processEntry(entry) {
+    const token = entry.token = (entry.token || 0) + 1;
+    try {
+      if (!entry.report) await analyze(entry);
+      const out = await clean(entry);
+      if (token !== entry.token) return;
+      entry.out = out;
+      entry.state = 'done';
+    } catch (e) {
+      if (token !== entry.token) return;
+      entry.state = 'error';
+      entry.out = null;
+      entry.error = e && e.friendly ? e.message : 'Could not read this file: ' + ((e && e.message) || 'unknown error') + '.';
+    }
+    render(entry);
+  }
+
+  async function addFiles(files) {
+    files = Array.from(files || []);
+    if (!files.length) return;
+    errEl.textContent = '';
+    setBusy(1);
+    const fresh = files.map(f => {
+      const entry = { name: f.name || 'photo', file: f, bytes: null, state: 'working', card: el('article', 'rexif-card') };
+      entry.card.setAttribute('data-rexif-card', '');
+      entries.push(entry);
+      list.appendChild(entry.card);
+      render(entry);
+      return entry;
+    });
+    summary();
+    for (const entry of fresh) {
+      if (entries.indexOf(entry) < 0) continue; // list was cleared meanwhile
+      try {
+        entry.bytes = new Uint8Array(await entry.file.arrayBuffer());
+      } catch (e) {
+        entry.state = 'error'; entry.error = 'Your browser could not read this file.'; render(entry); continue;
+      }
+      await processEntry(entry);
+    }
+    setBusy(-1);
+    summary();
+  }
+
+  async function reprocess() {
+    if (!entries.length) return;
+    setBusy(1);
+    const gen = ++renderGen;
+    for (const entry of entries.slice()) {
+      if (!entry.report || gen !== renderGen) continue;
+      entry.state = 'working';
+      entry.card.setAttribute('data-state', 'working');
+      const hint = entry.card.querySelector('.rexif-name .hint');
+      if (hint) hint.textContent = 'Updating…';
+      await processEntry(entry);
+    }
+    setBusy(-1);
+    if (gen === renderGen) summary();
+  }
+
+  function clearAll() {
+    renderGen++;
+    entries.forEach(e => { if (e.url) URL.revokeObjectURL(e.url); });
+    entries.length = 0;
+    list.textContent = '';
+    summary();
+  }
+
+  // ---------- Sample photo ----------
+  async function sample() {
+    const c = document.createElement('canvas');
+    c.width = 720; c.height = 480;
+    const g = c.getContext('2d');
+    const sky = g.createLinearGradient(0, 0, 0, 480);
+    sky.addColorStop(0, '#1d3b6e'); sky.addColorStop(0.55, '#f08a4b'); sky.addColorStop(1, '#f6c667');
+    g.fillStyle = sky; g.fillRect(0, 0, 720, 480);
+    g.fillStyle = '#ffe6a8'; g.beginPath(); g.arc(470, 300, 52, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#2b2d42'; g.beginPath(); g.moveTo(0, 480); g.lineTo(0, 330); g.lineTo(160, 250); g.lineTo(300, 340); g.lineTo(430, 270); g.lineTo(600, 350); g.lineTo(720, 300); g.lineTo(720, 480); g.fill();
+    g.fillStyle = '#16172b'; g.fillRect(0, 410, 720, 70);
+    g.fillStyle = '#ffffff'; g.font = '600 28px system-ui, sans-serif'; g.fillText('Sample photo', 28, 52);
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+    if (!blob) throw fail('Your browser could not create the sample photo.');
+    const jpg = new Uint8Array(await blob.arrayBuffer());
+    const tiff = makeTiff([
+      [0x010F, T.A('Example Camera Co.')], [0x0110, T.A('EC-1 Mark II')], [0x0131, T.A('Sample Photo Editor 2.1')],
+      [0x0132, T.A('2024:05:18 16:20:11')], [0x013B, T.A('Alex Sample')], [0x0112, T.S([1])]
+    ], [
+      [0x8769, [[0x9003, T.A('2024:05:18 14:07:32')], [0x9011, T.A('-04:00')], [0x829A, T.R([[1, 500]])], [0x829D, T.R([[8, 1]])], [0x8827, T.S([100])], [0x920A, T.R([[26, 1]])], [0xA431, T.A('EC1-0048213')]]],
+      [0x8825, [[0, T.B([2, 3, 0, 0])], [1, T.A('N')], [2, T.R([[40, 1], [41, 1], [2129, 100]])], [3, T.A('W')], [4, T.R([[74, 1], [2, 1], [4021, 100]])], [5, T.B([0])], [6, T.R([[12, 1]])]]]
+    ]);
+    const xmp = new TextEncoder().encode('http://ns.adobe.com/xap/1.0/\0<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="Sample Photo Editor 2.1"/></rdf:RDF></x:xmpmeta>');
+    const com = new TextEncoder().encode('Holiday trip, day 3');
+    const seg = (m, p) => { const s = new Uint8Array(4 + p.length); s.set([0xFF, m, (p.length + 2) >> 8, (p.length + 2) & 255]); s.set(p, 4); return s; };
+    const exifSeg = seg(0xE1, concat([new Uint8Array([0x45, 0x78, 0x69, 0x66, 0, 0]), tiff]));
+    let at = 2;
+    if (jpg[2] === 0xFF && jpg[3] === 0xE0) at = 4 + be16(jpg, 4);
+    const file = concat([jpg.subarray(0, at), exifSeg, seg(0xE1, xmp), seg(0xFE, com), jpg.subarray(at)]);
+    return new File([file], 'sample-photo.jpg', { type: 'image/jpeg' });
+  }
+
+  // ---------- Events ----------
+  fileInput.addEventListener('change', () => {
+    const files = Array.from(fileInput.files || []);
+    fileInput.value = '';
+    addFiles(files);
+  });
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('is-over'); }));
+  ['dragleave', 'dragend'].forEach(t => drop.addEventListener(t, () => drop.classList.remove('is-over')));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('is-over');
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
+  TT.$$('input[name="rexif-orient"]').forEach(r => r.addEventListener('change', reprocess));
+  iccBox.addEventListener('change', reprocess);
+  $('#rexif-clear').addEventListener('click', clearAll);
+  $('#rexif-all').addEventListener('click', () => {
+    const done = entries.filter(e => e.state === 'done' && e.out);
+    done.forEach((e, i) => setTimeout(() => TT.download(e.out.name, e.out.blob), i * 350));
+  });
+  $('#rexif-sample').addEventListener('click', async () => {
+    try { addFiles([await sample()]); } catch (e) { errEl.textContent = e.friendly ? e.message : 'Could not create the sample photo.'; }
+  });
+  summary();
+})();
+</script>

@@ -1,0 +1,490 @@
+---
+title: "Signature Generator: Draw a Signature Online"
+description: Draw your signature with a mouse, finger or stylus and download it as a transparent PNG or SVG, trimmed and ready for documents. Nothing is uploaded.
+category: Image & PDF
+keywords: [signature generator, draw signature online, online signature maker, transparent signature png, handwritten signature, electronic signature, signature pad, signature svg]
+howto: |
+  ## How to create your signature
+
+  1. Sign in the box with a mouse, a finger on a touchscreen, or a stylus.
+     **Undo** (or Ctrl+Z) removes the last stroke, and **Clear** starts over;
+     Undo brings a cleared signature back.
+  2. Choose black or blue ink, or any colour, and set the line thickness.
+     Both apply to the whole signature, so you can change them after signing.
+  3. Download a **PNG** with a transparent background or an **SVG** vector
+     file. Both are trimmed to the ink with a little padding, so they drop
+     neatly onto a signature line.
+
+  ## Tips for a natural-looking signature
+
+  - Sign at your normal speed. With **Natural line width** on, the line
+    thins when you move quickly and thickens when you slow down, much like
+    a ballpoint. A stylus (Apple Pencil, Surface Pen, S Pen and similar)
+    sets the width with pressure instead.
+  - Use the full width of the pad. A large signature scaled down in a
+    document looks smoother than a small one scaled up.
+  - Signing with a mouse is hard. A finger on a phone or tablet usually
+    looks better: open this page on that device and download the file there.
+  - Some offices ask for blue ink on printed forms because it makes an
+    original easy to tell apart from a black-and-white copy.
+
+  ## PNG or SVG?
+
+  | | PNG | SVG |
+  |---|---|---|
+  | What it stores | Pixels, transparent background | Vector curves |
+  | Enlarging | Blurs beyond its pixel size | Sharp at any size |
+  | Good for | Word, Google Docs, PDF editors, email | Design tools, websites |
+  {: .data .sg-table}
+
+  The PNG is drawn at twice its on-screen size by default, which stays sharp
+  at a normal printed signature size; choose 3× or 4× for large prints. Turn
+  on **White background** if an app shows the transparent areas as black.
+
+  ## How it works
+
+  The pad is an HTML canvas that listens to Pointer Events, the W3C standard
+  that delivers mouse, touch and pen input through one interface, including
+  pen pressure. Each sample is stored with its position and a width factor,
+  and strokes are drawn as quadratic Bézier curves through the midpoints
+  between samples, which turns the jagged line reported by the hardware into
+  smooth curves. The canvas matches your screen's pixel density, so lines
+  are crisp on high-resolution displays, and scrolling is switched off
+  inside the pad so a finger stroke does not move the page. Because the
+  strokes are kept as vectors, each download is redrawn from them at the
+  size you pick, and the SVG contains the same curves as editable paths.
+
+  ## Can I use it to sign documents?
+
+  Many legal systems accept electronic signatures for everyday agreements:
+  the US ESIGN Act and the EU eIDAS Regulation both say a signature cannot
+  be denied legal effect just because it is electronic. Some documents, such as wills or
+  notarised deeds, still need ink or a certified digital signature, so check
+  what the recipient accepts. This is general information, not legal advice.
+faq:
+  - q: Is my signature uploaded or saved anywhere?
+    a: No. Your strokes live only in this page's memory while it is open. Nothing is sent to a server or written to storage, and closing or reloading the tab erases the signature.
+  - q: How do I add the signature to a Word document or PDF?
+    a: In Word or Google Docs, insert the PNG as a picture, then in Word set its text wrapping to In Front of Text so you can place it on the signature line. Most PDF editors, including the Fill & Sign tool in Adobe Acrobat Reader, can add an image as your signature.
+  - q: Why does my signature appear on a black background?
+    a: The PNG background is transparent, and a few apps and image viewers display transparency as black. Turn on White background before downloading, or use the SVG file.
+  - q: Can I sign with my finger or an Apple Pencil?
+    a: Yes. The pad works with touch and styluses as well as a mouse, and the page does not scroll while you draw on it. With a pressure-sensitive stylus, pressing harder draws a thicker line.
+---
+<style>
+.sg-pad {
+  --sg-paper: #ffffff; --sg-guide: #c3c8cf; --sg-guide-text: #8b929c;
+  position: relative; height: clamp(190px, 32vw, 290px); margin: 0 0 14px; overflow: hidden;
+  background: var(--sg-paper); border: 1px solid var(--border); border-radius: 12px;
+  touch-action: none; -webkit-user-select: none; user-select: none;
+}
+@media (prefers-color-scheme: dark) { .sg-pad { --sg-paper: #f1f2ef; } }
+.sg-pad canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: 100%; cursor: crosshair; touch-action: none; }
+.sg-pad:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sg-line { position: absolute; left: 7%; right: 7%; bottom: 25%; border-bottom: 1.5px solid var(--sg-guide); pointer-events: none; }
+.sg-x { position: absolute; left: 7%; bottom: calc(25% + 4px); color: var(--sg-guide-text); font-size: 20px; font-weight: 600; line-height: 1; pointer-events: none; }
+.sg-hint { position: absolute; left: 0; right: 0; top: 34%; color: var(--sg-guide-text); font-size: 17px; text-align: center; pointer-events: none; }
+.sg-hint[hidden] { display: none; }
+.sg-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; margin: 0 0 12px; }
+.sg-ink-field { margin: 0; }
+.sg-inks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.sg-inks .check { gap: 6px; }
+.sg-custom-wrap { display: inline-flex; align-items: center; gap: 8px; }
+.sg-inks input:focus:not(:focus-visible), .sg-export input:focus:not(:focus-visible), .checks input:focus:not(:focus-visible) { outline: none; }
+.sg-table { margin: 0 0 14px; }
+.sg-dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border); }
+.sg-custom { width: 40px; height: 32px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; }
+.sg-thick { flex: 1 1 200px; min-width: 0; max-width: 320px; margin: 0; }
+.sg-thick-row { display: flex; align-items: center; gap: 10px; }
+.sg-thick-row output { flex: 0 0 auto; min-width: 48px; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.sg-edit { display: flex; gap: 10px; margin-left: auto; }
+.sg-export { padding-top: 16px; border-top: 1px solid var(--border); }
+.sg-export .row { align-items: center; }
+.sg-export .row > .field { flex: 0 1 220px; }
+.sg-info { margin: 0 0 12px; }
+@media (max-width: 560px) { .sg-edit { margin-left: 0; } }
+</style>
+
+<div class="sg-pad" id="sg-pad" data-strokes="0">
+  <div class="sg-line" aria-hidden="true"></div>
+  <span class="sg-x" aria-hidden="true">×</span>
+  <p class="sg-hint" id="sg-hint" aria-hidden="true">Sign here</p>
+  <canvas id="sg-canvas" role="img" aria-label="Signature pad. Draw your signature here with a mouse, finger or stylus."></canvas>
+</div>
+
+<div class="sg-bar">
+  <div class="field sg-ink-field">
+    <span class="label" id="sg-ink-label">Ink colour</span>
+    <div class="sg-inks" role="radiogroup" aria-labelledby="sg-ink-label">
+      <label class="check"><input type="radio" name="sg-ink" value="#000000" checked> <span class="sg-dot" style="background:#000000"></span> Black</label>
+      <label class="check"><input type="radio" name="sg-ink" value="#1a47b8"> <span class="sg-dot" style="background:#1a47b8"></span> Blue</label>
+      <span class="sg-custom-wrap">
+        <label class="check"><input type="radio" name="sg-ink" value="custom" id="sg-ink-custom"> Custom</label>
+        <input type="color" id="sg-custom" class="sg-custom" value="#7a1f2b" aria-label="Custom ink colour">
+      </span>
+    </div>
+  </div>
+  <div class="field sg-thick">
+    <label for="sg-width">Thickness</label>
+    <div class="sg-thick-row">
+      <input type="range" id="sg-width" min="1" max="10" step="0.5" value="3">
+      <output id="sg-width-out" for="sg-width">3 px</output>
+    </div>
+  </div>
+  <div class="sg-edit">
+    <button class="btn secondary" type="button" id="sg-undo" disabled>Undo</button>
+    <button class="btn secondary" type="button" id="sg-clear" disabled>Clear</button>
+  </div>
+</div>
+<div class="checks">
+  <label class="check"><input type="checkbox" id="sg-vary" checked> Natural line width (speed and pen pressure)</label>
+</div>
+
+<div class="sg-export">
+  <div class="row">
+    <div class="field">
+      <label for="sg-scale">PNG size</label>
+      <select id="sg-scale">
+        <option value="1">1× (as on screen)</option>
+        <option value="2" selected>2× (recommended)</option>
+        <option value="3">3×</option>
+        <option value="4">4× (large print)</option>
+      </select>
+    </div>
+    <label class="check"><input type="checkbox" id="sg-white"> White background</label>
+  </div>
+  <p class="msg error" id="sg-error" role="alert"></p>
+  <div class="actions">
+    <button class="btn" type="button" id="sg-png" disabled>Download PNG</button>
+    <button class="btn secondary" type="button" id="sg-svg" disabled>Download SVG</button>
+    <button class="btn secondary" type="button" id="sg-copy" disabled>Copy image</button>
+  </div>
+  <p class="hint sg-info" id="sg-info" aria-live="polite">Draw your signature above to enable the downloads.</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var pad = TT.$('#sg-pad'), canvas = TT.$('#sg-canvas'), ctx = canvas.getContext('2d');
+  var hint = TT.$('#sg-hint'), widthIn = TT.$('#sg-width'), widthOut = TT.$('#sg-width-out');
+  var varyBox = TT.$('#sg-vary'), customIn = TT.$('#sg-custom'), scaleSel = TT.$('#sg-scale'), whiteBox = TT.$('#sg-white');
+  var undoBtn = TT.$('#sg-undo'), clearBtn = TT.$('#sg-clear'), pngBtn = TT.$('#sg-png'), svgBtn = TT.$('#sg-svg'), copyBtn = TT.$('#sg-copy');
+  var errBox = TT.$('#sg-error'), info = TT.$('#sg-info');
+
+  var PADDING = 12;          // CSS px of empty space around the ink in exports
+  var strokes = [];          // { points: [{x, y, t, f}], pen: bool, v: number }
+  var history = [];          // { type: 'add' } or { type: 'clear', strokes: [...] }
+  var current = null, activeId = null, dpr = 1, raf = 0;
+
+  // ---------- settings ----------
+  function inkColor() {
+    var v = TT.$('input[name="sg-ink"]:checked').value;
+    return v === 'custom' ? customIn.value : v;
+  }
+  function baseWidth() { return Number(widthIn.value) || 3; }
+
+  // ---------- geometry ----------
+  function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+  // Splits a stroke into drawable pieces: straight ends plus quadratic curves through the
+  // midpoints between samples, each with its own width.
+  function segments(s) {
+    var pts = s.points, n = pts.length, out = [], vary = varyBox.checked, base = baseWidth();
+    function w(p) { return base * (vary ? p.f : 1); }
+    if (n < 2) return out;
+    if (n === 2) {
+      out.push({ x0: pts[0].x, y0: pts[0].y, x1: pts[1].x, y1: pts[1].y, w: (w(pts[0]) + w(pts[1])) / 2 });
+      return out;
+    }
+    var m = mid(pts[0], pts[1]);
+    out.push({ x0: pts[0].x, y0: pts[0].y, x1: m.x, y1: m.y, w: w(pts[0]) });
+    for (var i = 1; i < n - 1; i++) {
+      var a = mid(pts[i - 1], pts[i]), b = mid(pts[i], pts[i + 1]);
+      out.push({ x0: a.x, y0: a.y, cx: pts[i].x, cy: pts[i].y, x1: b.x, y1: b.y, w: w(pts[i]) });
+    }
+    var e = mid(pts[n - 2], pts[n - 1]);
+    out.push({ x0: e.x, y0: e.y, x1: pts[n - 1].x, y1: pts[n - 1].y, w: w(pts[n - 1]) });
+    return out;
+  }
+
+  function dotRadius(s) { return baseWidth() * (varyBox.checked ? s.points[0].f : 1) / 2; }
+
+  function bounds() {
+    var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    function add(x, y, r) {
+      if (x - r < b.x0) b.x0 = x - r;
+      if (y - r < b.y0) b.y0 = y - r;
+      if (x + r > b.x1) b.x1 = x + r;
+      if (y + r > b.y1) b.y1 = y + r;
+    }
+    strokes.forEach(function (s) {
+      if (s.points.length === 1) { add(s.points[0].x, s.points[0].y, dotRadius(s)); return; }
+      segments(s).forEach(function (g) {
+        var r = g.w / 2;
+        add(g.x0, g.y0, r); add(g.x1, g.y1, r);
+        if (g.cx !== undefined) add(g.cx, g.cy, r);
+      });
+    });
+    return isFinite(b.x0) ? b : null;
+  }
+
+  // ---------- drawing ----------
+  function drawAll(c) {
+    var color = inkColor();
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    c.strokeStyle = color;
+    c.fillStyle = color;
+    strokes.forEach(function (s) {
+      if (s.points.length === 1) {
+        c.beginPath();
+        c.arc(s.points[0].x, s.points[0].y, dotRadius(s), 0, Math.PI * 2);
+        c.fill();
+        return;
+      }
+      segments(s).forEach(function (g) {
+        c.beginPath();
+        c.moveTo(g.x0, g.y0);
+        if (g.cx !== undefined) c.quadraticCurveTo(g.cx, g.cy, g.x1, g.y1);
+        else c.lineTo(g.x1, g.y1);
+        c.lineWidth = g.w;
+        c.stroke();
+      });
+    });
+  }
+
+  function redraw() {
+    raf = 0;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawAll(ctx);
+  }
+  function scheduleDraw() { if (!raf) raf = requestAnimationFrame(redraw); }
+
+  function resize() {
+    var r = canvas.getBoundingClientRect();
+    dpr = window.devicePixelRatio || 1;
+    var w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    redraw();
+  }
+
+  // ---------- input ----------
+  function addPoint(s, e) {
+    var r = canvas.getBoundingClientRect();
+    var p = {
+      x: Math.min(Math.max(e.clientX - r.left, 0), r.width),
+      y: Math.min(Math.max(e.clientY - r.top, 0), r.height),
+      t: e.timeStamp || 0
+    };
+    var last = s.points[s.points.length - 1];
+    if (last && Math.abs(p.x - last.x) + Math.abs(p.y - last.y) < 0.75) return;
+    if (s.pen) {
+      var pr = e.pressure > 0 ? Math.min(1, e.pressure) : 0.5;
+      p.f = 0.3 + 1.4 * pr;                 // 0.5 pressure gives the chosen thickness
+    } else if (!last) {
+      p.f = 1;
+    } else {
+      var dist = Math.hypot(p.x - last.x, p.y - last.y), dt = Math.max(1, p.t - last.t);
+      var target = Math.min(1.35, Math.max(0.5, 1.4 - 0.3 * dist / dt)); // faster is thinner
+      s.v = s.v == null ? target : s.v * 0.75 + target * 0.25;
+      p.f = s.v;
+    }
+    s.points.push(p);
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    if (activeId !== null) return;               // one pointer at a time (palm, second finger)
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    errBox.textContent = '';
+    activeId = e.pointerId;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic or already released */ }
+    current = { points: [], pen: e.pointerType === 'pen', v: null };
+    addPoint(current, e);
+    strokes.push(current);
+    scheduleDraw();
+    updateUi();
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (e.pointerId !== activeId || !current) return;
+    e.preventDefault();
+    var events = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+    if (!events || !events.length) events = [e];
+    for (var i = 0; i < events.length; i++) addPoint(current, events[i]);
+    scheduleDraw();
+  });
+  function endStroke(e) {
+    if (e.pointerId !== activeId) return;
+    if (current) history.push({ type: 'add' });
+    current = null;
+    activeId = null;
+    scheduleDraw();
+    updateUi();
+  }
+  canvas.addEventListener('pointerup', endStroke);
+  canvas.addEventListener('pointercancel', endStroke);
+  canvas.addEventListener('lostpointercapture', endStroke);
+  // Older mobile browsers need this as well as touch-action: none to keep the page still.
+  ['touchstart', 'touchmove'].forEach(function (type) {
+    canvas.addEventListener(type, function (e) { if (e.cancelable) e.preventDefault(); }, { passive: false });
+  });
+
+  function undo() {
+    var h = history.pop();
+    if (!h) return;
+    if (h.type === 'add') strokes.pop();
+    else strokes = h.strokes;
+    scheduleDraw();
+    updateUi();
+  }
+  function clear() {
+    if (!strokes.length) return;
+    history.push({ type: 'clear', strokes: strokes });
+    strokes = [];
+    scheduleDraw();
+    updateUi();
+  }
+
+  // ---------- export ----------
+  function exportSize(scale) {
+    var b = bounds();
+    if (!b) return null;
+    return {
+      b: b,
+      w: Math.ceil((b.x1 - b.x0 + 2 * PADDING) * scale),
+      h: Math.ceil((b.y1 - b.y0 + 2 * PADDING) * scale)
+    };
+  }
+
+  function exportCanvas() {
+    var scale = Number(scaleSel.value) || 2, sz = exportSize(scale);
+    if (!sz) return null;
+    var c = document.createElement('canvas');
+    c.width = sz.w; c.height = sz.h;
+    var x = c.getContext('2d');
+    if (whiteBox.checked) { x.fillStyle = '#ffffff'; x.fillRect(0, 0, sz.w, sz.h); }
+    x.setTransform(scale, 0, 0, scale, (PADDING - sz.b.x0) * scale, (PADDING - sz.b.y0) * scale);
+    drawAll(x);
+    return c;
+  }
+
+  function pngBlob() {
+    var c = exportCanvas();
+    if (!c) return Promise.reject(new Error('empty'));
+    return new Promise(function (resolve, reject) {
+      c.toBlob(function (b) { b ? resolve(b) : reject(new Error('encode')); }, 'image/png');
+    });
+  }
+
+  function r2(n) { var v = Math.round(n * 100) / 100; return Object.is(v, -0) ? '0' : String(v); }
+
+  function svgText() {
+    var b = bounds();
+    if (!b) return null;
+    var ox = PADDING - b.x0, oy = PADDING - b.y0;
+    var W = r2(b.x1 - b.x0 + 2 * PADDING), H = r2(b.y1 - b.y0 + 2 * PADDING), color = inkColor();
+    var out = ['<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">'];
+    if (whiteBox.checked) out.push('<rect width="100%" height="100%" fill="#ffffff"/>');
+    out.push('<g fill="none" stroke="' + color + '" stroke-linecap="round" stroke-linejoin="round">');
+    var dots = [];
+    strokes.forEach(function (s) {
+      if (s.points.length === 1) {
+        dots.push('<circle cx="' + r2(s.points[0].x + ox) + '" cy="' + r2(s.points[0].y + oy) + '" r="' + r2(dotRadius(s)) + '"/>');
+        return;
+      }
+      // Consecutive pieces with the same (rounded) width share one path.
+      var d = '', width = null;
+      segments(s).forEach(function (g) {
+        var gw = r2(Math.round(g.w * 10) / 10);
+        var piece = (g.cx !== undefined ? 'Q' + r2(g.cx + ox) + ' ' + r2(g.cy + oy) + ' ' : 'L') + r2(g.x1 + ox) + ' ' + r2(g.y1 + oy);
+        if (gw !== width) {
+          if (d) out.push('<path stroke-width="' + width + '" d="' + d + '"/>');
+          width = gw;
+          d = 'M' + r2(g.x0 + ox) + ' ' + r2(g.y0 + oy) + piece;
+        } else {
+          d += piece;
+        }
+      });
+      if (d) out.push('<path stroke-width="' + width + '" d="' + d + '"/>');
+    });
+    out.push('</g>');
+    if (dots.length) out.push('<g fill="' + color + '">' + dots.join('') + '</g>');
+    out.push('</svg>');
+    return out.join('\n') + '\n';
+  }
+
+  pngBtn.addEventListener('click', function () {
+    errBox.textContent = '';
+    pngBlob().then(function (b) { TT.download('signature.png', b); }, function () {
+      errBox.textContent = strokes.length ? 'The PNG could not be created.' : 'Draw your signature first.';
+    });
+  });
+  svgBtn.addEventListener('click', function () {
+    errBox.textContent = '';
+    var svg = svgText();
+    if (!svg) { errBox.textContent = 'Draw your signature first.'; return; }
+    TT.download('signature.svg', svg, 'image/svg+xml');
+  });
+  copyBtn.addEventListener('click', function () {
+    errBox.textContent = '';
+    if (!strokes.length) { errBox.textContent = 'Draw your signature first.'; return; }
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.write || typeof ClipboardItem !== 'function') throw new Error('unsupported');
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob() })]).then(function () {
+        TT.flash(copyBtn, 'Copied!');
+      }, function () {
+        errBox.textContent = 'Your browser did not allow copying the image. Use Download PNG instead.';
+      });
+    } catch (e) {
+      errBox.textContent = 'This browser cannot copy images. Use Download PNG instead.';
+    }
+  });
+
+  // ---------- UI state ----------
+  function updateUi() {
+    var has = strokes.length > 0;
+    pad.setAttribute('data-strokes', strokes.length);
+    hint.hidden = has;
+    undoBtn.disabled = history.length === 0;
+    clearBtn.disabled = !has;
+    pngBtn.disabled = svgBtn.disabled = copyBtn.disabled = !has;
+    widthOut.textContent = widthIn.value + ' px';
+    if (!has) { info.textContent = 'Draw your signature above to enable the downloads.'; return; }
+    if (current) return;
+    var scale = Number(scaleSel.value) || 2, sz = exportSize(scale), one = exportSize(1);
+    info.textContent = 'PNG: ' + sz.w + ' × ' + sz.h + ' px. SVG: ' + one.w + ' × ' + one.h + ', scales to any size.';
+  }
+
+  function restyle() { scheduleDraw(); updateUi(); }
+  TT.$$('input[name="sg-ink"]').forEach(function (r) { r.addEventListener('change', restyle); });
+  customIn.addEventListener('input', function () { TT.$('#sg-ink-custom').checked = true; restyle(); });
+  widthIn.addEventListener('input', restyle);
+  varyBox.addEventListener('change', restyle);
+  scaleSel.addEventListener('change', updateUi);
+  whiteBox.addEventListener('change', updateUi);
+  undoBtn.addEventListener('click', undo);
+  clearBtn.addEventListener('click', clear);
+  document.addEventListener('keydown', function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return;
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(TEXTAREA|SELECT)$/.test(t.tagName) || (t.tagName === 'INPUT' && /^(text|number|search|email|url|password)$/.test(t.type)))) return;
+    if (!history.length) return;
+    e.preventDefault();
+    undo();
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+  else window.addEventListener('resize', resize);
+  // Moving the window to a screen with a different pixel density changes devicePixelRatio only.
+  (function watchDpr() {
+    if (!window.matchMedia) return;
+    var mq = window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { resize(); watchDpr(); }, { once: true });
+  })();
+  resize();
+  updateUi();
+})();
+</script>

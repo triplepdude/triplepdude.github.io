@@ -1,0 +1,570 @@
+---
+title: "Resize Image: Change Image Size in Pixels"
+description: Resize an image by pixels or percentage, with presets for Instagram, HD and passport photos. Save as JPEG, PNG or WebP. Runs in your browser, no upload.
+category: Image & PDF
+keywords: [resize image, image resizer, resize photo, change image size, resize image to 1080x1080, resize image in pixels, resize image by percentage, reduce image dimensions]
+howto: |
+  ## How to resize an image
+
+  1. Choose an image, drop it on the box or paste it with Ctrl+V (⌘V on a
+     Mac). Any format your browser can display works, including JPG, PNG,
+     WebP, GIF, BMP and AVIF.
+  2. Pick a preset, or type a width or height in pixels. With **Lock aspect
+     ratio** on, the other side follows automatically so the picture is never
+     squashed. Switch to **Percentage** to scale both sides at once, for
+     example to 50%.
+  3. Choose the output format and quality, check the preview and the new
+     file size, then press **Download**.
+
+  ## When the new shape is different
+
+  A preset such as 1080 × 1080 often has a different shape from your photo.
+  Fixed-size presets unlock the aspect ratio, and you choose what happens to
+  the difference:
+
+  - **Crop to fill** scales the image until it covers the whole frame and
+    trims the overflow equally from both sides, so the centre stays in view.
+    This is what you want for social media posts and profile pictures.
+  - **Fit inside** shows the whole image and fills the empty bands with
+    white, black or transparency (letterboxing).
+  - **Stretch** forces the exact width and height and distorts the picture.
+    It is rarely right, but some upload forms insist on exact dimensions.
+
+  ## How the resizing works
+
+  Your browser decodes the image and draws it onto an HTML canvas at the new
+  size with its best smoothing filter (`imageSmoothingQuality` set to
+  `high`). For big reductions the image is first halved step by step until it
+  is less than twice the target size, and only then scaled to the final size.
+  Each halving blends every 2 × 2 block of pixels, so fine detail such as
+  hair, text and fabric does not break up into jagged edges and moiré, which
+  is what happens when a single large step skips over most of the source
+  pixels.
+
+  Enlarging works too, but it cannot invent detail: the new pixels are
+  interpolated from their neighbours, so edges look softer. For prints, a
+  common rule is 300 pixels per inch, so a 6 × 4 inch print needs about
+  1800 × 1200 pixels.
+
+  ## Formats, quality and file size
+
+  | Format | Best for | Transparency |
+  |---|---|---|
+  | JPEG | Photos, smallest files | No, becomes white |
+  | PNG | Screenshots, logos, text | Yes, lossless |
+  | WebP | Photos and graphics for the web | Yes |
+  {: .data .ri-table}
+
+  The quality slider applies to JPEG and WebP. Settings from 80 to 90 usually
+  look the same as the original at a fraction of the size, while below about
+  60 blocky artefacts start to show. PNG is lossless, so it ignores the
+  slider. If your browser cannot encode WebP, the tool says so and saves a
+  PNG instead.
+
+  Saving a new file also drops the metadata stored in the original, such as
+  the camera model and GPS location, which is worth knowing before you share
+  a photo. Photos taken sideways are turned upright first, following their
+  EXIF orientation tag, so the result is the way up you see it here.
+faq:
+  - q: Is my image uploaded to a server?
+    a: No. The image is decoded, resized and encoded by your own browser. It never leaves your device, and the page keeps working offline once it has loaded.
+  - q: Will resizing make the file smaller?
+    a: Usually, because fewer pixels need fewer bytes. Two exceptions are saving a photo as PNG, which is lossless and often several times larger than JPEG, and enlarging an image. The file size box shows the change before you download.
+  - q: How do I resize to exactly 1080 × 1080 without squashing the photo?
+    a: Choose the Instagram square preset, or unlock the aspect ratio and type 1080 in both boxes, then keep Crop to fill selected. The image is scaled to cover the square and the edges are trimmed evenly.
+  - q: Can I use it for a passport or visa photo?
+    a: The 600 × 600 preset matches the smallest square digital photo the US State Department accepts (it allows 600 to 1200 pixels per side). The tool does not check head size, lighting or background, so compare the result with the official rules for your document.
+  - q: Why does my enlarged image look blurry?
+    a: Resizing cannot recreate detail that was never captured. When an image is enlarged, the extra pixels are estimated from their neighbours, which softens edges. Start from the largest original you have.
+---
+<style>
+.ri-drop {
+  position: relative; margin: 0 0 16px; padding: 36px 16px; text-align: center;
+  background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.ri-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.ri-drop p { margin: 10px 0 0; }
+.ri-drop .hint { margin-top: 4px; }
+.ri-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
+.ri-filebar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 0 0 16px; padding: 10px 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.ri-filebar.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.ri-filebar[hidden], .ri-drop[hidden] { display: none; }
+.ri-filemeta { display: grid; flex: 1 1 200px; min-width: 0; }
+.ri-filemeta strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ri-cols { align-items: start; }
+.ri-settings, .ri-result { min-width: 0; }
+.ri-wh > .field { flex: 1 1 110px; }
+.ri-lock { margin: 0 0 16px; }
+.ri-pct-row { display: flex; align-items: center; gap: 12px; }
+.ri-pct-row input[type="range"] { flex: 1 1 auto; min-width: 0; }
+.ri-pct-row input[type="number"] { flex: 0 0 96px; width: 96px; }
+.ri-quick { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.ri-preview {
+  display: flex; align-items: center; justify-content: center; min-height: 240px; margin: 0 0 16px; padding: 12px;
+  overflow: hidden; background-color: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+  background-image: repeating-conic-gradient(var(--border) 0% 25%, transparent 0% 50%);
+  background-size: 20px 20px;
+}
+.ri-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 380px; }
+.ri-preview img[hidden], .ri-placeholder[hidden], [data-ri-hidden] { display: none !important; }
+.ri-placeholder { margin: 0; padding: 8px 12px; color: var(--muted); background: var(--surface); border-radius: 8px; text-align: center; }
+.ri-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ri-stats .stat b { font-size: 1.25rem; }
+.ri-table { margin: 0 0 14px; }
+.ri-out-row > .field { flex: 1 1 170px; }
+@media (max-width: 440px) { .ri-stats .stat b { font-size: 1.05rem; } }
+.ri-note { margin: -4px 0 12px; }
+.ri-note:empty { display: none; }
+</style>
+
+<div class="ri-drop" id="ri-drop">
+  <input type="file" id="ri-file" class="ri-file" accept="image/*" tabindex="-1" aria-label="Choose an image">
+  <button class="btn" type="button" id="ri-choose">Choose image</button>
+  <p>or drop it here, or paste with Ctrl+V</p>
+  <p class="hint">JPG, PNG, WebP, GIF, BMP or AVIF. Nothing is uploaded.</p>
+</div>
+<div class="ri-filebar" id="ri-filebar" hidden>
+  <div class="ri-filemeta"><strong id="ri-fname"></strong><span class="hint" id="ri-forig"></span></div>
+  <button class="btn secondary small" type="button" id="ri-another">Choose another image</button>
+</div>
+<p class="msg error" id="ri-error" role="alert"></p>
+
+<div class="cols ri-cols">
+  <div class="ri-settings">
+    <div class="field">
+      <label for="ri-preset">Preset</label>
+      <select id="ri-preset">
+        <option value="custom">Custom size</option>
+        <optgroup label="Social media">
+          <option value="ig-square">Instagram square (1080 × 1080)</option>
+          <option value="ig-portrait">Instagram portrait (1080 × 1350)</option>
+          <option value="story">Story, Reels, TikTok (1080 × 1920)</option>
+          <option value="link">Facebook, LinkedIn link image (1200 × 630)</option>
+          <option value="x-header">X (Twitter) header (1500 × 500)</option>
+          <option value="yt-thumb">YouTube thumbnail (1280 × 720)</option>
+        </optgroup>
+        <optgroup label="Screen and video">
+          <option value="hd">HD 720p (1280 × 720)</option>
+          <option value="fhd">Full HD 1080p (1920 × 1080)</option>
+          <option value="uhd">4K UHD (3840 × 2160)</option>
+        </optgroup>
+        <optgroup label="Photos and web">
+          <option value="passport">Passport, US visa photo (600 × 600)</option>
+          <option value="avatar">Profile picture (400 × 400)</option>
+          <option value="web">Web page, 1200 px wide</option>
+          <option value="email">Email, 800 px wide</option>
+        </optgroup>
+      </select>
+    </div>
+
+    <div class="label" id="ri-by-label">Resize by</div>
+    <div class="checks" role="radiogroup" aria-labelledby="ri-by-label">
+      <label class="check"><input type="radio" name="ri-by" value="px" checked> Pixels</label>
+      <label class="check"><input type="radio" name="ri-by" value="pct"> Percentage</label>
+    </div>
+
+    <div id="ri-px-group">
+      <div class="row ri-wh">
+        <div class="field">
+          <label for="ri-w">Width (px)</label>
+          <input type="number" id="ri-w" min="1" max="16384" step="1" inputmode="numeric" placeholder="Width">
+        </div>
+        <div class="field">
+          <label for="ri-h">Height (px)</label>
+          <input type="number" id="ri-h" min="1" max="16384" step="1" inputmode="numeric" placeholder="Height">
+        </div>
+      </div>
+      <label class="check ri-lock"><input type="checkbox" id="ri-lock" checked> Lock aspect ratio</label>
+      <div class="row ri-wh" id="ri-fit-row">
+        <div class="field">
+          <label for="ri-fit">If the shape differs</label>
+          <select id="ri-fit">
+            <option value="crop">Crop to fill (keep centre)</option>
+            <option value="pad">Fit inside, add background</option>
+            <option value="stretch">Stretch to exact size</option>
+          </select>
+        </div>
+        <div class="field" id="ri-bg-field">
+          <label for="ri-bg">Background</label>
+          <select id="ri-bg">
+            <option value="#ffffff">White</option>
+            <option value="#000000">Black</option>
+            <option value="transparent">Transparent</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="ri-pct-group">
+      <div class="field">
+        <label for="ri-pct">Scale (%)</label>
+        <div class="ri-pct-row">
+          <input type="range" id="ri-pct-range" min="1" max="200" value="100" aria-label="Scale percentage slider">
+          <input type="number" id="ri-pct" min="1" max="1000" step="any" value="100" inputmode="decimal">
+        </div>
+      </div>
+      <div class="ri-quick">
+        <button class="btn secondary small" type="button" data-pct="25">25%</button>
+        <button class="btn secondary small" type="button" data-pct="50">50%</button>
+        <button class="btn secondary small" type="button" data-pct="75">75%</button>
+        <button class="btn secondary small" type="button" data-pct="200">200%</button>
+      </div>
+    </div>
+
+    <div class="row ri-out-row">
+      <div class="field">
+        <label for="ri-format">Save as</label>
+        <select id="ri-format">
+          <option value="same">Original format</option>
+          <option value="image/jpeg">JPEG</option>
+          <option value="image/png">PNG</option>
+          <option value="image/webp">WebP</option>
+        </select>
+      </div>
+      <div class="field" id="ri-q-field">
+        <label for="ri-quality">Quality: <span id="ri-q-out">90</span></label>
+        <input type="range" id="ri-quality" min="1" max="100" value="90">
+      </div>
+    </div>
+  </div>
+
+  <div class="ri-result">
+    <div class="ri-preview" id="ri-preview">
+      <p class="ri-placeholder" id="ri-placeholder">Your resized image will appear here.</p>
+      <img id="ri-img" alt="Preview of the resized image" hidden>
+    </div>
+    <div class="stats ri-stats" aria-live="polite">
+      <div class="stat"><b id="ri-dims">–</b><span>New size in pixels</span></div>
+      <div class="stat"><b id="ri-size">–</b><span><span id="ri-fmt"></span><span id="ri-change">File size</span></span></div>
+    </div>
+    <p class="hint ri-note" id="ri-note" aria-live="polite"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="ri-download" disabled>Download</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var fileInput = TT.$('#ri-file'), dropZone = TT.$('#ri-drop'), fileBar = TT.$('#ri-filebar');
+  var errBox = TT.$('#ri-error'), presetSel = TT.$('#ri-preset');
+  var wIn = TT.$('#ri-w'), hIn = TT.$('#ri-h'), lockBox = TT.$('#ri-lock'), fitSel = TT.$('#ri-fit'), bgSel = TT.$('#ri-bg');
+  var pctIn = TT.$('#ri-pct'), pctRange = TT.$('#ri-pct-range'), fmtSel = TT.$('#ri-format'), qIn = TT.$('#ri-quality');
+  var previewImg = TT.$('#ri-img'), placeholder = TT.$('#ri-placeholder'), downloadBtn = TT.$('#ri-download');
+
+  var MAX_SIDE = 16384, MAX_PIXELS = 64000000;
+  var PRESETS = {
+    'ig-square': [1080, 1080], 'ig-portrait': [1080, 1350], 'story': [1080, 1920], 'link': [1200, 630],
+    'x-header': [1500, 500], 'yt-thumb': [1280, 720], 'hd': [1280, 720], 'fhd': [1920, 1080], 'uhd': [3840, 2160],
+    'passport': [600, 600], 'avatar': [400, 400], 'web': [1200, 0], 'email': [800, 0]
+  };
+  var TYPE_NAMES = { 'image/jpeg': 'JPEG', 'image/png': 'PNG', 'image/webp': 'WebP' };
+  var EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+  var src = null, lastEdited = 'w', renderToken = 0, result = null, resultUrl = null;
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
+    return (n / 1048576).toFixed(n < 10485760 ? 2 : 1) + ' MB';
+  }
+  function by() { return TT.$('input[name="ri-by"]:checked').value; }
+  function setBy(v) { TT.$('input[name="ri-by"][value="' + v + '"]').checked = true; }
+  function intOf(el) { var v = Number(el.value); return el.value.trim() !== '' && Number.isFinite(v) ? Math.round(v) : NaN; }
+  function hide(el, h) { if (h) el.setAttribute('data-ri-hidden', ''); else el.removeAttribute('data-ri-hidden'); }
+
+  function loadImage(url) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        if (img.decode) img.decode().then(function () { resolve(img); }, function () { resolve(img); });
+        else resolve(img);
+      };
+      img.onerror = function () { reject(new Error('decode')); };
+      img.src = url;
+    });
+  }
+  function toBlob(canvas, type, q) {
+    return new Promise(function (resolve, reject) {
+      canvas.toBlob(function (b) { b ? resolve(b) : reject(new Error('encode')); }, type, q);
+    });
+  }
+
+  function outType() {
+    var f = fmtSel.value;
+    if (f !== 'same') return f;
+    return src && TYPE_NAMES[src.type] ? src.type : 'image/png';
+  }
+
+  // ---------- target size ----------
+  function target() {
+    if (!src) return null;
+    var w, h, fit = 'stretch';
+    if (by() === 'pct') {
+      var p = Number(pctIn.value);
+      if (!(p > 0) || !Number.isFinite(p)) return { error: 'Enter a percentage greater than 0.' };
+      w = Math.max(1, Math.round(src.w * p / 100));
+      h = Math.max(1, Math.round(src.h * p / 100));
+    } else {
+      w = intOf(wIn); h = intOf(hIn);
+      if (!(w >= 1) || !(h >= 1)) return { error: 'Enter a width and a height of at least 1 pixel.' };
+      if (!lockBox.checked) fit = fitSel.value;
+    }
+    if (w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS) {
+      return { error: 'That is larger than this tool can create: at most 16,384 pixels per side and 64 megapixels in total.' };
+    }
+    return { w: w, h: h, fit: fit };
+  }
+
+  // Draws the source rectangle into ctx at (dx, dy, dw, dh). Big reductions are done by repeated
+  // halving so every source pixel contributes, then one final high-quality step.
+  function resample(img, sx, sy, sw, sh, ctx, dx, dy, dw, dh) {
+    var cur = img, temp = [];
+    while (sw / 2 >= dw && sh / 2 >= dh) {
+      var nw = Math.max(dw, Math.round(sw / 2)), nh = Math.max(dh, Math.round(sh / 2));
+      var c = document.createElement('canvas');
+      c.width = nw; c.height = nh;
+      var cx = c.getContext('2d');
+      cx.imageSmoothingEnabled = true;
+      cx.imageSmoothingQuality = 'high';
+      cx.drawImage(cur, sx, sy, sw, sh, 0, 0, nw, nh);
+      temp.push(c);
+      cur = c; sx = 0; sy = 0; sw = nw; sh = nh;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(cur, sx, sy, sw, sh, dx, dy, dw, dh);
+    temp.forEach(function (c) { c.width = c.height = 0; });
+  }
+
+  function draw(t, type) {
+    var W = t.w, H = t.h, sx = 0, sy = 0, sw = src.w, sh = src.h, dx = 0, dy = 0, dw = W, dh = H, s;
+    if (t.fit === 'crop') {
+      s = Math.max(W / src.w, H / src.h);
+      sw = Math.min(src.w, W / s); sh = Math.min(src.h, H / s);
+      sx = (src.w - sw) / 2; sy = (src.h - sh) / 2;
+    } else if (t.fit === 'pad') {
+      s = Math.min(W / src.w, H / src.h);
+      dw = Math.max(1, Math.min(W, Math.round(src.w * s)));
+      dh = Math.max(1, Math.min(H, Math.round(src.h * s)));
+      dx = Math.floor((W - dw) / 2); dy = Math.floor((H - dh) / 2);
+    }
+    var out = document.createElement('canvas');
+    out.width = W; out.height = H;
+    var ctx = out.getContext('2d');
+    var bg = t.fit === 'pad' ? bgSel.value : 'transparent';
+    if (type === 'image/jpeg' && bg === 'transparent') bg = '#ffffff';
+    if (bg !== 'transparent') { ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H); }
+    resample(src.img, sx, sy, sw, sh, ctx, dx, dy, dw, dh);
+    return out;
+  }
+
+  // ---------- rendering the result ----------
+  function setResult(r) {
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+    resultUrl = null;
+    result = r;
+    downloadBtn.disabled = !r;
+    if (!r) {
+      previewImg.hidden = true;
+      previewImg.removeAttribute('src');
+      placeholder.hidden = false;
+      TT.$('#ri-dims').textContent = '–';
+      TT.$('#ri-size').textContent = '–';
+      TT.$('#ri-fmt').textContent = '';
+      TT.$('#ri-change').textContent = 'File size';
+      TT.$('#ri-note').textContent = '';
+      return;
+    }
+    resultUrl = URL.createObjectURL(r.blob);
+    previewImg.src = resultUrl;
+    previewImg.hidden = false;
+    placeholder.hidden = true;
+    TT.$('#ri-dims').textContent = r.w + ' × ' + r.h;
+    TT.$('#ri-size').textContent = fmtBytes(r.blob.size);
+    var change = Math.round((r.blob.size / src.size - 1) * 100);
+    var actual = r.blob.type || r.type, lossy = actual !== 'image/png';
+    TT.$('#ri-fmt').textContent = (TYPE_NAMES[actual] || actual) + (lossy ? ' ' + qIn.value : '');
+    TT.$('#ri-change').textContent = change === 0 ? ', same as original' : ', ' + Math.abs(change) + '% ' + (change < 0 ? 'smaller' : 'larger');
+    var notes = [];
+    if (actual !== r.type) notes.push('Your browser cannot save ' + TYPE_NAMES[r.type] + ' images, so this is a ' + (TYPE_NAMES[actual] || actual) + ' file.');
+    if (r.w > src.w * 1.001 || r.h > src.h * 1.001) notes.push('This enlarges the original, so it will look softer: resizing cannot add detail.');
+    TT.$('#ri-note').textContent = notes.join(' ');
+    var base = src.name.replace(/\.[^.]+$/, '') || 'image';
+    r.filename = base + '-' + r.w + 'x' + r.h + '.' + (EXT[actual] || 'png');
+  }
+
+  async function render() {
+    var token = ++renderToken;
+    errBox.textContent = '';
+    if (!src) return;
+    var t = target();
+    if (!t || t.error) {
+      if (t) errBox.textContent = t.error;
+      setResult(null);
+      return;
+    }
+    var type = outType();
+    try {
+      var canvas = draw(t, type);
+      var blob = await toBlob(canvas, type, Number(qIn.value) / 100);
+      canvas.width = canvas.height = 0;
+      if (token !== renderToken) return;
+      setResult({ blob: blob, w: t.w, h: t.h, type: type });
+    } catch (e) {
+      if (token !== renderToken) return;
+      errBox.textContent = 'The image could not be resized, probably because this device ran out of memory. Try a smaller size.';
+      setResult(null);
+    }
+  }
+  var schedule = TT.debounce(render, 150);
+
+  // ---------- controls ----------
+  function syncVisibility() {
+    var pct = by() === 'pct';
+    hide(TT.$('#ri-px-group'), pct);
+    hide(TT.$('#ri-pct-group'), !pct);
+    hide(TT.$('#ri-fit-row'), lockBox.checked);
+    hide(TT.$('#ri-bg-field'), fitSel.value !== 'pad');
+    hide(TT.$('#ri-q-field'), outType() === 'image/png');
+    TT.$('#ri-q-out').textContent = qIn.value;
+    var sameOpt = fmtSel.querySelector('option[value="same"]');
+    sameOpt.textContent = src ? 'Original (' + (TYPE_NAMES[src.type] || 'PNG') + ')' : 'Original format';
+  }
+
+  function followLock() {
+    if (!src || !lockBox.checked) return;
+    if (lastEdited === 'h') {
+      var h = intOf(hIn);
+      if (h >= 1) wIn.value = Math.max(1, Math.round(h * src.w / src.h));
+    } else {
+      var w = intOf(wIn);
+      if (w >= 1) hIn.value = Math.max(1, Math.round(w * src.h / src.w));
+    }
+  }
+
+  function setPct(p, fromRange) {
+    if (!fromRange) pctIn.value = p;
+    pctRange.value = Math.min(200, Math.max(1, Number(p) || 1));
+    if (fromRange) pctIn.value = p;
+    var v = Number(pctIn.value);
+    if (src && v > 0) {
+      wIn.value = Math.max(1, Math.round(src.w * v / 100));
+      hIn.value = Math.max(1, Math.round(src.h * v / 100));
+    }
+  }
+
+  function applyPreset() {
+    var p = PRESETS[presetSel.value];
+    if (!p) return;
+    setBy('px');
+    if (p[1]) {
+      lockBox.checked = false;
+      wIn.value = p[0];
+      hIn.value = p[1];
+    } else {
+      lockBox.checked = true;
+      lastEdited = 'w';
+      wIn.value = p[0];
+      if (src) followLock(); else hIn.value = '';
+    }
+  }
+
+  function changed() { syncVisibility(); schedule(); }
+
+  wIn.addEventListener('input', function () { lastEdited = 'w'; presetSel.value = 'custom'; followLock(); changed(); });
+  hIn.addEventListener('input', function () { lastEdited = 'h'; presetSel.value = 'custom'; followLock(); changed(); });
+  lockBox.addEventListener('change', function () { presetSel.value = 'custom'; followLock(); changed(); });
+  presetSel.addEventListener('change', function () { applyPreset(); changed(); });
+  TT.$$('input[name="ri-by"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      presetSel.value = 'custom';
+      if (by() === 'pct') setPct(pctIn.value, false);
+      changed();
+    });
+  });
+  pctIn.addEventListener('input', function () { presetSel.value = 'custom'; setPct(pctIn.value, false); changed(); });
+  pctRange.addEventListener('input', function () { presetSel.value = 'custom'; setPct(pctRange.value, true); changed(); });
+  TT.$$('[data-pct]').forEach(function (b) {
+    b.addEventListener('click', function () { presetSel.value = 'custom'; setPct(b.getAttribute('data-pct'), false); changed(); });
+  });
+  [fitSel, bgSel, fmtSel].forEach(function (el) { el.addEventListener('change', changed); });
+  qIn.addEventListener('input', changed);
+
+  downloadBtn.addEventListener('click', function () {
+    if (result) TT.download(result.filename, result.blob);
+  });
+
+  // ---------- loading ----------
+  async function loadFile(file) {
+    if (!file) return;
+    errBox.textContent = '';
+    var url = URL.createObjectURL(file), img;
+    try {
+      img = await loadImage(url);
+      if (!img.naturalWidth || !img.naturalHeight) throw new Error('size');
+    } catch (e) {
+      URL.revokeObjectURL(url);
+      errBox.textContent = '“' + (file.name || 'That file') + '” is not an image this browser can open. Try a JPG, PNG, WebP, GIF, BMP or AVIF file.';
+      return;
+    }
+    if (src) URL.revokeObjectURL(src.url);
+    src = {
+      img: img, url: url, w: img.naturalWidth, h: img.naturalHeight, size: file.size || 1,
+      name: file.name || 'pasted-image.png', type: (file.type || '').toLowerCase()
+    };
+    if (src.type === 'image/jpg') src.type = 'image/jpeg';
+    TT.$('#ri-fname').textContent = src.name;
+    TT.$('#ri-fname').title = src.name;
+    TT.$('#ri-forig').textContent = 'Original: ' + src.w + ' × ' + src.h + ' px, ' + fmtBytes(file.size) +
+      (TYPE_NAMES[src.type] ? ', ' + TYPE_NAMES[src.type] : '');
+    dropZone.hidden = true;
+    fileBar.hidden = false;
+    if (presetSel.value !== 'custom') applyPreset();
+    else if (by() === 'pct') setPct(pctIn.value, false);
+    else { wIn.value = src.w; hIn.value = src.h; lastEdited = 'w'; }
+    syncVisibility();
+    render();
+  }
+
+  TT.$('#ri-choose').addEventListener('click', function () { fileInput.click(); });
+  TT.$('#ri-another').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    var f = fileInput.files && fileInput.files[0];
+    loadFile(f).then(function () { fileInput.value = ''; });
+  });
+
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1; }
+  function dropTarget() { return src ? fileBar : dropZone; }
+  document.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropTarget().classList.add('is-over');
+  });
+  document.addEventListener('dragleave', function (e) {
+    if (!e.relatedTarget) { dropZone.classList.remove('is-over'); fileBar.classList.remove('is-over'); }
+  });
+  document.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropZone.classList.remove('is-over');
+    fileBar.classList.remove('is-over');
+    loadFile(e.dataTransfer.files[0]);
+  });
+  document.addEventListener('paste', function (e) {
+    var files = e.clipboardData ? Array.prototype.filter.call(e.clipboardData.files || [], function (f) { return /^image\//.test(f.type); }) : [];
+    if (!files.length) return;
+    e.preventDefault();
+    loadFile(files[0]);
+  });
+
+  syncVisibility();
+})();
+</script>

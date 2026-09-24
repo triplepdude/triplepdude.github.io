@@ -1,0 +1,554 @@
+---
+title: "Keyboard Tester: Test Every Key Online"
+description: Test every key on your keyboard online. Keys light up as you press them, with key codes, a rollover and ghosting counter, and key chatter detection.
+category: Device Tests
+keywords: [keyboard tester, keyboard test online, key tester, test keyboard keys, keyboard ghosting test, n-key rollover test, key chatter test]
+howto: |
+  ## How to test your keyboard
+
+  Press every key once; the keyboard picture is focused when the page loads. A
+  key turns solid while held and stays tinted after release, so a key that
+  never lights up is faulty or is swallowed before it reaches the browser. The
+  counter shows how many keys of the chosen layout you have covered. Pick **Tenkeyless**
+  or **60%** if your board has no number pad or no function row, so the count
+  matches your hardware. Keys that are not on the drawing, such as media keys,
+  F13 to F24 or the extra ISO key next to left Shift, appear under **Other keys**.
+
+  While the keyboard picture is focused, the page blocks the default action of
+  keys that would scroll or move you away: Space, the arrows, Page Up/Down,
+  Home, End, Tab, Backspace, Alt, the Menu key and F1 to F12. Press **Esc twice**
+  quickly, or click elsewhere, to stop capturing. Shortcuts the operating system
+  handles first, such as the Windows key, Alt+Tab or Ctrl+Alt+Del, cannot be
+  blocked by any web page.
+
+  ## What the numbers mean
+
+  Each press fires a `keydown` event and each release a `keyup` event, as
+  defined in the W3C UI Events specification. The panel shows the fields a
+  developer usually needs:
+
+  | Field | Meaning | Example |
+  |---|---|---|
+  | `key` | The character or action produced, which depends on your layout and Shift | `a`, `A`, `Enter` |
+  | `code` | The physical key position, named after the US QWERTY key in that spot | `KeyA`, `NumpadEnter` |
+  | `keyCode` | Legacy numeric code, deprecated but still common in older scripts | `65`, `13` |
+  | `location` | 0 standard, 1 left, 2 right, 3 numeric keypad | `ShiftRight` is 2 |
+  | `repeat` | `true` for auto-repeat events while a key is held | |
+  {: .data .kbt-gt}
+
+  Because `code` describes position, a French AZERTY user who presses the key
+  labelled A sees `code` = `KeyQ` and `key` = `a`. The drawing is lit by `code`,
+  so it always matches physical position even when the printed legends differ.
+  Legacy `keyCode` values also differ between browsers for a few punctuation
+  keys: Firefox reports 59 for the semicolon key, 61 for equals and 173 for
+  minus, while Chrome and Safari report 186, 187 and 189.
+
+  ## Rollover and ghosting
+
+  **Max held at once** records the largest number of keys the browser saw down
+  at the same moment. Hold several keys together, for example A, S, D, F plus
+  J, K, L and semicolon, then check that every one is listed under **Held now**.
+  A keyboard with a basic matrix may drop the third or fourth key in some
+  combinations (blocking), or report a key you did not press (ghosting). USB
+  keyboards that use the standard boot protocol are limited to six normal keys
+  plus modifiers, so a result of 6 is expected for many office keyboards, while
+  gaming boards advertising n-key rollover should go higher.
+
+  ## Key chatter
+
+  A worn or dirty mechanical switch can bounce and register one press as two.
+  The tester flags a **possible chatter** whenever a key goes down again within
+  the chosen threshold (50 ms by default) of being released, which is faster
+  than people normally repeat a key. The log's **Timing** column shows how long
+  each key was held and the gap before its next press. If a switch chatters
+  often, compressed air or replacing the switch usually fixes it.
+faq:
+  - q: Is anything I type sent to a server?
+    a: No. Key events are handled by JavaScript in this page and are kept only in memory while the tab is open. Nothing is uploaded, logged or stored, and the Reset button or closing the tab clears everything.
+  - q: Why does a key not light up even though it works elsewhere?
+    a: Some keys never reach web pages. The Fn key is handled inside the keyboard itself, the Windows or Command key and shortcuts such as Alt+Tab are caught by the operating system, and on Windows the Print Screen key only sends a key release, which the tester still counts. Try the key with the tester focused and with other apps closed.
+  - q: Can I test my phone's on-screen keyboard?
+    a: No. Touch keyboards on phones and tablets do not send physical key codes to web pages. A Bluetooth or USB keyboard connected to a phone or tablet does work; scroll the keyboard picture sideways on a narrow screen.
+  - q: How many keys should the rollover counter reach?
+    a: Most standard USB keyboards reach at least 6 normal keys plus the modifiers, and n-key rollover gaming keyboards can show 10 or more. Many laptop keyboards stop at 2 or 3 in some combinations. If a key you are holding is missing from Held now, the keyboard is blocking it.
+---
+<style>
+.kbt-gt { margin: 0 0 16px; }
+.kbt-status { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+.kbt-dot { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--border); }
+.kbt-status.is-on { color: var(--text); }
+.kbt-status.is-on .kbt-dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.kbt-scroll {
+  margin: 0 0 10px; padding: 10px; overflow-x: auto; overflow-y: hidden;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+  cursor: pointer; overscroll-behavior-x: contain;
+}
+.kbt-scroll:focus { outline: none; }
+.kbt-scroll:focus-visible, .kbt-scroll.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.kbt-board {
+  position: relative; width: 100%;
+  min-width: calc(var(--kbt-w) * 27px);
+  aspect-ratio: var(--kbt-w) / var(--kbt-h);
+  container-type: inline-size;
+  user-select: none; -webkit-user-select: none;
+}
+.kbt-key { position: absolute; }
+.kbt-cap {
+  --u: calc(100cqw / var(--kbt-w));
+  position: absolute; inset: 2px; inset: calc(var(--u) * 0.045);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  overflow: hidden;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-bottom-width: 3px;
+  border-radius: 5px; border-radius: calc(var(--u) * 0.12);
+  font-size: 11px; font-size: calc(var(--u) * 0.27);
+  line-height: 1.1; text-align: center; white-space: nowrap;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.kbt-cap span + span { margin-top: 0.1em; }
+.kbt-key.is-sm .kbt-cap { font-size: 9px; font-size: calc(var(--u) * 0.22); }
+.kbt-key.is-tested .kbt-cap { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.kbt-key.is-down .kbt-cap { background: var(--accent); border-color: var(--accent); color: var(--accent-text); border-bottom-width: 1px; }
+.kbt-key.is-chatter .kbt-cap { box-shadow: inset 0 0 0 2px var(--danger); }
+.kbt-swipe { margin: -4px 0 8px; }
+.kbt-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+.kbt-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.kbt-legend i { width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); }
+.kbt-legend i.l-down { background: var(--accent); border-color: var(--accent); }
+.kbt-legend i.l-tested { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.kbt-legend i.l-chatter { box-shadow: inset 0 0 0 2px var(--danger); }
+.kbt-h { margin: 20px 0 8px; font-size: 1rem; }
+.kbt-held { margin: 0 0 16px; min-height: 0; }
+.kbt-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+.kbt-chips li {
+  padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); font-size: 13px;
+}
+.kbt-chips li.is-on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.kbt-last .stat b { font-family: var(--mono); font-size: 1.1rem; }
+.kbt-log td, .kbt-log th { white-space: nowrap; }
+.kbt-log td.kbt-t { color: var(--muted); }
+.kbt-log tr.is-chatter td { color: var(--danger); }
+.kbt-empty { color: var(--muted); }
+</style>
+
+<div class="row">
+  <div class="field">
+    <label for="kbt-layout">Layout</label>
+    <select id="kbt-layout">
+      <option value="full">Full-size (104 keys)</option>
+      <option value="tkl">Tenkeyless (87 keys)</option>
+      <option value="60">60% (61 keys)</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="kbt-labels">Key names</label>
+    <select id="kbt-labels">
+      <option value="pc">Windows / Linux</option>
+      <option value="mac">Mac</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="kbt-chatter-ms">Chatter threshold</label>
+    <select id="kbt-chatter-ms">
+      <option value="20">20 ms</option>
+      <option value="30">30 ms</option>
+      <option value="50" selected>50 ms</option>
+      <option value="80">80 ms</option>
+    </select>
+  </div>
+  <button class="btn secondary" type="button" id="kbt-reset">Reset</button>
+</div>
+
+<p class="kbt-status" id="kbt-status"><span class="kbt-dot" aria-hidden="true"></span><span id="kbt-status-text">Click the keyboard, then press any key.</span></p>
+
+<div class="kbt-scroll" id="kbt-scroll" tabindex="0" role="application" aria-label="Keyboard tester. Press keys to test them. Press Escape twice to leave." aria-describedby="kbt-status-text">
+  <div class="kbt-board" id="kbt-board" aria-hidden="true"></div>
+</div>
+
+<p class="hint kbt-swipe" id="kbt-swipe" hidden>Scroll the keyboard sideways to see every key.</p>
+<div class="kbt-legend" aria-hidden="true">
+  <span><i></i>Not tested</span>
+  <span><i class="l-down"></i>Held down</span>
+  <span><i class="l-tested"></i>Tested</span>
+  <span><i class="l-chatter"></i>Possible chatter</span>
+</div>
+
+<p class="msg ok" id="kbt-done" aria-live="polite"></p>
+
+<div class="stats">
+  <div class="stat"><b id="kbt-tested">0 / 104</b><span>Keys tested</span></div>
+  <div class="stat"><b id="kbt-held-count">0</b><span>Held now</span></div>
+  <div class="stat"><b id="kbt-max">0</b><span>Max held at once</span></div>
+  <div class="stat"><b id="kbt-chatter">0</b><span>Possible chatter</span></div>
+  <div class="stat"><b id="kbt-presses">0</b><span>Key presses</span></div>
+</div>
+
+<p class="label">Held now</p>
+<p class="output kbt-held" id="kbt-held" aria-live="polite">None</p>
+
+<h2 class="kbt-h">Last key event</h2>
+<div class="stats kbt-last" aria-live="polite">
+  <div class="stat"><b id="kbt-ev-type">–</b><span>Event</span></div>
+  <div class="stat"><b id="kbt-ev-key">–</b><span>event.key</span></div>
+  <div class="stat"><b id="kbt-ev-code">–</b><span>event.code</span></div>
+  <div class="stat"><b id="kbt-ev-keycode">–</b><span>event.keyCode</span></div>
+  <div class="stat"><b id="kbt-ev-location">–</b><span>event.location</span></div>
+  <div class="stat"><b id="kbt-ev-repeat">–</b><span>event.repeat</span></div>
+</div>
+<p class="label" id="kbt-mods-label">Modifier and lock state</p>
+<ul class="kbt-chips" id="kbt-mods" aria-labelledby="kbt-mods-label"></ul>
+
+<div id="kbt-other-wrap" hidden>
+  <p class="label" id="kbt-other-label">Other keys (not on the drawing)</p>
+  <ul class="kbt-chips" id="kbt-other" aria-labelledby="kbt-other-label"></ul>
+</div>
+
+<h2 class="kbt-h">Event log</h2>
+<div class="table-wrap">
+  <table class="data kbt-log">
+    <thead><tr><th scope="col">Event</th><th scope="col">key</th><th scope="col">code</th><th scope="col">keyCode</th><th scope="col">location</th><th scope="col">Timing</th></tr></thead>
+    <tbody id="kbt-log"><tr><td colspan="6" class="kbt-empty">No keys pressed yet.</td></tr></tbody>
+  </table>
+</div>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="kbt-copy">Copy full log</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---- Key geometry (ANSI, in key units) ----
+  var KEYS = [];
+  function row(y, x, section, items) {
+    items.forEach(function (it) {
+      if (typeof it === 'number') { x += it; return; }
+      var w = it[2] || 1;
+      KEYS.push({ code: it[0], label: it[1], x: x, y: y, w: w, h: it[3] || 1, s: section });
+      x += w;
+    });
+  }
+  function letters(str) { return str.split('').map(function (c) { return ['Key' + c, c]; }); }
+  function fn(a, b) { var out = []; for (var i = a; i <= b; i++) out.push(['F' + i, 'F' + i]); return out; }
+
+  row(0, 0, 'f', [['Escape', 'Esc'], 1].concat(fn(1, 4), [0.5], fn(5, 8), [0.5], fn(9, 12)));
+  row(0, 15.25, 'n', [['PrintScreen', 'PrtSc'], ['ScrollLock', 'ScrLk'], ['Pause', 'Pause']]);
+
+  row(1.5, 0, 'm', [['Backquote', '~\n`'], ['Digit1', '!\n1'], ['Digit2', '@\n2'], ['Digit3', '#\n3'], ['Digit4', '$\n4'],
+    ['Digit5', '%\n5'], ['Digit6', '^\n6'], ['Digit7', '&\n7'], ['Digit8', '*\n8'], ['Digit9', '(\n9'], ['Digit0', ')\n0'],
+    ['Minus', '_\n-'], ['Equal', '+\n='], ['Backspace', 'Backspace', 2]]);
+  row(1.5, 15.25, 'n', [['Insert', 'Ins'], ['Home', 'Home'], ['PageUp', 'PgUp']]);
+  row(1.5, 18.5, 'p', [['NumLock', 'Num\nLock'], ['NumpadDivide', '/'], ['NumpadMultiply', '*'], ['NumpadSubtract', '-']]);
+
+  row(2.5, 0, 'm', [['Tab', 'Tab', 1.5]].concat(letters('QWERTYUIOP'), [['BracketLeft', '{\n['], ['BracketRight', '}\n]'], ['Backslash', '|\n\\', 1.5]]));
+  row(2.5, 15.25, 'n', [['Delete', 'Del'], ['End', 'End'], ['PageDown', 'PgDn']]);
+  row(2.5, 18.5, 'p', [['Numpad7', '7\nHome'], ['Numpad8', '8\n↑'], ['Numpad9', '9\nPgUp'], ['NumpadAdd', '+', 1, 2]]);
+
+  row(3.5, 0, 'm', [['CapsLock', 'Caps Lock', 1.75]].concat(letters('ASDFGHJKL'), [['Semicolon', ':\n;'], ['Quote', '"\n\''], ['Enter', 'Enter', 2.25]]));
+  row(3.5, 18.5, 'p', [['Numpad4', '4\n←'], ['Numpad5', '5'], ['Numpad6', '6\n→']]);
+
+  row(4.5, 0, 'm', [['ShiftLeft', 'Shift', 2.25]].concat(letters('ZXCVBNM'), [['Comma', '<\n,'], ['Period', '>\n.'], ['Slash', '?\n/'], ['ShiftRight', 'Shift', 2.75]]));
+  row(4.5, 16.25, 'n', [['ArrowUp', '↑']]);
+  row(4.5, 18.5, 'p', [['Numpad1', '1\nEnd'], ['Numpad2', '2\n↓'], ['Numpad3', '3\nPgDn'], ['NumpadEnter', 'Enter', 1, 2]]);
+
+  row(5.5, 0, 'm', [['ControlLeft', 'Ctrl', 1.25], ['MetaLeft', 'Win', 1.25], ['AltLeft', 'Alt', 1.25], ['Space', 'Space', 6.25],
+    ['AltRight', 'Alt', 1.25], ['MetaRight', 'Win', 1.25], ['ContextMenu', 'Menu', 1.25], ['ControlRight', 'Ctrl', 1.25]]);
+  row(5.5, 15.25, 'n', [['ArrowLeft', '←'], ['ArrowDown', '↓'], ['ArrowRight', '→']]);
+  row(5.5, 18.5, 'p', [['Numpad0', '0\nIns', 2], ['NumpadDecimal', '.\nDel']]);
+
+  var LAYOUTS = { full: 'fmnp', tkl: 'fmn', '60': 'm' };
+  var MAC_LABELS = {
+    ControlLeft: 'control', ControlRight: 'control', MetaLeft: '⌘ cmd', MetaRight: '⌘ cmd',
+    AltLeft: '⌥ option', AltRight: '⌥ option', Backspace: 'delete', Enter: 'return',
+    Delete: 'del ⌦', NumLock: 'clear', Escape: 'esc', CapsLock: 'caps lock', Tab: 'tab', ShiftLeft: 'shift', ShiftRight: 'shift'
+  };
+  var SMALL = { NumLock: 1, PrintScreen: 1, ScrollLock: 1, Pause: 1, Insert: 1, PageUp: 1, PageDown: 1, Home: 1, End: 1, Delete: 1, ContextMenu: 1,
+    Numpad7: 1, Numpad9: 1, Numpad1: 1, Numpad3: 1, Numpad0: 1, NumpadDecimal: 1, MetaLeft: 1, MetaRight: 1, AltLeft: 1, AltRight: 1 };
+  var MODIFIERS = { ShiftLeft: 1, ShiftRight: 1, ControlLeft: 1, ControlRight: 1, AltLeft: 1, AltRight: 1, MetaLeft: 1, MetaRight: 1 };
+  var MOD_STATES = [['Shift', 'Shift'], ['Control', 'Ctrl'], ['Alt', 'Alt'], ['Meta', 'Meta'], ['AltGraph', 'AltGr'],
+    ['CapsLock', 'Caps Lock'], ['NumLock', 'Num Lock'], ['ScrollLock', 'Scroll Lock']];
+  var LOCATIONS = ['0 (standard)', '1 (left)', '2 (right)', '3 (numpad)'];
+  var PREVENT_KEYS = { ' ': 1, Spacebar: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, PageUp: 1, PageDown: 1,
+    Home: 1, End: 1, Tab: 1, Backspace: 1, Alt: 1, ContextMenu: 1, '/': 1, '\'': 1 };
+  var PREVENT_CODES = { Space: 1, Tab: 1, Backspace: 1, AltLeft: 1, AltRight: 1, ContextMenu: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
+  var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+
+  var scroller = TT.$('#kbt-scroll');
+  var board = TT.$('#kbt-board');
+  var layoutSel = TT.$('#kbt-layout');
+  var labelSel = TT.$('#kbt-labels');
+  var chatterSel = TT.$('#kbt-chatter-ms');
+  var logBody = TT.$('#kbt-log');
+
+  var keyEls = {};       // code -> element (current layout only)
+  var layoutCodes = {};  // code -> true for current layout
+  var layoutTotal = 0;
+  var tested = new Set();
+  var held = new Map();   // id -> keydown timeStamp
+  var lastUp = {};        // id -> keyup timeStamp
+  var chatterKeys = new Set();
+  var maxHeld = 0, presses = 0, chatterCount = 0, lastEsc = -1e9;
+  var log = [];           // full log, capped
+  var LOG_MAX = 500, LOG_SHOW = 10;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c]; });
+  }
+  function fmt(n) { return String(Math.round(n * 1000) / 1000); }
+
+  // ---- Rendering the board ----
+  function render() {
+    var sections = LAYOUTS[layoutSel.value] || LAYOUTS.full;
+    var mac = labelSel.value === 'mac';
+    var keys = KEYS.filter(function (k) { return sections.indexOf(k.s) >= 0; }).map(function (k) {
+      var c = { code: k.code, label: k.label, x: k.x, y: k.y, w: k.w, h: k.h };
+      if (mac) {
+        if (MAC_LABELS[k.code]) c.label = MAC_LABELS[k.code];
+        // Apple boards put Option next to Control and Command next to Space.
+        if (k.code === 'MetaLeft') c.x = 2.5; else if (k.code === 'AltLeft') c.x = 1.25;
+        else if (k.code === 'MetaRight') c.x = 10; else if (k.code === 'AltRight') c.x = 11.25;
+      }
+      return c;
+    });
+    var minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
+    keys.forEach(function (k) {
+      minX = Math.min(minX, k.x); minY = Math.min(minY, k.y);
+      maxX = Math.max(maxX, k.x + k.w); maxY = Math.max(maxY, k.y + k.h);
+    });
+    var W = maxX - minX, H = maxY - minY;
+    board.style.setProperty('--kbt-w', W);
+    board.style.setProperty('--kbt-h', H);
+    keyEls = {}; layoutCodes = {};
+    layoutTotal = keys.length;
+    board.innerHTML = keys.map(function (k) {
+      layoutCodes[k.code] = true;
+      var style = 'left:' + fmt((k.x - minX) / W * 100) + '%;top:' + fmt((k.y - minY) / H * 100) + '%;width:' +
+        fmt(k.w / W * 100) + '%;height:' + fmt(k.h / H * 100) + '%';
+      var lines = k.label.split('\n').map(function (l) { return '<span>' + esc(l) + '</span>'; }).join('');
+      return '<div class="kbt-key' + (SMALL[k.code] ? ' is-sm' : '') + '" data-code="' + k.code + '" style="' + style + '"><div class="kbt-cap">' + lines + '</div></div>';
+    }).join('');
+    TT.$$('.kbt-key', board).forEach(function (el) {
+      var code = el.getAttribute('data-code');
+      keyEls[code] = el;
+      el.classList.toggle('is-tested', tested.has(code));
+      el.classList.toggle('is-down', held.has(code));
+      el.classList.toggle('is-chatter', chatterKeys.has(code));
+    });
+    updateStats();
+  }
+
+  // ---- Stats and panels ----
+  function updateStats() {
+    var n = 0;
+    tested.forEach(function (c) { if (layoutCodes[c]) n++; });
+    TT.$('#kbt-tested').textContent = n + ' / ' + layoutTotal;
+    TT.$('#kbt-held-count').textContent = String(held.size);
+    TT.$('#kbt-max').textContent = String(maxHeld);
+    TT.$('#kbt-chatter').textContent = String(chatterCount);
+    TT.$('#kbt-presses').textContent = presses.toLocaleString();
+    TT.$('#kbt-done').textContent = n === layoutTotal && layoutTotal > 0 ? 'All ' + layoutTotal + ' keys on this layout have been tested.' : '';
+    var names = [];
+    held.forEach(function (_, id) { names.push(id); });
+    TT.$('#kbt-held').textContent = names.length ? names.join(' + ') : 'None';
+
+    var others = [];
+    tested.forEach(function (c) { if (!layoutCodes[c]) others.push(c); });
+    TT.$('#kbt-other-wrap').hidden = others.length === 0;
+    TT.$('#kbt-other').innerHTML = others.map(function (c) {
+      return '<li class="' + (held.has(c) ? 'is-on' : '') + '">' + esc(c) + '</li>';
+    }).join('');
+  }
+
+  function showMods(e) {
+    TT.$('#kbt-mods').innerHTML = MOD_STATES.map(function (m) {
+      var on = false;
+      try { on = !!(e && e.getModifierState && e.getModifierState(m[0])); } catch (err) { on = false; }
+      return '<li class="' + (on ? 'is-on' : '') + '">' + m[1] + (on ? ' on' : '') + '</li>';
+    }).join('');
+  }
+
+  function keyText(k) {
+    if (k === ' ') return '" " (Space)';
+    if (k === '') return '(empty)';
+    return k;
+  }
+
+  function showEvent(e) {
+    TT.$('#kbt-ev-type').textContent = e.type;
+    TT.$('#kbt-ev-key').textContent = keyText(e.key);
+    TT.$('#kbt-ev-code').textContent = e.code || '(empty)';
+    TT.$('#kbt-ev-keycode').textContent = String(e.keyCode);
+    TT.$('#kbt-ev-location').textContent = LOCATIONS[e.location] || String(e.location);
+    TT.$('#kbt-ev-repeat').textContent = String(!!e.repeat);
+    showMods(e);
+  }
+
+  function renderLog() {
+    if (!log.length) {
+      logBody.innerHTML = '<tr><td colspan="6" class="kbt-empty">No keys pressed yet.</td></tr>';
+      return;
+    }
+    var rows = [];
+    for (var i = log.length - 1; i >= 0 && rows.length < LOG_SHOW; i--) {
+      var r = log[i];
+      rows.push('<tr' + (r.chatter ? ' class="is-chatter"' : '') + '><td>' + esc(r.type + (r.repeat ? ' (repeat ×' + (r.repeats + 1) + ')' : '') + (r.chatter ? ', chatter?' : '')) +
+        '</td><td class="mono">' + esc(keyText(r.key)) + '</td><td class="mono">' + esc(r.code || '(empty)') + '</td><td>' + r.keyCode +
+        '</td><td>' + r.location + '</td><td class="kbt-t">' + esc(r.timing) + '</td></tr>');
+    }
+    logBody.innerHTML = rows.join('');
+  }
+
+  function addLog(e, timing, chatter) {
+    var last = log[log.length - 1];
+    if (e.repeat && last && last.repeat && last.code === e.code && last.key === e.key) {
+      last.repeats = (last.repeats || 0) + 1;
+    } else {
+      log.push({ type: e.type, key: e.key, code: e.code, keyCode: e.keyCode, location: e.location, repeat: !!e.repeat,
+        repeats: 0, timing: timing, chatter: chatter, t: e.timeStamp });
+      if (log.length > LOG_MAX) log.shift();
+    }
+    renderLog();
+  }
+
+  // Keep a pressed key visible when the drawing scrolls sideways on small screens.
+  function reveal(el) {
+    if (!el || scroller.scrollWidth <= scroller.clientWidth) return;
+    var r = el.getBoundingClientRect(), s = scroller.getBoundingClientRect();
+    if (r.left < s.left + 10) scroller.scrollLeft -= s.left + 10 - r.left;
+    else if (r.right > s.right - 10) scroller.scrollLeft += r.right - s.right + 10;
+  }
+
+  function setClass(id, cls, on) { var el = keyEls[id]; if (el) el.classList.toggle(cls, on); }
+
+  // ---- Key handling ----
+  function isEditable(t) {
+    return t && t.nodeType === 1 && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName));
+  }
+
+  function shouldPrevent(e) {
+    return PREVENT_KEYS[e.key] === 1 || PREVENT_CODES[e.code] === 1 || /^F([1-9]|1[0-2])$/.test(e.code);
+  }
+
+  function release() {
+    scroller.blur();
+    TT.$('#kbt-reset').focus();
+  }
+
+  function onKey(e) {
+    if (isEditable(e.target)) return;
+    var active = document.activeElement === scroller;
+    if (active && shouldPrevent(e)) e.preventDefault();
+    var id = e.code || (e.key ? 'Key "' + e.key + '"' : 'Unidentified');
+    var t = e.timeStamp || performance.now();
+    var timing = '', chatter = false;
+
+    if (e.type === 'keydown') {
+      if (!e.repeat || !held.has(id)) {
+        if (!held.has(id)) {
+          if (lastUp[id] != null) {
+            var gap = t - lastUp[id];
+            timing = 'gap ' + Math.round(gap) + ' ms';
+            if (gap < Number(chatterSel.value)) {
+              chatter = true;
+              chatterCount++;
+              chatterKeys.add(id);
+              setClass(id, 'is-chatter', true);
+            }
+          }
+          presses++;
+        }
+        held.set(id, t);
+        tested.add(id);
+        if (held.size > maxHeld) maxHeld = held.size;
+        setClass(id, 'is-down', true);
+        setClass(id, 'is-tested', true);
+        reveal(keyEls[id]);
+      }
+      if (active && id === 'Escape' && !e.repeat) {
+        if (t - lastEsc < 600) { lastEsc = -1e9; addLog(e, timing, chatter); showEvent(e); updateStats(); release(); return; }
+        lastEsc = t;
+      }
+    } else {
+      if (held.has(id)) {
+        timing = 'held ' + Math.round(t - held.get(id)) + ' ms';
+        held.delete(id);
+      } else {
+        // Some keys (Print Screen on Windows) only ever send keyup.
+        presses++;
+        timing = 'keyup only';
+        tested.add(id);
+        setClass(id, 'is-tested', true);
+        var el = keyEls[id];
+        if (el) { el.classList.add('is-down'); setTimeout(function () { if (!held.has(id)) el.classList.remove('is-down'); }, 180); }
+      }
+      lastUp[id] = t;
+      setClass(id, 'is-down', held.has(id));
+      // macOS does not send keyup for other keys released while Command is held.
+      if (isMac && (id === 'MetaLeft' || id === 'MetaRight')) {
+        Array.from(held.keys()).forEach(function (k) {
+          if (!MODIFIERS[k]) { held.delete(k); setClass(k, 'is-down', false); }
+        });
+      }
+    }
+    showEvent(e);
+    addLog(e, timing, chatter);
+    updateStats();
+  }
+
+  function clearHeld() {
+    if (!held.size) return;
+    held.forEach(function (_, id) { setClass(id, 'is-down', false); });
+    held.clear();
+    updateStats();
+  }
+
+  function setStatus() {
+    var on = document.activeElement === scroller;
+    TT.$('#kbt-status').classList.toggle('is-on', on);
+    scroller.classList.toggle('is-active', on);
+    TT.$('#kbt-status-text').textContent = on
+      ? 'Capturing keys. Space, Tab, arrows and F-keys stay on this page. Press Esc twice to stop.'
+      : 'Not capturing: keys still register, but Space, Tab and arrows will scroll or move focus. Click the keyboard to capture them.';
+  }
+
+  function reset() {
+    tested.clear(); held.clear(); chatterKeys.clear();
+    lastUp = {}; log = [];
+    maxHeld = 0; presses = 0; chatterCount = 0;
+    TT.$$('.kbt-key', board).forEach(function (el) { el.classList.remove('is-tested', 'is-down', 'is-chatter'); });
+    ['#kbt-ev-type', '#kbt-ev-key', '#kbt-ev-code', '#kbt-ev-keycode', '#kbt-ev-location', '#kbt-ev-repeat'].forEach(function (s) { TT.$(s).textContent = '–'; });
+    showMods(null);
+    renderLog();
+    updateStats();
+  }
+
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('keyup', onKey, true);
+  window.addEventListener('blur', clearHeld);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) clearHeld(); });
+  scroller.addEventListener('focus', setStatus);
+  scroller.addEventListener('blur', setStatus);
+  layoutSel.addEventListener('change', render);
+  labelSel.addEventListener('change', render);
+  TT.$('#kbt-reset').addEventListener('click', function () { reset(); scroller.focus({ preventScroll: true }); });
+  TT.$('#kbt-copy').addEventListener('click', function (e) {
+    var lines = ['event\tkey\tcode\tkeyCode\tlocation\trepeat\ttiming\ttime_ms'];
+    log.forEach(function (r) {
+      lines.push([r.type + (r.repeat ? ' repeat x' + (r.repeats + 1) : ''), r.key === ' ' ? 'Space' : r.key, r.code, r.keyCode, r.location, r.repeat, r.timing, Math.round(r.t)].join('\t'));
+    });
+    TT.copy(lines.join('\n'), e.currentTarget);
+  });
+
+  function checkOverflow() { TT.$('#kbt-swipe').hidden = scroller.scrollWidth <= scroller.clientWidth + 1; }
+  window.addEventListener('resize', TT.debounce(checkOverflow, 100));
+  layoutSel.addEventListener('change', checkOverflow);
+
+  if (isMac) labelSel.value = 'mac';
+  render();
+  showMods(null);
+  checkOverflow();
+  scroller.focus({ preventScroll: true });
+  setStatus();
+})();
+</script>

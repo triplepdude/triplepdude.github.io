@@ -1,0 +1,630 @@
+---
+title: Discord Timestamp Generator
+description: Make Discord timestamps that show in every reader's own time zone. Pick a date and time, preview each format live and copy the code in one click.
+category: Date & Time
+keywords: [discord timestamp generator, discord timestamp, discord time converter, discord timestamp format, discord relative timestamp, discord unix timestamp, discord time zone]
+howto: |
+  ## How to use it
+
+  1. Pick the date and time of your event. The time zone starts as yours;
+     change it when the time was announced somewhere else, for example
+     "8 PM New York time".
+  2. Copy the code for the style you like and paste it into a Discord message.
+     Everyone who reads it sees the time converted to their own time zone and
+     language.
+  3. To check a timestamp someone else posted, paste it into the decoder. It
+     also accepts a whole message, a plain Unix time, or a Discord ID
+     (message, user or server) and tells you when that ID was created.
+
+  ## What each style letter means
+
+  The code looks like `<t:1618953630:F>`: a Unix time in seconds, then an
+  optional style letter. Letters are case-sensitive. Examples below are for
+  `1618953630` as a US reader in Central time sees it:
+
+  | Code | Name | Shows as (English, US) |
+  |---|---|---|
+  | `t` | Short time | 4:20 PM |
+  | `T` | Medium time | 4:20:30 PM |
+  | `d` | Short date | 04/20/2021 |
+  | `D` | Long date | April 20, 2021 |
+  | `f` | Long date, short time | April 20, 2021 at 4:20 PM |
+  | `F` | Full date, short time | Tuesday, April 20, 2021 at 4:20 PM |
+  | `s` | Short date, short time | 04/20/2021, 4:20 PM |
+  | `S` | Short date, medium time | 04/20/2021, 4:20:30 PM |
+  | `R` | Relative | 3 hours ago, in 2 days |
+
+  Leaving the letter out, as in `<t:1618953630>`, gives the same result as `f`.
+  The `s` and `S` styles are newer additions to Discord's documented styles,
+  so check that they render in your app before relying on them. Readers with
+  a different language setting see their own format: English (UK) uses a
+  24-hour clock and day-first dates.
+
+  ## How it works
+
+  A Discord timestamp stores a single moment as the number of seconds since
+  1 January 1970 UTC, known as Unix time. The code carries no time zone at all:
+  each reader's app formats that moment in their own time zone. The time zone
+  you choose here is only used to turn the clock time you typed into that
+  number.
+
+  Around daylight saving changes some clock times happen twice and some never
+  happen. For a repeated time the generator uses the first occurrence; for a
+  skipped time (such as 2:30 AM on a spring-forward night) it moves forward by
+  the length of the gap, and it tells you when either happens.
+
+  ## Tips
+
+  - For events, pair the full date with a countdown:
+    `<t:1618953630:F> (<t:1618953630:R>)`. The generator builds this for you.
+  - Discord expects **seconds**. JavaScript's `Date.now()` returns
+    milliseconds, so divide by 1000 first. A 13-digit number pasted into
+    `<t:...>` does not show the date you meant.
+  - Bots can build the same codes: discord.py has
+    `discord.utils.format_dt(dt, style="R")`, and discord.js has the `time()`
+    helper with `TimestampStyles`.
+  - To find when a message was sent, turn on Developer Mode in Discord's
+    settings, choose *Copy Message ID* and paste the ID into the decoder. The
+    creation time is stored in the ID itself: the top 42 bits are milliseconds
+    since the start of 2015.
+faq:
+  - q: Will everyone see the time in their own time zone?
+    a: Yes. The code only contains a Unix time, and each reader's Discord app shows it in their own time zone and language. Nobody needs to convert anything.
+  - q: Why does my timestamp show the wrong time?
+    a: Usually the time was entered in the wrong time zone, or a millisecond value was used where Discord expects seconds. Paste the code into the decoder to see the exact moment it points to.
+  - q: Does the relative style keep updating?
+    a: Yes. A relative timestamp such as "in 2 hours" is recalculated by the reader's app, so it counts down and then switches to "ago" once the moment has passed. The preview here updates live in the same way.
+  - q: Can I choose a 12-hour or 24-hour clock?
+    a: Not in the code itself. Each reader sees the clock style that goes with their own Discord language, for example 4:20 PM in English (US) or 16:20 in English (UK).
+  - q: Is anything I enter sent to a server?
+    a: No. The generator and decoder run entirely in your browser. Nothing you type or paste is uploaded or stored.
+---
+<style>
+.tool-page:has(#dts-list) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
+.tool-page:has(#dts-list) .prose th, .tool-page:has(#dts-list) .prose td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.tool-page:has(#dts-list) .prose th { color: var(--muted); font-weight: 600; }
+@media (max-width: 480px) { .tool-page:has(#dts-list) .prose th, .tool-page:has(#dts-list) .prose td { padding: 6px 6px; font-size: 14px; } }
+.dts-h { margin: 28px 0 8px; font-size: 1.1rem; }
+.actions.dts-actions[hidden] { display: none; }
+.dts-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+.dts-inputs > .field:last-child { flex: 2 1 240px; }
+.dts-list { display: grid; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
+.dts-item {
+  display: grid;
+  grid-template-columns: minmax(0, 14.5rem) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.dts-name { font-size: 14px; font-weight: 600; line-height: 1.35; }
+.dts-name small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+.dts-letter { padding: 0 5px; border-radius: 4px; background: var(--bg); font-family: var(--mono); font-size: 13px; }
+.dts-chip { padding: 1px 3px; border-radius: 4px; background: color-mix(in srgb, var(--text) 9%, transparent); line-height: 1.5; }
+.dts-preview { min-width: 0; overflow-wrap: anywhere; }
+.dts-code { font-family: var(--mono); font-size: 14px; white-space: nowrap; }
+.dts-item.dts-wide .dts-code { white-space: normal; overflow-wrap: anywhere; }
+.dts-stats { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.dts-stats .stat b { font-size: 1.1rem; }
+.dts-stats .stat b.mono { font-size: 1.05rem; }
+.dts-stat-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dts-note { margin: -6px 0 16px; }
+.dts-note:empty { display: none; }
+.dts-dec { display: grid; gap: 8px; margin: 0 0 16px; }
+.dts-dec-item { padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.dts-dec-item > div + div { margin-top: 4px; }
+.dts-dec-item .mono { overflow-wrap: anywhere; }
+.dts-message { padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 8px 8px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+@media (max-width: 720px) {
+  .dts-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .dts-item .dts-name, .dts-item .dts-preview { grid-column: 1 / -1; }
+  .dts-code { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
+
+<div class="row dts-inputs">
+  <div class="field">
+    <label for="dts-date">Date</label>
+    <input type="date" id="dts-date" min="1970-01-01" max="9999-12-31">
+  </div>
+  <div class="field">
+    <label for="dts-time">Time</label>
+    <input type="time" id="dts-time" step="1">
+  </div>
+  <div class="field">
+    <label for="dts-zone">Time zone of the time you entered</label>
+    <select id="dts-zone"></select>
+  </div>
+</div>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="dts-now">Now</button>
+  <button class="btn secondary small" type="button" data-add="3600">+1 hour</button>
+  <button class="btn secondary small" type="button" data-add-days="1">+1 day</button>
+  <button class="btn secondary small" type="button" data-add-days="7">+1 week</button>
+  <button class="btn secondary small" type="button" data-add="-3600">&minus;1 hour</button>
+</div>
+<p class="msg error" id="dts-msg" role="alert"></p>
+<p class="hint dts-note" id="dts-note" aria-live="polite"></p>
+
+<div class="stats dts-stats" aria-live="polite">
+  <div class="stat">
+    <div class="dts-stat-row"><b class="mono" id="dts-unix">–</b><button class="btn secondary small" type="button" data-copy-target="#dts-unix" aria-label="Copy Unix timestamp">Copy</button></div>
+    <span>Unix timestamp (seconds)</span>
+  </div>
+  <div class="stat"><b id="dts-utc">–</b><span>UTC</span></div>
+  <div class="stat"><b id="dts-local">–</b><span id="dts-local-label">Your time</span></div>
+</div>
+
+<h2 class="dts-h">Discord codes</h2>
+<p class="hint" id="dts-preview-hint">Previews show what Discord displays in English (US) in your time zone. Every reader sees their own time zone and language.</p>
+<ul class="dts-list" id="dts-list"></ul>
+
+<hr class="dts-sep">
+<h2 class="dts-h">Decode a timestamp</h2>
+<div class="field">
+  <label for="dts-decode">Paste a Discord timestamp, a message, a Unix time or a Discord ID</label>
+  <input type="text" id="dts-decode" class="mono" autocomplete="off" spellcheck="false" placeholder="<t:1618953630:R> or 1618953630">
+</div>
+<p class="msg error" id="dts-decode-msg" role="alert"></p>
+<div id="dts-decode-out" aria-live="polite"></div>
+<div class="actions dts-actions" id="dts-decode-actions" hidden>
+  <button class="btn secondary small" type="button" id="dts-decode-load">Load into generator</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+
+  var STYLES = [
+    { k: 't', name: 'Short time' },
+    { k: 'T', name: 'Medium time', sub: 'with seconds' },
+    { k: 'd', name: 'Short date' },
+    { k: 'D', name: 'Long date' },
+    { k: 'f', name: 'Long date, short time', sub: 'default style' },
+    { k: 'F', name: 'Full date, short time' },
+    { k: 'R', name: 'Relative time', sub: 'updates live' },
+    { k: 's', name: 'Short date, short time', sub: 'newer style' },
+    { k: 'S', name: 'Short date, medium time', sub: 'newer style' },
+    { k: '', name: 'No letter', sub: 'same as f' },
+    { k: 'combo', name: 'Full date + relative', sub: 'popular for events' }
+  ];
+  var NAMES = {};
+  STYLES.forEach(function (s) { NAMES[s.k] = s.name; });
+
+  // ---------- Time zone helpers ----------
+  // Chrome reports some zones by their old CLDR names; show the current IANA names.
+  var MODERN = {
+    'Asia/Calcutta': 'Asia/Kolkata', 'Asia/Katmandu': 'Asia/Kathmandu', 'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+    'Asia/Rangoon': 'Asia/Yangon', 'Asia/Thimbu': 'Asia/Thimphu', 'Europe/Kiev': 'Europe/Kyiv',
+    'Atlantic/Faeroe': 'Atlantic/Faroe', 'America/Godthab': 'America/Nuuk', 'Pacific/Truk': 'Pacific/Chuuk',
+    'Pacific/Ponape': 'Pacific/Pohnpei', 'Pacific/Enderbury': 'Pacific/Kanton', 'Africa/Asmera': 'Africa/Asmara',
+    'America/Buenos_Aires': 'America/Argentina/Buenos_Aires', 'America/Catamarca': 'America/Argentina/Catamarca',
+    'America/Cordoba': 'America/Argentina/Cordoba', 'America/Jujuy': 'America/Argentina/Jujuy',
+    'America/Mendoza': 'America/Argentina/Mendoza', 'America/Indianapolis': 'America/Indiana/Indianapolis',
+    'America/Louisville': 'America/Kentucky/Louisville', 'America/Coral_Harbour': 'America/Atikokan'
+  };
+  function modern(tz) {
+    var m = MODERN[tz];
+    if (!m) return tz;
+    try { new Intl.DateTimeFormat('en-US', { timeZone: m }); return m; } catch (e) { return tz; }
+  }
+  var LOCAL_TZ = (function () {
+    try { return modern(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'); } catch (e) { return 'UTC'; }
+  })();
+  var partsCache = {};
+  function zoneParts(ms, tz) {
+    var f = partsCache[tz];
+    if (!f) {
+      f = partsCache[tz] = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, hourCycle: 'h23', era: 'short', year: 'numeric', month: 'numeric',
+        day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric'
+      });
+    }
+    var o = {};
+    f.formatToParts(new Date(ms)).forEach(function (p) { o[p.type] = p.value; });
+    var y = +o.year;
+    if (/^B/.test(o.era || '')) y = 1 - y;
+    return { y: y, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, s: +o.second };
+  }
+  function utcMs(y, mo, d, h, mi, s) {
+    var dt = new Date(0);
+    dt.setUTCFullYear(y, mo - 1, d);
+    dt.setUTCHours(h, mi, s, 0);
+    return dt.getTime();
+  }
+  function offsetMs(ms, tz) {
+    var p = zoneParts(ms, tz);
+    return utcMs(p.y, p.mo, p.d, p.h, p.mi, p.s) - Math.floor(ms / 1000) * 1000;
+  }
+  // Wall-clock time in a zone -> epoch ms. Repeated times use the earlier
+  // instant; skipped times move forward by the gap (like Temporal "compatible").
+  function fromZoned(y, mo, d, h, mi, s, tz) {
+    var wall = utcMs(y, mo, d, h, mi, s);
+    var before = offsetMs(wall - 864e5, tz), after = offsetMs(wall + 864e5, tz);
+    var found = [];
+    [before, after].forEach(function (off) {
+      var t = wall - off;
+      if (offsetMs(t, tz) === off && found.indexOf(t) < 0) found.push(t);
+    });
+    found.sort(function (a, b) { return a - b; });
+    if (found.length) return { ms: found[0], repeated: found.length > 1 };
+    return { ms: wall - before, skipped: true };
+  }
+  function offsetLabel(off) {
+    var sign = off < 0 ? '\u2212' : '+', a = Math.abs(Math.round(off / 1000));
+    var h = Math.floor(a / 3600), m = Math.floor(a % 3600 / 60), sec = a % 60;
+    return 'UTC' + sign + pad(h) + ':' + pad(m) + (sec ? ':' + pad(sec) : '');
+  }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  function buildZoneSelect(sel) {
+    var zones = [];
+    try { zones = Intl.supportedValuesOf('timeZone').slice(); } catch (e) { zones = []; }
+    if (!zones.length) zones = ['America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney', 'Pacific/Auckland'];
+    var seen = {};
+    zones = zones.map(modern).filter(function (z) {
+      if (z === 'UTC' || seen[z]) return false;
+      seen[z] = true;
+      return true;
+    }).sort();
+    zones.unshift('UTC');
+    if (zones.indexOf(LOCAL_TZ) < 0) zones.unshift(LOCAL_TZ);
+    var now = Date.now(), frag = document.createDocumentFragment();
+    zones.forEach(function (z) {
+      var label;
+      try { label = z.replace(/_/g, ' ') + ' (' + offsetLabel(offsetMs(now, z)) + ')'; } catch (e) { return; }
+      var o = document.createElement('option');
+      o.value = z;
+      o.textContent = label + (z === LOCAL_TZ ? ' · local' : '');
+      frag.appendChild(o);
+    });
+    sel.appendChild(frag);
+    sel.value = LOCAL_TZ;
+    if (sel.value !== LOCAL_TZ) sel.value = 'UTC';
+  }
+
+  // ---------- Discord-style formatting (English, US; viewer's local zone) ----------
+  function dtf(opts) { return new Intl.DateTimeFormat('en-US', opts); }
+  var F = {
+    t: dtf({ hour: 'numeric', minute: '2-digit' }),
+    T: dtf({ hour: 'numeric', minute: '2-digit', second: '2-digit' }),
+    d: dtf({ month: '2-digit', day: '2-digit', year: 'numeric' }),
+    D: dtf({ month: 'long', day: 'numeric', year: 'numeric' }),
+    f: dtf({ dateStyle: 'long', timeStyle: 'short' }),
+    F: dtf({ dateStyle: 'full', timeStyle: 'short' }),
+    full: dtf({ dateStyle: 'full', timeStyle: 'long' })
+  };
+  function clean(s) { return s.replace(/[\u202f\u2009\u00a0]/g, ' '); }
+  function fmt(key, ms) { return clean(F[key].format(new Date(ms))); }
+
+  // Relative wording and rounding thresholds as used by Discord's client.
+  function relative(ms, now) {
+    var diff = ms - now, a = Math.abs(diff);
+    var sec = Math.round(a / 1000), min = Math.round(a / 6e4), hr = Math.round(a / 36e5), day = Math.round(a / 864e5);
+    var mon = Math.round(a / 864e5 * 4800 / 146097), yr = Math.round(a / 864e5 * 400 / 146097);
+    var s;
+    if (sec <= 44) s = 'a few seconds';
+    else if (min <= 1) s = 'a minute';
+    else if (min < 45) s = min + ' minutes';
+    else if (hr <= 1) s = 'an hour';
+    else if (hr < 22) s = hr + ' hours';
+    else if (day <= 1) s = 'a day';
+    else if (day < 26) s = day + ' days';
+    else if (mon <= 1) s = 'a month';
+    else if (mon < 11) s = mon + ' months';
+    else if (yr <= 1) s = 'a year';
+    else s = yr + ' years';
+    return diff > 0 ? 'in ' + s : s + ' ago';
+  }
+
+  function render(style, sec) {
+    var ms = sec * 1000;
+    switch (style) {
+      case 't': case 'T': case 'd': case 'D': case 'f': case 'F': return fmt(style, ms);
+      case 's': return fmt('d', ms) + ', ' + fmt('t', ms);
+      case 'S': return fmt('d', ms) + ', ' + fmt('T', ms);
+      case 'R': return relative(ms, Date.now());
+      default: return fmt('f', ms);
+    }
+  }
+  function code(style, sec) { return '<t:' + sec + (style ? ':' + style : '') + '>'; }
+
+  // ---------- Generator ----------
+  var dateEl = $('#dts-date'), timeEl = $('#dts-time'), zoneEl = $('#dts-zone');
+  var list = $('#dts-list');
+  var current = null; // seconds
+  var rows = {};
+
+  STYLES.forEach(function (st) {
+    var li = document.createElement('li');
+    li.className = 'dts-item' + (st.k === 'combo' ? ' dts-wide' : '');
+    li.setAttribute('data-style', st.k || 'default');
+    var name = document.createElement('div');
+    name.className = 'dts-name';
+    name.textContent = st.name + ' ';
+    if (st.k && st.k !== 'combo') {
+      var letter = document.createElement('span');
+      letter.className = 'dts-letter';
+      letter.textContent = st.k;
+      name.appendChild(letter);
+    }
+    if (st.sub) {
+      var small = document.createElement('small');
+      small.textContent = st.sub;
+      name.appendChild(small);
+    }
+    var prev = document.createElement('div');
+    prev.className = 'dts-preview';
+    var cd = document.createElement('code');
+    cd.className = 'dts-code';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn small';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy ' + st.name.toLowerCase() + ' code');
+    btn.addEventListener('click', function () { TT.copy(cd.textContent, btn); });
+    li.appendChild(name); li.appendChild(prev); li.appendChild(cd); li.appendChild(btn);
+    list.appendChild(li);
+    rows[st.k] = { prev: prev, code: cd, btn: btn };
+  });
+
+  function chip(text) {
+    var s = document.createElement('span');
+    s.className = 'dts-chip';
+    s.textContent = text;
+    return s;
+  }
+  function setPreview(el, text) {
+    if (el.textContent === text) return;
+    el.textContent = '';
+    el.appendChild(chip(text));
+  }
+  function renderRows() {
+    STYLES.forEach(function (st) {
+      var r = rows[st.k];
+      if (current === null) {
+        r.code.textContent = '–';
+        r.prev.textContent = '';
+        r.btn.disabled = true;
+        return;
+      }
+      r.btn.disabled = false;
+      if (st.k === 'combo') {
+        r.code.textContent = code('F', current) + ' (' + code('R', current) + ')';
+        var text = render('F', current) + ' (' + render('R', current) + ')';
+        if (r.prev.getAttribute('data-text') !== text) {
+          r.prev.setAttribute('data-text', text);
+          r.prev.textContent = '';
+          r.prev.appendChild(chip(render('F', current)));
+          r.prev.appendChild(document.createTextNode(' ('));
+          r.prev.appendChild(chip(render('R', current)));
+          r.prev.appendChild(document.createTextNode(')'));
+        }
+      } else {
+        r.code.textContent = code(st.k, current);
+        setPreview(r.prev, render(st.k, current));
+      }
+    });
+  }
+
+  function isoUtc(ms) {
+    var d = new Date(ms);
+    var y = d.getUTCFullYear();
+    return (y < 0 ? '-' : '') + String(Math.abs(y)).padStart(4, '0') + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) +
+      ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) + ' UTC';
+  }
+
+  function parseInputs() {
+    var dm = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(dateEl.value);
+    var tm = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(timeEl.value);
+    if (!dm) return { error: 'Enter a date.' };
+    if (!tm) return { error: 'Enter a time.' };
+    var y = +dm[1], mo = +dm[2], d = +dm[3], h = +tm[1], mi = +tm[2], s = tm[3] ? +tm[3] : 0;
+    if (y < 1970 || y > 9999) return { error: 'Choose a year from 1970 to 9999.' };
+    var tz = zoneEl.value || LOCAL_TZ;
+    var r = fromZoned(y, mo, d, h, mi, s, tz);
+    r.tz = tz;
+    r.wall = dateEl.value + ' ' + pad(h) + ':' + pad(mi) + ':' + pad(s);
+    return r;
+  }
+
+  function update() {
+    var msg = $('#dts-msg'), note = $('#dts-note');
+    var r;
+    try { r = parseInputs(); } catch (e) { r = { error: 'That date or time zone could not be converted.' }; }
+    if (r.error) {
+      msg.textContent = r.error;
+      note.textContent = '';
+      current = null;
+      $('#dts-unix').textContent = '–';
+      $('#dts-utc').textContent = '–';
+      $('#dts-local').textContent = '–';
+      renderRows();
+      return;
+    }
+    msg.textContent = '';
+    current = Math.floor(r.ms / 1000);
+    var off = offsetLabel(offsetMs(r.ms, r.tz));
+    var parts = [];
+    if (r.skipped) parts.push('That clock time does not exist in ' + r.tz + ' because the clocks jump forward for daylight saving time, so the next valid time was used.');
+    if (r.repeated) parts.push('That clock time happens twice in ' + r.tz + ' because the clocks go back; the first occurrence was used.');
+    if (r.tz !== LOCAL_TZ) parts.push(r.tz.replace(/_/g, ' ') + ' is ' + off + ' at that moment.');
+    note.textContent = parts.join(' ');
+    $('#dts-unix').textContent = String(current);
+    $('#dts-utc').textContent = isoUtc(current * 1000);
+    $('#dts-local').textContent = fmt('full', current * 1000);
+    renderRows();
+  }
+
+  function setFromSeconds(sec) {
+    var tz = zoneEl.value || LOCAL_TZ;
+    var p = zoneParts(sec * 1000, tz);
+    dateEl.value = String(p.y).padStart(4, '0') + '-' + pad(p.mo) + '-' + pad(p.d);
+    timeEl.value = pad(p.h) + ':' + pad(p.mi) + ':' + pad(p.s);
+    update();
+  }
+
+  // ---------- Decoder ----------
+  var TOKEN = /<t:(-?\d{1,17})(?::([tTdDfFsSR]))?>/g;
+  var DISCORD_EPOCH = 1420070400000n;
+  var decoded = null;
+
+  function decodeItem(label, sec, style, extra) {
+    var box = document.createElement('div');
+    box.className = 'dts-dec-item';
+    var l1 = document.createElement('div');
+    var c = document.createElement('code');
+    c.className = 'mono';
+    c.textContent = label;
+    l1.appendChild(c);
+    if (style !== null) {
+      var n = document.createElement('span');
+      n.className = 'hint';
+      n.textContent = ' · ' + (style ? NAMES[style] + ' (' + style + ')' : 'no style letter, same as f');
+      l1.appendChild(n);
+    }
+    box.appendChild(l1);
+    if (style !== null) {
+      var l2 = document.createElement('div');
+      l2.appendChild(document.createTextNode('Discord shows: '));
+      var ch = chip(render(style, sec));
+      if (style === 'R') ch.setAttribute('data-rel', String(sec));
+      l2.appendChild(ch);
+      box.appendChild(l2);
+    }
+    var l3 = document.createElement('div');
+    l3.className = 'hint';
+    l3.textContent = (extra ? extra + ' · ' : '') + 'Your time: ' + fmt('full', sec * 1000) + ' · ' + isoUtc(sec * 1000) + ' · Unix ' + sec;
+    box.appendChild(l3);
+    return box;
+  }
+
+  function runDecode() {
+    var raw = $('#dts-decode').value;
+    var out = $('#dts-decode-out'), msg = $('#dts-decode-msg');
+    out.textContent = '';
+    msg.textContent = '';
+    decoded = null;
+    $('#dts-decode-actions').hidden = true;
+    var text = raw.trim();
+    if (!text) return;
+    var frag = document.createDocumentFragment(), wrap = document.createElement('div');
+    wrap.className = 'dts-dec';
+    var tokens = [], m;
+    TOKEN.lastIndex = 0;
+    while ((m = TOKEN.exec(raw)) !== null) tokens.push({ index: m.index, len: m[0].length, sec: +m[1], style: m[2] || '', src: m[0] });
+    try {
+      if (tokens.length) {
+        var bad = tokens.filter(function (t) { return !isFinite(new Date(t.sec * 1000).getTime()); });
+        if (bad.length) { msg.textContent = bad[0].src + ' is outside the range of dates a browser can show.'; return; }
+        var rest = raw.replace(TOKEN, '').trim();
+        if (rest) {
+          var p = document.createElement('div');
+          p.className = 'dts-message';
+          var pos = 0;
+          tokens.forEach(function (t) {
+            p.appendChild(document.createTextNode(raw.slice(pos, t.index)));
+            var ch = chip(render(t.style, t.sec));
+            if (t.style === 'R') ch.setAttribute('data-rel', String(t.sec));
+            p.appendChild(ch);
+            pos = t.index + t.len;
+          });
+          p.appendChild(document.createTextNode(raw.slice(pos)));
+          var lbl = document.createElement('p');
+          lbl.className = 'label';
+          lbl.textContent = 'Message preview';
+          frag.appendChild(lbl);
+          frag.appendChild(p);
+        }
+        tokens.slice(0, 20).forEach(function (t) { wrap.appendChild(decodeItem(t.src, t.sec, t.style, '')); });
+        decoded = tokens[0].sec;
+      } else if (/^-?\d+$/.test(text)) {
+        var digits = text.replace('-', '');
+        if (digits.length >= 17 && text[0] !== '-') {
+          var id = BigInt(text);
+          if (id >= (1n << 64n)) { msg.textContent = 'That number is too large to be a Discord ID.'; return; }
+          var msv = Number((id >> 22n) + DISCORD_EPOCH);
+          var secv = Math.floor(msv / 1000);
+          var created = new Date(msv).toISOString().replace('T', ' ').replace('Z', ' UTC');
+          wrap.appendChild(decodeItem(text, secv, null, 'Discord ID created ' + created));
+          wrap.appendChild(decodeItem(code('F', secv), secv, 'F', ''));
+          decoded = secv;
+        } else {
+          var n = Number(text), note = '';
+          if (Math.abs(n) >= 1e14) {
+            n = Math.floor(n / 1e6);
+            note = 'Looks like microseconds; Discord needs seconds, so use ' + n;
+          } else if (Math.abs(n) >= 1e11) {
+            n = Math.floor(n / 1000);
+            note = 'Looks like milliseconds; Discord needs seconds, so use ' + n;
+          }
+          if (!isFinite(new Date(n * 1000).getTime())) { msg.textContent = 'That number is outside the range of dates a browser can show.'; return; }
+          ['f', 'R'].forEach(function (s, i) { wrap.appendChild(decodeItem(code(s, n), n, s, i === 0 ? note : '')); });
+          decoded = n;
+        }
+      } else {
+        msg.textContent = 'No timestamp found. Paste a code like <t:1618953630:F>, a Unix time in seconds, or a Discord ID.';
+        return;
+      }
+    } catch (e) {
+      msg.textContent = 'That input could not be decoded.';
+      return;
+    }
+    frag.appendChild(wrap);
+    out.appendChild(frag);
+    $('#dts-decode-actions').hidden = decoded === null;
+  }
+
+  // ---------- Wiring ----------
+  buildZoneSelect(zoneEl);
+  [dateEl, timeEl].forEach(function (el) { el.addEventListener('input', update); el.addEventListener('change', update); });
+  zoneEl.addEventListener('change', update);
+  $('#dts-now').addEventListener('click', function () { setFromSeconds(Math.floor(Date.now() / 1000)); });
+  TT.$$('[data-add]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var base = current === null ? Math.floor(Date.now() / 1000) : current;
+      setFromSeconds(base + Number(b.getAttribute('data-add')));
+    });
+  });
+  // Days are added on the calendar, so the clock time stays the same across DST changes.
+  TT.$$('[data-add-days]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var dm = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(dateEl.value);
+      if (current === null || !dm) { setFromSeconds(Math.floor(Date.now() / 1000) + 86400 * Number(b.getAttribute('data-add-days'))); return; }
+      var dt = new Date(0);
+      dt.setUTCFullYear(+dm[1], +dm[2] - 1, +dm[3] + Number(b.getAttribute('data-add-days')));
+      dateEl.value = String(dt.getUTCFullYear()).padStart(4, '0') + '-' + pad(dt.getUTCMonth() + 1) + '-' + pad(dt.getUTCDate());
+      update();
+    });
+  });
+  $('#dts-decode').addEventListener('input', TT.debounce(runDecode, 120));
+  $('#dts-decode-load').addEventListener('click', function () {
+    if (decoded === null) return;
+    setFromSeconds(decoded);
+    dateEl.focus();
+  });
+  $('#dts-preview-hint').textContent = 'Previews show what Discord displays in English (US) in your time zone (' + LOCAL_TZ.replace(/_/g, ' ') + '). Every reader sees their own time zone and language.';
+
+  // Start at the current minute.
+  var start = Math.floor(Date.now() / 60000) * 60;
+  setFromSeconds(start);
+
+  // Keep relative previews live.
+  setInterval(function () {
+    if (current !== null) {
+      setPreview(rows.R.prev, render('R', current));
+      var combo = rows.combo.prev;
+      var rel = render('R', current);
+      var chips = combo.querySelectorAll('.dts-chip');
+      if (chips[1] && chips[1].textContent !== rel) chips[1].textContent = rel;
+    }
+    TT.$$('#dts-decode-out [data-rel]').forEach(function (el) {
+      var t = render('R', Number(el.getAttribute('data-rel')));
+      if (el.textContent !== t) el.textContent = t;
+    });
+  }, 1000);
+})();
+</script>

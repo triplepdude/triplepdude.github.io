@@ -1,0 +1,598 @@
+---
+title: Unix Timestamp Converter (Epoch Time)
+description: Convert Unix epoch timestamps to dates and back. Detects seconds, milliseconds, microseconds or nanoseconds and shows UTC, local, ISO 8601 and RFC 2822.
+category: Date & Time
+keywords: [unix timestamp converter, epoch converter, unix time, epoch time, timestamp to date, date to timestamp, current unix timestamp, milliseconds to date]
+howto: |
+  ## How to use it
+
+  The clock at the top shows the current Unix time, ticking live. A copy button
+  copies the value at the moment you click it.
+
+  - **Timestamp to date:** paste a number. The unit is detected from its size,
+    and you can override it. You get UTC, local time in any time zone,
+    ISO 8601, RFC 2822, the HTTP date format and a relative time. Thousands
+    separators, negative values, decimals and forms like `1e9` are accepted.
+  - **Date to timestamp:** choose a date, a time and the time zone that time
+    is in. You can also paste a date string such as `2001-09-09T01:46:40Z` or
+    `Sun, 09 Sep 2001 01:46:40 GMT`. A string without an offset is read in the
+    time zone you selected.
+
+  ## What Unix time is
+
+  Unix time counts the seconds since 00:00:00 UTC on 1 January 1970, the Unix
+  epoch. It ignores leap seconds, so every day is exactly 86,400 seconds long.
+  The number is the same everywhere on Earth at a given instant; time zones
+  only matter when you turn it into a clock time.
+
+  ## How the unit is detected
+
+  | Digits today | Read as | Typical source |
+  |---|---|---|
+  | 10 | seconds | `date +%s`, PHP `time()`, Python `time.time()` |
+  | 13 | milliseconds | JavaScript `Date.now()`, Java `currentTimeMillis()` |
+  | 16 | microseconds | many databases and tracing tools |
+  | 19 | nanoseconds | Go `UnixNano()`, Python `time.time_ns()` |
+
+  Precisely, values below 10<sup>11</sup> are read as seconds, below
+  10<sup>14</sup> as milliseconds, below 10<sup>17</sup> as microseconds, and
+  anything larger as nanoseconds. With these limits, any moment from March
+  1973 to the year 5138 is detected correctly in every unit. For a millisecond
+  value before 1973, choose the unit by hand. Values are handled as exact
+  integers, so a 19-digit nanosecond timestamp keeps all its digits instead of
+  being rounded.
+
+  ## Negative timestamps
+
+  Moments before 1970 are negative: `-1` is 1969-12-31T23:59:59Z, and the Apollo
+  11 Moon landing, 1969-07-20T20:17:40Z, is `-14182940`. Negative values are
+  valid Unix time, but some older software and file formats reject them, so
+  test before relying on them.
+
+  ## The year 2038 problem
+
+  Many older systems store Unix time in a signed 32-bit integer, whose largest
+  value is 2,147,483,647, or 2038-01-19T03:14:07Z. One second later the counter
+  wraps to -2,147,483,648, which reads as 1901-12-13T20:45:52Z. Current 64-bit
+  operating systems use a 64-bit `time_t` and are not affected, but embedded
+  devices, old binary file formats and 32-bit database columns still are. For
+  example, MySQL's `TIMESTAMP` type ends at 2038-01-19 03:14:07 UTC. The
+  converter flags any value outside the 32-bit range.
+
+  ## Formats in the results
+
+  - **ISO 8601** (and RFC 3339): `2001-09-09T01:46:40Z`, or with an offset such
+    as `+02:00`. Fractional seconds are shown only when present.
+  - **RFC 2822**, used in email headers: `Sun, 09 Sep 2001 01:46:40 +0000`.
+  - **HTTP date** (RFC 9110), used in `Date`, `Expires` and `Last-Modified`
+    headers: always in GMT, `Sun, 09 Sep 2001 01:46:40 GMT`.
+faq:
+  - q: What is the current Unix timestamp?
+    a: It is the ticking number at the top of this page, taken from your device's clock. Unix time is the same in every time zone, so the value is identical for everyone at the same instant.
+  - q: How can I tell seconds from milliseconds?
+    a: Count the digits. A current timestamp in seconds has 10 digits and one in milliseconds has 13. The converter checks the size for you and shows which unit it used.
+  - q: Does Unix time count leap seconds?
+    a: No. Unix time treats every day as exactly 86,400 seconds. During a leap second, systems repeat or smear a second, so a leap second itself has no Unix timestamp of its own.
+  - q: Why is my converted time off by a few hours?
+    a: The timestamp itself is always UTC-based. An offset of whole hours usually means the date was read or written in the wrong time zone. Check the UTC row and the time zone selector.
+  - q: Is anything I enter uploaded?
+    a: No. All conversions happen in your browser with JavaScript. Nothing you type is sent to a server or stored.
+---
+<style>
+.tool-page:has(#ut-results) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
+.tool-page:has(#ut-results) .prose th, .tool-page:has(#ut-results) .prose td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.tool-page:has(#ut-results) .prose th { color: var(--muted); font-weight: 600; }
+@media (max-width: 480px) { .tool-page:has(#ut-results) .prose th, .tool-page:has(#ut-results) .prose td { padding: 6px 6px; font-size: 14px; } }
+.ut-h { margin: 28px 0 12px; font-size: 1.1rem; }
+.ut-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+.ut-now { grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.ut-now .stat b { font-family: var(--mono); font-size: clamp(1.4rem, 4.5vw, 1.9rem); font-variant-numeric: tabular-nums; }
+.ut-stat-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.ut-stats { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.ut-stats .stat b { font-family: var(--mono); font-size: 1rem; }
+.row > .field.ut-grow { flex: 2 1 240px; }
+.ut-results th { width: 13rem; }
+.ut-results th, .ut-results td { vertical-align: middle; }
+.ut-results td.ut-val { font-family: var(--mono); overflow-wrap: anywhere; }
+.ut-results td.ut-val.ut-human { font-family: inherit; font-size: 15px; }
+.ut-results td.ut-copy { width: 1%; white-space: nowrap; text-align: right; }
+.ut-results th small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+.msg.ut-info { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.ut-examples { align-items: center; }
+.ut-examples .hint { margin-right: 2px; }
+@media (max-width: 560px) {
+  table.data.ut-results, .ut-results tbody, .ut-results tr { display: block; }
+  table.data.ut-results tr { position: relative; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  table.data.ut-results th, table.data.ut-results td { display: block; width: auto; padding: 0; border: 0; }
+  table.data.ut-results th { min-height: 36px; padding-right: 76px; }
+  table.data.ut-results td.ut-copy { position: absolute; top: 10px; right: 0; width: auto; }
+}
+</style>
+
+<div class="stats ut-now">
+  <div class="stat">
+    <div class="ut-stat-row"><b id="ut-now-s">–</b><button class="btn secondary small" type="button" data-copy-target="#ut-now-s" aria-label="Copy current Unix time in seconds">Copy</button></div>
+    <span>Current Unix time, seconds</span>
+  </div>
+  <div class="stat">
+    <div class="ut-stat-row"><b id="ut-now-ms">–</b><button class="btn secondary small" type="button" data-copy-target="#ut-now-ms" aria-label="Copy current Unix time in milliseconds">Copy</button></div>
+    <span>Milliseconds</span>
+  </div>
+</div>
+
+<hr class="ut-sep">
+<h2 class="ut-h">Timestamp to date</h2>
+<div class="row">
+  <div class="field ut-grow">
+    <label for="ut-ts">Unix timestamp</label>
+    <input type="text" id="ut-ts" class="mono" autocomplete="off" spellcheck="false" placeholder="e.g. 1700000000 or 1700000000000">
+  </div>
+  <div class="field">
+    <label for="ut-unit">Unit</label>
+    <select id="ut-unit">
+      <option value="auto" selected>Auto-detect</option>
+      <option value="s">Seconds</option>
+      <option value="ms">Milliseconds</option>
+      <option value="us">Microseconds</option>
+      <option value="ns">Nanoseconds</option>
+    </select>
+  </div>
+  <div class="field ut-grow">
+    <label for="ut-view-zone">Show local time in</label>
+    <select id="ut-view-zone"></select>
+  </div>
+</div>
+<div class="actions ut-examples">
+  <span class="hint">Try:</span>
+  <button class="btn secondary small" type="button" id="ut-use-now">Now</button>
+  <button class="btn secondary small" type="button" data-example="0">0 (the epoch)</button>
+  <button class="btn secondary small" type="button" data-example="-14182940">&minus;14182940</button>
+  <button class="btn secondary small" type="button" data-example="2147483647">2147483647 (2038 limit)</button>
+</div>
+<p class="msg error" id="ut-ts-msg" role="alert"></p>
+<div aria-live="polite">
+  <p class="hint" id="ut-detected"></p>
+  <p class="msg ut-info" id="ut-note"></p>
+  <div class="table-wrap">
+    <table class="data ut-results">
+      <tbody id="ut-results"></tbody>
+    </table>
+  </div>
+</div>
+
+<hr class="ut-sep">
+<h2 class="ut-h">Date to timestamp</h2>
+<div class="row">
+  <div class="field">
+    <label for="ut-date">Date</label>
+    <input type="date" id="ut-date" min="0001-01-01" max="9999-12-31">
+  </div>
+  <div class="field">
+    <label for="ut-time">Time</label>
+    <input type="time" id="ut-time" step="1">
+  </div>
+  <div class="field ut-grow">
+    <label for="ut-zone">Time zone</label>
+    <select id="ut-zone"></select>
+  </div>
+</div>
+<p class="msg error" id="ut-date-msg" role="alert"></p>
+<p class="msg ut-info" id="ut-date-note"></p>
+<div class="stats ut-stats" aria-live="polite">
+  <div class="stat"><div class="ut-stat-row"><b id="ut-out-s">–</b><button class="btn secondary small" type="button" data-copy-target="#ut-out-s" aria-label="Copy timestamp in seconds">Copy</button></div><span>Unix timestamp, seconds</span></div>
+  <div class="stat"><div class="ut-stat-row"><b id="ut-out-ms">–</b><button class="btn secondary small" type="button" data-copy-target="#ut-out-ms" aria-label="Copy timestamp in milliseconds">Copy</button></div><span>Milliseconds</span></div>
+  <div class="stat"><div class="ut-stat-row"><b id="ut-out-iso">–</b><button class="btn secondary small" type="button" data-copy-target="#ut-out-iso" aria-label="Copy ISO 8601 date">Copy</button></div><span>ISO 8601, UTC</span></div>
+</div>
+
+<div class="field">
+  <label for="ut-parse">Or paste a date string <span class="hint">ISO 8601, RFC 2822 or HTTP date</span></label>
+  <input type="text" id="ut-parse" class="mono" autocomplete="off" spellcheck="false" placeholder="2001-09-09T01:46:40Z">
+</div>
+<p class="msg error" id="ut-parse-msg" role="alert"></p>
+<div class="output" id="ut-parse-out" aria-live="polite" hidden></div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var MAX_MS = 8.64e15; // JavaScript Date range: +/-100,000,000 days around 1970
+  var DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var UNIT_EXP = { s: 9, ms: 6, us: 3, ns: 0 };
+  var UNIT_NAME = { s: 'seconds', ms: 'milliseconds', us: 'microseconds', ns: 'nanoseconds' };
+
+  function pad(n, w) { var s = String(Math.abs(n)); while (s.length < (w || 2)) s = '0' + s; return (n < 0 ? '-' : '') + s; }
+
+  // ---------- Time zones ----------
+  var MODERN = {
+    'Asia/Calcutta': 'Asia/Kolkata', 'Asia/Katmandu': 'Asia/Kathmandu', 'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+    'Asia/Rangoon': 'Asia/Yangon', 'Asia/Thimbu': 'Asia/Thimphu', 'Europe/Kiev': 'Europe/Kyiv',
+    'Atlantic/Faeroe': 'Atlantic/Faroe', 'America/Godthab': 'America/Nuuk', 'Pacific/Truk': 'Pacific/Chuuk',
+    'Pacific/Ponape': 'Pacific/Pohnpei', 'Pacific/Enderbury': 'Pacific/Kanton', 'Africa/Asmera': 'Africa/Asmara',
+    'America/Buenos_Aires': 'America/Argentina/Buenos_Aires', 'America/Catamarca': 'America/Argentina/Catamarca',
+    'America/Cordoba': 'America/Argentina/Cordoba', 'America/Jujuy': 'America/Argentina/Jujuy',
+    'America/Mendoza': 'America/Argentina/Mendoza', 'America/Indianapolis': 'America/Indiana/Indianapolis',
+    'America/Louisville': 'America/Kentucky/Louisville', 'America/Coral_Harbour': 'America/Atikokan'
+  };
+  function modern(tz) {
+    var m = MODERN[tz];
+    if (!m) return tz;
+    try { new Intl.DateTimeFormat('en-US', { timeZone: m }); return m; } catch (e) { return tz; }
+  }
+  var LOCAL_TZ = (function () {
+    try { return modern(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'); } catch (e) { return 'UTC'; }
+  })();
+  var partsCache = {};
+  function zoneParts(ms, tz) {
+    var f = partsCache[tz];
+    if (!f) {
+      f = partsCache[tz] = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, hourCycle: 'h23', era: 'short', year: 'numeric', month: 'numeric',
+        day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric'
+      });
+    }
+    var o = {};
+    f.formatToParts(new Date(ms)).forEach(function (p) { o[p.type] = p.value; });
+    var y = +o.year;
+    if (/^B/.test(o.era || '')) y = 1 - y;
+    return { y: y, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, s: +o.second };
+  }
+  function utcMs(y, mo, d, h, mi, s) {
+    var dt = new Date(0);
+    dt.setUTCFullYear(y, mo - 1, d);
+    dt.setUTCHours(h, mi, s, 0);
+    return dt.getTime();
+  }
+  function offsetMs(ms, tz) {
+    var p = zoneParts(ms, tz);
+    return utcMs(p.y, p.mo, p.d, p.h, p.mi, p.s) - Math.floor(ms / 1000) * 1000;
+  }
+  // Wall-clock time in a zone -> epoch ms. Repeated times take the earlier
+  // instant; skipped times move forward by the gap.
+  function fromZoned(y, mo, d, h, mi, s, tz) {
+    var wall = utcMs(y, mo, d, h, mi, s);
+    var before = offsetMs(wall - 864e5, tz), after = offsetMs(wall + 864e5, tz);
+    var found = [];
+    [before, after].forEach(function (off) {
+      var t = wall - off;
+      if (offsetMs(t, tz) === off && found.indexOf(t) < 0) found.push(t);
+    });
+    found.sort(function (a, b) { return a - b; });
+    if (found.length) return { ms: found[0], repeated: found.length > 1 };
+    return { ms: wall - before, skipped: true };
+  }
+  function offsetStr(off, sep, minus) {
+    var a = Math.abs(Math.round(off / 1000));
+    var h = Math.floor(a / 3600), m = Math.floor(a % 3600 / 60), s = a % 60;
+    return (off < 0 ? (minus || '-') : '+') + pad(h) + sep + pad(m) + (s ? sep + pad(s) : '');
+  }
+  var zoneOptions = null;
+  function fillZoneSelect(sel) {
+    if (!zoneOptions) {
+      var zones = [];
+      try { zones = Intl.supportedValuesOf('timeZone').slice(); } catch (e) { zones = []; }
+      if (!zones.length) zones = ['America/Los_Angeles', 'America/Chicago', 'America/New_York', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Tokyo', 'Australia/Sydney'];
+      var seen = {};
+      zones = zones.map(modern).filter(function (z) {
+        if (z === 'UTC' || seen[z]) return false;
+        seen[z] = true;
+        return true;
+      }).sort();
+      zones.unshift('UTC');
+      if (zones.indexOf(LOCAL_TZ) < 0) zones.unshift(LOCAL_TZ);
+      var now = Date.now();
+      zoneOptions = document.createDocumentFragment();
+      zones.forEach(function (z) {
+        var label;
+        try { label = z.replace(/_/g, ' ') + ' (UTC' + offsetStr(offsetMs(now, z), ':', '\u2212') + ')'; } catch (e) { return; }
+        var o = document.createElement('option');
+        o.value = z;
+        o.textContent = label + (z === LOCAL_TZ ? ' \u00b7 local' : '');
+        zoneOptions.appendChild(o);
+      });
+    }
+    sel.appendChild(zoneOptions.cloneNode(true));
+    sel.value = LOCAL_TZ;
+    if (sel.value !== LOCAL_TZ) sel.value = 'UTC';
+  }
+
+  // ---------- Formatting ----------
+  var fmtCache = {};
+  function human(ms, tz) {
+    var y = new Date(ms).getUTCFullYear();
+    var key = tz + (y < 1 ? '|era' : '');
+    var f = fmtCache[key];
+    if (!f) {
+      var o = { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' };
+      if (y < 1) o.era = 'short';
+      f = fmtCache[key] = new Intl.DateTimeFormat('en-US', o);
+    }
+    return f.format(new Date(ms)).replace(/[\u202f\u2009\u00a0]/g, ' ');
+  }
+  function yearStr(y) { return y >= 0 && y <= 9999 ? pad(y, 4) : (y < 0 ? '-' : '+') + pad(Math.abs(y), 6); }
+  function fraction(ms, subNs) {
+    var msPart = ((ms % 1000) + 1000) % 1000;
+    if (!msPart && !subNs) return '';
+    var f = pad(msPart, 3) + pad(subNs, 6);
+    if (subNs === 0) f = f.slice(0, 3);
+    else if (subNs % 1000 === 0) f = f.slice(0, 6);
+    return '.' + f;
+  }
+  function isoParts(d) {
+    return yearStr(d.getUTCFullYear()) + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) +
+      'T' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+  }
+  function isoUtc(ms, subNs) { return isoParts(new Date(ms)) + fraction(ms, subNs || 0) + 'Z'; }
+  function isoZoned(ms, subNs, tz) {
+    var off = offsetMs(ms, tz);
+    return isoParts(new Date(ms + off)) + fraction(ms, subNs || 0) + (tz === 'UTC' ? 'Z' : offsetStr(off, ':'));
+  }
+  function mailDate(ms, zone) {
+    var d = new Date(ms), y = d.getUTCFullYear();
+    if (y < 0 || y > 9999) return null;
+    return DOW[d.getUTCDay()] + ', ' + pad(d.getUTCDate()) + ' ' + MON[d.getUTCMonth()] + ' ' + pad(y, 4) + ' ' +
+      pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) + ' ' + zone;
+  }
+  var RTF = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+  var REL_UNITS = [['year', 31556952], ['month', 2629746], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]];
+  function relTime(ms, now) {
+    var diff = (ms - now) / 1000, a = Math.abs(diff);
+    for (var i = 0; i < REL_UNITS.length; i++) {
+      var u = REL_UNITS[i];
+      if (a >= u[1] || u[0] === 'second') {
+        var text = RTF.format(Math.trunc(diff / u[1]), u[0]);
+        var days = Math.floor(a / 86400);
+        return days >= 2 ? text + ' (' + days.toLocaleString('en-US') + ' days)' : text;
+      }
+    }
+    return '';
+  }
+
+  // ---------- Exact number handling (BigInt nanoseconds) ----------
+  // Returns { digits, point, neg } for inputs like -1.5, 1e9, 1,700,000,000.
+  function parseDecimal(raw) {
+    var s = String(raw).trim().replace(/[\s,_']/g, '');
+    var m = /^([+-])?(\d*)(?:\.(\d*))?(?:e([+-]?\d{1,3}))?$/i.exec(s);
+    if (!m || !(m[2] || m[3])) return null;
+    var digits = (m[2] || '') + (m[3] || ''), point = (m[2] || '').length + (m[4] ? parseInt(m[4], 10) : 0);
+    var lead = digits.search(/[1-9]/);
+    if (lead === -1) return { neg: false, digits: '0', point: 1 };
+    digits = digits.slice(lead);
+    point -= lead;
+    return { neg: m[1] === '-', digits: digits, point: point };
+  }
+  function toNs(num, unit) {
+    var p = num.point + UNIT_EXP[unit];
+    if (p > 40) return null;
+    var intDigits = p <= 0 ? '0' : (num.digits + '0'.repeat(Math.max(0, p - num.digits.length))).slice(0, p);
+    var v = BigInt(intDigits);
+    return num.neg ? -v : v;
+  }
+  // Thresholds 1e11 / 1e14 / 1e17 = more than 11 / 14 / 17 integer digits.
+  function detectUnit(num) {
+    var n = num.digits === '0' ? 0 : num.point;
+    if (n <= 11) return 's';
+    if (n <= 14) return 'ms';
+    if (n <= 17) return 'us';
+    return 'ns';
+  }
+  function floorDiv(a, b) { var q = a / b; return (a % b !== 0n && (a < 0n) !== (b < 0n)) ? q - 1n : q; }
+  function decimalOf(ns, exp) {
+    if (exp === 0) return ns.toString();
+    var neg = ns < 0n, a = neg ? -ns : ns, base = 10n ** BigInt(exp);
+    var i = a / base, f = (a % base).toString().padStart(exp, '0').replace(/0+$/, '');
+    return (neg ? '-' : '') + i.toString() + (f ? '.' + f : '');
+  }
+
+  // ---------- Timestamp -> date ----------
+  var tsEl = $('#ut-ts'), unitEl = $('#ut-unit'), viewZone = $('#ut-view-zone'), results = $('#ut-results');
+  var shown = null; // { ms, subNs } currently displayed
+
+  var ROWS = [
+    ['utc', 'UTC'],
+    ['local', 'Local time'],
+    ['iso', 'ISO 8601', 'UTC'],
+    ['isolocal', 'ISO 8601', 'with offset'],
+    ['rfc2822', 'RFC 2822', 'email'],
+    ['http', 'HTTP date', 'RFC 9110'],
+    ['rel', 'Relative'],
+    ['s', 'Seconds'],
+    ['ms', 'Milliseconds'],
+    ['us', 'Microseconds'],
+    ['ns', 'Nanoseconds']
+  ];
+  var cells = {};
+  ROWS.forEach(function (r) {
+    var tr = document.createElement('tr');
+    var th = document.createElement('th');
+    th.scope = 'row';
+    th.textContent = r[1];
+    if (r[2]) { var sm = document.createElement('small'); sm.textContent = r[2]; th.appendChild(sm); }
+    var td = document.createElement('td');
+    td.className = 'ut-val' + (r[0] === 'utc' || r[0] === 'local' || r[0] === 'rel' ? ' ut-human' : '');
+    td.id = 'ut-r-' + r[0];
+    var tc = document.createElement('td');
+    tc.className = 'ut-copy';
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn secondary small';
+    b.textContent = 'Copy';
+    b.setAttribute('aria-label', 'Copy ' + r[1] + (r[2] ? ' (' + r[2] + ')' : ''));
+    b.addEventListener('click', function () { TT.copy(td.textContent, b); });
+    tc.appendChild(b);
+    tr.appendChild(th); tr.appendChild(td); tr.appendChild(tc);
+    results.appendChild(tr);
+    cells[r[0]] = { td: td, th: th, btn: b };
+  });
+
+  function clearResults() {
+    shown = null;
+    ROWS.forEach(function (r) { cells[r[0]].td.textContent = '–'; cells[r[0]].btn.disabled = true; });
+    $('#ut-detected').textContent = '';
+    $('#ut-note').textContent = '';
+  }
+
+  function convert() {
+    var msg = $('#ut-ts-msg');
+    var raw = tsEl.value;
+    if (!raw.trim()) { msg.textContent = ''; clearResults(); $('#ut-detected').textContent = 'Enter a Unix timestamp to convert it.'; return; }
+    var num = parseDecimal(raw);
+    if (!num) { clearResults(); msg.textContent = 'That is not a number. Enter digits, optionally with a minus sign or decimal point, e.g. 1700000000.'; return; }
+    var unit = unitEl.value === 'auto' ? detectUnit(num) : unitEl.value;
+    var ns = toNs(num, unit);
+    if (ns === null) { clearResults(); msg.textContent = 'That number is far too large to be a date.'; return; }
+    var msBig = floorDiv(ns, 1000000n);
+    if (msBig > BigInt(MAX_MS) || msBig < -BigInt(MAX_MS)) {
+      clearResults();
+      msg.textContent = 'Out of range: dates can only be shown up to 8.64 \u00d7 10^15 milliseconds (about 275,000 years) either side of 1970. Check the unit.';
+      return;
+    }
+    msg.textContent = '';
+    var ms = Number(msBig), subNs = Number(ns - msBig * 1000000n);
+    shown = { ms: ms, subNs: subNs };
+    var digitCount = num.point > 0 ? num.point : 1;
+    $('#ut-detected').textContent = unitEl.value === 'auto'
+      ? 'Detected: ' + UNIT_NAME[unit] + ' (' + digitCount + (digitCount === 1 ? ' digit' : ' digits') + ' before the decimal point).'
+      : 'Reading the value as ' + UNIT_NAME[unit] + '.';
+
+    var tz = viewZone.value || LOCAL_TZ;
+    cells.local.th.firstChild.textContent = tz === LOCAL_TZ ? 'Local time' : 'Time in zone';
+    var zoneLabel = cells.local.th.querySelector('small') || document.createElement('small');
+    zoneLabel.textContent = tz.replace(/_/g, ' ');
+    cells.local.th.appendChild(zoneLabel);
+
+    var rfc = mailDate(ms, '+0000'), http = mailDate(ms, 'GMT');
+    var values = {
+      utc: human(ms, 'UTC'),
+      local: human(ms, tz),
+      iso: isoUtc(ms, subNs),
+      isolocal: isoZoned(ms, subNs, tz),
+      rfc2822: rfc || 'Not available for years outside 0000 to 9999',
+      http: http || 'Not available for years outside 0000 to 9999',
+      rel: relTime(ms, Date.now()),
+      s: decimalOf(ns, 9),
+      ms: decimalOf(ns, 6),
+      us: decimalOf(ns, 3),
+      ns: decimalOf(ns, 0)
+    };
+    ROWS.forEach(function (r) {
+      var c = cells[r[0]];
+      c.td.textContent = values[r[0]];
+      c.btn.disabled = (r[0] === 'rfc2822' && !rfc) || (r[0] === 'http' && !http);
+    });
+
+    var sec = floorDiv(ns, 1000000000n), note = '';
+    if (sec === 2147483647n) note = 'This is the largest value a signed 32-bit time_t can hold. One second later, 32-bit clocks wrap around to 1901-12-13T20:45:52Z.';
+    else if (sec > 2147483647n) note = 'Year 2038 problem: this is after 2038-01-19T03:14:07Z, beyond the signed 32-bit range (max 2,147,483,647 seconds). Software that stores time in 32 bits cannot represent it.';
+    else if (sec < -2147483648n) note = 'This is before 1901-12-13T20:45:52Z, below the signed 32-bit range (min -2,147,483,648 seconds). Software that stores time in 32 bits cannot represent it.';
+    else if (sec < 0n) note = 'Negative timestamp: this moment is before the Unix epoch, 1970-01-01T00:00:00Z.';
+    $('#ut-note').textContent = note;
+  }
+
+  // ---------- Date -> timestamp ----------
+  var dateEl = $('#ut-date'), timeEl = $('#ut-time'), zoneEl = $('#ut-zone');
+  function toTimestamp() {
+    var msg = $('#ut-date-msg'), note = $('#ut-date-note');
+    var dm = /^(\d{4,6})-(\d{2})-(\d{2})$/.exec(dateEl.value);
+    var tm = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(timeEl.value);
+    var outS = $('#ut-out-s'), outMs = $('#ut-out-ms'), outIso = $('#ut-out-iso');
+    function fail(t) { msg.textContent = t; note.textContent = ''; outS.textContent = outMs.textContent = outIso.textContent = '–'; }
+    if (!dm) return fail('Enter a date.');
+    if (!tm) return fail('Enter a time.');
+    var tz = zoneEl.value || LOCAL_TZ, r;
+    try {
+      r = fromZoned(+dm[1], +dm[2], +dm[3], +tm[1], +tm[2], tm[3] ? +tm[3] : 0, tz);
+    } catch (e) { return fail('That date could not be converted.'); }
+    var ms = r.ms + (tm[4] ? +tm[4].padEnd(3, '0') : 0);
+    if (!isFinite(ms) || Math.abs(ms) > MAX_MS) return fail('That date is out of range.');
+    msg.textContent = '';
+    var notes = [];
+    if (r.skipped) notes.push('That clock time does not exist in ' + tz + ' because the clocks jump forward for daylight saving time; the next valid time was used.');
+    if (r.repeated) notes.push('That clock time happens twice in ' + tz + ' because the clocks go back; the first occurrence was used.');
+    note.textContent = notes.join(' ');
+    outS.textContent = String(Math.floor(ms / 1000));
+    outMs.textContent = String(ms);
+    outIso.textContent = isoUtc(ms, 0);
+  }
+
+  // ---------- Date string parser ----------
+  var ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?)?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+  function parseString() {
+    var raw = $('#ut-parse').value.trim(), msg = $('#ut-parse-msg'), out = $('#ut-parse-out');
+    msg.textContent = '';
+    out.hidden = true;
+    out.textContent = '';
+    if (!raw) return;
+    var ms = NaN, how = '', m = ISO_RE.exec(raw);
+    try {
+      if (m) {
+        var y = +m[1], mo = +m[2], d = +m[3], h = m[4] ? +m[4] : 0, mi = m[5] ? +m[5] : 0, s = m[6] ? +m[6] : 0;
+        var frac = m[7] ? +(m[7] + '00').slice(0, 3) : 0;
+        var check = new Date(utcMs(y, mo, d, h, mi, s));
+        if (mo < 1 || mo > 12 || check.getUTCDate() !== d || h > 23 || mi > 59 || s > 59) throw new Error('bad');
+        if (m[8]) {
+          var off = 0;
+          if (m[8].toUpperCase() !== 'Z') {
+            var om = /^([+-])(\d{2}):?(\d{2})?$/.exec(m[8]);
+            off = (+om[2] * 60 + (om[3] ? +om[3] : 0)) * 60000 * (om[1] === '-' ? -1 : 1);
+          }
+          ms = utcMs(y, mo, d, h, mi, s) - off + frac;
+          how = 'ISO 8601 with ' + (off ? 'offset ' + m[8] : 'UTC (Z)') + '.';
+        } else {
+          var tz = zoneEl.value || LOCAL_TZ;
+          ms = fromZoned(y, mo, d, h, mi, s, tz).ms + frac;
+          how = 'ISO 8601 without an offset, read as ' + tz + ' (the time zone selected above).';
+        }
+      } else if (/^[+-]?\d+(\.\d+)?$/.test(raw)) {
+        msg.textContent = 'That looks like a Unix timestamp. Paste it into the "Timestamp to date" box above.';
+        return;
+      } else {
+        ms = Date.parse(raw);
+        how = 'Read by your browser\'s date parser' + (/(gmt|utc|z\b|[+-]\d{4})/i.test(raw) ? '.' : '; without a zone it uses your local time zone.');
+      }
+    } catch (e) { ms = NaN; }
+    if (!isFinite(ms)) {
+      msg.textContent = 'Could not read that date. Try ISO 8601 (2001-09-09T01:46:40Z) or RFC 2822 (Sun, 09 Sep 2001 01:46:40 GMT).';
+      return;
+    }
+    out.textContent = 'Seconds:       ' + Math.floor(ms / 1000) + '\nMilliseconds:  ' + ms + '\nISO 8601 UTC:  ' + isoUtc(ms, 0) + '\n' + how;
+    out.hidden = false;
+  }
+
+  // ---------- Live clock ----------
+  var nowS = $('#ut-now-s'), nowMs = $('#ut-now-ms'), lastSec = null;
+  function tick() {
+    var n = Date.now(), s = Math.floor(n / 1000);
+    nowMs.textContent = String(n);
+    if (s !== lastSec) {
+      lastSec = s;
+      nowS.textContent = String(s);
+      if (shown) cells.rel.td.textContent = relTime(shown.ms, n);
+    }
+  }
+
+  // ---------- Wiring ----------
+  fillZoneSelect(viewZone);
+  fillZoneSelect(zoneEl);
+  tsEl.addEventListener('input', convert);
+  unitEl.addEventListener('change', convert);
+  viewZone.addEventListener('change', convert);
+  $('#ut-use-now').addEventListener('click', function () { tsEl.value = String(Math.floor(Date.now() / 1000)); unitEl.value = 'auto'; convert(); });
+  TT.$$('[data-example]').forEach(function (b) {
+    b.addEventListener('click', function () { tsEl.value = b.getAttribute('data-example'); unitEl.value = 'auto'; convert(); });
+  });
+  [dateEl, timeEl].forEach(function (el) { el.addEventListener('input', toTimestamp); el.addEventListener('change', toTimestamp); });
+  zoneEl.addEventListener('change', function () { toTimestamp(); parseString(); });
+  $('#ut-parse').addEventListener('input', parseString);
+
+  var start = Date.now();
+  tsEl.value = String(Math.floor(start / 1000));
+  var p = zoneParts(start, LOCAL_TZ);
+  dateEl.value = pad(p.y, 4) + '-' + pad(p.mo) + '-' + pad(p.d);
+  timeEl.value = pad(p.h) + ':' + pad(p.mi) + ':' + pad(p.s);
+  convert();
+  toTimestamp();
+  tick();
+  setInterval(tick, 50);
+})();
+</script>

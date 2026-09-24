@@ -1,0 +1,174 @@
+// Known answers were computed independently with Python
+// (datetime.fromtimestamp(..., timezone.utc) and zoneinfo), not copied from
+// the page. The browser runs in Europe/Rome with a fixed clock.
+module.exports = async ({ page, open, assert }) => {
+  const text = sel => page.locator(sel).textContent();
+  const r = id => text('#ut-r-' + id);
+  const conv = async (value, unit = 'auto') => {
+    await page.selectOption('#ut-unit', unit);
+    await page.fill('#ut-ts', value);
+  };
+
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTimezoneOverride', { timezoneId: 'Europe/Rome' });
+  await page.clock.install({ time: new Date('2026-09-24T00:00:00Z') }); // 1790208000
+  await open();
+
+  // Live clock, in seconds and milliseconds.
+  const s0 = Number(await text('#ut-now-s'));
+  const ms0 = Number(await text('#ut-now-ms'));
+  assert.ok(s0 >= 1790208000 && s0 < 1790208010, `current seconds ${s0}`);
+  assert.ok(ms0 >= 1790208000000 && ms0 < 1790208010000, `current ms ${ms0}`);
+  await page.clock.runFor(5000);
+  const s1 = Number(await text('#ut-now-s'));
+  assert.ok(s1 >= s0 + 5 && s1 < s0 + 10, `clock ticks: ${s0} -> ${s1}`);
+  const def = Number(await page.inputValue('#ut-ts'));
+  assert.ok(def >= 1790208000 && def < 1790208010, 'defaults to the current time');
+  assert.match(await text('#ut-detected'), /seconds/);
+
+  // Epoch zero.
+  await conv('0');
+  assert.equal(await r('iso'), '1970-01-01T00:00:00Z');
+  assert.equal(await r('isolocal'), '1970-01-01T01:00:00+01:00');
+  assert.equal(await r('rfc2822'), 'Thu, 01 Jan 1970 00:00:00 +0000');
+  assert.equal(await r('http'), 'Thu, 01 Jan 1970 00:00:00 GMT');
+  assert.match(await r('utc'), /Thursday, January 1, 1970.*12:00:00 AM UTC/);
+
+  // 1e9 seconds, in several spellings.
+  for (const v of ['1000000000', '1e9', '1,000,000,000', ' 1_000_000_000 ']) {
+    await conv(v);
+    assert.equal(await r('iso'), '2001-09-09T01:46:40Z', `input ${v}`);
+  }
+  assert.equal(await r('isolocal'), '2001-09-09T03:46:40+02:00');
+  assert.equal(await r('http'), 'Sun, 09 Sep 2001 01:46:40 GMT');
+  assert.equal(await r('rfc2822'), 'Sun, 09 Sep 2001 01:46:40 +0000');
+  assert.match(await r('local'), /Sunday, September 9, 2001.*3:46:40 AM GMT\+2/);
+  assert.equal(await r('rel'), '25 years ago (9,145 days)');
+  assert.equal(await r('ms'), '1000000000000');
+  assert.equal(await r('us'), '1000000000000000');
+  assert.equal(await r('ns'), '1000000000000000000');
+  assert.equal(await text('#ut-note'), '');
+
+  // Another zone for the local rows (Nepal is UTC+05:45).
+  await page.selectOption('#ut-view-zone', 'Asia/Kathmandu');
+  assert.equal(await r('isolocal'), '2001-09-09T07:31:40+05:45');
+  await page.selectOption('#ut-view-zone', 'Europe/Rome');
+
+  // The 32-bit limit and its neighbours.
+  await conv('2147483647');
+  assert.equal(await r('iso'), '2038-01-19T03:14:07Z');
+  assert.match(await text('#ut-note'), /largest value a signed 32-bit/);
+  assert.match(await r('rel'), /^in 11 years/);
+  await conv('2147483648');
+  assert.equal(await r('iso'), '2038-01-19T03:14:08Z');
+  assert.match(await text('#ut-note'), /Year 2038 problem/);
+  await conv('-2147483648');
+  assert.equal(await r('iso'), '1901-12-13T20:45:52Z');
+  await conv('-2147483649');
+  assert.match(await text('#ut-note'), /below the signed 32-bit range/);
+
+  // Negative timestamps.
+  await conv('-1');
+  assert.equal(await r('iso'), '1969-12-31T23:59:59Z');
+  assert.equal(await r('rfc2822'), 'Wed, 31 Dec 1969 23:59:59 +0000');
+  assert.match(await text('#ut-note'), /before the Unix epoch/);
+  await conv('-14182940');
+  assert.equal(await r('iso'), '1969-07-20T20:17:40Z');
+  await conv('-1.5');
+  assert.equal(await r('iso'), '1969-12-31T23:59:58.500Z');
+  assert.equal(await r('ms'), '-1500');
+
+  // Unit detection by magnitude, with exact sub-second digits.
+  await conv('1700000000000');
+  assert.match(await text('#ut-detected'), /milliseconds/);
+  assert.equal(await r('iso'), '2023-11-14T22:13:20Z');
+  assert.equal(await r('s'), '1700000000');
+  await conv('1700000000123');
+  assert.equal(await r('iso'), '2023-11-14T22:13:20.123Z');
+  assert.equal(await r('s'), '1700000000.123');
+  await conv('1700000000123456');
+  assert.match(await text('#ut-detected'), /microseconds/);
+  assert.equal(await r('iso'), '2023-11-14T22:13:20.123456Z');
+  await conv('1700000000123456789');
+  assert.match(await text('#ut-detected'), /nanoseconds/);
+  assert.equal(await r('iso'), '2023-11-14T22:13:20.123456789Z');
+  assert.equal(await r('s'), '1700000000.123456789');
+  assert.equal(await r('ms'), '1700000000123.456789');
+  await conv('1700000000.5');
+  assert.equal(await r('iso'), '2023-11-14T22:13:20.500Z');
+
+  // Manual unit override.
+  await conv('1700000000', 'ms');
+  assert.equal(await r('iso'), '1970-01-20T16:13:20Z');
+  assert.match(await text('#ut-detected'), /as milliseconds/);
+
+  // Bad input never throws; it shows a message.
+  await conv('abc');
+  assert.ok((await text('#ut-ts-msg')).length > 0);
+  assert.equal(await r('iso'), '–');
+  await conv('1e30');
+  assert.match(await text('#ut-ts-msg'), /range|large/);
+  await conv('');
+  assert.equal(await text('#ut-ts-msg'), '');
+
+  // Example buttons and copy.
+  await page.click('button[data-example="2147483647"]');
+  assert.equal(await page.inputValue('#ut-ts'), '2147483647');
+  await page.locator('#ut-r-iso + td button').click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '2038-01-19T03:14:07Z');
+
+  // Date -> timestamp. Defaults to now in the local zone.
+  assert.equal(await page.inputValue('#ut-zone'), 'Europe/Rome');
+  assert.equal(await page.inputValue('#ut-date'), '2026-09-24');
+  const outS = Number(await text('#ut-out-s'));
+  assert.ok(outS >= 1790208000 && outS < 1790208010, `default date to timestamp ${outS}`);
+
+  await page.selectOption('#ut-zone', 'UTC');
+  await page.fill('#ut-date', '2038-01-19');
+  await page.fill('#ut-time', '03:14:07');
+  assert.equal(await text('#ut-out-s'), '2147483647');
+  assert.equal(await text('#ut-out-ms'), '2147483647000');
+  assert.equal(await text('#ut-out-iso'), '2038-01-19T03:14:07Z');
+  await page.fill('#ut-date', '1969-12-31');
+  await page.fill('#ut-time', '23:59:59');
+  assert.equal(await text('#ut-out-s'), '-1');
+  await page.fill('#ut-date', '1970-01-01');
+  await page.fill('#ut-time', '00:00:00');
+  assert.equal(await text('#ut-out-s'), '0');
+
+  await page.selectOption('#ut-zone', 'Asia/Kathmandu');
+  await page.fill('#ut-date', '2026-07-04');
+  await page.fill('#ut-time', '20:00:00');
+  assert.equal(await text('#ut-out-s'), '1783174500');
+  await page.selectOption('#ut-zone', 'America/New_York');
+  await page.fill('#ut-date', '2026-03-08');
+  await page.fill('#ut-time', '02:30:00');
+  assert.equal(await text('#ut-out-s'), '1772955000');
+  assert.match(await text('#ut-date-note'), /does not exist/);
+  await page.fill('#ut-date', '2026-11-01');
+  await page.fill('#ut-time', '01:30:00');
+  assert.equal(await text('#ut-out-s'), '1793511000');
+  assert.match(await text('#ut-date-note'), /happens twice/);
+  await page.fill('#ut-date', '');
+  assert.equal(await text('#ut-date-msg'), 'Enter a date.');
+  assert.equal(await text('#ut-out-s'), '–');
+
+  // Date strings.
+  await page.selectOption('#ut-zone', 'UTC');
+  for (const s of ['2001-09-09T01:46:40Z', 'Sun, 09 Sep 2001 01:46:40 GMT', '2001-09-09T03:46:40+02:00', '2001-09-09 01:46:40']) {
+    await page.fill('#ut-parse', s);
+    const out = await text('#ut-parse-out');
+    assert.match(out, /Seconds:\s+1000000000\n/, `parse ${s}`);
+    assert.match(out, /ISO 8601 UTC:\s+2001-09-09T01:46:40Z/);
+  }
+  assert.match(await text('#ut-parse-out'), /read as UTC/);
+  await page.fill('#ut-parse', '2001-02-30T00:00:00Z');
+  assert.ok((await text('#ut-parse-msg')).length > 0);
+  assert.equal(await page.locator('#ut-parse-out').isHidden(), true);
+  await page.fill('#ut-parse', 'not a date');
+  assert.ok((await text('#ut-parse-msg')).length > 0);
+  await page.fill('#ut-parse', '1700000000');
+  assert.match(await text('#ut-parse-msg'), /Unix timestamp/);
+
+  await cdp.send('Emulation.setTimezoneOverride', { timezoneId: '' }).catch(() => {});
+};
