@@ -172,7 +172,7 @@ async function siteChecks(browser, base, problems) {
   const { context, page } = await newPage(browser, base, { width: 1280, height: 900 }, problems);
   const get = async p => {
     const resp = await page.request.get(base + p);
-    assert.equal(resp.status(), 200, `GET ${p} returned ${resp.status()}`);
+    if (resp.status() !== 200) problems.push(`GET ${p} returned ${resp.status()}`);
     return resp.text();
   };
 
@@ -187,22 +187,25 @@ async function siteChecks(browser, base, problems) {
     if (!(await page.evaluate(() => window.TT && typeof TT.copy === 'function'))) problems.push(`${p}: window.TT is missing`);
   }
   // Old cached pages still link these.
-  assert.match(await get('/assets/css/style.css'), /--field-border/);
-  assert.match(await get('/assets/js/common.js'), /window\.TT = /);
+  if (!/^\s*:root \{/.test(await get('/assets/css/style.css'))) problems.push('/assets/css/style.css does not serve the stylesheet');
+  if (!/window\.TT = /.test(await get('/assets/js/common.js'))) problems.push('/assets/js/common.js does not serve the shared helpers');
 
   // Homepage search results are announced (WCAG 4.1.3).
   await page.goto(base + '/', { waitUntil: 'load' });
-  assert.equal(await page.getAttribute('#search-status', 'role'), 'status');
-  const status = () => page.textContent('#search-status');
-  await page.fill('#tool-search', 'zzzz-no-such-tool');
-  await page.waitForFunction(() => document.getElementById('search-status').textContent !== '');
-  assert.equal(await status(), 'No tools match that search.');
+  const announced = async (query, expected) => {
+    await page.fill('#tool-search', query);
+    const ok = await page.waitForFunction(t => {
+      const el = document.querySelector('#search-status[role="status"]');
+      return el && el.textContent === t;
+    }, expected, { timeout: 3000 }).then(() => true, () => false);
+    if (!ok) problems.push(`homepage search "${query}" is not announced as "${expected}" in a role=status region`);
+  };
+  await announced('zzzz-no-such-tool', 'No tools match that search.');
   await page.fill('#tool-search', 'image');
   const matches = await page.$$eval('#all-tools li[data-search]:not([hidden])', l => l.length);
   assert.ok(matches > 1 && matches < slugs.length, `"image" matched ${matches} tools`);
-  await page.waitForFunction(n => document.getElementById('search-status').textContent === `${n} tools match.`, matches);
-  await page.fill('#tool-search', '');
-  await page.waitForFunction(n => document.getElementById('search-status').textContent === `Showing all ${n} tools.`, slugs.length);
+  await announced('image', `${matches} tools match.`);
+  await announced('', `Showing all ${slugs.length} tools.`);
 
   // Field outlines need 3:1 and placeholder text 4.5:1 against the surfaces
   // fields sit on, in both colour schemes (WCAG 1.4.11, 1.4.3).
@@ -221,10 +224,10 @@ async function siteChecks(browser, base, problems) {
       out.placeholder = getComputedStyle(search, '::placeholder').color;
       return out;
     });
-    assert.equal(c.searchBorder, c['--field-border'], 'the search box uses --field-border');
+    if (c.searchBorder !== c['--field-border']) problems.push(`${colorScheme}: the search box border does not use --field-border`);
     for (const bg of ['--bg', '--surface', '--surface-2']) {
-      const r = contrast(c['--field-border'], c[bg]);
-      if (r < 3) problems.push(`${colorScheme}: --field-border is ${r.toFixed(2)}:1 against ${bg} (needs 3:1)`);
+      const r = contrast(c.searchBorder, c[bg]);
+      if (r < 3) problems.push(`${colorScheme}: field border is ${r.toFixed(2)}:1 against ${bg} (needs 3:1)`);
       const pr = contrast(c.placeholder, c[bg]);
       if (pr < 4.5) problems.push(`${colorScheme}: placeholder text is ${pr.toFixed(2)}:1 against ${bg} (needs 4.5:1)`);
     }
@@ -262,7 +265,7 @@ async function siteChecks(browser, base, problems) {
       problems.push(`sitemap.xml: /${slug}/ ${dated ? 'has no <lastmod> although its front matter sets a date' : `has <lastmod> ${urls.get(`/${slug}/`)} but its front matter sets no date`}`);
     }
   }
-  assert.match(await get('/robots.txt'), /Sitemap: .*\/sitemap\.xml/);
+  if (!/Sitemap: .*\/sitemap\.xml/.test(await get('/robots.txt'))) problems.push('robots.txt does not point to the sitemap');
 
   // "More free tools" rotates, so every tool is linked from several others
   // rather than the alphabetically first ones from every page.
