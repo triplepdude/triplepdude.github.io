@@ -6,8 +6,10 @@
  *   node tests/run.js json-formatter  build only that tool, run its test
  *
  * Each tests/tools/<slug>.test.js exports:
- *   module.exports = async ({ page, open, assert }) => { ... }
- * where open() navigates to the tool's page. On top of each tool's own
+ *   module.exports = async ({ page, open, assert, fixtures }) => { ... }
+ * where open() navigates to the tool's page and fixtures is the path of
+ * tests/fixtures/<slug>/ for any sample files the test needs. The browser
+ * has a fake camera and microphone, and clipboard/camera/mic permissions. On top of each tool's own
  * assertions the runner checks, for every page: no JS errors, no requests to
  * other hosts, a single <h1>, a meta description, and no horizontal scroll
  * at phone width.
@@ -92,7 +94,7 @@ function serve(dir) {
 
 async function newPage(browser, base, viewport, problems) {
   const context = await browser.newContext({ viewport, acceptDownloads: true });
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write', 'camera', 'microphone'], { origin: base });
   const page = await context.newPage();
   await page.route('**/*', route => {
     const url = route.request().url();
@@ -121,7 +123,11 @@ async function main() {
 
   const { out, work } = build(only);
   const server = await serve(out);
-  const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+  // Fake camera/microphone so device-test tools can be exercised headlessly.
+  const browser = await chromium.launch({
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+  });
   let failed = 0;
 
   for (const t of testFiles) {
@@ -133,7 +139,7 @@ async function main() {
         const resp = await page.goto(url, { waitUntil: 'load' });
         assert.equal(resp.status(), 200, `GET ${url} returned ${resp.status()}`);
       };
-      await require(t.file)({ page, open, assert, base: server.base, url });
+      await require(t.file)({ page, open, assert, base: server.base, url, fixtures: path.join(__dirname, 'fixtures', t.slug) });
       await commonChecks(page, problems);
       await context.close();
 
