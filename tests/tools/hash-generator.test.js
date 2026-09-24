@@ -109,9 +109,45 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#hg-msg'), '');
   await page.fill('#hg-text', 'YW*j');
   assert.match(await text('#hg-msg'), /not valid Base64/);
+  // Padding boundaries: MD5/SHA-1/SHA-256 use 64-byte blocks (a message of 56-63 bytes needs a
+  // second padding block), SHA-384/512 use 128-byte blocks (boundary at 112). Expected values
+  // come from Node's crypto module.
+  await page.selectOption('#hg-enc', 'hex');
+  for (const n of [55, 56, 57, 63, 64, 65, 111, 112, 119, 120, 127, 128, 129]) {
+    const buf = Buffer.alloc(n);
+    for (let i = 0; i < n; i++) buf[i] = (i * 73 + n) & 255;
+    const exp = Object.fromEntries(ALGS.map(a => [a, crypto.createHash(a).update(buf).digest('hex')]));
+    await page.fill('#hg-text', buf.toString('hex'));
+    await settle(exp.sha512);
+    for (const a of ALGS) assert.equal(await text(`#hg-${a}-hex`), exp[a], `${n}-byte message: ${a}`);
+    assert.equal(await text('#hg-bytes'), `${n} bytes`);
+  }
+
   await page.selectOption('#hg-enc', 'utf8');
   await page.fill('#hg-text', 'abc');
   await expectAll(V.abc, 'back to utf8');
+
+  // Checksums pasted together with the text around them.
+  const sha = V.abc.sha256[0];
+  const formats = [
+    [`Algorithm       Hash                                                                   Path\n---------       ----                                                                   ----\nSHA256          ${sha.toUpperCase()}       C:\\Users\\me\\abc.txt`, 'SHA-256', 'PowerShell Get-FileHash'],
+    [`SHA256 hash of abc.txt:\n${sha}\nCertUtil: -hashfile command completed successfully.`, 'SHA-256', 'certutil'],
+    [`MD5 hash of file abc.txt:\n${V.abc.md5[0].match(/../g).join(' ')}\nCertUtil: -hashfile command completed successfully.`, 'MD5', 'old certutil with spaced bytes'],
+    [`SHA2-256(abc.txt)= ${sha}`, 'SHA-256', 'OpenSSL 3'],
+    [`(stdin)= ${V.abc.sha1[0]}`, 'SHA-1', 'old OpenSSL stdin'],
+    [`"${V.abc.sha512[0]}"`, 'SHA-512', 'quoted'],
+    [`sha256:${sha}`, 'SHA-256', 'Docker digest'],
+    [`integrity="sha384-${V.abc.sha384[1]}"`, 'SHA-384', 'SRI attribute'],
+  ];
+  for (const [value, alg, label] of formats) {
+    r = await cmp(value);
+    assert.match(r.cls, /\bok\b/, label);
+    assert.ok(r.msg.includes(`the ${alg} hash`), `${label}: ${r.msg}`);
+  }
+  r = await cmp('not a hash!');
+  assert.match(r.cls, /\berror\b/);
+  assert.match(r.msg, /does not look like a hash/);
+  await page.fill('#hg-expected', '');
 
   // Files: one million "a" (the RFC 1321 / FIPS 180 long-message vector).
   await page.check('input[name="hg-src"][value="file"]');
@@ -140,6 +176,52 @@ module.exports = async ({ page, open, assert }) => {
   await page.setInputFiles('#hg-file', { name: 'empty.dat', mimeType: 'application/octet-stream', buffer: Buffer.alloc(0) });
   await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of empty.dat'));
   await expectAll(V[''], 'empty file');
+  await page.fill('#hg-expected', '');
+
+  // A newer file replaces a big one still being hashed: only the newer result is shown.
+  const huge = Buffer.alloc(40 * 1024 * 1024, 7);
+  await page.setInputFiles('#hg-file', { name: 'huge.bin', mimeType: 'application/octet-stream', buffer: huge });
+  await page.waitForSelector('#hg-progress-wrap:not([hidden])');
+  await page.setInputFiles('#hg-file', { name: 'abc.txt', mimeType: 'text/plain', buffer: Buffer.from('abc') });
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of abc.txt'));
+  await page.waitForTimeout(1500); // give the stale job time to (wrongly) finish
+  assert.match(await text('#hg-summary'), /^Hashes of abc\.txt/);
+  assert.equal(await text('#hg-md5-hex'), V.abc.md5[0]);
+  assert.equal(await page.isVisible('#hg-progress-wrap'), false);
+
+  // Cancel stops a big file, resets the drop zone and hides the progress bar.
+  await page.setInputFiles('#hg-file', { name: 'huge.bin', mimeType: 'application/octet-stream', buffer: huge });
+  await page.waitForSelector('#hg-progress-wrap:not([hidden])');
+  await page.click('#hg-cancel');
+  await page.waitForTimeout(1500);
+  assert.match(await text('#hg-summary'), /cancelled/);
+  assert.equal(await text('#hg-md5-hex'), '–');
+  assert.match(await text('#hg-drop-title'), /Choose a file/);
+  assert.equal(await page.isVisible('#hg-progress-wrap'), false);
+  assert.equal(await page.getAttribute('#hg-results', 'data-busy'), '');
+
+  // Switching to Text while a file is hashing shows the text hashes, not dimmed.
+  await page.setInputFiles('#hg-file', { name: 'huge.bin', mimeType: 'application/octet-stream', buffer: huge });
+  await page.waitForSelector('#hg-progress-wrap:not([hidden])');
+  await page.check('input[name="hg-src"][value="text"]');
+  assert.equal(await page.getAttribute('#hg-results', 'data-busy'), '');
+  assert.equal(await text('#hg-md5-hex'), V.abc.md5[0]);
+  await page.check('input[name="hg-src"][value="file"]');
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of huge.bin'), null, { timeout: 30000 });
+  assert.equal(await text('#hg-md5-hex'), crypto.createHash('md5').update(huge).digest('hex'));
+
+  // Dropping a file on the tool card hashes it.
+  await page.check('input[name="hg-src"][value="text"]');
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['abc'], 'dropped.txt', { type: 'text/plain' }));
+    const card = document.querySelector('.tool-card');
+    card.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    card.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of dropped.txt'));
+  assert.equal(await text('#hg-sha256-hex'), V.abc.sha256[0]);
+  assert.equal(await page.isVisible('#hg-file-pane'), true);
 
   // Switching back to Text shows the text hashes again, then Clear resets.
   await page.fill('#hg-expected', '');

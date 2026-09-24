@@ -131,6 +131,18 @@ module.exports = async ({ page, open, assert }) => {
   // On screen the unchanged "y" is not a change: only one line was added.
   assert.deepEqual(await stats(), { added: 1, removed: 0, changed: 0, same: 2 });
 
+  // Download straight after typing: the patch reflects the current texts, not the last comparison.
+  await compare('one\ntwo\n', 'one\nTWO\n');
+  [dl] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => {
+    const B = document.querySelector('#tc-b');
+    B.value = 'one\nthree\n';
+    B.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#tc-download').click();   // before the 200 ms debounce fires
+  })]);
+  assert.equal(fs.readFileSync(await dl.path(), 'utf8'), ['--- original.txt', '+++ changed.txt', '@@ -1,2 +1,2 @@', ' one', '-two', '+three', ''].join('\n'));
+  await settle();
+  await compare('x\ny', 'x\ny\nz');
+
   // ---- Swap and clear ----
   await page.click('#tc-swap');
   await settle();
@@ -154,6 +166,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.textContent('#tc-ok'), 'The two texts are identical.');
   await page.setInputFiles('#tc-file-b', { name: 'bin.dat', mimeType: 'application/octet-stream', buffer: Buffer.from([0, 1, 2, 0, 255]) });
   await page.waitForFunction(() => /binary/.test(document.querySelector('#tc-error').textContent));
+  // UTF-16 with a byte order mark (Windows "Unicode" text) is decoded, not rejected as binary.
+  await page.setInputFiles('#tc-file-a', { name: 'u16le.txt', mimeType: 'text/plain', buffer: Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from('one\r\ntwo\r\n', 'utf16le')]) });
+  await page.waitForFunction(() => document.querySelector('#tc-a').value === 'one\ntwo\n');
+  await settle();
+  assert.equal(await page.textContent('#tc-error'), '');
+  assert.equal(await page.textContent('#tc-ok'), 'The two texts are identical.');
+  await page.setInputFiles('#tc-file-a', { name: 'u16be.txt', mimeType: 'text/plain', buffer: Buffer.concat([Buffer.from([0xFE, 0xFF]), Buffer.from('caf\u00E9\n', 'utf16le').swap16()]) });
+  await page.waitForFunction(() => document.querySelector('#tc-a').value === 'caf\u00E9\n');
 
   // ---- 5,000 lines: 100 edited, 20 inserted, 20 deleted ----
   const big = [], changed = [];
@@ -199,4 +219,39 @@ module.exports = async ({ page, open, assert }) => {
   assert.ok(rows < 2000, `expected folded output, got ${rows} rows`);
   await setOpt('#tc-hide', false);
   assert.equal(await page.locator('.tc-split tr').count(), 4880 + 100 + 20 + 20);
+
+  // ---- Rendering 5,000 changed lines must not freeze the page ----
+  // Output is split into 200-row blocks that the browser lays out only when on screen. As one
+  // table this blocked the main thread for over a second.
+  const manyA = [], manyB = [];
+  for (let i = 0; i < 5000; i++) { manyA.push(`alpha line ${i} text`); manyB.push(`beta line ${i} text`); }
+  for (const v of ['split', 'unified']) {
+    await view(v);
+    const longest = await page.evaluate(async ([a, b]) => {
+      const tasks = [];
+      const obs = new PerformanceObserver(l => l.getEntries().forEach(e => tasks.push(e.duration)));
+      obs.observe({ entryTypes: ['longtask'] });
+      document.querySelector('#tc-a').value = a;
+      const B = document.querySelector('#tc-b');
+      B.value = b + (B.value.endsWith('\n') ? '' : '\n');
+      B.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 300));
+      while (document.querySelector('#tc-out').getAttribute('aria-busy') !== 'false') await new Promise(r => setTimeout(r, 20));
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 50)));
+      obs.disconnect();
+      return Math.max(0, ...tasks);
+    }, [manyA.join('\n'), manyB.join('\n')]);
+    assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 5000, same: 0 });
+    assert.ok(longest < 600, `${v}: main thread blocked for ${Math.round(longest)} ms`);
+    assert.equal(await page.locator('.tc-blk').count(), v === 'split' ? 25 : 50);
+  }
+  // Word mode splits running text into blocks too.
+  await mode('word');
+  assert.ok(await page.locator('.tc-flow pre.tc-blk').count() > 1);
+  assert.equal(await page.textContent('#tc-tok-added'), '5,000');
+  assert.equal(await page.textContent('#tc-tok-removed'), '5,000');
+
+  // The two file buttons have distinct accessible names.
+  assert.equal(await page.getAttribute('[data-file="#tc-file-a"]', 'aria-label'), 'Open file as original text');
+  assert.equal(await page.getAttribute('[data-file="#tc-file-b"]', 'aria-label'), 'Open file as changed text');
 };

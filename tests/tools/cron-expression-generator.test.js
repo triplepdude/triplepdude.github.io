@@ -1,7 +1,8 @@
 // Expected run times were computed independently in Python: with croniter
 // for standard expressions, and with a separate minute-by-minute walk over
-// real instants (zoneinfo Europe/Rome) implementing Vixie cron's rules for
-// the "*/2 day-of-month" quirk and daylight-saving changes. croniter itself
+// real instants (zoneinfo) that simulates cronie/Vixie cron's main loop and
+// entry parser, covering the "*/2 day-of-month" quirk and daylight-saving
+// changes (Europe/Rome, Australia/Lord_Howe, America/Santiago). croniter itself
 // reads "0 0 */2 * 1" as day-of-month OR Monday, which is not what Vixie cron
 // and cronie do, so that case uses only the brute-force walk.
 module.exports = async ({ page, open, assert }) => {
@@ -16,6 +17,10 @@ module.exports = async ({ page, open, assert }) => {
   await cdp.send('Emulation.setTimezoneOverride', { timezoneId: 'Europe/Rome' });
   await setNow('2026-09-24T10:17:30Z'); // Thursday, 12:17:30 in Rome (CEST)
   await open();
+
+  // The description is announced; the run list, refreshed every 30 s, is not.
+  assert.equal(await page.locator('#cr-desc').evaluate(el => !!el.closest('[aria-live]')), true);
+  assert.equal(await page.locator('#cr-runs').evaluate(el => !!el.closest('[aria-live]')), false);
 
   // Default: weekdays at 09:00, local time.
   assert.equal(await page.inputValue('#cr-expr'), '0 9 * * 1-5');
@@ -98,9 +103,16 @@ module.exports = async ({ page, open, assert }) => {
   await setExpr('@weekly');
   assert.equal(await text('#cr-desc'), 'At 00:00 on Sunday.');
   assert.match(await text('#cr-note'), /@weekly is shorthand for 0 0 \* \* 0/);
-  await setExpr('@HOURLY');
+  await setExpr('@hourly');
   assert.equal(await text('#cr-desc'), 'Every hour, on the hour.');
   assert.equal((await runs())[0], 'Thu 2026-09-24 13:00');
+  // Vixie cron, cronie and BusyBox compare shortcut names with strcmp.
+  for (const bad of ['@HOURLY', '@Daily', '@REBOOT']) {
+    await setExpr(bad);
+    assert.equal(await text('#cr-err'), `Write ${bad.toLowerCase()} in lower case. Cron does not recognise "${bad}".`, bad);
+    assert.equal(await text('#cr-desc'), '', bad);
+    assert.deepEqual(await runs(), [], bad);
+  }
   await setExpr('@reboot');
   assert.match(await text('#cr-desc'), /each time the cron daemon starts/);
   assert.deepEqual(await runs(), []);
@@ -130,10 +142,30 @@ module.exports = async ({ page, open, assert }) => {
     assert.equal(await text('#cr-err'), '', e);
   }
 
-  // A step after a single value works but is flagged as non-portable.
+  // A step after a single value works but is flagged as non-portable, in
+  // the warning box rather than the neutral note.
   await setExpr('5/15 * * * *');
   assert.equal(await text('#cr-desc'), 'Every 15 minutes from minute 5 through 50 of every hour.');
-  assert.match(await text('#cr-note'), /Write 5-59\/15/);
+  assert.match(await text('#cr-warn'), /Vixie cron and cronie reject .*BusyBox cron runs it only at 5.*Write 5-59\/15/);
+  assert.equal(await text('#cr-note'), '');
+  await setExpr('0 9 * * 1-5');
+  assert.equal(await text('#cr-warn'), '', 'no warning for a portable expression');
+  // cronie reads a day-of-week range ending in 0/SUN as ending in 7; Debian's
+  // Vixie cron rejects it, so it is accepted with a warning.
+  await setExpr('0 0 * * SAT-SUN');
+  assert.equal(await text('#cr-err'), '');
+  assert.equal(await text('#cr-desc'), 'At 00:00 on Saturday and Sunday.');
+  assert.match(await text('#cr-warn'), /cronie reads "SAT-SUN" as 6-7.*Write 6-7/);
+  assert.deepEqual((await runs()).slice(0, 3), ['Sat 2026-09-26 00:00', 'Sun 2026-09-27 00:00', 'Sat 2026-10-03 00:00']);
+  await setExpr('0 0 * * 5-0');
+  assert.equal(await text('#cr-desc'), 'At 00:00, Friday through Sunday.');
+  // Feb 29 that is also a Sunday (AND mode because of */7): rare, but the
+  // search covers 400 years. Expected dates from Python's datetime.
+  await setExpr('0 0 29 2 */7');
+  assert.deepEqual(await runs(), [
+    'Sun 2032-02-29 00:00', 'Sun 2060-02-29 00:00', 'Sun 2088-02-29 00:00', 'Sun 2128-02-29 00:00', 'Sun 2156-02-29 00:00',
+    'Sun 2184-02-29 00:00', 'Sun 2224-02-29 00:00', 'Sun 2252-02-29 00:00', 'Sun 2280-02-29 00:00', 'Sun 2320-02-29 00:00'
+  ]);
   // A full crontab line: the rest is the command.
   await setExpr('0 5 * * * /usr/bin/backup.sh --full');
   assert.equal(await text('#cr-desc'), 'At 05:00 every day.');
@@ -147,7 +179,8 @@ module.exports = async ({ page, open, assert }) => {
     ['* * * 13 *', /^Month field: 13 is out of range/, 3],
     ['* * * * 8', /^Day of week field: 8 is out of range.*0 and 7 are Sunday/, 4],
     ['* * 5-1 * *', /^Day of month field: the range 5-1 runs backwards.*5-31,1/, 2],
-    ['* * * * SAT-SUN', /^Day of week field: .*backwards.*6-7/, 4],
+    ['* * * * SAT-SUN/2', /^Day of week field: .*backwards.*6-7/, 4],
+    ['0 22-2 * * *', /^Hour field: the range 22-2 runs backwards.*22-23,0-2/, 1],
     ['*/0 * * * *', /^Minute field: .*cannot be 0/, 0],
     ['1,,2 * * * *', /^Minute field: .*empty item/, 0],
     ['0 0 L * *', /^Day of month field: .*Quartz/, 2],
@@ -175,6 +208,17 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await text('#cr-err'), /Unknown shortcut "@every"/);
   await setExpr('   ');
   assert.match(await text('#cr-err'), /Enter a cron expression/);
+  // Dashes pasted from documents are not hyphens.
+  await setExpr('0 9 * * 1–5');
+  assert.equal(await text('#cr-err'), 'Day of week field: "1–5" contains a typographic dash. Write ranges with a plain hyphen, as in 1-5.');
+  // Long unbroken tokens in messages must wrap instead of widening the page.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const long = 'x'.repeat(300);
+  for (const e of ['0 9 * * 1-5 /usr/bin/' + long, long + ' * * * *', '@' + long, '5/15 * * * ' + long]) {
+    await setExpr(e);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 1, 'no horizontal scroll for ' + e.slice(0, 20));
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   // Builder writes the expression.
   const build = async (type, fill) => {
@@ -267,6 +311,41 @@ module.exports = async ({ page, open, assert }) => {
   await useUtc(true);
   assert.deepEqual((await runs()).slice(0, 4), ['Sun 2026-10-25 01:15', 'Sun 2026-10-25 02:15', 'Sun 2026-10-25 03:15', 'Mon 2026-10-26 01:15']);
   assert.equal(await page.locator('#cr-runs .cr-dst').count(), 0);
+
+  // Other daylight-saving shapes. Expected values come from a separate
+  // minute-by-minute Python simulation of cronie's main loop (cron.c: the
+  // "medium" jump runs skipped fixed-time jobs, the "negative" jump runs only
+  // wildcard jobs), using zoneinfo. Lord Howe moves clocks by 30 minutes.
+  await cdp.send('Emulation.setTimezoneOverride', { timezoneId: 'Australia/Lord_Howe' });
+  await setNow('2026-10-03T00:00:00Z');
+  await open();
+  await setExpr('15 2 * * *');
+  assert.deepEqual((await runs()).slice(0, 3), ['Sun 2026-10-04 02:30', 'Mon 2026-10-05 02:15', 'Tue 2026-10-06 02:15']);
+  await setExpr('*/10 2 * * *');
+  assert.deepEqual((await runs()).slice(0, 6), [
+    'Sun 2026-10-04 02:30', 'Sun 2026-10-04 02:40', 'Sun 2026-10-04 02:50', 'Mon 2026-10-05 02:00', 'Mon 2026-10-05 02:10', 'Mon 2026-10-05 02:20'
+  ]);
+  await setNow('2027-04-03T00:00:00Z');
+  await setExpr('*/15 1 * * *');
+  assert.deepEqual((await runs()).slice(0, 8), [
+    'Sun 2027-04-04 01:00', 'Sun 2027-04-04 01:15', 'Sun 2027-04-04 01:30', 'Sun 2027-04-04 01:45',
+    'Sun 2027-04-04 01:30', 'Sun 2027-04-04 01:45', 'Mon 2027-04-05 01:00', 'Mon 2027-04-05 01:15'
+  ]);
+  await setExpr('40 1 * * *');
+  assert.deepEqual((await runs()).slice(0, 3), ['Sun 2027-04-04 01:40', 'Mon 2027-04-05 01:40', 'Tue 2027-04-06 01:40']);
+  // Santiago changes at midnight: 00:00 -> 01:00 in September, and in April
+  // 24:00 on Saturday goes back to Saturday 23:00.
+  await cdp.send('Emulation.setTimezoneOverride', { timezoneId: 'America/Santiago' });
+  await setNow('2026-09-05T12:00:00Z');
+  await open();
+  await setExpr('30 0 * * *');
+  assert.deepEqual((await runs()).slice(0, 3), ['Sun 2026-09-06 01:00', 'Mon 2026-09-07 00:30', 'Tue 2026-09-08 00:30']);
+  await setNow('2027-04-03T12:00:00Z');
+  await setExpr('*/20 23 * * *');
+  assert.deepEqual((await runs()).slice(0, 8), [
+    'Sat 2027-04-03 23:00', 'Sat 2027-04-03 23:20', 'Sat 2027-04-03 23:40', 'Sat 2027-04-03 23:00',
+    'Sat 2027-04-03 23:20', 'Sat 2027-04-03 23:40', 'Sun 2027-04-04 23:00', 'Sun 2027-04-04 23:20'
+  ]);
 
   await cdp.send('Emulation.setTimezoneOverride', { timezoneId: '' }).catch(() => {});
 };

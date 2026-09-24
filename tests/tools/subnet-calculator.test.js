@@ -20,6 +20,36 @@ const CASES = [
   { in: '1.2.3.4/128.0.0.0', network: '0.0.0.0', broadcast: '127.255.255.255', first: '0.0.0.1', last: '127.255.255.254', usable: '2,147,483,646', total: '2,147,483,648', netmask: '128.0.0.0', wildcard: '127.255.255.255', cidr: '0.0.0.0/1', int: '16909060', hex: '0x01020304', rev: '4.3.2.1.in-addr.arpa', bin: '00000001000000100000001100000100', cls: 'A', type: /^Public/ },
 ];
 
+// 24 random inputs (random.seed(20260924), random address and prefix, CIDR / netmask / wildcard form)
+// with [input, network, broadcast (None for /31, /32), first host, last host, usable hosts] from
+// ipaddress.IPv4Interface(...).network, its hosts() and num_addresses.
+const RANDOM = [
+  ["3.232.184.75/9", "3.128.0.0/9", "3.255.255.255", "3.128.0.1", "3.255.255.254", 8388606],
+  ["143.7.217.144 224.0.0.0", "128.0.0.0/3", "159.255.255.255", "128.0.0.1", "159.255.255.254", 536870910],
+  ["216.231.52.145 0.0.0.31", "216.231.52.128/27", "216.231.52.159", "216.231.52.129", "216.231.52.158", 30],
+  ["71.50.196.77/23", "71.50.196.0/23", "71.50.197.255", "71.50.196.1", "71.50.197.254", 510],
+  ["195.68.17.45 255.255.255.240", "195.68.17.32/28", "195.68.17.47", "195.68.17.33", "195.68.17.46", 14],
+  ["192.96.46.240 0.0.7.255", "192.96.40.0/21", "192.96.47.255", "192.96.40.1", "192.96.47.254", 2046],
+  ["240.126.211.88/22", "240.126.208.0/22", "240.126.211.255", "240.126.208.1", "240.126.211.254", 1022],
+  ["113.6.48.47 255.254.0.0", "113.6.0.0/15", "113.7.255.255", "113.6.0.1", "113.7.255.254", 131070],
+  ["184.76.170.167 31.255.255.255", "160.0.0.0/3", "191.255.255.255", "160.0.0.1", "191.255.255.254", 536870910],
+  ["67.131.234.66/13", "67.128.0.0/13", "67.135.255.255", "67.128.0.1", "67.135.255.254", 524286],
+  ["68.7.7.2 192.0.0.0", "64.0.0.0/2", "127.255.255.255", "64.0.0.1", "127.255.255.254", 1073741822],
+  ["22.37.49.244 0.0.1.255", "22.37.48.0/23", "22.37.49.255", "22.37.48.1", "22.37.49.254", 510],
+  ["200.89.140.254/30", "200.89.140.252/30", "200.89.140.255", "200.89.140.253", "200.89.140.254", 2],
+  ["228.171.243.123 255.255.240.0", "228.171.240.0/20", "228.171.255.255", "228.171.240.1", "228.171.255.254", 4094],
+  ["19.84.153.188 0.0.255.255", "19.84.0.0/16", "19.84.255.255", "19.84.0.1", "19.84.255.254", 65534],
+  ["118.186.32.116/14", "118.184.0.0/14", "118.187.255.255", "118.184.0.1", "118.187.255.254", 262142],
+  ["128.144.91.229 255.255.255.254", "128.144.91.228/31", null, "128.144.91.228", "128.144.91.229", 2],
+  ["217.128.19.107 0.0.0.7", "217.128.19.104/29", "217.128.19.111", "217.128.19.105", "217.128.19.110", 6],
+  ["226.221.195.28/28", "226.221.195.16/28", "226.221.195.31", "226.221.195.17", "226.221.195.30", 14],
+  ["110.200.90.59 255.255.255.240", "110.200.90.48/28", "110.200.90.63", "110.200.90.49", "110.200.90.62", 14],
+  ["249.20.43.238 0.0.127.255", "249.20.0.0/17", "249.20.127.255", "249.20.0.1", "249.20.127.254", 32766],
+  ["9.235.21.15/10", "9.192.0.0/10", "9.255.255.255", "9.192.0.1", "9.255.255.254", 4194302],
+  ["140.154.170.1 255.255.255.128", "140.154.170.0/25", "140.154.170.127", "140.154.170.1", "140.154.170.126", 126],
+  ["167.219.220.209 0.0.0.63", "167.219.220.192/26", "167.219.220.255", "167.219.220.193", "167.219.220.254", 62],
+];
+
 module.exports = async ({ page, open, assert }) => {
   await open();
   // First text node of a cell (cells for /31 and /32 broadcast carry an explanatory <small>).
@@ -49,6 +79,15 @@ module.exports = async ({ page, open, assert }) => {
     assert.equal(bin, c.bin, `${c.in}: binary`);
     const bold = await page.locator('#sc-bin dd').first().locator('.sc-n').textContent().catch(() => '');
     assert.equal(bold.replace(/\./g, '').length, +c.cidr.split('/')[1], `${c.in}: network bits highlighted`);
+  }
+
+  for (const [inp, cidr, bc, first, last, usable] of RANDOM) {
+    await page.fill('#sc-ip', inp);
+    assert.equal(await text('#sc-big'), cidr, `${inp}: cidr`);
+    assert.equal(await cell('broadcast'), bc || 'None', `${inp}: broadcast`);
+    assert.equal(await cell('first'), first, `${inp}: first`);
+    assert.equal(await cell('last'), last, `${inp}: last`);
+    assert.equal(await cell('usable'), usable.toLocaleString('en-US'), `${inp}: usable`);
   }
 
   // Notes: wildcard reading, /31 explanation, network/broadcast address warnings, larger-than-range.
@@ -83,6 +122,13 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await typeOf('240.0.0.1'), 'Reserved');
   assert.equal(await text('#sc-class-badge'), 'Class E');
 
+  // Picking a mask with an empty box doesn't invent an input like "/8".
+  await page.fill('#sc-ip', '');
+  await page.selectOption('#sc-prefix', '8');
+  assert.equal(await page.inputValue('#sc-ip'), '');
+  assert.match(await text('#sc-msg'), /Enter an IPv4 address/);
+  await page.selectOption('#sc-prefix', '32');
+
   // Address only, then the mask list.
   await page.fill('#sc-ip', '10.1.2.3');
   assert.equal(await text('#sc-big'), '10.1.2.3/32'); // no mask typed: the list keeps the last one, /32
@@ -104,6 +150,10 @@ module.exports = async ({ page, open, assert }) => {
     ['1.2.3.x/24', /"x" .*not a number/],
     ['1.2.3.4/', /after the slash/],
     ['1.2.3.4/24 extra', /one prefix or mask/],
+    ['192.168.1.1:8080', /includes a port number.*192\.168\.1\.1\/24/],
+    ['192.168.1.1:8080/24', /includes a port number/],
+    ['0010.1.1.1/8', /0010 .*more than three digits/],
+    ['/24', /address before the slash/],
   ];
   for (const [v, re] of errs) {
     await page.fill('#sc-ip', v);
@@ -168,19 +218,48 @@ module.exports = async ({ page, open, assert }) => {
     '172.28.0.0/14,172.28.0.0,172.28.0.1,172.31.255.254,172.31.255.255,262142,255.252.0.0',
   ]);
 
-  // Big split: table capped at 1,024 rows, CSV has all 65,536 (python: 10.0.0.0/8 -> /24, [1023] = 10.3.255.0/24).
+  // Big split: table capped at 512 rows (so typing stays fast), CSV has all 65,536
+  // (python: list(ip_network('10.0.0.0/8').subnets(new_prefix=24)) -> [511] = 10.1.255.0/24).
   await page.fill('#sc-ip', '10.0.0.0/8');
   await page.selectOption('#sc-split-mode', 'prefix');
   await page.selectOption('#sc-split-prefix', '24');
-  assert.match(await text('#sc-split-info'), /65,536 subnets of \/24.*first 1,024.*all of them/);
+  assert.match(await text('#sc-split-info'), /65,536 subnets of \/24.*first 512.*all of them/);
   r = await rows();
-  assert.equal(r.length, 1024);
-  assert.equal(r[1023][1], '10.3.255.0/24');
+  assert.equal(r.length, 512);
+  assert.equal(r[511][1], '10.1.255.0/24');
+  // Recalculating with the big table stays well under a frame budget of ~100 ms.
+  const ms = await page.evaluate(() => {
+    const el = document.querySelector('#sc-ip');
+    const t0 = performance.now();
+    el.value = '10.0.0.1/8'; el.dispatchEvent(new Event('input'));
+    void document.body.offsetHeight;
+    return performance.now() - t0;
+  });
+  assert.ok(ms < 150, `recalculation took ${ms} ms`);
   const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('#sc-csv')]);
   const big = fs.readFileSync(await dl2.path(), 'utf8').trim().split(/\r\n/);
   assert.equal(big.length, 65537);
   assert.equal(big[1025].split(',')[0], '10.4.0.0/24');
   assert.equal(big[65536].split(',')[0], '10.255.255.0/24');
+
+  // Large counts must be sized exactly: Math.log2(2^31 + 1) rounds to 31, but 2^31 subnets are too few.
+  await page.fill('#sc-ip', '0.0.0.0/0');
+  await page.selectOption('#sc-split-mode', 'count');
+  await page.fill('#sc-split-num', String(2 ** 31 + 1));
+  assert.match(await text('#sc-split-info'), /4,294,967,296 subnets of \/32/);
+  await page.fill('#sc-split-num', String(2 ** 32));
+  assert.match(await text('#sc-split-info'), /^4,294,967,296 subnets of \/32/);
+  await page.fill('#sc-split-num', String(2 ** 32 + 1));
+  assert.match(await text('#sc-split-msg'), /at most 4,294,967,296 subnets/);
+  assert.equal(await page.isVisible('#sc-split-out'), false);
+  // Hosts: a /1 has 2^31 - 2 usable hosts, so 2^31 - 1 hosts need the whole /0.
+  await page.selectOption('#sc-split-mode', 'hosts');
+  await page.fill('#sc-split-num', String(2 ** 31 - 2));
+  assert.match(await text('#sc-split-info'), /^2 subnets of \/1 \(128\.0\.0\.0\), 2,147,483,646 usable hosts each/);
+  await page.fill('#sc-split-num', String(2 ** 31 - 1));
+  assert.match(await text('#sc-split-msg'), /needs a \/0, the same size as this network/);
+  await page.fill('#sc-split-num', String(2 ** 32 - 1));
+  assert.match(await text('#sc-split-msg'), /only 4,294,967,294 usable hosts/);
 
   // /31 split into two /32 host routes; hosts mode explains why it can't.
   await page.fill('#sc-ip', '10.0.0.0/30');

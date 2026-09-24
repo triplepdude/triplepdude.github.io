@@ -7,10 +7,11 @@ howto: |
   ## How to use the JWT decoder
 
   Paste a token into the box. It may start with `Bearer ` or be split over
-  several lines; both are cleaned up. The header and payload appear as
-  formatted JSON, and the claims table shows `exp`, `nbf` and `iat` as dates in
-  UTC and in your time zone, with a badge saying whether the token is valid
-  right now.
+  several lines; both are cleaned up. You can also paste a whole JSON response
+  or callback URL, and the first token found in it is decoded. The header and
+  payload appear as formatted JSON, and the claims table shows `exp`, `nbf` and
+  `iat` as dates in UTC and in your time zone, with a badge saying whether the
+  token is valid right now.
 
   To check the signature, enter the key under **Verify the signature**. The
   field changes with the algorithm named in the token's header:
@@ -257,8 +258,21 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
     return raw.trim().replace(/^(authorization\s*:\s*)?bearer\s+/i, '').replace(/^["']+|["']+$/g, '').replace(/\s+/g, '');
   }
 
-  function decodeToken(raw) {
-    const s = cleanToken(raw);
+  // A JWT inside other text: a JSON response, a callback URL (#id_token=...), a cookie header.
+  const EMBEDDED = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*)?/g;
+  function decodeInput(raw) {
+    try { return decodeToken(cleanToken(raw)); } catch (e) {
+      if (!(e instanceof UserError)) throw e;
+      const found = raw.match(EMBEDDED) || [];
+      if (!found.length || found[0] === cleanToken(raw)) throw e;
+      let t;
+      try { t = decodeToken(found[0]); } catch (e2) { throw e2; }
+      t.extracted = found.length;
+      return t;
+    }
+  }
+
+  function decodeToken(s) {
     if (!s) return null;
     const bad = s.match(/[^A-Za-z0-9_\-.=+/]/);
     if (bad) throw new UserError('The token contains "' + bad[0] + '", which can\'t appear in a JWT. Tokens use only letters, digits, "-", "_" and dots.');
@@ -269,6 +283,7 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
     if (!header.obj || typeof header.obj !== 'object' || Array.isArray(header.obj)) throw new UserError('The header must be a JSON object, like {"alg":"HS256","typ":"JWT"}.');
     if (parts.length === 5) return { jwe: true, parts: parts, header: header, warnings: [] };
     const warnings = [];
+    const nested = typeof header.obj.cty === 'string' && header.obj.cty.toUpperCase() === 'JWT';
     if (/[+/=]/.test(s)) warnings.push('The token contains "+", "/" or "=" from standard Base64. JWTs must use Base64url without padding (RFC 7515), so most libraries will reject it.');
     let payload = null;
     if (parts[1] === '') {
@@ -282,15 +297,21 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
         payload = { text: hexOf(bytes), obj: null, raw: true };
       } else {
         try { payload = { text: text, obj: JSON.parse(text) }; } catch (e) {
-          warnings.push('The payload is not JSON. A JWT payload must be a JSON object of claims (RFC 7519).');
+          if (!nested) warnings.push('The payload is not JSON. A JWT payload must be a JSON object of claims (RFC 7519).');
           payload = { text: text, obj: null, raw: true };
         }
         if (payload.obj !== null && (typeof payload.obj !== 'object' || Array.isArray(payload.obj))) warnings.push('The payload is JSON but not an object, so it has no claims.');
       }
     }
-    const sig = b64Bytes(parts[2], 'signature');
+    // A damaged signature must not hide the header and payload: report it and carry on.
+    let sig = null, sigError = '';
+    try { sig = b64Bytes(parts[2], 'signature'); } catch (e) {
+      if (!(e instanceof UserError)) throw e;
+      sigError = e.message;
+      warnings.push(e.message + ' The token may have been cut off when it was copied.');
+    }
     const signingInput = new TextEncoder().encode(parts[0] + '.' + parts[1]);
-    return { parts: parts, header: header, payload: payload, sig: sig, signingInput: signingInput, warnings: warnings };
+    return { parts: parts, header: header, payload: payload, sig: sig, sigError: sigError, nested: nested, signingInput: signingInput, warnings: warnings };
   }
 
   // ---------- Dates ----------
@@ -409,12 +430,14 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
       badge('jwt-time-badge', ts[0], ts[1]);
       if (/^none$/i.test(alg)) {
         warnings.unshift('alg is "' + alg + '": this token is unsigned and unsafe. Anyone can create or edit such a token, so a server must never accept it. Some JWT libraries once did, which let attackers forge any claims.' +
-          (t.sig.length ? ' It also carries a signature, which an unsecured JWT must not have.' : ''));
+          (t.parts[2] ? ' It also carries a signature, which an unsecured JWT must not have.' : ''));
       } else if (alg && !spec) {
-        info.push('"' + alg + '" is not a standard JWS algorithm, so its signature can\'t be checked here.');
+        info.push('"' + alg + '" is not one of the signature algorithms this page supports, so its signature can\'t be checked here.');
       }
+      if (t.nested) info.push('The "cty" header says the payload is itself a JWT (a nested token). Paste the payload into the token box to decode the inner token.');
       if (h.crit) info.push('The header lists critical extensions (crit: ' + JSON.stringify(h.crit) + '). A library that doesn\'t understand them must reject the token.');
     }
+    if (t.extracted) info.unshift('Found ' + (t.extracted === 1 ? 'a token' : t.extracted + ' tokens') + ' inside the pasted text' + (t.extracted === 1 ? ' and decoded it.' : ' and decoded the first one.'));
     $('#jwt-warn').textContent = warnings.join(' ');
     $('#jwt-info').textContent = info.join(' ');
   }
@@ -521,6 +544,8 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
     }
   }
 
+  const PRIVATE_KEY_MSG = 'This is a private key. Verifying needs only the public key, and a private key should never be pasted into a website. Paste the matching public key instead.';
+
   async function importPublicKey(text, spec, alg, header, notes) {
     if (text[0] === '{' || text[0] === '[') {
       let obj;
@@ -543,7 +568,7 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
     const pem = text.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----/);
     if (pem) {
       const type = pem[1];
-      if (/PRIVATE KEY/.test(type)) throw new UserError('This is a private key. Verifying needs only the public key, and a private key should never be pasted into a website. Paste the matching public key instead.');
+      if (/PRIVATE KEY/.test(type)) throw new UserError(PRIVATE_KEY_MSG);
       const der = b64Bytes(pem[2].replace(/^[\w-]+:.*$/gm, ''), 'PEM key', 'Base64');
       if (type === 'PUBLIC KEY') return importSpki(der, spec, alg);
       if (type === 'RSA PUBLIC KEY') {
@@ -555,10 +580,19 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
     }
     if (/^-----BEGIN/.test(text)) throw new UserError('The PEM block is incomplete: its BEGIN and END lines must match.');
     // Bare Base64 DER, e.g. an x5c entry or a PEM body without its armor lines.
-    if (/^[A-Za-z0-9+/=\s]+$/.test(text) && text.length > 60) {
+    if (/^[A-Za-z0-9+/=\s]+$/.test(text) && text.replace(/\s+/g, '').length >= 40) {
       const der = b64Bytes(text, 'key', 'Base64');
-      const outer = derNode(der, 0), first = derNode(der, outer.start);
-      if (first.tag === 0x30 && derNode(der, first.start).tag === 0x06) return importSpki(der, spec, alg);
+      const outer = derNode(der, 0);
+      if (outer.tag !== 0x30) throw new UserError('This Base64 text is not a public key or certificate.');
+      const kids = [];
+      for (let p = outer.start; p < outer.end && kids.length < 4;) { const k = derNode(der, p); kids.push(k.tag); p = k.end; }
+      const shape = kids.join(',');
+      if (shape === '48,3') return importSpki(der, spec, alg); // SubjectPublicKeyInfo
+      if (shape === '2,2') { // PKCS#1 RSAPublicKey
+        if (spec.kty !== 'RSA') throw new UserError('This is an RSA key, but ' + alg + ' needs ' + describeNeed(spec) + '.');
+        return importSpki(pkcs1ToSpki(der), spec, alg);
+      }
+      if (kids[0] === 2 && kids.length >= 3) throw new UserError(PRIVATE_KEY_MSG); // PKCS#8, PKCS#1 or SEC1 private key
       return importSpki(certToSpki(der), spec, alg);
     }
     throw new UserError('Paste the public key as PEM (-----BEGIN PUBLIC KEY-----), a certificate, a JWK or a JWKS.');
@@ -600,7 +634,9 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
     if (!t || t.jwe) return done('', '');
     if (/^none$/i.test(alg)) return done('bad', 'Unsigned token (alg "' + alg + '"). There is nothing to verify, and it must not be trusted.', ['Unsigned', 'bad']);
     if (!spec) return done('', '', ['Signature not checked', '']);
+    if (t.header.obj.b64 === false) return done('', 'This token signs an unencoded payload ("b64": false, RFC 7797), which this page does not verify.', ['Signature not checked', '']);
     if (!subtle) return done('bad', 'Signature checks need the Web Crypto API, which browsers only offer on secure (https) pages.', ['Signature not checked', '']);
+    if (t.sigError) return done('bad', 'Invalid signature: ' + t.sigError.replace(/^The signature is/, 'the signature part is') + ' Check that the whole token was copied.', ['Invalid signature', 'bad']);
 
     try {
       let key;
@@ -619,6 +655,8 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
         const text = keyEl.value.trim();
         if (!text) return done('', 'Paste the public key to check the signature.', ['Signature not checked', '']);
         key = await importPublicKey(text, spec, alg, t.header.obj, notes);
+        const bits = key.algorithm && key.algorithm.modulusLength;
+        if (spec.kty === 'RSA' && bits && bits < 2048) notes.push('This RSA key is only ' + bits + ' bits. RFC 7518 requires 2048 bits or more for ' + alg + '.');
       }
       if (spec.sigLen && t.sig.length !== spec.sigLen) {
         const der = spec.kty === 'EC' && t.sig[0] === 0x30 && t.sig.length >= 8 && t.sig.length <= spec.sigLen + 9;
@@ -627,21 +665,36 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
       }
       const ok = await subtle.verify(spec.kty === 'oct' ? 'HMAC' : spec.ver, key, t.sig, t.signingInput);
       if (ok) done('ok', 'Signature verified: this token was signed with this ' + (spec.kty === 'oct' ? 'secret' : 'key\'s private key') + ' and has not been changed since.', ['Signature verified', 'ok']);
-      else done('bad', 'Invalid signature: the token was changed after it was signed, or it was signed with a different ' + (spec.kty === 'oct' ? 'secret' : 'key') + '.', ['Invalid signature', 'bad']);
+      else {
+        if (spec.kty === 'oct' && !b64El.checked && secretEl.value !== secretEl.value.trim()) {
+          notes.push('The secret starts or ends with a space, and spaces count as part of the secret. Remove it if it was copied by accident.');
+        }
+        done('bad', 'Invalid signature: the token was changed after it was signed, or it was signed with a different ' + (spec.kty === 'oct' ? 'secret' : 'key') + '.', ['Invalid signature', 'bad']);
+      }
     } catch (e) {
       if (e instanceof UserError) return done('bad', e.message, ['Signature not checked', '']);
       done('bad', 'The signature could not be checked: ' + (e && e.message ? e.message : e), ['Signature not checked', '']);
     }
   }
 
+  // True when the token is the example with a few characters edited (someone trying out
+  // tampering), so the example secret stays and the check fails as it should.
+  function nearExample(tok) {
+    const n = Math.min(tok.length, EXAMPLE.length);
+    let a = 0, b = 0;
+    while (a < n && tok[a] === EXAMPLE[a]) a++;
+    while (b < n - a && tok[tok.length - 1 - b] === EXAMPLE[EXAMPLE.length - 1 - b]) b++;
+    return Math.max(tok.length, EXAMPLE.length) - (a + b) <= 12;
+  }
+
   function update() {
-    if (exampleActive && cleanToken(tokenEl.value) !== EXAMPLE) {
+    if (exampleActive && !nearExample(cleanToken(tokenEl.value))) {
       if (secretEl.value === EXAMPLE_SECRET) secretEl.value = '';
       exampleActive = false;
     }
     let t = null;
     try {
-      t = decodeToken(tokenEl.value);
+      t = decodeInput(tokenEl.value);
       msgEl.textContent = '';
     } catch (e) {
       if (!(e instanceof UserError)) throw e;

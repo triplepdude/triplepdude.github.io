@@ -35,7 +35,8 @@ howto: |
   Each field takes `*` for every value, a single value, a range such as `9-17`,
   a list such as `1,15`, or a step: `*/15` means every 15th value from the
   start of the range (0, 15, 30, 45) and `1-10/2` means 1, 3, 5, 7, 9. Names
-  are not case sensitive and also work in ranges, as in `MON-FRI`. A step
+  are not case sensitive and also work in ranges, as in `MON-FRI`, but the
+  `@` shortcuts below must be lower case. A step
   restarts at every hour or day, so `*/7` in the minute field fires at :56 and
   again at :00, four minutes later. Pick a step that divides 60 (or 24 for
   hours) for even spacing.
@@ -55,12 +56,12 @@ howto: |
 
   When both day fields are restricted, cron runs the job on days that match
   **either** of them. `0 12 13 * 5` runs at noon on every 13th and on every
-  Friday, not only on Friday the 13th. This rule comes from Vixie cron and is
-  shared by cronie, the cron on most Linux distributions. If either field
-  starts with `*`, both must match instead, and that includes steps like
-  `*/2`: `0 0 */2 * 1` fires only on odd-numbered days that are also Mondays.
-  Some cron libraries treat `*/2` as a restriction, so they would give a
-  different answer for that last example.
+  Friday, not only on Friday the 13th. This is old Unix behaviour, and Vixie
+  cron and its descendants (cronie on Fedora and RHEL, Debian's cron) keep
+  it. In those crons a field that starts with `*` counts as unrestricted, and
+  that includes steps like `*/2`: `0 0 */2 * 1` fires only on odd-numbered
+  days that are also Mondays. BusyBox cron and many libraries treat `*/2` as
+  a restriction and would also run it on every Monday.
 
   To require both, schedule on one field and test the other in the command,
   for example `0 12 13 * * [ "$(date +\%u)" = 5 ] && /path/to/job`. The
@@ -69,12 +70,13 @@ howto: |
   ## Time zones and daylight saving
 
   Cron uses the server's local time unless it supports a setting such as
-  cronie's `CRON_TZ`. On the night clocks go forward, a time like 02:30 does
-  not exist; this tool leaves such runs out, and it lists a time that happens
-  twice in autumn only once. Real daemons differ here: Vixie-derived ones run
-  fixed-time jobs from a skipped hour right after the jump and do not repeat
-  them when an hour repeats. Keep important jobs out of the 01:00–03:00 window
-  or schedule them in UTC.
+  cronie's `CRON_TZ`. The run list follows what Vixie cron and cronie do when
+  clocks change. On the night clocks go forward, a fixed-time job such as
+  `30 2 * * *` runs right after the jump, at 03:00, while a job with `*` in
+  the minute or hour field simply skips the missing times. When an hour
+  repeats in autumn, fixed-time jobs run once and `*` jobs run in both copies.
+  Other schedulers may differ, so keep important jobs out of the
+  01:00–03:00 window or run the server on UTC.
 faq:
   - q: How do I run a cron job every 5 minutes?
     a: Use `*/5 * * * *`. It fires at minute 0, 5, 10 and so on of every hour. For every 5 minutes during office hours on weekdays, use `*/5 9-17 * * 1-5`.
@@ -96,7 +98,9 @@ faq:
 .cr-desc { margin: 0 0 14px; font-size: clamp(1.1rem, 3.4vw, 1.35rem); font-weight: 650; line-height: 1.4; }
 .cr-desc:empty { display: none; }
 .msg.cr-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.msg.cr-warn { background: var(--danger-soft); color: var(--text); border-left: 3px solid var(--danger); white-space: pre-line; }
 .msg.cr-err { white-space: pre-line; }
+.cr-desc, .msg.cr-err, .msg.cr-warn, .msg.cr-note { overflow-wrap: anywhere; }
 .cr-h { margin: 26px 0 12px; font-size: 1.1rem; }
 .cr-builder { margin: 4px 0 0; padding: 16px 16px 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
 .cr-builder .cr-h { margin-top: 0; }
@@ -138,6 +142,7 @@ faq:
 <p class="msg error cr-err" id="cr-err" role="alert"></p>
 <div aria-live="polite">
   <p class="cr-desc" id="cr-desc"></p>
+  <p class="msg cr-warn" id="cr-warn"></p>
   <p class="msg cr-note" id="cr-note"></p>
 </div>
 
@@ -257,7 +262,7 @@ faq:
       <span class="hint" id="cr-zone"></span>
     </div>
     <label class="check cr-utc"><input type="checkbox" id="cr-utc"> Use UTC instead of local time</label>
-    <div class="table-wrap" aria-live="polite">
+    <div class="table-wrap">
       <table class="data cr-runs">
         <thead><tr><th scope="col">When</th><th scope="col">From now</th></tr></thead>
         <tbody id="cr-runs"></tbody>
@@ -313,11 +318,12 @@ faq:
       throw fail(fi, '"' + s + '" is a Quartz or AWS extension (? L W #) that standard cron does not support.');
     }
     if (/^-\d+$/.test(s)) throw fail(fi, 'negative numbers are not allowed. Allowed: ' + f.allowed + '.');
+    if (/[\u2012-\u2015\u2212]/.test(s)) throw fail(fi, '"' + s + '" contains a typographic dash. Write ranges with a plain hyphen, as in 1-5.');
     throw fail(fi, '"' + s + '" is not a valid value. Allowed: ' + f.allowed + '.');
   }
 
   function parseField(tok, fi) {
-    var f = FIELDS[fi], set = new Set(), warn = null;
+    var f = FIELDS[fi], set = new Set(), warn = [];
     var parts = tok.split(',');
     for (var k = 0; k < parts.length; k++) {
       var part = parts[k];
@@ -338,12 +344,18 @@ faq:
         if (r.length !== 2 || r[1] === '') throw fail(fi, '"' + base + '" is not a valid range. Write it as start-end, like ' + (fi === 4 ? '1-5' : fi === 3 ? '3-10' : fi === 2 ? '1-15' : fi === 1 ? '9-17' : '0-29') + '.');
         lo = parseValue(r[0], fi);
         hi = parseValue(r[1], fi);
-        if (lo > hi) throw fail(fi, 'the range ' + base + ' runs backwards. Cron ranges cannot wrap around; split it into two, like ' + wrapHint(fi, lo, hi) + '.');
+        if (lo > hi && fi === 4 && hi === 0 && sl.length === 1) {
+          // cronie reads FRI-SUN (5-0) as 5-7; Debian's Vixie cron rejects it.
+          hi = 7;
+          warn.push('Day of week field: cronie reads "' + base + '" as ' + lo + '-7, but the Vixie cron in Debian and Ubuntu rejects a range that runs backwards. Write ' + lo + '-7 so it works everywhere.');
+        } else if (lo > hi) {
+          throw fail(fi, 'the range ' + base + ' runs backwards. Cron ranges cannot wrap around; split it into two, like ' + wrapHint(fi, lo, hi) + '.');
+        }
       } else {
         lo = hi = parseValue(base, fi);
         if (sl.length === 2) {
           hi = f.max;
-          warn = FIELDS[fi].label + ' field: Vixie cron rejects a step after a single value such as "' + part + '". Other schedulers read it as ' + base + '-' + f.max + '/' + step + ', which is what is shown here. Write ' + base + '-' + f.max + '/' + step + ' so it works everywhere.';
+          warn.push(FIELDS[fi].label + ' field: Vixie cron and cronie reject a step after a single value such as "' + part + '", and BusyBox cron runs it only at ' + base + '. Many libraries read it as ' + base + '-' + f.max + '/' + step + ', which is what is shown here. Write ' + base + '-' + f.max + '/' + step + ' so it works everywhere.');
         }
       }
       for (var v = lo; v <= hi; v += step) set.add(fi === 4 && v === 7 ? 0 : v);
@@ -363,11 +375,14 @@ faq:
     var tokens = text.split(/\s+/);
     var res = { tokens: null, macro: null, reboot: false, command: '', fields: null, errors: [], warnings: [] };
     if (tokens[0].charAt(0) === '@') {
-      var name = tokens[0].toLowerCase();
+      var name = tokens[0], lower = name.toLowerCase();
       res.command = tokens.slice(1).join(' ');
       if (name === '@reboot') { res.reboot = true; res.macro = '@reboot'; return res; }
       if (!MACROS[name]) {
-        res.error = 'Unknown shortcut "' + tokens[0] + '". Use @yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly or @reboot.';
+        // Vixie cron, cronie and BusyBox compare shortcut names case-sensitively.
+        res.error = MACROS[lower] || lower === '@reboot'
+          ? 'Write ' + lower + ' in lower case. Cron does not recognise "' + name + '".'
+          : 'Unknown shortcut "' + name + '". Use @yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly or @reboot.';
         return res;
       }
       res.macro = name;
@@ -390,7 +405,7 @@ faq:
     for (var i = 0; i < 5; i++) {
       try {
         fields.push(parseField(tokens[i], i));
-        if (fields[i].warn) res.warnings.push(fields[i].warn);
+        res.warnings = res.warnings.concat(fields[i].warn);
       } catch (e) {
         if (!(e instanceof CronError)) throw e;
         fields.push(null);
@@ -569,11 +584,14 @@ faq:
     }
     return null;
   }
-  // Walks calendar days in the chosen zone, then the matching hours and
-  // minutes. Daylight-saving changes follow cronie and Vixie cron: a
-  // fixed-time job whose time is skipped runs right after the jump, a job with
-  // * in the minute or hour field skips the missing minutes, and in a repeated
-  // hour only * jobs run twice.
+  // Walks matching months and days in the chosen zone, then the matching hours
+  // and minutes, up to 400 years ahead (a full Gregorian cycle) so that rare
+  // schedules such as Feb 29 on a given weekday are still found.
+  // Daylight-saving changes follow cronie and Vixie cron: a fixed-time job
+  // whose time is skipped runs right after the jump, a job with * in the
+  // minute or hour field skips the missing minutes, and in a repeated hour
+  // only * jobs run twice.
+  var HORIZON_YEARS = 400;
   function nextRuns(p, fromMs, count, utc) {
     var out = [], start = new Date(fromMs);
     var y = utc ? start.getUTCFullYear() : start.getFullYear();
@@ -581,10 +599,18 @@ faq:
     var d = utc ? start.getUTCDate() : start.getDate();
     var H = sorted(p.hour.set), M = sorted(p.minute.set);
     var wild = p.minute.star || p.hour.star;
-    for (var i = 0; i < 366 * 30 && out.length < count; i++) {
-      var cal = new Date(Date.UTC(y, mo, d + i));
-      var cy = cal.getUTCFullYear(), cm = cal.getUTCMonth(), cd = cal.getUTCDate();
-      if (!p.month.set.has(cm + 1) || !dayMatches(p, cd, cal.getUTCDay())) continue;
+    for (var i = 0; i <= 12 * HORIZON_YEARS && out.length < count; i++) {
+      var cy = y + Math.floor((mo + i) / 12), cm = (mo + i) % 12;
+      if (!p.month.set.has(cm + 1)) continue;
+      var dim = new Date(Date.UTC(cy, cm + 1, 0)).getUTCDate();
+      for (var cd = i === 0 ? d : 1; cd <= dim && out.length < count; cd++) {
+        if (!dayMatches(p, cd, new Date(Date.UTC(cy, cm, cd)).getUTCDay())) continue;
+        out = out.concat(runsOnDay(cy, cm, cd));
+      }
+    }
+    return out.slice(0, count);
+
+    function runsOnDay(cy, cm, cd) {
       var day = [];
       for (var hi = 0; hi < H.length; hi++) {
         for (var mi = 0; mi < M.length; mi++) {
@@ -607,9 +633,8 @@ faq:
         }
       }
       day.sort(function (a, b) { return a.ms - b.ms; });
-      out = out.concat(day);
+      return day;
     }
-    return out.slice(0, count);
   }
 
   var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -686,6 +711,7 @@ faq:
       tr.appendChild(rel);
       body.appendChild(tr);
     });
+    if (list.length < 10) row('No further runs in the next ' + HORIZON_YEARS + ' years.');
   }
 
   function update(fromBuilder) {
@@ -710,7 +736,7 @@ faq:
       } else if (!andMode && (dRestricted || wRestricted)) {
         notes.push('Both day fields are set and one of them covers every day, so the job runs every day: cron runs when either day field matches.');
       } else if (andMode && dRestricted && wRestricted) {
-        notes.push('Because a day field starts with *, Vixie cron and cronie require both the day of month and the day of week to match. Some libraries treat */N as a restriction and would run when either matches.');
+        notes.push('Because a day field starts with *, Vixie cron and cronie require both the day of month and the day of week to match. BusyBox cron and some libraries treat */N as a restriction and would run when either matches.');
       }
       if (dRestricted && !wRestricted && p.dom.tok.indexOf('/') < 0) {
         var Mo = sorted(p.month.set), Dd = sorted(p.dom.set);
@@ -726,9 +752,9 @@ faq:
           notes.push('Months that have no day ' + joinList(missing, 'or') + ' are skipped on that day. Cron has no "last day of the month" value.');
         }
       }
-      notes = notes.concat(res.warnings);
     }
     if (!res.error && res.command) notes.push('The rest of the line is the command: ' + res.command);
+    $('#cr-warn').textContent = res.error ? '' : (res.warnings || []).join('\n');
     $('#cr-note').textContent = notes.join(' ');
     renderFields(res);
     renderRuns();

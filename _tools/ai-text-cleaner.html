@@ -6,12 +6,12 @@ keywords: [remove em dashes, em dash remover, ai text cleaner, remove hidden cha
 howto: |
   ## How to use the AI text cleaner
 
-  Paste your text into the box. Every option shows how many matching
+  Paste your text into the box. Each option shows how many matching
   characters your text contains, and the cleaned version updates as you type
   or toggle options. The **Where the changes are** panel shows the original
   text with each invisible character drawn as a labelled tag (hover or tap
-  one for its code point and name), so you can see exactly what was hiding in
-  it. When you are happy, copy the cleaned text or download it as a `.txt` file.
+  one for its code point and name). Copy the result or download it as a
+  `.txt` file.
 
   ## Exactly which characters are changed
 
@@ -25,52 +25,56 @@ howto: |
   | Unusual spaces | U+00A0, U+1680, U+2000 to U+200A, U+202F, U+205F, U+3000 | a normal space |
   | Line separators | U+2028, U+0085 / U+2029 | a line break / a blank line |
 
-  **Invisible characters** removes every character in the Unicode *Cf*
-  (format) category. That covers the zero-width space U+200B, zero-width
-  non-joiner and joiner U+200C and U+200D, the direction marks U+200E, U+200F
-  and U+061C, the bidirectional controls U+202A to U+202E and U+2066 to U+2069,
-  the word joiner and invisible operators U+2060 to U+2064, the byte order mark
-  U+FEFF, the soft hyphen U+00AD, the Mongolian vowel separator U+180E and the
-  tag characters U+E0001 and U+E0020 to U+E007F. It also removes the combining
-  grapheme joiner U+034F, the Hangul fillers U+115F, U+1160, U+3164 and U+FFA0,
-  and variation selectors (U+FE00 to U+FE0F, U+E0100 to U+E01EF) that come in
-  runs of two or more or follow no character. Real text uses at most one after
-  a character, for example U+FE0F to show ❤ (U+2764) as a colour emoji.
+  **Invisible characters** removes the Unicode *Cf* (format) category, apart
+  from the exceptions below. That includes the zero-width space U+200B, the
+  zero-width non-joiner and joiner U+200C and U+200D, the direction marks
+  U+200E, U+200F and U+061C, the bidirectional controls U+202A to U+202E and
+  U+2066 to U+2069, the word joiner and invisible operators U+2060 to U+2064,
+  the byte order mark U+FEFF, the soft hyphen U+00AD, the Mongolian vowel
+  separator U+180E and the tag characters U+E0001 and U+E0020 to U+E007F. It
+  also removes the combining grapheme joiner U+034F, the Hangul fillers
+  U+115F, U+1160, U+3164 and U+FFA0, and variation selectors (U+FE00 to
+  U+FE0F, U+E0100 to U+E01EF) that come in runs, follow no character or
+  follow one this tool removes or replaces. Real text uses at most one after
+  a character, such as U+FE0F to show ❤ (U+2764) as a colour emoji.
 
   ## What is kept on purpose
 
   - **Emoji sequences.** A joiner between two emoji (as in a family or a
-    rainbow flag) and the tag characters inside flags such as Scotland's are
-    kept, because removing them splits the emoji apart.
+    rainbow flag) stays, and so do the tag characters that spell a region
+    code inside a flag such as Scotland's. Tags that spell anything else are
+    removed.
   - **Scripts that need joiners.** A zero-width non-joiner or joiner between
-    two letters of scripts such as Persian, Arabic, Hindi or Bengali changes
-    how the word is written, so it stays. Between Latin letters it is removed.
+    two letters of Persian, Arabic, Hindi, Bengali and similar scripts changes
+    how the word is written, so it stays. Between Latin letters it goes.
+  - **Old-style Hangul syllables** built from conjoining jamo keep a filler
+    that stands in for a missing part.
   - **Visible format characters**, such as the Arabic number signs U+0600 to
     U+0605, are left alone.
 
-  Letters, accents, emoji and ordinary line breaks are never touched. Tabs
-  are only removed at the end of a line, by the trailing whitespace option.
+  Collapsing spaces keeps the indentation at the start of a line, and tabs
+  are removed only at the end of a line.
 
   ## How em dashes are replaced
 
   With **comma**, "the result—surprisingly—was good" becomes "the result,
   surprisingly, was good". A dash between two numbers becomes a hyphen
-  (1990-2000), a dash before a full stop, question mark or closing bracket is
-  dropped, and a dash at the start of a line becomes a hyphen. **Hyphen with
-  spaces** always gives a hyphen with one space on each side, and **plain
-  hyphen** swaps the dash for `-` and keeps whatever spacing was there. Read
-  the result once: an em dash sometimes works as a colon, and no rule can
-  know that.
+  (1990-2000), a dash right before other punctuation such as a full stop or
+  closing bracket is dropped, and a dash at the start of a line becomes a
+  hyphen. **Hyphen with spaces** puts one space on each side of the hyphen
+  (except at the start or end of a line), and **plain hyphen** swaps the dash
+  for `-` and keeps the spacing. Read the result once: an em dash sometimes
+  works as a colon, and no rule can know that.
 
   ## Hidden characters and AI detectors
 
-  Invisible characters in pasted text can come from typography (a narrow
-  no-break space before a unit), from the app or page you copied from, or
-  from deliberate tampering. Tag characters, for example, mirror
-  ASCII letters and have been used to hide instructions inside text given to
-  AI tools; the highlighted view decodes them so you can read what was hidden.
-  Cleaning characters does not change your wording, so it will not change what
-  an AI detector, which analyses the words themselves, reports.
+  Invisible characters can come from typography (a narrow no-break space
+  before a unit), from the app you copied from, or from deliberate tampering.
+  Tag characters mirror printable ASCII and have been used to hide
+  instructions in text given to AI tools; the highlighted view decodes them
+  so you can read what was hidden. The cleaner changes punctuation and
+  spacing but never rewrites your words, so don't expect it to change an AI
+  detector's verdict.
 faq:
   - q: Is my text uploaded anywhere?
     a: No. The cleaning runs entirely in your browser with JavaScript. Your text is not sent to a server, logged or stored.
@@ -206,6 +210,8 @@ faq:
   var emStyle = TT.$('#atc-em-style');
   var OPTS = ['em', 'en', 'quotes', 'ellipsis', 'inv', 'spaces', 'collapse', 'trim'];
   var VIEW_LIMIT = 100000;
+  // Thousands of highlight elements take hundreds of milliseconds to lay out; past this, show plain text.
+  var MARK_LIMIT = 5000;
 
   var EXAMPLE = 'Here\u2019s the thing\u2014clean text matters more than you\u2019d think.\u00A0When you paste AI output into a CMS, \u201Csmart\u201D punctuation and invisible characters come along for the ride\u2026\n\n' +
     'Some are harmless; others\u200B break search, word counts or code. A non\u2011breaking hyphen looks like a normal one, and a narrow no\u2011break space hides in \u201C10\u202F%\u201D.  \n' +
@@ -244,6 +250,8 @@ faq:
   var RE_DQUOTE = /[\u201C-\u201F]/g;
   var RE_ELLIPSIS = /\u2026/g;
   var RE_COLLAPSE = /(?<=\S) {2,}/g;
+  // Repeated spaces that end a line are counted by the trailing whitespace option instead.
+  var RE_COLLAPSE_MID = /(?<=\S) {2,}(?![ \t]*(?:\n|$))/g;
   var RE_TRIM = /[ \t]+(?=\n|$)/g;
   var RE_VIEW = /[ \t]+(?=\n|$)| {2,}|[\p{Cf}\u034F\u115F\u1160\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\u2028\u2029\u0085\u2010-\u2015\u2212\u2E3A\u2E3B\u2018-\u201F\u2026]/gu;
   var RE_PICT = /\p{Extended_Pictographic}/u;
@@ -251,6 +259,8 @@ faq:
   var RE_LETTER = /[\p{L}\p{M}]/u;
   var RE_NOJOIN_SCRIPT = /[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Common}\p{Script=Inherited}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
   var RE_NOBASE = /[\s\p{Cc}\p{Cf}]/u;
+  // Characters this page removes or replaces: a variation selector after one has nothing left to modify.
+  var RE_GONE_BASE = /[\u034F\u115F\u1160\u3164\uFFA0\u2010-\u2015\u2018-\u201F\u2026\u2212\u2E3A\u2E3B]/;
 
   function hex(cp) { return 'U+' + cp.toString(16).toUpperCase().padStart(4, '0'); }
   function isVS(cp) { return (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF); }
@@ -289,26 +299,37 @@ faq:
     var c = chr(cp);
     return cp > 0 && RE_LETTER.test(c) && !RE_NOJOIN_SCRIPT.test(c);
   }
+  // A flag tag sequence (England, Scotland, Wales and other subdivisions, UTS #51): U+1F3F4, a
+  // lowercase Unicode subdivision code (region + 1-4 letters or digits) in tag characters, then
+  // the cancel tag U+E007F. Anything else hiding behind U+1F3F4, such as smuggled text, is removed.
   function inFlag(s, i) {
     var j = i;
     while (isTag(prevCp(s, j))) j -= 2;
     if (prevCp(s, j) !== 0x1F3F4) return false;
-    var k = i, last = s.codePointAt(i);
+    var k = j, spec = '';
     for (;;) {
-      var n = k + 2 < s.length ? s.codePointAt(k + 2) : -1;
-      if (!isTag(n)) break;
+      var c = k < s.length ? s.codePointAt(k) : -1;
+      if (!isTag(c)) return false;
+      if (c === 0xE007F) break;
+      spec += String.fromCharCode(c - 0xE0000);
       k += 2;
-      last = n;
     }
-    return last === 0xE007F;
+    return i <= k && /^(?:[a-z]{2}|[0-9]{3})[a-z0-9]{1,4}$/.test(spec);
   }
+  // Old-style Hangul syllables are spelled with conjoining jamo, and the choseong filler U+115F
+  // or jungseong filler U+1160 stands in for a missing part. A filler next to a real jamo is part
+  // of a visible syllable; a lone filler, or two fillers together, shows nothing.
+  function isChoseong(cp) { return (cp >= 0x1100 && cp <= 0x115E) || (cp >= 0xA960 && cp <= 0xA97C); }
+  function isJungseong(cp) { return (cp >= 0x1161 && cp <= 0x11A7) || (cp >= 0xD7B0 && cp <= 0xD7C6); }
 
   // 'remove', 'keep' (a joiner or tag that real text needs) or null (not a hidden character).
   function invAction(s, i, cp) {
     if (isVisibleFormat(cp)) return null;
+    if (cp === 0x115F && isJungseong(nextCp(s, i, cp))) return null;
+    if (cp === 0x1160 && isChoseong(prevCp(s, i))) return null;
     if (isVS(cp)) {
       var p = prevCp(s, i);
-      if (p < 0 || isVS(p) || isVS(nextCp(s, i, cp)) || RE_NOBASE.test(chr(p))) return 'remove';
+      if (p < 0 || isVS(p) || isVS(nextCp(s, i, cp)) || RE_NOBASE.test(chr(p)) || RE_GONE_BASE.test(chr(p))) return 'remove';
       return null;
     }
     if (cp === 0x200D && (joinsEmoji(s, i) || (needsJoiner(prevCp(s, i)) && needsJoiner(nextCp(s, i, cp))))) return 'keep';
@@ -384,7 +405,7 @@ faq:
     n.ellipsis = count(RE_ELLIPSIS, s);
     if (o.ellipsis) s = s.replace(RE_ELLIPSIS, '...');
 
-    n.collapse = count(RE_COLLAPSE, s);
+    n.collapse = count(o.trim ? RE_COLLAPSE_MID : RE_COLLAPSE, s);
     if (o.collapse) s = s.replace(RE_COLLAPSE, ' ');
 
     n.trim = count(RE_TRIM, s);
@@ -421,7 +442,7 @@ faq:
   function renderView(text, o) {
     var frag = document.createDocumentFragment();
     var s = text.length > VIEW_LIMIT ? text.slice(0, VIEW_LIMIT) : text;
-    var last = 0, m, group = null;
+    var last = 0, m, group = null, capped = false;
     RE_VIEW.lastIndex = 0;
 
     function plain(upto) {
@@ -445,6 +466,8 @@ faq:
     }
 
     while ((m = RE_VIEW.exec(s))) {
+      // Each highlight adds about two nodes: the text before it and the highlight itself.
+      if (frag.childNodes.length >= MARK_LIMIT * 2) { capped = true; break; }
       var tok = m[0], idx = m.index, cp = tok.codePointAt(0);
       if (group && (idx !== group.end || !(group.type === 'tag' ? isTag(cp) : isVS(cp)))) flushGroup();
 
@@ -526,8 +549,10 @@ faq:
     flushGroup();
     plain(s.length);
     view.replaceChildren(frag);
-    viewNote.hidden = text.length <= VIEW_LIMIT;
-    viewNote.textContent = text.length > VIEW_LIMIT ? 'Showing the first ' + VIEW_LIMIT.toLocaleString() + ' characters. The cleaned text covers all of it.' : '';
+    var note = capped ? 'Highlighting about the first ' + MARK_LIMIT.toLocaleString() + ' changes; the rest of the preview is plain text.'
+      : text.length > VIEW_LIMIT ? 'Showing the first ' + VIEW_LIMIT.toLocaleString() + ' characters.' : '';
+    viewNote.hidden = !note;
+    viewNote.textContent = note ? note + ' The cleaned text covers all of it.' : '';
   }
 
   function plural(n, one, many) { return n.toLocaleString() + ' ' + (n === 1 ? one : many); }

@@ -173,7 +173,8 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await row('status'), 'Unknown version');
 
   // Accepted spellings.
-  for (const v of ['{017F22E2-79B0-7CC3-98C4-DC0C0C07398F}', 'urn:uuid:017f22e2-79b0-7cc3-98c4-dc0c0c07398f', ' 017F22E279B07CC398C4DC0C0C07398F ']) {
+  for (const v of ['{017F22E2-79B0-7CC3-98C4-DC0C0C07398F}', 'urn:uuid:017f22e2-79b0-7cc3-98c4-dc0c0c07398f', ' 017F22E279B07CC398C4DC0C0C07398F ',
+    '"017f22e2-79b0-7cc3-98c4-dc0c0c07398f"', "'017F22E2-79B0-7CC3-98C4-DC0C0C07398F'", '{urn:uuid:017f22e2-79b0-7cc3-98c4-dc0c0c07398f}', 'URN:UUID:017F22E2-79B0-7CC3-98C4-DC0C0C07398F']) {
     await inspect(v);
     assert.equal(await text('#uu-in-err'), '', v);
     assert.equal(await row('standard-form'), '017f22e2-79b0-7cc3-98c4-dc0c0c07398f', v);
@@ -184,6 +185,8 @@ module.exports = async ({ page, open, assert }) => {
     ['017f22e2-79b0-7cc3-98c4-dc0c0c07398', /32 hex digits, but this has 31/],
     ['017f22e279b0-7cc3-98c4-dc0c0c07398f0', /32 hex digits, but this has 33/],
     ['017f22e279b0-7cc3-98c4-dc0c0c07398f', /hyphens are in the wrong places/],
+    ['017f22e2-79b0-7cc3-98c4-dc0c0c0739😀', /^"😀" is not a hexadecimal digit/],
+    ['"017f22e2-79b0-7cc3-98c4-dc0c0c07398f', /^""" is not a hexadecimal digit/],
   ]) {
     await inspect(v);
     assert.match(await text('#uu-in-err'), re, v);
@@ -191,4 +194,20 @@ module.exports = async ({ page, open, assert }) => {
   }
   await inspect('');
   assert.equal(await text('#uu-in-err'), '');
+
+  // Without crypto.randomUUID (older browsers, pages not served over HTTPS)
+  // the page falls back to getRandomValues and must still set the bits.
+  const p2 = await page.context().newPage();
+  const p2errors = [];
+  p2.on('pageerror', e => p2errors.push(e.message));
+  await p2.addInitScript(() => { Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }); });
+  await p2.goto(page.url());
+  assert.equal(await p2.evaluate(() => typeof crypto.randomUUID), 'undefined');
+  await p2.fill('#uu-count', '500');
+  const fb = (await p2.inputValue('#uu-out')).split('\n');
+  assert.equal(fb.length, 500);
+  for (const u of fb) assert.match(u, V4);
+  assert.equal(new Set(fb).size, 500);
+  assert.deepEqual(p2errors, []);
+  await p2.close();
 };

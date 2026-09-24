@@ -22,7 +22,8 @@ howto: |
   | UTM | zone 18, north, easting 585631, northing 4511327 |
 
   Latitude comes first unless you label the values with N, S, E or W. South
-  and west can be written with a minus sign instead of a letter.
+  and west can be written with a minus sign instead of a letter. Brackets,
+  `geo:` links and colon-separated values such as `40:44:54N` also work.
 
   ## How an MGRS grid reference is built
 
@@ -131,7 +132,7 @@ faq:
     </div>
     <button class="btn secondary mg-locate" type="button" id="mg-locate">Use my location</button>
   </div>
-  <p class="hint">Decimal degrees, degrees and minutes, or degrees, minutes and seconds. Use N, S, E, W or a minus sign for south and west.</p>
+  <p class="hint">Decimal degrees, degrees and minutes, or degrees, minutes and seconds. Use N, S, E, W or a minus sign for south and west. Works from 80°S to 84°N; the polar UPS grid is not supported.</p>
   <div class="actions mg-examples">
     <span class="hint">Try:</span>
     <button class="btn secondary small" type="button" data-example="-33.8568, 151.2153">Sydney</button>
@@ -367,7 +368,7 @@ faq:
     if (zone < 1 || zone > 60) throw new Error('The zone number must be between 1 and 60.');
     if (/[IO]/.test(band + colL + rowL)) throw new Error('MGRS never uses the letters I and O. Check whether you meant 1 or 0.');
     if (band === 'X' && (zone === 32 || zone === 34 || zone === 36)) throw new Error('Zone ' + zone + 'X does not exist: around Svalbard only zones 31X, 33X, 35X and 37X are used.');
-    if (digits.length % 2) throw new Error('The easting and northing need the same number of digits, for example 85631 11326. You gave ' + digits.length + ' digits.');
+    if (digits.length % 2) throw new Error('The easting and northing need the same number of digits, for example 85631 11326. You gave ' + digits.length + (digits.length === 1 ? ' digit.' : ' digits.'));
     if (digits.length > 10) throw new Error('Use at most 10 digits (5 for the easting and 5 for the northing), which is 1 m precision.');
     var set = COLS[(zone - 1) % 3];
     var col = set.indexOf(colL);
@@ -391,7 +392,12 @@ faq:
   function parseLatLon(input) {
     var s = String(input).trim();
     if (!s) throw new Error('Enter a latitude and longitude, for example 40.7484, -73.9857.');
+    // A geo: URI (RFC 5870) carries "lat,lon" and optional ";param" parts.
+    if (/^geo:/i.test(s)) s = s.slice(4).replace(/;.*$/, '');
     s = s.replace(/\b(?:latitude|longitude|lat|long|lon|lng)\b\s*[:=]?/gi, ' ')
+      // Brackets from copied arrays or tuples, and colons between degrees, minutes and seconds (40:44:54N).
+      .replace(/[()[\]{}]/g, ' ')
+      .replace(/:/g, ' ')
       .replace(/[\u2032\u2019\u2018\u00B4`]/g, "'")
       .replace(/[\u2033\u201D\u201C]|''/g, '"')
       .replace(/[\u00BA\u02DA]/g, '\u00B0')

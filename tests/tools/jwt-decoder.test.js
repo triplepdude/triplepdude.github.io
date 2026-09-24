@@ -12,7 +12,7 @@ const hmac = (hash, secret) => data => crypto.createHmac(hash, secret).update(da
 
 const JWT_IO = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
 
-module.exports = async ({ page, open, assert, fixtures }) => {
+module.exports = async ({ page, open, assert, fixtures, url }) => {
   await open();
   const text = sel => page.locator(sel).textContent();
   const now = Math.floor(Date.now() / 1000);
@@ -220,6 +220,103 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.fill('#jwt-token', b64u('{"alg":"HS256"}') + '.' + b64u('hello world') + '.');
   assert.equal(await text('#jwt-payload'), 'hello world');
   assert.match(await text('#jwt-warn'), /payload is not JSON/);
+
+  // A cut-off signature still shows the header and payload, and verification says why it fails.
+  const good = makeToken({ alg: 'HS256', typ: 'JWT' }, { sub: 'cut' }, hmac('sha256', 'k'.repeat(32)));
+  await page.fill('#jwt-token', good.slice(0, good.length - 42)); // leaves 1 signature character
+  assert.equal(await text('#jwt-msg'), '');
+  assert.equal(await page.isVisible('#jwt-out'), true);
+  assert.match(await text('#jwt-payload'), /"sub": "cut"/);
+  assert.match(await text('#jwt-warn'), /signature is not valid Base64url.*cut off/);
+  await page.fill('#jwt-secret', 'k'.repeat(32));
+  await invalid('truncated signature');
+  assert.match(await text('#jwt-verify'), /whole token was copied/);
+  assert.equal(await text('#jwt-sig-badge'), 'Invalid signature');
+
+  // Tokens inside other text: a JSON token response, a callback URL, a cookie.
+  await page.fill('#jwt-token', JSON.stringify({ access_token: good, token_type: 'Bearer', id_token: JWT_IO }));
+  assert.equal(await text('#jwt-msg'), '');
+  assert.match(await text('#jwt-payload'), /"sub": "cut"/);
+  assert.match(await text('#jwt-info'), /Found 2 tokens inside the pasted text and decoded the first one/);
+  await verified('token extracted from JSON');
+  await page.fill('#jwt-token', 'https://app.example.com/callback#id_token=' + JWT_IO + '&state=af0ifjsldkj');
+  assert.match(await text('#jwt-payload'), /"name": "John Doe"/);
+  assert.match(await text('#jwt-info'), /Found a token inside the pasted text/);
+  await page.fill('#jwt-token', 'Cookie: session=' + JWT_IO + '; theme=dark');
+  assert.match(await text('#jwt-payload'), /"name": "John Doe"/);
+
+  // A secret with a stray trailing space gets a hint when verification fails.
+  await page.fill('#jwt-token', good);
+  await page.fill('#jwt-secret', 'k'.repeat(32) + ' ');
+  await invalid('secret with trailing space');
+  assert.match(await text('#jwt-key-note'), /ends with a space/);
+  await page.fill('#jwt-secret', 'k'.repeat(32));
+  await verified('secret without the space');
+
+  // Algorithms that exist but aren't supported here are not called non-standard.
+  await page.fill('#jwt-token', makeToken({ alg: 'ES256K' }, { sub: 'x' }, () => Buffer.alloc(64, 1)));
+  assert.match(await text('#jwt-info'), /"ES256K" is not one of the signature algorithms this page supports/);
+
+  // RFC 7797 unencoded payloads use a different signing input, so they are not reported as tampered.
+  await page.fill('#jwt-token', makeToken({ alg: 'HS256', b64: false, crit: ['b64'] }, { sub: 'x' }, hmac('sha256', 'k'.repeat(32))));
+  await expectVerify(/unencoded payload.*RFC 7797/, 'b64 false');
+  assert.equal(await text('#jwt-sig-badge'), 'Signature not checked');
+
+  // Nested JWT (cty: JWT): no "payload is not JSON" warning, an explanation instead.
+  await page.fill('#jwt-token', makeToken({ alg: 'HS256', cty: 'JWT' }, JWT_IO, hmac('sha256', 'x')));
+  assert.equal(await text('#jwt-warn'), '');
+  assert.match(await text('#jwt-info'), /payload is itself a JWT/);
+  assert.equal(await text('#jwt-payload'), JWT_IO);
+
+  // Bare Base64 DER keys: PKCS#1 RSA public key works, private keys are refused, Ed25519 SPKI (60 chars) works.
+  await page.fill('#jwt-token', rsToken);
+  await page.fill('#jwt-key', rsa.publicKey.export({ type: 'pkcs1', format: 'der' }).toString('base64'));
+  await verified('RS256 bare base64 PKCS#1');
+  await page.fill('#jwt-key', rsa.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'));
+  await expectVerify(/This is a private key/, 'bare PKCS#8 private key refused');
+  await page.fill('#jwt-key', rsa.privateKey.export({ type: 'pkcs1', format: 'der' }).toString('base64'));
+  await expectVerify(/This is a private key/, 'bare PKCS#1 private key refused');
+  await page.fill('#jwt-token', makeToken({ alg: 'EdDSA' }, { sub: 'ed' }, d => crypto.sign(null, d, ed.privateKey)));
+  const edDer = ed.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  assert.equal(edDer.length, 60);
+  await page.fill('#jwt-key', edDer);
+  await verified('EdDSA bare base64 SPKI');
+
+  // RSA keys under 2048 bits verify, with a note (RFC 7518 section 3.3).
+  const rsa1024 = crypto.generateKeyPairSync('rsa', { modulusLength: 1024 });
+  await page.fill('#jwt-token', makeToken({ alg: 'RS256' }, { sub: 'small' }, d => crypto.sign('sha256', d, rsa1024.privateKey)));
+  await page.fill('#jwt-key', rsa1024.publicKey.export({ type: 'spki', format: 'pem' }));
+  await verified('RS256 1024-bit');
+  assert.match(await text('#jwt-key-note'), /only 1024 bits.*2048 bits or more/);
+
+  // Editing the example a little keeps its secret, so the tampering shows as an invalid signature.
+  await page.click('#jwt-example');
+  await verified('example before tampering');
+  const ex = await page.inputValue('#jwt-token');
+  const [exH, exP, exS] = ex.split('.');
+  const exPayload = JSON.parse(Buffer.from(exP, 'base64url').toString());
+  // Change one character of the Base64url payload (a flipped letter inside "role").
+  const i = exP.length - 30;
+  const flipped = exP.slice(0, i) + (exP[i] === 'A' ? 'B' : 'A') + exP.slice(i + 1);
+  assert.ok(exPayload.role);
+  await page.fill('#jwt-token', [exH, flipped, exS].join('.'));
+  assert.notEqual(await page.inputValue('#jwt-secret'), '', 'example secret kept after a small edit');
+  await invalid('tampered example');
+
+  // Local times follow the viewer's time zone, including daylight saving time.
+  // python: datetime.fromtimestamp(t, ZoneInfo('America/New_York')) -> Sat Jun 20 2026 08:00:00 PM EDT,
+  // Wed Dec 31 2025 07:00:00 PM EST.
+  const nyCtx = await page.context().browser().newContext({ timezoneId: 'America/New_York', locale: 'en-US' });
+  const ny = await nyCtx.newPage();
+  const nyErrors = [];
+  ny.on('pageerror', e => nyErrors.push(e.message));
+  await ny.goto(url);
+  await ny.fill('#jwt-token', makeToken({ alg: 'HS256' }, { exp: 1782000000, iat: 1767225600 }, hmac('sha256', 'x')));
+  assert.equal(await ny.locator('tr[data-claim="exp"] .jwt-utc').textContent(), '2026-06-21 00:00:00 UTC');
+  assert.match(await ny.locator('tr[data-claim="exp"] .jwt-local').textContent(), /^Local: Sat, Jun 20, 2026, 08:00:00 PM EDT/);
+  assert.match(await ny.locator('tr[data-claim="iat"] .jwt-local').textContent(), /^Local: Wed, Dec 31, 2025, 07:00:00 PM EST/);
+  assert.deepEqual(nyErrors, []);
+  await nyCtx.close();
 
   // Clear, then the example comes back.
   await page.click('#jwt-clear');

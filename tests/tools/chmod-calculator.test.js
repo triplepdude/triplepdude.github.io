@@ -94,6 +94,21 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#cm-err'), '');
   await page.locator('#cm-symbolic').blur();
   assert.match(await text('#cm-err'), /Expected 9 characters/);
+  // Typing an ls -l string that starts with its file type shows no error
+  // until it is complete (the d is not read as a permission).
+  await page.fill('#cm-octal', '644');
+  await page.uncheck('#cm-dir');
+  await page.fill('#cm-symbolic', '');
+  for (const ch of 'drwxr-x---') {
+    await page.locator('#cm-symbolic').press(ch === '-' ? 'Minus' : ch);
+    assert.equal(await text('#cm-err'), '', 'while typing ' + (await val('#cm-symbolic')));
+  }
+  assert.equal(await val('#cm-octal'), '750');
+  assert.equal(await page.isChecked('#cm-dir'), true);
+  await page.fill('#cm-symbolic', 'drwxr-xr-');
+  await page.locator('#cm-symbolic').blur();
+  assert.match(await text('#cm-err'), /Expected 9 characters/);
+  await page.fill('#cm-octal', '1777');
 
   // Checkboxes -> octal and symbolic, live.
   await page.fill('#cm-octal', '000');
@@ -108,7 +123,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#cm-d-s'), '4');
   await page.getByLabel('Owner execute').uncheck();
   assert.equal(await val('#cm-symbolic'), 'rwSr--r--');
-  assert.match(await text('#cm-warnings'), /no effect/);
+  assert.match(await text('#cm-warnings'), /nobody can execute the file \(shown as S\), so it has no effect/);
+  // Linux still honours setuid when group or others may execute (fs/exec.c
+  // bprm_fill_uid checks only S_ISUID), so S is not "no effect" there.
+  await page.getByLabel('Group execute').check();
+  assert.equal(await val('#cm-symbolic'), 'rwSr-xr--');
+  assert.match(await text('#cm-warnings'), /owner cannot execute the file \(shown as S\)\. Group members or others who run it still get the owner’s rights/);
+  assert.doesNotMatch(await text('#cm-warnings'), /no effect/);
+  await page.getByLabel('Group execute').uncheck();
   await page.locator('input[data-bit="2048"]').uncheck();
   await page.locator('input[data-bit="512"]').check();
   await page.getByLabel('Others execute').check();
@@ -138,6 +160,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#cm-cmd-num'), "chmod 750 'my file'\\''s.sh'");
   await page.fill('#cm-file', '-weird');
   assert.equal(await text('#cm-cmd-num'), 'chmod 750 ./-weird');
+  // A leading dash needs ./ even when the name is quoted.
+  await page.fill('#cm-file', '-my file');
+  assert.equal(await text('#cm-cmd-num'), "chmod 750 './-my file'");
+  // Wildcards stay unquoted so the shell expands them; $ is quoted.
+  await page.fill('#cm-file', '*.sh');
+  assert.equal(await text('#cm-cmd-num'), 'chmod 750 *.sh');
+  await page.fill('#cm-file', '$HOME/x');
+  assert.equal(await text('#cm-cmd-num'), "chmod 750 '$HOME/x'");
   await page.fill('#cm-file', 'public_html');
   await page.check('#cm-rec');
   assert.equal(await text('#cm-cmd-num'), 'chmod -R 750 public_html');
@@ -190,6 +220,20 @@ module.exports = async ({ page, open, assert }) => {
           assert.equal(A, st.ls, `${cmd} -> ${A}`);
         }
       }
+      // The quoting must survive a real shell: odd names and a wildcard.
+      await page.uncheck('#cm-dir');
+      await page.fill('#cm-octal', '640');
+      for (const [name, files] of [["-x y's", ["-x y's"]], ['*.sh', ['a.sh', 'b c.sh']], ['$HOME', ['$HOME']]]) {
+        const sub = fs.mkdtempSync(path.join(dir, 'q-'));
+        for (const f of files) { fs.writeFileSync(path.join(sub, f), ''); fs.chmodSync(path.join(sub, f), 0o777); }
+        await page.fill('#cm-file', name);
+        for (const cmd of [await text('#cm-cmd-num'), await text('#cm-cmd-sym')]) {
+          for (const f of files) fs.chmodSync(path.join(sub, f), 0o777);
+          execFileSync('sh', ['-c', cmd], { cwd: sub });
+          for (const f of files) assert.equal((fs.statSync(path.join(sub, f)).mode & 0o7777).toString(8), '640', `${cmd} on ${f}`);
+        }
+      }
+      await page.fill('#cm-file', '');
       // On a directory, the numeric command keeps setuid/setgid (GNU rule),
       // and the five-digit form the page suggests clears them.
       await page.check('#cm-dir');

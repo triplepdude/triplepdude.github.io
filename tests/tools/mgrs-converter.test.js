@@ -64,6 +64,39 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('button[data-example^="60"]');
   assert.equal(await val('#mg-big'), '32V KN 97476 00831');
 
+  // Antimeridian (pyproj/mgrs): zone 60 just west of 180\u00B0, zone 1 just east of it.
+  await ll('-16.5, 179.9999');
+  assert.equal(await val('#mg-big'), '60K ZG 20277 73373');
+  assert.equal(await val('#mg-r-utm'), '60K 820277 8173373');
+  await ll('-16.5, -179.9999');
+  assert.equal(await val('#mg-big'), '1K AB 79722 73373');
+  assert.equal(await val('#mg-r-utm'), '1K 179723 8173373');
+  // 64\u00B0N is outside the Norway exception (band W); just below it is 32V.
+  await ll('64, 5');
+  assert.equal(await val('#mg-big'), '31W EL 97812 98548');
+  await ll('63.9999, 5');
+  assert.equal(await val('#mg-big'), '32V LS 04448 03141');
+  // The edges of MGRS coverage: 84\u00B0N and 80\u00B0S are still in the grid.
+  await ll('84, 20');
+  assert.equal(await val('#mg-big'), '33X WP 58278 30624');
+  await ll('-80, -60');
+  assert.equal(await val('#mg-big'), '21C VM 41867 16915');
+  // A hair south of the equator is band M with a northing just under 10,000,000 m.
+  await ll('-0.0000001, 0');
+  assert.equal(await val('#mg-big'), '31M AV 66021 99999');
+  // Pasted formats: brackets, a geo: URI (RFC 5870) and colon-separated DMS.
+  await ll('(40.748440, -73.985664)');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  await ll('[40.748440, -73.985664]');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  await ll('geo:40.748440,-73.985664;u=35');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  await ll('40:44:54.38N 73:59:08.39W');
+  assert.equal(await val('#mg-r-dd'), '40.748439, -73.985664');
+  assert.equal(await err(), '');
+  // The page says up front that polar areas are not covered.
+  assert.match(await page.textContent('#mg-panel-ll .hint'), /80\u00B0S to 84\u00B0N; the polar UPS grid is not supported/);
+
   // ---- MGRS to latitude/longitude: the centre of the square (pyproj inverse at +0.5 m). ----
   await mode('mgrs');
   await page.fill('#mg-mgrs', '32VKN9747700830');
@@ -96,6 +129,14 @@ module.exports = async ({ page, open, assert }) => {
     assert.match(await err(), re, s);
     assert.equal(await page.isVisible('#mg-out'), false);
   }
+
+  // Only the 100 km square: the result is its centre (pyproj: E 550000, N 4550000 in zone 18N).
+  await page.fill('#mg-mgrs', '18TWL');
+  within(await val('#mg-r-dd'), 41.099739709, -74.404583508, 1.5e-6, '18TWL');
+  assert.match(await val('#mg-note'), /100 km square/);
+  assert.equal(await err(), '');
+  await page.fill('#mg-mgrs', '18TWL8');
+  assert.match(await err(), /You gave 1 digit\./);
 
   // ---- UTM to latitude/longitude ----
   await mode('utm');

@@ -35,8 +35,8 @@ howto: |
   execute lets you run the file as a program. On a directory, read lets you
   list the names in it, write lets you create, rename and delete entries, and
   execute lets you enter it and reach files inside by name. Write on a
-  directory does nothing without execute, and a directory without execute
-  cannot be used even if it is readable.
+  directory does nothing without execute, and read without execute lists the
+  names but does not let you open the files or see their details.
 
   Only one class applies to you: if you own the file, the owner bits decide,
   even when the group or others bits allow more. So `chmod 077` locks the
@@ -56,7 +56,8 @@ howto: |
 
   `ls -l` shows these bits in the execute position: a lowercase `s` or `t`
   means the bit and execute are both set, and an uppercase `S` or `T` means
-  the bit is set without execute. For setuid, `S` means it has no effect.
+  the bit is set without execute. Linux ignores setgid on a program without
+  group execute, but setuid still applies to anyone else allowed to run it.
 
   ## Tips
 
@@ -65,7 +66,7 @@ howto: |
     `find DIR -type d -exec chmod 755 {} +` and
     `find DIR -type f -exec chmod 644 {} +`, or use
     `chmod -R u=rwX,go=rX DIR`, where the capital `X` adds execute only to
-    directories and files that already have it.
+    directories and to files that someone can already execute.
   - The symbolic command adds the sticky bit as a separate `+t`, because some
     chmod versions, including the BSD one on macOS, ignore `t` attached to `o`.
   - On a directory, GNU chmod keeps an existing setuid or setgid bit when
@@ -87,6 +88,7 @@ faq:
 .tool-page:has(#cm-octal) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
 .tool-page:has(#cm-octal) .prose th, .tool-page:has(#cm-octal) .prose td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .tool-page:has(#cm-octal) .prose th { color: var(--muted); font-weight: 600; }
+@media (max-width: 560px) { .tool-page:has(#cm-octal) .prose th, .tool-page:has(#cm-octal) .prose td { padding: 6px 5px; } }
 .cm-modes .field input { font-size: clamp(1.25rem, 4.5vw, 1.6rem); letter-spacing: 0.06em; }
 table.data.cm-grid { table-layout: fixed; }
 table.data.cm-grid th, table.data.cm-grid td { text-align: center; vertical-align: middle; padding: 6px 4px; }
@@ -189,7 +191,7 @@ table.data.cm-grid tbody th { color: var(--text); }
 
 <div class="row">
   <div class="field">
-    <label for="cm-file">File or directory name</label>
+    <label for="cm-file">File or directory name <span class="hint">wildcards like *.sh stay unquoted</span></label>
     <input type="text" id="cm-file" class="mono" placeholder="file" autocomplete="off" autocapitalize="off" spellcheck="false">
   </div>
   <div class="checks cm-opts">
@@ -270,9 +272,11 @@ table.data.cm-grid tbody th { color: var(--text); }
     if (m & 512) parts.push('+t');
     return parts.join(',');
   }
+  // Quotes a name for sh. A leading - gets ./ so chmod does not read it as an
+  // option; wildcards (* ? [ ]) stay unquoted so the shell expands them.
   function shellQuote(s) {
-    if (/^[A-Za-z0-9._\/~@%+=:,-]+$/.test(s) && s.charAt(0) !== '-') return s;
-    if (/^[A-Za-z0-9._\/~@%+=:,-]+$/.test(s)) return './' + s;
+    if (s.charAt(0) === '-') s = './' + s;
+    if (/^[A-Za-z0-9._\/~@%+=:,*?\[\]-]+$/.test(s)) return s;
     return "'" + s.replace(/'/g, "'\\''") + "'";
   }
 
@@ -298,6 +302,8 @@ table.data.cm-grid tbody th { color: var(--text); }
     var s = raw.trim(), type = null;
     if (!s) return { error: 'Enter a permission string such as rwxr-xr-x.' };
     if (s.length === 11 && /[.+@]$/.test(s)) s = s.slice(0, 10);
+    // A partly typed ls -l string such as "drwxr-x" waits for the rest.
+    if (s.length <= 9 && /^[dlcbps][rwxsStT-]*$/.test(s)) return { short: true };
     if (s.length === 10) {
       type = s.charAt(0);
       if ('-dlcbps'.indexOf(type) < 0) return { error: 'The first of 10 characters is the file type: - for a file or d for a directory, not "' + type + '".' };
@@ -364,7 +370,13 @@ table.data.cm-grid tbody th { color: var(--text); }
     var u = (m >> 6) & 7, g = (m >> 3) & 7, o = m & 7;
     if (!isDir && (o & 2)) warn.push('Anyone on the system can change this file.');
     if (isDir && (o & 3) === 3 && !(m & 512)) warn.push('Anyone on the system can delete or replace files in this directory. Add the sticky bit (' + octal(m | 512) + ') if that is not intended.');
-    if ((m & 2048) && !(m & 64)) warn.push('setuid is set but the owner has no execute permission (shown as S), so it has no effect.');
+    if ((m & 2048) && !(m & 64) && !isDir) {
+      // Linux applies setuid whenever the caller may execute the file, even if
+      // the owner may not (fs/exec.c, bprm_fill_uid).
+      warn.push(m & 9
+        ? 'setuid is set but the owner cannot execute the file (shown as S). Group members or others who run it still get the owner\u2019s rights, which is rarely intended.'
+        : 'setuid is set but nobody can execute the file (shown as S), so it has no effect.');
+    }
     if ((m & 1024) && !(m & 8) && !isDir) warn.push('setgid is set without group execute (shown as S), so it does nothing when the file is run.');
     if ((g & ~u) || (o & ~u)) warn.push('The owner has fewer rights than the group or others. As the owner you get only the owner bits, even where the others bits allow more.');
     var box = $('#cm-warnings');

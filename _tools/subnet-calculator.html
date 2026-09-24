@@ -73,7 +73,7 @@ faq:
   - q: What is the difference between a netmask and a wildcard mask?
     a: A wildcard mask is the netmask with every bit flipped, so 255.255.255.0 becomes 0.0.0.255. Cisco ACLs and OSPF use wildcards, where a 0 bit means "must match". The calculator accepts either form after the address.
   - q: Why does a /31 show two usable hosts?
-    a: RFC 3021 allows /31 networks on point-to-point links, where no broadcast address is needed, so both addresses can be assigned. Most current routers support it.
+    a: RFC 3021 allows /31 networks on point-to-point links, where no broadcast address is needed, so both addresses can be assigned. Major router operating systems, including Cisco IOS and Juniper Junos, support it.
   - q: Is 100.64.x.x a private address?
     a: Not in the RFC 1918 sense. 100.64.0.0/10 is shared address space (RFC 6598) that internet providers use between customers and their carrier-grade NAT. It isn't routable on the internet, but you shouldn't use it on your own network either.
   - q: Is anything I enter sent to a server?
@@ -230,7 +230,7 @@ faq:
 (function () {
   'use strict';
   const $ = TT.$;
-  const MAX_ROWS = 1024, MAX_EXPORT = 65536;
+  const MAX_ROWS = 512, MAX_EXPORT = 65536;
 
   // ---------- Bit helpers (all values are unsigned 32-bit numbers) ----------
   const maskOf = p => (p === 0 ? 0 : (0xFFFFFFFF << (32 - p)) >>> 0);
@@ -243,6 +243,8 @@ faq:
   class InputError extends Error {}
 
   function parseIPv4(s, what) {
+    const port = s.match(/^(\d+\.\d+\.\d+\.\d+):\d*$/);
+    if (port) throw new InputError('"' + s + '" includes a port number. Enter the address without ":' + s.split(':')[1] + '", for example ' + port[1] + '/24.');
     if (s.indexOf(':') >= 0) throw new InputError('"' + s + '" looks like an IPv6 address. This calculator handles IPv4 only.');
     const parts = s.split('.');
     if (parts.length !== 4) {
@@ -254,7 +256,8 @@ faq:
       if (p === '') throw new InputError('"' + s + '" has an empty part between dots.');
       if (!/^\d+$/.test(p)) throw new InputError('"' + p + '" in ' + s + ' is not a number. Each part must be a number from 0 to 255.');
       const n = parseInt(p, 10);
-      if (n > 255 || p.length > 3) throw new InputError(p + ' in ' + s + ' is out of range. Each part must be from 0 to 255.');
+      if (n > 255) throw new InputError(p + ' in ' + s + ' is out of range. Each part must be from 0 to 255.');
+      if (p.length > 3) throw new InputError(p + ' in ' + s + ' has more than three digits. Write each part as a number from 0 to 255 without extra zeros.');
       if (p.length > 1 && p[0] === '0') leadingZero = true;
       v = v * 256 + n;
     }
@@ -282,6 +285,7 @@ faq:
   function parseInput(raw, fallbackPrefix) {
     const s = raw.trim();
     if (!s) throw new InputError('Enter an IPv4 address, for example 192.168.1.10/24.');
+    if (s[0] === '/') throw new InputError('Enter the IPv4 address before the slash, for example 192.168.1.10' + s.replace(/\s+/g, '') + '.');
     const tokens = s.split(/[\s/]+/).filter(Boolean);
     if (tokens.length > 2) throw new InputError('Enter an address followed by one prefix or mask, for example 192.168.1.10/24 or 192.168.1.10 255.255.255.0.');
     const ip = parseIPv4(tokens[0], 'address');
@@ -470,14 +474,14 @@ faq:
     if (!raw || !Number.isInteger(n) || n < 1) throw new InputError(mode === 'count' ? 'Enter the number of subnets you need, 2 or more.' : 'Enter how many hosts each subnet must hold, 1 or more.');
     if (mode === 'count') {
       if (n < 2) throw new InputError('Enter 2 or more subnets.');
-      const bits = Math.ceil(Math.log2(n) - 1e-9);
+      const bits = bitsFor(n);
       const q = p + bits;
       if (q > 32) throw new InputError('A /' + p + ' has ' + fmt(current.s.total) + ' addresses, so it can be split into at most ' + fmt(current.s.total) + ' subnets.');
       return { q: q, note: n !== Math.pow(2, bits) ? fmt(n) + ' is not a power of two, so this is the smallest equal split with at least ' + fmt(n) + ' subnets. ' : '' };
     }
     // hosts: the smallest block whose usable hosts (network and broadcast excluded) fit n.
     if (p === 31) throw new InputError('A /31 can only be split into two /32 host routes. Choose "Number of subnets" or "New prefix length".');
-    let q = 32 - Math.ceil(Math.log2(n + 2) - 1e-9);
+    let q = 32 - bitsFor(n + 2);
     if (q > 30) q = 30;
     if (q < p) throw new InputError('A /' + p + ' has only ' + plural(current.s.usable, 'usable host') + ', so it can\'t hold a subnet of ' + plural(n, 'host') + '.');
     if (q === p) throw new InputError('A subnet for ' + plural(n, 'host') + ' needs a /' + q + ', the same size as this network, so there is nothing to split.');
@@ -529,6 +533,9 @@ faq:
     body.appendChild(frag);
   }
 
+  // Smallest b with 2^b >= n, computed exactly (Math.log2 rounds for large n).
+  function bitsFor(n) { let b = 0; while (Math.pow(2, b) < n) b++; return b; }
+
   function* splitRows() {
     const n = Math.min(lastSplit.count, MAX_EXPORT);
     for (let i = 0; i < n; i++) yield subnet(lastSplit.base.net + i * lastSplit.step, lastSplit.q);
@@ -538,7 +545,7 @@ faq:
   ipEl.addEventListener('input', calc);
   prefixSel.addEventListener('change', () => {
     const tok = ipEl.value.trim().split(/[\s/]+/)[0] || '';
-    ipEl.value = tok + '/' + prefixSel.value;
+    if (tok) ipEl.value = tok + '/' + prefixSel.value;
     calc();
   });
   TT.$$('[data-example]').forEach(b => b.addEventListener('click', () => { ipEl.value = b.getAttribute('data-example'); calc(); }));

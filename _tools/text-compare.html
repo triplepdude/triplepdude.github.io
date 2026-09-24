@@ -8,10 +8,11 @@ howto: |
 
   Paste the original text on the left and the changed text on the right, or
   open a file on either side. The differences appear as you type. Removed text
-  is marked with a minus sign and a red background, added text with a plus
-  sign and a green background, so the marks still work if you can't tell the
-  colours apart. **Swap** exchanges the two sides and **Download .diff** saves
-  the changes as a patch file.
+  has a red background and is struck through; added text has a green
+  background and is underlined. In line mode each changed line also gets a
+  minus or plus sign, so nothing depends on telling the colours apart.
+  **Swap** exchanges the two sides and **Download .diff** saves the changes as
+  a patch file.
 
   ## Line, word or character?
 
@@ -121,7 +122,10 @@ faq:
 .tc del { background: var(--tc-del-hl); text-decoration: line-through; text-decoration-thickness: 1px; }
 .tc del + ins { margin-left: 2px; }
 .tc ins { background: var(--tc-ins-hl); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
-.tc del::before, .tc del::after, .tc ins::before, .tc ins::after { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Screen-reader-only labels. Static inline-blocks: absolutely positioned ones cost seconds of layout on big diffs. */
+.tc del::before, .tc del::after, .tc ins::before, .tc ins::after { display: inline-block; width: 1px; height: 1px; margin-right: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Big outputs come in blocks; off-screen blocks skip layout. One block is left alone. */
+.tc-blk:not(:only-of-type) { content-visibility: auto; }
 .tc del::before { content: " [removed: "; }
 .tc ins::before { content: " [added: "; }
 .tc del::after, .tc ins::after { content: "] "; }
@@ -130,7 +134,9 @@ faq:
 .tc-pane { min-width: 0; }
 .tc-pane + .tc-pane { border-left: 1px solid var(--border); }
 .tc-pane h3 { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 13px; font-weight: 600; }
-.tc-pane pre { margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.tc-pane pre { margin: 0; padding: 0 12px; font-family: var(--mono); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.tc-pane h3 + pre { padding-top: 10px; }
+.tc-pane pre:last-child { padding-bottom: 10px; }
 .tc-flow.is-prose pre { font-family: inherit; font-size: 15px; }
 .tc-status { min-height: 1.4em; margin: -8px 0 8px; color: var(--muted); font-size: 13px; }
 @media (max-width: 620px) {
@@ -147,7 +153,7 @@ faq:
     <div class="field">
       <div class="tc-head">
         <label for="tc-a">Original text</label>
-        <button class="btn secondary small" type="button" data-file="#tc-file-a">Open file…</button>
+        <button class="btn secondary small" type="button" data-file="#tc-file-a" aria-label="Open file as original text">Open file…</button>
         <input type="file" id="tc-file-a" hidden accept="text/*,.txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.sql,.yml,.yaml,.toml,.ini,.log,.srt,.tex">
       </div>
       <textarea id="tc-a" class="mono" rows="10" spellcheck="false" placeholder="Paste the original text here…"></textarea>
@@ -155,7 +161,7 @@ faq:
     <div class="field">
       <div class="tc-head">
         <label for="tc-b">Changed text</label>
-        <button class="btn secondary small" type="button" data-file="#tc-file-b">Open file…</button>
+        <button class="btn secondary small" type="button" data-file="#tc-file-b" aria-label="Open file as changed text">Open file…</button>
         <input type="file" id="tc-file-b" hidden accept="text/*,.txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.sql,.yml,.yaml,.toml,.ini,.log,.srt,.tex">
       </div>
       <textarea id="tc-b" class="mono" rows="10" spellcheck="false" placeholder="Paste the changed text here…"></textarea>
@@ -402,11 +408,15 @@ faq:
     }
 
     // Renders a token list, wrapping changed tokens; whitespace-only changes stay plain when ignored.
+    // Each line is wrapped on its own, so every line break sits outside the tags and the output
+    // can be cut into blocks at any line break.
     function mark(tag, toks, o) {
       var text = toks.join('');
       if (o.ignoreWS && RE_HWS.test(text)) return esc(text);
-      var html = esc(text).replace(/\n/g, '<span class="tc-nl" aria-hidden="true">\u21B5</span>\n');
-      return '<' + tag + '>' + html + '</' + tag + '>';
+      return text.split('\n').map(function (seg, i, all) {
+        var nl = i < all.length - 1 ? '<span class="tc-nl" aria-hidden="true">\u21B5</span>' : '';
+        return seg || nl ? '<' + tag + '>' + esc(seg) + nl + '</' + tag + '>' : '';
+      }).join('\n');
     }
 
     function allSpace(toks) {
@@ -481,13 +491,28 @@ faq:
       return [[0, CTX], [r.len - CTX, r.len]];
     }
 
+    // Rows go into blocks of BLOCK rows, each its own fixed-layout table with
+    // content-visibility: auto, so the browser only lays out the blocks on screen.
+    // One big table took over a second of main-thread layout for 5,000 changed lines.
+    var BLOCK = 200;
     function renderLines(A, B, regs, o, deadline) {
       var split = o.view === 'split';
       var cols = split ? 6 : 4;
-      var html = [split
+      var head = split
         ? '<table class="tc-table tc-split"><colgroup><col class="tc-num"><col class="tc-mk"><col><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>'
-        : '<table class="tc-table tc-unified"><colgroup><col class="tc-num"><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>'];
+        : '<table class="tc-table tc-unified"><colgroup><col class="tc-num"><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>';
+      var html = [], rows = [];
       var timedOut = false;
+
+      function flushBlock() {
+        if (!rows.length) return;
+        html.push('<div class="tc-blk" style="contain-intrinsic-size:auto ' + rows.length * 22 + 'px">' + head + rows.join('') + '</tbody></table></div>');
+        rows = [];
+      }
+      function push(tr) {
+        rows.push(tr);
+        if (rows.length >= BLOCK) flushBlock();
+      }
 
       function row(an, at, bn, bt, cls) {
         if (split) {
@@ -495,25 +520,25 @@ faq:
             : '<td class="tc-num">' + an + '</td><td class="tc-mk ' + (cls === 'eq' ? '' : 'tc-del') + '">' + (cls === 'eq' ? '' : '-') + '</td><td class="tc-txt ' + (cls === 'eq' ? '' : 'tc-del') + '">' + at + '</td>';
           var r = bt === null ? '<td class="tc-num"></td><td class="tc-mk tc-empty"></td><td class="tc-txt tc-empty"></td>'
             : '<td class="tc-num">' + bn + '</td><td class="tc-mk ' + (cls === 'eq' ? '' : 'tc-ins') + '">' + (cls === 'eq' ? '' : '+') + '</td><td class="tc-txt ' + (cls === 'eq' ? '' : 'tc-ins') + '">' + bt + '</td>';
-          html.push('<tr>' + l + r + '</tr>');
+          push('<tr>' + l + r + '</tr>');
         } else if (cls === 'eq') {
-          html.push('<tr><td class="tc-num">' + an + '</td><td class="tc-num">' + bn + '</td><td class="tc-mk"></td><td class="tc-txt">' + bt + '</td></tr>');
+          push('<tr><td class="tc-num">' + an + '</td><td class="tc-num">' + bn + '</td><td class="tc-mk"></td><td class="tc-txt">' + bt + '</td></tr>');
         } else if (cls === 'del') {
-          html.push('<tr><td class="tc-num tc-del">' + an + '</td><td class="tc-num tc-del"></td><td class="tc-mk tc-del">-</td><td class="tc-txt tc-del">' + at + '</td></tr>');
+          push('<tr><td class="tc-num tc-del">' + an + '</td><td class="tc-num tc-del"></td><td class="tc-mk tc-del">-</td><td class="tc-txt tc-del">' + at + '</td></tr>');
         } else {
-          html.push('<tr><td class="tc-num tc-ins"></td><td class="tc-num tc-ins">' + bn + '</td><td class="tc-mk tc-ins">+</td><td class="tc-txt tc-ins">' + bt + '</td></tr>');
+          push('<tr><td class="tc-num tc-ins"></td><td class="tc-num tc-ins">' + bn + '</td><td class="tc-mk tc-ins">+</td><td class="tc-txt tc-ins">' + bt + '</td></tr>');
         }
       }
 
       regs.forEach(function (r, idx) {
         if (r.eq) {
           var runs = visibleRuns(r, idx, regs.length, o), shown = 0;
-          runs.forEach(function (span, si) {
-            if (span[0] > shown || (si === 0 && span[0] > 0)) html.push(fold(span[0] - shown, cols));
+          runs.forEach(function (span) {
+            if (span[0] > shown) push(fold(span[0] - shown, cols));
             for (var i = span[0]; i < span[1]; i++) row(r.a + i + 1, esc(A[r.a + i]), r.b + i + 1, esc(B[r.b + i]), 'eq');
             shown = span[1];
           });
-          if (shown < r.len) html.push(fold(r.len - shown, cols));
+          if (shown < r.len) push(fold(r.len - shown, cols));
           return;
         }
         var pairs = Math.min(r.k, r.m), p, left = [], right = [];
@@ -540,31 +565,57 @@ faq:
           for (p = 0; p < r.m; p++) row(0, null, r.b + p + 1, right[p], 'ins');
         }
       });
-      html.push('</tbody></table>');
+      flushBlock();
       return { html: html.join(''), timedOut: timedOut };
     }
 
+    // A pane of running text, split into <pre> blocks of about BLOCK lines at
+    // fragment boundaries so off-screen blocks skip layout (content-visibility).
+    function pane(lineHeight) {
+      var blocks = [], cur = [], lines = 0;
+      function flush() {
+        if (!cur.length) return;
+        blocks.push('<pre class="tc-blk" style="contain-intrinsic-size:auto ' + Math.ceil(lines * lineHeight) + 'px">' + cur.join('') + '</pre>');
+        cur = [];
+        lines = 0;
+      }
+      function add(html, n) {
+        cur.push(html);
+        lines += n;
+        if (lines >= BLOCK) flush();
+      }
+      return {
+        add: add,
+        // Adds the HTML of a changed region line by line (its line breaks are all outside tags).
+        addLines: function (html) {
+          var parts = html.split('\n'), last = parts.length - 1;
+          for (var i = 0; i < last; i++) add(parts[i] + '\n', 1);
+          if (parts[last]) add(parts[last], 0);
+        },
+        html: function () { flush(); return blocks.join(''); }
+      };
+    }
+
     function renderFlow(A, B, regs, o, deadline, counts) {
-      var left = [], right = [], inline = [], timedOut = false;
+      var lh = o.mode === 'word' ? 24 : 21;
+      var left = pane(lh), right = pane(lh), inline = pane(lh), timedOut = false;
+      function foldAll(n) {
+        var f = fold(n, 0);
+        left.add(f, 1); right.add(f, 1); inline.add(f, 1);
+      }
       regs.forEach(function (r, idx) {
         if (r.eq) {
           var runs = visibleRuns(r, idx, regs.length, o), shown = 0;
-          runs.forEach(function (span, si) {
-            if (span[0] > shown || (si === 0 && span[0] > 0)) {
-              var f = fold(span[0] - shown, 0);
-              left.push(f); right.push(f); inline.push(f);
-            }
+          runs.forEach(function (span) {
+            if (span[0] > shown) foldAll(span[0] - shown);
             for (var i = span[0]; i < span[1]; i++) {
-              left.push(esc(A[r.a + i]) + '\n');
-              right.push(esc(B[r.b + i]) + '\n');
-              inline.push(esc(B[r.b + i]) + '\n');
+              left.add(esc(A[r.a + i]) + '\n', 1);
+              right.add(esc(B[r.b + i]) + '\n', 1);
+              inline.add(esc(B[r.b + i]) + '\n', 1);
             }
             shown = span[1];
           });
-          if (shown < r.len) {
-            var f2 = fold(r.len - shown, 0);
-            left.push(f2); right.push(f2); inline.push(f2);
-          }
+          if (shown < r.len) foldAll(r.len - shown);
           return;
         }
         var at = A.slice(r.a, r.a + r.k).map(function (l) { return l + '\n'; }).join('');
@@ -572,25 +623,25 @@ faq:
         var ta = tokens(at, o.mode, o), tb = tokens(bt, o.mode, o);
         if (!timedOut && ta.length + tb.length < 400000 && Date.now() < deadline) {
           var t = tokenHtml(ta, tb, o, deadline, counts, o.mode === 'word');
-          left.push(t.left); right.push(t.right); inline.push(t.inline);
+          left.addLines(t.left); right.addLines(t.right); inline.addLines(t.inline);
           timedOut = timedOut || t.timedOut;
         } else {
           timedOut = true;
           var dl = at ? mark('del', [at], o) : '', il = bt ? mark('ins', [bt], o) : '';
           counts.del += countToks(ta, o);
           counts.ins += countToks(tb, o);
-          left.push(dl); right.push(il); inline.push(dl + il);
+          left.addLines(dl); right.addLines(il); inline.addLines(dl + il);
         }
       });
       var prose = o.mode === 'word' ? ' is-prose' : '';
       if (o.view === 'split') {
         return {
-          html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h3>Original</h3><pre>' + left.join('') + '</pre></section>' +
-            '<section class="tc-pane"><h3>Changed</h3><pre>' + right.join('') + '</pre></section></div>',
+          html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h3>Original</h3>' + left.html() + '</section>' +
+            '<section class="tc-pane"><h3>Changed</h3>' + right.html() + '</section></div>',
           timedOut: timedOut
         };
       }
-      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h3>Changes</h3><pre>' + inline.join('') + '</pre></section></div>', timedOut: timedOut };
+      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h3>Changes</h3>' + inline.html() + '</section></div>', timedOut: timedOut };
     }
 
     // Unified diff (diff -u) of the exact texts, three lines of context.
@@ -678,7 +729,7 @@ faq:
         scope.postMessage(r);
       };
     }
-    return { run: run };
+    return { run: run, patch: patchText };
   }
 
   var ta = TT.$('#tc-a'), tb = TT.$('#tc-b'), out = TT.$('#tc-out'), hint = TT.$('#tc-hint');
@@ -841,15 +892,28 @@ faq:
   });
   TT.$('#tc-download').addEventListener('click', function () {
     errBox.textContent = '';
-    if (!latest || (!ta.value && !tb.value)) {
+    var a = ta.value, b = tb.value, patch;
+    if (!a && !b) {
       errBox.textContent = 'Enter two texts first.';
       return;
     }
-    if (!latest.patch) {
+    if (latest && lastReq && latest.id === lastReq.id && lastReq.a === a && lastReq.b === b) {
+      patch = latest.patch;
+    } else {
+      // The comparison on screen is older than the texts (still typing or computing): build the patch now.
+      try {
+        if (!local) local = tcEngine(null);
+        patch = local.patch(a, b);
+      } catch (e) {
+        errBox.textContent = 'Could not build the patch: ' + (e && e.message || e);
+        return;
+      }
+    }
+    if (!patch) {
       okBox.textContent = 'The texts are exactly the same, so there is no patch to download.';
       return;
     }
-    TT.download('text-compare.diff', latest.patch, 'text/x-diff;charset=utf-8');
+    TT.download('text-compare.diff', patch, 'text/x-diff;charset=utf-8');
   });
 
   function loadFile(input, target) {
@@ -862,7 +926,11 @@ faq:
         input.value = '';
         return;
       }
-      f.text().then(function (text) {
+      f.arrayBuffer().then(function (buf) {
+        // Blob.text() is UTF-8 only; honour a UTF-16 byte order mark (Windows "Unicode" text files).
+        var bytes = new Uint8Array(buf);
+        var enc = bytes[0] === 0xFF && bytes[1] === 0xFE ? 'utf-16le' : bytes[0] === 0xFE && bytes[1] === 0xFF ? 'utf-16be' : 'utf-8';
+        var text = new TextDecoder(enc).decode(bytes);
         if (/\u0000/.test(text.slice(0, 8000))) {
           errBox.textContent = f.name + ' looks like a binary file, not text.';
           return;

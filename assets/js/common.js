@@ -3,8 +3,25 @@
 (function () {
   'use strict';
 
+  // One shared polite live region, so confirmations like "Copied!" are
+  // announced even on buttons whose accessible name comes from aria-label.
+  var live;
+  function announce(text) {
+    if (!document.body) return;
+    if (!live) {
+      live = document.createElement('div');
+      live.className = 'visually-hidden';
+      live.setAttribute('role', 'status');
+      live.setAttribute('aria-live', 'polite');
+      document.body.appendChild(live);
+    }
+    live.textContent = '';
+    setTimeout(function () { live.textContent = text; }, 50);
+  }
+
   function flash(btn, text) {
     if (!btn) return;
+    announce(text);
     var original = btn.getAttribute('data-label') || btn.textContent;
     btn.setAttribute('data-label', original);
     btn.textContent = text;
@@ -78,6 +95,7 @@
     copy: copy,
     download: download,
     debounce: debounce,
-    flash: flash
+    flash: flash,
+    announce: announce
   };
 })();

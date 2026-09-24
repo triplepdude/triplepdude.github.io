@@ -13,12 +13,14 @@ howto: |
   To check a download, paste the checksum published next to it into **Compare
   with expected hash**. The page tells you which algorithm matches, or that none
   does. Besides a bare hash it accepts a line copied from `sha256sum` output
-  (`hash  filename`), the BSD format `SHA256 (file) = hash`, and Subresource
-  Integrity values such as `sha384-oqVu…`.
+  (`hash  filename`), the BSD format `SHA256 (file) = hash`, OpenSSL's
+  `SHA2-256(file)= hash`, the output of PowerShell's `Get-FileHash` or Windows
+  `certutil -hashfile`, and Subresource Integrity values such as `sha384-oqVu…`.
 
-  Text is hashed as UTF-8, the encoding used by nearly every command-line tool
-  and programming language. Set **Input is** to *Hex bytes* or *Base64* to hash
-  raw bytes instead, for example a key or a value copied from a packet dump.
+  Text is hashed as UTF-8, the encoding of most text files and web pages, so the
+  result matches `sha256sum` run on a UTF-8 file with the same content. Set
+  **Input is** to *Hex bytes* or *Base64* to hash raw bytes instead, for example
+  a key or a value copied from a packet dump.
 
   ## How it works
 
@@ -32,13 +34,13 @@ howto: |
   MD5 is specified in RFC 1321; SHA-1 and the SHA-2 family (SHA-256, SHA-384,
   SHA-512) in NIST's FIPS 180-4.
 
-  | Algorithm | Digest size | Collision resistance |
+  | Algorithm | Digest size | Collisions |
   |---|---|---|
   | MD5 | 128 bits, 32 hex characters | Broken |
   | SHA-1 | 160 bits, 40 hex characters | Broken |
-  | SHA-256 | 256 bits, 64 hex characters | Secure |
-  | SHA-384 | 384 bits, 96 hex characters | Secure |
-  | SHA-512 | 512 bits, 128 hex characters | Secure |
+  | SHA-256 | 256 bits, 64 hex characters | No practical attack |
+  | SHA-384 | 384 bits, 96 hex characters | No practical attack |
+  | SHA-512 | 512 bits, 128 hex characters | No practical attack |
 
   Hex and Base64 are the same bytes written two ways: the 16 bytes of an MD5
   digest become 32 hex characters or 24 Base64 characters ending in `==`.
@@ -49,8 +51,9 @@ howto: |
   the one the publisher lists. When someone might swap the file on purpose,
   rely on SHA-256 or longer. MD5 collisions (two different files with the same
   hash) take seconds on an ordinary computer, and a practical SHA-1 collision
-  was published in 2017. SHA-384 and SHA-512 are also faster than SHA-256 on
-  most 64-bit processors, because they work on 64-bit words.
+  was published in 2017. A checksum only protects you if it comes from a source
+  the attacker can't change: someone who can replace the file on a mirror may
+  be able to replace a checksum stored next to it as well.
 
   None of these is suitable on its own for storing passwords. They are designed
   to be fast, which helps anyone guessing passwords. Use a deliberately slow
@@ -398,7 +401,7 @@ faq:
   // ---------- State and rendering ----------
   const textEl = $('#hg-text'), encEl = $('#hg-enc'), upperEl = $('#hg-upper'), expEl = $('#hg-expected');
   const fileEl = $('#hg-file'), drop = $('#hg-drop'), msgEl = $('#hg-msg'), listEl = $('#hg-results');
-  const state = { src: 'text', results: { text: null, file: null }, summary: { text: '', file: 'Choose a file to see its hashes' }, error: { text: '', file: '' }, textJob: 0, fileJob: 0 };
+  const state = { src: 'text', results: { text: null, file: null }, summary: { text: '', file: 'Choose a file to see its hashes' }, error: { text: '', file: '' }, busy: { text: false, file: false }, textJob: 0, fileJob: 0 };
 
   function hexOf(d) { const h = toHex(d); return upperEl.checked ? h.toUpperCase() : h; }
 
@@ -406,6 +409,7 @@ faq:
     const r = state.results[state.src];
     msgEl.textContent = state.error[state.src];
     $('#hg-summary').textContent = state.summary[state.src];
+    listEl.dataset.busy = state.busy[state.src] ? '1' : '';
     ALGS.forEach(a => {
       const hexEl = $('#hg-' + a.id + '-hex'), b64El = $('#hg-' + a.id + '-b64');
       if (!r) { hexEl.textContent = '–'; b64El.textContent = '–'; return; }
@@ -418,16 +422,34 @@ faq:
   }
 
   // Pull the hash out of what people paste: bare values, "hash  file" (sha256sum),
-  // "SHA256 (file) = hash" (BSD), "sha256-BASE64" (Subresource Integrity), "0x..." and grouped hex.
+  // "SHA256 (file) = hash" (BSD), "SHA2-256(file)= hash" (OpenSSL), Get-FileHash and
+  // certutil output, "sha256-BASE64" (Subresource Integrity), "0x..." and grouped hex.
+  const isDigestHex = v => /^[0-9a-f]+$/i.test(v) && ALGS.some(a => a.hexLen === v.length);
+  function isDigestB64(v) {
+    if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(v)) return false;
+    const n = v.replace(/=+$/, '').length;
+    return ALGS.some(a => Math.ceil(a.hexLen / 2 * 4 / 3) === n);
+  }
+  const stripPrefix = v => v.replace(/^\*/, '').replace(/^(md5|sha-?1|sha-?256|sha-?384|sha-?512)[:=-]/i, '').replace(/^0x/i, '');
   function extractExpected(raw) {
     const s = raw.trim();
     if (!s) return '';
-    const squashed = s.replace(/[\s:]/g, '');
-    if (/^(0x)?[0-9a-f]+$/i.test(squashed) && ALGS.some(a => a.hexLen === squashed.replace(/^0x/i, '').length)) return squashed.replace(/^0x/i, '');
+    // The whole value is hex, possibly grouped with spaces or colons.
+    const squashed = s.replace(/[\s:]/g, '').replace(/^0x/i, '');
+    if (isDigestHex(squashed)) return squashed;
+    // A run of space- or colon-separated hex bytes inside other text (older certutil output).
+    let run = [];
+    for (const tok of s.split(/[\s:]+/).concat([''])) {
+      if (/^[0-9a-f]{2}$/i.test(tok)) { run.push(tok); continue; }
+      if (isDigestHex(run.join(''))) return run.join('');
+      run = [];
+    }
     const bsd = s.match(/^[\w-]+\s*\(.*\)\s*=\s*(\S+)$/);
-    let v = bsd ? bsd[1] : s.split(/\s+/)[0];
-    v = v.replace(/^\*/, '').replace(/^(md5|sha-?1|sha-?256|sha-?384|sha-?512)[:=-]/i, '').replace(/^0x/i, '');
-    return v;
+    if (bsd) return stripPrefix(bsd[1]);
+    const tokens = s.split(/[\s"'`,;()<>[\]{}|]+/).map(stripPrefix).filter(Boolean);
+    const first = tokens[0] || '';
+    // Nothing shaped like a digest: keep a lone or hex first token so the message can say what is wrong with it.
+    return tokens.find(isDigestHex) || tokens.find(isDigestB64) || (tokens.length === 1 || /^[0-9a-f]+$/i.test(first) ? first : s);
   }
 
   function compare() {
@@ -469,8 +491,10 @@ faq:
       } else {
         out.textContent = 'No match. The expected value has ' + v.length + ' hex characters, but MD5, SHA-1, SHA-256, SHA-384 and SHA-512 have 32, 40, 64, 96 and 128. Check that it was copied completely.';
       }
-    } else {
+    } else if (/^[A-Za-z0-9+/_-]+={0,2}$/.test(v)) {
       out.textContent = 'No match. The value was read as Base64 and does not equal any of the hashes above.';
+    } else {
+      out.textContent = 'No match. This does not look like a hash: checksums are written in hex (0-9 and a-f) or Base64.';
     }
   }
 
@@ -487,6 +511,7 @@ faq:
       state.error.text = e.message;
       state.results.text = null;
       state.summary.text = 'Fix the input to see its hashes';
+      state.busy.text = false;
       $('#hg-bytes').textContent = '';
       if (state.src === 'text') render();
       return;
@@ -494,17 +519,21 @@ faq:
     state.error.text = '';
     const n = bytes.length;
     $('#hg-bytes').textContent = n.toLocaleString() + (n === 1 ? ' byte' : ' bytes') + (mode === 'utf8' ? ' in UTF-8' : '');
-    if (n > CHUNK) listEl.dataset.busy = '1';
+    if (n > CHUNK) {
+      state.busy.text = true;
+      if (state.src === 'text') listEl.dataset.busy = '1';
+    }
     try {
       const res = await hashAll(bytes, () => job === state.textJob);
       if (!res) return;
       state.results.text = res;
       state.summary.text = n === 0 ? 'Hashes of an empty input' : 'Hashes of ' + n.toLocaleString() + (n === 1 ? ' byte' : ' bytes') + (mode === 'utf8' ? ' of text' : '');
     } catch (e) {
+      if (job !== state.textJob) return;
       state.results.text = null;
       state.error.text = 'Could not compute the hashes: ' + (e && e.message ? e.message : e);
     }
-    if (job === state.textJob) listEl.dataset.busy = '';
+    state.busy.text = false;
     if (state.src === 'text') render();
   }
 
@@ -525,7 +554,7 @@ faq:
     state.error.file = '';
     state.results.file = null;
     state.summary.file = 'Hashing ' + (file.name || 'file') + '…';
-    listEl.dataset.busy = '1';
+    state.busy.file = true;
     render();
     try {
       const res = await hashAll(file, () => job === state.fileJob, showProgress);
@@ -542,8 +571,16 @@ faq:
     }
     if (job !== state.fileJob) return;
     $('#hg-progress-wrap').hidden = true;
-    listEl.dataset.busy = '';
+    state.busy.file = false;
     render();
+  }
+
+  function resetFilePicker() {
+    fileEl.value = '';
+    $('#hg-progress-wrap').hidden = true;
+    state.busy.file = false;
+    $('#hg-drop-title').innerHTML = '<span>Choose a file</span> or drop it here';
+    $('#hg-drop-hint').textContent = 'Any file type. It is read on your device and never uploaded.';
   }
 
   function setSource(src) {
@@ -562,11 +599,11 @@ faq:
   fileEl.addEventListener('change', () => { if (fileEl.files && fileEl.files[0]) hashFile(fileEl.files[0]); });
   $('#hg-cancel').addEventListener('click', () => {
     state.fileJob++;
-    $('#hg-progress-wrap').hidden = true;
-    listEl.dataset.busy = '';
+    resetFilePicker();
+    state.results.file = null;
     state.summary.file = 'Hashing cancelled. Choose a file to start again.';
-    fileEl.value = '';
     render();
+    fileEl.focus();
   });
 
   // Dropping a file anywhere on the tool hashes it (and keeps the browser from opening it).
@@ -600,14 +637,10 @@ faq:
       textEl.focus();
     } else {
       state.fileJob++;
-      fileEl.value = '';
+      resetFilePicker();
       state.results.file = null;
       state.error.file = '';
       state.summary.file = 'Choose a file to see its hashes';
-      $('#hg-progress-wrap').hidden = true;
-      listEl.dataset.busy = '';
-      $('#hg-drop-title').innerHTML = '<span>Choose a file</span> or drop it here';
-      $('#hg-drop-hint').textContent = 'Any file type. It is read on your device and never uploaded.';
       render();
     }
   });
