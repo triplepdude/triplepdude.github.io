@@ -127,6 +127,30 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.isDisabled('#wct-snap'), true);
   assert.match(await text('#wct-status'), /released/);
 
+  // Regression: picking a resolution while the browser was still opening the camera was
+  // ignored, and the page then claimed the camera could not deliver the new size.
+  await page.evaluate(() => {
+    const md = navigator.mediaDevices, gum = md.getUserMedia;
+    md.getUserMedia = c => new Promise(r => setTimeout(r, 600)).then(() => gum(c));
+  });
+  await page.selectOption('#wct-res', '');
+  const n0 = await page.evaluate(() => window.__gum.calls.length);
+  await page.click('#wct-start');
+  await page.selectOption('#wct-res', '1920x1080');
+  await page.waitForFunction(n => window.__gum.streams.length === n + 2, n0, { timeout: 8000 });
+  await waitText('#wct-resolution', /^1920 × 1080$/);
+  await waitText('#wct-status', /working at the requested 1920 × 1080/);
+  assert.deepEqual(await page.evaluate(n => [window.__gum.calls[n].video.width, window.__gum.calls[n + 1].video.width], n0), [undefined, { ideal: 1920 }]);
+  assert.equal(await page.evaluate(n => window.__gum.streams[n].getTracks().every(t => t.readyState === 'ended'), n0), true);
+
+  // Leaving the page releases the camera and resets the controls (back/forward cache).
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+  assert.equal(await page.evaluate(() => window.__gum.streams.every(st => st.getTracks().every(t => t.readyState === 'ended'))), true);
+  assert.equal(await page.isEnabled('#wct-start'), true);
+  assert.equal(await page.isDisabled('#wct-stop'), true);
+  assert.equal(await page.isVisible('#wct-video'), false);
+  await page.selectOption('#wct-res', '');
+
   // Known picture: left half pure red, right half pure blue, 320 x 180.
   const useCanvas = colors => page.evaluate(cols => {
     const c = document.createElement('canvas');
@@ -156,6 +180,24 @@ module.exports = async ({ page, open, assert }) => {
   assert.ok(Math.abs(bright - 14) <= 3, `brightness ${bright}%`);
   await page.click('#wct-stop');
 
+  // Aspect ratios of sizes that do not reduce neatly (computed by hand):
+  // 1280 x 800 = 8:5, sold as 16:10; 1366 x 768 = 683:384 = 1.7786, within 1% of 16:9.
+  for (const [w, h, want] of [[1280, 800, '16:10 (1.60)'], [1366, 768, '≈16:9 (1.78)'], [480, 640, '3:4 (0.75)']]) {
+    await page.evaluate(([cw, ch]) => {
+      const c = document.createElement('canvas');
+      c.width = cw; c.height = ch;
+      const g = c.getContext('2d');
+      clearInterval(window.__paint);
+      window.__paint = setInterval(() => { g.fillStyle = '#808080'; g.fillRect(0, 0, cw, ch); }, 40);
+      navigator.mediaDevices.getUserMedia = async () => c.captureStream(25);
+    }, [w, h]);
+    await page.click('#wct-start');
+    await waitText('#wct-resolution', new RegExp(`^${w} × ${h}$`));
+    assert.equal(await text('#wct-aspect'), want);
+    assert.equal(await text('#wct-mp'), (w * h / 1e6).toFixed(2) + ' MP');
+    await page.click('#wct-stop');
+  }
+
   // A black picture triggers the covered-lens warning.
   await useCanvas(['#000000', '#000000']);
   await page.click('#wct-start');
@@ -179,6 +221,18 @@ module.exports = async ({ page, open, assert }) => {
     assert.equal(await page.isDisabled('#wct-stop'), true);
     assert.equal(await page.isEnabled('#wct-start'), true);
   }
+
+  // Regression: when the browser restores an unticked Mirror box on reload, the preview
+  // must not stay mirrored.
+  await page.addInitScript(() => {
+    new MutationObserver((_, obs) => {
+      const m = document.getElementById('wct-mirror');
+      if (m) { m.checked = false; obs.disconnect(); }
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await page.reload();
+  assert.equal(await page.isChecked('#wct-mirror'), false);
+  assert.equal(await page.$eval('#wct-video', v => v.classList.contains('is-mirrored')), false);
 
   // Insecure context: explained on click and on load, and Start is disabled.
   await page.evaluate(() => Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true }));

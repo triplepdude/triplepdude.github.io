@@ -64,17 +64,25 @@ function parsePdf(buf, assert) {
     const imRef = Number(new RegExp('/' + imName + ' (\\d+) 0 R').exec(pg.dict)[1]);
     const im = obj(imRef);
     const num = key => Number(new RegExp('/' + key + ' (\\d+)').exec(im.dict)[1]);
+    // Either a device colour space name or [/ICCBased N 0 R].
+    const cs = /\/ColorSpace (?:\/(\w+)|\[\s*\/ICCBased (\d+) 0 R\s*\])/.exec(im.dict);
+    assert.ok(cs, `image ${imRef} has a /ColorSpace`);
+    let icc = null;
+    if (cs[2]) {
+      const prof = obj(Number(cs[2]));
+      icc = { num: Number(cs[2]), n: Number(/\/N (\d+)/.exec(prof.dict)[1]), alternate: (/\/Alternate \/(\w+)/.exec(prof.dict) || [])[1], data: prof.data };
+    }
     return {
       mediaBox, cm,
       image: {
         width: num('Width'), height: num('Height'),
-        colorSpace: /\/ColorSpace \/(\w+)/.exec(im.dict)[1],
+        colorSpace: cs[1] || 'ICCBased', icc,
         filter: /\/Filter \/(\w+)/.exec(im.dict)[1],
         data: im.data,
       },
     };
   });
-  return { pages, text: s };
+  return { pages, text: s, count };
 }
 
 // Reads width, height and component count from a JPEG's SOF marker.
@@ -96,7 +104,7 @@ const near = (assert, actual, expected, msg, tol = 0.002) => {
   actual.forEach((v, i) => assert.ok(Math.abs(v - expected[i]) <= tol, `${msg}: got [${actual}] expected [${expected}]`));
 };
 
-module.exports = async ({ page, open, assert, fixtures }) => {
+module.exports = async ({ page, open, assert, fixtures, url }) => {
   await open();
   const fx = f => path.join(fixtures, f);
   const names = () => page.locator('#itp-list .itp-name').allTextContents();
@@ -213,7 +221,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual(await names(), ['orange.webp', 'cmyk.jpg', 'green.gif']);
   assert.equal(await page.locator('#itp-list .itp-num').first().textContent(), '1');
 
-  ({ pdf } = await makePdf());
+  ({ buf, pdf } = await makePdf());
   [p1, p2, p3] = pdf.pages;
   near(assert, p1.mediaBox, [0, 0, 37.5, 18.75], 'WebP 50x25 page');
   near(assert, p2.mediaBox, [0, 0, 22.5, 15], 'CMYK 30x20 page');
@@ -237,4 +245,95 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
   });
   await page.waitForFunction(() => document.querySelectorAll('#itp-list .itp-item').length === 4);
+  await page.click('#itp-clear');
+
+  // Colour profiles. p3-split.jpg carries a Display P3 profile split over two APP2 segments, stored in
+  // reverse order, so the chunks must be joined by sequence number (ICC.1 Annex B.4). Without the
+  // profile a PDF reader shows the P3 pixel values as plain sRGB, visibly duller than the browser.
+  const p3jpg = fs.readFileSync(fx('p3-split.jpg'));
+  const p3icc = fs.readFileSync(fx('p3.icc'));
+  const app2 = (seq, cnt, data) => {
+    const body = Buffer.concat([Buffer.from('ICC_PROFILE\0', 'latin1'), Buffer.from([seq, cnt]), data]);
+    const len = Buffer.alloc(2); len.writeUInt16BE(body.length + 2);
+    return Buffer.concat([Buffer.from([0xff, 0xe2]), len, body]);
+  };
+  const withSegment = (jpeg, seg) => Buffer.concat([jpeg.subarray(0, 2), seg, jpeg.subarray(2)]);
+  // An RGB profile in a greyscale JPEG does not match, and half of a two-part profile is incomplete: both are ignored.
+  const grayRgbProfile = withSegment(fs.readFileSync(fx('gray.jpg')), app2(1, 1, p3icc));
+  const halfProfile = withSegment(fs.readFileSync(fx('rot6.jpg')), app2(1, 2, p3icc.subarray(0, 3000)));
+  // A 2 x 2 PNG is 1.5 pt wide at 96 px per inch, below the 3 pt minimum page size of ISO 32000-1 Annex C.
+  const tinyPng = Buffer.from(await page.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 2; c.height = 2;
+    const b = await new Promise(r => c.toBlob(r, 'image/png'));
+    return Array.from(new Uint8Array(await b.arrayBuffer()));
+  }));
+  await page.selectOption('#itp-mode', 'jpeg');
+  await page.setInputFiles('#itp-file', [
+    { name: 'p3-a.jpg', mimeType: 'image/jpeg', buffer: p3jpg },
+    { name: 'p3-b.jpg', mimeType: 'image/jpeg', buffer: p3jpg },
+    { name: 'gray-rgb-profile.jpg', mimeType: 'image/jpeg', buffer: grayRgbProfile },
+    { name: 'half-profile.jpg', mimeType: 'image/jpeg', buffer: halfProfile },
+    { name: 'tiny.png', mimeType: 'image/png', buffer: tinyPng },
+  ]);
+  await page.waitForFunction(() => document.querySelectorAll('#itp-list .itp-item').length === 5);
+  await page.waitForFunction(() => !document.querySelector('#itp-make').disabled);
+  assert.equal(await page.textContent('#itp-error'), '');
+  ({ buf, pdf } = await makePdf());
+  assert.ok(pdf.text.startsWith('%PDF-1.7\n'), 'ICC version 4 profiles need PDF 1.5 or later; the file says 1.7');
+  const [q1, q2, q3, q4, q5] = pdf.pages;
+  assert.equal(Buffer.compare(q1.image.data, p3jpg), 0, 'the P3 JPEG is still copied byte for byte');
+  assert.equal(q1.image.colorSpace, 'ICCBased');
+  assert.equal(q1.image.icc.n, 3);
+  assert.equal(q1.image.icc.alternate, 'DeviceRGB');
+  assert.equal(Buffer.compare(q1.image.icc.data, p3icc), 0, 'the joined profile is embedded exactly');
+  assert.equal(q2.image.icc.num, q1.image.icc.num, 'identical profiles are stored once');
+  assert.equal(pdf.count, 4 + 3 * 5 + 1, 'xref covers the catalog, pages, info, 15 page objects and one profile');
+  assert.equal(q3.image.colorSpace, 'DeviceGray', 'an RGB profile is not attached to a greyscale JPEG');
+  assert.equal(q4.image.colorSpace, 'DeviceRGB', 'an incomplete profile is ignored');
+  assert.equal(Buffer.compare(q4.image.data, halfProfile), 0);
+  near(assert, q1.mediaBox, [0, 0, 30, 15], 'P3 40x20 page');
+  near(assert, q5.mediaBox, [0, 0, 3, 3], 'tiny image gets the 3 pt minimum page');
+  near(assert, q5.cm, [1.5, 0, 0, 1.5, 0.75, 0.75], 'tiny image centred on its page');
+
+  // Creating the PDF from the keyboard: the button is disabled while working, then gets focus back.
+  await page.focus('#itp-make');
+  await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
+  await page.waitForFunction(() => !document.querySelector('#itp-make').disabled);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'itp-make', 'focus returns to Create PDF');
+
+  // Default page size follows the CLDR paper-size territories: Letter in Belize, A4 in Germany and the Dominican Republic.
+  for (const [locale, size] of [['en-BZ', 'letter'], ['de-DE', 'a4'], ['es-DO', 'a4'], ['en-US', 'letter']]) {
+    const ctx = await page.context().browser().newContext({ locale });
+    const p = await ctx.newPage();
+    await p.goto(url);
+    assert.equal(await p.inputValue('#itp-size'), size, `default page size for ${locale}`);
+    await ctx.close();
+  }
+
+  // A 4097 x 4097 PNG is just over the 16,777,216-pixel canvas budget: it is scaled to 4096 x 4096
+  // (4097 * sqrt(2^24 / 4097^2) = 4096), and the status says so instead of claiming exact pixels.
+  const big = Buffer.from(await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 4097; c.height = 4097;
+    const x = c.getContext('2d');
+    x.fillStyle = '#3366cc'; x.fillRect(0, 0, c.width, c.height);
+    const b = await new Promise(r => c.toBlob(r, 'image/png'));
+    return Array.from(new Uint8Array(await b.arrayBuffer()));
+  }));
+  await page.click('#itp-clear');
+  await page.setInputFiles('#itp-file', { name: 'huge.png', mimeType: 'image/png', buffer: big });
+  await page.waitForFunction(() => !document.querySelector('#itp-make').disabled);
+  ({ pdf } = await makePdf());
+  assert.deepEqual([pdf.pages[0].image.width, pdf.pages[0].image.height], [4096, 4096]);
+  near(assert, pdf.pages[0].mediaBox, [0, 0, 3072.75, 3072.75], 'page still follows the original 4097 px size');
+  assert.match(await page.textContent('#itp-status'), /“huge\.png” was larger than 16\.7 megapixels.*scaled down/);
+
+  // Adding images while a PDF is being created is refused with a message, not silently dropped.
+  await page.evaluate(() => {
+    document.querySelector('#itp-make').click();
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([1])], 'late.png', { type: 'image/png' }));
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+  });
+  assert.match(await page.textContent('#itp-error'), /wait until the current step has finished/);
 };

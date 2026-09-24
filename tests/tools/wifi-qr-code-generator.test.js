@@ -158,8 +158,11 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.isEnabled('#wq-png'), true);
 
   // Password visibility toggle.
+  assert.equal(await page.getAttribute('#wq-pass-toggle', 'aria-label'), 'Hide password');
   await page.click('#wq-pass-toggle');
   assert.equal(await page.getAttribute('#wq-pass', 'type'), 'password');
+  assert.equal(await page.getAttribute('#wq-pass-toggle', 'aria-label'), 'Show password');
+  assert.equal(await page.getAttribute('#wq-pass-toggle', 'aria-pressed'), null, 'no aria-pressed on a button whose label changes');
   await page.click('#wq-pass-toggle');
   assert.equal(await page.getAttribute('#wq-pass', 'type'), 'text');
 
@@ -183,4 +186,41 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.isVisible('h1'), true);
   assert.equal(await page.locator('.wq-print-root .wq-card').count(), 0);
   await page.emulateMedia({ media: 'screen' });
+
+  // A value ending in a backslash is escaped to "\\;", which Android's older parser
+  // does not treat as the end of the field: the code is still made, with a warning.
+  await page.fill('#wq-ssid', 'Home');
+  await page.fill('#wq-pass', 'hunter2hunter2\\');
+  assert.equal(await payload(), String.raw`WIFI:T:WPA;S:Home;P:hunter2hunter2\\;;`);
+  assert.match(await page.textContent('#wq-warn'), /password ends with a backslash/);
+  const bs = await download('#wq-png');
+  assert.equal(Buffer.from((await decode(bs.buf, 'image/png')).bytes).toString('utf8'), String.raw`WIFI:T:WPA;S:Home;P:hunter2hunter2\\;;`);
+  await page.fill('#wq-pass', 'back\\slash-inside');
+  assert.equal(await page.textContent('#wq-warn'), '');
+  await page.fill('#wq-ssid', 'Lab\\');
+  assert.match(await page.textContent('#wq-warn'), /network name ends with a backslash/);
+
+  // A lone UTF-16 surrogate (bad paste) is replaced by U+FFFD, so the QR bytes, the
+  // byte count and the text shown all agree.
+  await page.$eval('#wq-ssid', el => {
+    el.value = 'Net' + String.fromCharCode(0xD83D) + 'X';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const lone = 'WIFI:T:WPA;S:Net\uFFFDX;P:back\\\\slash-inside;;';
+  assert.equal(await payload(), lone);
+  assert.match(await page.textContent('#wq-meta'), new RegExp(`, ${Buffer.byteLength(lone, 'utf8')} bytes$`));
+  const lonePng = await download('#wq-png');
+  assert.deepEqual((await decode(lonePng.buf, 'image/png')).bytes, Array.from(Buffer.from(lone, 'utf8')));
+
+  // Same through the fallback used by browsers without String.prototype.toWellFormed:
+  // lone high and low surrogates become U+FFFD, a valid pair is kept.
+  await page.addInitScript(() => { delete String.prototype.toWellFormed; });
+  await open();
+  assert.equal(await page.evaluate(() => typeof ''.toWellFormed), 'undefined');
+  await page.$eval('#wq-ssid', el => {
+    const f = String.fromCharCode;
+    el.value = f(0xDC00) + 'a' + f(0xD83D, 0xDE00) + 'b' + f(0xD800);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  assert.equal(await payload(), 'WIFI:T:WPA;S:\uFFFDa\u{1F600}b\uFFFD;P:correct horse battery staple;;');
 };

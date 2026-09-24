@@ -175,7 +175,7 @@ faq:
   var PADDING = 12;          // CSS px of empty space around the ink in exports
   var strokes = [];          // { points: [{x, y, t, f}], pen: bool, v: number }
   var history = [];          // { type: 'add' } or { type: 'clear', strokes: [...] }
-  var current = null, activeId = null, dpr = 1, raf = 0;
+  var current = null, activeId = null, dpr = 1, raf = 0, padW = 0, padH = 0;
 
   // ---------- settings ----------
   function inkColor() {
@@ -263,8 +263,30 @@ faq:
   }
   function scheduleDraw() { if (!raf) raf = requestAnimationFrame(redraw); }
 
+  // Every stroke, including cleared ones that Undo can bring back.
+  function allStrokes() {
+    var seen = new Set();
+    strokes.forEach(function (s) { seen.add(s); });
+    history.forEach(function (h) { if (h.strokes) h.strokes.forEach(function (s) { seen.add(s); }); });
+    return Array.from(seen);
+  }
+
+  // When the pad gets smaller (a phone turned to portrait, a narrower window), shrink the signature
+  // towards the top-left corner just enough that no ink ends up outside the visible pad.
+  function fitInk(w, h) {
+    var list = allStrokes(), maxX = 0, maxY = 0;
+    list.forEach(function (s) { s.points.forEach(function (p) { if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y; }); });
+    var k = Math.min(1, maxX > w ? w / maxX : 1, maxY > h ? h / maxY : 1);
+    if (!(k < 1) || !(k > 0)) return;
+    list.forEach(function (s) { s.points.forEach(function (p) { p.x *= k; p.y *= k; }); });
+  }
+
   function resize() {
     var r = canvas.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      if (padW && (r.width < padW || r.height < padH)) fitInk(r.width, r.height);
+      padW = r.width; padH = r.height;
+    }
     dpr = window.devicePixelRatio || 1;
     var w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
@@ -332,7 +354,20 @@ faq:
     canvas.addEventListener(type, function (e) { if (e.cancelable) e.preventDefault(); }, { passive: false });
   });
 
+  // Drops the stroke being drawn, so Undo or Clear pressed mid-stroke (Ctrl+Z, or a second finger on
+  // the button) cannot leave the history out of step with the strokes.
+  function abortStroke() {
+    if (!current) return false;
+    var i = strokes.indexOf(current), id = activeId;
+    if (i !== -1) strokes.splice(i, 1);
+    current = null;
+    activeId = null;
+    try { canvas.releasePointerCapture(id); } catch (err) { /* already released */ }
+    return true;
+  }
+
   function undo() {
+    if (abortStroke()) { scheduleDraw(); updateUi(); return; }
     var h = history.pop();
     if (!h) return;
     if (h.type === 'add') strokes.pop();
@@ -341,7 +376,8 @@ faq:
     updateUi();
   }
   function clear() {
-    if (!strokes.length) return;
+    abortStroke();
+    if (!strokes.length) { scheduleDraw(); updateUi(); return; }
     history.push({ type: 'clear', strokes: strokes });
     strokes = [];
     scheduleDraw();
@@ -471,7 +507,7 @@ faq:
     if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return;
     var t = e.target;
     if (t && (t.isContentEditable || /^(TEXTAREA|SELECT)$/.test(t.tagName) || (t.tagName === 'INPUT' && /^(text|number|search|email|url|password)$/.test(t.type)))) return;
-    if (!history.length) return;
+    if (!history.length && !current) return;
     e.preventDefault();
     undo();
   });

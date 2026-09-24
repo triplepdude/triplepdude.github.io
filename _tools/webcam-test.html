@@ -12,8 +12,8 @@ howto: |
      corner. The figures below it update every half second.
   3. Press **Take snapshot** to capture a full-resolution still, then
      **Download PNG** to save it.
-  4. Press **Stop** to release the camera. The webcam light should switch off
-     within a second; if it stays on, another app or tab is still using it.
+  4. Press **Stop** to release the camera. The webcam light should go out a
+     moment later; if it stays on, another app or tab is still using it.
 
   Camera names only appear once you have granted access, because browsers
   hide device labels from pages without permission.
@@ -79,7 +79,7 @@ faq:
   - q: Why is the measured frame rate lower than my camera's rating?
     a: Webcams lower their frame rate in dim light to get a brighter exposure. Add light in front of you, close other apps using the camera, and connect it directly to the computer rather than through a hub.
   - q: It says my camera is in use. What do I do?
-    a: Another program has the camera open. Quit video call apps, streaming software and other browser tabs that use the camera, then press Start again. Restarting the browser clears a stuck tab.
+    a: Another program has the camera open. Quit video call apps, streaming software and other browser tabs that use the camera, then press Start again. If nothing else seems to be using it, restarting the browser or unplugging and reconnecting the camera can release it.
   - q: How do I test the back camera on my phone?
     a: After you allow access, open the Camera list and choose the rear camera; phones usually list it as back or environment facing. Press Start again if it does not switch automatically.
 ---
@@ -189,7 +189,7 @@ faq:
   const video = $('#wct-video'), stage = $('#wct-stage'), mirror = $('#wct-mirror');
   const errEl = $('#wct-error'), okEl = $('#wct-status');
   const canvas = $('#wct-canvas');
-  const st = { stream: null, starting: false, gen: 0, timer: 0, vfc: 0, samples: [], frames: 0, darkSince: 0, darkWarned: false, lastQ: null, snapName: '' };
+  const st = { stream: null, starting: false, pending: false, gen: 0, timer: 0, vfc: 0, samples: [], frames: 0, darkSince: 0, darkWarned: false, lastQ: null, snapName: '' };
   const RATIOS = [[4, 3], [16, 9], [16, 10], [3, 2], [5, 4], [1, 1], [21, 9], [9, 16], [3, 4]];
 
   function setError(t) { errEl.textContent = t || ''; }
@@ -237,6 +237,9 @@ faq:
   function aspectText(w, h) {
     if (!w || !h) return '–';
     const g = gcd(w, h), rw = w / g, rh = h / g, dec = (w / h).toFixed(2);
+    // 8:5 is always sold as 16:10 (1280 x 800, 1920 x 1200).
+    if (rw === 8 && rh === 5) return '16:10 (' + dec + ')';
+    if (rw === 5 && rh === 8) return '10:16 (' + dec + ')';
     if (rw <= 32 && rh <= 32) return rw + ':' + rh + ' (' + dec + ')';
     let best = null, bestErr = 1;
     RATIOS.forEach(r => { const err = Math.abs(w / h - r[0] / r[1]) / (r[0] / r[1]); if (err < bestErr) { bestErr = err; best = r; } });
@@ -312,6 +315,7 @@ faq:
     setError(''); setOk('');
     release(); // the old stream must be closed first, or the camera keeps its current mode
     st.starting = true;
+    st.pending = false;
     updateButtons();
     const gen = st.gen;
     const c = constraints();
@@ -320,13 +324,16 @@ faq:
       stream = await navigator.mediaDevices.getUserMedia(c);
     } catch (e) {
       st.starting = false;
+      st.pending = false;
       setError(explain(e));
       updateButtons();
       refreshDevices();
       return;
     }
     st.starting = false;
-    if (gen !== st.gen) { stream.getTracks().forEach(t => t.stop()); updateButtons(); return; }
+    if (gen !== st.gen) { st.pending = false; stream.getTracks().forEach(t => t.stop()); updateButtons(); return; }
+    // A menu changed while the browser was opening the camera: reopen with the new choice.
+    if (st.pending) { stream.getTracks().forEach(t => t.stop()); start(); return; }
     const track = stream.getVideoTracks()[0];
     if (!track) { stream.getTracks().forEach(t => t.stop()); setError('No camera found. The browser returned no video track.'); updateButtons(); return; }
     st.stream = stream;
@@ -496,8 +503,11 @@ faq:
   stopBtn.addEventListener('click', () => stop());
   snapBtn.addEventListener('click', snapshot);
   $('#wct-download').addEventListener('click', downloadSnap);
-  mirror.addEventListener('change', () => video.classList.toggle('is-mirrored', mirror.checked));
-  [sel, resSel, fpsSel].forEach(el => el.addEventListener('change', () => { if (st.stream) start(); }));
+  const syncMirror = () => video.classList.toggle('is-mirrored', mirror.checked);
+  mirror.addEventListener('change', syncMirror);
+  syncMirror(); // browsers may restore the checkbox state on reload
+  // Changes while the permission prompt is open are applied once the camera opens.
+  [sel, resSel, fpsSel].forEach(el => el.addEventListener('change', () => { if (st.starting) st.pending = true; else if (st.stream) start(); }));
   video.addEventListener('resize', () => { if (st.stream) showInfo(true); });
   if (stage.requestFullscreen) {
     fsBtn.addEventListener('click', () => {
@@ -505,7 +515,8 @@ faq:
       else stage.requestFullscreen().catch(() => setError('Full screen was blocked by the browser.'));
     });
   } else fsBtn.hidden = true;
-  window.addEventListener('pagehide', release);
+  // Release the camera when leaving, and leave a clean page if it is restored from the back/forward cache.
+  window.addEventListener('pagehide', () => { if (st.stream || st.starting) stop(''); });
   if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
     navigator.mediaDevices.addEventListener('devicechange', () => refreshDevices());
   }

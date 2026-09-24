@@ -14,7 +14,9 @@ howto: |
     the number of possible passphrases by 7,776.
   - **Separator** and **capitalisation** only change how the words are
     joined and written, to fit a site's password rules. They add no
-    strength, because an attacker is assumed to know your settings.
+    strength, because an attacker is assumed to know your settings. No word
+    in the list is the start of another word, so even with no separator a
+    passphrase splits back into its words only one way and loses nothing.
   - **Add a digit / a symbol** puts one random digit or one random symbol
     from `! # $ % & * + = ? @` at the end of a random word, for sites that
     insist on them. Each adds about 3.3 bits.
@@ -36,8 +38,8 @@ howto: |
 
   Strength is measured in bits of entropy, assuming the attacker knows the
   word list and every setting you chose. Each word adds log2(7,776) ≈
-  12.925 bits. Capitalising one random word adds log2 of the number of
-  words, and a digit or a symbol adds log2(10) ≈ 3.32 bits each. Where the
+  12.925 bits. Writing one random word in capitals adds log2 of the number
+  of words, and a digit or a symbol adds log2(10) ≈ 3.32 bits each. Where the
   digit or symbol lands is not counted, which keeps the estimate on the safe
   side.
 
@@ -78,7 +80,7 @@ faq:
   - q: Is a passphrase better than a random password?
     a: Bit for bit they are equally strong. A six-word passphrase and a 12-character random password of letters, digits and symbols both have about 77 to 79 bits of entropy, but the words are far easier to remember and type.
   - q: Why does adding a capital letter or a separator not increase the strength?
-    a: Strength counts only the random choices. If every word is capitalised, or the words are always joined with a hyphen, an attacker who knows the method tries that form first, so it adds nothing. Capitalising one randomly chosen word does add a little, and the entropy figure includes it.
+    a: Strength counts only the random choices. If every word is capitalised, or the words are always joined with a hyphen, an attacker who knows the method tries that form first, so it adds nothing. Writing one randomly chosen word in capitals does add a little, and the entropy figure includes it.
   - q: What is the EFF word list?
     a: A list of 7,776 common English words chosen by the Electronic Frontier Foundation for Diceware, with offensive and hard-to-spell words removed. EFF also publishes shorter lists for four dice; this page uses the long list, the one intended for five dice.
 ---
@@ -91,6 +93,7 @@ faq:
 .pp-len { flex: 0 0 auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .pp-item .btn { flex: 0 0 auto; }
 .pp-empty { color: var(--muted); }
+#pp-error, #pp-dice-error { overflow-wrap: anywhere; }
 .pp-strength[data-level="weak"] { color: var(--danger); }
 .pp-strength[data-level="strong"], .pp-strength[data-level="very-strong"] { color: var(--accent); }
 .pp-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
@@ -162,7 +165,7 @@ faq:
         <option value="lower" selected>lowercase</option>
         <option value="title">Capitalise Each Word</option>
         <option value="upper">UPPERCASE</option>
-        <option value="one">Capitalise one random word</option>
+        <option value="one">One random word in CAPITALS</option>
       </select>
     </div>
   </div>
@@ -184,7 +187,7 @@ faq:
     <div class="field pp-rate-field">
       <label for="pp-rate">Attacker's guessing speed</label>
       <select id="pp-rate">
-        <option value="1e3">1,000/s: online, rate-limited</option>
+        <option value="1e3">1,000/s: online attack on a login</option>
         <option value="1e4">10,000/s: slow hash (bcrypt)</option>
         <option value="1e11" selected>100 billion/s: fast hash (MD5)</option>
         <option value="1e14">100 trillion/s: huge GPU cluster</option>
@@ -199,7 +202,7 @@ faq:
     <label for="pp-dice">Five dice per word, separated by spaces</label>
     <input type="text" id="pp-dice" class="mono" placeholder="e.g. 16655 43152 21316" autocomplete="off" inputmode="numeric" spellcheck="false">
   </div>
-  <div class="msg error" id="pp-dice-error" role="alert"></div>
+  <div class="msg error" id="pp-dice-error" aria-live="polite"></div>
   <div class="output" id="pp-dice-out" aria-live="polite"></div>
   <div class="actions">
     <button class="btn secondary small" type="button" data-copy-target="#pp-dice-out">Copy words</button>
@@ -341,7 +344,7 @@ faq:
       var full = parts.join(s.sep);
       var len = document.createElement('span');
       len.className = 'pp-len';
-      len.textContent = full.length + ' chars';
+      len.textContent = Array.from(full).length + ' chars';
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn secondary small';
@@ -381,7 +384,10 @@ faq:
     if (!words) { err.textContent = 'The word list is still loading.'; return; }
     var bad = groups.filter(function (g) { return !/^[1-6]{5}$/.test(g); });
     if (bad.length) {
-      err.textContent = 'Each word needs exactly five dice, each 1 to 6. Check: ' + bad.slice(0, 5).join(', ');
+      // Echo at most five groups, each cut short, so a long paste cannot flood the message.
+      err.textContent = 'Each word needs exactly five dice, each 1 to 6. Check: ' + bad.slice(0, 5).map(function (g) {
+        return g.length > 12 ? g.slice(0, 12) + '…' : g;
+      }).join(', ') + (bad.length > 5 ? ' and ' + (bad.length - 5) + ' more' : '');
       return;
     }
     out.textContent = groups.map(function (g) {

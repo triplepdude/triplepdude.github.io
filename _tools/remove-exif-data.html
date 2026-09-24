@@ -6,8 +6,8 @@ keywords: [remove exif data, exif remover, remove metadata from photo, remove gp
 howto: |
   ## How to remove EXIF data from a photo
 
-  1. Choose or drop one or more JPEG, PNG or WebP files. Nothing is uploaded;
-     the files are rewritten by this page in your browser.
+  1. Choose or drop one or more JPEG, PNG or WebP files. They are rewritten
+     here in your browser, never uploaded.
   2. Read the table for each photo: what was found, such as the GPS position,
      the time it was taken and the camera's serial number, and whether each
      item is kept or removed in the cleaned copy.
@@ -22,8 +22,7 @@ howto: |
   Metadata does not live inside the pixels. Each format stores it in separate
   blocks next to the compressed image, so the tool copies the image blocks
   byte for byte and leaves the metadata blocks out. Nothing is decoded or
-  compressed again, so there is no quality loss, and the file usually gets a
-  little smaller.
+  compressed again, so there is no quality loss.
 
   | Format | Removed | Kept |
   |---|---|---|
@@ -66,10 +65,10 @@ howto: |
   - **Names and edit history** in XMP and IPTC fields: author, copyright,
     editing software, keywords and captions.
 
-  Photos often keep all of this when sent as a file in a messaging app,
-  attached to an email or shared through a cloud storage link. File names
-  such as `IMG_20240518_140732.jpg` also contain the date and time, so
-  rename the file if that matters.
+  Photos usually keep all of this when sent as a file in a messaging app,
+  attached to an email or shared through a cloud storage link. Names such as
+  `IMG_20230714_183205.jpg` also give away the date and time, so rename the
+  file if that matters.
 faq:
   - q: Are my photos uploaded to a server?
     a: No. The files are read and rewritten entirely in your browser. Nothing is sent over the network, which you can confirm by opening the page, going offline and using it.
@@ -770,7 +769,16 @@ faq:
     entry.type = type;
     if (!type) throw fail('This is not a JPEG, PNG or WebP image, or the file is damaged.');
     if (UNSUPPORTED[type]) throw fail(UNSUPPORTED[type]);
-    entry.report = type === 'jpeg' ? analyzeJpeg(u) : type === 'png' ? await analyzePng(u) : analyzeWebp(u);
+    const r = type === 'jpeg' ? analyzeJpeg(u) : type === 'png' ? await analyzePng(u) : analyzeWebp(u);
+    // A file cut off before its image data would "clean" into a file nothing can open.
+    if (!hasImageData(r)) throw fail('This ' + TYPES[type].label + ' file has no image data. It is probably truncated or damaged.');
+    entry.report = r;
+  }
+  function hasImageData(r) {
+    if (!(r.width > 0 && r.height > 0)) return false;
+    if (r.type === 'jpeg') return r._walk.segs.some(s => s.m === 0xDA);
+    if (r.type === 'png') return r._walk.chunks.some(c => c.type === 'IDAT');
+    return r._walk.chunks.some(c => c.type === 'VP8 ' || c.type === 'VP8L' || c.type === 'ANMF');
   }
 
   async function clean(entry) {
@@ -825,7 +833,7 @@ faq:
       if (x.gps) {
         const g = x.gps;
         let v = g.ok ? g.lat.toFixed(6) + ', ' + g.lon.toFixed(6) + ' (' + dms(g.lat, 'N', 'S') + ' ' + dms(g.lon, 'E', 'W') + ')' : 'GPS fields present, but no position';
-        if (g.ok && isFinite(g.alt)) v += ', altitude ' + Math.round(g.alt) + ' m';
+        if (g.ok && isFinite(g.alt)) v += ', altitude ' + Number(g.alt.toFixed(1)) + ' m';
         if (g.ok && isFinite(g.dir)) v += ', facing ' + Math.round(g.dir) + '°';
         add('Location (GPS)', v);
         if (g.when) add('GPS time (UTC)', exifDate(g.when));
@@ -873,7 +881,15 @@ faq:
     thumb.width = 64; thumb.height = 64;
     if (entry.url) URL.revokeObjectURL(entry.url);
     entry.url = entry.out ? URL.createObjectURL(entry.out.blob) : '';
-    if (entry.url) thumb.src = entry.url; else thumb.hidden = true;
+    if (entry.url) {
+      thumb.decoding = 'async';
+      thumb.addEventListener('error', () => {
+        if (!thumb.isConnected) return; // the card was redrawn meanwhile
+        thumb.hidden = true;
+        head.after(el('p', 'msg error rexif-undecodable', 'Your browser cannot display this image. The file may be damaged or use a feature your browser does not support. The cleaned copy keeps the same image data, so it may not open either.'));
+      });
+      thumb.src = entry.url;
+    } else thumb.hidden = true;
     const name = el('div', 'rexif-name');
     name.appendChild(el('strong', '', entry.name));
     const info = el('span', 'hint');

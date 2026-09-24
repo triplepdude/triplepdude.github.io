@@ -268,4 +268,51 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(d.buf.includes('Example Camera'), false);
   img = await decode(d.buf);
   assert.deepEqual([img.w, img.h], [720, 480]);
+
+  // ---------- Little-endian EXIF, southern and western hemisphere, progressive JPEG ----------
+  // le-progressive-o8.jpg carries a hand-written "II" TIFF block: Make, Orientation 8, GPS
+  // S 33/1 51/1 545/10, W 151/1 12/1 36/1, altitude 125/10 with AltitudeRef 1 (below sea level).
+  await page.click('#rexif-clear');
+  await page.setInputFiles('#rexif-file', F('le-progressive-o8.jpg'));
+  await idle();
+  t = await table(0);
+  const leLat = (-(33 + 51 / 60 + 54.5 / 3600)).toFixed(6), leLon = (-(151 + 12 / 60 + 36 / 3600)).toFixed(6);
+  assert.equal(leLat, '-33.865139');
+  assert.equal(t['Location (GPS)'][0], `${leLat}, ${leLon} (33°51′54.5″S 151°12′36.0″W), altitude -12.5 m`);
+  assert.equal(t.Camera[0], 'NIKON CORPORATION');
+  assert.deepEqual(t.Orientation, ['Rotate 270° clockwise (8)', 'Kept']);
+  d = await download(0);
+  const leOrig = fs.readFileSync(F('le-progressive-o8.jpg'));
+  assert.ok(jpegSegments(leOrig).segs.filter(s => s.m === 0xda).length > 1, 'the fixture is progressive (several scans)');
+  assert.ok(scanData(d.buf).equals(scanData(leOrig)), 'every progressive scan is byte-identical');
+  const leApp1 = jpegSegments(d.buf).segs.find(s => s.m === 0xe1).payload;
+  assert.deepEqual(tiffIfd0(leApp1.subarray(6)).tags, [{ tag: 0x0112, type: 3, count: 1, short: 8 }]);
+  assert.equal(d.buf.includes('NIKON'), false);
+  img = await decode(d.buf);
+  assert.deepEqual([img.w, img.h], [80, 120], 'orientation 8 is still applied');
+
+  // ---------- Files without image data are refused; undisplayable ones are flagged ----------
+  const gpsJpg = fs.readFileSync(F('gps-rotated.jpg'));
+  const sos = jpegSegments(gpsJpg).segs.find(s => s.m === 0xda).start;
+  const metaPng = fs.readFileSync(F('meta.png'));
+  // Intact chunk structure, but IHDR claims a bit depth of 3, which PNG does not allow (1, 2, 4, 8
+  // or 16), so browsers refuse it. The CRC is recomputed so only the value is wrong.
+  const badPng = Buffer.from(metaPng);
+  assert.equal(badPng.toString('latin1', 12, 16), 'IHDR');
+  badPng[24] = 3;
+  badPng.writeUInt32BE(zlib.crc32(badPng.subarray(12, 29)), 29);
+  await page.click('#rexif-clear');
+  await page.setInputFiles('#rexif-file', [
+    { name: 'cut-before-scan.jpg', mimeType: 'image/jpeg', buffer: gpsJpg.subarray(0, sos) },
+    { name: 'header-only.png', mimeType: 'image/png', buffer: metaPng.subarray(0, 33) },
+    { name: 'bad-depth.png', mimeType: 'image/png', buffer: badPng },
+  ]);
+  await idle();
+  assert.match(await page.textContent(`${card(0)} .rexif-err`), /This JPEG file has no image data/);
+  assert.match(await page.textContent(`${card(1)} .rexif-err`), /This PNG file has no image data/);
+  assert.equal(await page.locator(`${card(0)} [data-rexif-dl]`).count(), 0);
+  await page.waitForSelector(`${card(2)} .rexif-undecodable`);
+  assert.match(await page.textContent(`${card(2)} .rexif-undecodable`), /cannot display this image/);
+  assert.match((await table(2))['Text: Author'][0], /Jane Example/, 'its metadata is still listed and removed');
+  assert.match(await page.textContent('#rexif-error'), /2 files could not be cleaned/);
 };

@@ -145,6 +145,92 @@ module.exports = async ({ page, open, assert, url }) => {
   const [lo, hi] = [Math.min(...widths), Math.max(...widths)];
   assert.ok(hi > lo * 2.5, `light pressure is thinner than heavy pressure (${lo}..${hi})`);
 
+  // Copy image puts the same PNG on the clipboard.
+  await page.selectOption('#sg-scale', '2');
+  const info = await page.textContent('#sg-info');
+  const [, cw, ch] = /PNG: (\d+) × (\d+) px/.exec(info).map(Number);
+  await page.click('#sg-copy');
+  await page.waitForFunction(() => document.querySelector('#sg-copy').textContent === 'Copied!');
+  const clip = await page.evaluate(async () => {
+    const items = await navigator.clipboard.read();
+    const bmp = await createImageBitmap(await items[0].getType('image/png'));
+    return { types: items[0].types, w: bmp.width, h: bmp.height };
+  });
+  assert.ok(clip.types.includes('image/png'), `clipboard types ${clip.types}`);
+  assert.deepEqual([clip.w, clip.h], [cw, ch], 'clipboard image matches the PNG export size');
+  assert.equal(await page.textContent('#sg-error'), '');
+
+  // Undo pressed in the middle of a stroke drops only the stroke being drawn. Before the fix it undid the
+  // previous action as well (here: brought back the cleared signature) and left a ghost history entry.
+  await page.click('#sg-clear');
+  await page.uncheck('#sg-vary');
+  await drawLine(40, 40, 240, 40);
+  await drawLine(40, 80, 240, 80);
+  await page.click('#sg-clear');
+  assert.equal(await strokes(), 0);
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  await page.mouse.move(box.x + 40, box.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 140, box.y + 120, { steps: 5 });
+  assert.equal(await strokes(), 1);
+  await page.keyboard.press('Control+z');
+  assert.equal(await strokes(), 0, 'Ctrl+Z mid-stroke removes just that stroke');
+  await page.mouse.move(box.x + 240, box.y + 120, { steps: 5 });
+  await page.mouse.up();
+  assert.equal(await strokes(), 0, 'the rest of the aborted stroke is ignored');
+  await page.click('#sg-undo');
+  assert.equal(await strokes(), 2, 'the next Undo brings back the cleared signature');
+
+  // Clear tapped with a second finger while the first is still drawing clears that stroke too, and
+  // Undo then restores exactly what was there before it.
+  const touch = (type, px, py) => page.evaluate(({ type, x, y }) => {
+    document.querySelector('#sg-canvas').dispatchEvent(new PointerEvent(type, {
+      pointerId: 21, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, pressure: type === 'pointerup' ? 0 : 0.5,
+      button: type === 'pointermove' ? -1 : 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true,
+    }));
+  }, { type, x: box.x + px, y: box.y + py });
+  await touch('pointerdown', 40, 150);
+  for (let i = 1; i <= 10; i++) await touch('pointermove', 40 + i * 15, 150);
+  assert.equal(await strokes(), 3);
+  await page.click('#sg-clear');
+  assert.equal(await strokes(), 0);
+  for (let i = 11; i <= 15; i++) await touch('pointermove', 40 + i * 15, 150);
+  await touch('pointerup', 265, 150);
+  assert.equal(await strokes(), 0, 'the cleared stroke does not come back when the finger lifts');
+  await page.click('#sg-undo');
+  assert.equal(await strokes(), 2, 'Undo restores the two finished strokes');
+  await page.click('#sg-undo');
+  assert.equal(await strokes(), 1);
+
+  // Narrowing the window (or turning a phone to portrait) shrinks the signature so none of it is hidden.
+  await page.click('#sg-clear');
+  await drawLine(100, 60, 900, 60);
+  const inkX = () => page.evaluate(() => {
+    const c = document.querySelector('#sg-canvas');
+    const t = document.createElement('canvas');
+    t.width = c.width; t.height = c.height;
+    const g = t.getContext('2d', { willReadFrequently: true });
+    g.drawImage(c, 0, 0);
+    const d = g.getImageData(0, 0, t.width, t.height).data;
+    let min = Infinity, max = -1;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 128) { const x = ((i - 3) / 4) % t.width; if (x < min) min = x; if (x > max) max = x; }
+    const k = t.width / c.getBoundingClientRect().width;
+    return { min: min / k, max: max / k, width: c.getBoundingClientRect().width };
+  });
+  const wide = await inkX();
+  assert.ok(Math.abs(wide.min - 98) <= 3 && Math.abs(wide.max - 902) <= 3, `ink 98..902 before, got ${wide.min}..${wide.max}`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => document.querySelector('#sg-canvas').getBoundingClientRect().width < 400);
+  await page.waitForTimeout(200);
+  const narrow = await inkX();
+  const k = narrow.width / 900;
+  assert.ok(narrow.max <= narrow.width && narrow.max >= narrow.width - 4, `ink reaches but stays inside the ${narrow.width} px pad, got max ${narrow.max}`);
+  assert.ok(Math.abs(narrow.min - 100 * k) <= 3, `left end scaled to ${100 * k}, got ${narrow.min}`);
+  svg = (await download('#sg-svg')).buf.toString('utf8');
+  const vbw = Number(/viewBox="0 0 ([\d.]+)/.exec(svg)[1]);
+  assert.ok(Math.abs(vbw - (800 * k + 4 + 24)) <= 1.5, `SVG follows the scaled ink: ${vbw}`);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   // HiDPI: the backing store follows devicePixelRatio.
   const hi2 = await page.context().browser().newContext({ viewport: { width: 800, height: 700 }, deviceScaleFactor: 2 });
   const p2 = await hi2.newPage();

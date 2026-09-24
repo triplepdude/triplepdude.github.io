@@ -52,14 +52,15 @@ howto: |
   The first digit is not drawn as bars at all; it sets which of two patterns
   (odd or even parity) each of the next six digits uses. Code 128 has three
   code sets: A (capitals and control characters), B (upper and lower case)
-  and C (pairs of digits). This generator searches for the mix of code sets
-  that gives the fewest symbols, so long runs of digits are packed two per
-  symbol and the barcode stays short.
+  and C (pairs of digits). The generator picks the mix of code sets that
+  gives the fewest symbols, packing runs of digits two per symbol.
 
   ## Printing tips
 
-  - Keep the white margins (quiet zones). Scanners need at least 10 modules of
-    space on each side, and 11 on the left of an EAN-13.
+  - Keep the white margins (quiet zones), which the generator adds for you.
+    Code 128, Code 39 and ITF-14 need at least 10 modules of clear space on
+    each side. EAN-13 needs 11 on the left and 7 on the right, UPC-A 9 on
+    each side and EAN-8 7 on each side.
   - Dark bars on a light background scan best. Red bars are invisible to many
     laser scanners, which use red light.
   - Do not stretch the image sideways in a layout program. Resize it here with
@@ -76,7 +77,7 @@ faq:
   - q: What is the difference between Code 128 and Code 39?
     a: Code 128 encodes all ASCII characters and packs digits two per symbol, so it is much more compact. Code 39 only has capitals, digits and a few symbols, but it is self-checking and still used by older systems. Choose Code 128 unless your scanner or software requires Code 39.
   - q: Can I make an ISBN barcode?
-    a: Yes. An ISBN-13 is an EAN-13 starting with 978 or 979. Enter the ISBN without hyphens and choose EAN-13. Books often also carry a separate 5-digit price add-on, which this tool does not create.
+    a: Yes. An ISBN-13 is an EAN-13 starting with 978 or 979. Choose EAN-13 and enter the ISBN; hyphens are ignored. If you enter an older 10-digit ISBN, the generator offers its ISBN-13 (978 plus the first nine digits and a new check digit). Books often also carry a separate 5-digit price add-on, which this tool does not create.
 ---
 <style>
 .bc-top { align-items: flex-start; }
@@ -93,6 +94,9 @@ faq:
 .bc-color { display: flex; align-items: center; gap: 8px; }
 .bc-color input[type="color"] { width: 44px; height: 44px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; flex: 0 0 auto; }
 .bc-color input[type="text"] { min-width: 0; }
+.bc-color input[aria-invalid="true"] { border-color: var(--danger); }
+.bc-ratio-note { margin: -4px 0 16px; }
+.bc-ratio-note:empty { display: none; }
 .bc-warn { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
 .bc-stats .stat b { font-size: 1.05rem; font-family: var(--mono); }
 .bc-options input[type="number"], .bc-color input[type="text"] { height: 44px; min-height: 44px; }
@@ -114,12 +118,12 @@ faq:
   </div>
   <div class="field">
     <label for="bc-data">Data to encode</label>
-    <input type="text" id="bc-data" class="mono" value="SKU-10492-B" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="120" aria-describedby="bc-data-hint">
+    <input type="text" id="bc-data" class="mono" value="SKU-10492-B" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="120" aria-describedby="bc-data-hint bc-error">
     <span class="hint" id="bc-data-hint"></span>
   </div>
 </div>
 
-<div class="msg error" id="bc-error" role="alert"></div>
+<div class="msg error" id="bc-error" aria-live="polite"></div>
 <div class="bc-fix-wrap" id="bc-fix-wrap" hidden>
   <button class="btn secondary small" type="button" id="bc-fix"></button>
 </div>
@@ -161,7 +165,7 @@ faq:
     <div class="field">
       <label for="bc-scale">PNG resolution</label>
       <select id="bc-scale">
-        <option value="1" selected>1× (as shown)</option>
+        <option value="1" selected>1×</option>
         <option value="2">2×</option>
         <option value="3">3×</option>
         <option value="4">4× (print)</option>
@@ -176,6 +180,7 @@ faq:
       </select>
     </div>
   </div>
+  <p class="hint bc-ratio-note" id="bc-ratio-note" aria-live="polite"></p>
   <div class="row">
     <div class="field">
       <label for="bc-fg">Bar colour</label>
@@ -257,9 +262,24 @@ faq:
     return (10 - sum % 10) % 10;
   }
 
+  // ISBN-10 check: weights 10..1, total divisible by 11; X stands for 10.
+  function isbn10Valid(s) {
+    var sum = 0;
+    for (var i = 0; i < 10; i++) {
+      var ch = s.charAt(i).toUpperCase();
+      sum += (ch === 'X' ? 10 : Number(ch)) * (10 - i);
+    }
+    return sum % 11 === 0;
+  }
+
   function numeric(type, raw) {
     var t = TYPES[type], s = raw.replace(/[\s-]/g, '');
     if (!s) throw new InputError('Enter the ' + t.name + ' number.');
+    if (type === 'ean13' && /^[0-9]{9}[0-9Xx]$/.test(s) && isbn10Valid(s)) {
+      var isbn13 = '978' + s.slice(0, 9);
+      isbn13 += gs1Check(isbn13);
+      throw new InputError('This looks like an ISBN-10. Its barcode uses the ISBN-13, which is ' + isbn13 + '.', isbn13);
+    }
     var bad = s.replace(/[0-9]/g, '');
     if (bad) throw new InputError(t.name + ' codes contain digits only. Remove: ' + uniqueChars(bad) + '.');
     var n = t.digits;
@@ -496,14 +516,16 @@ faq:
     var pad = Math.max(10, 5 * X);
     var bearer = sym.bearer ? 4 * X : 0;
     var qL = t.quiet[0] * X, qR = t.quiet[1] * X;
-    var width = Math.ceil(bearer + qL + sym.width * X + qR + bearer);
+    // Every element is a whole number of pixels (options() snaps the wide:narrow ratio),
+    // so rounding only removes floating-point noise and keeps PNG edges sharp.
+    var width = Math.round(bearer + qL + sym.width * X + qR + bearer);
     var top = pad + bearer;
     var retail = !sym.plain;
     var font = retail ? Math.max(10, Math.round(9 * X)) : Math.max(10, Math.round(6 * X + 4));
     var ext = o.showText && retail ? 5 * X : 0;
     var rects = [];
     sym.bars.forEach(function (b) {
-      rects.push({ x: bearer + qL + b.x * X, y: top, w: b.w * X, h: H + (b.long ? ext : 0) });
+      rects.push({ x: bearer + qL + Math.round(b.x * X), y: top, w: Math.round(b.w * X), h: H + (b.long ? ext : 0) });
     });
     if (bearer) {
       rects.push({ x: 0, y: pad, w: width, h: bearer });
@@ -512,6 +534,12 @@ faq:
       rects.push({ x: width - bearer, y: pad, w: bearer, h: H + 2 * bearer });
     }
     var texts = [], bottom = top + H + bearer;
+    if (o.showText && !retail && sym.text.length) {
+      // Shrink long text (e.g. many digits packed two per symbol) so it fits inside the image.
+      // Monospace digits and capitals are about 0.6 em wide; 0.62 leaves a little slack.
+      var fit = Math.floor((width - 4) / (0.62 * Math.max(1, sym.text[0].s.length)));
+      font = Math.max(6, Math.min(font, fit));
+    }
     if (o.showText) {
       var baseline = retail ? top + H + X + Math.round(font * 0.8) : bottom + Math.round(font * 0.25) + Math.round(font * 0.8);
       sym.text.forEach(function (tx) {
@@ -545,6 +573,7 @@ faq:
     canvas.width = Math.round(L.width * scale);
     canvas.height = Math.round(L.height * scale);
     var ctx = canvas.getContext('2d');
+    if (!ctx) return Promise.resolve(null);
     ctx.scale(scale, scale);
     if (!o.transparent) { ctx.fillStyle = o.bg; ctx.fillRect(0, 0, L.width, L.height); }
     ctx.fillStyle = o.fg;
@@ -563,7 +592,12 @@ faq:
     });
     return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
   }
-  function validHex(s) { return /^#[0-9a-fA-F]{6}$/.test(s); }
+  // Accepts #rrggbb, #rgb, with or without the #. Returns lowercase #rrggbb or null.
+  function normHex(s) {
+    var v = String(s).trim().replace(/^#/, '');
+    if (/^[0-9a-fA-F]{3}$/.test(v)) v = v.replace(/./g, '$&$&');
+    return /^[0-9a-fA-F]{6}$/.test(v) ? '#' + v.toLowerCase() : null;
+  }
 
   // ---------- UI ----------
   var typeEl = $('#bc-type'), dataEl = $('#bc-data'), preview = $('#bc-preview');
@@ -573,15 +607,19 @@ faq:
   var current = null, lastType = typeEl.value;
 
   function options() {
-    var h = parseInt($('#bc-height').value, 10);
+    var h = Math.round(Number($('#bc-height').value));
+    var X = Number($('#bc-width').value) || 2;
+    var ratio = Number($('#bc-ratio').value) || 3;
     return {
-      barWidth: Number($('#bc-width').value) || 2,
-      height: isFinite(h) ? Math.min(400, Math.max(10, h)) : 80,
+      barWidth: X,
+      height: $('#bc-height').value.trim() !== '' && isFinite(h) ? Math.min(400, Math.max(10, h)) : 80,
       showText: $('#bc-text').checked,
       transparent: $('#bc-transparent').checked,
-      fg: validHex(fgHex.value) ? fgHex.value.toLowerCase() : fg.value,
-      bg: validHex(bgHex.value) ? bgHex.value.toLowerCase() : bg.value,
-      ratio: Number($('#bc-ratio').value) || 3,
+      fg: normHex(fgHex.value) || fg.value,
+      bg: normHex(bgHex.value) || bg.value,
+      // Wide bars must be whole pixels, or the PNG gets grey half-pixel edges.
+      ratio: Math.round(ratio * X) / X,
+      ratioWanted: ratio,
       c39check: $('#bc-c39check').checked,
       bearer: $('#bc-bearer').checked
     };
@@ -592,7 +630,11 @@ faq:
   function update() {
     var type = typeEl.value, o = options();
     $('#bc-data-hint').textContent = TYPES[type].hint;
-    $('#bc-ratio-field').hidden = !(type === 'code39' || type === 'itf14');
+    var hasRatio = type === 'code39' || type === 'itf14';
+    $('#bc-ratio-field').hidden = !hasRatio;
+    var widePx = Math.round(o.ratio * o.barWidth);
+    $('#bc-ratio-note').textContent = hasRatio && o.ratio !== o.ratioWanted ?
+      'Wide bars are rounded to ' + widePx + ' px, so the ratio is ' + (Math.round(o.ratio * 100) / 100) + ' : 1.' : '';
     $('#bc-c39check-wrap').hidden = type !== 'code39';
     $('#bc-bearer-wrap').hidden = type !== 'itf14';
     preview.classList.toggle('bc-transparent', o.transparent);
@@ -611,6 +653,7 @@ faq:
       el.setAttribute('data-module', String(o.barWidth));
       el.setAttribute('data-quiet', String(TYPES[type].quiet[0] * o.barWidth + (res.sym.bearer ? 4 * o.barWidth : 0)));
       errEl.textContent = '';
+      dataEl.setAttribute('aria-invalid', 'false');
       $('#bc-encoded').textContent = res.info.encoded;
       $('#bc-check').textContent = res.info.check;
       $('#bc-check-label').textContent = res.info.checkLabel;
@@ -623,6 +666,7 @@ faq:
       if (!(e instanceof InputError)) e = new InputError('Something went wrong while drawing this barcode. Check the data and try again.');
       current = null;
       errEl.textContent = e.message;
+      dataEl.setAttribute('aria-invalid', 'true');
       if (e.fix) { fixBtn.textContent = 'Use ' + e.fix; fixBtn.setAttribute('data-fix', e.fix); fixWrap.hidden = false; }
       preview.classList.add('bc-empty');
       preview.textContent = 'Your barcode appears here.';
@@ -661,10 +705,16 @@ faq:
   function pairColour(picker, hex) {
     picker.addEventListener('input', function () { hex.value = picker.value; update(); });
     hex.addEventListener('input', function () {
-      var v = hex.value.trim();
-      if (/^[0-9a-fA-F]{6}$/.test(v)) v = '#' + v;
-      if (validHex(v)) picker.value = v.toLowerCase();
+      var v = normHex(hex.value);
+      if (v) picker.value = v;
+      // An unfinished or invalid code is ignored (the picker's colour is used) and flagged.
+      hex.setAttribute('aria-invalid', String(!v && hex.value.trim() !== ''));
       update();
+    });
+    hex.addEventListener('change', function () {
+      // On leaving the box, show the colour actually in use.
+      hex.value = picker.value;
+      hex.setAttribute('aria-invalid', 'false');
     });
   }
   pairColour(fg, fgHex);

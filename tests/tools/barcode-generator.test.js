@@ -136,10 +136,12 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#bc-check'), '1 (verified)');
   await setData('4006381333932');
   assert.match(await text('#bc-error'), /check digit should be 1, not 2\. The correct EAN-13 is 4006381333931/);
+  assert.equal(await page.getAttribute('#bc-data', 'aria-invalid'), 'true');
   assert.equal(await page.locator('#bc-preview svg').count(), 0);
   await page.click('#bc-fix');
   assert.equal(await page.inputValue('#bc-data'), '4006381333931');
   assert.equal(await text('#bc-error'), '');
+  assert.equal(await page.getAttribute('#bc-data', 'aria-invalid'), 'false');
   await setData('40063813339');
   assert.match(await text('#bc-error'), /needs 12 digits .* or 13 digits\. You entered 11/);
   await setData('4006381A3393');
@@ -247,4 +249,82 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#bc-height', '-5');
   assert.equal(await page.locator('#bc-preview svg').count(), 1);
   assert.equal(await page.getAttribute('#bc-preview g.bc-bars rect', 'height'), '10');
+  await page.fill('#bc-height', '2.5e1');
+  assert.equal(await page.getAttribute('#bc-preview g.bc-bars rect', 'height'), '25', 'exponent notation is read as a number');
+  await page.fill('#bc-height', '80');
+  await page.uncheck('#bc-transparent');
+  await page.check('#bc-text');
+
+  // Hex colour box: #rgb shorthand is accepted; an invalid code is flagged and ignored.
+  await page.fill('#bc-fg-hex', '#f00');
+  assert.equal(await page.getAttribute('#bc-preview g.bc-bars', 'fill'), '#ff0000');
+  assert.equal(await page.inputValue('#bc-fg'), '#ff0000');
+  await page.fill('#bc-fg-hex', '#12');
+  assert.equal(await page.getAttribute('#bc-fg-hex', 'aria-invalid'), 'true');
+  assert.equal(await page.getAttribute('#bc-preview g.bc-bars', 'fill'), '#ff0000');
+  await page.fill('#bc-fg-hex', '000000');
+  assert.equal(await page.getAttribute('#bc-fg-hex', 'aria-invalid'), 'false');
+  assert.equal(await page.getAttribute('#bc-preview g.bc-bars', 'fill'), '#000000');
+
+  // ISBN-10 in the EAN-13 box: offered as its ISBN-13 (978 + 9 digits + GS1 check),
+  // values computed independently in Python. An invalid ISBN-10 is not converted.
+  await page.selectOption('#bc-type', 'ean13');
+  await page.selectOption('#bc-width', '2');
+  await setData('0-306-40615-2');
+  assert.match(await text('#bc-error'), /ISBN-10.*9780306406157/);
+  await page.click('#bc-fix');
+  assert.equal(await text('#bc-encoded'), '9780306406157');
+  assert.equal(await modules(), EAN13_ALL['9780306406157']);
+  await setData('080442957X');
+  assert.match(await text('#bc-error'), /9780804429573/);
+  await setData('0306406153');
+  assert.match(await text('#bc-error'), /needs 12 digits/);
+
+  // Wide bars are whole pixels: ITF-14 at 1 px with a 2.5 ratio draws 3 px wide bars
+  // (the ratio note says so) and the PNG has no grey anti-aliased columns.
+  await page.selectOption('#bc-type', 'itf14');
+  await setData('1540014128876');
+  await page.uncheck('#bc-bearer');
+  await page.selectOption('#bc-width', '1');
+  await page.selectOption('#bc-ratio', '2.5');
+  assert.match(await text('#bc-ratio-note'), /rounded to 3 px, so the ratio is 3 : 1/);
+  const itfRects = await page.$$eval('#bc-preview g.bc-bars rect', rs => rs.map(r => [Number(r.getAttribute('x')), Number(r.getAttribute('width'))]));
+  assert.ok(itfRects.every(([x, wd]) => Number.isInteger(x) && Number.isInteger(wd)), 'bars on whole pixels');
+  assert.deepEqual([...new Set(itfRects.map(r => r[1]))].sort(), [1, 3]);
+  assert.equal(await modules(), EXPECTED.itf14_15400141288763);
+  await page.selectOption('#bc-type', 'ean8');
+  assert.equal(await text('#bc-ratio-note'), '', 'no ratio note for types without wide bars');
+  await page.selectOption('#bc-type', 'itf14');
+  await setData('1540014128876');
+  const itfPng = await download('#bc-png');
+  const greys = await page.evaluate(async b64 => {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(bmp, 0, 0);
+    const y = Number(document.querySelector('#bc-preview g.bc-bars rect').getAttribute('y')) + 5;
+    const d = x.getImageData(0, y, c.width, 1).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] !== 0 && d[i] !== 255) n++;
+    return n;
+  }, itfPng.buf.toString('base64'));
+  assert.equal(greys, 0, 'no grey pixels in a bar row');
+  // At 2 px a 2.5 ratio is exact (5 px), so there is no note.
+  await page.selectOption('#bc-width', '2');
+  assert.equal(await text('#bc-ratio-note'), '');
+  assert.deepEqual([...new Set(await page.$$eval('#bc-preview g.bc-bars rect', rs => rs.map(r => r.getAttribute('width'))))].sort(), ['2', '5']);
+
+  // Long human-readable text is shrunk to fit inside the image rather than clipped.
+  await page.selectOption('#bc-type', 'code128');
+  await page.selectOption('#bc-width', '1');
+  await setData('1'.repeat(120));
+  const fitBox = await page.evaluate(() => {
+    const svg = document.querySelector('#bc-preview svg');
+    const bb = svg.querySelector('text').getBBox();
+    return { left: bb.x, right: bb.x + bb.width, width: Number(svg.getAttribute('width')) };
+  });
+  assert.ok(fitBox.left >= 0 && fitBox.right <= fitBox.width, `text inside image: ${JSON.stringify(fitBox)}`);
+  assert.equal(decode128(await modules(), assert).text, '1'.repeat(120));
 };

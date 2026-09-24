@@ -64,9 +64,12 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForFunction(() => document.querySelector('#ri-error').textContent.includes('notes.txt'));
   assert.equal(await page.isDisabled('#ri-download'), true);
 
-  // 400x300 PNG. Loading shows the original size and fills the fields.
-  await page.setInputFiles('#ri-file', fx('scene.png'));
+  // 400x300 PNG, chosen with the button. Loading shows the original size and fills the fields, and
+  // keyboard focus moves to "Choose another image" instead of being lost with the hidden drop zone.
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#ri-choose')]);
+  await chooser.setFiles(fx('scene.png'));
   await waitDims('400 × 300');
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'ri-another');
   assert.equal(await text('#ri-error'), '');
   assert.equal(await page.inputValue('#ri-w'), '400');
   assert.equal(await page.inputValue('#ri-h'), '300');
@@ -97,7 +100,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual([out.info.type, out.info.width, out.info.height], ['jpeg', 100, 75]);
   const lowQ = out.buf.length;
   await page.fill('#ri-quality', '20');
-  await page.waitForFunction(() => document.querySelector('#ri-fmt').textContent === 'JPEG 20');
+  await page.waitForFunction(() => document.querySelector('#ri-fmt').textContent === 'JPEG at quality 20');
   out = await download();
   assert.ok(out.buf.length < lowQ, 'lower quality gives a smaller JPEG');
   await page.click('[data-pct="50"]');
@@ -198,4 +201,66 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.selectOption('#ri-preset', 'email');
   assert.equal(await page.isChecked('#ri-lock'), true);
   await waitDims('800 × 800');
+
+  // Fit inside with a transparent background but JPEG output: the bands are white and a note says why.
+  await page.selectOption('#ri-preset', 'ig-portrait');
+  await page.selectOption('#ri-fit', 'pad');
+  await page.selectOption('#ri-bg', 'transparent');
+  await waitDims('1080 × 1350');
+  await page.waitForFunction(() => /JPEG cannot store transparency/.test(document.querySelector('#ri-note').textContent));
+  out = await download();
+  assert.equal(out.info.type, 'jpeg');
+  // 100x100 fitted into 1080x1350 is 1080x1080 with 135 px bands above and below.
+  close((await pixels(out.buf, [[540, 20]]))[0], [255, 255, 255, 255], 3, 'band is white in the JPEG');
+  await page.selectOption('#ri-format', 'image/png');
+  await page.waitForFunction(() => /PNG/.test(document.querySelector('#ri-fmt').textContent) && !/JPEG cannot/.test(document.querySelector('#ri-note').textContent));
+  out = await download();
+  assert.equal((await pixels(out.buf, [[540, 20]]))[0][3], 0, 'band stays transparent in the PNG');
+
+  // Stretching 1600x400 to 100x400 shrinks only the width, 16 times. Each side is halved on its own
+  // (800, 400 and 200 wide) and the final step does the last 2x; the old loop needed both sides to
+  // halve and so made one 16x jump. Recorded by wrapping drawImage; 1 px stripes must average to grey.
+  const wide = Buffer.from(await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 1600; c.height = 400;
+    const x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, 1600, 400); x.fillStyle = '#000';
+    for (let i = 0; i < 1600; i += 2) x.fillRect(i, 0, 1, 400);
+    const b = await new Promise(r => c.toBlob(r, 'image/png'));
+    return Array.from(new Uint8Array(await b.arrayBuffer()));
+  }));
+  await page.selectOption('#ri-preset', 'custom');
+  await page.setInputFiles('#ri-file', { name: 'wide.png', mimeType: 'image/png', buffer: wide });
+  await waitDims('1600 × 400');
+  await page.uncheck('#ri-lock');
+  await page.selectOption('#ri-fit', 'stretch');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    window.__draws = [];
+    const orig = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+      window.__draws.push(this.canvas.width + 'x' + this.canvas.height);
+      return orig.apply(this, args);
+    };
+  });
+  await page.fill('#ri-w', '100');
+  assert.equal(await page.inputValue('#ri-h'), '400', 'unlocked: the height stays');
+  await waitDims('100 × 400');
+  assert.deepEqual(await page.evaluate(() => window.__draws), ['800x400', '400x400', '200x400', '100x400']);
+  out = await download();
+  assert.deepEqual([out.info.width, out.info.height], [100, 400]);
+  const row = [];
+  for (let x = 0; x < 100; x += 7) row.push([x, 200]);
+  for (const p of await pixels(out.buf, row)) assert.ok(p[0] >= 110 && p[0] <= 145, `stretched stripes average to grey, got ${p[0]}`);
+
+  // GIF cannot be encoded by canvas, so "original format" says it saves a PNG, and does.
+  const gif = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
+  await page.selectOption('#ri-format', 'same');
+  await page.check('#ri-lock');
+  await page.setInputFiles('#ri-file', { name: 'dot.gif', mimeType: 'image/gif', buffer: gif });
+  await waitDims('1 × 1');
+  assert.match(await page.locator('#ri-format option[value="same"]').textContent(), /^PNG \(GIF cannot be saved here\)$/);
+  out = await download();
+  assert.equal(out.name, 'dot-1x1.png');
+  assert.equal(out.info.type, 'png');
 };

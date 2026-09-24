@@ -13,6 +13,9 @@ module.exports = async ({ page, open, assert }) => {
   const list = listText.trim().split('\n');
   assert.equal(list.length, 7776);
   const inList = new Set(list);
+  // The how-to says no word is the start of another, so "no separator" loses nothing.
+  const sorted = [...list].sort();
+  for (let i = 1; i < sorted.length; i++) assert.ok(!sorted[i].startsWith(sorted[i - 1]), `${sorted[i - 1]} is a prefix of ${sorted[i]}`);
 
   // Instrument randomness before any page script runs: queued values are fed
   // to crypto.getRandomValues first, and Math.random must never be used.
@@ -170,6 +173,21 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#pp-dice', '12345 1234 70000');
   assert.match(await text('#pp-dice-error'), /five dice, each 1 to 6\. Check: 1234, 70000/);
   assert.equal(await text('#pp-dice-out'), '');
+  // A long bad paste is shortened in the message and never widens a phone-sized page.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.fill('#pp-dice', '1'.repeat(300) + ' 7 8 9 0 77 88');
+  assert.match(await text('#pp-dice-error'), /Check: 111111111111…, 7, 8, 9, 0 and 2 more$/);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1, 'no horizontal scroll');
+  await page.fill('#pp-dice', '');
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Character counts are in code points, so an emoji separator counts once.
+  await page.selectOption('#pp-sep', 'custom');
+  await page.fill('#pp-custom', '🙂');
+  const emo = (await phrases())[0];
+  assert.equal(emo.split('🙂').length, 4);
+  assert.equal(await page.textContent('#pp-list .pp-item:first-child .pp-len'), `${Array.from(emo).length} chars`);
+  await page.selectOption('#pp-sep', '-');
 
   // Nothing is stored.
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);

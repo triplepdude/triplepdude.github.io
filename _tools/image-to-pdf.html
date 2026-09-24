@@ -8,12 +8,12 @@ howto: |
 
   1. Press **Choose images**, drop files onto the box, or paste a copied
      screenshot with Ctrl+V (⌘V on a Mac). You can keep adding more.
-  2. Put the pages in order. Drag a page by its grip handle (with a mouse you
-     can drag the whole card) or use the arrow buttons. The × removes a page.
+  2. Put the pages in order: drag a page by its grip handle (or the whole
+     card with a mouse), or use the arrow buttons. The × removes a page.
   3. Pick a page size, orientation and margin. The thumbnails show exactly
      where each image will sit on its page.
-  4. Press **Create PDF**. The file is assembled on your device and saved to
-     your downloads folder.
+  4. Press **Create PDF**. The file is built on your device and saved to
+     your downloads.
 
   Each image becomes one page. It is scaled to fit inside the margins, never
   cropped or stretched, and centred on the page.
@@ -32,13 +32,11 @@ howto: |
   **Portrait** or **Landscape** to make every page the same, which matters
   when the PDF will be printed double-sided or bound.
 
-  Most printers cannot print right to the edge of the paper and leave a few
-  millimetres blank, so the default small margin (6 mm, about ¼ inch) keeps
-  the edge of a scanned page from being cut off. Choose **None** for a
-  document that will only be read on screen, or when your images already have
-  white borders. Untick **Enlarge small images** to place small pictures,
-  such as logos or icons, at their natural size instead of blowing them up to
-  fill the page.
+  Most printers leave a few millimetres blank at the paper's edge, so the
+  default small margin (6 mm, about ¼ inch) keeps the edge of a scanned page
+  from being cut off. Choose **None** for a document that will only be read
+  on screen. Untick **Enlarge small images** to place small pictures, such as
+  logos, at their natural size instead of blowing them up to fill the page.
 
   ## What happens to image quality
 
@@ -48,7 +46,9 @@ howto: |
   kilobytes larger than the photos themselves. Phone cameras often save the
   picture sideways plus an EXIF orientation tag that says how to turn it. The
   tool reads that tag and rotates the image with the page's transformation
-  matrix instead of re-encoding it, so portrait photos come out upright.
+  matrix instead of re-encoding it, so portrait photos come out upright. An
+  embedded colour profile, such as the Display P3 profile in many phone
+  photos, is copied too, so colours look the same as in this page.
 
   PNG, WebP, GIF and other formats are decoded by your browser, placed on a
   white background (transparent areas become white, as they would on paper)
@@ -56,25 +56,26 @@ howto: |
   smudges around sharp lettering, so for screenshots and scanned text save
   them as **Lossless**: the exact pixels are stored with lossless Flate
   compression. The file is bigger, but text stays crisp. Animated GIFs
-  contribute their first frame, and CMYK JPEGs from print software are
-  converted to RGB so their colours are right in every viewer.
+  contribute their first frame, and CMYK JPEGs are converted to RGB so their
+  colours are right in every viewer. Images converted this way are limited
+  to 16.7 megapixels, the canvas limit of Safari on iPhone and iPad; bigger
+  ones are scaled down and the tool tells you.
 
   ## Tips
 
-  - Photograph documents straight on in even light, and crop away the table
-    or background first; this tool fits images but does not crop them.
-  - The PDF is roughly as large as all your images together. To email a big
-    batch, shrink the photos first: about 1,600 pixels on the long side is
-    plenty for an A4 or Letter page read on screen.
-  - The output is a standard PDF 1.4 file that opens in any PDF reader,
-    including web browsers, Adobe Acrobat, macOS Preview and phone viewers.
+  - Crop away the table or background around a photographed document
+    first; this tool fits images but does not crop them.
+  - To email a big batch, shrink the photos first: about 1,600 pixels on
+    the long side is plenty for an A4 or Letter page read on screen.
+  - The output is a standard PDF 1.7 file (ISO 32000-1) that opens in any
+    PDF reader, including web browsers, Acrobat and macOS Preview.
 faq:
   - q: Are my images uploaded to a server?
     a: No. The images are read and the PDF is assembled by JavaScript running in this page, on your own device. Nothing is sent over the network, so the tool keeps working even if you go offline after the page has loaded.
   - q: How many images can I put in one PDF?
     a: There is no fixed limit. The images and the finished PDF are held in your device's memory, so very large batches, hundreds of megabytes of photos, work best on a computer rather than a phone.
   - q: Will the PDF be smaller than my photos?
-    a: No. JPEG photos are embedded unchanged to avoid any quality loss, so the PDF is about the size of the photos combined. Resize or compress the images first if you need a smaller file.
+    a: Not for JPEG photos. They are embedded unchanged to avoid any quality loss, so the PDF is about the size of the photos combined. PNG screenshots saved as JPEG often shrink. Resize or compress the photos first if you need a smaller file.
   - q: Why did some pages come out in landscape?
     a: With orientation set to Auto, each page follows its image, so wide images get landscape pages. Choose Portrait or Landscape to make every page face the same way.
   - q: Can I convert HEIC photos from an iPhone?
@@ -212,8 +213,10 @@ faq:
   var PAGE_SIZES = { a4: [595.28, 841.89], letter: [612, 792] };
   var PX_TO_PT = 0.75;            // 96 px per inch, 72 pt per inch
   var MAX_PAGE_PT = 14400;        // 200 in, the page size limit most readers enforce
+  var MIN_PAGE_PT = 3;            // smallest page size ISO 32000-1 Annex C recommends
   var MAX_CANVAS_PIXELS = 16777216; // stay under Safari's canvas area limit
-  var LETTER_REGIONS = ['US', 'CA', 'MX', 'PH', 'CL', 'CO', 'VE', 'CR', 'GT', 'PR', 'DO', 'PA', 'SV', 'NI'];
+  // Territories whose default paper is US Letter, from CLDR supplementalData (paperSize); the rest use A4.
+  var LETTER_REGIONS = ['BZ', 'CA', 'CL', 'CO', 'CR', 'GT', 'MX', 'NI', 'PA', 'PH', 'PR', 'SV', 'US', 'VE'];
 
   var items = [];
   var nextId = 1, pastedCount = 0, nameEdited = false, busy = false, drag = null;
@@ -277,7 +280,9 @@ faq:
       var maxSide = MAX_PAGE_PT - 2 * m;
       s = Math.min(1, maxSide / Math.max(natW, natH));
       var iw = natW * s, ih = natH * s;
-      return { pw: iw + 2 * m, ph: ih + 2 * m, x: m, y: m, w: iw, h: ih };
+      // ISO 32000-1 Annex C: pages should be at least 3 x 3 units, so tiny images sit centred on a 3 pt page.
+      pw = Math.max(MIN_PAGE_PT, iw + 2 * m); ph = Math.max(MIN_PAGE_PT, ih + 2 * m);
+      return { pw: pw, ph: ph, x: (pw - iw) / 2, y: (ph - ih) / 2, w: iw, h: ih };
     }
     var size = PAGE_SIZES[o.size] || PAGE_SIZES.a4;
     pw = size[0]; ph = size[1];
@@ -326,10 +331,39 @@ faq:
       } else if (m === 0xE1 && len >= 16 && b[s] === 0x45 && b[s + 1] === 0x78 && b[s + 2] === 0x69 && b[s + 3] === 0x66 && b[s + 4] === 0 && b[s + 5] === 0) {
         var ori = exifOrientation(b, s + 6, i + 2 + len);
         if (ori) info.orientation = ori;
+      } else if (m === 0xE2 && len > 16 && hasPrefix(b, s, ICC_TAG)) {
+        // ICC profile, possibly split over several APP2 segments (ICC.1 Annex B.4): sequence number, count, data.
+        var seq = b[s + 12], cnt = b[s + 13];
+        if (!info.icc) info.icc = { count: cnt, parts: [] };
+        if (cnt === info.icc.count && seq >= 1 && seq <= cnt) info.icc.parts[seq - 1] = b.subarray(s + 14, i + 2 + len);
       }
       i += 2 + len;
     }
     return info.sof ? info : null;
+  }
+
+  var ICC_TAG = [0x49, 0x43, 0x43, 0x5F, 0x50, 0x52, 0x4F, 0x46, 0x49, 0x4C, 0x45, 0x00]; // "ICC_PROFILE\0"
+  function hasPrefix(b, at, tag) {
+    for (var k = 0; k < tag.length; k++) if (b[at + k] !== tag[k]) return false;
+    return true;
+  }
+  function ascii4(b, at) { return String.fromCharCode(b[at], b[at + 1], b[at + 2], b[at + 3]); }
+
+  // Joins the APP2 chunks into one ICC profile and checks that it describes the JPEG's colour space.
+  // Phone cameras tag photos with Display P3; without the profile a PDF reader would show them duller.
+  function iccProfile(icc, comps) {
+    if (!icc || !(icc.count >= 1)) return null;
+    var total = 0, k;
+    for (k = 0; k < icc.count; k++) { if (!icc.parts[k]) return null; total += icc.parts[k].length; }
+    if (total < 132) return null;
+    var p = new Uint8Array(total), at = 0;
+    for (k = 0; k < icc.count; k++) { p.set(icc.parts[k], at); at += icc.parts[k].length; }
+    var size = ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0;
+    if (size < 132 || size > total || ascii4(p, 36) !== 'acsp') return null;
+    if (['mntr', 'scnr', 'spac', 'prtr'].indexOf(ascii4(p, 12)) === -1) return null;
+    var space = ascii4(p, 16);
+    if (!((comps === 3 && space === 'RGB ') || (comps === 1 && space === 'GRAY'))) return null;
+    return size === total ? p : p.subarray(0, size);
   }
 
   function exifOrientation(b, t, end) {
@@ -367,7 +401,7 @@ faq:
         (jpg.comps === 1 || jpg.comps === 3) && jpg.width > 0 && jpg.height > 0) {
       var swap = jpg.orientation >= 5;
       return {
-        data: bytes, filter: 'DCTDecode', cs: jpg.comps === 1 ? 'DeviceGray' : 'DeviceRGB',
+        data: bytes, filter: 'DCTDecode', cs: jpg.comps === 1 ? 'DeviceGray' : 'DeviceRGB', icc: iccProfile(jpg.icc, jpg.comps),
         pxW: jpg.width, pxH: jpg.height, orientation: jpg.orientation,
         dispW: swap ? jpg.height : jpg.width, dispH: swap ? jpg.width : jpg.height
       };
@@ -400,11 +434,11 @@ faq:
       out = { data: new Uint8Array(await blob.arrayBuffer()), filter: 'DCTDecode' };
     }
     canvas.width = canvas.height = 0;
-    out.cs = 'DeviceRGB'; out.pxW = cw; out.pxH = ch; out.orientation = 1; out.dispW = w; out.dispH = h;
+    out.cs = 'DeviceRGB'; out.pxW = cw; out.pxH = ch; out.orientation = 1; out.dispW = w; out.dispH = h; out.scaled = k < 1;
     return out;
   }
 
-  // ---------- minimal PDF 1.4 writer ----------
+  // ---------- minimal PDF writer ----------
   function latin1(str) {
     var a = new Uint8Array(str.length);
     for (var i = 0; i < str.length; i++) a[i] = str.charCodeAt(i) & 0xFF;
@@ -455,12 +489,27 @@ faq:
     clearMessages();
     busy = true;
     update();
-    var o = options(), n = items.length, name = pdfFileName();
+    var o = options(), n = items.length, name = pdfFileName(), scaled = [];
     try {
       var w = new PdfWriter();
-      w.raw('%PDF-1.4\n');
+      // 1.7 (ISO 32000-1) because camera colour profiles are often ICC version 4, which PDF 1.4 predates.
+      w.raw('%PDF-1.7\n');
       w.raw(new Uint8Array([0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A]));
-      var kids = [];
+      var kids = [], profiles = [], nextObj = 4 + 3 * n;
+      // Writes each distinct ICC profile once (a batch of phone photos shares one) and returns its object number.
+      var profileObj = function (p, comps) {
+        for (var j = 0; j < profiles.length; j++) {
+          var q = profiles[j].bytes;
+          if (q.length !== p.length) continue;
+          var same = true;
+          for (var b = 0; b < p.length && same; b++) same = q[b] === p[b];
+          if (same) return profiles[j].num;
+        }
+        var num = nextObj++;
+        w.stream(num, '/N ' + comps + ' /Alternate /' + (comps === 1 ? 'DeviceGray' : 'DeviceRGB'), p);
+        profiles.push({ bytes: p, num: num });
+        return num;
+      };
       for (var k = 0; k < n; k++) kids.push((4 + 3 * k) + ' 0 R');
       w.obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
       w.obj(2, '<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + n + ' >>');
@@ -472,22 +521,31 @@ faq:
         try { im = await prepare(item, o); } catch (e) {
           throw new Error('“' + item.name + '” could not be read. Remove it and try again.');
         }
+        if (im.scaled) scaled.push(item.name);
         var L = layout(im.dispW, im.dispH, o);
         var mtx = placementMatrix(im.orientation, L.x, L.y, L.w, L.h).map(num).join(' ');
         var pageObj = 4 + 3 * i, contentObj = pageObj + 1, imageObj = pageObj + 2, res = '/Im' + (i + 1);
         w.obj(pageObj, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + num(L.pw) + ' ' + num(L.ph) + '] /Resources << /XObject << ' + res + ' ' + imageObj + ' 0 R >> >> /Contents ' + contentObj + ' 0 R >>');
         w.stream(contentObj, '', latin1('q\n' + mtx + ' cm\n' + res + ' Do\nQ\n'));
-        w.stream(imageObj, '/Type /XObject /Subtype /Image /Width ' + im.pxW + ' /Height ' + im.pxH + ' /ColorSpace /' + im.cs + ' /BitsPerComponent 8 /Filter /' + im.filter, im.data);
+        var cs = im.icc ? '[/ICCBased ' + profileObj(im.icc, im.cs === 'DeviceGray' ? 1 : 3) + ' 0 R]' : '/' + im.cs;
+        w.stream(imageObj, '/Type /XObject /Subtype /Image /Width ' + im.pxW + ' /Height ' + im.pxH + ' /ColorSpace ' + cs + ' /BitsPerComponent 8 /Filter /' + im.filter, im.data);
       }
       var blob = w.finish('1 0 R', '3 0 R');
       TT.download(name, blob);
       statusBox.textContent = 'Saved ' + name + ': ' + n + (n === 1 ? ' page, ' : ' pages, ') + fmtBytes(blob.size) + '.';
+      if (scaled.length) {
+        statusBox.textContent += ' ' + (scaled.length === 1 ? '“' + scaled[0] + '” was' : scaled.length + ' images were') +
+          ' larger than 16.7 megapixels, the most a browser canvas can reliably hold, so ' + (scaled.length === 1 ? 'it was' : 'they were') + ' scaled down to fit.';
+      }
     } catch (e) {
       showError(e && /could not be read/.test(e.message) ? e.message : 'The PDF could not be created. Your device may be out of memory; try fewer or smaller images.');
     } finally {
+      var refocus = document.activeElement === makeBtn || document.activeElement === document.body;
       busy = false;
       makeBtn.textContent = 'Create PDF';
       update();
+      // The button is disabled while working, which drops keyboard focus; put it back.
+      if (refocus && !makeBtn.disabled) makeBtn.focus();
     }
   }
 
@@ -528,7 +586,8 @@ faq:
 
   async function addFiles(fileList) {
     var files = Array.prototype.slice.call(fileList || []);
-    if (!files.length || busy) return;
+    if (!files.length) return;
+    if (busy) { showError('Please wait until the current step has finished, then add those images again.'); return; }
     clearMessages();
     var bad = [], before = items.length;
     busy = true;

@@ -34,12 +34,12 @@ howto: |
 
   Your browser decodes the image and draws it onto an HTML canvas at the new
   size with its best smoothing filter (`imageSmoothingQuality` set to
-  `high`). For big reductions the image is first halved step by step until it
-  is less than twice the target size, and only then scaled to the final size.
-  Each halving blends every 2 × 2 block of pixels, so fine detail such as
-  hair, text and fabric does not break up into jagged edges and moiré, which
-  is what happens when a single large step skips over most of the source
-  pixels.
+  `high`). For big reductions each side is first halved step by step until it
+  is at most twice its target size, and only then scaled to the final size.
+  Each halving averages neighbouring pixels (roughly a 2 × 2 block per output
+  pixel), so fine detail such as hair, text and fabric does not break up into
+  jagged edges and moiré. That breakup is what a single large step with a
+  simple filter produces, because it samples only a few of the source pixels.
 
   Enlarging works too, but it cannot invent detail: the new pixels are
   interpolated from their neighbours, so edges look softer. For prints, a
@@ -56,7 +56,7 @@ howto: |
   {: .data .ri-table}
 
   The quality slider applies to JPEG and WebP. Settings from 80 to 90 usually
-  look the same as the original at a fraction of the size, while below about
+  look almost identical to the original at a fraction of the size, while below about
   60 blocky artefacts start to show. PNG is lossless, so it ignores the
   slider. If your browser cannot encode WebP, the tool says so and saves a
   PNG instead.
@@ -73,7 +73,7 @@ faq:
   - q: How do I resize to exactly 1080 × 1080 without squashing the photo?
     a: Choose the Instagram square preset, or unlock the aspect ratio and type 1080 in both boxes, then keep Crop to fill selected. The image is scaled to cover the square and the edges are trimmed evenly.
   - q: Can I use it for a passport or visa photo?
-    a: The 600 × 600 preset matches the smallest square digital photo the US State Department accepts (it allows 600 to 1200 pixels per side). The tool does not check head size, lighting or background, so compare the result with the official rules for your document.
+    a: The 600 × 600 preset matches the smallest square digital photo the US State Department accepts (it allows 600 to 1200 pixels per side). Upload portals also limit the file size, which is shown under the preview. The tool does not check head size, lighting or background, so compare the result with the official rules for your document.
   - q: Why does my enlarged image look blurry?
     a: Resizing cannot recreate detail that was never captured. When an image is enlarged, the extra pixels are estimated from their neighbours, which softens edges. Start from the largest original you have.
 ---
@@ -153,7 +153,7 @@ faq:
           <option value="uhd">4K UHD (3840 × 2160)</option>
         </optgroup>
         <optgroup label="Photos and web">
-          <option value="passport">Passport, US visa photo (600 × 600)</option>
+          <option value="passport">US passport or visa photo (600 × 600)</option>
           <option value="avatar">Profile picture (400 × 400)</option>
           <option value="web">Web page, 1200 px wide</option>
           <option value="email">Email, 800 px wide</option>
@@ -323,11 +323,13 @@ faq:
   }
 
   // Draws the source rectangle into ctx at (dx, dy, dw, dh). Big reductions are done by repeated
-  // halving so every source pixel contributes, then one final high-quality step.
+  // halving so every source pixel contributes, then one final high-quality step. Each axis is halved
+  // on its own, so stretching to a very different shape (only one side shrinking) is covered too.
   function resample(img, sx, sy, sw, sh, ctx, dx, dy, dw, dh) {
     var cur = img, temp = [];
-    while (sw / 2 >= dw && sh / 2 >= dh) {
-      var nw = Math.max(dw, Math.round(sw / 2)), nh = Math.max(dh, Math.round(sh / 2));
+    while (sw > 2 * dw || sh > 2 * dh) {
+      var nw = sw > 2 * dw ? Math.max(dw, Math.round(sw / 2)) : Math.max(1, Math.round(sw));
+      var nh = sh > 2 * dh ? Math.max(dh, Math.round(sh / 2)) : Math.max(1, Math.round(sh));
       var c = document.createElement('canvas');
       c.width = nw; c.height = nh;
       var cx = c.getContext('2d');
@@ -390,10 +392,11 @@ faq:
     TT.$('#ri-size').textContent = fmtBytes(r.blob.size);
     var change = Math.round((r.blob.size / src.size - 1) * 100);
     var actual = r.blob.type || r.type, lossy = actual !== 'image/png';
-    TT.$('#ri-fmt').textContent = (TYPE_NAMES[actual] || actual) + (lossy ? ' ' + qIn.value : '');
-    TT.$('#ri-change').textContent = change === 0 ? ', same as original' : ', ' + Math.abs(change) + '% ' + (change < 0 ? 'smaller' : 'larger');
+    TT.$('#ri-fmt').textContent = (TYPE_NAMES[actual] || actual) + (lossy ? ' at quality ' + qIn.value : '');
+    TT.$('#ri-change').textContent = change === 0 ? ', same as the original' : ', ' + Math.abs(change) + '% ' + (change < 0 ? 'smaller' : 'larger') + ' than the original';
     var notes = [];
     if (actual !== r.type) notes.push('Your browser cannot save ' + TYPE_NAMES[r.type] + ' images, so this is a ' + (TYPE_NAMES[actual] || actual) + ' file.');
+    if (r.fit === 'pad' && bgSel.value === 'transparent' && actual === 'image/jpeg') notes.push('JPEG cannot store transparency, so the background is white. Save as PNG or WebP to keep it transparent.');
     if (r.w > src.w * 1.001 || r.h > src.h * 1.001) notes.push('This enlarges the original, so it will look softer: resizing cannot add detail.');
     TT.$('#ri-note').textContent = notes.join(' ');
     var base = src.name.replace(/\.[^.]+$/, '') || 'image';
@@ -416,7 +419,7 @@ faq:
       var blob = await toBlob(canvas, type, Number(qIn.value) / 100);
       canvas.width = canvas.height = 0;
       if (token !== renderToken) return;
-      setResult({ blob: blob, w: t.w, h: t.h, type: type });
+      setResult({ blob: blob, w: t.w, h: t.h, type: type, fit: t.fit });
     } catch (e) {
       if (token !== renderToken) return;
       errBox.textContent = 'The image could not be resized, probably because this device ran out of memory. Try a smaller size.';
@@ -435,7 +438,10 @@ faq:
     hide(TT.$('#ri-q-field'), outType() === 'image/png');
     TT.$('#ri-q-out').textContent = qIn.value;
     var sameOpt = fmtSel.querySelector('option[value="same"]');
-    sameOpt.textContent = src ? 'Original (' + (TYPE_NAMES[src.type] || 'PNG') + ')' : 'Original format';
+    var ext = src ? /\.([a-z0-9]{2,5})$/i.exec(src.name) : null;
+    var srcFmt = ext ? ext[1].toUpperCase() : src ? (src.type.split('/')[1] || '').toUpperCase().replace('SVG+XML', 'SVG') : '';
+    sameOpt.textContent = !src ? 'Original format' : TYPE_NAMES[src.type] ? 'Original (' + TYPE_NAMES[src.type] + ')' :
+      'PNG (' + (srcFmt || 'this format') + ' cannot be saved here)';
   }
 
   function followLock() {
@@ -524,8 +530,10 @@ faq:
     TT.$('#ri-fname').title = src.name;
     TT.$('#ri-forig').textContent = 'Original: ' + src.w + ' × ' + src.h + ' px, ' + fmtBytes(file.size) +
       (TYPE_NAMES[src.type] ? ', ' + TYPE_NAMES[src.type] : '');
+    var hadFocus = document.activeElement === TT.$('#ri-choose');
     dropZone.hidden = true;
     fileBar.hidden = false;
+    if (hadFocus) TT.$('#ri-another').focus();
     if (presetSel.value !== 'custom') applyPreset();
     else if (by() === 'pct') setPct(pctIn.value, false);
     else { wIn.value = src.w; hIn.value = src.h; lastEdited = 'w'; }

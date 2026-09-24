@@ -28,8 +28,10 @@ module.exports = async ({ page, open, assert }) => {
     };
   });
 
+  assert.match(await text('#mict-rec-status'), /^Start the microphone/);
   await page.click('#mict-start');
   await waitText('#mict-rate', /kHz/);
+  assert.match(await text('#mict-rec-status'), /^Ready\. Press Record/);
   assert.equal(await page.isDisabled('#mict-start'), true);
   assert.equal(await page.isEnabled('#mict-stop'), true);
   assert.equal(await page.isEnabled('#mict-rec'), true);
@@ -54,6 +56,19 @@ module.exports = async ({ page, open, assert }) => {
   await waitText('#mict-status', /microphone is working/);
   await page.waitForFunction(() => parseFloat(document.getElementById('mict-hold').textContent) > -20, null, { timeout: 5000 });
   assert.ok(Number(await page.getAttribute('#mict-meter', 'aria-valuenow')) >= -60);
+  // Regression: the analyser ran at the output rate (44.1 kHz) on a 48 kHz mic and the
+  // resampled full-scale beep read +0.4 dBFS. It now runs at the track's rate, so the
+  // beep (samples at +/-1.0) reads exactly 0.0 and nothing ever goes above 0.
+  const trackRate = await page.evaluate(() => window.__gum.streams[0].getAudioTracks()[0].getSettings().sampleRate);
+  assert.match(await text('#mict-settings'), new RegExp('Analysis sample rate' + trackRate.toLocaleString('en-US') + ' Hz'));
+  await waitText('#mict-hold', /^0\.0$/);
+  for (let i = 0; i < 10; i++) {
+    for (const id of ['#mict-peak', '#mict-hold', '#mict-rms']) {
+      const v = await text(id);
+      assert.ok(!(parseFloat(v) > 0) && v !== '-0.0', `${id} reads ${v}`);
+    }
+    await page.waitForTimeout(80);
+  }
 
   // Hear-yourself toggle wires up without errors.
   await page.check('#mict-monitor');
@@ -100,6 +115,33 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.isDisabled('#mict-stop'), true);
   assert.equal(await page.isDisabled('#mict-rec'), true);
   assert.match(await text('#mict-status'), /released/);
+
+  // Regression: a filter changed while the browser is still opening the mic was ignored,
+  // so the checkbox and the live stream disagreed. It is now applied once the mic opens.
+  await page.evaluate(() => {
+    const md = navigator.mediaDevices, gum = md.getUserMedia;
+    md.getUserMedia = c => new Promise(r => setTimeout(r, 600)).then(() => gum(c));
+  });
+  const n0 = await page.evaluate(() => window.__gum.calls.length);
+  await page.click('#mict-start');
+  await page.uncheck('#mict-ns');
+  await page.waitForFunction(n => window.__gum.calls.length === n + 2 && window.__gum.streams.length === n + 2, n0, { timeout: 8000 });
+  await waitText('#mict-settings', /Noise suppressionOff/);
+  const pend = await page.evaluate(n => ({
+    first: window.__gum.calls[n].audio.noiseSuppression,
+    second: window.__gum.calls[n + 1].audio.noiseSuppression,
+    oldEnded: window.__gum.streams[n].getTracks().every(t => t.readyState === 'ended'),
+  }), n0);
+  assert.deepEqual(pend, { first: true, second: false, oldEnded: true });
+  assert.equal(await page.isEnabled('#mict-stop'), true);
+
+  // Leaving the page releases the mic and resets the buttons (for back/forward cache restores).
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+  assert.equal(await page.evaluate(() => window.__gum.streams.every(s => s.getTracks().every(t => t.readyState === 'ended'))), true);
+  assert.equal(await page.isEnabled('#mict-start'), true);
+  assert.equal(await page.isDisabled('#mict-stop'), true);
+  assert.equal(await page.isDisabled('#mict-rec'), true);
+  await page.check('#mict-ns');
 
   // Known answer: a 1 kHz sine at amplitude 0.5.
   const useSine = amp => page.evaluate(a => {

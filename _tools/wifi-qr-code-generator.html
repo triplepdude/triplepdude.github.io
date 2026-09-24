@@ -27,7 +27,7 @@ howto: |
   | Field | Meaning | Values |
   |---|---|---|
   | `T:` | Security type | `WPA` (covers WPA, WPA2 and WPA3 Personal), `WEP`, or `nopass` |
-  | `S:` | Network name | Up to 32 bytes; a letter with an accent takes 2, an emoji 4 |
+  | `S:` | Network name | Up to 32 bytes; most accented letters take 2, an emoji 4 |
   | `P:` | Password | Left out for open networks |
   | `H:` | Hidden network | `true` when the network does not broadcast its name |
 
@@ -72,7 +72,7 @@ faq:
   - q: Is my Wi-Fi password sent anywhere?
     a: No. The QR code is built by JavaScript in your browser. The network name and password are never uploaded, logged or saved, and they disappear when you close the tab.
   - q: Which phones can scan a Wi-Fi QR code?
-    a: The built-in Camera app on iPhone (iOS 11 and later) and on most Android phones (Android 10 and later) recognises Wi-Fi codes and offers to join. On older Android phones, Google Lens or a QR scanner app does the same.
+    a: The built-in Camera app on iPhone (iOS 11 and later) recognises Wi-Fi codes and offers to join. On Android, the Camera app on most recent phones or Google Lens does the same, and Android 10 and later also has a scanner in the Wi-Fi settings (the QR icon next to Add network).
   - q: My network uses WPA3. Which security option should I choose?
     a: Choose WPA/WPA2/WPA3. The code's WPA type covers every WPA generation with a password, and the phone and router agree on the strongest one they both support when it joins.
   - q: Will the QR code still work if I change my Wi-Fi password?
@@ -152,7 +152,7 @@ faq:
       <label for="wq-pass">Password</label>
       <div class="wq-pass-row">
         <input type="text" id="wq-pass" class="mono" value="correct horse battery staple" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="128">
-        <button class="btn secondary small" type="button" id="wq-pass-toggle" aria-pressed="false" aria-controls="wq-pass">Hide</button>
+        <button class="btn secondary small" type="button" id="wq-pass-toggle" aria-controls="wq-pass" aria-label="Hide password">Hide</button>
       </div>
     </div>
     <div class="row">
@@ -206,7 +206,7 @@ faq:
   </div>
 
   <div class="wq-text">
-    <div class="msg error" id="wq-error" role="alert"></div>
+    <div class="msg error" id="wq-error" aria-live="polite"></div>
     <div class="msg wq-warn" id="wq-warn" aria-live="polite"></div>
     <div class="field">
       <span class="label" id="wq-payload-label">Text inside the QR code</span>
@@ -289,6 +289,23 @@ faq:
 
   function bytes(s) { return enc.encode(s).length; }
 
+  // A lone UTF-16 surrogate (from a bad paste) would be encoded differently by the QR
+  // library and by TextEncoder, so replace it with U+FFFD as TextEncoder does.
+  function wellFormed(s) {
+    if (typeof s.toWellFormed === 'function') return s.toWellFormed();
+    var out = '';
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c >= 0xD800 && c <= 0xDBFF) {
+        var d = s.charCodeAt(i + 1);
+        if (d >= 0xDC00 && d <= 0xDFFF) { out += s.charAt(i) + s.charAt(i + 1); i++; continue; }
+        out += '\uFFFD';
+      } else if (c >= 0xDC00 && c <= 0xDFFF) out += '\uFFFD';
+      else out += s.charAt(i);
+    }
+    return out;
+  }
+
   function checkInput(o) {
     var errors = [], warnings = [];
     if (!o.ssid) errors.push('Enter the network name (SSID).');
@@ -310,6 +327,10 @@ faq:
     }
     if (o.security !== 'nopass' && o.password && o.password !== o.password.trim()) {
       warnings.push('The password starts or ends with a space. It is kept in the code, so remove it if it was a typo.');
+    }
+    // Escaped, a trailing backslash becomes \\; and Android's older parser does not split there.
+    if (/\\$/.test(o.ssid) || (o.security !== 'nopass' && /\\$/.test(o.password))) {
+      warnings.push('The ' + (/\\$/.test(o.ssid) ? 'network name' : 'password') + ' ends with a backslash (\\). Some Android versions misread a value that ends with one, so test the code on an Android phone before printing it.');
     }
     return { errors: errors, warnings: warnings };
   }
@@ -372,7 +393,7 @@ faq:
   }
 
   function fileBase(ssid) {
-    var slug = ssid.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).toLowerCase();
+    var slug = ssid.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).toLowerCase();
     return 'wifi-qr' + (slug ? '-' + slug : '');
   }
 
@@ -403,8 +424,8 @@ faq:
 
   function readOptions() {
     return {
-      ssid: ssidEl.value,
-      password: passEl.value,
+      ssid: wellFormed(ssidEl.value),
+      password: wellFormed(passEl.value),
       security: secEl.value,
       hidden: hiddenEl.checked,
       quoteHex: quoteEl.checked
@@ -482,7 +503,7 @@ faq:
     var hide = passEl.type === 'text';
     passEl.type = hide ? 'password' : 'text';
     toggleBtn.textContent = hide ? 'Show' : 'Hide';
-    toggleBtn.setAttribute('aria-pressed', String(hide));
+    toggleBtn.setAttribute('aria-label', hide ? 'Show password' : 'Hide password');
   });
 
   pngBtn.addEventListener('click', function () {

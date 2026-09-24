@@ -38,7 +38,7 @@ function decodePng(buf, assert) {
   };
 }
 
-module.exports = async ({ page, open, assert, fixtures }) => {
+module.exports = async ({ page, open, assert, fixtures, url }) => {
   await open();
   const near = (p, rgba, tol = 6) => rgba.every((v, k) => Math.abs(p[k] - v) <= tol);
   const RED = [255, 0, 0, 255], GREEN = [0, 255, 0, 255], BLUE = [0, 0, 255, 255];
@@ -49,6 +49,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     return png;
   }
   const setRange = (sel, v) => page.$eval(sel, (el, val) => { el.value = String(val); el.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+  // The zoom slider is logarithmic: its value is 100 * log2(zoom), announced as a percentage.
+  const setZoom = pct => setRange('#circ-zoom', Math.round(100 * Math.log2(pct / 100)));
+  const zoomText = () => page.getAttribute('#circ-zoom', 'aria-valuetext');
   function checkCorners(png, rgba) {
     const n = png.w - 1;
     for (const [x, y] of [[0, 0], [n, 0], [0, n], [n, n]]) assert.deepEqual(png.px(x, y), rgba, `corner ${x},${y}`);
@@ -81,13 +84,17 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.ok(near(png.px(236, 128), BLUE), `right ${png.px(236, 128)}`);
 
   // ---------- Zoom 200%: image x 150..250, all green ----------
-  await setRange('#circ-zoom', 200);
-  await page.waitForFunction(() => document.querySelector('#circ-zoom-out').textContent === '200%');
+  assert.equal(await zoomText(), '100%');
+  assert.equal(await page.inputValue('#circ-zoom'), '0', '100% sits at log2(1) = 0');
+  await setZoom(200);
+  assert.equal(await page.inputValue('#circ-zoom'), '100');
+  assert.equal(await zoomText(), '200%');
+  assert.equal(await page.textContent('#circ-zoom-out'), '200%');
   png = await download();
   assert.ok(near(png.px(20, 128), GREEN), `zoomed left ${png.px(20, 128)}`);
   assert.ok(near(png.px(236, 128), GREEN));
   await page.click('#circ-reset');
-  assert.equal(await page.inputValue('#circ-zoom'), '100');
+  assert.equal(await zoomText(), '100%');
 
   // ---------- Drag right: clamped once the image's left edge meets the circle ----------
   const ed = page.locator('#circ-editor');
@@ -112,13 +119,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.ok(near(png.px(128, 128), GREEN), `after arrows ${png.px(128, 128)}`);
   await ed.focus(); // the download click moved focus to the button
   await page.keyboard.press('NumpadAdd');
-  assert.equal(await page.inputValue('#circ-zoom'), '110');
+  assert.equal(await zoomText(), '110%');
   await page.keyboard.press('Minus');
-  assert.equal(await page.inputValue('#circ-zoom'), '100');
+  assert.equal(await zoomText(), '100%');
   await page.keyboard.press('Equal');
-  assert.equal(await page.inputValue('#circ-zoom'), '110');
+  assert.equal(await zoomText(), '110%');
   await page.keyboard.press('0');
-  assert.equal(await page.inputValue('#circ-zoom'), '100');
+  assert.equal(await zoomText(), '100%');
 
   // ---------- Rotate 90° clockwise: the left (red) third ends up on top ----------
   await page.click('#circ-rotate');
@@ -147,8 +154,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.isDisabled('#circ-bg-color'), false);
   await page.fill('#circ-bg-color', '#123456');
   const minZoom = Number(await page.getAttribute('#circ-zoom', 'min'));
-  assert.equal(minZoom, 25, 'minimum zoom is half of "whole image fits"');
+  assert.equal(minZoom, -200, 'minimum zoom is half of "whole image fits": log2(0.25) = -2');
   await setRange('#circ-zoom', minZoom);
+  assert.equal(await zoomText(), '25%');
   png = await download();
   // At 25% the image spans 0.5 x 0.25 diameters around the centre.
   assert.deepEqual(png.px(128, 30), [0x12, 0x34, 0x56, 255], 'uncovered inside -> background');
@@ -188,4 +196,43 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await page.textContent('#circ-error'), /could not be opened as an image/);
   png = await download(); // the previous image is still there
   assert.equal(png.name, 'stripes-circle-128.png');
+  // 128 px from a 200 px crop is drawn from a pre-shrunk copy (in the worker): same geometry.
+  checkCorners(png, [0, 0, 0, 0]);
+  assert.ok(near(png.px(64, 64), GREEN), `128 centre ${png.px(64, 64)}`);
+  assert.ok(near(png.px(10, 64), RED), `128 left ${png.px(10, 64)}`);  // image x = 100 + 10 * 200 / 128 = 115.6
+  assert.ok(near(png.px(118, 64), BLUE), `128 right ${png.px(118, 64)}`); // image x = 284.4
+
+  // ---------- EXIF orientation: a sideways-stored phone photo comes out upright ----------
+  // rot6.jpg stores 300x200 pixels with a red 60x40 block at the stored top-left and EXIF
+  // Orientation 6, so it displays as 200x300 with the block at x 160-199, y 0-59.
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'rot6.jpg'));
+  await page.waitForFunction(() => /rot6\.jpg/.test(document.querySelector('#circ-drop-title').textContent));
+  assert.match(await page.textContent('#circ-drop-hint'), /^200 × 300 px/);
+  await setRange('#circ-zoom', await page.getAttribute('#circ-zoom', 'min'));
+  assert.equal(await zoomText(), '33%');
+  png = await download();
+  // Zoom 1/3: the 200 px width spans 1/3 of the 128 px circle, so 1 image px = 0.2133 output px and
+  // the image covers x 42.7-85.3, y 32-96. The red block lands at x 76.8-85.1, y 32-44.6.
+  assert.ok(near(png.px(81, 38), RED, 20), `top-right of the upright photo is red: ${png.px(81, 38)}`);
+  assert.ok(near(png.px(50, 38), [40, 90, 200, 255], 20), `top-left is blue: ${png.px(50, 38)}`);
+  assert.ok(near(png.px(55, 90), [40, 90, 200, 255], 20), `bottom is blue: ${png.px(55, 90)}`);
+  assert.equal(png.px(20, 64)[3], 0, 'inside the circle but beside the photo: transparent');
+
+  // ---------- No OffscreenCanvas: the page draws the PNG itself ----------
+  const p2 = await page.context().newPage();
+  const p2errors = [];
+  p2.on('pageerror', e => p2errors.push(e.message));
+  p2.on('console', m => { if (m.type() === 'error') p2errors.push(m.text()); });
+  await p2.addInitScript(() => { delete window.OffscreenCanvas; });
+  await p2.goto(url);
+  await p2.setInputFiles('#circ-file', path.join(fixtures, 'stripes.png'));
+  await p2.waitForFunction(() => /stripes\.png/.test(document.querySelector('#circ-drop-title').textContent));
+  await p2.selectOption('#circ-size', '128');
+  const [dl2] = await Promise.all([p2.waitForEvent('download'), p2.click('#circ-download')]);
+  png = decodePng(fs.readFileSync(await dl2.path()), assert);
+  assert.deepEqual([png.w, png.h], [128, 128]);
+  checkCorners(png, [0, 0, 0, 0]);
+  assert.ok(near(png.px(64, 64), GREEN) && near(png.px(10, 64), RED) && near(png.px(118, 64), BLUE), 'same crop without the worker');
+  assert.deepEqual(p2errors, []);
+  await p2.close();
 };

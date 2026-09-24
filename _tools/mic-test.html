@@ -11,8 +11,8 @@ howto: |
   2. Speak at your normal distance. The bar moves, the waveform draws your
      voice, and a green message confirms that sound is reaching the browser.
   3. Press **Record** to capture a 5-second clip (or 10 or 30 seconds). It
-     plays back automatically when it finishes, so you hear exactly what a
-     call or recording app receives.
+     plays back automatically when it finishes, so you hear what the browser
+     captures with the current filter settings.
   4. Press **Stop** when you are done. The page stops every audio track, so
      the browser's recording indicator switches off.
 
@@ -26,10 +26,12 @@ howto: |
   Levels are shown in dBFS, decibels relative to full scale. 0 dBFS is the
   largest value digital audio can hold, so every reading is zero or negative.
   **Peak** is the loudest single sample in the last 2,048 samples (about 43 ms
-  at 48 kHz), and **Level (RMS)** is the average power over the same window.
-  For a steady sine wave the RMS reading sits 3 dB below the peak; for speech
-  the gap is usually 10 to 20 dB. **Peak hold** keeps the loudest peak since
-  you pressed Start, which is the number to check before recording.
+  at 48 kHz), and **Level (RMS)** is the root-mean-square level over the same
+  window. For a steady sine wave the RMS reading sits 3 dB below the peak;
+  speech is spikier, so the gap is wider. **Peak hold** keeps the loudest peak
+  since you pressed Start, which is the number to check before recording. The
+  analysis runs at the microphone's own sample rate where the browser allows
+  it, because resampling can overshoot and read slightly above 0 dBFS.
 
   | Peak while you talk | What it means |
   |---|---|
@@ -45,14 +47,15 @@ howto: |
 
   ## Echo cancellation, noise suppression and auto gain
 
-  Browsers process microphone audio by default with the same WebRTC filters
-  used for video calls. They are exposed as the `echoCancellation`,
+  By default, browsers run microphone audio through the same kind of
+  processing used for video calls. The three stages are the `echoCancellation`,
   `noiseSuppression` and `autoGainControl` constraints of the W3C Media
-  Capture and Streams specification, and the checkboxes above switch them on
-  or off. Automatic gain slowly raises quiet input and lowers loud input, so
-  turn it off when you want to judge the real volume set in your operating
-  system. Turning all three off gives the rawest signal the browser allows,
-  which is what music and podcast apps usually request.
+  Capture and Streams specification. The checkboxes above switch them on or
+  off where the browser supports it, and the settings table shows what was
+  actually applied. Automatic gain gradually raises quiet input and lowers loud
+  input, so turn it off when you want to judge the real volume set in your
+  operating system. Turning all three off gives the rawest signal the browser
+  allows; music apps often do this because the filters are tuned for speech.
 
   ## When the microphone will not start
 
@@ -67,13 +70,13 @@ howto: |
     localhost.
 faq:
   - q: Is my voice recorded or uploaded anywhere?
-    a: No. The audio is analysed by your browser's Web Audio engine on your own device. The test clip is kept in memory only until you record again, press Stop or close the tab, and it leaves your computer only if you press Download.
+    a: No. The audio is analysed by your browser's Web Audio engine on your own device. A test clip stays in the page's memory until you record a new one, reload or close the tab, and it leaves your computer only if you press Download.
   - q: The meter moves here, but people cannot hear me in Zoom or Teams. Why?
     a: Call apps pick their own input device. Open the app's audio settings and choose the same microphone that works here, and check that it is not muted inside the app or by a headset mute button.
   - q: What is a good microphone level?
     a: For speech, aim for peaks between about −25 and −6 dBFS at your normal speaking distance. Peaks near 0 dBFS or the clipping warning mean the input is too loud and will distort.
   - q: Why does my recording sound different from the live meter?
-    a: The clip is compressed with the Opus codec (or AAC in Safari) and includes whatever echo cancellation and noise suppression are switched on. Turn the filters off and record again to hear the raw input.
+    a: The clip is compressed, with the Opus codec in current browsers (AAC in older Safari versions), and includes whatever echo cancellation and noise suppression are switched on. Turn the filters off and record again to hear the raw input.
   - q: Why is the microphone list empty or showing generic names?
     a: Browsers only reveal device names after you allow microphone access for the page. Press Start once and the list fills in; if it stays empty, the system does not see any input device.
 ---
@@ -192,8 +195,10 @@ faq:
   const audio = $('#mict-audio'), dlBtn = $('#mict-dl');
   const ec = $('#mict-ec'), ns = $('#mict-ns'), agc = $('#mict-agc'), mon = $('#mict-monitor');
   const MIN_DB = -60, HEARD_DB = -45, CLIP = 0.99;
+  const REC_IDLE = 'Start the microphone to record a test clip.';
+  const REC_READY = 'Ready. Press Record, say a sentence, and the clip plays back when it ends.';
   const st = {
-    stream: null, ctx: null, src: null, an: null, monitor: null, buf: null, raf: 0, starting: false, gen: 0,
+    stream: null, ctx: null, src: null, an: null, monitor: null, buf: null, raf: 0, starting: false, pending: false, gen: 0,
     peakHold: -Infinity, clipCount: 0, clipping: false, meterDb: MIN_DB, markDb: -Infinity, markT: 0, lastT: 0,
     heard: false, startT: 0, warned: false, textT: 0, histMax: -Infinity, histT: 0, history: [],
     recorder: null, recTimer: 0, recStart: 0, recLen: 5, recBlob: null, recUrl: null, recExt: 'webm'
@@ -242,8 +247,9 @@ faq:
   }
 
   // ---------- Helpers ----------
-  const toDb = x => (x > 0 ? 20 * Math.log10(x) : -Infinity);
-  const fmtDb = v => (v === -Infinity || v < -120 ? '-∞' : v.toFixed(1));
+  // Float samples above 1.0 only come from resampling overshoot, so readings stop at 0 dBFS.
+  const toDb = x => (x > 0 ? Math.min(0, 20 * Math.log10(x)) : -Infinity);
+  const fmtDb = v => (v === -Infinity || v < -120 ? '-∞' : (v > -0.05 ? 0 : v).toFixed(1));
 
   function readColors() {
     const cs = getComputedStyle(document.body);
@@ -283,12 +289,8 @@ faq:
     const g = hist.getContext('2d'), w = hist.width, h = hist.height;
     g.clearRect(0, 0, w, h);
     g.strokeStyle = colors['--border']; g.lineWidth = dpr;
-    g.fillStyle = colors['--muted']; g.font = (10 * dpr) + 'px system-ui, sans-serif';
-    [-20, -40].forEach(db => {
-      const y = Math.round(h - (db - MIN_DB) / -MIN_DB * h) + 0.5;
-      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
-      g.fillText(db + ' dB', 4 * dpr, y - 3 * dpr);
-    });
+    const lines = [-20, -40].map(db => [db, Math.round(h - (db - MIN_DB) / -MIN_DB * h) + 0.5]);
+    lines.forEach(([, y]) => { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); });
     const bw = 3 * dpr, count = Math.floor(w / bw);
     const hs = st.history.slice(-count);
     for (let i = 0; i < hs.length; i++) {
@@ -299,6 +301,9 @@ faq:
       const x = w - (hs.length - i) * bw;
       g.fillRect(x, h - frac * h, bw - dpr, frac * h);
     }
+    // Labels last so the bars never cover them.
+    g.fillStyle = colors['--muted']; g.font = (10 * dpr) + 'px system-ui, sans-serif';
+    lines.forEach(([db, y]) => g.fillText(db + ' dB', 4 * dpr, y - 3 * dpr));
   }
 
   function setMeter(db, markDb) {
@@ -346,6 +351,9 @@ faq:
     const recording = !!(st.recorder && st.recorder.state === 'recording');
     recBtn.disabled = !running && !recording;
     recBtn.textContent = recording ? 'Stop recording' : 'Record ' + $('#mict-len').value + ' s clip';
+    // Only swap the idle hints; leave results and errors from a recording in place.
+    const rs = recStatus.textContent;
+    if (!recording && (rs === REC_IDLE || rs === REC_READY)) recStatus.textContent = running ? REC_READY : REC_IDLE;
   }
 
   function releaseStream() {
@@ -376,6 +384,7 @@ faq:
     setError(''); setOk('');
     releaseStream();
     st.starting = true;
+    st.pending = false;
     updateButtons();
     const gen = st.gen;
     const audioC = { echoCancellation: ec.checked, noiseSuppression: ns.checked, autoGainControl: agc.checked };
@@ -385,20 +394,31 @@ faq:
       stream = await navigator.mediaDevices.getUserMedia({ audio: audioC });
     } catch (e) {
       st.starting = false;
+      st.pending = false;
       setError(explain(e));
       updateButtons();
       refreshDevices();
       return;
     }
     st.starting = false;
-    if (gen !== st.gen) { stream.getTracks().forEach(t => t.stop()); updateButtons(); return; }
+    if (gen !== st.gen) { st.pending = false; stream.getTracks().forEach(t => t.stop()); updateButtons(); return; }
+    // The device or a filter changed while the browser was opening the mic: reopen with the new choice.
+    if (st.pending) { stream.getTracks().forEach(t => t.stop()); start(); return; }
     const track = stream.getAudioTracks()[0];
     if (!track) { stream.getTracks().forEach(t => t.stop()); setError('No microphone found. The browser returned no audio track.'); updateButtons(); return; }
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
-      const ctx = new AC();
+      const rate = track.getSettings ? track.getSettings().sampleRate : 0;
+      let ctx = null, src = null;
+      // Analyse at the mic's own rate so no resampling sits between the samples and the meter.
+      if (rate) {
+        try { ctx = new AC({ sampleRate: rate }); src = ctx.createMediaStreamSource(stream); } catch (e) {
+          if (ctx) ctx.close().catch(() => {});
+          ctx = null; src = null;
+        }
+      }
+      if (!ctx) { ctx = new AC(); src = ctx.createMediaStreamSource(stream); }
       if (ctx.state === 'suspended' && ctx.resume) ctx.resume().catch(() => {});
-      const src = ctx.createMediaStreamSource(stream);
       const an = ctx.createAnalyser();
       an.fftSize = 2048;
       src.connect(an);
@@ -581,6 +601,7 @@ faq:
     dlBtn.hidden = false;
     const codec = /opus/.test(type) ? 'Opus' : /mp4|aac/.test(type) ? 'AAC' : type;
     recStatus.textContent = 'Recorded a ' + secs.toFixed(1) + ' s clip (' + Math.max(1, Math.round(blob.size / 1024)) + ' KB, ' + codec + '). Playing it back now.';
+    if (document.hidden) { recStatus.textContent = recStatus.textContent.replace('Playing it back now.', 'Press play to listen.'); return; }
     const p = audio.play();
     if (p && p.catch) p.catch(() => { recStatus.textContent = recStatus.textContent.replace('Playing it back now.', 'Press play to listen.'); });
   }
@@ -608,10 +629,13 @@ faq:
   recBtn.addEventListener('click', record);
   $('#mict-len').addEventListener('change', updateButtons);
   $('#mict-reset-peak').addEventListener('click', () => { st.peakHold = -Infinity; st.clipCount = 0; st.markDb = -Infinity; $('#mict-hold').textContent = '–'; $('#mict-clip').textContent = st.stream ? 'None' : '–'; });
-  sel.addEventListener('change', () => { if (st.stream) start(); });
-  [ec, ns, agc].forEach(c => c.addEventListener('change', () => { if (st.stream) start(); }));
+  // Changes while the permission prompt is open are applied once the mic opens.
+  const restart = () => { if (st.starting) st.pending = true; else if (st.stream) start(); };
+  sel.addEventListener('change', restart);
+  [ec, ns, agc].forEach(c => c.addEventListener('change', restart));
   mon.addEventListener('change', applyMonitor);
-  window.addEventListener('pagehide', () => releaseStream());
+  // Release the mic when leaving, and leave the page in a clean state if it is restored from the back/forward cache.
+  window.addEventListener('pagehide', () => { if (st.stream || st.starting) stop(''); });
   window.addEventListener('resize', TT.debounce(() => { if (!st.stream) { drawWave(null); drawHistory(); } }, 100));
   if (window.matchMedia) {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
