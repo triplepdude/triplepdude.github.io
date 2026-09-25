@@ -1,0 +1,476 @@
+---
+title: What Week Is It? ISO Week Number Today
+description: See today's ISO 8601 week number, find the week of any date, and list every week of a year with Monday to Sunday dates. US week numbers included.
+category: Date & Time
+keywords: [what week is it, week number, current week number, iso week number, week number today, calendar week, weeks in a year, week number calendar]
+howto: |
+  ## How to use it
+
+  The big number at the top is the current ISO week, worked out from your
+  device's date and time zone. It updates by itself if you leave the page open
+  past midnight.
+
+  - **Week of a date:** pick any date to get its ISO week, its full ISO week
+    date (such as `2026-W39-4`, meaning the Thursday of week 39), the day of the
+    year and the US-style week number.
+  - **Dates of a week:** enter a year and a week number to see which Monday and
+    Sunday it runs between.
+  - **All weeks in a year:** the table lists every week with its first and last
+    day, highlights the current week, and downloads as CSV for a spreadsheet or
+    project plan. Switch the numbering to US if your calendar starts on Sunday.
+
+  ## How ISO 8601 week numbers work
+
+  ISO 8601 defines three rules. Weeks start on Monday. Week 1 is the week that
+  contains the first Thursday of the year, which is the same as the week that
+  contains January 4. And every week belongs entirely to the year that holds
+  its Thursday, called the *week-year*.
+
+  Because of that last rule, the days around New Year can belong to a
+  neighbouring year's week. December 29 to 31 can fall in week 1 of the next
+  year, and January 1 to 3 can fall in week 52 or 53 of the previous one.
+  Always pair an ISO week with its week-year, not the calendar year.
+
+  | Date | Weekday | ISO week | US week |
+  |---|---|---|---|
+  | 2020-12-31 | Thursday | 2020-W53 | 53 |
+  | 2021-01-03 | Sunday | 2020-W53 | 2 |
+  | 2024-12-30 | Monday | 2025-W01 | 53 |
+  | 2027-01-01 | Friday | 2026-W53 | 1 |
+
+  ## Years with 53 weeks
+
+  Most years have 52 ISO weeks. A year has 53 when January 1 is a Thursday, or
+  when it is a leap year that starts on a Wednesday. That happens in 71 of every
+  400 years; 2020 and 2026 are recent examples, and the next one after 2026
+  is 2032. December 28 is always in the last week of its year, which gives a
+  quick way to count them.
+
+  ## US week numbers (not ISO)
+
+  Many US calendars count weeks from Sunday and call the week containing
+  January 1 week 1, however few days of it fall in the new year. The first and
+  last weeks are often partial, so a year has 53 weeks and occasionally 54
+  (2028 does, because it is a leap year that starts on a Saturday). This is what
+  `WEEKNUM(date)` returns in Excel and Google Sheets. The ISO number comes from
+  `ISOWEEKNUM(date)` instead.
+
+  ## Getting ISO weeks in code
+
+  - **Python:** `date.isocalendar()` returns the week-year, week and weekday.
+  - **strftime:** use `%G-W%V`. Pairing `%V` with `%Y` gives the wrong year at
+    the turn of the year, and `%U` is a Sunday-based count that starts at week 0.
+  - **PostgreSQL:** `EXTRACT(WEEK FROM d)` and `EXTRACT(ISOYEAR FROM d)`.
+  - **MySQL:** `WEEK(d, 3)` is the ISO week.
+
+  This page does its date math on plain year, month and day numbers rather
+  than on clock times, so daylight saving changes can never shift a date into
+  the wrong week.
+faq:
+  - q: What week number is it right now?
+    a: The number at the top of this page is the current ISO 8601 week, calculated from your device's date. Near midnight between Sunday and Monday, people in different time zones can be in different weeks.
+  - q: Why does January 1 sometimes belong to week 52 or 53?
+    a: An ISO week belongs to the year that contains its Thursday. If January 1 falls on a Friday, Saturday or Sunday, that week's Thursday is in December, so the first days of January count as the last week of the previous year.
+  - q: How many weeks are in a year?
+    a: A year has 52 ISO weeks, or 53 when it starts on a Thursday (or on a Wednesday in a leap year). With US numbering, where partial weeks count, a year has 53 weeks and sometimes 54.
+  - q: Should I use ISO or US week numbers?
+    a: Use ISO week numbers for anything shared internationally. They are defined by the ISO 8601 standard, are the usual convention in Europe, and are what ISOWEEKNUM, Python's isocalendar() and PostgreSQL's EXTRACT(WEEK) return. Use the US system only when your calendar or spreadsheet already counts weeks from Sunday.
+  - q: How do I get the ISO week number in Excel or Google Sheets?
+    a: Use `=ISOWEEKNUM(A2)`, which works in both. `=WEEKNUM(A2, 21)` gives the same ISO number, while `=WEEKNUM(A2)` on its own gives the Sunday-based US number. Neither returns the week-year, so near New Year pair the week with `=YEAR(A2 - WEEKDAY(A2, 2) + 4)`, which is the year of that week's Thursday.
+---
+<style>
+.tool-page:has(#wn-table) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
+.tool-page:has(#wn-table) .prose th, .tool-page:has(#wn-table) .prose td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+.tool-page:has(#wn-table) .prose th { color: var(--muted); font-weight: 600; }
+@media (max-width: 480px) { .tool-page:has(#wn-table) .prose th, .tool-page:has(#wn-table) .prose td { padding: 6px 6px; font-size: 14px; } }
+.wn-h { margin: 28px 0 12px; font-size: 1.1rem; }
+.wn-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 4px; }
+.wn-top .result-big { margin: 0; }
+.wn-top .wn-iso { color: var(--muted); font-family: var(--mono); font-size: 1.05rem; }
+.wn-range { margin: 0 0 16px; font-size: 1.05rem; }
+.wn-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+.wn-line { margin: 0 0 16px; }
+.wn-line:empty { display: none; }
+.wn-scroll { max-height: 30rem; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.wn-scroll:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wn-scroll table.data thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); box-shadow: inset 0 -1px 0 var(--border); }
+.wn-scroll table.data th, .wn-scroll table.data td { white-space: nowrap; }
+.wn-scroll table.data tbody tr:last-child > * { border-bottom: 0; }
+.wn-scroll table.data tr.wn-current > * { background: var(--accent-soft); }
+.wn-scroll table.data tbody th { color: var(--text); font-variant-numeric: tabular-nums; }
+.wn-badge { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 700; line-height: 18px; vertical-align: 1px; }
+.wn-dim { color: var(--muted); }
+.wn-d { white-space: nowrap; }
+.wn-row-num > .field { flex: 1 1 110px; }
+.stat b.wn-nowrap { font-size: 1.15rem; line-height: 1.55; white-space: nowrap; overflow-wrap: normal; }
+.output.wn-out { font-family: inherit; font-size: 15px; }
+@media (max-width: 480px) {
+  .wn-scroll table.data th, .wn-scroll table.data td { padding: 7px 8px; white-space: normal; }
+  .wn-dim { display: block; }
+  .wn-badge { display: block; width: max-content; margin: 2px 0 0; }
+}
+</style>
+
+<div aria-live="polite">
+  <p class="label" id="wn-today-label">Current ISO week · <span id="wn-today-date"></span></p>
+  <div class="wn-top">
+    <p class="result-big">Week <span id="wn-today-week">–</span></p>
+    <span class="wn-iso" id="wn-today-iso"></span>
+  </div>
+  <p class="wn-range" id="wn-today-range"></p>
+  <div class="stats">
+    <div class="stat"><b id="wn-today-year">–</b><span>ISO week-year</span></div>
+    <div class="stat"><b id="wn-today-doy">–</b><span>Day of the year</span></div>
+    <div class="stat"><b id="wn-today-count">–</b><span id="wn-today-count-label">ISO weeks this year</span></div>
+    <div class="stat"><b id="wn-today-us">–</b><span>US week (Sunday start, not ISO)</span></div>
+  </div>
+</div>
+
+<hr class="wn-sep">
+<h2 class="wn-h">Week number of a date</h2>
+<div class="row">
+  <div class="field">
+    <label for="wn-date">Date</label>
+    <input type="date" id="wn-date" min="0001-01-01" max="9999-12-31">
+  </div>
+  <button class="btn secondary" type="button" id="wn-date-today">Today</button>
+</div>
+<p class="msg error" id="wn-date-msg" role="alert"></p>
+<div aria-live="polite">
+  <div class="stats">
+    <div class="stat"><b id="wn-date-week">–</b><span>ISO week</span></div>
+    <div class="stat"><b id="wn-date-iso" class="mono wn-nowrap">–</b><span>ISO week date</span></div>
+    <div class="stat"><b id="wn-date-doy">–</b><span>Day of the year</span></div>
+    <div class="stat"><b id="wn-date-us">–</b><span>US week (Sunday start, not ISO)</span></div>
+  </div>
+  <p class="wn-line" id="wn-date-range"></p>
+</div>
+
+<hr class="wn-sep">
+<h2 class="wn-h">Dates of a week</h2>
+<div class="row wn-row-num">
+  <div class="field">
+    <label for="wn-find-year">Year</label>
+    <input type="number" id="wn-find-year" min="1" max="9999" step="1" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label for="wn-find-week">ISO week</label>
+    <input type="number" id="wn-find-week" min="1" max="53" step="1" inputmode="numeric">
+  </div>
+</div>
+<p class="msg error" id="wn-find-msg" role="alert"></p>
+<p class="output wn-out" id="wn-find-out" aria-live="polite"></p>
+
+<hr class="wn-sep">
+<h2 class="wn-h">All weeks in <span id="wn-table-title">a year</span></h2>
+<div class="row">
+  <div class="field">
+    <label for="wn-year">Year</label>
+    <input type="number" id="wn-year" min="1" max="9999" step="1" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label for="wn-system">Numbering</label>
+    <select id="wn-system">
+      <option value="iso" selected>ISO 8601 (Monday start)</option>
+      <option value="us">US (Sunday start, week 1 has Jan 1) – not ISO</option>
+    </select>
+  </div>
+</div>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="wn-prev" aria-label="Previous year">&larr; Previous year</button>
+  <button class="btn secondary small" type="button" id="wn-this">This year</button>
+  <button class="btn secondary small" type="button" id="wn-next" aria-label="Next year">Next year &rarr;</button>
+  <button class="btn small" type="button" id="wn-csv">Download CSV</button>
+</div>
+<p class="msg error" id="wn-year-msg" role="alert"></p>
+<p class="hint" id="wn-table-note" aria-live="polite"></p>
+<div class="table-wrap wn-scroll" id="wn-scroll" tabindex="0" role="region" aria-label="Weeks of the selected year">
+  <table class="data" id="wn-table">
+    <thead><tr><th scope="col">Week</th><th scope="col" id="wn-col-start">Monday</th><th scope="col" id="wn-col-end">Sunday</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  function fdiv(a, b) { return Math.floor(a / b); }
+  function mod(a, b) { return ((a % b) + b) % b; }
+  function pad(n, w) { var s = String(Math.abs(n)); while (s.length < w) s = '0' + s; return (n < 0 ? '-' : '') + s; }
+
+  // Calendar math on plain day numbers (days since 1970-01-01, proleptic
+  // Gregorian). No Date objects, so time zones and DST cannot interfere.
+  function dayNum(y, m, d) {
+    y -= m <= 2 ? 1 : 0;
+    var era = fdiv(y, 400), yoe = y - era * 400;
+    var doy = fdiv(153 * (m + (m > 2 ? -3 : 9)) + 2, 5) + d - 1;
+    return era * 146097 + yoe * 365 + fdiv(yoe, 4) - fdiv(yoe, 100) + doy - 719468;
+  }
+  function civil(z) {
+    z += 719468;
+    var era = fdiv(z, 146097), doe = z - era * 146097;
+    var yoe = fdiv(doe - fdiv(doe, 1460) + fdiv(doe, 36524) - fdiv(doe, 146096), 365);
+    var doy = doe - (365 * yoe + fdiv(yoe, 4) - fdiv(yoe, 100));
+    var mp = fdiv(5 * doy + 2, 153);
+    var d = doy - fdiv(153 * mp + 2, 5) + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    return { y: yoe + era * 400 + (m <= 2 ? 1 : 0), m: m, d: d };
+  }
+  function isoDow(z) { return mod(z + 3, 7) + 1; } // 1 = Monday ... 7 = Sunday
+  function isoWeek(z) {
+    var thu = z - isoDow(z) + 4, y = civil(thu).y;
+    return { year: y, week: fdiv(thu - dayNum(y, 1, 1), 7) + 1, day: isoDow(z) };
+  }
+  function weeksIn(y) { return isoWeek(dayNum(y, 12, 28)).week; }
+  function isoMonday(y, w) { var jan4 = dayNum(y, 1, 4); return jan4 - isoDow(jan4) + 1 + (w - 1) * 7; }
+  function usWeek(z) {
+    var y = civil(z).y, jan1 = dayNum(y, 1, 1);
+    return fdiv(z - jan1 + mod(isoDow(jan1), 7), 7) + 1;
+  }
+  function usWeeksIn(y) { return usWeek(dayNum(y, 12, 31)); }
+  function dayOfYear(z) { return z - dayNum(civil(z).y, 1, 1) + 1; }
+
+  function isoDate(z) { var c = civil(z); return pad(c.y, 4) + '-' + pad(c.m, 2) + '-' + pad(c.d, 2); }
+  function isoWeekStr(y, w) { return pad(y, 4) + '-W' + pad(w, 2); }
+  // "Mon, Dec 29" stays on one line; a year from another year may wrap below it on phones.
+  function dateCell(td, z, ctxYear) {
+    var c = civil(z), span = document.createElement('span');
+    span.className = 'wn-d';
+    span.textContent = DAYS[isoDow(z) - 1].slice(0, 3) + ', ' + MONTHS[c.m - 1].slice(0, 3) + ' ' + c.d + (c.y !== ctxYear ? ',' : '');
+    td.appendChild(span);
+    if (c.y !== ctxYear) td.appendChild(document.createTextNode(' ' + c.y));
+  }
+  function fmtLong(z, withYear) {
+    var c = civil(z);
+    return DAYS[isoDow(z) - 1] + ', ' + MONTHS[c.m - 1] + ' ' + c.d + (withYear === false ? '' : ', ' + c.y);
+  }
+  function rangeLong(a, b) {
+    var same = civil(a).y === civil(b).y;
+    return fmtLong(a, !same) + ' to ' + fmtLong(b, true);
+  }
+
+  function todayZ() {
+    var n = new Date();
+    return dayNum(n.getFullYear(), n.getMonth() + 1, n.getDate());
+  }
+  function daysInMonth(y, m) { return dayNum(m === 12 ? y + 1 : y, m === 12 ? 1 : m + 1, 1) - dayNum(y, m, 1); }
+  function parseDate(s) {
+    var m = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$/.exec(s || '');
+    if (!m) return null;
+    var y = +m[1], mo = +m[2], d = +m[3];
+    if (y < 1 || mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo)) return null;
+    return dayNum(y, mo, d);
+  }
+  function parseYear(s) {
+    var v = String(s).trim();
+    if (!/^\d{1,4}$/.test(v)) return null;
+    var y = +v;
+    return y >= 1 && y <= 9999 ? y : null;
+  }
+
+  var today = todayZ();
+
+  // ----- Today -----
+  function renderToday() {
+    var w = isoWeek(today), mon = today - w.day + 1;
+    $('#wn-today-date').textContent = fmtLong(today);
+    $('#wn-today-week').textContent = w.week;
+    $('#wn-today-iso').textContent = isoWeekStr(w.year, w.week) + '-' + w.day;
+    $('#wn-today-range').textContent = rangeLong(mon, mon + 6);
+    $('#wn-today-year').textContent = w.year;
+    $('#wn-today-doy').textContent = dayOfYear(today);
+    $('#wn-today-count').textContent = weeksIn(w.year);
+    $('#wn-today-count-label').textContent = 'ISO weeks in ' + w.year;
+    $('#wn-today-us').textContent = usWeek(today);
+  }
+
+  // ----- Week of a date -----
+  var dateInput = $('#wn-date');
+  function renderDate() {
+    var msg = $('#wn-date-msg');
+    var z = parseDate(dateInput.value);
+    var ids = ['#wn-date-week', '#wn-date-iso', '#wn-date-doy', '#wn-date-us'];
+    if (z === null) {
+      // An empty field is not an error; only a bad value gets the red message.
+      msg.textContent = dateInput.value ? 'Enter a valid date between the years 1 and 9999.' : '';
+      ids.forEach(function (id) { $(id).textContent = '–'; });
+      $('#wn-date-range').textContent = dateInput.value ? '' : 'Pick a date to see its week number.';
+      return;
+    }
+    msg.textContent = '';
+    var w = isoWeek(z), c = civil(z), mon = z - w.day + 1;
+    $('#wn-date-week').textContent = w.week;
+    $('#wn-date-iso').textContent = isoWeekStr(w.year, w.week) + '-' + w.day;
+    $('#wn-date-doy').textContent = dayOfYear(z);
+    $('#wn-date-us').textContent = usWeek(z);
+    var text = fmtLong(z) + ' is in ISO week ' + w.week + ' of ' + w.year + ', which runs ' + rangeLong(mon, mon + 6) + '.';
+    if (w.year !== c.y) {
+      text += ' Because that week\'s Thursday falls in ' + w.year + ', the date counts toward week-year ' + w.year + ', not ' + c.y + '.';
+    }
+    $('#wn-date-range').textContent = text;
+  }
+
+  // ----- Dates of a week -----
+  function renderFind() {
+    var msg = $('#wn-find-msg'), out = $('#wn-find-out');
+    var y = parseYear($('#wn-find-year').value);
+    var wv = String($('#wn-find-week').value).trim();
+    var w = /^\d{1,2}$/.test(wv) ? +wv : NaN;
+    if (y === null) { msg.textContent = 'Enter a year from 1 to 9999.'; out.textContent = ''; return; }
+    var max = weeksIn(y);
+    if (!(w >= 1 && w <= max)) {
+      msg.textContent = y + ' has ' + max + ' ISO weeks. Enter a week from 1 to ' + max + '.';
+      out.textContent = '';
+      return;
+    }
+    msg.textContent = '';
+    var mon = isoMonday(y, w);
+    out.textContent = isoWeekStr(y, w) + ' runs from ' + fmtLong(mon) + ' to ' + fmtLong(mon + 6) + '.';
+  }
+
+  // ----- Year table -----
+  var yearInput = $('#wn-year'), systemSel = $('#wn-system');
+  var rows = [];
+
+  function buildRows(y, sys) {
+    var list = [];
+    if (sys === 'us') {
+      var jan1 = dayNum(y, 1, 1), dec31 = dayNum(y, 12, 31), first = jan1 - mod(isoDow(jan1), 7);
+      var n = usWeeksIn(y);
+      for (var i = 1; i <= n; i++) {
+        var s = Math.max(jan1, first + (i - 1) * 7), e = Math.min(dec31, first + (i - 1) * 7 + 6);
+        list.push({ week: i, label: String(i), start: s, end: e, days: e - s + 1 });
+      }
+    } else {
+      var count = weeksIn(y);
+      for (var k = 1; k <= count; k++) {
+        var m = isoMonday(y, k);
+        list.push({ week: k, label: isoWeekStr(y, k), start: m, end: m + 6, days: 7 });
+      }
+    }
+    return list;
+  }
+
+  function renderTable(scrollToCurrent) {
+    var msg = $('#wn-year-msg');
+    var y = parseYear(yearInput.value);
+    var tbody = $('#wn-table tbody');
+    if (y === null) {
+      msg.textContent = 'Enter a year from 1 to 9999.';
+      tbody.textContent = '';
+      rows = [];
+      $('#wn-csv').disabled = true;
+      return;
+    }
+    msg.textContent = '';
+    $('#wn-csv').disabled = false;
+    var sys = systemSel.value === 'us' ? 'us' : 'iso';
+    rows = buildRows(y, sys);
+    $('#wn-table-title').textContent = y;
+    $('#wn-col-start').textContent = sys === 'us' ? 'Starts' : 'Monday';
+    $('#wn-col-end').textContent = sys === 'us' ? 'Ends' : 'Sunday';
+    $('#wn-table-note').textContent = sys === 'us'
+      ? y + ' has ' + rows.length + ' US-style weeks (Sunday to Saturday, not ISO). The first and last weeks stop at the year boundary, so they can be shorter than 7 days.'
+      : y + ' has ' + rows.length + ' ISO weeks, Monday to Sunday.' + (rows.length === 53 ? ' It is a long year with a week 53.' : '');
+
+    var frag = document.createDocumentFragment(), currentRow = null;
+    rows.forEach(function (r) {
+      var tr = document.createElement('tr');
+      var th = document.createElement('th');
+      th.scope = 'row';
+      th.textContent = sys === 'us' ? r.label : String(r.week);
+      if (sys === 'iso') th.title = r.label;
+      var isCurrent = today >= r.start && today <= r.end;
+      if (isCurrent) {
+        tr.className = 'wn-current';
+        var b = document.createElement('span');
+        b.className = 'wn-badge';
+        b.textContent = 'This week';
+        th.appendChild(b);
+        currentRow = tr;
+      }
+      var td1 = document.createElement('td'), td2 = document.createElement('td');
+      dateCell(td1, r.start, y);
+      dateCell(td2, r.end, y);
+      if (r.days < 7) {
+        var note = document.createElement('span');
+        note.className = 'wn-dim';
+        note.textContent = ' (' + r.days + (r.days === 1 ? ' day)' : ' days)');
+        td2.appendChild(note);
+      }
+      tr.appendChild(th); tr.appendChild(td1); tr.appendChild(td2);
+      frag.appendChild(tr);
+    });
+    tbody.textContent = '';
+    tbody.appendChild(frag);
+
+    var box = $('#wn-scroll');
+    if (scrollToCurrent && currentRow) {
+      var head = $('#wn-table thead').offsetHeight;
+      box.scrollTop = Math.max(0, currentRow.offsetTop - head - currentRow.offsetHeight * 2);
+    } else if (scrollToCurrent !== null) {
+      box.scrollTop = 0;
+    }
+  }
+
+  function downloadCsv() {
+    var y = parseYear(yearInput.value);
+    if (y === null || !rows.length) return;
+    var us = systemSel.value === 'us';
+    var lines = [us ? 'US week (Sunday start; not ISO),Start,End,Days' : 'Week,ISO week,Start (Monday),End (Sunday)'];
+    rows.forEach(function (r) {
+      lines.push(us ? [r.week, isoDate(r.start), isoDate(r.end), r.days].join(',') : [r.week, r.label, isoDate(r.start), isoDate(r.end)].join(','));
+    });
+    TT.download((us ? 'us-weeks-' : 'iso-weeks-') + y + '.csv', lines.join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
+  }
+
+  function setYear(y) {
+    yearInput.value = y;
+    renderTable(true);
+  }
+  // The year that contains today: the ISO week-year, or the calendar year for
+  // US numbering. They differ for a few days around New Year.
+  function currentYear(sys) { return sys === 'us' ? civil(today).y : isoWeek(today).year; }
+
+  // ----- Wiring -----
+  dateInput.addEventListener('input', renderDate);
+  dateInput.addEventListener('change', renderDate);
+  $('#wn-date-today').addEventListener('click', function () { dateInput.value = isoDate(today); renderDate(); });
+  $('#wn-find-year').addEventListener('input', renderFind);
+  $('#wn-find-week').addEventListener('input', renderFind);
+  yearInput.addEventListener('input', function () { renderTable(true); });
+  var lastSys = systemSel.value;
+  systemSel.addEventListener('change', function () {
+    // If the table was showing "this year", keep showing the year that holds today.
+    if (parseYear(yearInput.value) === currentYear(lastSys)) yearInput.value = currentYear(systemSel.value);
+    lastSys = systemSel.value;
+    renderTable(true);
+  });
+  $('#wn-prev').addEventListener('click', function () { var y = parseYear(yearInput.value); setYear(y === null ? civil(today).y : Math.max(1, y - 1)); });
+  $('#wn-next').addEventListener('click', function () { var y = parseYear(yearInput.value); setYear(y === null ? civil(today).y : Math.min(9999, y + 1)); });
+  $('#wn-this').addEventListener('click', function () { setYear(currentYear(systemSel.value)); });
+  $('#wn-csv').addEventListener('click', downloadCsv);
+
+  var tw = isoWeek(today);
+  dateInput.value = isoDate(today);
+  $('#wn-find-year').value = tw.year;
+  $('#wn-find-week').value = tw.week;
+  yearInput.value = tw.year;
+  renderToday();
+  renderDate();
+  renderFind();
+  renderTable(true);
+
+  // Roll over to the new day if the page stays open past midnight.
+  setInterval(function () {
+    var z = todayZ();
+    if (z === today) return;
+    today = z;
+    renderToday();
+    renderTable(null);
+  }, 30000);
+})();
+</script>

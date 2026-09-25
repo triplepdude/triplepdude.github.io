@@ -1,0 +1,473 @@
+---
+title: Passphrase Generator (Diceware, EFF List)
+description: Generate strong, memorable passphrases from the EFF Diceware word list with your browser's secure random generator. See entropy and crack time instantly.
+category: Generators
+keywords: [passphrase generator, diceware password generator, eff wordlist, random word password generator, memorable password generator, xkcd password generator, strong passphrase]
+howto: |
+  ## How to use it
+
+  Five passphrases appear as soon as the page loads. Pick one you like and
+  copy it, or press **Generate new** for another batch. Changing any setting
+  makes a fresh batch straight away.
+
+  - **Words**: six is the usual recommendation. Each extra word multiplies
+    the number of possible passphrases by 7,776.
+  - **Separator** and **capitalisation** only change how the words are
+    joined and written, to fit a site's password rules. They add no
+    strength, because an attacker is assumed to know your settings. No word
+    in the list is the start of another word, so even with no separator a
+    passphrase splits back into its words only one way and loses nothing.
+  - **Add a digit / a symbol** puts one random digit or one random symbol
+    from `! # $ % & * + = ? @` at the end of a random word, for sites that
+    insist on them. Each adds about 3.3 bits.
+
+  ## Where the randomness comes from
+
+  Words are drawn from the EFF Long Wordlist of 7,776 words, the list the
+  Electronic Frontier Foundation published for Diceware, where five dice rolls
+  (6⁵ = 7,776) pick each word. Here the dice are replaced by
+  `crypto.getRandomValues`, the browser's cryptographically secure random
+  number generator. A random 32-bit number is only used if it falls below
+  the largest multiple of 7,776 that fits in 32 bits; otherwise it is
+  thrown away and a new one is drawn. This *rejection sampling* avoids the
+  small bias that a plain remainder would give, so every word is exactly
+  equally likely. Nothing is predictable from the time, and nothing is sent
+  anywhere.
+
+  ## How strength is calculated
+
+  Strength is measured in bits of entropy, assuming the attacker knows the
+  word list and every setting you chose. Each word adds log2(7,776) ≈
+  12.925 bits. Writing one random word in capitals adds log2 of the number
+  of words, and a digit or a symbol adds log2(10) ≈ 3.32 bits each. Where the
+  digit or symbol lands is not counted, which keeps the estimate on the safe
+  side.
+
+  | Words | Entropy | Average time at 100 billion guesses a second |
+  |---|---|---|
+  | 4 | 51.7 bits | about 5 hours |
+  | 5 | 64.6 bits | about 4.5 years |
+  | 6 | 77.5 bits | about 35 thousand years |
+  | 7 | 90.5 bits | about 270 million years |
+
+  The crack time is the average: half of all possible passphrases, divided
+  by the guessing speed you choose. 100 billion guesses per second is
+  roughly one high-end graphics card attacking a fast hash such as MD5. A
+  login page that limits attempts is millions of times slower, while a site
+  that stores passwords with a slow hash such as bcrypt or Argon2 slows
+  offline attacks enormously.
+
+  ## Tips
+
+  - Use a passphrase for the few secrets you must remember: your password
+    manager, computer login and email. Let the password manager create the
+    rest.
+  - Do not swap words for ones you like better or reorder them to form a
+    sentence. Any human choice reduces the randomness.
+  - Prefer real dice? Roll five dice per word and type the results into the
+    lookup box to get the matching words from the same list.
+
+  ## Word list credit
+
+  The EFF Long Wordlist is by the Electronic Frontier Foundation (eff.org),
+  published under the Creative Commons Attribution 3.0 United States licence
+  (CC BY 3.0 US). This page uses the words unchanged, without the dice numbers.
+faq:
+  - q: Is it safe to generate a passphrase on a website?
+    a: This page makes passphrases entirely in your browser with the Web Crypto random generator. They are never sent to a server, logged or stored, and they are gone when you close the tab. You can disconnect from the internet after the page loads and it keeps working.
+  - q: How many words should my passphrase have?
+    a: Six words (about 77.5 bits) is a good default for important accounts such as a password manager. Five is reasonable where attempts are rate-limited, and seven or more suits encryption keys that could face offline attacks.
+  - q: Is a passphrase better than a random password?
+    a: Bit for bit they are equally strong. A six-word passphrase and a 12-character random password of letters, digits and symbols both have about 77 to 79 bits of entropy, but the words are far easier to remember and type.
+  - q: Why does adding a capital letter or a separator not increase the strength?
+    a: Strength counts only the random choices. If every word is capitalised, or the words are always joined with a hyphen, an attacker who knows the method tries that form first, so it adds nothing. Writing one randomly chosen word in capitals does add a little, and the entropy figure includes it.
+  - q: What is the EFF word list?
+    a: A list of 7,776 common English words chosen by the Electronic Frontier Foundation for Diceware, with offensive and hard-to-spell words removed. EFF also publishes shorter lists for four dice; this page uses the long list, the one intended for five dice.
+---
+<style>
+.pp-list { display: grid; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
+.pp-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.pp-text { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 1.05rem; line-height: 1.45; overflow-wrap: anywhere; }
+.pp-item:first-child .pp-text { font-size: 1.2rem; font-weight: 600; }
+.pp-sep { color: var(--muted); }
+.pp-len { flex: 0 0 auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.pp-item .btn { flex: 0 0 auto; }
+.pp-empty { color: var(--muted); }
+.pp-placeholder .btn { visibility: hidden; }
+.pp-placeholder .pp-text { min-height: 1.45em; }
+#pp-error, #pp-dice-error { overflow-wrap: anywhere; }
+.pp-strength[data-level="weak"] { color: var(--danger); }
+.pp-strength[data-level="strong"], .pp-strength[data-level="very-strong"] { color: var(--accent); }
+.pp-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
+.pp-section h2 { margin: 0 0 12px; font-size: 1.05rem; }
+.pp-range { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.pp-range output { min-width: 2ch; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pp-section .row > .field { flex: 1 1 150px; }
+.pp-credit { margin: 16px 0 0; }
+.pp-stats .stat b { font-size: 1.2rem; }
+@media (min-width: 360px) { .pp-stats .pp-time-stat { grid-column: span 2; } }
+.pp-section .row > .pp-count-field { flex: 0 1 180px; }
+.pp-section .row > .pp-rate-field { flex: 2 1 260px; }
+#pp-dice-out:empty::before { content: 'The words appear here.'; color: var(--muted); font-family: system-ui, sans-serif; }
+@media (max-width: 480px) {
+  .pp-item { flex-wrap: wrap; }
+  .pp-text { flex-basis: 100%; }
+  .pp-len { margin-right: auto; }
+}
+/* On phones a passphrase wraps to two or three lines depending on the words
+   drawn. Real rows and loading placeholders share the same minimum height, so
+   swapping one for the other never moves the options below. */
+@media (max-width: 900px) { .pp-item .pp-text { min-height: 2.9em; } }
+@media (max-width: 480px) {
+  .pp-item:first-child .pp-text { min-height: 4.35em; }
+}
+@media (max-width: 400px) { .pp-item .pp-text { min-height: 4.35em; } }
+</style>
+
+<div class="msg error" id="pp-error" role="alert"></div>
+
+<!-- Five placeholder rows the size of real ones hold the space while the word list
+     loads, so nothing below jumps. The list is redrawn on every change, so it is not a
+     live region: a short summary is announced in #pp-status instead. -->
+<ol class="pp-list" id="pp-list" aria-label="Generated passphrases">
+  <li class="pp-item pp-placeholder"><span class="pp-text pp-empty">Loading the word list…</span><span class="pp-len">&nbsp;</span><span class="btn secondary small" aria-hidden="true">Copy</span></li>
+  <li class="pp-item pp-placeholder" aria-hidden="true"><span class="pp-text">&nbsp;</span><span class="pp-len">&nbsp;</span><span class="btn secondary small">Copy</span></li>
+  <li class="pp-item pp-placeholder" aria-hidden="true"><span class="pp-text">&nbsp;</span><span class="pp-len">&nbsp;</span><span class="btn secondary small">Copy</span></li>
+  <li class="pp-item pp-placeholder" aria-hidden="true"><span class="pp-text">&nbsp;</span><span class="pp-len">&nbsp;</span><span class="btn secondary small">Copy</span></li>
+  <li class="pp-item pp-placeholder" aria-hidden="true"><span class="pp-text">&nbsp;</span><span class="pp-len">&nbsp;</span><span class="btn secondary small">Copy</span></li>
+</ol>
+<p class="visually-hidden" id="pp-status" role="status"></p>
+
+<div class="actions">
+  <button class="btn" type="button" id="pp-generate" disabled>Generate new</button>
+  <button class="btn secondary" type="button" id="pp-copy-all" disabled>Copy all</button>
+</div>
+
+<div class="stats pp-stats">
+  <div class="stat"><b id="pp-bits">–</b><span>Entropy</span></div>
+  <div class="stat"><b id="pp-strength" class="pp-strength">–</b><span>Strength</span></div>
+  <div class="stat pp-time-stat"><b id="pp-time">–</b><span>Average time to crack</span></div>
+  <div class="stat"><b id="pp-space">–</b><span>Possible passphrases</span></div>
+</div>
+<p class="hint" id="pp-assumption">Assumes the attacker knows the word list and your settings and makes 100 billion guesses a second. Average time is half of all possibilities.</p>
+
+<section class="pp-section" aria-labelledby="pp-options-h">
+  <h2 id="pp-options-h">Options</h2>
+  <div class="row">
+    <div class="field">
+      <label for="pp-words">Words</label>
+      <div class="pp-range">
+        <input type="range" id="pp-words" min="3" max="12" step="1" value="6">
+        <output id="pp-words-out" for="pp-words">6</output>
+      </div>
+    </div>
+    <div class="field">
+      <label for="pp-sep">Separator</label>
+      <select id="pp-sep">
+        <option value="-" selected>Hyphen (-)</option>
+        <option value=" ">Space</option>
+        <option value=".">Full stop (.)</option>
+        <option value="_">Underscore (_)</option>
+        <option value=",">Comma (,)</option>
+        <option value="">None</option>
+        <option value="custom">Custom…</option>
+      </select>
+    </div>
+    <div class="field" id="pp-custom-field" hidden>
+      <label for="pp-custom">Custom separator</label>
+      <input type="text" id="pp-custom" value="+" maxlength="4" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label for="pp-case">Capitalisation</label>
+      <select id="pp-case">
+        <option value="lower" selected>lowercase</option>
+        <option value="title">Capitalise Each Word</option>
+        <option value="upper">UPPERCASE</option>
+        <option value="one">One random word in CAPITALS</option>
+      </select>
+    </div>
+  </div>
+  <div class="checks">
+    <label class="check"><input type="checkbox" id="pp-digit"> Add a random digit</label>
+    <label class="check"><input type="checkbox" id="pp-symbol"> Add a random symbol</label>
+  </div>
+  <div class="row">
+    <div class="field pp-count-field">
+      <label for="pp-count">How many to generate</label>
+      <select id="pp-count">
+        <option value="1">1</option>
+        <option value="5" selected>5</option>
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+      </select>
+    </div>
+    <div class="field pp-rate-field">
+      <label for="pp-rate">Attacker's guessing speed</label>
+      <select id="pp-rate">
+        <option value="1e3">1,000/s: online attack on a login</option>
+        <option value="1e4">10,000/s: slow hash (bcrypt)</option>
+        <option value="1e11" selected>100 billion/s: fast hash (MD5)</option>
+        <option value="1e14">100 trillion/s: huge GPU cluster</option>
+      </select>
+    </div>
+  </div>
+</section>
+
+<section class="pp-section" aria-labelledby="pp-dice-h">
+  <h2 id="pp-dice-h">Look up your own dice rolls</h2>
+  <div class="field">
+    <label for="pp-dice">Five dice per word, separated by spaces</label>
+    <input type="text" id="pp-dice" class="mono" placeholder="e.g. 16655 43152 21316" autocomplete="off" inputmode="numeric" spellcheck="false">
+  </div>
+  <div class="msg error" id="pp-dice-error" aria-live="polite"></div>
+  <div class="output" id="pp-dice-out" aria-live="polite"></div>
+  <div class="actions">
+    <button class="btn secondary small" type="button" data-copy-target="#pp-dice-out">Copy words</button>
+  </div>
+</section>
+
+<p class="hint pp-credit">Word list: <a href="https://www.eff.org/dice" rel="noopener">EFF Long Wordlist</a> by the Electronic Frontier Foundation, used under <a href="https://creativecommons.org/licenses/by/3.0/us/" rel="noopener license">CC BY 3.0 US</a>.</p>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var LIST_URL = "{{ '/assets/data/passphrase-generator/eff-large-wordlist.txt' | relative_url }}";
+  var LIST_SIZE = 7776;
+  var SYMBOLS = '!#$%&*+=?@';
+  var YEAR = 365.25 * 24 * 3600;
+  var words = null, current = [];
+
+  var listEl = $('#pp-list'), errEl = $('#pp-error');
+  var genBtn = $('#pp-generate'), copyAllBtn = $('#pp-copy-all');
+  var wordsEl = $('#pp-words'), sepEl = $('#pp-sep'), customEl = $('#pp-custom'), caseEl = $('#pp-case');
+  var digitEl = $('#pp-digit'), symbolEl = $('#pp-symbol'), countEl = $('#pp-count'), rateEl = $('#pp-rate');
+
+  // Uniform integer in [0, n) from crypto.getRandomValues, with rejection sampling.
+  function randomInt(n) {
+    if (n <= 1) return 0;
+    var limit = Math.floor(4294967296 / n) * n;
+    var buf = new Uint32Array(1);
+    do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+    return buf[0] % n;
+  }
+
+  function settings() {
+    var n = Math.min(12, Math.max(3, parseInt(wordsEl.value, 10) || 6));
+    return {
+      n: n,
+      sep: sepEl.value === 'custom' ? customEl.value : sepEl.value,
+      caps: caseEl.value,
+      digit: digitEl.checked,
+      symbol: symbolEl.checked,
+      count: parseInt(countEl.value, 10) || 5,
+      rate: Number(rateEl.value) || 1e11
+    };
+  }
+
+  function entropyBits(s) {
+    var bits = s.n * Math.log2(LIST_SIZE);
+    if (s.caps === 'one') bits += Math.log2(s.n);
+    if (s.digit) bits += Math.log2(10);
+    if (s.symbol) bits += Math.log2(SYMBOLS.length);
+    return bits;
+  }
+
+  function capitalise(w) { return w.charAt(0).toUpperCase() + w.slice(1); }
+
+  // Returns the parts of one passphrase: [{word}, {sep}, ...] so it can be shown and copied.
+  function makePassphrase(s) {
+    var picked = [];
+    for (var i = 0; i < s.n; i++) picked.push(words[randomInt(LIST_SIZE)]);
+    if (s.caps === 'title') picked = picked.map(capitalise);
+    else if (s.caps === 'upper') picked = picked.map(function (w) { return w.toUpperCase(); });
+    else if (s.caps === 'one') { var k = randomInt(s.n); picked[k] = picked[k].toUpperCase(); }
+    if (s.digit) { var d = randomInt(s.n); picked[d] += String(randomInt(10)); }
+    if (s.symbol) { var y = randomInt(s.n); picked[y] += SYMBOLS.charAt(randomInt(SYMBOLS.length)); }
+    return picked;
+  }
+
+  function sig2(x) { return Number(x.toPrecision(2)); }
+  var SUP = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
+  function sci(x) {
+    var e = Math.floor(Math.log10(x)), m = sig2(x / Math.pow(10, e));
+    if (m >= 10) { m = sig2(m / 10); e++; }
+    return m + ' × 10' + String(e).replace(/\d/g, function (c) { return SUP[c]; });
+  }
+  function plural(v, unit) { return v + ' ' + unit + (v === 1 ? '' : 's'); }
+
+  function formatDuration(seconds) {
+    if (!isFinite(seconds)) return 'longer than the age of the universe';
+    if (seconds < 1) return 'less than a second';
+    if (seconds < 60) return 'about ' + plural(sig2(seconds), 'second');
+    if (seconds < 3600) return 'about ' + plural(sig2(seconds / 60), 'minute');
+    if (seconds < 86400) return 'about ' + plural(sig2(seconds / 3600), 'hour');
+    if (seconds < YEAR) return 'about ' + plural(sig2(seconds / 86400), 'day');
+    var y = seconds / YEAR;
+    if (y < 1000) return 'about ' + plural(sig2(y), 'year');
+    var names = [[1e12, 'trillion'], [1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']];
+    if (y < 1e15) {
+      for (var i = 0; i < names.length; i++) {
+        if (y >= names[i][0]) {
+          var v = sig2(y / names[i][0]);
+          if (v >= 1000 && i > 0) return 'about ' + sig2(v / 1000) + ' ' + names[i - 1][1] + ' years';
+          return 'about ' + v + ' ' + names[i][1] + ' years';
+        }
+      }
+    }
+    return 'about ' + sci(y) + ' years';
+  }
+
+  function strength(bits) {
+    if (bits < 45) return ['Weak', 'weak'];
+    if (bits < 60) return ['Fair', 'fair'];
+    if (bits < 75) return ['Good', 'good'];
+    if (bits < 100) return ['Strong', 'strong'];
+    return ['Very strong', 'very-strong'];
+  }
+
+  function rateText(rate) {
+    return { 1e3: '1,000', 1e4: '10,000', 1e11: '100 billion', 1e14: '100 trillion' }[rate] || rate.toLocaleString('en-US');
+  }
+
+  function updateStats(s) {
+    var bits = entropyBits(s);
+    $('#pp-bits').textContent = bits.toFixed(1) + ' bits';
+    var st = strength(bits);
+    $('#pp-strength').textContent = st[0];
+    $('#pp-strength').setAttribute('data-level', st[1]);
+    $('#pp-time').textContent = formatDuration(Math.pow(2, bits - 1) / s.rate);
+    $('#pp-space').textContent = sci(Math.pow(2, bits));
+    $('#pp-assumption').textContent = 'Assumes the attacker knows the word list and your settings and makes ' +
+      rateText(s.rate) + ' guesses a second. Average time is half of all possibilities.';
+  }
+
+  function render(s) {
+    listEl.textContent = '';
+    current.forEach(function (parts, idx) {
+      var li = document.createElement('li');
+      li.className = 'pp-item';
+      var text = document.createElement('span');
+      text.className = 'pp-text';
+      parts.forEach(function (w, i) {
+        if (i > 0 && s.sep) {
+          var sp = document.createElement('span');
+          sp.className = 'pp-sep';
+          sp.textContent = s.sep;
+          text.appendChild(sp);
+        }
+        text.appendChild(document.createTextNode(w));
+      });
+      var full = parts.join(s.sep);
+      var len = document.createElement('span');
+      len.className = 'pp-len';
+      len.textContent = Array.from(full).length + ' chars';
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn secondary small';
+      btn.textContent = 'Copy';
+      btn.setAttribute('aria-label', 'Copy passphrase ' + (idx + 1));
+      btn.addEventListener('click', function () { TT.copy(full, btn); });
+      li.appendChild(text);
+      li.appendChild(len);
+      li.appendChild(btn);
+      listEl.appendChild(li);
+    });
+  }
+
+  // One short summary for screen readers once the controls settle, instead of
+  // re-reading every passphrase on each slider step.
+  var statusEl = $('#pp-status'), statusTimer = null;
+  function announce(text) {
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () {
+      statusEl.textContent = '';
+      setTimeout(function () { statusEl.textContent = text; }, 50);
+    }, 500);
+  }
+
+  function summary(s) {
+    return plural(s.n, 'word') + ', ' + entropyBits(s).toFixed(1) + ' bits, ' + strength(entropyBits(s))[0].toLowerCase() +
+      ', average time to crack ' + formatDuration(Math.pow(2, entropyBits(s) - 1) / s.rate) + '.';
+  }
+
+  // quiet: true on page load, when nothing should be announced.
+  function generate(quiet) {
+    var s = settings();
+    $('#pp-words-out').textContent = String(s.n);
+    $('#pp-custom-field').hidden = sepEl.value !== 'custom';
+    updateStats(s);
+    if (!words) return;
+    current = [];
+    for (var i = 0; i < s.count; i++) current.push(makePassphrase(s));
+    render(s);
+    if (quiet !== true) announce((s.count === 1 ? '1 new passphrase: ' : s.count + ' new passphrases: ') + summary(s));
+  }
+
+  function allText() {
+    var sep = settings().sep;
+    return current.map(function (p) { return p.join(sep); }).join('\n');
+  }
+
+  // Five dice (1-6) map to a list index in base 6: 11111 is the first word, 66666 the last.
+  function lookupDice() {
+    var out = $('#pp-dice-out'), err = $('#pp-dice-error');
+    var groups = $('#pp-dice').value.trim().split(/[\s,;]+/).filter(Boolean);
+    out.textContent = '';
+    err.textContent = '';
+    if (!groups.length) return;
+    if (!words) { err.textContent = 'The word list is still loading.'; return; }
+    var bad = groups.filter(function (g) { return !/^[1-6]{5}$/.test(g); });
+    if (bad.length) {
+      // Echo at most five groups, each cut short, so a long paste cannot flood the message.
+      err.textContent = 'Each word needs exactly five dice, each 1 to 6. Check: ' + bad.slice(0, 5).map(function (g) {
+        return g.length > 12 ? g.slice(0, 12) + '…' : g;
+      }).join(', ') + (bad.length > 5 ? ' and ' + (bad.length - 5) + ' more' : '');
+      return;
+    }
+    out.textContent = groups.map(function (g) {
+      var idx = 0;
+      for (var i = 0; i < 5; i++) idx = idx * 6 + (Number(g.charAt(i)) - 1);
+      return words[idx];
+    }).join(' ');
+  }
+
+  function loadList() {
+    fetch(LIST_URL).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (txt) {
+      var list = txt.split(/\r?\n/).map(function (w) { return w.trim(); }).filter(Boolean);
+      if (list.length !== LIST_SIZE) throw new Error('unexpected list length ' + list.length);
+      words = list;
+      genBtn.disabled = false;
+      copyAllBtn.disabled = false;
+      generate(true);
+      lookupDice();
+    }).catch(function () {
+      errEl.textContent = 'The word list could not be loaded, so no passphrases can be made. Check your connection and reload the page.';
+      listEl.textContent = '';
+    });
+  }
+
+  genBtn.addEventListener('click', function () { generate(); });
+  copyAllBtn.addEventListener('click', function () { TT.copy(allText(), copyAllBtn); });
+  wordsEl.addEventListener('input', function () { generate(); });
+  [sepEl, caseEl, digitEl, symbolEl, countEl].forEach(function (el) { el.addEventListener('change', function () { generate(); }); });
+  rateEl.addEventListener('change', function () {
+    var s = settings();
+    updateStats(s);
+    announce('At ' + rateText(s.rate) + ' guesses a second: ' + summary(s));
+  });
+  customEl.addEventListener('input', function () {
+    // Re-join the current passphrases with the new separator rather than drawing new words.
+    var s = settings();
+    if (words && current.length) { render(s); announce('Passphrases now joined with ' + (s.sep ? '“' + s.sep + '”' : 'no separator') + '.'); }
+  });
+  $('#pp-dice').addEventListener('input', lookupDice);
+
+  updateStats(settings());
+  loadList();
+})();
+</script>

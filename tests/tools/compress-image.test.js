@@ -1,0 +1,342 @@
+const fs = require('fs');
+const path = require('path');
+
+// Independent JPEG reader (ITU T.81): frame size from SOFn and the first quantisation value
+// of table 0 (the DC step of the luminance table).
+function jpegInfo(buf) {
+  if (buf[0] !== 0xff || buf[1] !== 0xd8) throw new Error('not a JPEG');
+  const info = { dqt: {} };
+  let i = 2;
+  while (i < buf.length) {
+    const m = buf[i + 1], len = buf.readUInt16BE(i + 2);
+    if (m === 0xdb) {
+      let p = i + 4;
+      while (p < i + 2 + len) {
+        const pq = buf[p] >> 4, tq = buf[p] & 15;
+        info.dqt[tq] = pq ? buf.readUInt16BE(p + 1) : buf[p + 1];
+        p += 1 + 64 * (pq ? 2 : 1);
+      }
+    }
+    if (m >= 0xc0 && m <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(m)) {
+      info.height = buf.readUInt16BE(i + 5);
+      info.width = buf.readUInt16BE(i + 7);
+    }
+    if (m === 0xda) break;
+    i += 2 + len;
+  }
+  return info;
+}
+// IJG libjpeg quality scaling (jcparam.c) applied to the Annex K luminance DC value 16.
+function ijgDc(q) {
+  const scale = q < 50 ? Math.floor(5000 / q) : 200 - 2 * q;
+  return Math.min(255, Math.max(1, Math.floor((16 * scale + 50) / 100)));
+}
+const kb = n => (n < 1e5 ? (n / 1000).toFixed(1) : (n / 1000).toFixed(0)) + ' KB';
+// RIFF/WebP chunk types in order (VP8 = lossy, VP8L = lossless).
+function webpChunks(buf) {
+  if (buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WEBP') throw new Error('not WebP');
+  const types = [];
+  for (let o = 12; o + 8 <= buf.length;) {
+    const size = buf.readUInt32LE(o + 4);
+    types.push(buf.toString('latin1', o, o + 4));
+    o += 8 + size + (size & 1);
+  }
+  return types;
+}
+
+module.exports = async ({ page, open, assert, fixtures, url }) => {
+  await open();
+  const F = n => path.join(fixtures, n);
+  const orig = fs.readFileSync(F('photo.jpg'));
+  const text = s => page.textContent(s);
+  const settle = async () => {
+    await page.waitForFunction(() => ['done', 'error'].includes(document.querySelector('#cmpi-result').dataset.state), null, { timeout: 30000 });
+    return page.getAttribute('#cmpi-result', 'data-state');
+  };
+  async function download() {
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#cmpi-download')]);
+    return { name: dl.suggestedFilename(), buf: fs.readFileSync(await dl.path()) };
+  }
+  const decode = (buf, points = []) => page.evaluate(async ([b64, pts]) => {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const bmp = await createImageBitmap(new Blob([bytes]));
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const g = c.getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    return { w: bmp.width, h: bmp.height, px: pts.map(([x, y]) => Array.from(g.getImageData(x, y, 1, 1).data)) };
+  }, [buf.toString('base64'), points]);
+  const setQuality = q => page.$eval('#cmpi-quality', (el, v) => { el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); }, q);
+  const near = (p, rgba, tol = 12) => rgba.every((v, k) => Math.abs(p[k] - v) <= tol);
+  // Re-encode the original photo with the page's plain <canvas> (not the tool's code) at quality q.
+  const encodeAt = qq => page.evaluate(async ([b64, qv]) => {
+    const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), c => c.charCodeAt(0))]));
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0);
+    return (await new Promise(r => c.toBlob(r, 'image/jpeg', qv / 100))).size;
+  }, [orig.toString('base64'), qq]);
+
+  assert.equal(await page.isVisible('#cmpi-result'), false);
+  assert.equal(await page.isVisible('#cmpi-target'), true);
+  assert.equal(await page.isVisible('#cmpi-quality'), false);
+
+  // ---------- Default: JPG under 100 KB ----------
+  await page.setInputFiles('#cmpi-file', F('photo.jpg'));
+  assert.equal(await settle(), 'done');
+  let d = await download();
+  assert.equal(d.name, 'photo-compressed.jpg');
+  assert.ok(d.buf.length <= 100000, `${d.buf.length} <= 100000`);
+  assert.ok(d.buf.length > 80000, `binary search gets close to the limit: ${d.buf.length}`);
+  let j = jpegInfo(d.buf);
+  assert.deepEqual([j.width, j.height], [1000, 700]);
+  let q = parseInt(await text('#cmpi-q'), 10);
+  assert.equal(j.dqt[0], ijgDc(q), `quantiser matches ${q}% quality`);
+  assert.equal(await text('#cmpi-orig'), kb(orig.length));
+  assert.equal(await text('#cmpi-size'), kb(d.buf.length));
+  assert.equal(await text('#cmpi-saved'), Math.round((1 - d.buf.length / orig.length) * 100) + '%');
+  assert.equal(await text('#cmpi-dims'), '1000 × 700');
+  assert.ok((await text('#cmpi-bytes')).includes(`${d.buf.length.toLocaleString('en-US')} bytes (limit 100,000 bytes)`));
+
+  // ---------- 50 KB preset: the result is the highest quality that fits ----------
+  await page.click('.cmpi-presets [data-kb="50"]');
+  assert.equal(await page.getAttribute('.cmpi-presets [data-kb="50"]', 'aria-pressed'), 'true');
+  assert.equal(await settle(), 'done');
+  d = await download();
+  assert.ok(d.buf.length <= 50000 && d.buf.length > 40000, `50 KB target gave ${d.buf.length} bytes`);
+  j = jpegInfo(d.buf);
+  assert.deepEqual([j.width, j.height], [1000, 700]);
+  q = parseInt(await text('#cmpi-q'), 10);
+  assert.ok(q >= 30 && q < 95, `quality ${q}`);
+  assert.equal(j.dqt[0], ijgDc(q));
+  // Independently re-encode the original one quality step higher: it must not fit.
+  const nextSize = await encodeAt(q + 1);
+  assert.ok(nextSize > 50000, `quality ${q + 1} would be ${nextSize} bytes`);
+  const d50 = d.buf;
+
+  // ---------- Unreachable at the 30% floor: scaled down ----------
+  await page.fill('#cmpi-target', '4');
+  assert.equal(await settle(), 'done');
+  const note = await text('#cmpi-note');
+  const m = /scaled down to (\d+) × (\d+) px/.exec(note);
+  assert.ok(m, note);
+  d = await download();
+  assert.ok(d.buf.length <= 4000, `${d.buf.length} <= 4000`);
+  j = jpegInfo(d.buf);
+  assert.deepEqual([j.width, j.height], [Number(m[1]), Number(m[2])]);
+  assert.ok(j.width < 1000 && Math.abs(j.width / j.height - 1000 / 700) < 0.02, `${j.width}x${j.height} keeps the aspect ratio`);
+
+  // ---------- Quality mode ----------
+  await page.check('input[name="cmpi-mode"][value="quality"]');
+  assert.equal(await page.isVisible('#cmpi-quality'), true);
+  assert.equal(await page.isVisible('#cmpi-target'), false);
+  await settle();
+  await setQuality(90);
+  assert.equal(await settle(), 'done');
+  assert.equal(await text('#cmpi-quality-out'), '90%');
+  const d90 = await download();
+  j = jpegInfo(d90.buf);
+  assert.deepEqual([j.width, j.height, j.dqt[0]], [1000, 700, ijgDc(90)]);
+  assert.equal(ijgDc(90), 3);
+  await setQuality(30);
+  assert.equal(await settle(), 'done');
+  const d30 = await download();
+  j = jpegInfo(d30.buf);
+  assert.deepEqual([j.width, j.height, j.dqt[0]], [1000, 700, 27]);
+  assert.ok(d30.buf.length < d90.buf.length * 0.6, `${d30.buf.length} vs ${d90.buf.length}`);
+  assert.equal(await text('#cmpi-q'), '30%');
+
+  // ---------- Resize and WebP ----------
+  await page.selectOption('#cmpi-resize', '640');
+  assert.equal(await settle(), 'done');
+  j = jpegInfo((await download()).buf);
+  assert.deepEqual([j.width, j.height], [640, 448]);
+  assert.equal(await page.isVisible('#cmpi-maxpx'), false);
+  await page.selectOption('#cmpi-resize', 'custom');
+  assert.equal(await page.isVisible('#cmpi-maxpx'), true);
+  await settle();
+  await page.fill('#cmpi-maxpx', '500');
+  assert.equal(await settle(), 'done');
+  j = jpegInfo((await download()).buf);
+  assert.deepEqual([j.width, j.height], [500, 350]);
+  await page.fill('#cmpi-maxpx', '5');
+  assert.equal(await settle(), 'error');
+  assert.match(await text('#cmpi-error'), /between 16 and 20,000 px/);
+  await page.fill('#cmpi-maxpx', '640');
+  assert.equal(await settle(), 'done');
+  await page.selectOption('#cmpi-format', 'image/webp');
+  assert.equal(await settle(), 'done');
+  d = await download();
+  assert.equal(d.name, 'photo-compressed.webp');
+  assert.equal(d.buf.toString('latin1', 0, 4) + d.buf.toString('latin1', 8, 12), 'RIFFWEBP');
+  let img = await decode(d.buf);
+  assert.deepEqual([img.w, img.h], [640, 448]);
+  await page.selectOption('#cmpi-resize', '0');
+  await settle();
+
+  // ---------- Transparent PNG ----------
+  await page.selectOption('#cmpi-format', 'image/jpeg');
+  await settle();
+  await page.check('input[name="cmpi-mode"][value="target"]');
+  await settle();
+  await page.setInputFiles('#cmpi-file', F('logo.png'));
+  assert.equal(await settle(), 'done');
+  assert.match(await text('#cmpi-note'), /filled with white/);
+  assert.match(await text('#cmpi-note'), /larger than your original/);
+  assert.match(await text('#cmpi-drop-title'), /logo\.png/);
+  d = await download();
+  assert.equal(d.name, 'logo-compressed.jpg');
+  img = await decode(d.buf, [[2, 2], [150, 100], [60, 100]]);
+  assert.deepEqual([img.w, img.h], [300, 200]);
+  assert.ok(near(img.px[0], [255, 255, 255, 255]), `corner flattened to white: ${img.px[0]}`);
+  assert.ok(near(img.px[1], [20, 60, 200, 255], 20), `centre stays blue: ${img.px[1]}`);
+  assert.ok(near(img.px[2], [220, 40, 60, 255], 20), `shape stays red: ${img.px[2]}`);
+
+  await page.selectOption('#cmpi-format', 'image/webp');
+  assert.equal(await settle(), 'done');
+  assert.doesNotMatch(await text('#cmpi-note'), /white/);
+  d = await download();
+  img = await decode(d.buf, [[2, 2], [150, 100]]);
+  assert.equal(img.px[0][3], 0, 'WebP keeps the transparent corner');
+  assert.equal(img.px[1][3], 255);
+
+  // ---------- Compare view: transparent parts of the original show the checkerboard ----------
+  // Regression: the compressed JPG (white corners) used to show through the original's transparent
+  // corners on the left side. In dark mode the checkerboard is dark, so white there is the bug.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.selectOption('#cmpi-format', 'image/jpeg');
+  assert.equal(await settle(), 'done');
+  await page.$eval('#cmpi-split', el => { el.value = '50'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.locator('#cmpi-compare').scrollIntoViewIfNeeded();
+  await page.waitForFunction(() => document.querySelector('#cmpi-after').complete && document.querySelector('#cmpi-before').complete);
+  const shot = await page.locator('#cmpi-compare').screenshot();
+  const corners = await page.evaluate(async b64 => {
+    const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), c => c.charCodeAt(0))]));
+    const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    const at = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
+    return { left: at(3, bmp.height - 4), right: at(bmp.width - 4, bmp.height - 4) };
+  }, shot.toString('base64'));
+  assert.ok(corners.left[0] < 90 && corners.left[1] < 90, `original's transparent corner is dark checkerboard: ${corners.left}`);
+  assert.ok(near(corners.right, [255, 255, 255, 255], 6), `compressed JPG corner is white: ${corners.right}`);
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.selectOption('#cmpi-format', 'image/webp');
+  assert.equal(await settle(), 'done');
+
+  // ---------- Compare slider ----------
+  await page.$eval('#cmpi-split', el => { el.value = '20'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  assert.equal(await page.$eval('#cmpi-compare', el => el.style.getPropertyValue('--pos')), '20%');
+  await page.locator('#cmpi-compare').scrollIntoViewIfNeeded();
+  const box = await page.locator('#cmpi-compare').boundingBox();
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+  assert.equal(await page.inputValue('#cmpi-split'), '75');
+
+  // ---------- Errors ----------
+  await page.fill('#cmpi-target', '0');
+  assert.equal(await settle(), 'error');
+  assert.match(await text('#cmpi-error'), /between 1 and 100,000 KB/);
+  assert.equal(await page.isDisabled('#cmpi-download'), true);
+  await page.fill('#cmpi-target', '50');
+  assert.equal(await settle(), 'done');
+  assert.equal(await text('#cmpi-error'), '');
+
+  await page.setInputFiles('#cmpi-file', { name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('definitely not an image') });
+  assert.equal(await settle(), 'error');
+  assert.match(await text('#cmpi-error'), /could not be opened as an image/);
+  assert.equal(await page.isDisabled('#cmpi-download'), true);
+
+  // ---------- Keep the width and height: go below 30% quality instead of shrinking ----------
+  // Independently measured: this photo is 35,573 bytes at q30 and 5,866 bytes at q1.
+  await page.selectOption('#cmpi-format', 'image/jpeg');
+  await page.setInputFiles('#cmpi-file', F('photo.jpg'));
+  assert.equal(await settle(), 'done');
+  await page.fill('#cmpi-target', '20');
+  assert.equal(await settle(), 'done');
+  assert.match(await text('#cmpi-note'), /scaled down to/, 'by default the image shrinks');
+  await page.check('#cmpi-keepsize');
+  assert.equal(await settle(), 'done');
+  d = await download();
+  j = jpegInfo(d.buf);
+  q = parseInt(await text('#cmpi-q'), 10);
+  assert.deepEqual([j.width, j.height], [1000, 700], 'dimensions kept');
+  assert.ok(q >= 1 && q < 30, `quality ${q}`);
+  assert.equal(j.dqt[0], ijgDc(q));
+  assert.ok(d.buf.length <= 20000, `${d.buf.length} <= 20000`);
+  assert.ok(await encodeAt(q + 1) > 20000, 'one step higher would not fit');
+  assert.match(await text('#cmpi-note'), new RegExp(`keep all 1000 × 700 px, the quality had to drop to ${q}%`));
+  await page.fill('#cmpi-target', '5');
+  assert.equal(await settle(), 'error');
+  assert.match(await text('#cmpi-error'), /Even at 1% quality this image is 5\.9 KB at 1000 × 700 px/);
+  await page.uncheck('#cmpi-keepsize');
+  assert.equal(await settle(), 'done');
+  assert.ok(parseInt(await text('#cmpi-dims'), 10) < 1000, 'shrinks again once unticked');
+
+  // ---------- SVG: the worker cannot decode it, so the page does the work ----------
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#2050c0"/><circle cx="200" cy="150" r="80" fill="#e02040"/></svg>';
+  await page.setInputFiles('#cmpi-file', { name: 'shape.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
+  assert.equal(await settle(), 'done');
+  d = await download();
+  assert.equal(d.name, 'shape-compressed.jpg');
+  img = await decode(d.buf, [[200, 150], [10, 10]]);
+  assert.deepEqual([img.w, img.h], [400, 300]);
+  assert.ok(near(img.px[0], [224, 32, 64, 255], 20), `circle ${img.px[0]}`);
+  assert.ok(near(img.px[1], [32, 80, 192, 255], 20), `background ${img.px[1]}`);
+  // ...and the next photo goes back to the worker.
+  await page.fill('#cmpi-target', '50');
+  await page.setInputFiles('#cmpi-file', F('photo.jpg'));
+  assert.equal(await settle(), 'done');
+  assert.ok((await download()).buf.equals(d50), 'same 50 KB result as before');
+
+  // ---------- A browser without OffscreenCanvas encodes on the page, with identical output ----------
+  const p2 = await page.context().newPage();
+  const p2errors = [];
+  p2.on('pageerror', e => p2errors.push(e.message));
+  p2.on('console', msg => { if (msg.type() === 'error') p2errors.push(msg.text()); });
+  await p2.addInitScript(() => { delete window.OffscreenCanvas; });
+  await p2.goto(url);
+  assert.equal(await p2.evaluate(() => typeof OffscreenCanvas), 'undefined');
+  await p2.setInputFiles('#cmpi-file', F('photo.jpg'));
+  await p2.click('.cmpi-presets [data-kb="50"]');
+  await p2.waitForFunction(() => document.querySelector('#cmpi-result').dataset.state === 'done', null, { timeout: 30000 });
+  const [dl2] = await Promise.all([p2.waitForEvent('download'), p2.click('#cmpi-download')]);
+  assert.ok(fs.readFileSync(await dl2.path()).equals(d50), 'fallback gives the same bytes as the worker');
+  assert.deepEqual(p2errors, []);
+  await p2.close();
+
+  // ---------- Actual size: the scrolling stage can be focused and panned from the keyboard ----------
+  assert.equal(await page.getAttribute('#cmpi-stage', 'tabindex'), null, 'not a tab stop while it does not scroll');
+  await page.check('#cmpi-zoom');
+  const zs = await page.$eval('#cmpi-stage', s => ({ tab: s.getAttribute('tabindex'), role: s.getAttribute('role'), label: s.getAttribute('aria-label'),
+    scrolls: s.scrollWidth > s.clientWidth || s.scrollHeight > s.clientHeight }));
+  assert.deepEqual(zs, { tab: '0', role: 'region', label: 'Comparison at actual size (scroll to pan)', scrolls: true });
+  await page.focus('#cmpi-stage');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await page.waitForFunction(() => { const s = document.querySelector('#cmpi-stage'); return s.scrollLeft > 0 || s.scrollTop > 0; });
+  await page.uncheck('#cmpi-zoom');
+  assert.deepEqual(await page.$eval('#cmpi-stage', s => [s.getAttribute('tabindex'), s.getAttribute('role'), s.getAttribute('aria-label')]), [null, null, null]);
+
+  // ---------- WebP at 100% quality is lossless, and the page says so ----------
+  await page.selectOption('#cmpi-format', 'image/webp');
+  await page.check('input[name="cmpi-mode"][value="quality"]');
+  await setQuality(100);
+  assert.equal(await settle(), 'done');
+  d = await download();
+  assert.ok(webpChunks(d.buf).includes('VP8L'), `lossless bitstream: ${webpChunks(d.buf)}`);
+  assert.match(await text('#cmpi-note'), /This WebP is lossless/);
+  await setQuality(99);
+  assert.equal(await settle(), 'done');
+  d = await download();
+  assert.ok(webpChunks(d.buf).includes('VP8 '), `lossy bitstream: ${webpChunks(d.buf)}`);
+  assert.doesNotMatch(await text('#cmpi-note'), /lossless/);
+
+  // ---------- A file that cannot be opened, before any image: no empty result panel ----------
+  await open();
+  await page.setInputFiles('#cmpi-file', { name: 'nope.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('not a picture') });
+  await page.waitForFunction(() => document.querySelector('#cmpi-error').textContent.length > 0);
+  assert.match(await text('#cmpi-error'), /could not be opened as an image/);
+  assert.equal(await page.isVisible('#cmpi-result'), false);
+  assert.match(await text('#cmpi-drop-hint'), /JPG, PNG, WebP or any image/);
+};

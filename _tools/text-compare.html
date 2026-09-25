@@ -1,0 +1,969 @@
+---
+title: "Text Compare: Online Diff Checker"
+description: Compare two texts and see every difference highlighted by line, word or character. Side-by-side or inline view, ignore whitespace or case, in your browser.
+category: Text
+keywords: [text compare, diff checker, compare text online, text difference checker, compare two texts, diff tool, find differences between two texts, compare documents]
+howto: |
+  ## How to compare two texts
+
+  Paste the original text on the left and the changed text on the right, or
+  open a file on either side. The differences appear as you type. Removed text
+  has a red background and is struck through; added text has a green
+  background and is underlined. In line mode each changed line also gets a
+  minus or plus sign, so nothing depends on telling the colours apart.
+  **Swap** exchanges the two sides and **Download .diff** saves the changes as
+  a patch file.
+
+  ## Line, word or character?
+
+  | Compare by | Best for | What is highlighted |
+  |---|---|---|
+  | Line | Code, lists, CSV, config files | Whole lines, with the changed words inside a changed line |
+  | Word | Prose, contracts, articles | Individual words and punctuation, in running text |
+  | Character | Short strings, IDs, typos | Single characters |
+
+  **Side by side** shows the original and changed versions in two columns;
+  **Inline** merges them into one column, which reads better on a phone.
+  **Hide unchanged lines** folds long stretches that are identical and keeps
+  three lines of context around each change.
+
+  ## How the comparison works
+
+  The tool uses Eugene Myers' O(ND) difference algorithm (1986), the same
+  method behind GNU diff and Git's default diff. It finds the shortest edit
+  script: the fewest insertions and deletions that turn one text into the
+  other, which is the same as finding their longest common subsequence. It
+  runs in linear memory by searching from both ends for the middle of the
+  edit path, and lines that appear on only one side are set aside first,
+  a speed-up GNU diff also uses. The work happens in a background thread, so
+  the page stays responsive with texts of many thousands of lines.
+
+  In word and character mode the texts are first compared line by line, then
+  each changed block is compared again word by word or character by character.
+  Words, runs of spaces and punctuation marks are separate tokens. Characters
+  are grapheme clusters, so an emoji or an accented letter counts as one.
+
+  ## Reading the numbers
+
+  Within each block of changes, removed lines are paired with added lines in
+  order. Each pair counts as one **changed** line and the rest as **added** or
+  **removed**. If three lines are replaced by five, you see 3 changed and 2
+  added. Unchanged lines are the lines the two texts have in common.
+
+  ## Ignoring whitespace and case
+
+  With **Ignore whitespace**, any run of spaces or tabs counts as a single
+  space and spaces at the start or end of a line don't count, so re-indented
+  or re-spaced lines match. Line breaks still count. In word and character
+  mode, added or removed spaces and tabs are not highlighted at all. **Ignore case** compares text as if it were all
+  lower case. Both options affect only the comparison; the texts are shown as
+  you entered them.
+
+  ## Patch files
+
+  The downloaded `.diff` file is a standard unified diff, the format of
+  `diff -u` and `git diff`, with three lines of context. It is always made
+  from the exact texts, even when an ignore option is on, so
+  `patch original.txt < text-compare.diff` turns the original into the
+  changed text. When the texts differ in a great many places, such as rows
+  that were reordered, the search for the smallest patch stops after a few
+  seconds and the remaining changes are written as whole removed and added
+  blocks. That patch is longer but still applies the same way.
+faq:
+  - q: Is my text uploaded anywhere?
+    a: No. Both texts are compared in your browser, in a background thread on your own device. Nothing is sent to a server or stored, and opened files are read locally.
+  - q: Why is a line I edited shown as removed and added?
+    a: A diff describes changes as removals and additions. When a removed line and an added line sit in the same place they are paired as a changed line, and the words that differ inside it are highlighted more strongly.
+  - q: Do Windows and Unix line endings count as differences?
+    a: No. Browsers store line breaks in a text box as a single line feed, and opened files are converted the same way, so CRLF and LF files compare as equal.
+  - q: How large can the texts be?
+    a: Several thousand lines compare almost instantly on a typical computer. Very large texts that differ almost everywhere take longer, but the page stays usable while the comparison runs.
+  - q: Why do the differences look different from another diff tool?
+    a: When several edits are equally short, tools can pick different ones, for example which of two identical blank lines is kept. Every minimal diff is correct; they just group the changes differently.
+---
+<style>
+.tc {
+  --tc-del-bg: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  --tc-ins-bg: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --tc-del-hl: color-mix(in srgb, var(--danger) 30%, var(--surface));
+  --tc-ins-hl: color-mix(in srgb, var(--accent) 32%, var(--surface));
+}
+.tc-inputs { margin-bottom: 4px; }
+.tc-inputs textarea { min-height: 220px; }
+.tc-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.tc-head > label { font-size: 14px; font-weight: 600; }
+.tc-opts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0 0 12px; }
+.tc-opts fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.tc-opts legend { padding: 0; margin-bottom: 2px; }
+.tc-opts .checks { margin: 0; }
+.tc-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tc-seg label { position: relative; display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; font-size: 14px; cursor: pointer; border-right: 1px solid var(--border); }
+.tc-seg label:last-child { border-right: 0; }
+.tc-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.tc-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+/* Two rings, so focus shows on both the filled (checked) and the plain segments. */
+.tc-seg label:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 4px var(--accent-text); outline: 2px solid transparent; }
+.tc-stats .stat b { font-variant-numeric: tabular-nums; }
+.tc-stat-add b { color: var(--accent); }
+.tc-stat-del b { color: var(--danger); }
+.tc-out { max-width: 100%; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.tc-out:empty { display: none; }
+.tc-hint { margin: 0 0 16px; padding: 14px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 14px; }
+.tc-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--mono); font-size: 13px; line-height: 1.5; }
+.tc-table td { height: 21px; padding: 1px 6px; vertical-align: top; }
+.tc-table .tc-num { width: 3.6em; padding-right: 6px; color: var(--muted); text-align: right; font-size: 12px; background: var(--surface-2); user-select: none; -webkit-user-select: none; }
+.tc-table .tc-mk { width: 1.6em; padding: 1px 0; text-align: center; font-weight: 700; user-select: none; -webkit-user-select: none; }
+.tc-table .tc-txt { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.tc-split .tc-txt:nth-child(3) { border-right: 1px solid var(--border); }
+.tc-table .tc-del { background: var(--tc-del-bg); }
+.tc-table .tc-ins { background: var(--tc-ins-bg); }
+.tc-table .tc-mk.tc-del { color: var(--danger); }
+.tc-table .tc-mk.tc-ins { color: var(--accent); }
+.tc-table .tc-empty { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--surface-2) 6px 12px); }
+.tc-table .tc-fold td, .tc-fold-flow { padding: 4px 10px; background: var(--surface-2); color: var(--muted); font-family: system-ui, sans-serif; font-size: 13px; text-align: center; }
+.tc-fold-flow { display: block; margin: 2px -12px; }
+.tc del, .tc ins { border-radius: 2px; color: inherit; }
+.tc del { background: var(--tc-del-hl); text-decoration: line-through; text-decoration-thickness: 1px; }
+.tc del + ins { margin-left: 2px; }
+.tc ins { background: var(--tc-ins-hl); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+/* Screen-reader-only labels. Static inline-blocks: absolutely positioned ones cost seconds of layout on big diffs. */
+.tc del::before, .tc del::after, .tc ins::before, .tc ins::after { display: inline-block; width: 1px; height: 1px; margin-right: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Big outputs come in blocks; off-screen blocks skip layout. One block is left alone. */
+.tc-blk:not(:only-of-type) { content-visibility: auto; }
+.tc del::before { content: " [removed: "; }
+.tc ins::before { content: " [added: "; }
+.tc del::after, .tc ins::after { content: "] "; }
+.tc .tc-nl { color: var(--muted); font-weight: 700; }
+.tc-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.tc-pane { min-width: 0; }
+.tc-pane + .tc-pane { border-left: 1px solid var(--border); }
+.tc-pane h2 { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 13px; font-weight: 600; }
+.tc-pane pre { margin: 0; padding: 0 12px; font-family: var(--mono); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.tc-pane h2 + pre { padding-top: 10px; }
+.tc-pane pre:last-child { padding-bottom: 10px; }
+.tc-flow.is-prose pre { font-family: inherit; font-size: 15px; }
+.tc-status { min-height: 1.4em; margin: -8px 0 8px; color: var(--muted); font-size: 13px; }
+@media (max-width: 620px) {
+  .tc-pane + .tc-pane { border-left: 0; border-top: 1px solid var(--border); }
+  .tc-table { font-size: 12px; }
+  .tc-table .tc-num { width: 2.9em; padding-right: 4px; font-size: 11px; }
+  .tc-table .tc-mk { width: 1.2em; }
+  .tc-table td { padding-left: 3px; padding-right: 3px; }
+}
+</style>
+
+<div class="tc">
+  <div class="cols tc-inputs">
+    <div class="field">
+      <div class="tc-head">
+        <label for="tc-a">Original text</label>
+        <button class="btn secondary small" type="button" data-file="#tc-file-a" aria-label="Open file as original text">Open file…</button>
+        <input type="file" id="tc-file-a" hidden accept="text/*,.txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.sql,.yml,.yaml,.toml,.ini,.log,.srt,.tex">
+      </div>
+      <textarea id="tc-a" class="mono" rows="10" spellcheck="false" placeholder="Paste the original text here…"></textarea>
+    </div>
+    <div class="field">
+      <div class="tc-head">
+        <label for="tc-b">Changed text</label>
+        <button class="btn secondary small" type="button" data-file="#tc-file-b" aria-label="Open file as changed text">Open file…</button>
+        <input type="file" id="tc-file-b" hidden accept="text/*,.txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.sql,.yml,.yaml,.toml,.ini,.log,.srt,.tex">
+      </div>
+      <textarea id="tc-b" class="mono" rows="10" spellcheck="false" placeholder="Paste the changed text here…"></textarea>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="tc-swap">Swap sides</button>
+    <button class="btn secondary small" type="button" id="tc-clear">Clear</button>
+    <button class="btn secondary small" type="button" id="tc-example">Load example</button>
+    <button class="btn secondary small" type="button" id="tc-download">Download .diff</button>
+  </div>
+
+  <div class="tc-opts">
+    <fieldset>
+      <legend class="label">Compare by</legend>
+      <div class="tc-seg">
+        <label><input type="radio" name="tc-mode" value="line" checked>Line</label>
+        <label><input type="radio" name="tc-mode" value="word">Word</label>
+        <label><input type="radio" name="tc-mode" value="char">Character</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend class="label">View</legend>
+      <div class="tc-seg">
+        <label><input type="radio" name="tc-view" value="split" checked>Side by side</label>
+        <label><input type="radio" name="tc-view" value="unified">Inline</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend class="label">Options</legend>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="tc-ws"> Ignore whitespace</label>
+        <label class="check"><input type="checkbox" id="tc-case"> Ignore case</label>
+        <label class="check"><input type="checkbox" id="tc-hide"> Hide unchanged lines</label>
+      </div>
+    </fieldset>
+  </div>
+
+  <div class="stats tc-stats" aria-live="polite">
+    <div class="stat tc-stat-add"><b id="tc-added">0</b><span>Lines added</span></div>
+    <div class="stat tc-stat-del"><b id="tc-removed">0</b><span>Lines removed</span></div>
+    <div class="stat"><b id="tc-changed">0</b><span>Lines changed</span></div>
+    <div class="stat"><b id="tc-same">0</b><span>Unchanged lines</span></div>
+    <div class="stat tc-stat-add" id="tc-tok-add-box" hidden><b id="tc-tok-added">0</b><span id="tc-tok-added-label">Words added</span></div>
+    <div class="stat tc-stat-del" id="tc-tok-del-box" hidden><b id="tc-tok-removed">0</b><span id="tc-tok-removed-label">Words removed</span></div>
+  </div>
+  <p class="msg ok" id="tc-ok" aria-live="polite"></p>
+  <p class="msg error" id="tc-error" role="alert"></p>
+  <p class="tc-status" id="tc-status" aria-live="polite"></p>
+  <p class="tc-hint" id="tc-hint">Paste or type text in both boxes, or press <b>Load example</b>, to see the differences here.</p>
+  <div class="tc-out" id="tc-out" aria-busy="false"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // The diff engine is self-contained so it can run in a Web Worker (built from
+  // its own source) and, if workers are unavailable, on the page itself.
+  function tcEngine(scope) {
+    'use strict';
+
+    var seg = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+
+    // ---- Myers O(ND) diff, linear space: bisect on the middle snake. ----
+    // A and B are arrays of integer ids. Returns matched index pairs [i0, j0, i1, j1, ...].
+    function lcsPairs(A, B, deadline) {
+      var out = [];
+      var state = { timedOut: false };
+
+      function range(a0, a1, b0, b1) {
+        while (a0 < a1 && b0 < b1 && A[a0] === B[b0]) { out.push(a0, b0); a0++; b0++; }
+        var e1 = a1, e2 = b1;
+        while (e1 > a0 && e2 > b0 && A[e1 - 1] === B[e2 - 1]) { e1--; e2--; }
+        if (a0 < e1 && b0 < e2) bisect(a0, e1, b0, e2);
+        for (var k = 0; k < a1 - e1; k++) out.push(e1 + k, e2 + k);
+      }
+
+      function bisect(a0, a1, b0, b1) {
+        var n = a1 - a0, m = b1 - b0;
+        var maxD = Math.ceil((n + m) / 2);
+        var off = maxD, vlen = 2 * maxD + 2;
+        var v1 = new Int32Array(vlen).fill(-1), v2 = new Int32Array(vlen).fill(-1);
+        v1[off + 1] = 0;
+        v2[off + 1] = 0;
+        var delta = n - m, front = (delta & 1) !== 0;
+        var k1s = 0, k1e = 0, k2s = 0, k2e = 0;
+        for (var d = 0; d < maxD; d++) {
+          if ((d & 15) === 0 && Date.now() > deadline) { state.timedOut = true; return; }
+          for (var k1 = -d + k1s; k1 <= d - k1e; k1 += 2) {
+            var k1o = off + k1;
+            var x1 = (k1 === -d || (k1 !== d && v1[k1o - 1] < v1[k1o + 1])) ? v1[k1o + 1] : v1[k1o - 1] + 1;
+            var y1 = x1 - k1;
+            while (x1 < n && y1 < m && A[a0 + x1] === B[b0 + y1]) { x1++; y1++; }
+            v1[k1o] = x1;
+            if (x1 > n) k1e += 2;
+            else if (y1 > m) k1s += 2;
+            else if (front) {
+              var k2o = off + delta - k1;
+              if (k2o >= 0 && k2o < vlen && v2[k2o] !== -1 && x1 >= n - v2[k2o]) { split(a0, a1, b0, b1, x1, y1); return; }
+            }
+          }
+          for (var k2 = -d + k2s; k2 <= d - k2e; k2 += 2) {
+            var k2o2 = off + k2;
+            var x2 = (k2 === -d || (k2 !== d && v2[k2o2 - 1] < v2[k2o2 + 1])) ? v2[k2o2 + 1] : v2[k2o2 - 1] + 1;
+            var y2 = x2 - k2;
+            while (x2 < n && y2 < m && A[a1 - x2 - 1] === B[b1 - y2 - 1]) { x2++; y2++; }
+            v2[k2o2] = x2;
+            if (x2 > n) k2e += 2;
+            else if (y2 > m) k2s += 2;
+            else if (!front) {
+              var k1o2 = off + delta - k2;
+              if (k1o2 >= 0 && k1o2 < vlen && v1[k1o2] !== -1) {
+                var fx = v1[k1o2], fy = fx - (k1o2 - off);
+                if (fx >= n - x2) { split(a0, a1, b0, b1, fx, fy); return; }
+              }
+            }
+          }
+        }
+        // No common element in this range: everything is a deletion plus an insertion.
+      }
+
+      function split(a0, a1, b0, b1, x, y) {
+        if ((x === 0 && y === 0) || (x === a1 - a0 && y === b1 - b0)) return;
+        range(a0, a0 + x, b0, b0 + y);
+        range(a0 + x, a1, b0 + y, b1);
+      }
+
+      range(0, A.length, 0, B.length);
+      return { pairs: out, timedOut: state.timedOut };
+    }
+
+    // Elements found on only one side can never match; drop them before the search.
+    function diffIds(A, B, deadline) {
+      var inA = new Set(A), inB = new Set(B), ai = [], bi = [], fa = [], fb = [], i;
+      for (i = 0; i < A.length; i++) if (inB.has(A[i])) { ai.push(i); fa.push(A[i]); }
+      for (i = 0; i < B.length; i++) if (inA.has(B[i])) { bi.push(i); fb.push(B[i]); }
+      var r = lcsPairs(fa, fb, deadline);
+      var pairs = new Array(r.pairs.length);
+      for (i = 0; i < r.pairs.length; i += 2) { pairs[i] = ai[r.pairs[i]]; pairs[i + 1] = bi[r.pairs[i + 1]]; }
+      return { pairs: pairs, timedOut: r.timedOut };
+    }
+
+    // Runs of {t: 0 equal | 1 removed | 2 added, a, b, len}.
+    function toOps(n, m, pairs) {
+      var ops = [], i = 0, j = 0;
+      function push(t, a, b, len) {
+        if (!len) return;
+        var last = ops[ops.length - 1];
+        if (last && last.t === t && t === 0 && last.a + last.len === a && last.b + last.len === b) last.len += len;
+        else ops.push({ t: t, a: a, b: b, len: len });
+      }
+      for (var k = 0; k <= pairs.length; k += 2) {
+        var pi = k < pairs.length ? pairs[k] : n, pj = k < pairs.length ? pairs[k + 1] : m;
+        push(1, i, j, pi - i);
+        push(2, pi, j, pj - j);
+        if (k < pairs.length) push(0, pi, pj, 1);
+        i = pi + 1;
+        j = pj + 1;
+      }
+      return ops;
+    }
+
+    // Equal runs and change blocks {eq:false, a, k (removed count), b, m (added count)}.
+    function regions(ops) {
+      var out = [];
+      for (var i = 0; i < ops.length; i++) {
+        var op = ops[i];
+        if (op.t === 0) { out.push({ eq: true, a: op.a, b: op.b, len: op.len }); continue; }
+        var r = { eq: false, a: op.a, b: op.b, k: 0, m: 0 };
+        if (op.t === 1) {
+          r.k = op.len;
+          var nx = ops[i + 1];
+          if (nx && nx.t === 2) { r.m = nx.len; r.b = nx.b; i++; }
+        } else {
+          r.m = op.len;
+        }
+        out.push(r);
+      }
+      return out;
+    }
+
+    function idMapper() {
+      var map = new Map();
+      return function (key) {
+        var v = map.get(key);
+        if (v === undefined) { v = map.size; map.set(key, v); }
+        return v;
+      };
+    }
+
+    function splitLines(t) {
+      if (t === '') return [];
+      var lines = t.split('\n');
+      if (lines[lines.length - 1] === '') lines.pop();
+      return lines;
+    }
+
+    function lineKey(s, o) {
+      if (o.ignoreWS) s = s.replace(/\s+/g, ' ').trim();
+      return o.ignoreCase ? s.toLowerCase() : s;
+    }
+
+    var RE_WORD = /[\p{L}\p{M}\p{N}_]+|\n|[^\S\n]+|[\s\S]/gu;
+    var RE_WS = /^\s+$/;
+    var RE_HWS = /^[^\S\n]+$/;
+    var RE_WORDCHAR = /[\p{L}\p{N}]/u;
+
+    function tokens(s, mode, o) {
+      if (mode === 'word') return s.match(RE_WORD) || [];
+      var out = [], g;
+      if (seg) {
+        for (g of seg.segment(s)) out.push(g.segment);
+      } else {
+        for (g of s) out.push(g);
+      }
+      if (!o.ignoreWS) return out;
+      var merged = [];
+      for (var i = 0; i < out.length; i++) {
+        var t = out[i];
+        if (RE_HWS.test(t) && merged.length && RE_HWS.test(merged[merged.length - 1])) merged[merged.length - 1] += t;
+        else merged.push(t);
+      }
+      return merged;
+    }
+
+    // Spaces and tabs can be ignored; line breaks always count.
+    function tokKey(t, o) {
+      if (o.ignoreWS && RE_HWS.test(t)) return ' ';
+      return o.ignoreCase ? t.toLowerCase() : t;
+    }
+
+    function diffTokens(ta, tb, o, deadline) {
+      var id = idMapper();
+      var A = ta.map(function (t) { return id(tokKey(t, o)); });
+      var B = tb.map(function (t) { return id(tokKey(t, o)); });
+      var r = diffIds(A, B, deadline);
+      return { ops: toOps(A.length, B.length, r.pairs), timedOut: r.timedOut };
+    }
+
+    function esc(s) {
+      return s.replace(/[&<>"]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'; });
+    }
+
+    // Renders a token list, wrapping changed tokens; whitespace-only changes stay plain when ignored.
+    // Each line is wrapped on its own, so every line break sits outside the tags and the output
+    // can be cut into blocks at any line break.
+    function mark(tag, toks, o) {
+      var text = toks.join('');
+      if (o.ignoreWS && RE_HWS.test(text)) return esc(text);
+      return text.split('\n').map(function (seg, i, all) {
+        var nl = i < all.length - 1 ? '<span class="tc-nl" aria-hidden="true">\u21B5</span>' : '';
+        return seg || nl ? '<' + tag + '>' + esc(seg) + nl + '</' + tag + '>' : '';
+      }).join('\n');
+    }
+
+    function allSpace(toks) {
+      for (var i = 0; i < toks.length; i++) if (!RE_WS.test(toks[i]) || toks[i].indexOf('\n') >= 0) return false;
+      return true;
+    }
+
+    // Side A html, side B html and inline html for a token-level diff. With word
+    // tokens, a lone space between two changes is folded into them, so a
+    // rewritten phrase reads as one removal and one addition.
+    function tokenHtml(ta, tb, o, deadline, counts, words) {
+      var d = diffTokens(ta, tb, o, deadline), ops = d.ops;
+      var left = '', right = '', inline = '', gA = [], gB = [];
+      function flush() {
+        if (gA.length) {
+          var h = mark('del', gA, o);
+          left += h;
+          inline += h;
+          if (counts) counts.del += countToks(gA, o);
+        }
+        if (gB.length) {
+          var h2 = mark('ins', gB, o);
+          right += h2;
+          inline += h2;
+          if (counts) counts.ins += countToks(gB, o);
+        }
+        gA = [];
+        gB = [];
+      }
+      for (var k = 0; k < ops.length; k++) {
+        var op = ops[k];
+        var a = ta.slice(op.a, op.a + op.len), b = tb.slice(op.b, op.b + op.len);
+        if (op.t === 1) { gA = gA.concat(a); continue; }
+        if (op.t === 2) { gB = gB.concat(b); continue; }
+        if (words && k > 0 && k < ops.length - 1 && allSpace(a) && allSpace(b)) {
+          gA = gA.concat(a);
+          gB = gB.concat(b);
+          continue;
+        }
+        flush();
+        left += esc(a.join(''));
+        right += esc(b.join(''));
+        inline += esc(b.join(''));
+      }
+      flush();
+      return { left: left, right: right, inline: inline, timedOut: d.timedOut };
+    }
+
+    function countToks(toks, o) {
+      var n = 0;
+      for (var i = 0; i < toks.length; i++) {
+        var t = toks[i];
+        if (o.mode === 'word') { if (RE_WORDCHAR.test(t)) n++; }
+        else if (!(o.ignoreWS && RE_HWS.test(t))) n++;
+      }
+      return n;
+    }
+
+    function fold(n, cols) {
+      var label = '\u22EF ' + n.toLocaleString('en-US') + ' unchanged line' + (n === 1 ? '' : 's');
+      return cols ? '<tr class="tc-fold"><td colspan="' + cols + '">' + label + '</td></tr>' : '<span class="tc-fold-flow">' + label + '</span>';
+    }
+
+    // Which lines of an equal run to show when unchanged lines are hidden.
+    function visibleRuns(r, idx, count, o) {
+      var CTX = 3;
+      if (!o.hideSame || r.len <= CTX * 2 + 1) return [[0, r.len]];
+      var first = idx === 0, last = idx === count - 1;
+      if (first && last) return [[0, 0]];
+      if (first) return [[r.len - CTX, r.len]];
+      if (last) return [[0, CTX]];
+      return [[0, CTX], [r.len - CTX, r.len]];
+    }
+
+    // Rows go into blocks of BLOCK rows, each its own fixed-layout table with
+    // content-visibility: auto, so the browser only lays out the blocks on screen.
+    // One big table took over a second of main-thread layout for 5,000 changed lines.
+    var BLOCK = 200;
+    function renderLines(A, B, regs, o, deadline) {
+      var split = o.view === 'split';
+      var cols = split ? 6 : 4;
+      var head = split
+        ? '<table class="tc-table tc-split"><colgroup><col class="tc-num"><col class="tc-mk"><col><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>'
+        : '<table class="tc-table tc-unified"><colgroup><col class="tc-num"><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>';
+      var html = [], rows = [];
+      var timedOut = false;
+
+      function flushBlock() {
+        if (!rows.length) return;
+        html.push('<div class="tc-blk" style="contain-intrinsic-size:auto ' + rows.length * 22 + 'px">' + head + rows.join('') + '</tbody></table></div>');
+        rows = [];
+      }
+      function push(tr) {
+        rows.push(tr);
+        if (rows.length >= BLOCK) flushBlock();
+      }
+
+      function row(an, at, bn, bt, cls) {
+        if (split) {
+          var l = at === null ? '<td class="tc-num"></td><td class="tc-mk tc-empty"></td><td class="tc-txt tc-empty"></td>'
+            : '<td class="tc-num">' + an + '</td><td class="tc-mk ' + (cls === 'eq' ? '' : 'tc-del') + '">' + (cls === 'eq' ? '' : '-') + '</td><td class="tc-txt ' + (cls === 'eq' ? '' : 'tc-del') + '">' + at + '</td>';
+          var r = bt === null ? '<td class="tc-num"></td><td class="tc-mk tc-empty"></td><td class="tc-txt tc-empty"></td>'
+            : '<td class="tc-num">' + bn + '</td><td class="tc-mk ' + (cls === 'eq' ? '' : 'tc-ins') + '">' + (cls === 'eq' ? '' : '+') + '</td><td class="tc-txt ' + (cls === 'eq' ? '' : 'tc-ins') + '">' + bt + '</td>';
+          push('<tr>' + l + r + '</tr>');
+        } else if (cls === 'eq') {
+          push('<tr><td class="tc-num">' + an + '</td><td class="tc-num">' + bn + '</td><td class="tc-mk"></td><td class="tc-txt">' + bt + '</td></tr>');
+        } else if (cls === 'del') {
+          push('<tr><td class="tc-num tc-del">' + an + '</td><td class="tc-num tc-del"></td><td class="tc-mk tc-del">-</td><td class="tc-txt tc-del">' + at + '</td></tr>');
+        } else {
+          push('<tr><td class="tc-num tc-ins"></td><td class="tc-num tc-ins">' + bn + '</td><td class="tc-mk tc-ins">+</td><td class="tc-txt tc-ins">' + bt + '</td></tr>');
+        }
+      }
+
+      regs.forEach(function (r, idx) {
+        if (r.eq) {
+          var runs = visibleRuns(r, idx, regs.length, o), shown = 0;
+          runs.forEach(function (span) {
+            if (span[0] > shown) push(fold(span[0] - shown, cols));
+            for (var i = span[0]; i < span[1]; i++) row(r.a + i + 1, esc(A[r.a + i]), r.b + i + 1, esc(B[r.b + i]), 'eq');
+            shown = span[1];
+          });
+          if (shown < r.len) push(fold(r.len - shown, cols));
+          return;
+        }
+        var pairs = Math.min(r.k, r.m), p, left = [], right = [];
+        for (p = 0; p < pairs; p++) {
+          var at = A[r.a + p], bt = B[r.b + p];
+          if (!timedOut && at.length + bt.length < 20000 && Date.now() < deadline) {
+            var t = tokenHtml(tokens(at, 'word', o), tokens(bt, 'word', o), o, deadline, null, true);
+            left.push(t.left);
+            right.push(t.right);
+            timedOut = timedOut || t.timedOut;
+          } else {
+            left.push(esc(at));
+            right.push(esc(bt));
+          }
+        }
+        for (p = pairs; p < r.k; p++) left.push(esc(A[r.a + p]));
+        for (p = pairs; p < r.m; p++) right.push(esc(B[r.b + p]));
+        if (split) {
+          for (p = 0; p < Math.max(r.k, r.m); p++) {
+            row(r.a + p + 1, p < r.k ? left[p] : null, r.b + p + 1, p < r.m ? right[p] : null, 'chg');
+          }
+        } else {
+          for (p = 0; p < r.k; p++) row(r.a + p + 1, left[p], 0, null, 'del');
+          for (p = 0; p < r.m; p++) row(0, null, r.b + p + 1, right[p], 'ins');
+        }
+      });
+      flushBlock();
+      return { html: html.join(''), timedOut: timedOut };
+    }
+
+    // A pane of running text, split into <pre> blocks of about BLOCK lines at
+    // fragment boundaries so off-screen blocks skip layout (content-visibility).
+    function pane(lineHeight) {
+      var blocks = [], cur = [], lines = 0;
+      function flush() {
+        if (!cur.length) return;
+        blocks.push('<pre class="tc-blk" style="contain-intrinsic-size:auto ' + Math.ceil(lines * lineHeight) + 'px">' + cur.join('') + '</pre>');
+        cur = [];
+        lines = 0;
+      }
+      function add(html, n) {
+        cur.push(html);
+        lines += n;
+        if (lines >= BLOCK) flush();
+      }
+      return {
+        add: add,
+        // Adds the HTML of a changed region line by line (its line breaks are all outside tags).
+        addLines: function (html) {
+          var parts = html.split('\n'), last = parts.length - 1;
+          for (var i = 0; i < last; i++) add(parts[i] + '\n', 1);
+          if (parts[last]) add(parts[last], 0);
+        },
+        html: function () { flush(); return blocks.join(''); }
+      };
+    }
+
+    function renderFlow(A, B, regs, o, deadline, counts) {
+      var lh = o.mode === 'word' ? 24 : 21;
+      var left = pane(lh), right = pane(lh), inline = pane(lh), timedOut = false;
+      function foldAll(n) {
+        var f = fold(n, 0);
+        left.add(f, 1); right.add(f, 1); inline.add(f, 1);
+      }
+      regs.forEach(function (r, idx) {
+        if (r.eq) {
+          var runs = visibleRuns(r, idx, regs.length, o), shown = 0;
+          runs.forEach(function (span) {
+            if (span[0] > shown) foldAll(span[0] - shown);
+            for (var i = span[0]; i < span[1]; i++) {
+              left.add(esc(A[r.a + i]) + '\n', 1);
+              right.add(esc(B[r.b + i]) + '\n', 1);
+              inline.add(esc(B[r.b + i]) + '\n', 1);
+            }
+            shown = span[1];
+          });
+          if (shown < r.len) foldAll(r.len - shown);
+          return;
+        }
+        var at = A.slice(r.a, r.a + r.k).map(function (l) { return l + '\n'; }).join('');
+        var bt = B.slice(r.b, r.b + r.m).map(function (l) { return l + '\n'; }).join('');
+        var ta = tokens(at, o.mode, o), tb = tokens(bt, o.mode, o);
+        if (!timedOut && ta.length + tb.length < 400000 && Date.now() < deadline) {
+          var t = tokenHtml(ta, tb, o, deadline, counts, o.mode === 'word');
+          left.addLines(t.left); right.addLines(t.right); inline.addLines(t.inline);
+          timedOut = timedOut || t.timedOut;
+        } else {
+          timedOut = true;
+          var dl = at ? mark('del', [at], o) : '', il = bt ? mark('ins', [bt], o) : '';
+          counts.del += countToks(ta, o);
+          counts.ins += countToks(tb, o);
+          left.addLines(dl); right.addLines(il); inline.addLines(dl + il);
+        }
+      });
+      var prose = o.mode === 'word' ? ' is-prose' : '';
+      if (o.view === 'split') {
+        return {
+          html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Original</h2>' + left.html() + '</section>' +
+            '<section class="tc-pane"><h2>Changed</h2>' + right.html() + '</section></div>',
+          timedOut: timedOut
+        };
+      }
+      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Changes</h2>' + inline.html() + '</section></div>', timedOut: timedOut };
+    }
+
+    // Unified diff (diff -u) of the exact texts, three lines of context. The search stops at
+    // the deadline (Myers diff grows with lines x differences, e.g. reordered rows); past it
+    // the remaining changes are written as whole removed/added blocks, which still apply.
+    // Returns { text, timedOut }.
+    function patchText(a, b, deadline) {
+      var A = splitLines(a), B = splitLines(b);
+      var noEolA = a !== '' && a[a.length - 1] !== '\n', noEolB = b !== '' && b[b.length - 1] !== '\n';
+      var id = idMapper();
+      // A last line without a newline differs from the same text with one, as in GNU diff.
+      var ia = A.map(function (l, i) { return id(i === A.length - 1 && noEolA ? l + '\u0000' : l); });
+      var ib = B.map(function (l, i) { return id(i === B.length - 1 && noEolB ? l + '\u0000' : l); });
+      var d = diffIds(ia, ib, deadline);
+      var regs = regions(toOps(A.length, B.length, d.pairs));
+      var lines = [];
+      regs.forEach(function (r) {
+        var i;
+        if (r.eq) { for (i = 0; i < r.len; i++) lines.push({ t: ' ', ai: r.a + i, bi: r.b + i }); return; }
+        for (i = 0; i < r.k; i++) lines.push({ t: '-', ai: r.a + i, bi: r.b });
+        for (i = 0; i < r.m; i++) lines.push({ t: '+', ai: r.a + r.k, bi: r.b + i });
+      });
+      var changes = [];
+      lines.forEach(function (l, i) { if (l.t !== ' ') changes.push(i); });
+      if (!changes.length) return { text: '', timedOut: false };
+      var CTX = 3, out = '--- original.txt\n+++ changed.txt\n', h = 0;
+      while (h < changes.length) {
+        var start = Math.max(0, changes[h] - CTX), endIdx = changes[h];
+        while (h + 1 < changes.length && changes[h + 1] - endIdx <= CTX * 2 + 1) endIdx = changes[++h];
+        h++;
+        var end = Math.min(lines.length, endIdx + CTX + 1);
+        var aStart = -1, bStart = -1, aCount = 0, bCount = 0, body = '';
+        for (var i = start; i < end; i++) {
+          var l = lines[i];
+          if (l.t !== '+') { if (aStart < 0) aStart = l.ai; aCount++; }
+          if (l.t !== '-') { if (bStart < 0) bStart = l.bi; bCount++; }
+          var text = l.t === '+' ? B[l.bi] : A[l.ai];
+          body += l.t + text + '\n';
+          var lastOld = l.t !== '+' && noEolA && l.ai === A.length - 1;
+          var lastNew = l.t !== '-' && noEolB && l.bi === B.length - 1;
+          if (lastOld || lastNew) {
+            body += '\\ No newline at end of file\n';
+          }
+        }
+        if (aStart < 0) aStart = lines[start].ai;
+        if (bStart < 0) bStart = lines[start].bi;
+        var ar = aCount === 0 ? aStart + ',0' : (aStart + 1) + (aCount === 1 ? '' : ',' + aCount);
+        var br = bCount === 0 ? bStart + ',0' : (bStart + 1) + (bCount === 1 ? '' : ',' + bCount);
+        out += '@@ -' + ar + ' +' + br + ' @@\n' + body;
+      }
+      return { text: out, timedOut: d.timedOut };
+    }
+
+    function run(o) {
+      var t0 = Date.now();
+      var A = splitLines(o.a), B = splitLines(o.b);
+      var id = idMapper();
+      var ia = A.map(function (l) { return id(lineKey(l, o)); });
+      var ib = B.map(function (l) { return id(lineKey(l, o)); });
+      var d = diffIds(ia, ib, t0 + 8000);
+      var regs = regions(toOps(A.length, B.length, d.pairs));
+      var stats = { added: 0, removed: 0, changed: 0, same: 0 };
+      regs.forEach(function (r) {
+        if (r.eq) { stats.same += r.len; return; }
+        var p = Math.min(r.k, r.m);
+        stats.changed += p;
+        stats.removed += r.k - p;
+        stats.added += r.m - p;
+      });
+      var counts = { ins: 0, del: 0 };
+      var deadline = Date.now() + 3000;
+      var rendered = o.mode === 'line' ? renderLines(A, B, regs, o, deadline) : renderFlow(A, B, regs, o, deadline, counts);
+      // The patch shares the comparison's time budget (with a short minimum of its own).
+      var patch = patchText(o.a, o.b, Math.max(t0 + 8000, Date.now() + 500));
+      return {
+        html: rendered.html,
+        stats: stats,
+        tokens: counts,
+        identical: stats.added + stats.removed + stats.changed === 0,
+        patch: patch.text,
+        patchCoarse: patch.timedOut,
+        timedOut: d.timedOut || rendered.timedOut,
+        ms: Date.now() - t0
+      };
+    }
+
+    if (scope) {
+      scope.onmessage = function (e) {
+        var r;
+        try { r = run(e.data); } catch (err) { r = { error: String(err && err.message || err) }; }
+        r.id = e.data.id;
+        scope.postMessage(r);
+      };
+    }
+    return { run: run, patch: patchText };
+  }
+
+  var ta = TT.$('#tc-a'), tb = TT.$('#tc-b'), out = TT.$('#tc-out'), hint = TT.$('#tc-hint');
+  var okBox = TT.$('#tc-ok'), errBox = TT.$('#tc-error'), statusBox = TT.$('#tc-status');
+  var worker = null, workerUrl = null, busy = false, seq = 0, latest = null, statusTimer = 0, local = null, lastReq = null;
+  var typing = false;
+
+  var EXAMPLE_A = 'Project kickoff notes\nDate: 3 March\nAttendees: Ana, Ben, Chloe\n\nThe launch is planned for the second week of April.\nBudget: 12,000 EUR\n\nOpen questions:\n- Who owns the landing page?\n- Do we need a French translation?\n- When is the next review?';
+  var EXAMPLE_B = 'Project kickoff notes\nDate: 4 March\nAttendees: Ana, Ben, Chloe, Dev\n\nThe launch is planned for the last week of April.\nBudget: 12,000 EUR\n\nOpen questions:\n- Who owns the landing page?\n- Which analytics tool do we use?\n- When is the next review?\n- Who writes the press release?';
+
+  if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+    TT.$('input[name="tc-view"][value="unified"]').checked = true;
+  }
+
+  function radio(name) { return TT.$('input[name="' + name + '"]:checked').value; }
+
+  function options() {
+    return {
+      a: ta.value,
+      b: tb.value,
+      mode: radio('tc-mode'),
+      view: radio('tc-view'),
+      ignoreWS: TT.$('#tc-ws').checked,
+      ignoreCase: TT.$('#tc-case').checked,
+      hideSame: TT.$('#tc-hide').checked
+    };
+  }
+
+  function getWorker() {
+    if (worker) return worker;
+    if (typeof Worker === 'undefined' || typeof Blob === 'undefined') return null;
+    try {
+      if (!workerUrl) workerUrl = URL.createObjectURL(new Blob(['(' + tcEngine.toString() + ')(self);'], { type: 'text/javascript' }));
+      worker = new Worker(workerUrl);
+      worker.onmessage = function (e) {
+        busy = false;
+        if (e.data.id === seq) show(e.data);
+      };
+      worker.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        busy = false;
+        worker.terminate();
+        worker = null;
+        workerUrl = null;
+        runLocal(lastReq);
+      };
+    } catch (e) {
+      worker = null;
+    }
+    return worker;
+  }
+
+  function runLocal(o) {
+    try {
+      if (!local) local = tcEngine(null);
+      var r = local.run(o);
+      r.id = seq;
+      show(r);
+    } catch (e) {
+      show({ id: seq, error: String(e && e.message || e) });
+    }
+  }
+
+  function setStats(s, tokens, mode) {
+    TT.$('#tc-added').textContent = s.added.toLocaleString();
+    TT.$('#tc-removed').textContent = s.removed.toLocaleString();
+    TT.$('#tc-changed').textContent = s.changed.toLocaleString();
+    TT.$('#tc-same').textContent = s.same.toLocaleString();
+    var tokMode = mode !== 'line';
+    TT.$('#tc-tok-add-box').hidden = !tokMode;
+    TT.$('#tc-tok-del-box').hidden = !tokMode;
+    if (tokMode) {
+      var unit = mode === 'word' ? 'Words' : 'Characters';
+      TT.$('#tc-tok-added-label').textContent = unit + ' added';
+      TT.$('#tc-tok-removed-label').textContent = unit + ' removed';
+      TT.$('#tc-tok-added').textContent = tokens.ins.toLocaleString();
+      TT.$('#tc-tok-removed').textContent = tokens.del.toLocaleString();
+    }
+  }
+
+  function show(r) {
+    clearTimeout(statusTimer);
+    statusBox.textContent = '';
+    if (!typing) out.setAttribute('aria-busy', 'false');
+    if (r.error) {
+      errBox.textContent = 'The comparison failed: ' + r.error;
+      return;
+    }
+    errBox.textContent = '';
+    latest = r;
+    var o = lastReq;
+    setStats(r.stats, r.tokens, o.mode);
+    if (!o.a && !o.b) {
+      out.innerHTML = '';
+      hint.hidden = false;
+      okBox.textContent = '';
+      return;
+    }
+    hint.hidden = true;
+    out.innerHTML = r.html;
+    if (r.identical) {
+      if (o.a === o.b) okBox.textContent = 'The two texts are identical.';
+      else if (o.ignoreWS || o.ignoreCase) okBox.textContent = 'No differences, ignoring ' + (o.ignoreWS && o.ignoreCase ? 'whitespace and case' : o.ignoreWS ? 'whitespace' : 'case') + '.';
+      else okBox.textContent = 'The texts are identical apart from a line break at the very end.';
+    } else {
+      okBox.textContent = '';
+    }
+    if (r.timedOut) statusBox.textContent = 'These texts differ in very many places, so some changes are shown as whole blocks.';
+  }
+
+  function compare() {
+    var o = options();
+    o.id = ++seq;
+    lastReq = o;
+    typing = false;
+    out.setAttribute('aria-busy', 'true');
+    if (busy && worker) {
+      worker.terminate();
+      worker = null;
+    }
+    var w = getWorker();
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () { statusBox.textContent = 'Comparing\u2026'; }, 250);
+    if (w) {
+      busy = true;
+      w.postMessage(o);
+    } else {
+      runLocal(o);
+    }
+  }
+
+  var compareSoon = TT.debounce(compare, 200);
+  function onInput() {
+    typing = true;
+    out.setAttribute('aria-busy', 'true');
+    compareSoon();
+  }
+  ta.addEventListener('input', onInput);
+  tb.addEventListener('input', onInput);
+  TT.$$('input[name="tc-mode"], input[name="tc-view"], #tc-ws, #tc-case, #tc-hide').forEach(function (el) {
+    el.addEventListener('change', compare);
+  });
+
+  TT.$('#tc-swap').addEventListener('click', function () {
+    var t = ta.value;
+    ta.value = tb.value;
+    tb.value = t;
+    compare();
+  });
+  TT.$('#tc-clear').addEventListener('click', function () {
+    ta.value = '';
+    tb.value = '';
+    compare();
+    ta.focus();
+  });
+  TT.$('#tc-example').addEventListener('click', function () {
+    ta.value = EXAMPLE_A;
+    tb.value = EXAMPLE_B;
+    compare();
+  });
+  TT.$('#tc-download').addEventListener('click', function () {
+    errBox.textContent = '';
+    var a = ta.value, b = tb.value, patch, coarse;
+    if (!a && !b) {
+      errBox.textContent = 'Enter two texts first.';
+      return;
+    }
+    if (latest && lastReq && latest.id === lastReq.id && lastReq.a === a && lastReq.b === b) {
+      patch = latest.patch;
+      coarse = latest.patchCoarse;
+    } else {
+      // The comparison on screen is older than the texts (still typing or computing): build the
+      // patch now, on this thread, so the time limit is short to keep the page responsive.
+      try {
+        if (!local) local = tcEngine(null);
+        var p = local.patch(a, b, Date.now() + 1000);
+        patch = p.text;
+        coarse = p.timedOut;
+      } catch (e) {
+        errBox.textContent = 'Could not build the patch: ' + (e && e.message || e);
+        return;
+      }
+    }
+    if (!patch) {
+      okBox.textContent = 'The texts are exactly the same, so there is no patch to download.';
+      return;
+    }
+    TT.download('text-compare.diff', patch, 'text/x-diff;charset=utf-8');
+    if (coarse) okBox.textContent = 'These texts differ in very many places, so the patch lists some changes as whole removed and added blocks. It still applies correctly.';
+  });
+
+  function loadFile(input, target) {
+    input.addEventListener('change', function () {
+      var f = input.files && input.files[0];
+      if (!f) return;
+      errBox.textContent = '';
+      if (f.size > 20 * 1024 * 1024) {
+        errBox.textContent = f.name + ' is larger than 20 MB. Open a smaller text file.';
+        input.value = '';
+        return;
+      }
+      f.arrayBuffer().then(function (buf) {
+        // Blob.text() is UTF-8 only; honour a UTF-16 byte order mark (Windows "Unicode" text files).
+        var bytes = new Uint8Array(buf);
+        var enc = bytes[0] === 0xFF && bytes[1] === 0xFE ? 'utf-16le' : bytes[0] === 0xFE && bytes[1] === 0xFF ? 'utf-16be' : 'utf-8';
+        var text = new TextDecoder(enc).decode(bytes);
+        if (/\u0000/.test(text.slice(0, 8000))) {
+          errBox.textContent = f.name + ' looks like a binary file, not text.';
+          return;
+        }
+        target.value = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+        compare();
+      }, function () {
+        errBox.textContent = 'Could not read ' + f.name + '.';
+      }).finally(function () { input.value = ''; });
+    });
+  }
+  TT.$$('[data-file]').forEach(function (btn) {
+    btn.addEventListener('click', function () { TT.$(btn.getAttribute('data-file')).click(); });
+  });
+  loadFile(TT.$('#tc-file-a'), ta);
+  loadFile(TT.$('#tc-file-b'), tb);
+
+  compare();
+})();
+</script>

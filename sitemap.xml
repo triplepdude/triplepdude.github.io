@@ -1,0 +1,41 @@
+---
+# The site's own sitemap, used instead of jekyll-sitemap's (which still
+# generates /robots.txt). jekyll-sitemap gives every tool the build time as its
+# <lastmod>, because Jekyll dates each collection document with the build
+# time, so all tools claimed to change on every deploy and search engines learn
+# to ignore the field. Here <lastmod> is only written when a page sets
+# last_modified_at (or an explicit date) in its front matter.
+layout: null
+sitemap: false
+---
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{%- assign build_time = site.time | date: "%s" -%}
+{%- assign collections = site.collections | where_exp: "c", "c.output != false" -%}
+{%- for collection in collections -%}
+{%- assign docs = collection.docs | where_exp: "d", "d.sitemap != false" -%}
+{%- for doc in docs -%}
+  {%- assign lastmod = doc.last_modified_at -%}
+  {%- unless lastmod -%}
+    {%- assign doc_time = doc.date | date: "%s" -%}
+    {%- if doc_time != build_time %}{% assign lastmod = doc.date %}{% endif -%}
+  {%- endunless %}
+  <url>
+    <loc>{{ doc.url | replace: "/index.html", "/" | absolute_url | xml_escape }}</loc>
+    {%- if lastmod %}
+    <lastmod>{{ lastmod | date_to_xmlschema }}</lastmod>
+    {%- endif %}
+  </url>
+{%- endfor -%}
+{%- endfor -%}
+{%- assign pages = site.html_pages | where_exp: "p", "p.sitemap != false" | where_exp: "p", "p.url != '/404.html'" -%}
+{%- for p in pages -%}
+  {%- assign lastmod = p.last_modified_at | default: p.date %}
+  <url>
+    <loc>{{ p.url | replace: "/index.html", "/" | absolute_url | xml_escape }}</loc>
+    {%- if lastmod %}
+    <lastmod>{{ lastmod | date_to_xmlschema }}</lastmod>
+    {%- endif %}
+  </url>
+{%- endfor %}
+</urlset>
