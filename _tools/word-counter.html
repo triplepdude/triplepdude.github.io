@@ -1,0 +1,147 @@
+---
+title: Word Counter
+description: Count words, characters, sentences, paragraphs, and reading time as you type. Free, instant, and private. Your text never leaves your browser.
+category: Text
+keywords: [word count, character count, character counter, letter counter, reading time, sentence counter]
+howto: |
+  ## How to use the word counter
+
+  Type or paste your text into the box. Every count updates as you type, so you
+  can watch an essay, a post, or a meta description stay within its limit. Use
+  **Copy text** to copy everything back out, or **Clear** to start over.
+
+  ## How each number is counted
+
+  - **Words.** A word is a run of letters, digits, or accent marks. Apostrophes
+    and hyphens inside a word keep it together, so *don't* and *well-known* are
+    one word each. Numbers written with a decimal point, thousands separator, or
+    colon, such as *3.5*, *1,000*, and *10:30*, also count as one word.
+    Punctuation and symbols such as *&*, *—*, or emoji are not words.
+  - **Chinese and Japanese.** These languages don't put spaces between words, so
+    each Han, Hiragana, or Katakana character counts as one word. Word
+    processors use the same convention. Korean uses spaces, so it is counted like
+    English.
+  - **Characters** counts what a reader sees as one character. An emoji with a
+    skin tone, a flag, or a letter with a separate accent mark is stored as
+    several code points but counts once. Spaces and line breaks are included.
+    **Characters (no spaces)** leaves out all whitespace.
+  - **Sentences** end at a period, question mark, exclamation mark, or ellipsis,
+    including the full-width 。！？ used in Chinese and Japanese.
+    Abbreviations like *e.g.* or *Dr.* end a sentence too, so treat the sentence
+    count as a close estimate.
+  - **Paragraphs** are blocks of text separated by at least one blank line.
+
+  ## Reading and speaking time
+
+  Reading time uses **238 words per minute**, the average silent reading speed
+  for adults reading non-fiction in English, from a 2019 meta-analysis of 190
+  studies by Marc Brysbaert. Speaking time uses **150 words per minute**, a
+  typical pace for a presentation or a podcast. Your own speed may differ, so
+  use them as estimates when planning a talk or a blog post.
+
+  ## Common length limits
+
+  | Where | Limit |
+  |---|---|
+  | X (Twitter) post | 280 characters |
+  | Google search result title | about 60 characters before it is cut off |
+  | Meta description | about 155 characters before it is cut off |
+  | SMS message | 160 characters, or 70 if it contains emoji or other non-GSM characters |
+  | Common App personal essay | 650 words |
+
+  Search engines truncate titles and descriptions by pixel width rather than a
+  fixed character count, so the numbers above are guides, not hard limits.
+faq:
+  - q: Is my text uploaded anywhere?
+    a: No. The counting happens entirely in your browser with JavaScript. Nothing you type is sent to a server or stored.
+  - q: Why might my word processor show a slightly different count?
+    a: Programs disagree on edge cases such as words joined by a dash without spaces, URLs, and symbols. This counter's rules are listed above so you know exactly what it counts.
+  - q: Does it count emoji and accented characters correctly?
+    a: Yes. Characters are counted as user-perceived characters, so an emoji or an accented letter counts as one character even when it is stored as several code points.
+  - q: How long does it take to read 1,000 words?
+    a: About 4 minutes 12 seconds at the average adult reading speed of 238 words per minute, and about 6 minutes 40 seconds to read aloud at 150 words per minute.
+---
+<div class="field">
+  <label for="wc-input">Your text</label>
+  <textarea id="wc-input" rows="10" placeholder="Start typing or paste your text here…"></textarea>
+</div>
+
+<div class="stats">
+  <div class="stat"><b id="wc-words">0</b><span>Words</span></div>
+  <div class="stat"><b id="wc-chars">0</b><span>Characters</span></div>
+  <div class="stat"><b id="wc-chars-ns">0</b><span>Characters (no spaces)</span></div>
+  <div class="stat"><b id="wc-sentences">0</b><span>Sentences</span></div>
+  <div class="stat"><b id="wc-paragraphs">0</b><span>Paragraphs</span></div>
+  <div class="stat"><b id="wc-reading">0 sec</b><span>Reading time</span></div>
+  <div class="stat"><b id="wc-speaking">0 sec</b><span>Speaking time</span></div>
+</div>
+<p class="visually-hidden" id="wc-status" role="status"></p>
+
+<div class="actions">
+  <button class="btn secondary small" type="button" data-copy-target="#wc-input">Copy text</button>
+  <button class="btn secondary small" type="button" id="wc-clear">Clear</button>
+</div>
+
+<script>
+(function () {
+  var input = TT.$('#wc-input');
+  var seg = window.Intl && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+
+  function graphemes(s) {
+    if (!seg) return Array.from(s).length;
+    var n = 0;
+    for (var _ of seg.segment(s)) n++;
+    return n;
+  }
+
+  function duration(words, wpm) {
+    var secs = Math.round(words / wpm * 60);
+    if (secs < 60) return secs + ' sec';
+    var m = Math.floor(secs / 60), s = secs % 60;
+    return m + ' min' + (s ? ' ' + s + ' sec' : '');
+  }
+
+  function update() {
+    var text = input.value;
+    // Han/Kana characters are one word each (no spaces in Chinese/Japanese);
+    // everything else is split on non-word characters.
+    var cjk = (text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu) || []).length;
+    var rest = text.replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu, ' ');
+    var words = cjk + (rest.match(/[\p{L}\p{N}\p{M}]+(?:['’\-][\p{L}\p{N}\p{M}]+|(?<=\p{N})[.,:]\p{N}+)*/gu) || []).length;
+    // A period or comma between digits (3.5, 1,000) doesn't end a sentence.
+    var sentenceText = text.replace(/(\p{N})[.,](?=\p{N})/gu, '$1');
+    // A sentence is a stretch between end marks that holds a letter or digit.
+    // Split + test is linear; a single matching regex backtracks
+    // quadratically on long runs of spaces or symbols.
+    var sentences = sentenceText.split(/[.!?…。！？]+/).filter(function (p) { return /[\p{L}\p{N}]/u.test(p); }).length;
+    var paragraphs = text.split(/\n\s*\n/).filter(function (p) { return p.trim(); }).length;
+    TT.$('#wc-words').textContent = words.toLocaleString();
+    var chars = graphemes(text);
+    TT.$('#wc-chars').textContent = chars.toLocaleString();
+    TT.$('#wc-chars-ns').textContent = graphemes(text.replace(/\s+/g, '')).toLocaleString();
+    TT.$('#wc-sentences').textContent = sentences.toLocaleString();
+    TT.$('#wc-paragraphs').textContent = paragraphs.toLocaleString();
+    TT.$('#wc-reading').textContent = duration(words, 238);
+    TT.$('#wc-speaking').textContent = duration(words, 150);
+    last = { words: words, chars: chars };
+  }
+
+  // Screen readers get one labelled summary after typing pauses, instead of
+  // every bare number changing on every keystroke.
+  var last = { words: 0, chars: 0 };
+  var status = TT.$('#wc-status');
+  var announce = TT.debounce(function () {
+    status.textContent = last.words.toLocaleString() + (last.words === 1 ? ' word, ' : ' words, ') +
+      last.chars.toLocaleString() + (last.chars === 1 ? ' character' : ' characters');
+  }, 1000);
+  // Short text updates on every keystroke; very long text waits for a pause.
+  var updateLater = TT.debounce(update, 150);
+
+  input.addEventListener('input', function () {
+    if (input.value.length > 20000) updateLater(); else update();
+    announce();
+  });
+  TT.$('#wc-clear').addEventListener('click', function () { input.value = ''; update(); announce(); input.focus(); });
+  update();
+})();
+</script>

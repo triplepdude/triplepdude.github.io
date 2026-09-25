@@ -1,0 +1,76 @@
+---
+layout: default
+title: Free Online Tools
+---
+{%- assign used = site.tools | map: "category" | uniq | sort -%}
+{%- assign categories = "" | split: "" -%}
+{%- for c in site.data.categories -%}{%- if used contains c -%}{%- assign categories = categories | push: c -%}{%- endif -%}{%- endfor -%}
+{%- for c in used -%}{%- unless categories contains c -%}{%- assign categories = categories | push: c -%}{%- endunless -%}{%- endfor -%}
+<main class="wrap">
+  <section class="hero">
+    <h1>Free online tools that run in your browser</h1>
+    <p class="lede">{{ site.tools.size }} fast, private utilities for developers and everyday tasks. No sign-up, no uploads, no daily limits.</p>
+    <input id="tool-search" class="search" type="search" placeholder="Search {{ site.tools.size }} tools…" aria-label="Search tools" autocomplete="off">
+    <p id="search-status" class="visually-hidden" role="status"></p>
+  </section>
+
+  <div id="all-tools">
+    {%- for cat in categories %}
+    <section class="category" id="{{ cat | slugify }}">
+      <h2>{{ cat }}</h2>
+      <ul class="tool-grid">
+        {%- assign tools = site.tools | where: "category", cat | sort: "title" %}
+        {%- for t in tools %}
+        <li data-search="{{ t.title | downcase | escape }} {{ t.description | downcase | escape }} {{ t.keywords | join: ' ' | downcase | escape }}">
+          <a class="tool-tile" href="{{ t.url | relative_url }}">
+            <strong>{{ t.title }}</strong>
+            <span>{{ t.description }}</span>
+          </a>
+        </li>
+        {%- endfor %}
+      </ul>
+    </section>
+    {%- endfor %}
+    <p class="empty-search" id="no-results" hidden>No tools match that search.</p>
+  </div>
+
+  <section class="prose home-about">
+    <h2>Why these tools?</h2>
+    <p><strong>Private by design.</strong> Every tool runs as JavaScript in your own browser. Text, photos, and files are never uploaded, which also makes them safe for work documents and personal images.</p>
+    <p><strong>Fast and free.</strong> Pages are small and load quickly, keep working if your connection drops after they load, and have no sign-up, watermarks, file-size paywalls, or daily limits.</p>
+    <p><strong>Explained, not just computed.</strong> Each tool comes with a short guide to the standard behind it, from ISO week numbers to EXIF metadata, so you can trust the result.</p>
+  </section>
+
+  {% include ad-slot.html %}
+</main>
+
+<script>
+(function () {
+  var input = document.getElementById('tool-search');
+  var items = TT.$$('#all-tools li[data-search]');
+  var sections = TT.$$('#all-tools .category');
+  var none = document.getElementById('no-results');
+  var status = document.getElementById('search-status');
+  // Screen readers hear the result count once typing pauses, not per key.
+  var announce = TT.debounce(function (query, shown) {
+    status.textContent = !query ? 'Showing all ' + items.length + ' tools.' :
+      shown === 0 ? 'No tools match that search.' :
+      shown === 1 ? '1 tool matches.' : shown + ' tools match.';
+  }, 400);
+  input.addEventListener('input', function () {
+    var terms = input.value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    var shown = 0;
+    items.forEach(function (li) {
+      var hay = li.getAttribute('data-search');
+      var match = terms.every(function (t) { return hay.indexOf(t) !== -1; });
+      li.hidden = !match;
+      if (match) shown++;
+    });
+    sections.forEach(function (s) {
+      s.hidden = !s.querySelector('li:not([hidden])');
+    });
+    none.hidden = shown !== 0;
+    announce(terms.join(' '), shown);
+  });
+})();
+</script>

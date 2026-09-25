@@ -1,0 +1,109 @@
+---
+layout: default
+---
+{%- assign tool_url = page.url | absolute_url -%}
+<main class="wrap tool-page">
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href="{{ '/' | relative_url }}">All tools</a>
+    <span aria-hidden="true">/</span>
+    <a href="{{ '/' | relative_url }}#{{ page.category | slugify }}">{{ page.category }}</a>
+  </nav>
+
+  <h1>{{ page.title }}</h1>
+  <p class="lede">{{ page.description }}</p>
+
+  <section class="tool-card" aria-label="{{ page.title }}">
+    {{ content }}
+  </section>
+
+  {% include ad-slot.html %}
+
+  {%- if page.howto %}
+  <section class="prose">
+    {{ page.howto | markdownify }}
+  </section>
+  {%- endif %}
+
+  {%- if page.faq and page.faq.size > 0 %}
+  <section class="faq">
+    <h2>Frequently asked questions</h2>
+    {%- for item in page.faq %}
+    <details>
+      <summary>{{ item.q }}</summary>
+      <div class="faq-answer">{{ item.a | markdownify }}</div>
+    </details>
+    {%- endfor %}
+  </section>
+  {%- endif %}
+
+  {%- comment -%}
+    Up to 3 tools from the same category, then other tools, 6 in all. Both
+    passes walk the title-sorted list onwards from this page and wrap around,
+    so each tool is linked from the few tools just before it. Every tool then
+    gets about the same number of these links, instead of the alphabetically
+    first tools being listed on every page.
+  {%- endcomment -%}
+  {%- assign ring = site.tools | sort: "title" -%}
+  {%- assign ring_size = ring.size -%}
+  {%- assign me = 0 -%}
+  {%- for t in ring -%}{%- if t.url == page.url -%}{%- assign me = forloop.index0 -%}{%- endif -%}{%- endfor -%}
+  {%- assign related = "" | split: "" -%}
+  {%- assign related_urls = "" | split: "" -%}
+  {%- for step in (1..ring_size) -%}
+    {%- if related.size >= 3 -%}{%- break -%}{%- endif -%}
+    {%- assign i = me | plus: step | modulo: ring_size -%}
+    {%- assign t = ring[i] -%}
+    {%- if t.url != page.url and t.category == page.category -%}
+      {%- assign related = related | push: t -%}
+      {%- assign related_urls = related_urls | push: t.url -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- for step in (1..ring_size) -%}
+    {%- if related.size >= 6 -%}{%- break -%}{%- endif -%}
+    {%- assign i = me | plus: step | modulo: ring_size -%}
+    {%- assign t = ring[i] -%}
+    {%- unless t.url == page.url or related_urls contains t.url -%}
+      {%- assign related = related | push: t -%}
+      {%- assign related_urls = related_urls | push: t.url -%}
+    {%- endunless -%}
+  {%- endfor -%}
+  {%- if related.size > 0 %}
+  <section class="related">
+    <h2>More free tools</h2>
+    <ul class="tool-grid compact">
+      {%- for t in related %}
+      <li><a class="tool-tile" href="{{ t.url | relative_url }}"><strong>{{ t.title }}</strong><span>{{ t.description | truncate: 90 }}</span></a></li>
+      {%- endfor %}
+    </ul>
+  </section>
+  {%- endif %}
+</main>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebApplication",
+      "name": {{ page.title | jsonify }},
+      "url": {{ tool_url | jsonify }},
+      "description": {{ page.description | jsonify }},
+      "applicationCategory": {% if page.category == "Developer" %}"DeveloperApplication"{% else %}"UtilitiesApplication"{% endif %},
+      "operatingSystem": "Any",
+      {%- if page.last_modified_at %}
+      "dateModified": {{ page.last_modified_at | date_to_xmlschema | jsonify }},
+      {%- endif %}
+      "browserRequirements": "Requires JavaScript",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "All tools", "item": {{ '/' | absolute_url | jsonify }} },
+        { "@type": "ListItem", "position": 2, "name": {{ page.title | jsonify }}, "item": {{ tool_url | jsonify }} }
+      ]
+    }
+  ]
+}
+</script>

@@ -1,0 +1,655 @@
+---
+title: "AI Text Cleaner: Remove Em Dashes"
+description: Remove em dashes, curly quotes and hidden characters from ChatGPT and other AI text. See every zero-width and non-breaking space, then copy clean text.
+category: Text
+keywords: [remove em dashes, em dash remover, ai text cleaner, remove hidden characters, zero width space remover, invisible character remover, chatgpt text cleaner, remove non-breaking spaces]
+howto: |
+  ## How to use the AI text cleaner
+
+  Paste your text into the box. Each option shows how many matching
+  characters your text contains, and the cleaned version updates as you type
+  or toggle options. The **Where the changes are** panel shows the original
+  text with each invisible character drawn as a labelled tag (hover or tap
+  one for its code point and name). Copy the result or download it as a
+  `.txt` file.
+
+  ## Exactly which characters are changed
+
+  | Option | Characters (Unicode code points) | Becomes |
+  |---|---|---|
+  | Em dashes | — U+2014, ― U+2015, ⸺ U+2E3A, ⸻ U+2E3B | the style you pick |
+  | En dashes and hyphens | – U+2013, ‒ U+2012, ‐ U+2010, non-breaking hyphen U+2011, − U+2212 | `-` |
+  | Curly quotes | ‘ ’ ‚ ‛ U+2018 to U+201B | `'` |
+  | | “ ” „ ‟ U+201C to U+201F | `"` |
+  | Ellipsis | … U+2026 | `...` |
+  | Unusual spaces | U+00A0, U+1680, U+2000 to U+200A, U+202F, U+205F, U+3000 | a normal space |
+  | Line separators | U+2028, U+0085 / U+2029 | a line break / a blank line |
+
+  **Invisible characters** removes the Unicode *Cf* (format) category, apart
+  from the exceptions below. That includes the zero-width space U+200B, the
+  zero-width non-joiner and joiner U+200C and U+200D, the direction marks
+  U+200E, U+200F and U+061C, the bidirectional controls U+202A to U+202E and
+  U+2066 to U+2069, the word joiner and invisible operators U+2060 to U+2064,
+  the byte order mark U+FEFF, the soft hyphen U+00AD, the Mongolian vowel
+  separator U+180E and the tag characters U+E0001 and U+E0020 to U+E007F. It
+  also removes the combining grapheme joiner U+034F, the Hangul fillers
+  U+115F, U+1160, U+3164 and U+FFA0, and variation selectors (U+FE00 to
+  U+FE0F, U+E0100 to U+E01EF) that come in runs, follow no character or
+  follow one this tool removes or replaces. Real text uses at most one after
+  a character, such as U+FE0F to show ❤ (U+2764) as a colour emoji.
+
+  ## What is kept on purpose
+
+  - **Emoji sequences.** A joiner between two emoji (as in a family or a
+    rainbow flag) stays, and so do the tag characters that spell a region
+    code inside a flag such as Scotland's. Tags that spell anything else are
+    removed.
+  - **Scripts that need joiners.** A zero-width non-joiner or joiner between
+    two letters of Persian, Arabic, Hindi, Bengali and similar scripts changes
+    how the word is written, so it stays. Between Latin letters it goes.
+  - **Old-style Hangul syllables** built from conjoining jamo keep a filler
+    that stands in for a missing part.
+  - **Visible format characters**, such as the Arabic number signs U+0600 to
+    U+0605, are left alone.
+
+  Collapsing spaces keeps the indentation at the start of a line, and tabs
+  are removed only at the end of a line.
+
+  ## How em dashes are replaced
+
+  With **comma**, "the result—surprisingly—was good" becomes "the result,
+  surprisingly, was good". A dash between two numbers becomes a hyphen
+  (1990-2000), a dash right before other punctuation such as a full stop or
+  closing bracket is dropped, and a dash at the start of a line becomes a
+  hyphen. **Hyphen with spaces** puts one space on each side of the hyphen
+  (except at the start or end of a line), and **plain hyphen** swaps the dash
+  for `-` and keeps the spacing. Read the result once: an em dash sometimes
+  works as a colon, and no rule can know that.
+
+  ## Hidden characters and AI detectors
+
+  Invisible characters can come from typography (a narrow no-break space
+  before a unit), from the app you copied from, or from deliberate tampering.
+  Tag characters mirror printable ASCII and have been used to hide
+  instructions in text given to AI tools; the highlighted view decodes them
+  so you can read what was hidden. The cleaner changes punctuation and
+  spacing but never rewrites your words, so don't expect it to change an AI
+  detector's verdict.
+faq:
+  - q: Is my text uploaded anywhere?
+    a: No. The cleaning runs entirely in your browser with JavaScript. Your text is not sent to a server, logged or stored.
+  - q: Which em dash replacement should I use?
+    a: Comma reads most naturally for dashes that set off an aside, as in "the plan, in theory, works". Hyphen with spaces keeps the pause of a dash while using only keyboard characters. Plain hyphen is a straight swap that keeps your original spacing.
+  - q: Why are some zero-width joiners marked as kept?
+    a: They sit inside an emoji sequence or between letters of a script that needs them. Removing those would break the emoji into separate pictures or change how the word is spelled, so the cleaner leaves them in place.
+  - q: Will removing these characters make AI text undetectable?
+    a: No. AI detectors judge the wording and its statistics, not invisible code points. This tool fixes typography and removes hidden characters; it does not rewrite anything.
+  - q: Does it change accented letters, emoji or other languages?
+    a: No. Only the characters listed on this page are changed. Letters in any script, accents, emoji and ordinary line breaks come through unchanged.
+---
+<style>
+.atc {
+  --atc-warn: #875000;
+  --atc-warn-soft: rgb(245 158 11 / 0.2);
+}
+@media (prefers-color-scheme: dark) {
+  .atc { --atc-warn: #fbbf24; --atc-warn-soft: rgb(251 191 36 / 0.16); }
+}
+.atc-opts { display: grid; align-items: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 2px 24px; min-width: 0; margin: 0 0 16px; padding: 10px 14px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.atc-opts legend { padding: 0 6px; font-size: 14px; font-weight: 600; }
+.atc-opt { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
+.atc-opt .check { flex: 0 1 auto; min-width: 0; align-items: flex-start; padding: 4px 0; line-height: 1.45; }
+.atc-opt .check input { flex: 0 0 auto; margin: 1px 0 0; }
+.atc-opt .atc-count { margin-left: 4px; vertical-align: 1px; }
+.atc-opt.is-wide { grid-column: 1 / -1; }
+.atc-opt select { width: auto; max-width: 100%; min-height: 34px; padding: 4px 8px; font-size: 14px; }
+.atc-count { display: inline-block; min-width: 1.9em; padding: 0 7px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 600; line-height: 1.6; text-align: center; font-variant-numeric: tabular-nums; }
+.atc-count.is-found { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.atc-sub { flex-basis: 100%; margin: -4px 0 4px 26px; }
+.atc-cols { align-items: start; }
+.atc-cols .field { margin-bottom: 8px; }
+.atc-view { max-height: 420px; min-height: 180px; margin: 0; overflow: auto; font-family: inherit; font-size: 15px; line-height: 1.7; }
+.atc-view:empty::before { content: attr(data-empty); color: var(--muted); }
+.atc-out { min-height: 180px; max-height: 420px; field-sizing: content; }
+.atc-pill { display: inline-block; margin: 0 1px; padding: 0 4px; border-radius: 4px; font-family: var(--mono); font-size: 11px; font-weight: 700; line-height: 1.5; vertical-align: 1px; white-space: nowrap; cursor: help; }
+.atc-pill.is-inv { background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger); }
+.atc-pill.is-sp { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+.atc-pill.is-kept, .atc-pill.is-off { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.atc-pill.is-tags { white-space: normal; overflow-wrap: anywhere; }
+.atc-ty { padding: 0 1px; border-radius: 3px; background: var(--atc-warn-soft); color: inherit; box-shadow: inset 0 -2px 0 var(--atc-warn); cursor: help; }
+.atc-ws { border-radius: 3px; background: var(--atc-warn-soft); color: var(--atc-warn); font-family: var(--mono); cursor: help; }
+.atc-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 16px; color: var(--muted); font-size: 13px; }
+.atc-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.atc-note { margin: 6px 0 0; }
+</style>
+
+<div class="atc">
+  <div class="field">
+    <label for="atc-input">Text to clean</label>
+    <textarea id="atc-input" rows="8" placeholder="Paste text from ChatGPT, Claude, Gemini or anywhere else…" spellcheck="false"></textarea>
+  </div>
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="atc-example">Load example</button>
+    <button class="btn secondary small" type="button" id="atc-clear">Clear</button>
+  </div>
+
+  <fieldset class="atc-opts">
+    <legend>What to clean</legend>
+    <div class="atc-opt is-wide">
+      <label class="check"><input type="checkbox" id="atc-o-em" checked><span>Replace em dashes (—) <span class="atc-count" id="atc-n-em">0</span></span></label>
+      <select id="atc-em-style" aria-label="Replace em dashes with">
+        <option value="comma" selected>with a comma</option>
+        <option value="spaced">with a hyphen with spaces ( - )</option>
+        <option value="hyphen">with a plain hyphen (-)</option>
+      </select>
+    </div>
+    <div class="atc-opt">
+      <label class="check"><input type="checkbox" id="atc-o-en" checked><span>Replace en dashes and Unicode hyphens with - <span class="atc-count" id="atc-n-en">0</span></span></label>
+    </div>
+    <div class="atc-opt">
+      <label class="check"><input type="checkbox" id="atc-o-quotes" checked><span>Straighten curly quotes and apostrophes <span class="atc-count" id="atc-n-quotes">0</span></span></label>
+    </div>
+    <div class="atc-opt">
+      <label class="check"><input type="checkbox" id="atc-o-ellipsis" checked><span>Replace the ellipsis character (…) with ... <span class="atc-count" id="atc-n-ellipsis">0</span></span></label>
+    </div>
+    <div class="atc-opt">
+      <label class="check"><input type="checkbox" id="atc-o-inv" checked><span>Remove zero-width and invisible characters <span class="atc-count" id="atc-n-inv">0</span></span></label>
+      <span class="hint atc-sub" id="atc-kept" hidden></span>
+    </div>
+    <div class="atc-opt">
+      <label class="check"><input type="checkbox" id="atc-o-spaces" checked><span>Convert non-breaking and unusual spaces <span class="atc-count" id="atc-n-spaces">0</span></span></label>
+    </div>
+    <div class="atc-opt">
+      <label class="check"><input type="checkbox" id="atc-o-collapse" checked><span>Collapse repeated spaces <span class="atc-count" id="atc-n-collapse">0</span></span></label>
+    </div>
+    <div class="atc-opt">
+      <label class="check"><input type="checkbox" id="atc-o-trim" checked><span>Trim trailing whitespace <span class="atc-count" id="atc-n-trim">0</span></span></label>
+    </div>
+  </fieldset>
+
+  <p class="msg ok" id="atc-summary" aria-live="polite"></p>
+  <p class="msg error" id="atc-error" role="alert"></p>
+
+  <div class="cols atc-cols">
+    <div>
+      <div class="field">
+        <span class="label" id="atc-view-label">Where the changes are</span>
+        <div class="output atc-view" id="atc-view" role="region" aria-labelledby="atc-view-label" tabindex="0" data-empty="Paste some text to reveal hidden characters."></div>
+        <p class="hint atc-note" id="atc-view-note" hidden></p>
+      </div>
+      <div class="atc-legend" aria-hidden="true">
+        <span><span class="atc-pill is-inv">ZWSP</span> removed</span>
+        <span><span class="atc-pill is-sp">NBSP</span> becomes a space</span>
+        <span><mark class="atc-ty">—</mark> replaced</span>
+        <span><span class="atc-pill is-kept">ZWJ</span> kept</span>
+      </div>
+    </div>
+    <div>
+      <div class="field">
+        <label for="atc-output">Cleaned text</label>
+        <textarea id="atc-output" class="atc-out" rows="8" readonly spellcheck="false" aria-live="polite"></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn" type="button" id="atc-copy">Copy cleaned text</button>
+        <button class="btn secondary" type="button" id="atc-download">Download .txt</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var input = TT.$('#atc-input');
+  var output = TT.$('#atc-output');
+  var view = TT.$('#atc-view');
+  var viewNote = TT.$('#atc-view-note');
+  var summary = TT.$('#atc-summary');
+  var errorBox = TT.$('#atc-error');
+  var emStyle = TT.$('#atc-em-style');
+  var OPTS = ['em', 'en', 'quotes', 'ellipsis', 'inv', 'spaces', 'collapse', 'trim'];
+  var VIEW_LIMIT = 100000;
+  // Thousands of highlight elements take hundreds of milliseconds to lay out; past this, show plain text.
+  var MARK_LIMIT = 5000;
+
+  var EXAMPLE = 'Here\u2019s the thing\u2014clean text matters more than you\u2019d think.\u00A0When you paste AI output into a CMS, \u201Csmart\u201D punctuation and invisible characters come along for the ride\u2026\n\n' +
+    'Some are harmless; others\u200B break search, word counts or code. A non\u2011breaking hyphen looks like a normal one, and a narrow no\u2011break space hides in \u201C10\u202F%\u201D.  \n' +
+    'Joiners inside emoji like \uD83D\uDC69\u200D\uD83D\uDCBB are kept.\uFEFF';
+
+  var SPACE_NAMES = {
+    0x00A0: ['NBSP', 'No-break space'], 0x1680: ['OGHAM', 'Ogham space mark'], 0x2000: ['NQSP', 'En quad'],
+    0x2001: ['MQSP', 'Em quad'], 0x2002: ['ENSP', 'En space'], 0x2003: ['EMSP', 'Em space'],
+    0x2004: ['3/MSP', 'Three-per-em space'], 0x2005: ['4/MSP', 'Four-per-em space'], 0x2006: ['6/MSP', 'Six-per-em space'],
+    0x2007: ['FSP', 'Figure space'], 0x2008: ['PSP', 'Punctuation space'], 0x2009: ['THSP', 'Thin space'],
+    0x200A: ['HSP', 'Hair space'], 0x202F: ['NNBSP', 'Narrow no-break space'], 0x205F: ['MMSP', 'Medium mathematical space'],
+    0x3000: ['IDSP', 'Ideographic space'], 0x2028: ['LSEP', 'Line separator'], 0x2029: ['PSEP', 'Paragraph separator'],
+    0x0085: ['NEL', 'Next line']
+  };
+  var INV_NAMES = {
+    0x00AD: ['SHY', 'Soft hyphen'], 0x034F: ['CGJ', 'Combining grapheme joiner'], 0x061C: ['ALM', 'Arabic letter mark'],
+    0x115F: ['HCF', 'Hangul choseong filler'], 0x1160: ['HJF', 'Hangul jungseong filler'], 0x180E: ['MVS', 'Mongolian vowel separator'],
+    0x200B: ['ZWSP', 'Zero width space'], 0x200C: ['ZWNJ', 'Zero width non-joiner'], 0x200D: ['ZWJ', 'Zero width joiner'],
+    0x200E: ['LRM', 'Left-to-right mark'], 0x200F: ['RLM', 'Right-to-left mark'], 0x202A: ['LRE', 'Left-to-right embedding'],
+    0x202B: ['RLE', 'Right-to-left embedding'], 0x202C: ['PDF', 'Pop directional formatting'], 0x202D: ['LRO', 'Left-to-right override'],
+    0x202E: ['RLO', 'Right-to-left override'], 0x2060: ['WJ', 'Word joiner'], 0x2061: ['FA', 'Function application'],
+    0x2062: ['ITIMES', 'Invisible times'], 0x2063: ['ISEP', 'Invisible separator'], 0x2064: ['IPLUS', 'Invisible plus'],
+    0x2066: ['LRI', 'Left-to-right isolate'], 0x2067: ['RLI', 'Right-to-left isolate'], 0x2068: ['FSI', 'First strong isolate'],
+    0x2069: ['PDI', 'Pop directional isolate'], 0x3164: ['HF', 'Hangul filler'], 0xFEFF: ['BOM', 'Zero width no-break space (byte order mark)'],
+    0xFFA0: ['HWHF', 'Halfwidth Hangul filler'], 0xFFF9: ['IAA', 'Interlinear annotation anchor'],
+    0xFFFA: ['IAS', 'Interlinear annotation separator'], 0xFFFB: ['IAT', 'Interlinear annotation terminator'],
+    0xE0001: ['LTAG', 'Language tag']
+  };
+
+  var SPACE_CLASS = '[ \\t\\u00A0\\u2000-\\u200A\\u202F\\u205F]*';
+  var RE_INV = /[\p{Cf}\u034F\u115F\u1160\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu;
+  var RE_SPACE = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\u2028\u2029\u0085]/g;
+  var RE_EM = new RegExp('(' + SPACE_CLASS + ')([\\u2014\\u2015\\u2E3A\\u2E3B]+)(' + SPACE_CLASS + ')', 'g');
+  var RE_EN = /[\u2010-\u2013\u2212]/g;
+  var RE_SQUOTE = /[\u2018-\u201B]/g;
+  var RE_DQUOTE = /[\u201C-\u201F]/g;
+  var RE_ELLIPSIS = /\u2026/g;
+  var RE_COLLAPSE = /(?<=\S) {2,}/g;
+  // Whitespace runs are matched whole and the code checks what follows them. A lookahead
+  // such as [ \t]+(?=\n|$) backtracks quadratically on a long run that doesn't end a line.
+  var RE_WS_RUN = /[ \t]+/g;
+  var RE_VIEW = /[ \t]+|[\p{Cf}\u034F\u115F\u1160\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\u2028\u2029\u0085\u2010-\u2015\u2212\u2E3A\u2E3B\u2018-\u201F\u2026]/gu;
+  var RE_PICT = /\p{Extended_Pictographic}/u;
+  var RE_PICT_NEXT = /[\p{Extended_Pictographic}\u{1F9B0}-\u{1F9B3}]/u;
+  var RE_LETTER = /[\p{L}\p{M}]/u;
+  var RE_NOJOIN_SCRIPT = /[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Common}\p{Script=Inherited}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  var RE_NOBASE = /[\s\p{Cc}\p{Cf}]/u;
+  // Characters this page removes or replaces: a variation selector after one has nothing left to modify.
+  var RE_GONE_BASE = /[\u034F\u115F\u1160\u3164\uFFA0\u2010-\u2015\u2018-\u201F\u2026\u2212\u2E3A\u2E3B]/;
+
+  function hex(cp) { return 'U+' + cp.toString(16).toUpperCase().padStart(4, '0'); }
+  function isVS(cp) { return (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF); }
+  function isTag(cp) { return cp >= 0xE0020 && cp <= 0xE007F; }
+  // Format characters that print something visible (prepended number signs, hieroglyph controls).
+  function isVisibleFormat(cp) {
+    return (cp >= 0x0600 && cp <= 0x0605) || cp === 0x06DD || cp === 0x070F || cp === 0x0890 || cp === 0x0891 ||
+      cp === 0x08E2 || cp === 0x110BD || cp === 0x110CD || (cp >= 0x13430 && cp <= 0x1345F);
+  }
+  function prevCp(s, i) {
+    if (i <= 0) return -1;
+    var c = s.charCodeAt(i - 1);
+    if (c >= 0xDC00 && c <= 0xDFFF && i >= 2) {
+      var h = s.charCodeAt(i - 2);
+      if (h >= 0xD800 && h <= 0xDBFF) return s.codePointAt(i - 2);
+    }
+    return c;
+  }
+  function cpLen(cp) { return cp > 0xFFFF ? 2 : 1; }
+  function nextCp(s, i, cp) {
+    var j = i + cpLen(cp);
+    return j < s.length ? s.codePointAt(j) : -1;
+  }
+  function chr(cp) { return cp < 0 ? '' : String.fromCodePoint(cp); }
+
+  function joinsEmoji(s, i) {
+    var j = i, p;
+    do {
+      p = prevCp(s, j);
+      if (p < 0) return false;
+      j -= cpLen(p);
+    } while (p === 0xFE0F || (p >= 0x1F3FB && p <= 0x1F3FF));
+    return RE_PICT.test(chr(p)) && RE_PICT_NEXT.test(chr(nextCp(s, i, 0x200D)));
+  }
+  function needsJoiner(cp) {
+    var c = chr(cp);
+    return cp > 0 && RE_LETTER.test(c) && !RE_NOJOIN_SCRIPT.test(c);
+  }
+  // A flag tag sequence (England, Scotland, Wales and other subdivisions, UTS #51): U+1F3F4, a
+  // lowercase Unicode subdivision code (region + 1-4 letters or digits) in tag characters, then
+  // the cancel tag U+E007F. Anything else hiding behind U+1F3F4, such as smuggled text, is removed.
+  // Every tag in a run gets the same answer, so it is worked out once per run: scanning the
+  // run again for each of its tags took quadratic time on a long run of tag characters.
+  var flagRun = { s: null, start: -1, end: -1, cancel: -1 };
+  function inFlag(s, i) {
+    if (flagRun.s !== s || i < flagRun.start || i >= flagRun.end) {
+      var j = i;
+      while (isTag(prevCp(s, j))) j -= 2;
+      var k = j, spec = '', cancel = -1;
+      while (k < s.length && isTag(s.codePointAt(k))) {
+        var c = s.codePointAt(k);
+        if (c === 0xE007F) { if (cancel < 0) cancel = k; }
+        else if (cancel < 0) spec += String.fromCharCode(c - 0xE0000);
+        k += 2;
+      }
+      var ok = cancel >= 0 && prevCp(s, j) === 0x1F3F4 && /^(?:[a-z]{2}|[0-9]{3})[a-z0-9]{1,4}$/.test(spec);
+      flagRun = { s: s, start: j, end: k, cancel: ok ? cancel : -1 };
+    }
+    return flagRun.cancel >= 0 && i <= flagRun.cancel;
+  }
+  // Old-style Hangul syllables are spelled with conjoining jamo, and the choseong filler U+115F
+  // or jungseong filler U+1160 stands in for a missing part. A filler next to a real jamo is part
+  // of a visible syllable; a lone filler, or two fillers together, shows nothing.
+  function isChoseong(cp) { return (cp >= 0x1100 && cp <= 0x115E) || (cp >= 0xA960 && cp <= 0xA97C); }
+  function isJungseong(cp) { return (cp >= 0x1161 && cp <= 0x11A7) || (cp >= 0xD7B0 && cp <= 0xD7C6); }
+
+  // 'remove', 'keep' (a joiner or tag that real text needs) or null (not a hidden character).
+  function invAction(s, i, cp) {
+    if (isVisibleFormat(cp)) return null;
+    if (cp === 0x115F && isJungseong(nextCp(s, i, cp))) return null;
+    if (cp === 0x1160 && isChoseong(prevCp(s, i))) return null;
+    if (isVS(cp)) {
+      var p = prevCp(s, i);
+      if (p < 0 || isVS(p) || isVS(nextCp(s, i, cp)) || RE_NOBASE.test(chr(p)) || RE_GONE_BASE.test(chr(p))) return 'remove';
+      return null;
+    }
+    if (cp === 0x200D && (joinsEmoji(s, i) || (needsJoiner(prevCp(s, i)) && needsJoiner(nextCp(s, i, cp))))) return 'keep';
+    if (cp === 0x200C && needsJoiner(prevCp(s, i)) && needsJoiner(nextCp(s, i, cp))) return 'keep';
+    if (isTag(cp) && inFlag(s, i)) return 'keep';
+    return 'remove';
+  }
+
+  function emReplacement(s, m, pre, post, off, style) {
+    if (style === 'hyphen') return pre + '-' + post;
+    var before = off > 0 ? s[off - 1] : '';
+    var end = off + m.length;
+    var after = end < s.length ? s[end] : '';
+    var after2 = end + 1 < s.length ? s[end + 1] : '';
+    var atStart = before === '' || before === '\n';
+    var atEnd = after === '' || after === '\n';
+    if (atStart && atEnd) return '-';
+    if (atStart) return pre + (post ? '- ' : '-');
+    if (style === 'spaced') return atEnd ? ' -' : ' - ';
+    if (atEnd) return ',';
+    if (/\d/.test(before) && /\d/.test(after)) return '-';
+    if (/[.,;:!?)\]}]/.test(after)) return '';
+    if (after === '\u201D' || after === '\u2019' || (/["']/.test(after) && !post && (after2 === '' || /[\s.,;:!?)]/.test(after2)))) return ',';
+    if (/[,;:]/.test(before)) return ' ';
+    if (/[(\[{]/.test(before)) return '';
+    return ', ';
+  }
+
+  // True when only spaces and tabs sit between position i and the end of the line.
+  function endsLine(str, i) {
+    var c;
+    while (i < str.length && ((c = str.charCodeAt(i)) === 32 || c === 9)) i++;
+    return i === str.length || str.charCodeAt(i) === 10;
+  }
+  // Repeated spaces that end a line are counted by the trailing whitespace option instead.
+  function countCollapseMid(str) {
+    var n = 0;
+    str.replace(RE_COLLAPSE, function (m, off) { if (!endsLine(str, off + m.length)) n++; return m; });
+    return n;
+  }
+  function countTrim(str) {
+    var n = 0;
+    str.replace(RE_WS_RUN, function (m, off) { if (endsLine(str, off + m.length)) n++; return m; });
+    return n;
+  }
+  function trimLines(str) {
+    return str.replace(RE_WS_RUN, function (m, off) { return endsLine(str, off + m.length) ? '' : m; });
+  }
+
+  function readOptions() {
+    var o = {};
+    OPTS.forEach(function (k) { o[k] = TT.$('#atc-o-' + k).checked; });
+    o.emStyle = emStyle.value;
+    return o;
+  }
+
+  function clean(text, o) {
+    var n = {}, kept = 0, s = text;
+    function count(re, str) { var m = str.match(re); return m ? m.length : 0; }
+
+    n.inv = 0;
+    var src = s;
+    var afterInv = src.replace(RE_INV, function (ch, off) {
+      var a = invAction(src, off, ch.codePointAt(0));
+      if (a === 'remove') { n.inv++; return o.inv ? '' : ch; }
+      if (a === 'keep') kept++;
+      return ch;
+    });
+    s = afterInv;
+
+    n.spaces = count(RE_SPACE, s);
+    if (o.spaces) {
+      s = s.replace(RE_SPACE, function (ch) {
+        if (ch === '\u2029') return '\n\n';
+        if (ch === '\u2028' || ch === '\u0085') return '\n';
+        return ' ';
+      });
+    }
+
+    n.em = 0;
+    var emSrc = s;
+    var emOut = emSrc.replace(RE_EM, function (m, pre, dashes, post, off) {
+      n.em += dashes.length;
+      return emReplacement(emSrc, m, pre, post, off, o.emStyle);
+    });
+    if (o.em) s = emOut;
+
+    n.en = count(RE_EN, s);
+    if (o.en) s = s.replace(RE_EN, '-');
+
+    n.quotes = count(RE_SQUOTE, s) + count(RE_DQUOTE, s);
+    if (o.quotes) s = s.replace(RE_SQUOTE, "'").replace(RE_DQUOTE, '"');
+
+    n.ellipsis = count(RE_ELLIPSIS, s);
+    if (o.ellipsis) s = s.replace(RE_ELLIPSIS, '...');
+
+    n.collapse = o.trim ? countCollapseMid(s) : count(RE_COLLAPSE, s);
+    if (o.collapse) s = s.replace(RE_COLLAPSE, ' ');
+
+    n.trim = countTrim(s);
+    if (o.trim) s = trimLines(s);
+
+    return { text: s, counts: n, kept: kept };
+  }
+
+  // ----- Highlighted view of the original text -----
+  function decodeTags(cps) {
+    return cps.map(function (cp) {
+      var c = cp - 0xE0000;
+      return c >= 0x20 && c < 0x7F ? String.fromCharCode(c) : '';
+    }).join('');
+  }
+  function decodeSelectors(cps) {
+    try {
+      var bytes = new Uint8Array(cps.map(function (cp) { return cp >= 0xE0100 ? cp - 0xE0100 + 16 : cp - 0xFE00; }));
+      var t = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      return /^[^\p{Cc}\p{Cf}]+$/u.test(t) ? t : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function pill(kind, label, title) {
+    var el = document.createElement('span');
+    el.className = 'atc-pill ' + kind;
+    el.textContent = label;
+    el.title = title;
+    return el;
+  }
+
+  function renderView(text, o) {
+    var frag = document.createDocumentFragment();
+    var s = text.length > VIEW_LIMIT ? text.slice(0, VIEW_LIMIT) : text;
+    var last = 0, m, group = null, capped = false;
+    RE_VIEW.lastIndex = 0;
+
+    function plain(upto) {
+      if (upto > last) frag.appendChild(document.createTextNode(s.slice(last, upto)));
+    }
+    function flushGroup() {
+      if (!group) return;
+      var el;
+      if (group.type === 'tag') {
+        var hidden = decodeTags(group.cps);
+        el = pill('is-inv is-tags', hidden ? 'TAGS \u201C' + hidden + '\u201D' : 'TAG\u00D7' + group.cps.length,
+          group.cps.length + ' tag character' + (group.cps.length > 1 ? 's' : '') + (hidden ? ' spelling \u201C' + hidden + '\u201D' : '') + (o.inv ? ': removed' : ': found'));
+      } else {
+        var bytes = group.cps.length > 1 ? decodeSelectors(group.cps) : '';
+        el = pill('is-inv is-tags', 'VS\u00D7' + group.cps.length + (bytes ? ' \u201C' + bytes + '\u201D' : ''),
+          group.cps.length + ' variation selector' + (group.cps.length > 1 ? 's' : '') + ' with no character to modify' + (bytes ? ', hiding the text \u201C' + bytes + '\u201D' : '') + (o.inv ? ': removed' : ': found'));
+      }
+      if (!o.inv) el.classList.add('is-off');
+      frag.appendChild(el);
+      group = null;
+    }
+
+    while ((m = RE_VIEW.exec(s))) {
+      // Each highlight adds about two nodes: the text before it and the highlight itself.
+      if (frag.childNodes.length >= MARK_LIMIT * 2) { capped = true; break; }
+      var tok = m[0], idx = m.index, cp = tok.codePointAt(0);
+      if (group && (idx !== group.end || !(group.type === 'tag' ? isTag(cp) : isVS(cp)))) flushGroup();
+
+      if (cp === 0x20 || cp === 0x09) {
+        // Runs of spaces: trailing whitespace, or repeated spaces between words.
+        var end = idx + tok.length;
+        var trailing = end === s.length || s.charAt(end) === '\n';
+        if (trailing && o.trim) {
+          plain(idx);
+          var t = document.createElement('span');
+          t.className = 'atc-ws';
+          t.title = 'Trailing whitespace: removed';
+          t.textContent = tok.replace(/ /g, '\u00B7').replace(/\t/g, '\u2192');
+          frag.appendChild(t);
+          last = idx + tok.length;
+        } else if (!trailing && o.collapse && idx > 0 && /\S/.test(s.charAt(idx - 1))) {
+          // Only spaces right after a word are collapsed, not tabs or what follows them.
+          var lead = tok.length - tok.replace(/^ +/, '').length;
+          if (lead > 1) {
+            plain(idx + 1);
+            var c = document.createElement('span');
+            c.className = 'atc-ws';
+            c.title = (lead - 1) + ' extra space' + (lead > 2 ? 's' : '') + ': removed';
+            c.textContent = '\u00B7'.repeat(lead - 1);
+            frag.appendChild(c);
+            last = idx + lead;
+          }
+        }
+        continue;
+      }
+
+      var len = tok.length;
+      if (SPACE_NAMES[cp]) {
+        plain(idx);
+        var sp = pill('is-sp', SPACE_NAMES[cp][0], hex(cp) + ' ' + SPACE_NAMES[cp][1] + (o.spaces ? ': becomes a ' + (cp === 0x2028 || cp === 0x2029 || cp === 0x85 ? 'line break' : 'space') : ': kept'));
+        if (!o.spaces) sp.classList.add('is-off');
+        frag.appendChild(sp);
+        if (cp === 0x2028 || cp === 0x2029 || cp === 0x85) frag.appendChild(document.createTextNode('\n'));
+        last = idx + len;
+        continue;
+      }
+
+      var ty = null;
+      if (cp === 0x2014 || cp === 0x2015 || cp === 0x2E3A || cp === 0x2E3B) ty = o.em ? 'Em dash (' + hex(cp) + '): replaced' : null;
+      else if ((cp >= 0x2010 && cp <= 0x2013) || cp === 0x2212) ty = o.en ? hex(cp) + ' ' + ({ 0x2010: 'Hyphen', 0x2011: 'Non-breaking hyphen', 0x2012: 'Figure dash', 0x2013: 'En dash', 0x2212: 'Minus sign' })[cp] + ': becomes -' : null;
+      else if (cp >= 0x2018 && cp <= 0x201F) ty = o.quotes ? hex(cp) + ' curly quote: becomes ' + (cp <= 0x201B ? "'" : '"') : null;
+      else if (cp === 0x2026) ty = o.ellipsis ? 'U+2026 Ellipsis: becomes ...' : null;
+      if ((cp >= 0x2010 && cp <= 0x2015) || (cp >= 0x2018 && cp <= 0x201F) || cp === 0x2026 || cp === 0x2212 || cp === 0x2E3A || cp === 0x2E3B) {
+        if (ty) {
+          plain(idx);
+          var mk = document.createElement('mark');
+          mk.className = 'atc-ty';
+          mk.title = ty;
+          mk.textContent = tok;
+          frag.appendChild(mk);
+          last = idx + len;
+        }
+        continue;
+      }
+
+      var action = invAction(s, idx, cp);
+      // Tags inside a flag emoji stay invisible so the flag still renders.
+      if (!action || (action === 'keep' && isTag(cp))) continue;
+      plain(idx);
+      last = idx + len;
+      if (action === 'remove' && (isTag(cp) || isVS(cp))) {
+        var type = isTag(cp) ? 'tag' : 'vs';
+        if (!group) group = { type: type, cps: [] };
+        group.cps.push(cp);
+        group.end = idx + len;
+        continue;
+      }
+      var name = INV_NAMES[cp] || (isTag(cp) ? ['TAG', 'Tag character'] : isVS(cp) ? ['VS', 'Variation selector'] : [hex(cp), 'Format character']);
+      var el;
+      if (action === 'keep') {
+        el = pill('is-kept', name[0], hex(cp) + ' ' + name[1] + ': kept, because this ' + (isTag(cp) ? 'flag emoji needs it' : 'emoji or word needs it'));
+      } else {
+        el = pill('is-inv', name[0], hex(cp) + ' ' + name[1] + (o.inv ? ': removed' : ': found'));
+        if (!o.inv) el.classList.add('is-off');
+      }
+      frag.appendChild(el);
+    }
+    flushGroup();
+    plain(s.length);
+    view.replaceChildren(frag);
+    var note = capped ? 'Highlighting about the first ' + MARK_LIMIT.toLocaleString() + ' changes; the rest of the preview is plain text.'
+      : text.length > VIEW_LIMIT ? 'Showing the first ' + VIEW_LIMIT.toLocaleString() + ' characters.' : '';
+    viewNote.hidden = !note;
+    viewNote.textContent = note ? note + ' The cleaned text covers all of it.' : '';
+  }
+
+  function plural(n, one, many) { return n.toLocaleString() + ' ' + (n === 1 ? one : many); }
+
+  function update() {
+    try {
+      errorBox.textContent = '';
+      var text = input.value;
+      var o = readOptions();
+      var r = clean(text, o);
+      output.value = r.text;
+      OPTS.forEach(function (k) {
+        var el = TT.$('#atc-n-' + k);
+        var n = r.counts[k] || 0;
+        el.textContent = n.toLocaleString();
+        el.classList.toggle('is-found', n > 0);
+        el.title = n + ' found';
+      });
+      var keptEl = TT.$('#atc-kept');
+      keptEl.hidden = !r.kept;
+      keptEl.textContent = r.kept ? plural(r.kept, 'joiner or tag', 'joiners or tags') + ' kept inside emoji or words that need ' + (r.kept === 1 ? 'it' : 'them') + '.' : '';
+      emStyle.disabled = !o.em;
+
+      if (!text) {
+        summary.textContent = '';
+        view.replaceChildren();
+        viewNote.hidden = true;
+        return;
+      }
+      var changed = OPTS.reduce(function (sum, k) { return sum + (o[k] ? r.counts[k] || 0 : 0); }, 0);
+      var before = Array.from(text).length, after = Array.from(r.text).length;
+      summary.textContent = changed
+        ? 'Cleaned ' + plural(changed, 'item', 'items') + '. Length: ' + before.toLocaleString() + ' \u2192 ' + after.toLocaleString() + ' characters.'
+        : 'Nothing to clean with the selected options. Length: ' + before.toLocaleString() + ' characters.';
+      renderView(text, o);
+    } catch (e) {
+      errorBox.textContent = 'Something went wrong while cleaning this text: ' + (e && e.message ? e.message : e);
+    }
+  }
+
+  var debounced = TT.debounce(update, 150);
+  input.addEventListener('input', function () {
+    if (input.value.length > 50000) debounced(); else update();
+  });
+  OPTS.forEach(function (k) { TT.$('#atc-o-' + k).addEventListener('change', update); });
+  emStyle.addEventListener('change', update);
+
+  TT.$('#atc-example').addEventListener('click', function () {
+    input.value = EXAMPLE;
+    update();
+  });
+  TT.$('#atc-clear').addEventListener('click', function () {
+    input.value = '';
+    update();
+    input.focus();
+  });
+  TT.$('#atc-copy').addEventListener('click', function (e) {
+    TT.copy(output.value, e.currentTarget);
+  });
+  TT.$('#atc-download').addEventListener('click', function () {
+    if (!output.value) {
+      errorBox.textContent = 'There is no cleaned text to download yet. Paste some text first.';
+      return;
+    }
+    TT.download('cleaned-text.txt', output.value, 'text/plain;charset=utf-8');
+  });
+
+  update();
+})();
+</script>

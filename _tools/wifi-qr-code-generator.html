@@ -1,0 +1,558 @@
+---
+title: WiFi QR Code Generator
+description: Make a QR code that joins your Wi-Fi in one scan. Works with WPA/WPA2/WPA3, WEP, open and hidden networks. Download PNG or SVG, or print a card.
+category: Generators
+keywords: [wifi qr code generator, wifi qr code, qr code for wifi password, share wifi password, wifi password qr code, guest wifi qr code card, printable wifi qr code]
+howto: |
+  ## How to make a Wi-Fi QR code
+
+  1. Type the **network name** (SSID) exactly as your phone lists it. Capitals,
+     spaces and punctuation all matter.
+  2. Type the **password** and pick the **security** type. Almost every home
+     and office router uses WPA2 or WPA3, so leave it on WPA/WPA2/WPA3 unless
+     your router settings say WEP or the network has no password.
+  3. Tick **Hidden network** only if the network does not appear in your
+     phone's Wi-Fi list.
+  4. Scan the preview with your phone before you download or print it. The
+     Camera app on iPhone and on most Android phones offers to join the
+     network when it sees the code.
+
+  ## What is inside the code
+
+  The QR code holds a short line of text in the format first published by the
+  ZXing barcode project, which phone cameras recognise:
+  `WIFI:T:WPA;S:Home Network;P:secret pass;;`. The box under the preview shows
+  the exact text for your network.
+
+  | Field | Meaning | Values |
+  |---|---|---|
+  | `T:` | Security type | `WPA` (covers WPA, WPA2 and WPA3 Personal), `WEP`, or `nopass` |
+  | `S:` | Network name | Up to 32 bytes; most accented letters take 2, an emoji 4 |
+  | `P:` | Password | Left out for open networks |
+  | `H:` | Hidden network | `true` when the network does not broadcast its name |
+
+  Because `;` ends a field and `:` separates a field's name from its value,
+  the characters `\`, `;`, `,`, `:` and `"` inside a name or password are
+  escaped with a backslash. A password of `pa;ss` is written `pa\;ss`. The
+  generator does this for you, and the scanner removes the backslashes again.
+  Text is encoded as UTF-8, so names with accents or emoji work.
+
+  One oddity from the ZXing format: its original Android scanner app read a
+  network name made only of hex digits (such as `CAFE1234`) as hex-encoded
+  bytes, and the format suggests wrapping such a name in double quotes. The
+  **Quote a hex-only network name** option does that. Leave it off unless a
+  scanner gets the name wrong.
+
+  ## Error correction and size
+
+  QR codes store extra recovery data, so a code still scans when part of it is
+  scratched, dirty or covered.
+
+  | Level | Can recover about | Good for |
+  |---|---|---|
+  | L | 7% of the code | Clean screens, smallest pattern |
+  | M | 15% | Most uses (default) |
+  | Q | 25% | Printed cards that get handled |
+  | H | 30% | Outdoor signs, laminated or worn prints |
+
+  Higher levels make the pattern denser, so print it larger. Keep the white
+  border (the quiet zone, four modules wide) when you crop or place the image,
+  because scanners need it to find the code. Download the SVG for print
+  layouts: it stays sharp at any size.
+
+  ## Tips
+
+  - Put a guest network on the card rather than your main network, so
+    visitors never see the password you use for your own devices.
+  - The password is stored in the code itself. Anyone who can photograph the
+    card can join, and if you change the password the old card stops working.
+  - WEP keys are either 5 or 13 characters, or 10 or 26 hex digits. WEP is
+    easy to break, so switch the router to WPA2 or WPA3 if you can.
+faq:
+  - q: Is my Wi-Fi password sent anywhere?
+    a: No. The QR code is built by JavaScript in your browser. The network name and password are never uploaded, logged or saved, and they disappear when you close the tab.
+  - q: Which phones can scan a Wi-Fi QR code?
+    a: The built-in Camera app on iPhone (iOS 11 and later) recognises Wi-Fi codes and offers to join. On Android, the Camera app on most recent phones or Google Lens does the same, and Android 10 and later also has a scanner in the Wi-Fi settings (the QR icon next to Add network).
+  - q: My network uses WPA3. Which security option should I choose?
+    a: Choose WPA/WPA2/WPA3. The code's WPA type covers every WPA generation with a password, and the phone and router agree on the strongest one they both support when it joins.
+  - q: Will the QR code still work if I change my Wi-Fi password?
+    a: No. The code contains the password itself, not a link to it, so it cannot update. Make a new code after changing the password or the network name.
+  - q: Can I add a logo in the middle?
+    a: A logo covers part of the pattern, so only do it with error correction H, keep the logo under about a fifth of the code's width, and test the result on several phones before printing.
+---
+<style>
+.wq-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 330px); grid-template-rows: auto 1fr; grid-template-areas: "form preview" "text preview"; gap: 0 28px; align-items: start; }
+.wq-form { grid-area: form; min-width: 0; }
+.wq-text { grid-area: text; min-width: 0; }
+.wq-form .row { margin-bottom: 12px; }
+.wq-preview { grid-area: preview; display: grid; gap: 12px; min-width: 0; margin-bottom: 16px; }
+.wq-qr { display: grid; place-items: center; aspect-ratio: 1; width: 100%; max-width: 330px; margin: 0 auto; background: #fff; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.wq-qr svg { display: block; width: 100%; height: auto; }
+.wq-qr.wq-empty { background: var(--surface-2); color: var(--muted); font-size: 14px; text-align: center; padding: 20px; }
+.wq-meta { margin: 0; color: var(--muted); font-size: 13px; text-align: center; }
+.wq-preview .actions { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 0; }
+.wq-preview .actions .btn { padding: 0 10px; }
+.wq-preview .row { margin-bottom: 0; }
+.wq-preview .row > .field { flex: 1 1 120px; }
+.wq-pass-row { display: flex; gap: 8px; }
+.wq-pass-row input { flex: 1 1 auto; min-width: 0; }
+.wq-warn { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
+.wq-warn ul { margin: 0; padding-left: 18px; }
+.wq-adv { margin: 0 0 16px; }
+.wq-adv summary { cursor: pointer; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.wq-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
+.wq-section h2 { margin: 0 0 12px; font-size: 1.1rem; }
+.wq-card-wrap { display: grid; grid-template-columns: minmax(0, 520px) minmax(0, 1fr); gap: 8px 28px; align-items: start; }
+.wq-card-wrap .row { margin-bottom: 8px; }
+.wq-card-controls .hint { margin: 0; }
+.wq-text .field { margin-bottom: 0; }
+.wq-text .output { margin-bottom: 10px; }
+.wq-card { display: flex; align-items: center; gap: 20px; max-width: 520px; margin: 0 0 16px; padding: 20px; background: var(--surface-2); border: 2px solid var(--border); border-radius: 14px; color: var(--text); }
+.wq-card-qr { flex: 0 0 150px; width: 150px; background: #fff; border-radius: 8px; overflow: hidden; }
+.wq-card-qr svg { display: block; width: 100%; height: auto; }
+.wq-card-body { min-width: 0; }
+.wq-card-title { margin: 0 0 10px; font-size: 1.5rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.wq-card-info { margin: 0 0 10px; }
+.wq-card-info dt { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.wq-card-info dd { margin: 0 0 8px; font-size: 1.05rem; font-weight: 600; overflow-wrap: anywhere; }
+.wq-card-info dd.wq-mono { font-family: var(--mono); }
+.wq-card-foot { margin: 0; color: var(--muted); font-size: 13px; }
+.wq-print-root { display: none; }
+@media (max-width: 760px) {
+  .wq-card-wrap { grid-template-columns: minmax(0, 1fr); }
+  .wq-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "form" "preview" "text"; }
+  .wq-preview { margin-bottom: 20px; }
+}
+@media (max-width: 480px) {
+  .wq-card { flex-direction: column; align-items: stretch; text-align: center; }
+  .wq-card-qr { flex-basis: auto; width: 180px; margin: 0 auto; }
+}
+@media print {
+  html.wq-can-print body > :not(.wq-print-root) { display: none !important; }
+  html.wq-can-print .wq-print-root { display: block !important; padding-top: 10mm; }
+  .wq-print-root .wq-card { flex-direction: column; align-items: center; width: 110mm; max-width: none; margin: 0 auto; padding: 10mm; text-align: center; background: #fff; color: #000; border: 0.6mm solid #000; border-radius: 5mm; }
+  .wq-print-root .wq-card-body { display: contents; }
+  .wq-print-root .wq-card-title { order: 1; margin-bottom: 1mm; }
+  .wq-print-root .wq-card-qr { order: 2; flex-basis: auto; width: 70mm; margin: 0 auto 1mm; }
+  .wq-print-root .wq-card-info { order: 3; }
+  .wq-print-root .wq-card-foot { order: 4; }
+  .wq-print-root .wq-card-title { font-size: 22pt; }
+  .wq-print-root .wq-card-info dt, .wq-print-root .wq-card-foot { color: #444; }
+  .wq-print-root .wq-card-info dd { font-size: 15pt; }
+}
+</style>
+
+<div class="wq-grid">
+  <div class="wq-form">
+    <div class="field">
+      <label for="wq-ssid">Network name (SSID)</label>
+      <input type="text" id="wq-ssid" value="Home Network" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="64">
+    </div>
+    <div class="field">
+      <label for="wq-pass">Password</label>
+      <div class="wq-pass-row">
+        <input type="text" id="wq-pass" class="mono" value="correct horse battery staple" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="128">
+        <button class="btn secondary small" type="button" id="wq-pass-toggle" aria-controls="wq-pass" aria-label="Hide password">Hide</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="wq-sec">Security</label>
+        <select id="wq-sec">
+          <option value="WPA" selected>WPA/WPA2/WPA3 (most networks)</option>
+          <option value="WEP">WEP (old routers)</option>
+          <option value="nopass">None (open network)</option>
+        </select>
+      </div>
+    </div>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="wq-hidden"> Hidden network</label>
+    </div>
+    <details class="wq-adv">
+      <summary>Advanced</summary>
+      <label class="check"><input type="checkbox" id="wq-quote"> Quote a hex-only network name</label>
+      <p class="hint">For names made only of 0-9 and A-F, such as CAFE1234. Only needed if a scanner reads the name wrongly.</p>
+    </details>
+    <p class="hint">The example values are placeholders. Replace them with your own network's details.</p>
+  </div>
+
+  <div class="wq-preview">
+    <div class="wq-qr" id="wq-qr"></div>
+    <!-- The details line, the warnings and the payload below are redrawn on every keystroke,
+         so they are not live regions; a one-line summary is announced here once typing pauses. -->
+    <p class="wq-meta" id="wq-meta"></p>
+    <p class="visually-hidden" id="wq-status" role="status"></p>
+    <div class="row">
+      <div class="field">
+        <label for="wq-ecl">Error correction</label>
+        <select id="wq-ecl">
+          <option value="L">L (7%)</option>
+          <option value="M" selected>M (15%)</option>
+          <option value="Q">Q (25%)</option>
+          <option value="H">H (30%)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="wq-size">PNG size</label>
+        <select id="wq-size">
+          <option value="256">256 px</option>
+          <option value="512" selected>512 px</option>
+          <option value="1024">1024 px</option>
+          <option value="2048">2048 px</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" type="button" id="wq-png">Download PNG</button>
+      <button class="btn secondary" type="button" id="wq-svg">Download SVG</button>
+    </div>
+  </div>
+
+  <div class="wq-text">
+    <div class="msg error" id="wq-error" aria-live="polite"></div>
+    <div class="msg wq-warn" id="wq-warn"></div>
+    <div class="field">
+      <span class="label" id="wq-payload-label">Text inside the QR code</span>
+      <div class="output" id="wq-payload" role="group" aria-labelledby="wq-payload-label"></div>
+    </div>
+    <div class="actions">
+      <button class="btn secondary small" type="button" data-copy-target="#wq-payload">Copy text</button>
+    </div>
+  </div>
+</div>
+
+<section class="wq-section" aria-labelledby="wq-card-h">
+  <h2 id="wq-card-h">Printable card</h2>
+  <div class="wq-card-wrap">
+    <div class="wq-card" id="wq-card">
+      <div class="wq-card-qr" id="wq-card-qr"></div>
+      <div class="wq-card-body">
+        <p class="wq-card-title" id="wq-card-title">Wi-Fi</p>
+        <dl class="wq-card-info">
+          <dt>Network</dt>
+          <dd id="wq-card-ssid"></dd>
+          <dt id="wq-card-pass-dt">Password</dt>
+          <dd class="wq-mono" id="wq-card-pass"></dd>
+        </dl>
+        <p class="wq-card-foot">Point your phone's camera at the code to join.</p>
+      </div>
+    </div>
+    <div class="wq-card-controls">
+      <div class="row">
+        <div class="field">
+          <label for="wq-card-heading">Card heading</label>
+          <input type="text" id="wq-card-heading" value="Wi-Fi" maxlength="40">
+        </div>
+      </div>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="wq-card-showpass" checked> Show the password on the card</label>
+      </div>
+      <div class="actions">
+        <button class="btn" type="button" id="wq-print">Print card</button>
+      </div>
+      <p class="hint">Printing shows only the card. Choose "Save as PDF" in the print dialog to keep a copy.</p>
+    </div>
+  </div>
+</section>
+
+<script src="{{ '/assets/vendor/qrcode-generator/qrcode.min.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var ssidEl = $('#wq-ssid'), passEl = $('#wq-pass'), secEl = $('#wq-sec'), hiddenEl = $('#wq-hidden');
+  var quoteEl = $('#wq-quote'), eclEl = $('#wq-ecl'), sizeEl = $('#wq-size');
+  var qrBox = $('#wq-qr'), metaEl = $('#wq-meta'), payloadEl = $('#wq-payload');
+  var errEl = $('#wq-error'), warnEl = $('#wq-warn');
+  var pngBtn = $('#wq-png'), svgBtn = $('#wq-svg'), printBtn = $('#wq-print');
+  var toggleBtn = $('#wq-pass-toggle');
+  var MARGIN = 4; // quiet zone in modules, as required by ISO/IEC 18004
+  var ECL_PCT = { L: 7, M: 15, Q: 25, H: 30 };
+  var enc = new TextEncoder();
+  var current = null; // { qr, payload, ssid }
+
+  var lib = typeof window.qrcode === 'function' ? window.qrcode : null;
+  if (lib && lib.stringToBytesFuncs && lib.stringToBytesFuncs['UTF-8']) {
+    lib.stringToBytes = lib.stringToBytesFuncs['UTF-8'];
+  }
+
+  // Backslash-escape the characters that have meaning in the WIFI: format.
+  function escapeValue(s) {
+    return s.replace(/[\\;,:"]/g, '\\$&');
+  }
+
+  function buildPayload(o) {
+    var ssid = escapeValue(o.ssid);
+    if (o.quoteHex && /^[0-9A-Fa-f]+$/.test(o.ssid)) ssid = '"' + ssid + '"';
+    var p = 'WIFI:T:' + o.security + ';S:' + ssid + ';';
+    if (o.security !== 'nopass') p += 'P:' + escapeValue(o.password) + ';';
+    if (o.hidden) p += 'H:true;';
+    return p + ';';
+  }
+
+  function bytes(s) { return enc.encode(s).length; }
+
+  // A lone UTF-16 surrogate (from a bad paste) would be encoded differently by the QR
+  // library and by TextEncoder, so replace it with U+FFFD as TextEncoder does.
+  function wellFormed(s) {
+    if (typeof s.toWellFormed === 'function') return s.toWellFormed();
+    var out = '';
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c >= 0xD800 && c <= 0xDBFF) {
+        var d = s.charCodeAt(i + 1);
+        if (d >= 0xDC00 && d <= 0xDFFF) { out += s.charAt(i) + s.charAt(i + 1); i++; continue; }
+        out += '\uFFFD';
+      } else if (c >= 0xDC00 && c <= 0xDFFF) out += '\uFFFD';
+      else out += s.charAt(i);
+    }
+    return out;
+  }
+
+  function checkInput(o) {
+    var errors = [], warnings = [];
+    if (!o.ssid) errors.push('Enter the network name (SSID).');
+    else {
+      var n = bytes(o.ssid);
+      if (n > 32) warnings.push('Wi-Fi network names are at most 32 bytes, and this one is ' + n + ' bytes. Check it matches the name your phone shows.');
+      if (o.ssid !== o.ssid.trim()) warnings.push('The network name starts or ends with a space. It is kept in the code, so remove it if it was a typo.');
+    }
+    if (o.security === 'WPA') {
+      if (!o.password) errors.push('Enter the Wi-Fi password, or choose None for an open network.');
+      else if (!/^[0-9A-Fa-f]{64}$/.test(o.password) && (o.password.length < 8 || o.password.length > 63)) {
+        warnings.push('WPA passwords are 8 to 63 characters long (or exactly 64 hex digits), and this one is ' + o.password.length + '. Check it for typos.');
+      }
+    } else if (o.security === 'WEP') {
+      if (!o.password) errors.push('Enter the WEP key, or choose None for an open network.');
+      else if (!(/^[0-9A-Fa-f]{10}$|^[0-9A-Fa-f]{26}$/.test(o.password) || o.password.length === 5 || o.password.length === 13)) {
+        warnings.push('WEP keys are 5 or 13 characters, or 10 or 26 hex digits. This one is ' + o.password.length + ' characters.');
+      }
+    }
+    if (o.security !== 'nopass' && o.password && o.password !== o.password.trim()) {
+      warnings.push('The password starts or ends with a space. It is kept in the code, so remove it if it was a typo.');
+    }
+    // Escaped, a trailing backslash becomes \\; and Android's older parser does not split there.
+    if (/\\$/.test(o.ssid) || (o.security !== 'nopass' && /\\$/.test(o.password))) {
+      warnings.push('The ' + (/\\$/.test(o.ssid) ? 'network name' : 'password') + ' ends with a backslash (\\). Some Android versions misread a value that ends with one, so test the code on an Android phone before printing it.');
+    }
+    return { errors: errors, warnings: warnings };
+  }
+
+  function makeQr(text, ecl) {
+    var qr = lib(0, ecl);
+    qr.addData(text, 'Byte');
+    qr.make();
+    return qr;
+  }
+
+  function modulePath(qr) {
+    var n = qr.getModuleCount(), d = '';
+    for (var r = 0; r < n; r++) {
+      var c = 0;
+      while (c < n) {
+        if (qr.isDark(r, c)) {
+          var s = c;
+          while (c < n && qr.isDark(r, c)) c++;
+          d += 'M' + (s + MARGIN) + ' ' + (r + MARGIN) + 'h' + (c - s) + 'v1h-' + (c - s) + 'z';
+        } else c++;
+      }
+    }
+    return d;
+  }
+
+  function svgMarkup(qr, px) {
+    var total = qr.getModuleCount() + 2 * MARGIN;
+    var size = px ? ' width="' + px + '" height="' + px + '"' : '';
+    return '<svg xmlns="http://www.w3.org/2000/svg"' + size + ' viewBox="0 0 ' + total + ' ' + total +
+      '" shape-rendering="crispEdges"><rect width="' + total + '" height="' + total + '" fill="#ffffff"/>' +
+      '<path fill="#000000" d="' + modulePath(qr) + '"/></svg>';
+  }
+
+  function placeSvg(box, markup, label) {
+    box.innerHTML = markup;
+    var svg = box.firstElementChild;
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+  }
+
+  function pngBlob(qr, px) {
+    var n = qr.getModuleCount(), total = n + 2 * MARGIN, s = px / total;
+    var canvas = document.createElement('canvas');
+    canvas.width = canvas.height = px;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, px, px);
+    ctx.fillStyle = '#000000';
+    // Round module edges to whole pixels so the image stays sharp at any size.
+    for (var r = 0; r < n; r++) {
+      var y0 = Math.round((r + MARGIN) * s), y1 = Math.round((r + MARGIN + 1) * s);
+      for (var c = 0; c < n; c++) {
+        if (!qr.isDark(r, c)) continue;
+        var x0 = Math.round((c + MARGIN) * s), x1 = Math.round((c + MARGIN + 1) * s);
+        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      }
+    }
+    return new Promise(function (resolve) { canvas.toBlob(resolve, 'image/png'); });
+  }
+
+  function fileBase(ssid) {
+    var slug = ssid.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).toLowerCase();
+    return 'wifi-qr' + (slug ? '-' + slug : '');
+  }
+
+  // Messages are live regions: rewrite one only when its text changes, so it is not
+  // announced again on every keystroke.
+  function setMsg(el, text) {
+    if (el.textContent !== text) el.textContent = text;
+  }
+
+  function setList(el, items) {
+    if (el.textContent === items.join('') && (items.length > 1) === !!el.querySelector('ul')) return;
+    el.textContent = '';
+    if (!items.length) return;
+    if (items.length === 1) { el.textContent = items[0]; return; }
+    var ul = document.createElement('ul');
+    items.forEach(function (t) { var li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+    el.appendChild(ul);
+  }
+
+  // One short summary for screen readers (with any warnings), once typing pauses, so
+  // a passing warning such as a trailing space mid-word is not read out. Nothing on load.
+  var statusEl = $('#wq-status'), statusTimer = null, loaded = false, warnText = '';
+  function announce(text) {
+    clearTimeout(statusTimer);
+    if (!loaded) return;
+    statusTimer = setTimeout(function () { setMsg(statusEl, text); }, 700);
+  }
+
+  function showEmpty(text) {
+    qrBox.classList.add('wq-empty');
+    qrBox.textContent = text;
+    $('#wq-card-qr').textContent = '';
+    metaEl.textContent = '';
+    // Errors are announced by #wq-error straight away; warnings with the summary.
+    announce(warnText);
+  }
+
+  function updateCard(o) {
+    $('#wq-card-title').textContent = $('#wq-card-heading').value.trim() || 'Wi-Fi';
+    $('#wq-card-ssid').textContent = o.ssid;
+    var showPass = $('#wq-card-showpass').checked && o.security !== 'nopass';
+    $('#wq-card-pass-dt').hidden = !showPass;
+    $('#wq-card-pass').hidden = !showPass;
+    $('#wq-card-pass').textContent = showPass ? o.password : '';
+  }
+
+  function readOptions() {
+    return {
+      ssid: wellFormed(ssidEl.value),
+      password: wellFormed(passEl.value),
+      security: secEl.value,
+      hidden: hiddenEl.checked,
+      quoteHex: quoteEl.checked
+    };
+  }
+
+  function update() {
+    refresh();
+    syncPrint();
+  }
+
+  function refresh() {
+    var o = readOptions();
+    passEl.disabled = o.security === 'nopass';
+    toggleBtn.disabled = passEl.disabled;
+    var check = checkInput(o);
+    setList(warnEl, check.warnings);
+    warnText = check.warnings.join(' ');
+    updateCard(o);
+    current = null;
+    pngBtn.disabled = svgBtn.disabled = printBtn.disabled = true;
+
+    if (!lib) {
+      setMsg(errEl, 'The QR code library did not load. Reload the page and try again.');
+      payloadEl.textContent = '';
+      return showEmpty('QR code unavailable');
+    }
+    if (check.errors.length) {
+      setList(errEl, check.errors);
+      payloadEl.textContent = '';
+      return showEmpty('Fill in the details to see your QR code');
+    }
+    var payload = buildPayload(o);
+    payloadEl.textContent = payload;
+    var qr;
+    try {
+      qr = makeQr(payload, eclEl.value);
+    } catch (e) {
+      setMsg(errEl, 'This is too much text for a QR code. Shorten the network name or password.');
+      return showEmpty('QR code unavailable');
+    }
+    setMsg(errEl, '');
+    current = { qr: qr, payload: payload, ssid: o.ssid };
+    var n = qr.getModuleCount();
+    var version = (n - 17) / 4;
+    qrBox.classList.remove('wq-empty');
+    var markup = svgMarkup(qr);
+    placeSvg(qrBox, markup, 'QR code to join the Wi-Fi network ' + o.ssid);
+    qrBox.firstElementChild.setAttribute('data-modules', String(n));
+    placeSvg($('#wq-card-qr'), markup, 'QR code to join the Wi-Fi network ' + o.ssid);
+    metaEl.textContent = 'Version ' + version + ', ' + n + ' × ' + n + ' modules, error correction ' +
+      eclEl.value + ' (' + ECL_PCT[eclEl.value] + '%), ' + bytes(payload) + ' bytes';
+    announce('QR code updated: version ' + version + ', ' + bytes(payload) + ' bytes.' + (warnText ? ' ' + warnText : ''));
+    pngBtn.disabled = svgBtn.disabled = printBtn.disabled = false;
+  }
+
+  // A copy of the card sits directly under <body> so print CSS can hide everything else.
+  // Without a valid code the page prints normally.
+  var printRoot = document.createElement('div');
+  printRoot.className = 'wq-print-root';
+  printRoot.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(printRoot);
+  function syncPrint() {
+    printRoot.innerHTML = '';
+    document.documentElement.classList.toggle('wq-can-print', !!current);
+    if (!current) return;
+    var clone = $('#wq-card').cloneNode(true);
+    clone.removeAttribute('id');
+    TT.$$('[id]', clone).forEach(function (el) { el.removeAttribute('id'); });
+    printRoot.appendChild(clone);
+  }
+
+  [ssidEl, passEl, $('#wq-card-heading')].forEach(function (el) { el.addEventListener('input', update); });
+  [secEl, hiddenEl, quoteEl, eclEl, $('#wq-card-showpass')].forEach(function (el) { el.addEventListener('change', update); });
+
+  toggleBtn.addEventListener('click', function () {
+    var hide = passEl.type === 'text';
+    passEl.type = hide ? 'password' : 'text';
+    toggleBtn.textContent = hide ? 'Show' : 'Hide';
+    toggleBtn.setAttribute('aria-label', hide ? 'Show password' : 'Hide password');
+  });
+
+  pngBtn.addEventListener('click', function () {
+    if (!current) return;
+    var px = parseInt(sizeEl.value, 10) || 512;
+    var name = fileBase(current.ssid) + '.png';
+    pngBlob(current.qr, px).then(function (blob) {
+      if (blob) TT.download(name, blob);
+      else errEl.textContent = 'Your browser could not create the PNG. Try the SVG download instead.';
+    });
+  });
+
+  svgBtn.addEventListener('click', function () {
+    if (!current) return;
+    var px = parseInt(sizeEl.value, 10) || 512;
+    TT.download(fileBase(current.ssid) + '.svg', '<?xml version="1.0" encoding="UTF-8"?>\n' + svgMarkup(current.qr, px) + '\n', 'image/svg+xml');
+  });
+
+  printBtn.addEventListener('click', function () {
+    if (!current) return;
+    syncPrint();
+    window.print();
+  });
+  window.addEventListener('beforeprint', syncPrint);
+
+  update();
+  loaded = true;
+})();
+</script>

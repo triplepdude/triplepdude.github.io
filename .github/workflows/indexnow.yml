@@ -1,0 +1,58 @@
+# Tells Bing, Yandex, Seznam, Naver and other IndexNow search engines about the
+# site's pages after each deploy, so new tools get crawled quickly. Runs on its
+# own; nothing to configure. (Google does not use IndexNow; it reads
+# /sitemap.xml instead.)
+name: IndexNow
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'tests/**'
+      - 'README.md'
+      - 'package.json'
+      - '.github/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: indexnow
+  cancel-in-progress: true
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SITE: https://triplepdude.github.io
+      KEY: 782cb43905a7c7d4e0821239bd8daeae
+    steps:
+      - name: Wait for the new build to go live
+        run: |
+          # GitHub Pages deploys separately; give it time, then confirm the key file is served.
+          sleep 90
+          for i in $(seq 1 30); do
+            if curl -fsS "$SITE/$KEY.txt" | grep -q "$KEY"; then exit 0; fi
+            sleep 20
+          done
+          echo "Key file not reachable at $SITE/$KEY.txt" >&2
+          exit 1
+
+      - name: Submit every URL in the sitemap
+        run: |
+          curl -fsS "$SITE/sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed 's/<[^>]*>//g' > urls.txt
+          echo "Submitting $(wc -l < urls.txt) URLs"
+          python3 - <<'PY'
+          import json, os
+          urls = [u.strip() for u in open("urls.txt") if u.strip()]
+          body = {"host": os.environ["SITE"].split("//", 1)[1], "key": os.environ["KEY"],
+                  "keyLocation": f"{os.environ['SITE']}/{os.environ['KEY']}.txt", "urlList": urls}
+          json.dump(body, open("body.json", "w"))
+          PY
+          status=$(curl -sS -o response.txt -w '%{http_code}' -X POST https://api.indexnow.org/indexnow \
+            -H 'Content-Type: application/json; charset=utf-8' --data @body.json)
+          echo "IndexNow responded HTTP $status"; cat response.txt
+          # 200 = accepted, 202 = accepted and key validation pending.
+          case "$status" in 200|202) ;; *) exit 1 ;; esac

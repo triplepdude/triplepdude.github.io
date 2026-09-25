@@ -1,0 +1,606 @@
+---
+title: IP Subnet Calculator (IPv4 CIDR & Netmask)
+description: Find the network, broadcast, host range, netmask, wildcard and usable hosts of any IPv4 CIDR block, check if it is private, and split it into subnets.
+category: Security & Network
+keywords: [subnet calculator, ip subnet calculator, cidr calculator, ipv4 subnet calculator, netmask calculator, wildcard mask calculator, subnet splitter, how many hosts in a subnet]
+howto: |
+  ## How to use the subnet calculator
+
+  Enter an IPv4 address followed by its mask. All of these forms work:
+
+  - CIDR prefix: `192.168.1.10/24`
+  - Netmask: `192.168.1.10 255.255.255.0` (a slash instead of the space works too)
+  - Wildcard mask, as written in Cisco ACLs and OSPF: `192.168.1.10 0.0.0.255`
+
+  You can also type just the address and pick the mask from the list. Results
+  update as you type. The splitter underneath divides the network into equal
+  subnets, by how many you need, by the hosts each must hold, or by a new
+  prefix length, and exports the list as CSV.
+
+  ## How the numbers are worked out
+
+  An IPv4 address is a 32-bit number. The prefix length says how many leading
+  bits name the network; the remaining bits number the hosts in it.
+
+  - **Netmask:** the prefix written as ones followed by zeros, so /20 is
+    255.255.240.0. The **wildcard mask** is its inverse, 0.0.15.255.
+  - **Network address:** the address AND the netmask, with every host bit 0.
+  - **Broadcast address:** the network OR the wildcard, with every host bit 1.
+  - **Usable hosts:** 2<sup>32 − prefix</sup> − 2, because the network and
+    broadcast addresses can't be given to a device.
+
+  The binary view shows the split: network bits are highlighted, host bits are
+  plain. Two hosts are on the same subnet exactly when they give the same
+  network address under the same mask.
+
+  ## /31 and /32
+
+  A /31 holds two addresses, so the usual rule would leave no hosts at all.
+  RFC 3021 lets point-to-point links use both addresses and drop the
+  broadcast, which saves addresses on router-to-router links. A /32 is a single
+  address, used for loopback interfaces, host routes and firewall rules. The
+  calculator shows 2 and 1 usable hosts for them, with no broadcast address.
+
+  ## Address types
+
+  | Range | Type | RFC |
+  |---|---|---|
+  | 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 | Private | 1918 |
+  | 100.64.0.0/10 | Shared address space (carrier-grade NAT) | 6598 |
+  | 127.0.0.0/8 | Loopback | 1122 |
+  | 169.254.0.0/16 | Link-local (automatic addressing) | 3927 |
+  | 224.0.0.0/4 | Multicast | 5771 |
+  | 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24 | Documentation | 5737 |
+  | 240.0.0.0/4 | Reserved | 1112 |
+
+  The calculator also recognizes 0.0.0.0/8, the benchmarking block
+  198.18.0.0/15 and the limited broadcast address 255.255.255.255. Any other
+  address is public: routable on the internet.
+
+  The class (A to E) follows from the first bits of the address. CIDR replaced
+  classful addressing in 1993 (RFC 1519, now RFC 4632), so the class is shown
+  for reference and exam questions; it does not decide the mask.
+
+  ## Tips
+
+  - Avoid leading zeros such as `010.1.1.1`. This page reads them as decimal,
+    but some software reads them as octal, where 010 means 8.
+  - When a subnet must hold a given number of devices, count the router and
+    leave room to grow: 50 devices need a /26 (62 hosts), not a /27 (30).
+faq:
+  - q: How many usable hosts are in a /24?
+    a: A /24 has 254 usable hosts. It holds 256 addresses, but the first (network) and last (broadcast) can't be assigned to devices. In general a network with prefix p has 2^(32 − p) − 2 usable hosts, except /31 and /32.
+  - q: What is the difference between a netmask and a wildcard mask?
+    a: A wildcard mask is the netmask with every bit flipped, so 255.255.255.0 becomes 0.0.0.255. Cisco ACLs and OSPF use wildcards, where a 0 bit means "must match". The calculator accepts either form after the address.
+  - q: Why does a /31 show two usable hosts?
+    a: RFC 3021 allows /31 networks on point-to-point links, where no broadcast address is needed, so both addresses can be assigned. Major router operating systems, including Cisco IOS and Juniper Junos, support it.
+  - q: Is 100.64.x.x a private address?
+    a: Not in the RFC 1918 sense. 100.64.0.0/10 is shared address space (RFC 6598) that internet providers use between customers and their carrier-grade NAT. It isn't routable on the internet, but you shouldn't use it on your own network either.
+  - q: Is anything I enter sent to a server?
+    a: No. Every calculation runs in your browser with JavaScript. The addresses you type are not uploaded or stored.
+---
+<style>
+.row > .field.sc-grow { flex: 2 1 260px; }
+.sc-examples { align-items: center; margin-top: -4px; }
+.sc-examples .hint { margin-right: 2px; }
+.sc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 14px; }
+.sc-head .result-big { margin: 0; font-family: var(--mono); font-size: clamp(1.4rem, 5vw, 2rem); }
+.sc-badge { display: inline-block; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 13px; font-weight: 600; }
+.sc-badge.is-private { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.sc-badge.is-public { border-color: var(--muted); }
+.msg.sc-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.sc-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 0 28px; }
+.sc-table th { width: 1%; padding-right: 20px; white-space: nowrap; }
+.sc-table td { font-family: var(--mono); overflow-wrap: anywhere; }
+.sc-table td.sc-plain { font-family: inherit; }
+.sc-table td small { display: block; color: var(--muted); font-family: system-ui, sans-serif; font-size: 13px; }
+.sc-bin { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px; margin: 0 0 16px; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; font-family: var(--mono); font-size: 14px; }
+.sc-bin dt { color: var(--muted); font-family: system-ui, sans-serif; font-size: 13px; line-height: 1.7; }
+.sc-bin dd { margin: 0; letter-spacing: 0.02em; overflow-wrap: anywhere; }
+.sc-bin .sc-n { color: var(--accent); font-weight: 700; }
+.sc-bin .sc-h { color: var(--text); }
+.sc-legend { margin: -8px 0 16px; }
+.sc-legend b { color: var(--accent); font-family: var(--mono); }
+.sc-h2 { margin: 28px 0 12px; font-size: 1.1rem; }
+.sc-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+.sc-split-table td { white-space: nowrap; }
+.sc-split-table td.sc-idx, .sc-split-table th.sc-idx { color: var(--muted); text-align: right; width: 1%; }
+.sc-split-table td:not(.sc-idx):not(.sc-num) { font-family: var(--mono); font-size: 13px; }
+.sc-split-table .sc-num { text-align: right; }
+@media (max-width: 560px) {
+  .sc-split-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  table.data.sc-split-table, .sc-split-table tbody { display: block; }
+  table.data.sc-split-table tr { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  table.data.sc-split-table td { display: block; padding: 0; border: 0; white-space: normal; }
+  .sc-split-table td.sc-idx { grid-row: 1 / span 3; width: auto; }
+  .sc-split-table td.sc-subnet { grid-column: 2; grid-row: 1; font-weight: 700; }
+  .sc-split-table td.sc-num { grid-column: 3; grid-row: 1; }
+  .sc-split-table td.sc-num::after { content: " usable"; color: var(--muted); font-size: 12px; }
+  .sc-split-table td.sc-range, .sc-split-table td.sc-bc { grid-column: 2 / 4; overflow-wrap: anywhere; }
+  .sc-split-table td[data-label]::before { content: attr(data-label) " "; color: var(--muted); font-family: system-ui, sans-serif; font-size: 12px; }
+  table.data.sc-table, .sc-table tbody, .sc-table tr { display: block; }
+  table.data.sc-table tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  table.data.sc-table th, table.data.sc-table td { display: block; width: auto; padding: 0; border: 0; }
+  table.data.sc-table th { font-size: 13px; }
+  .sc-bin { grid-template-columns: minmax(0, 1fr); gap: 0; font-size: 13px; }
+  .sc-bin dd { margin-bottom: 6px; }
+}
+</style>
+
+<div class="row">
+  <div class="field sc-grow">
+    <label for="sc-ip">IP address and mask</label>
+    <input type="text" id="sc-ip" class="mono" value="192.168.1.10/24" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="192.168.1.10/24 or 10.0.0.1 255.255.0.0">
+  </div>
+  <div class="field">
+    <label for="sc-prefix">Mask</label>
+    <select id="sc-prefix"></select>
+  </div>
+</div>
+<div class="actions sc-examples">
+  <span class="hint">Try:</span>
+  <button class="btn secondary small" type="button" data-example="172.16.5.4 255.255.240.0">172.16.5.4 255.255.240.0</button>
+  <button class="btn secondary small" type="button" data-example="10.1.2.3 0.0.255.255">10.1.2.3 0.0.255.255 (wildcard)</button>
+  <button class="btn secondary small" type="button" data-example="100.64.0.1/10">100.64.0.1/10</button>
+  <button class="btn secondary small" type="button" data-example="10.0.0.0/31">10.0.0.0/31</button>
+</div>
+
+<!-- The results and messages below are redrawn on every keystroke, so none of them is a
+     live region or alert (an address is incomplete until typing ends): #sc-status
+     announces one short summary, or the error, once typing pauses. -->
+<p class="msg error" id="sc-msg"></p>
+<p class="visually-hidden" id="sc-status" role="status"></p>
+
+<div id="sc-out">
+  <div class="sc-head">
+    <p class="result-big" id="sc-big">–</p>
+    <span class="sc-badge" id="sc-type-badge"></span>
+    <span class="sc-badge" id="sc-class-badge"></span>
+  </div>
+  <p class="msg sc-note" id="sc-note"></p>
+  <div class="sc-tables">
+  <div class="table-wrap">
+    <table class="data sc-table">
+      <tbody>
+        <tr><th scope="row">IP address</th><td id="sc-address"></td></tr>
+        <tr><th scope="row">Network address</th><td id="sc-network"></td></tr>
+        <tr><th scope="row">Broadcast address</th><td id="sc-broadcast"></td></tr>
+        <tr><th scope="row">First usable host</th><td id="sc-first"></td></tr>
+        <tr><th scope="row">Last usable host</th><td id="sc-last"></td></tr>
+        <tr><th scope="row">Usable hosts</th><td id="sc-usable"></td></tr>
+        <tr><th scope="row">Total addresses</th><td id="sc-total"></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="table-wrap">
+    <table class="data sc-table">
+      <tbody>
+        <tr><th scope="row">Netmask</th><td id="sc-netmask"></td></tr>
+        <tr><th scope="row">Wildcard mask</th><td id="sc-wildcard"></td></tr>
+        <tr><th scope="row">CIDR notation</th><td id="sc-cidr"></td></tr>
+        <tr><th scope="row">Address class</th><td class="sc-plain" id="sc-class"></td></tr>
+        <tr><th scope="row">Address type</th><td class="sc-plain" id="sc-type"></td></tr>
+        <tr><th scope="row">Address as integer</th><td id="sc-int"></td></tr>
+        <tr><th scope="row">Address in hex</th><td id="sc-hex"></td></tr>
+        <tr><th scope="row">Reverse DNS name</th><td id="sc-rev"></td></tr>
+      </tbody>
+    </table>
+  </div>
+  </div>
+  <p class="label">Binary</p>
+  <dl class="sc-bin" id="sc-bin"></dl>
+  <p class="hint sc-legend"><b>Bold</b> bits are the network part, the rest are host bits.</p>
+</div>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="sc-copy">Copy results</button>
+</div>
+
+<hr class="sc-sep">
+<h2 class="sc-h2">Split into subnets</h2>
+<div class="row">
+  <div class="field">
+    <label for="sc-split-mode">Split by</label>
+    <select id="sc-split-mode">
+      <option value="count" selected>Number of subnets</option>
+      <option value="hosts">Hosts per subnet</option>
+      <option value="prefix">New prefix length</option>
+    </select>
+  </div>
+  <div class="field" id="sc-split-num-field">
+    <label for="sc-split-num" id="sc-split-num-label">Number of subnets</label>
+    <input type="number" id="sc-split-num" min="2" step="1" value="4" inputmode="numeric">
+  </div>
+  <div class="field" id="sc-split-prefix-field" hidden>
+    <label for="sc-split-prefix">New prefix</label>
+    <select id="sc-split-prefix"></select>
+  </div>
+</div>
+<p class="msg error" id="sc-split-msg"></p>
+<div id="sc-split-out">
+  <p class="hint" id="sc-split-info"></p>
+  <div class="table-wrap">
+    <table class="data sc-split-table">
+      <thead><tr><th class="sc-idx" scope="col">#</th><th scope="col">Subnet</th><th scope="col">Usable host range</th><th scope="col">Broadcast</th><th class="sc-num" scope="col">Hosts</th></tr></thead>
+      <tbody id="sc-split-body"></tbody>
+    </table>
+  </div>
+  <div class="actions">
+    <button class="btn small" type="button" id="sc-csv">Download CSV</button>
+    <button class="btn secondary small" type="button" id="sc-copy-list">Copy subnet list</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const MAX_ROWS = 512, MAX_EXPORT = 65536;
+
+  // ---------- Bit helpers (all values are unsigned 32-bit numbers) ----------
+  const maskOf = p => (p === 0 ? 0 : (0xFFFFFFFF << (32 - p)) >>> 0);
+  const dotted = n => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
+  const fmt = n => n.toLocaleString('en-US');
+  const plural = (n, word) => fmt(n) + ' ' + word + (n === 1 ? '' : 's');
+  function popcount(n) { let c = 0; while (n) { c += n & 1; n >>>= 1; } return c; }
+  function isNetmask(m) { const inv = (~m) >>> 0; return ((inv + 1) & inv) === 0; }
+
+  class InputError extends Error {}
+
+  function parseIPv4(s, what) {
+    const port = s.match(/^(\d+\.\d+\.\d+\.\d+):\d*$/);
+    if (port) throw new InputError('"' + s + '" includes a port number. Enter the address without ":' + s.split(':')[1] + '", for example ' + port[1] + '/24.');
+    if (s.indexOf(':') >= 0) throw new InputError('"' + s + '" looks like an IPv6 address. This calculator handles IPv4 only.');
+    const parts = s.split('.');
+    if (parts.length !== 4) {
+      throw new InputError('An IPv4 ' + what + ' has four numbers separated by dots, like ' + (what === 'address' ? '192.168.1.10' : '255.255.255.0') +
+        '. "' + s + '" has ' + parts.length + '.');
+    }
+    let v = 0, leadingZero = false;
+    for (const p of parts) {
+      if (p === '') throw new InputError('"' + s + '" has an empty part between dots.');
+      if (!/^\d+$/.test(p)) throw new InputError('"' + p + '" in ' + s + ' is not a number. Each part must be a number from 0 to 255.');
+      const n = parseInt(p, 10);
+      if (n > 255) throw new InputError(p + ' in ' + s + ' is out of range. Each part must be from 0 to 255.');
+      if (p.length > 3) throw new InputError(p + ' in ' + s + ' has more than three digits. Write each part as a number from 0 to 255 without extra zeros.');
+      if (p.length > 1 && p[0] === '0') leadingZero = true;
+      v = v * 256 + n;
+    }
+    return { value: v, leadingZero: leadingZero };
+  }
+
+  function parseMask(tok) {
+    const t = tok.replace(/^\//, '');
+    if (/^\d+$/.test(t)) {
+      const p = parseInt(t, 10);
+      if (p > 32) throw new InputError('/' + t + ' is not a valid prefix length. IPv4 prefixes run from /0 to /32.');
+      return { prefix: p, kind: 'prefix' };
+    }
+    if (t.indexOf('.') >= 0) {
+      const m = parseIPv4(t, 'mask').value;
+      if (isNetmask(m)) return { prefix: popcount(m), kind: 'netmask', ambiguous: m === 0 || m === 0xFFFFFFFF, text: t };
+      const w = (~m) >>> 0;
+      if (isNetmask(w)) return { prefix: popcount(w), kind: 'wildcard', text: t };
+      throw new InputError(t + ' is neither a netmask nor a wildcard mask: its 1 bits are not contiguous. A netmask looks like 255.255.240.0, a wildcard like 0.0.15.255.');
+    }
+    throw new InputError('"' + tok + '" is not a prefix length (0 to 32), a netmask or a wildcard mask.');
+  }
+
+  // Accepts "a.b.c.d/nn", "a.b.c.d/mask", "a.b.c.d mask" or just "a.b.c.d".
+  function parseInput(raw, fallbackPrefix) {
+    const s = raw.trim();
+    if (!s) throw new InputError('Enter an IPv4 address, for example 192.168.1.10/24.');
+    if (s[0] === '/') throw new InputError('Enter the IPv4 address before the slash, for example 192.168.1.10' + s.replace(/\s+/g, '') + '.');
+    const tokens = s.split(/[\s/]+/).filter(Boolean);
+    if (tokens.length > 2) throw new InputError('Enter an address followed by one prefix or mask, for example 192.168.1.10/24 or 192.168.1.10 255.255.255.0.');
+    const ip = parseIPv4(tokens[0], 'address');
+    const mask = tokens.length === 2 ? parseMask(tokens[1]) : (/\/\s*$/.test(s) ? null : { prefix: fallbackPrefix, kind: 'list' });
+    if (!mask) throw new InputError('Add a prefix length after the slash, for example /24.');
+    return { ip: ip.value, ipText: tokens[0], leadingZero: ip.leadingZero, mask: mask };
+  }
+
+  function subnet(ip, p) {
+    const mask = maskOf(p), wild = (~mask) >>> 0;
+    const net = (ip & mask) >>> 0, bc = (net | wild) >>> 0;
+    const total = Math.pow(2, 32 - p);
+    let first, last, usable;
+    if (p === 32) { first = last = net; usable = 1; }
+    else if (p === 31) { first = net; last = bc; usable = 2; }
+    else { first = net + 1; last = bc - 1; usable = total - 2; }
+    return { p: p, mask: mask, wild: wild, net: net, bc: bc, total: total, first: first, last: last, usable: usable };
+  }
+
+  // IANA IPv4 Special-Purpose Address Registry (RFC 6890) plus multicast and class E.
+  const SPECIAL = [
+    ['255.255.255.255', 32, 'Broadcast', 'Limited broadcast (RFC 919)'],
+    ['0.0.0.0', 8, 'This network', '"This network", not a usable address (RFC 1122)'],
+    ['10.0.0.0', 8, 'Private', 'Private network (RFC 1918)', 'private'],
+    ['100.64.0.0', 10, 'CGNAT', 'Shared address space for carrier-grade NAT (RFC 6598)'],
+    ['127.0.0.0', 8, 'Loopback', 'Loopback, this host only (RFC 1122)'],
+    ['169.254.0.0', 16, 'Link-local', 'Link-local, self-assigned when DHCP fails (RFC 3927)'],
+    ['172.16.0.0', 12, 'Private', 'Private network (RFC 1918)', 'private'],
+    ['192.0.0.0', 24, 'IETF', 'IETF protocol assignments (RFC 6890)'],
+    ['192.0.2.0', 24, 'Documentation', 'Documentation, TEST-NET-1 (RFC 5737)'],
+    ['192.88.99.0', 24, 'Deprecated', 'Former 6to4 relay anycast (RFC 7526)'],
+    ['192.168.0.0', 16, 'Private', 'Private network (RFC 1918)', 'private'],
+    ['198.18.0.0', 15, 'Benchmarking', 'Network benchmarking (RFC 2544)'],
+    ['198.51.100.0', 24, 'Documentation', 'Documentation, TEST-NET-2 (RFC 5737)'],
+    ['203.0.113.0', 24, 'Documentation', 'Documentation, TEST-NET-3 (RFC 5737)'],
+    ['224.0.0.0', 4, 'Multicast', 'Multicast (RFC 5771)'],
+    ['240.0.0.0', 4, 'Reserved', 'Reserved for future use (RFC 1112)']
+  ].map(r => ({ net: parseIPv4(r[0], 'address').value, p: r[1], cidr: r[0] + '/' + r[1], short: r[2], long: r[3], cls: r[4] || '' }));
+
+  function addressType(ip) {
+    const hit = SPECIAL.find(r => ((ip & maskOf(r.p)) >>> 0) === r.net);
+    return hit || { short: 'Public', long: 'Public, routable on the internet', cls: 'public', p: 0 };
+  }
+
+  function addressClass(ip) {
+    const a = ip >>> 24;
+    if (a < 128) return { c: 'A', note: 'default mask /8' };
+    if (a < 192) return { c: 'B', note: 'default mask /16' };
+    if (a < 224) return { c: 'C', note: 'default mask /24' };
+    if (a < 240) return { c: 'D', note: 'multicast' };
+    return { c: 'E', note: 'reserved' };
+  }
+
+  function binary(n, p) {
+    const bits = n.toString(2).padStart(32, '0');
+    const frag = document.createDocumentFragment();
+    let netPart = '', hostPart = '';
+    for (let i = 0; i < 32; i++) {
+      const ch = bits[i] + (i % 8 === 7 && i < 31 ? '.' : '');
+      if (i < p) netPart += ch; else hostPart += ch;
+    }
+    if (netPart) { const b = document.createElement('span'); b.className = 'sc-n'; b.textContent = netPart; frag.appendChild(b); }
+    if (hostPart) { const h = document.createElement('span'); h.className = 'sc-h'; h.textContent = hostPart; frag.appendChild(h); }
+    return frag;
+  }
+
+  // ---------- Main calculator ----------
+  const ipEl = $('#sc-ip'), prefixSel = $('#sc-prefix'), msgEl = $('#sc-msg');
+  for (let p = 32; p >= 0; p--) {
+    const o = document.createElement('option');
+    o.value = String(p);
+    o.textContent = '/' + p + '  (' + dotted(maskOf(p)) + ')';
+    prefixSel.appendChild(o);
+  }
+  prefixSel.value = '24';
+
+  let current = null; // { ip, s }
+
+  function setText(id, text, small) {
+    const el = $('#' + id);
+    el.textContent = text;
+    if (small) { const sm = document.createElement('small'); sm.textContent = small; el.appendChild(sm); }
+  }
+
+  function calc() {
+    let parsed;
+    try {
+      parsed = parseInput(ipEl.value, parseInt(prefixSel.value, 10));
+    } catch (e) {
+      if (!(e instanceof InputError)) throw e;
+      msgEl.textContent = e.message;
+      current = null;
+      $('#sc-out').hidden = true;
+      $('#sc-copy').disabled = true;
+      split();
+      return;
+    }
+    msgEl.textContent = '';
+    $('#sc-out').hidden = false;
+    $('#sc-copy').disabled = false;
+    const p = parsed.mask.prefix, ip = parsed.ip, s = subnet(ip, p);
+    if (parsed.mask.kind !== 'list') prefixSel.value = String(p);
+    current = { ip: ip, s: s };
+
+    const type = addressType(ip), cls = addressClass(ip);
+    $('#sc-big').textContent = dotted(s.net) + '/' + p;
+    const badge = $('#sc-type-badge');
+    badge.textContent = type.short;
+    badge.className = 'sc-badge' + (type.cls ? ' is-' + type.cls : '');
+    $('#sc-class-badge').textContent = 'Class ' + cls.c;
+
+    setText('sc-address', dotted(ip));
+    setText('sc-network', dotted(s.net));
+    if (p === 32) setText('sc-broadcast', 'None', 'A /32 is a single address.');
+    else if (p === 31) setText('sc-broadcast', 'None', 'Point-to-point link: both addresses are hosts (RFC 3021).');
+    else setText('sc-broadcast', dotted(s.bc));
+    setText('sc-first', dotted(s.first));
+    setText('sc-last', dotted(s.last));
+    setText('sc-usable', fmt(s.usable));
+    setText('sc-total', fmt(s.total));
+    setText('sc-netmask', dotted(s.mask));
+    setText('sc-wildcard', dotted(s.wild));
+    setText('sc-cidr', dotted(s.net) + '/' + p);
+    setText('sc-class', cls.c + ' (' + cls.note + ')');
+    setText('sc-type', type.long);
+    setText('sc-int', String(ip));
+    setText('sc-hex', '0x' + ip.toString(16).toUpperCase().padStart(8, '0'));
+    setText('sc-rev', dotted(ip).split('.').reverse().join('.') + '.in-addr.arpa');
+
+    const notes = [];
+    if (parsed.mask.kind === 'wildcard') notes.push(parsed.mask.text + ' was read as a wildcard mask, which is netmask ' + dotted(s.mask) + ' (/' + p + ').');
+    if (parsed.mask.ambiguous && parsed.mask.text === '0.0.0.0') notes.push('0.0.0.0 was read as netmask /0. If you meant a wildcard mask matching one host, use /32.');
+    if (parsed.mask.ambiguous && parsed.mask.text === '255.255.255.255') notes.push('255.255.255.255 was read as netmask /32. If you meant a wildcard mask matching everything, use /0.');
+    if (parsed.leadingZero) notes.push('Parts with leading zeros were read as decimal. Some software reads them as octal (010 = 8), so it is safer to write them without the zeros.');
+    if (p <= 30 && ip === s.net && p > 0) notes.push(dotted(ip) + ' is the network address of this subnet, so it can\'t be assigned to a device.');
+    if (p <= 30 && ip === s.bc && p > 0) notes.push(dotted(ip) + ' is the broadcast address of this subnet, so it can\'t be assigned to a device.');
+    if (type.p && p < type.p) notes.push('This /' + p + ' network is larger than ' + type.cidr + ', so it also contains addresses of other types.');
+    $('#sc-note').textContent = notes.join(' ');
+
+    const bin = $('#sc-bin');
+    bin.textContent = '';
+    [['Address', ip], ['Netmask', s.mask], ['Network', s.net], ['Broadcast', s.bc]].forEach(([label, v]) => {
+      if (label === 'Broadcast' && p >= 31) return;
+      const dt = document.createElement('dt'); dt.textContent = label;
+      const dd = document.createElement('dd'); dd.appendChild(binary(v, p));
+      bin.appendChild(dt); bin.appendChild(dd);
+    });
+    updatePrefixOptions();
+    split();
+  }
+
+  function resultsText() {
+    if (!current) return '';
+    return TT.$$('.sc-table tr').map(tr => {
+      const td = tr.querySelector('td');
+      const main = td.firstChild ? td.firstChild.textContent : '';
+      return tr.querySelector('th').textContent + ': ' + main;
+    }).join('\n');
+  }
+
+  // ---------- Splitter ----------
+  const modeSel = $('#sc-split-mode'), numEl = $('#sc-split-num'), newPrefixSel = $('#sc-split-prefix'), splitMsg = $('#sc-split-msg');
+  let lastSplit = null;
+
+  function updatePrefixOptions() {
+    if (!current) return;
+    const p = current.s.p, keep = newPrefixSel.value;
+    newPrefixSel.textContent = '';
+    for (let q = p + 1; q <= 32; q++) {
+      const o = document.createElement('option');
+      const hosts = q === 32 ? 1 : q === 31 ? 2 : Math.pow(2, 32 - q) - 2;
+      o.value = String(q);
+      o.textContent = '/' + q + ' · ' + fmt(Math.pow(2, q - p)) + ' subnets, ' + fmt(hosts) + (hosts === 1 ? ' host' : ' hosts') + ' each';
+      newPrefixSel.appendChild(o);
+    }
+    if (keep && +keep > p) newPrefixSel.value = keep;
+    else if (p < 32) newPrefixSel.value = String(Math.min(32, p + 2));
+  }
+
+  function newPrefixFor() {
+    const p = current.s.p, mode = modeSel.value;
+    if (p === 32) throw new InputError('A /32 is a single address and can\'t be split further.');
+    if (mode === 'prefix') return { q: parseInt(newPrefixSel.value, 10) };
+    const raw = numEl.value.trim();
+    const n = Number(raw);
+    if (!raw || !Number.isInteger(n) || n < 1) throw new InputError(mode === 'count' ? 'Enter the number of subnets you need, 2 or more.' : 'Enter how many hosts each subnet must hold, 1 or more.');
+    if (mode === 'count') {
+      if (n < 2) throw new InputError('Enter 2 or more subnets.');
+      const bits = bitsFor(n);
+      const q = p + bits;
+      if (q > 32) throw new InputError('A /' + p + ' has ' + fmt(current.s.total) + ' addresses, so it can be split into at most ' + fmt(current.s.total) + ' subnets.');
+      return { q: q, note: n !== Math.pow(2, bits) ? fmt(n) + ' is not a power of two, so this is the smallest equal split with at least ' + fmt(n) + ' subnets. ' : '' };
+    }
+    // hosts: the smallest block whose usable hosts (network and broadcast excluded) fit n.
+    if (p === 31) throw new InputError('A /31 can only be split into two /32 host routes. Choose "Number of subnets" or "New prefix length".');
+    let q = 32 - bitsFor(n + 2);
+    if (q > 30) q = 30;
+    if (q < p) throw new InputError('A /' + p + ' has only ' + plural(current.s.usable, 'usable host') + ', so it can\'t hold a subnet of ' + plural(n, 'host') + '.');
+    if (q === p) throw new InputError('A subnet for ' + plural(n, 'host') + ' needs a /' + q + ', the same size as this network, so there is nothing to split.');
+    return { q: q, note: '' };
+  }
+
+  function split() {
+    const out = $('#sc-split-out'), body = $('#sc-split-body');
+    const isPrefix = modeSel.value === 'prefix';
+    $('#sc-split-prefix-field').hidden = !isPrefix;
+    $('#sc-split-num-field').hidden = isPrefix;
+    $('#sc-split-num-label').textContent = modeSel.value === 'hosts' ? 'Hosts per subnet' : 'Number of subnets';
+    numEl.min = modeSel.value === 'hosts' ? '1' : '2';
+    lastSplit = null;
+    body.textContent = '';
+    if (!current) { splitMsg.textContent = ''; out.hidden = true; return; }
+    let plan;
+    try { plan = newPrefixFor(); } catch (e) {
+      if (!(e instanceof InputError)) throw e;
+      splitMsg.textContent = e.message;
+      out.hidden = true;
+      return;
+    }
+    splitMsg.textContent = '';
+    out.hidden = false;
+    const p = current.s.p, q = plan.q, count = Math.pow(2, q - p), step = Math.pow(2, 32 - q);
+    const hosts = q === 32 ? 1 : q === 31 ? 2 : step - 2;
+    lastSplit = { base: current.s, q: q, count: count, step: step };
+    let info = (plan.note || '') + fmt(count) + (count === 1 ? ' subnet' : ' subnets') + ' of /' + q + ' (' + dotted(maskOf(q)) + '), ' +
+      fmt(hosts) + (hosts === 1 ? ' usable host' : ' usable hosts') + ' each.';
+    if (count > MAX_ROWS) info += ' Showing the first ' + fmt(MAX_ROWS) + '; the CSV has ' + (count > MAX_EXPORT ? 'the first ' + fmt(MAX_EXPORT) : 'all of them') + '.';
+    $('#sc-split-info').textContent = info;
+
+    const frag = document.createDocumentFragment();
+    const shown = Math.min(count, MAX_ROWS);
+    for (let i = 0; i < shown; i++) {
+      const s = subnet(current.s.net + i * step, q);
+      const tr = document.createElement('tr');
+      [String(i + 1), dotted(s.net) + '/' + q, dotted(s.first) + ' – ' + dotted(s.last), q >= 31 ? '—' : dotted(s.bc), fmt(s.usable)].forEach((v, k) => {
+        const td = document.createElement('td');
+        td.textContent = v;
+        td.className = ['sc-idx', 'sc-subnet', 'sc-range', 'sc-bc', 'sc-num'][k];
+        if (k === 2) td.dataset.label = 'Hosts';
+        if (k === 3) td.dataset.label = 'Broadcast';
+        tr.appendChild(td);
+      });
+      frag.appendChild(tr);
+    }
+    body.appendChild(frag);
+  }
+
+  // Smallest b with 2^b >= n, computed exactly (Math.log2 rounds for large n).
+  function bitsFor(n) { let b = 0; while (Math.pow(2, b) < n) b++; return b; }
+
+  function* splitRows() {
+    const n = Math.min(lastSplit.count, MAX_EXPORT);
+    for (let i = 0; i < n; i++) yield subnet(lastSplit.base.net + i * lastSplit.step, lastSplit.q);
+  }
+
+  // ---------- Screen reader summary ----------
+  const statusEl = $('#sc-status');
+  let statusTimer = null;
+  function sayLater(textFn) {
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      const text = textFn();
+      statusEl.textContent = '';
+      if (text) setTimeout(() => { statusEl.textContent = text; }, 50);
+    }, 700);
+  }
+  function splitSummary() {
+    if (!current) return '';
+    if (splitMsg.textContent) return 'Split: ' + splitMsg.textContent;
+    if (!lastSplit) return '';
+    return plural(lastSplit.count, 'subnet') + ' of /' + lastSplit.q + '.';
+  }
+  function summary() {
+    if (!current) return msgEl.textContent;
+    const s = current.s;
+    return dotted(s.net) + '/' + s.p + ': ' + plural(s.usable, 'usable host') + '. ' + splitSummary();
+  }
+  const recalc = () => { calc(); sayLater(summary); };
+  const resplit = () => { split(); sayLater(splitSummary); };
+
+  // ---------- Events ----------
+  ipEl.addEventListener('input', recalc);
+  prefixSel.addEventListener('change', () => {
+    const tok = ipEl.value.trim().split(/[\s/]+/)[0] || '';
+    if (tok) ipEl.value = tok + '/' + prefixSel.value;
+    recalc();
+  });
+  TT.$$('[data-example]').forEach(b => b.addEventListener('click', () => { ipEl.value = b.getAttribute('data-example'); recalc(); }));
+  modeSel.addEventListener('change', () => {
+    if (modeSel.value === 'hosts') numEl.value = '50';
+    else if (modeSel.value === 'count') numEl.value = '4';
+    resplit();
+  });
+  numEl.addEventListener('input', resplit);
+  newPrefixSel.addEventListener('change', resplit);
+  $('#sc-copy').addEventListener('click', e => TT.copy(resultsText(), e.currentTarget));
+  $('#sc-copy-list').addEventListener('click', e => {
+    if (!lastSplit) return;
+    const lines = [];
+    for (const s of splitRows()) lines.push(dotted(s.net) + '/' + s.p);
+    TT.copy(lines.join('\n'), e.currentTarget);
+  });
+  $('#sc-csv').addEventListener('click', () => {
+    if (!lastSplit) return;
+    const lines = ['Subnet,Network,First host,Last host,Broadcast,Usable hosts,Netmask'];
+    for (const s of splitRows()) {
+      lines.push([dotted(s.net) + '/' + s.p, dotted(s.net), dotted(s.first), dotted(s.last), s.p >= 31 ? '' : dotted(s.bc), s.usable, dotted(s.mask)].join(','));
+    }
+    TT.download('subnets-' + dotted(lastSplit.base.net) + '-' + lastSplit.base.p + '-to-' + lastSplit.q + '.csv', lines.join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
+  });
+
+  calc();
+})();
+</script>
