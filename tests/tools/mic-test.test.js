@@ -16,6 +16,18 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.isVisible('#mict-audio'), false);
   assert.equal(await page.isVisible('#mict-dl'), false);
 
+  // The meter fill uses the level table's bands on its -60..0 dBFS scale: amber
+  // (quiet) below -25 dBFS = 58.333%, green (good) to -6 dBFS = 90%, red above.
+  const grad = await page.$eval('#mict-meter', m => getComputedStyle(m).backgroundImage);
+  const stops = [...grad.matchAll(/(rgb\([^)]*\)) ([\d.]+)%/g)].map(m => [m[1], Number(m[2])]);
+  const colourAt = pct => stops.find(([, p]) => p >= pct)[0];
+  const [amber, green, red] = [colourAt(1), colourAt(59), colourAt(91)];
+  assert.equal(new Set([amber, green, red]).size, 3, grad);
+  assert.equal(colourAt(58), amber, grad);
+  assert.equal(colourAt(89), green, grad);
+  assert.equal(await page.$eval('.mict-gt', t => t.nextElementSibling.textContent.replace(/\s+/g, ' ')),
+    'The fill colour follows the same bands: amber while the peak is below −25 dBFS, green from −25 to −6 dBFS, and red above.');
+
   // Record every getUserMedia call and stream so we can check constraints and release.
   await page.evaluate(() => {
     const md = navigator.mediaDevices, orig = md.getUserMedia.bind(md);
@@ -29,8 +41,12 @@ module.exports = async ({ page, open, assert }) => {
   });
 
   assert.match(await text('#mict-rec-status'), /^Start the microphone/);
-  await page.click('#mict-start');
+  // Started from the keyboard: Start disables itself, so focus moves on to Stop
+  // instead of falling back to <body> (WCAG 2.4.3).
+  await page.focus('#mict-start');
+  await page.keyboard.press('Enter');
   await waitText('#mict-rate', /kHz/);
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'mict-stop');
   assert.match(await text('#mict-rec-status'), /^Ready\. Press Record/);
   assert.equal(await page.isDisabled('#mict-start'), true);
   assert.equal(await page.isEnabled('#mict-stop'), true);
@@ -90,10 +106,22 @@ module.exports = async ({ page, open, assert }) => {
 
   // Record a 5-second clip, check playback length and the downloaded WebM file.
   assert.match(await text('#mict-rec'), /Record 5 s clip/);
+  // Regression: the live status was rewritten every frame with the elapsed time,
+  // flooding screen readers. The counter is now in a separate, non-live element.
+  await page.evaluate(() => {
+    window.__live = [];
+    const el = document.getElementById('mict-rec-status');
+    new MutationObserver(() => window.__live.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
+  });
   await page.click('#mict-rec');
   assert.match(await text('#mict-rec'), /Stop recording/);
-  await waitText('#mict-rec-status', /Recording/);
+  await waitText('#mict-rec-status', /^Recording a 5-second clip/);
+  await waitText('#mict-rec-time', /^[1-4]\.\d s of 5 s$/);
+  assert.equal(await page.getAttribute('#mict-rec-time', 'aria-live'), null);
   await waitText('#mict-rec-status', /Recorded a [45]\.\d s clip/, 10000);
+  assert.equal(await page.isVisible('#mict-rec-time'), false);
+  const liveMsgs = await page.evaluate(() => window.__live);
+  assert.ok(liveMsgs.length <= 4, `live status changed ${liveMsgs.length} times: ${liveMsgs.join(' | ')}`);
   const dur = await (await page.waitForFunction(() => {
     const a = document.getElementById('mict-audio');
     return Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
@@ -108,8 +136,10 @@ module.exports = async ({ page, open, assert }) => {
   assert.ok(bytes.includes(Buffer.from('A_OPUS')), 'Opus codec id');
   assert.ok(bytes.length > 2000, `size ${bytes.length}`);
 
-  // Stop releases every track.
-  await page.click('#mict-stop');
+  // Stop releases every track, and keyboard focus goes back to Start.
+  await page.focus('#mict-stop');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'mict-start');
   assert.equal(await page.evaluate(() => window.__gum.streams.every(s => s.getTracks().every(t => t.readyState === 'ended'))), true);
   assert.equal(await page.isEnabled('#mict-start'), true);
   assert.equal(await page.isDisabled('#mict-stop'), true);

@@ -200,13 +200,14 @@ table.data.cm-grid tbody th { color: var(--text); }
   </div>
 </div>
 
-<div class="cm-cmds" aria-live="polite">
+<div class="cm-cmds">
   <div class="cm-cmd"><span class="label">Numeric</span><code id="cm-cmd-num"></code><button class="btn secondary small" type="button" data-copy-target="#cm-cmd-num" aria-label="Copy numeric chmod command">Copy</button></div>
   <div class="cm-cmd"><span class="label">Symbolic</span><code id="cm-cmd-sym"></code><button class="btn secondary small" type="button" data-copy-target="#cm-cmd-sym" aria-label="Copy symbolic chmod command">Copy</button></div>
   <div class="cm-cmd"><span class="label">ls -l shows</span><code id="cm-ls"></code><button class="btn secondary small" type="button" data-copy-target="#cm-ls" aria-label="Copy ls -l permission string">Copy</button></div>
   <p class="hint cm-dirnote" id="cm-dirnote"></p>
 </div>
 
+<p class="visually-hidden" id="cm-status" role="status"></p>
 <div aria-live="polite">
   <ul class="cm-explain" id="cm-explain"></ul>
   <div id="cm-warnings"></div>
@@ -410,8 +411,21 @@ table.data.cm-grid tbody th { color: var(--text); }
     $('#cm-dirnote').textContent = dirBox.checked && !(mode & 3072)
       ? 'GNU chmod keeps a directory\u2019s existing setuid or setgid bit with both commands. To clear it too, use chmod ' + rec + '00000'.slice(o5.length) + o5 + ' ' + target + '.'
       : '';
-    explain(mode);
+    // The explanation depends only on the mode and the Directory box, so it
+    // (a live region) is rebuilt only when one of those changes, not while
+    // the file name is typed.
+    var key = mode + (dirBox.checked ? 'd' : '-');
+    if (key !== explained) { explained = key; explain(mode); }
+    // Name, Directory and Recursive changes are summed up in one short status
+    // once the user pauses; mode changes are already read out by the explanation.
+    if (source === 'options') sayCommand();
   }
+  var explained = null, statusEl = $('#cm-status');
+  var sayCommand = TT.debounce(function () {
+    var text = $('#cm-cmd-num').textContent + '. ' + $('#cm-dirnote').textContent;
+    text = text.replace(/\. $/, '.');
+    if (statusEl.textContent !== text) statusEl.textContent = text;
+  }, 800);
 
   function showError(msg, el) {
     err.textContent = msg || '';

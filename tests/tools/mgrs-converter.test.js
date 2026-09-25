@@ -6,7 +6,11 @@ module.exports = async ({ page, open, assert }) => {
   const val = id => page.textContent(id);
   const mode = m => page.check(`input[name="mg-mode"][value="${m}"]`);
   const ll = async s => { await mode('ll'); await page.fill('#mg-ll', s); };
-  const err = () => page.textContent('#mg-error');
+  // Errors from typing wait for a pause or for the field to lose focus; blur to read them now.
+  const err = async () => {
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    return page.textContent('#mg-error');
+  };
   const within = (actual, lat, lon, tol, what) => {
     const [a, b] = actual.split(',').map(Number);
     assert.ok(Math.abs(a - lat) <= tol && Math.abs(b - lon) <= tol, `${what}: got ${actual}, want ${lat}, ${lon}`);
@@ -191,6 +195,50 @@ module.exports = async ({ page, open, assert }) => {
   }
   await ll('40.748440, -73.985664');
   assert.equal(await err(), '');
+
+  // Typing a coordinate key by key doesn't announce a format error on every keystroke; a
+  // half-typed value only reports its error after a pause, in a polite status region.
+  assert.equal(await page.getAttribute('#mg-error', 'role'), 'status');
+  await page.fill('#mg-ll', '');
+  await page.evaluate(() => {
+    window.__mgErrors = [];
+    const box = document.querySelector('#mg-error');
+    new MutationObserver(() => { if (box.textContent) window.__mgErrors.push(box.textContent); })
+      .observe(box, { childList: true, characterData: true, subtree: true });
+  });
+  await page.locator('#mg-ll').pressSequentially('51.5007, -0.1246', { delay: 30 });
+  await page.waitForTimeout(1000);
+  assert.deepEqual(await page.evaluate(() => window.__mgErrors), []);
+  assert.equal(await page.textContent('#mg-error'), '');
+  assert.match(await val('#mg-big'), /^30U XC \d{5} \d{5}$/);
+  await page.locator('#mg-ll').pressSequentially('x');
+  assert.equal(await page.textContent('#mg-error'), '');
+  await page.waitForFunction(() => document.querySelector('#mg-error').textContent !== '', null, { timeout: 2000 });
+  assert.equal((await page.evaluate(() => window.__mgErrors)).length, 1);
+  await ll('40.748440, -73.985664');
+
+  // The focused segment of the "Convert from" control shows a visible ring whether or not it is
+  // the checked (filled) one.
+  const segShadow = () => page.$eval('input[name="mg-mode"]:focus-visible', el => getComputedStyle(el.closest('label')).boxShadow);
+  await page.focus('#mg-ll');
+  await page.keyboard.press('Shift+Tab');
+  while (!(await page.evaluate(() => document.activeElement.name === 'mg-mode'))) await page.keyboard.press('Shift+Tab');
+  const checkedShadow = await segShadow();
+  assert.match(checkedShadow, /inset.*inset/, 'focus ring on the checked segment');
+  const [accentText, accent] = await page.evaluate(() => {
+    const d = document.createElement('div');
+    document.body.appendChild(d);
+    d.style.color = 'var(--accent-text)';
+    const t = getComputedStyle(d).color;
+    d.style.color = 'var(--accent)';
+    const a = getComputedStyle(d).color;
+    d.remove();
+    return [t, a];
+  });
+  assert.ok(checkedShadow.includes(accentText) && checkedShadow.includes(accent), checkedShadow);
+  await page.keyboard.press('ArrowRight');
+  assert.match(await segShadow(), /inset.*inset/, 'focus ring after moving with the arrow keys');
+  await mode('ll');
 
   // Copy button.
   await page.click('.mg-head button');

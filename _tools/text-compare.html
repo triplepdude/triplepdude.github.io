@@ -65,7 +65,10 @@ howto: |
   `diff -u` and `git diff`, with three lines of context. It is always made
   from the exact texts, even when an ignore option is on, so
   `patch original.txt < text-compare.diff` turns the original into the
-  changed text.
+  changed text. When the texts differ in a great many places, such as rows
+  that were reordered, the search for the smallest patch stops after a few
+  seconds and the remaining changes are written as whole removed and added
+  blocks. That patch is longer but still applies the same way.
 faq:
   - q: Is my text uploaded anywhere?
     a: No. Both texts are compared in your browser, in a background thread on your own device. Nothing is sent to a server or stored, and opened files are read locally.
@@ -98,7 +101,8 @@ faq:
 .tc-seg label:last-child { border-right: 0; }
 .tc-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .tc-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
-.tc-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Two rings, so focus shows on both the filled (checked) and the plain segments. */
+.tc-seg label:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 4px var(--accent-text); outline: 2px solid transparent; }
 .tc-stats .stat b { font-variant-numeric: tabular-nums; }
 .tc-stat-add b { color: var(--accent); }
 .tc-stat-del b { color: var(--danger); }
@@ -133,9 +137,9 @@ faq:
 .tc-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
 .tc-pane { min-width: 0; }
 .tc-pane + .tc-pane { border-left: 1px solid var(--border); }
-.tc-pane h3 { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 13px; font-weight: 600; }
+.tc-pane h2 { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 13px; font-weight: 600; }
 .tc-pane pre { margin: 0; padding: 0 12px; font-family: var(--mono); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-.tc-pane h3 + pre { padding-top: 10px; }
+.tc-pane h2 + pre { padding-top: 10px; }
 .tc-pane pre:last-child { padding-bottom: 10px; }
 .tc-flow.is-prose pre { font-family: inherit; font-size: 15px; }
 .tc-status { min-height: 1.4em; margin: -8px 0 8px; color: var(--muted); font-size: 13px; }
@@ -636,23 +640,27 @@ faq:
       var prose = o.mode === 'word' ? ' is-prose' : '';
       if (o.view === 'split') {
         return {
-          html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h3>Original</h3>' + left.html() + '</section>' +
-            '<section class="tc-pane"><h3>Changed</h3>' + right.html() + '</section></div>',
+          html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Original</h2>' + left.html() + '</section>' +
+            '<section class="tc-pane"><h2>Changed</h2>' + right.html() + '</section></div>',
           timedOut: timedOut
         };
       }
-      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h3>Changes</h3>' + inline.html() + '</section></div>', timedOut: timedOut };
+      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Changes</h2>' + inline.html() + '</section></div>', timedOut: timedOut };
     }
 
-    // Unified diff (diff -u) of the exact texts, three lines of context.
-    function patchText(a, b) {
+    // Unified diff (diff -u) of the exact texts, three lines of context. The search stops at
+    // the deadline (Myers diff grows with lines x differences, e.g. reordered rows); past it
+    // the remaining changes are written as whole removed/added blocks, which still apply.
+    // Returns { text, timedOut }.
+    function patchText(a, b, deadline) {
       var A = splitLines(a), B = splitLines(b);
       var noEolA = a !== '' && a[a.length - 1] !== '\n', noEolB = b !== '' && b[b.length - 1] !== '\n';
       var id = idMapper();
       // A last line without a newline differs from the same text with one, as in GNU diff.
       var ia = A.map(function (l, i) { return id(i === A.length - 1 && noEolA ? l + '\u0000' : l); });
       var ib = B.map(function (l, i) { return id(i === B.length - 1 && noEolB ? l + '\u0000' : l); });
-      var regs = regions(toOps(A.length, B.length, diffIds(ia, ib, Infinity).pairs));
+      var d = diffIds(ia, ib, deadline);
+      var regs = regions(toOps(A.length, B.length, d.pairs));
       var lines = [];
       regs.forEach(function (r) {
         var i;
@@ -662,7 +670,7 @@ faq:
       });
       var changes = [];
       lines.forEach(function (l, i) { if (l.t !== ' ') changes.push(i); });
-      if (!changes.length) return '';
+      if (!changes.length) return { text: '', timedOut: false };
       var CTX = 3, out = '--- original.txt\n+++ changed.txt\n', h = 0;
       while (h < changes.length) {
         var start = Math.max(0, changes[h] - CTX), endIdx = changes[h];
@@ -688,7 +696,7 @@ faq:
         var br = bCount === 0 ? bStart + ',0' : (bStart + 1) + (bCount === 1 ? '' : ',' + bCount);
         out += '@@ -' + ar + ' +' + br + ' @@\n' + body;
       }
-      return out;
+      return { text: out, timedOut: d.timedOut };
     }
 
     function run(o) {
@@ -710,12 +718,15 @@ faq:
       var counts = { ins: 0, del: 0 };
       var deadline = Date.now() + 3000;
       var rendered = o.mode === 'line' ? renderLines(A, B, regs, o, deadline) : renderFlow(A, B, regs, o, deadline, counts);
+      // The patch shares the comparison's time budget (with a short minimum of its own).
+      var patch = patchText(o.a, o.b, Math.max(t0 + 8000, Date.now() + 500));
       return {
         html: rendered.html,
         stats: stats,
         tokens: counts,
         identical: stats.added + stats.removed + stats.changed === 0,
-        patch: patchText(o.a, o.b),
+        patch: patch.text,
+        patchCoarse: patch.timedOut,
         timedOut: d.timedOut || rendered.timedOut,
         ms: Date.now() - t0
       };
@@ -892,18 +903,22 @@ faq:
   });
   TT.$('#tc-download').addEventListener('click', function () {
     errBox.textContent = '';
-    var a = ta.value, b = tb.value, patch;
+    var a = ta.value, b = tb.value, patch, coarse;
     if (!a && !b) {
       errBox.textContent = 'Enter two texts first.';
       return;
     }
     if (latest && lastReq && latest.id === lastReq.id && lastReq.a === a && lastReq.b === b) {
       patch = latest.patch;
+      coarse = latest.patchCoarse;
     } else {
-      // The comparison on screen is older than the texts (still typing or computing): build the patch now.
+      // The comparison on screen is older than the texts (still typing or computing): build the
+      // patch now, on this thread, so the time limit is short to keep the page responsive.
       try {
         if (!local) local = tcEngine(null);
-        patch = local.patch(a, b);
+        var p = local.patch(a, b, Date.now() + 1000);
+        patch = p.text;
+        coarse = p.timedOut;
       } catch (e) {
         errBox.textContent = 'Could not build the patch: ' + (e && e.message || e);
         return;
@@ -914,6 +929,7 @@ faq:
       return;
     }
     TT.download('text-compare.diff', patch, 'text/x-diff;charset=utf-8');
+    if (coarse) okBox.textContent = 'These texts differ in very many places, so the patch lists some changes as whole removed and added blocks. It still applies correctly.';
   });
 
   function loadFile(input, target) {

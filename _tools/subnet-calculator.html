@@ -89,7 +89,7 @@ faq:
 .sc-badge.is-private { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .sc-badge.is-public { border-color: var(--muted); }
 .msg.sc-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
-.sc-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0 28px; }
+.sc-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 0 28px; }
 .sc-table th { width: 1%; padding-right: 20px; white-space: nowrap; }
 .sc-table td { font-family: var(--mono); overflow-wrap: anywhere; }
 .sc-table td.sc-plain { font-family: inherit; }
@@ -145,9 +145,13 @@ faq:
   <button class="btn secondary small" type="button" data-example="10.0.0.0/31">10.0.0.0/31</button>
 </div>
 
-<p class="msg error" id="sc-msg" role="alert"></p>
+<!-- The results and messages below are redrawn on every keystroke, so none of them is a
+     live region or alert (an address is incomplete until typing ends): #sc-status
+     announces one short summary, or the error, once typing pauses. -->
+<p class="msg error" id="sc-msg"></p>
+<p class="visually-hidden" id="sc-status" role="status"></p>
 
-<div id="sc-out" aria-live="polite">
+<div id="sc-out">
   <div class="sc-head">
     <p class="result-big" id="sc-big">–</p>
     <span class="sc-badge" id="sc-type-badge"></span>
@@ -211,8 +215,8 @@ faq:
     <select id="sc-split-prefix"></select>
   </div>
 </div>
-<p class="msg error" id="sc-split-msg" role="alert"></p>
-<div id="sc-split-out" aria-live="polite">
+<p class="msg error" id="sc-split-msg"></p>
+<div id="sc-split-out">
   <p class="hint" id="sc-split-info"></p>
   <div class="table-wrap">
     <table class="data sc-split-table">
@@ -541,21 +545,46 @@ faq:
     for (let i = 0; i < n; i++) yield subnet(lastSplit.base.net + i * lastSplit.step, lastSplit.q);
   }
 
+  // ---------- Screen reader summary ----------
+  const statusEl = $('#sc-status');
+  let statusTimer = null;
+  function sayLater(textFn) {
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      const text = textFn();
+      statusEl.textContent = '';
+      if (text) setTimeout(() => { statusEl.textContent = text; }, 50);
+    }, 700);
+  }
+  function splitSummary() {
+    if (!current) return '';
+    if (splitMsg.textContent) return 'Split: ' + splitMsg.textContent;
+    if (!lastSplit) return '';
+    return plural(lastSplit.count, 'subnet') + ' of /' + lastSplit.q + '.';
+  }
+  function summary() {
+    if (!current) return msgEl.textContent;
+    const s = current.s;
+    return dotted(s.net) + '/' + s.p + ': ' + plural(s.usable, 'usable host') + '. ' + splitSummary();
+  }
+  const recalc = () => { calc(); sayLater(summary); };
+  const resplit = () => { split(); sayLater(splitSummary); };
+
   // ---------- Events ----------
-  ipEl.addEventListener('input', calc);
+  ipEl.addEventListener('input', recalc);
   prefixSel.addEventListener('change', () => {
     const tok = ipEl.value.trim().split(/[\s/]+/)[0] || '';
     if (tok) ipEl.value = tok + '/' + prefixSel.value;
-    calc();
+    recalc();
   });
-  TT.$$('[data-example]').forEach(b => b.addEventListener('click', () => { ipEl.value = b.getAttribute('data-example'); calc(); }));
+  TT.$$('[data-example]').forEach(b => b.addEventListener('click', () => { ipEl.value = b.getAttribute('data-example'); recalc(); }));
   modeSel.addEventListener('change', () => {
     if (modeSel.value === 'hosts') numEl.value = '50';
     else if (modeSel.value === 'count') numEl.value = '4';
-    split();
+    resplit();
   });
-  numEl.addEventListener('input', split);
-  newPrefixSel.addEventListener('change', split);
+  numEl.addEventListener('input', resplit);
+  newPrefixSel.addEventListener('change', resplit);
   $('#sc-copy').addEventListener('click', e => TT.copy(resultsText(), e.currentTarget));
   $('#sc-copy-list').addEventListener('click', e => {
     if (!lastSplit) return;

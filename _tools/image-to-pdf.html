@@ -40,10 +40,13 @@ howto: |
 
   ## What happens to image quality
 
-  **JPEG photos are copied into the PDF byte for byte.** The PDF format can
-  store JPEG data as it is (the `DCTDecode` filter in ISO 32000), so there is
-  no second round of compression, no quality loss, and the PDF is only a few
-  kilobytes larger than the photos themselves. Phone cameras often save the
+  **JPEG photos are copied into the PDF without re-encoding.** The PDF format
+  can store JPEG data as it is (the `DCTDecode` filter in ISO 32000), so there
+  is no second round of compression, no quality loss, and the PDF is about the
+  size of the photos themselves. Only the compressed picture is copied: the
+  photo's metadata (EXIF with GPS location and camera details, XMP, IPTC,
+  comments, thumbnails and extra data such as the video of a motion photo) is
+  left out. Phone cameras often save the
   picture sideways plus an EXIF orientation tag that says how to turn it. The
   tool reads that tag and rotates the image with the page's transformation
   matrix instead of re-encoding it, so portrait photos come out upright. An
@@ -72,10 +75,12 @@ howto: |
 faq:
   - q: Are my images uploaded to a server?
     a: No. The images are read and the PDF is assembled by JavaScript running in this page, on your own device. Nothing is sent over the network, so the tool keeps working even if you go offline after the page has loaded.
+  - q: Does the PDF include my photos' location or camera details?
+    a: No. The EXIF, XMP and IPTC metadata of a photo, such as GPS coordinates, the camera model and serial number, the date taken and the author, is removed from each JPEG before it is placed in the PDF, as are comments and any data after the image such as a motion photo's video. Other formats are redrawn from their pixels, which carries no metadata either. The PDF itself only records its title, its creation date and the name of this tool.
   - q: How many images can I put in one PDF?
     a: There is no fixed limit. The images and the finished PDF are held in your device's memory, so very large batches, hundreds of megabytes of photos, work best on a computer rather than a phone.
   - q: Will the PDF be smaller than my photos?
-    a: Not for JPEG photos. They are embedded unchanged to avoid any quality loss, so the PDF is about the size of the photos combined. PNG screenshots saved as JPEG often shrink. Resize or compress the photos first if you need a smaller file.
+    a: Not for JPEG photos. Their image data is embedded without re-encoding to avoid any quality loss, so the PDF is about the size of the photos combined. PNG screenshots saved as JPEG often shrink. Resize or compress the photos first if you need a smaller file.
   - q: Why did some pages come out in landscape?
     a: With orientation set to Auto, each page follows its image, so wide images get landscape pages. Choose Portrait or Landscape to make every page face the same way.
   - q: Can I convert HEIC photos from an iPhone?
@@ -388,6 +393,59 @@ faq:
     return 0;
   }
 
+  // Rebuilds the JPEG from only the segments a decoder needs, so the PDF does not carry the photo's
+  // EXIF (GPS position, camera serial number, date), XMP, IPTC, comments, thumbnails or anything stored
+  // after the end-of-image marker (the video of a motion photo, MPF extra images). The compressed image
+  // data is copied unchanged, so there is still no quality loss. Orientation is applied by the placement
+  // matrix and the ICC profile is written separately, so APP1 and APP2 are not needed.
+  function stripJpeg(b) {
+    var parts = [new Uint8Array([0xFF, 0xD8])], i = 2, sawAdobe = false, sawJfif = false, jfif = null;
+    function keep(from, to) { parts.push(b.subarray(from, to)); }
+    while (i + 2 <= b.length) {
+      if (b[i] !== 0xFF) break;
+      var m = b[i + 1];
+      if (m === 0xFF) { i++; continue; }
+      if (m === 0xD9) break;
+      if (m === 0x01 || (m >= 0xD0 && m <= 0xD7)) { i += 2; continue; }
+      if (i + 4 > b.length) break;
+      var len = (b[i + 2] << 8) | b[i + 3], end = i + 2 + len;
+      if (len < 2 || end > b.length) break;
+      if (m === 0xE0) {
+        // Keep a JFIF header (it tells decoders the data is YCbCr) but without its thumbnail.
+        if (!sawJfif && len >= 16 && b[i + 4] === 0x4A && b[i + 5] === 0x46 && b[i + 6] === 0x49 && b[i + 7] === 0x46 && b[i + 8] === 0) {
+          sawJfif = true;
+          jfif = new Uint8Array(18);
+          jfif.set(b.subarray(i, i + 16));
+          jfif[2] = 0; jfif[3] = 16; jfif[16] = 0; jfif[17] = 0;
+          parts.push(jfif);
+        }
+      } else if (m === 0xEE) {
+        // Adobe APP14 carries the colour transform flag, which decoders need.
+        if (!sawAdobe) { sawAdobe = true; keep(i, end); }
+      } else if ((m >= 0xE1 && m <= 0xEF) || m === 0xFE) {
+        // APP1-APP13, APP15 and COM: metadata only.
+      } else if (m === 0xDA) {
+        keep(i, end);
+        // Entropy-coded data runs until a marker other than a stuffed 0x00 or a restart marker.
+        var j = end;
+        while (j + 1 < b.length && !(b[j] === 0xFF && b[j + 1] !== 0x00 && !(b[j + 1] >= 0xD0 && b[j + 1] <= 0xD7))) j++;
+        if (j + 1 >= b.length) j = b.length;
+        keep(end, j);
+        i = j;
+        continue;
+      } else {
+        keep(i, end); // SOFn, DHT, DQT, DRI, DNL, DAC and the like
+      }
+      i = end;
+    }
+    parts.push(new Uint8Array([0xFF, 0xD9]));
+    var total = 0, at = 0, k;
+    for (k = 0; k < parts.length; k++) total += parts[k].length;
+    var out = new Uint8Array(total);
+    for (k = 0; k < parts.length; k++) { out.set(parts[k], at); at += parts[k].length; }
+    return out;
+  }
+
   // ---------- turning one image into PDF image data ----------
   async function deflate(bytes) {
     var stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'));
@@ -401,7 +459,7 @@ faq:
         (jpg.comps === 1 || jpg.comps === 3) && jpg.width > 0 && jpg.height > 0) {
       var swap = jpg.orientation >= 5;
       return {
-        data: bytes, filter: 'DCTDecode', cs: jpg.comps === 1 ? 'DeviceGray' : 'DeviceRGB', icc: iccProfile(jpg.icc, jpg.comps),
+        data: stripJpeg(bytes), filter: 'DCTDecode', cs: jpg.comps === 1 ? 'DeviceGray' : 'DeviceRGB', icc: iccProfile(jpg.icc, jpg.comps),
         pxW: jpg.width, pxH: jpg.height, orientation: jpg.orientation,
         dispW: swap ? jpg.height : jpg.width, dispH: swap ? jpg.width : jpg.height
       };
@@ -718,8 +776,15 @@ faq:
     if (!btn || !li || busy) return;
     var id = Number(li.dataset.id);
     if (btn.classList.contains('itp-remove')) removeItem(id);
-    else if (btn.classList.contains('itp-up')) move(id, -1);
-    else if (btn.classList.contains('itp-down')) move(id, 1);
+    else if (btn.classList.contains('itp-up') || btn.classList.contains('itp-down')) {
+      var up = btn.classList.contains('itp-up');
+      move(id, up ? -1 : 1);
+      // The item may have moved in the list and this button may now be disabled (first or last page):
+      // keep focus on the same button, else on the other arrow, else on the drag handle (WCAG 2.4.3).
+      var el = items[indexOfId(id)].el;
+      var same = TT.$(up ? '.itp-up' : '.itp-down', el), other = TT.$(up ? '.itp-down' : '.itp-up', el);
+      (!same.disabled ? same : !other.disabled ? other : TT.$('.itp-handle', el)).focus();
+    }
   });
 
   list.addEventListener('keydown', function (e) {

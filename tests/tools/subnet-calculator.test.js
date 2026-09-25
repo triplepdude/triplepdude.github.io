@@ -276,4 +276,38 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('#sc-copy');
   const clip = await page.evaluate(() => navigator.clipboard.readText());
   assert.ok(clip.includes('Network address: 192.168.1.0') && clip.includes('Wildcard mask: 0.0.0.255'), clip);
+
+  // Screen readers: the results, the split table and the error messages are redrawn on every
+  // keystroke (an address is incomplete until typing ends), so none is a live region or alert;
+  // #sc-status announces one short summary once typing pauses.
+  for (const sel of ['#sc-out', '#sc-split-out']) assert.equal(await page.getAttribute(sel, 'aria-live'), null, sel);
+  for (const sel of ['#sc-msg', '#sc-split-msg']) assert.equal(await page.getAttribute(sel, 'role'), null, sel);
+  await page.fill('#sc-split-num', '4');
+  await page.waitForTimeout(800);
+  await page.evaluate(() => {
+    window.__live = [];
+    new MutationObserver(ms => ms.forEach(m => {
+      const n = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const reg = n && n.closest('[aria-live]:not([aria-live="off"]), [role=status], [role=alert]');
+      if (reg && reg.textContent) window.__live.push(reg.id + ':' + reg.textContent);
+    })).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  const heard = async () => { await page.waitForTimeout(1000); const l = await page.evaluate(() => window.__live); await page.evaluate(() => { window.__live = []; }); return l; };
+  await page.fill('#sc-ip', '');
+  await page.type('#sc-ip', '10.20.30.40/16', { delay: 40 });
+  assert.deepEqual(await heard(), ['sc-status:10.20.0.0/16: 65,534 usable hosts. 4 subnets of /18.']);
+  await page.fill('#sc-split-num', '');
+  await page.type('#sc-split-num', '16', { delay: 40 });
+  assert.deepEqual(await heard(), ['sc-status:16 subnets of /20.']);
+  await page.fill('#sc-ip', '');
+  await page.type('#sc-ip', '10.20', { delay: 40 });
+  assert.deepEqual(await heard(), ['sc-status:An IPv4 address has four numbers separated by dots, like 192.168.1.10. "10.20" has 2.']);
+  await page.fill('#sc-ip', '192.168.1.10/24');
+
+  // Reflow (WCAG 1.4.10): no sideways scrolling at 320 CSS pixels.
+  const vp = page.viewportSize();
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, 'no horizontal scroll at 320px');
+  await page.setViewportSize(vp);
 };

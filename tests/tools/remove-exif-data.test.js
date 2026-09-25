@@ -315,4 +315,52 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await page.textContent(`${card(2)} .rexif-undecodable`), /cannot display this image/);
   assert.match((await table(2))['Text: Author'][0], /Jane Example/, 'its metadata is still listed and removed');
   assert.match(await page.textContent('#rexif-error'), /2 files could not be cleaned/);
+
+  // ---------- Hostile text chunks are read in linear time ----------
+  // Each is a few KB of zTXt that inflates to ~4 MB of text shaped to make a backtracking regular
+  // expression quadratic: NULs that are not at the end, "CreatorTool>" with no "<", and a raw
+  // profile whose header is followed by millions of spaces. Before the fix each froze the tab for hours.
+  const chunk = (type, data) => {
+    const b = Buffer.alloc(12 + data.length);
+    b.writeUInt32BE(data.length, 0);
+    b.write(type, 4, 'latin1');
+    data.copy(b, 8);
+    b.writeUInt32BE(zlib.crc32(b.subarray(4, 8 + data.length)), 8 + data.length);
+    return b;
+  };
+  const ztxt = (key, text) => chunk('zTXt', Buffer.concat([Buffer.from(key + '\0\0', 'latin1'), zlib.deflateSync(Buffer.from(text, 'latin1'))]));
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(1, 0); ihdr.writeUInt32BE(1, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const png1x1 = extra => Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), ...extra,
+    chunk('IDAT', zlib.deflateSync(Buffer.from([0, 200, 30, 30]))), chunk('IEND', Buffer.alloc(0))]);
+  const hostile = [
+    { name: 'nul-run.png', mimeType: 'image/png', buffer: png1x1([ztxt('Comment', '\0'.repeat(3999000) + 'x')]) },
+    { name: 'xmp-creatortool.png', mimeType: 'image/png', buffer: png1x1([ztxt('XML:com.adobe.xmp', 'CreatorTool>'.repeat(333250))]) },
+    { name: 'raw-profile.png', mimeType: 'image/png', buffer: png1x1([ztxt('Raw profile type exif', '\nexif\n12' + ' '.repeat(3990000) + 'Z')]) },
+    { name: 'long-value.png', mimeType: 'image/png', buffer: png1x1([ztxt('Title', ' '.repeat(100000) + 'A'.repeat(300))]) },
+  ];
+  hostile.forEach(f => assert.ok(f.buffer.length < 20000, `${f.name} is small: ${f.buffer.length}`));
+  await page.click('#rexif-clear');
+  const t0 = Date.now();
+  await page.setInputFiles('#rexif-file', hostile);
+  await idle();
+  assert.ok(Date.now() - t0 < 8000, `hostile text read in ${Date.now() - t0} ms`);
+  assert.equal(await page.locator('[data-rexif-card][data-state="done"]').count(), 4);
+  assert.equal((await table(0))['Text: Comment'][0], 'x');
+  assert.equal((await table(1)).XMP[0], '4.00 MB');
+  assert.equal((await table(2))['Text: Raw profile type exif'][0], 'exif 12…', 'not a valid profile, so listed as text');
+  // Only the start of a long value is tidied, after skipping leading blanks; it is shown cut off.
+  assert.equal((await table(3))['Text: Title'][0], 'A'.repeat(199) + '…');
+
+  // ---------- Keyboard focus survives the buttons' rows being hidden ----------
+  await page.focus('#rexif-clear');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.isVisible('#rexif-bulk'), false);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'rexif-sample', 'Clear list hands focus to the sample button');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector(`${card(0)} [data-rexif-dl]`);
+  await idle();
+  assert.equal(await page.isVisible('#rexif-empty'), false);
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Download cleaned sample-photo.jpg',
+    'the sample hands focus to its Download button');
 };

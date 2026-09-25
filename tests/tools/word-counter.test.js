@@ -42,6 +42,32 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await val('#wc-reading'), '4 min 12 sec');
   assert.equal(await val('#wc-speaking'), '6 min 40 sec');
 
+  // A long run of spaces between end marks must not freeze the page (the old
+  // sentence regex was quadratic: ~2 s for 40,000 spaces). Same count as before.
+  const ms = await page.evaluate(() => {
+    const el = document.querySelector('#wc-input');
+    el.value = 'x.' + ' '.repeat(40000) + '.' + '\t'.repeat(40000) + 'y';
+    const t = performance.now();
+    el.dispatchEvent(new Event('input'));
+    return performance.now() - t;
+  });
+  assert.ok(ms < 300, `input handler took ${ms} ms`);
+  await page.waitForFunction(() => document.querySelector('#wc-sentences').textContent === '2');
+  assert.equal(await val('#wc-words'), '2');
+
+  // The stats grid is not a live region; one labelled summary is announced
+  // after typing pauses.
+  assert.equal(await page.locator('.stats').getAttribute('aria-live'), null);
+  await page.fill('#wc-input', '');
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => {
+    window.__wcChanges = 0;
+    new MutationObserver(() => window.__wcChanges++).observe(document.querySelector('#wc-status'), { childList: true, characterData: true, subtree: true });
+  });
+  await page.locator('#wc-input').pressSequentially('The quick brown fox.', { delay: 20 });
+  await page.waitForFunction(() => document.querySelector('#wc-status').textContent === '4 words, 20 characters', null, { timeout: 3000 });
+  assert.equal(await page.evaluate(() => window.__wcChanges), 1);
+
   await page.click('#wc-clear');
   assert.equal(await val('#wc-words'), '0');
   assert.equal(await page.inputValue('#wc-input'), '');

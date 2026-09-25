@@ -57,9 +57,12 @@ module.exports = async ({ page, open, assert }) => {
     return { ...t.getSettings(), label: t.label, caps: t.getCapabilities ? t.getCapabilities() : null };
   });
 
-  // Default mode of Chromium's fake camera.
-  await page.click('#wct-start');
+  // Default mode of Chromium's fake camera. Started from the keyboard: Start disables
+  // itself, so focus moves on to Stop instead of falling back to <body> (WCAG 2.4.3).
+  await page.focus('#wct-start');
+  await page.keyboard.press('Enter');
   await waitText('#wct-resolution', /\d+ × \d+/);
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'wct-stop');
   let s = await lastSettings();
   assert.equal(await text('#wct-resolution'), `${s.width} × ${s.height}`);
   assert.equal(`${s.width}x${s.height}`, '640x480');
@@ -118,8 +121,11 @@ module.exports = async ({ page, open, assert }) => {
   const png = readPng(fs.readFileSync(await dl.path()), assert);
   assert.deepEqual(png, { width: 1280, height: 720 });
 
-  // Stop releases the camera.
-  await page.click('#wct-stop');
+  // Stop releases the camera, and keyboard focus goes back to Start.
+  await page.focus('#wct-stop');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => !document.getElementById('wct-start').disabled);
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'wct-start');
   assert.equal(await page.evaluate(() => window.__gum.streams.every(st => st.getTracks().every(t => t.readyState === 'ended'))), true);
   assert.equal(await page.$eval('#wct-video', v => v.srcObject), null);
   assert.equal(await page.isVisible('#wct-placeholder'), true);

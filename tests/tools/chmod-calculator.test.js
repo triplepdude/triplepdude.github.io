@@ -175,6 +175,33 @@ module.exports = async ({ page, open, assert }) => {
   await page.uncheck('#cm-rec');
   await page.fill('#cm-file', '');
 
+  // Live regions: typing a file name must not re-read the explanation or the
+  // commands on every key; one short status follows once typing pauses.
+  assert.equal(await page.locator('.cm-cmds[aria-live]').count(), 0);
+  await page.evaluate(() => {
+    window.__live = [];
+    document.querySelectorAll('[aria-live], [role=alert], [role=status]').forEach(r => new MutationObserver(() =>
+      window.__live.push([r.id || r.className, r.textContent.trim()])
+    ).observe(r, { childList: true, subtree: true, characterData: true }));
+  });
+  await page.focus('#cm-file');
+  await page.keyboard.type('deploy.sh', { delay: 30 });
+  assert.equal(await text('#cm-cmd-num'), 'chmod 750 deploy.sh', 'commands still update at once');
+  await page.waitForTimeout(1200);
+  assert.deepEqual(await page.evaluate(() => window.__live), [['cm-status', 'chmod 750 deploy.sh.']]);
+  // A mode change still updates the explanation; so does the Directory box.
+  await page.evaluate(() => { window.__live = []; });
+  await page.check('#cm-dir');
+  await page.waitForTimeout(1200);
+  const live = await page.evaluate(() => window.__live);
+  assert.ok(live.some(l => /Others have no access/.test(l[1]) || /Owner can list the contents/.test(l[1])), JSON.stringify(live));
+  assert.match((await page.evaluate(() => window.__live)).filter(l => l[0] === 'cm-status').pop()[1], /^chmod 750 deploy\.sh\. GNU chmod keeps/);
+  await page.fill('#cm-octal', '755');
+  assert.match(await text('#cm-explain'), /Others can list the contents and enter it\./);
+  await page.uncheck('#cm-dir');
+  await page.fill('#cm-file', '');
+  await page.fill('#cm-octal', '750');
+
   // Presets.
   assert.equal(await page.locator('#cm-presets tr').count(), 10);
   await page.click('button[data-preset="1777"]');

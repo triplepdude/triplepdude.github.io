@@ -347,5 +347,44 @@ module.exports = async ({ page, open, assert }) => {
     'Sat 2027-04-03 23:20', 'Sat 2027-04-03 23:40', 'Sun 2027-04-04 23:00', 'Sun 2027-04-04 23:20'
   ]);
 
+  // Live regions: typing must not fire an announcement per key.
+  const record = () => page.evaluate(() => {
+    window.__live = [];
+    if (window.__liveOn) return;
+    window.__liveOn = true;
+    document.querySelectorAll('[aria-live], [role=alert], [role=status]').forEach(r => new MutationObserver(() =>
+      window.__live.push([r.id || r.className, r.getAttribute('role') || r.getAttribute('aria-live'), r.textContent.trim()])
+    ).observe(r, { childList: true, subtree: true, characterData: true }));
+  });
+  const heard = () => page.evaluate(() => window.__live);
+  assert.equal(await page.locator('[role=alert]').count(), 0, 'no alert for typing errors');
+  assert.deepEqual(await page.$eval('#cr-expr', e => e.getAttribute('aria-describedby').split(' ')), ['cr-err', 'cr-desc']);
+  await setExpr('');
+  await page.waitForTimeout(1000);
+  await record();
+  await page.focus('#cr-expr');
+  await page.keyboard.type('*/5 9 * * 1', { delay: 30 });
+  assert.match(await text('#cr-err'), /^$|Expected 5 fields/, 'the visible error still updates at once');
+  await page.waitForTimeout(1200);
+  let log = await heard();
+  assert.ok(log.filter(l => l[0] === 'cr-err-status' && l[2]).length === 0, 'no error read out for a valid result: ' + JSON.stringify(log));
+  assert.ok(log.length <= 3, 'at most a few updates for 11 keys: ' + JSON.stringify(log));
+  // A pause on an unfinished expression reads the error once, as a status.
+  await record();
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  assert.equal(await text('#cr-err-status'), '');
+  await page.waitForTimeout(1200);
+  log = (await heard()).filter(l => l[0] === 'cr-err-status');
+  assert.equal(log.length, 1, JSON.stringify(log));
+  assert.match(log[0][2], /Expected 5 fields .* found 3\./);
+  // Leaving the field says it at once.
+  await setExpr('0 9 * *');
+  await page.dispatchEvent('#cr-expr', 'change');
+  assert.match(await text('#cr-err-status'), /Expected 5 fields .* found 4/);
+  await page.click('[data-cron]');
+  assert.equal(await text('#cr-err-status'), '');
+
   await cdp.send('Emulation.setTimezoneOverride', { timezoneId: '' }).catch(() => {});
 };

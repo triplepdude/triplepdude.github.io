@@ -7,10 +7,24 @@ module.exports = async ({ page, open, assert }) => {
   const hasClass = (code, cls) => page.locator(`.kbt-key[data-code="${code}"]`).evaluate((el, c) => el.classList.contains(c), cls);
   const active = () => page.evaluate(() => document.activeElement && document.activeElement.id);
 
-  // The tester is focused and shows the full-size layout on load.
-  assert.equal(await active(), 'kbt-scroll');
+  // The full-size layout shows on load. Regression: the tester used to grab focus
+  // and capture straight away, trapping Tab and Shift+Tab (WCAG 2.1.2).
+  assert.notEqual(await active(), 'kbt-scroll');
+  assert.equal(await page.getAttribute('#kbt-scroll', 'role'), 'group');
   assert.equal(await page.locator('#kbt-board .kbt-key').count(), 104);
   assert.equal(await text('#kbt-tested'), '0 / 104');
+  // Tabbing onto the idle area does not capture: Tab and Shift+Tab pass through.
+  await page.focus('#kbt-scroll');
+  assert.match(await text('#kbt-status-text'), /^Not capturing: press Enter or Space/);
+  await page.keyboard.press('Tab');
+  assert.equal(await active(), 'kbt-capture');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await active(), 'kbt-scroll');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await active(), 'kbt-reset');
+  await page.click('#kbt-reset'); // clear the Tab and Shift presses
+  assert.equal(await text('#kbt-tested'), '0 / 104');
+  await page.focus('#kbt-scroll'); // keys below must not activate the Reset button
 
   // A single key press fills in the event panel and marks the key.
   await page.keyboard.press('KeyA');
@@ -59,6 +73,12 @@ module.exports = async ({ page, open, assert }) => {
   await page.keyboard.up('NumpadEnter');
   assert.equal(await hasClass('NumpadEnter', 'is-tested'), true);
 
+  // Enter on the area starts capturing; the area becomes an application.
+  await page.focus('#kbt-scroll');
+  await page.keyboard.press('Enter');
+  assert.match(await text('#kbt-status-text'), /^Capturing/);
+  assert.equal(await page.getAttribute('#kbt-scroll', 'role'), 'application');
+
   // While capturing, Space/arrows/End do not scroll and Tab keeps focus.
   assert.equal(await page.evaluate(() => window.scrollY), 0);
   for (const k of ['Space', 'PageDown', 'ArrowDown', 'End', 'F1', 'Backspace']) await page.keyboard.press(k);
@@ -69,34 +89,69 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await hasClass('Tab', 'is-tested'), true);
   assert.match(await text('#kbt-status-text'), /^Capturing/);
 
-  // Escape twice releases the capture (no keyboard trap).
+  // Escape twice in a row releases the capture (no keyboard trap). Regression: the
+  // two presses had to be under 600 ms apart, a timed exit; any gap now works,
+  // but another key in between starts the count again.
   const human = () => page.waitForTimeout(120); // keep test presses slower than the chatter threshold
-  const escTwice = async () => {
+  const escTwice = async (gap = 150) => {
     await human();
     await page.keyboard.press('Escape');
     assert.equal(await active(), 'kbt-scroll');
-    await page.waitForTimeout(150); // a human double tap, well above the chatter threshold
+    assert.match(await text('#kbt-status-text'), /^Capturing/);
+    await page.waitForTimeout(gap);
     await page.keyboard.press('Escape');
   };
-  await escTwice();
-  assert.equal(await active(), 'kbt-capture');
+  await human();
+  await page.keyboard.press('Escape');
+  await human();
+  await page.keyboard.press('KeyM');
+  await human();
+  await page.keyboard.press('Escape');
+  assert.match(await text('#kbt-status-text'), /^Capturing/, 'Esc, M, Esc must not release');
+  await human();
+  await page.keyboard.press('KeyM');
+  await escTwice(900);
+  assert.equal(await active(), 'kbt-scroll');
   assert.match(await text('#kbt-status-text'), /^Not capturing/);
-  // Regression: focus used to land on Reset, so the next Space or Enter wiped all
-  // results. The release target now only resumes capturing.
+  assert.equal(await page.getAttribute('#kbt-scroll', 'role'), 'group');
+  // Space resumes capturing and never wipes results.
   const testedBefore = Number((await text('#kbt-tested')).split(' / ')[0]);
   assert.ok(testedBefore > 5);
   await human();
   await page.keyboard.press('Space');
   assert.equal(await active(), 'kbt-scroll');
+  assert.match(await text('#kbt-status-text'), /^Capturing/);
   assert.ok(Number((await text('#kbt-tested')).split(' / ')[0]) >= testedBefore, 'Space after release must not reset');
-  // Regression: Tab after releasing used to go straight back into the tester.
+  // After releasing, focus can move both ways. Regression: Shift+Tab went back into
+  // capture and the controls above the tester were unreachable.
   await escTwice();
+  await human();
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await active(), 'kbt-reset');
+  await human();
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await active(), 'kbt-chatter-ms');
+  await page.focus('#kbt-reset');
+  await human();
+  await page.keyboard.press('Tab');
+  assert.equal(await active(), 'kbt-scroll');
+  assert.match(await text('#kbt-status-text'), /^Not capturing/, 'Tab back onto the area must not capture');
+  await human();
+  await page.keyboard.press('Tab');
+  assert.equal(await active(), 'kbt-capture');
+  // The event log scrolls sideways on phones, so its wrapper is keyboard focusable.
+  await human();
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Event log');
   await human();
   await page.keyboard.press('Tab');
   assert.equal(await active(), 'kbt-copy');
-  await human();
-  await page.keyboard.press('Shift+Tab');
-  assert.equal(await active(), 'kbt-capture');
+
+  // Tested keys carry a tick as well as a tint (not colour alone, WCAG 1.4.1).
+  const tick = code => page.locator(`.kbt-key[data-code="${code}"] .kbt-cap`).evaluate(el => getComputedStyle(el, '::after').content);
+  assert.equal(await tick('KeyA'), '"\u2713"');
+  assert.equal(await tick('KeyZ'), 'none');
+  assert.equal(await page.locator('.kbt-legend i.l-tested').evaluate(el => getComputedStyle(el, '::after').content), '"\u2713"');
 
   // Outside the tester, keys still register but are not blocked.
   await page.evaluate(() => document.activeElement.blur());
@@ -137,7 +192,14 @@ module.exports = async ({ page, open, assert }) => {
     for (const type of ['keydown', 'keyup']) t.dispatchEvent(new KeyboardEvent(type, { code: 'IntlBackslash', key: '\\', keyCode: 226, bubbles: true }));
   });
   assert.equal(await page.locator('#kbt-other-wrap').isVisible(), true);
-  assert.match(await text('#kbt-other'), /IntlBackslash/);
+  assert.equal(await text('#kbt-other'), 'IntlBackslash');
+  // A held "other" key says so in text, not only with its fill colour.
+  await page.evaluate(() => document.getElementById('kbt-scroll').dispatchEvent(
+    new KeyboardEvent('keydown', { code: 'IntlBackslash', key: '\\', keyCode: 226, bubbles: true })));
+  assert.equal(await text('#kbt-other li.is-on'), 'IntlBackslash (held)');
+  await page.evaluate(() => document.getElementById('kbt-scroll').dispatchEvent(
+    new KeyboardEvent('keyup', { code: 'IntlBackslash', key: '\\', keyCode: 226, bubbles: true })));
+  assert.equal(await text('#kbt-other'), 'IntlBackslash');
 
   // Keys typed into the layout <select> are not recorded, and the status says so.
   const before = await text('#kbt-presses');
@@ -173,14 +235,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(clip.split('\n')[0], /^event\tkey\tcode\tkeyCode\tlocation/);
   assert.match(clip, /\tKeyA\t65\t0\t/);
 
-  // Reset clears everything and refocuses the tester.
+  // Reset clears everything and keeps focus on the button.
   await page.click('#kbt-reset');
   assert.equal(await text('#kbt-tested'), '0 / 61');
   assert.equal(await text('#kbt-max'), '0');
   assert.equal(await text('#kbt-chatter'), '0');
   assert.equal(await page.locator('.kbt-key.is-tested').count(), 0);
   assert.match(await text('#kbt-log'), /No keys pressed yet/);
-  assert.equal(await active(), 'kbt-scroll');
+  assert.equal(await active(), 'kbt-reset');
 
   // 60% boards send Escape from the top-left key: it marks that key, is not an
   // "other" key, and pressing both Escape and backquote still counts one key.
@@ -199,6 +261,7 @@ module.exports = async ({ page, open, assert }) => {
   await page.selectOption('#kbt-layout', '60');
   await page.click('#kbt-capture');
   assert.equal(await active(), 'kbt-scroll');
+  assert.match(await text('#kbt-status-text'), /^Capturing/);
 
   // Keys that only send keyup light briefly, then settle as tested.
   await page.evaluate(() => document.getElementById('kbt-scroll').dispatchEvent(

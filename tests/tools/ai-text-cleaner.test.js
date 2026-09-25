@@ -153,6 +153,66 @@ module.exports = async ({ page, open, assert }) => {
   // Removing a zero-width space between two spaces leaves a double space, which is then collapsed.
   assert.equal(await clean('a \u200B b'), 'a b');
 
+  // Mixed spaces and tabs: only a run that ends the line is trimmed, and only the spaces
+  // right after a word are collapsed.
+  assert.equal(await clean('a \t  b\tc  \t d \t \ne  \t'), 'a \t  b\tc \t d\ne');
+  assert.equal(await count('trim'), 2);
+  assert.equal(await count('collapse'), 1);
+  assert.deepEqual(await page.$$eval('#atc-view .atc-ws', els => els.map(e => e.textContent)),
+    ['\u00B7', '\u00B7\u2192\u00B7', '\u00B7\u00B7\u2192']);
+
+  // Long runs of tabs or spaces that don't end a line must not freeze the page (the old
+  // lookahead regexes took over 10 s on 40,000 tabs).
+  for (const run of ['\t'.repeat(40000), ' '.repeat(40000) + '\n', ' '.repeat(20000) + '\t'.repeat(20000) + 'x']) {
+    const ms = await page.evaluate(v => {
+      const el = document.querySelector('#atc-input');
+      el.value = 'a' + v + 'b';
+      const t = performance.now();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('#atc-o-quotes').click();
+      document.querySelector('#atc-o-quotes').click();
+      return performance.now() - t;
+    }, run);
+    assert.ok(ms < 1500, `cleaning a long whitespace run took ${Math.round(ms)} ms`);
+  }
+  // A long run of tag characters (with or without a flag in front) is checked once per run,
+  // not once per character (this took 18 s for 20,000 tags).
+  for (const lead of ['\u{1F3F4}', 'a']) {
+    const ms = await page.evaluate(v => {
+      const el = document.querySelector('#atc-input');
+      el.value = v;
+      const t = performance.now();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return performance.now() - t;
+    }, lead + '\u{E0067}'.repeat(20000));
+    assert.ok(ms < 1500, `cleaning 20,000 tag characters took ${Math.round(ms)} ms`);
+    assert.equal(await out(), lead);
+    assert.equal(await count('inv'), 20000);
+  }
+  assert.equal(await page.textContent('#atc-error'), '');
+
+  // The whitespace markers meet WCAG AA contrast (4.5:1) on their tinted background.
+  await setText('word  \nx');
+  const ratio = await page.$eval('#atc-view .atc-ws', el => {
+    const rgba = c => c.match(/[\d.]+/g).map(Number);
+    const lum = ([r, g, b]) => {
+      const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    let base = null;
+    for (let n = el.parentElement; n && !base; n = n.parentElement) {
+      const c = rgba(getComputedStyle(n).backgroundColor);
+      if (c.length === 3 || c[3] === 1) base = c.slice(0, 3);
+    }
+    base = base || [255, 255, 255];
+    const bg = rgba(getComputedStyle(el).backgroundColor);
+    const a = bg.length > 3 ? bg[3] : 1;
+    const mix = base.map((v, i) => bg[i] * a + v * (1 - a));
+    const l1 = lum(rgba(getComputedStyle(el).color)), l2 = lum(mix);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  });
+  assert.ok(ratio >= 4.5, `.atc-ws contrast ${ratio.toFixed(2)}:1`);
+
   // ---- Highlighted view ----
   await setText('A\u200Bb\u00A0c\u2014d \u{1F469}\u200D\u{1F4BB}');
   const pills = await page.$$eval('#atc-view .atc-pill', els => els.map(e => [e.textContent, e.className]));

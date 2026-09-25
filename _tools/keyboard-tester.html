@@ -6,8 +6,8 @@ keywords: [keyboard tester, keyboard test online, key tester, test keyboard keys
 howto: |
   ## How to test your keyboard
 
-  Press every key once; the keyboard picture is focused when the page loads.
-  Keys turn solid while held and stay tinted after release, so a key that never
+  Click the keyboard picture (or Tab to it and press Enter or Space), then press
+  every key once. Keys turn solid while held and keep a tick after release, so a key that never
   lights up is faulty or swallowed before it reaches the browser. The counter
   tracks how much of the chosen layout you have covered. Pick **Tenkeyless**
   or **60%** to match a board without a number pad or function row. On the 60%
@@ -16,11 +16,12 @@ howto: |
   On Macs and many laptops the top row sends brightness and media controls by
   default; hold Fn to test F1 to F12.
 
-  While the keyboard picture is focused, the page blocks the default action of
+  While capturing, the page blocks the default action of
   keys that would scroll or move you away: Space, the arrows, Page Up/Down,
-  Home, End, Tab, Backspace, Alt, the Menu key and F1 to F12. Press **Esc twice**
-  quickly, or click elsewhere, to stop capturing; focus moves to the **Capture
-  keys** button and Tab carries on down the page. No web page can block
+  Home, End, Tab, Backspace, Alt, the Menu key and F1 to F12. Press **Esc twice
+  in a row**, with no other key in between, or click elsewhere, to stop
+  capturing; focus stays on the picture and Tab or Shift+Tab move on as usual.
+  No web page can block
   system shortcuts such as Alt+Tab, Cmd+Tab or Ctrl+Alt+Del.
 
   ## What the numbers mean
@@ -111,17 +112,24 @@ faq:
 .kbt-key.is-sm .kbt-cap { font-size: 9px; font-size: calc(var(--u) * 0.22); }
 .kbt-key.is-tested .kbt-cap {
   background: var(--accent-soft); background: color-mix(in srgb, var(--accent) 20%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-color: var(--accent); border-width: 2px; border-bottom-width: 3px;
 }
+/* A tick, so tested keys do not rely on colour alone. */
+.kbt-key.is-tested .kbt-cap::after, .kbt-legend i.l-tested::after {
+  content: "\2713"; position: absolute; top: 0; right: 0.15em;
+  color: var(--accent); font-weight: 700; line-height: 1.1;
+}
+.kbt-key.is-down .kbt-cap::after { color: var(--accent-text); }
 .kbt-key.is-down .kbt-cap { background: var(--accent); border-color: var(--accent); color: var(--accent-text); border-bottom-width: 1px; }
 .kbt-key.is-chatter .kbt-cap { box-shadow: inset 0 0 0 2px var(--danger); }
 .kbt-swipe { margin: -4px 0 8px; }
 .kbt-under { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 16px; }
 .kbt-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 13px; }
 .kbt-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.kbt-legend i { width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); }
+.kbt-legend i { position: relative; width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); }
 .kbt-legend i.l-down { background: var(--accent); border-color: var(--accent); }
-.kbt-legend i.l-tested { background: var(--accent-soft); background: color-mix(in srgb, var(--accent) 20%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.kbt-legend i.l-tested { background: var(--accent-soft); background: color-mix(in srgb, var(--accent) 20%, var(--surface)); border: 2px solid var(--accent); }
+.kbt-legend i.l-tested::after { top: -2px; right: 0; font-size: 11px; font-style: normal; }
 .kbt-legend i.l-chatter { box-shadow: inset 0 0 0 2px var(--danger); }
 .kbt-h { margin: 20px 0 8px; font-size: 1rem; }
 .kbt-held { margin: 0 0 16px; min-height: 0; }
@@ -166,9 +174,9 @@ faq:
   <button class="btn secondary" type="button" id="kbt-reset">Reset</button>
 </div>
 
-<p class="kbt-status" id="kbt-status"><span class="kbt-dot" aria-hidden="true"></span><span id="kbt-status-text">Click the keyboard, then press any key.</span></p>
+<p class="kbt-status" id="kbt-status"><span class="kbt-dot" aria-hidden="true"></span><span id="kbt-status-text">Click the keyboard, or Tab to it and press Enter, then press any key.</span></p>
 
-<div class="kbt-scroll" id="kbt-scroll" tabindex="0" role="application" aria-label="Keyboard tester. Press keys to test them. Press Escape twice to leave." aria-describedby="kbt-status-text">
+<div class="kbt-scroll" id="kbt-scroll" tabindex="0" role="group" aria-label="Keyboard tester. Press Enter or Space to capture keys, then Escape twice to stop." aria-describedby="kbt-status-text">
   <div class="kbt-board" id="kbt-board" aria-hidden="true"></div>
 </div>
 
@@ -214,7 +222,7 @@ faq:
 </div>
 
 <h2 class="kbt-h">Event log</h2>
-<div class="table-wrap">
+<div class="table-wrap" tabindex="0" role="region" aria-label="Event log">
   <table class="data kbt-log">
     <thead><tr><th scope="col">Event</th><th scope="col">key</th><th scope="col">code</th><th scope="col">keyCode</th><th scope="col">location</th><th scope="col">Timing</th></tr></thead>
     <tbody id="kbt-log"><tr><td colspan="6" class="kbt-empty">No keys pressed yet.</td></tr></tbody>
@@ -299,7 +307,9 @@ faq:
   var held = new Map();   // id -> keydown timeStamp
   var lastUp = {};        // id -> keyup timeStamp
   var chatterKeys = new Set();
-  var maxHeld = 0, presses = 0, chatterCount = 0, lastEsc = -1e9;
+  var maxHeld = 0, presses = 0, chatterCount = 0;
+  var capturing = false;  // only after an explicit click, Enter/Space or the Capture button
+  var escRun = 0;         // Escape keydowns in a row with no other key between
   var log = [];           // full log, capped
   var LOG_MAX = 500, LOG_SHOW = 10;
 
@@ -380,7 +390,7 @@ faq:
     tested.forEach(function (c) { if (!layoutCodes[c]) others.push(c); });
     TT.$('#kbt-other-wrap').hidden = others.length === 0;
     TT.$('#kbt-other').innerHTML = others.map(function (c) {
-      return '<li class="' + (held.has(c) ? 'is-on' : '') + '">' + esc(c) + '</li>';
+      return held.has(c) ? '<li class="is-on">' + esc(c) + ' (held)</li>' : '<li>' + esc(c) + '</li>';
     }).join('');
   }
 
@@ -452,16 +462,25 @@ faq:
     return PREVENT_KEYS[e.key] === 1 || PREVENT_CODES[e.code] === 1 || /^F([1-9]|1[0-2])$/.test(e.code);
   }
 
-  // Hand focus to the button right after the drawing: Tab then carries on down the
-  // page, and Space or Enter on it only resumes capturing (it cannot wipe results).
-  function release() {
-    captureBtn.focus();
+  // Capturing is switched on explicitly and off again by Esc Esc or leaving the
+  // area. Focus stays put when it stops, so Tab and Shift+Tab both work from there.
+  function setCapture(on) {
+    capturing = !!on;
+    escRun = 0;
+    scroller.setAttribute('role', capturing ? 'application' : 'group');
+    setStatus();
   }
 
   function onKey(e) {
     if (isEditable(e.target)) return;
-    var active = document.activeElement === scroller;
+    var onArea = document.activeElement === scroller;
+    var active = onArea && capturing;
     if (active && shouldPrevent(e)) e.preventDefault();
+    // Enter or Space on the idle area starts capturing (and is recorded as usual).
+    if (onArea && !capturing && e.type === 'keydown' && (e.key === 'Enter' || e.key === ' ' || e.code === 'Space')) {
+      e.preventDefault();
+      setCapture(true);
+    }
     var id = e.code || (e.key ? 'Key "' + e.key + '"' : 'Unidentified');
     var t = e.timeStamp || performance.now();
     var timing = '', chatter = false;
@@ -486,9 +505,9 @@ faq:
         refresh(id);
         reveal(keyEls[id]);
       }
-      if (active && id === 'Escape' && !e.repeat) {
-        if (t - lastEsc < 600) { lastEsc = -1e9; addLog(e, timing, chatter); showEvent(e); updateStats(); release(); return; }
-        lastEsc = t;
+      if (!e.repeat) {
+        escRun = id === 'Escape' ? escRun + 1 : 0;
+        if (active && escRun >= 2) { addLog(e, timing, chatter); showEvent(e); updateStats(); setCapture(false); return; }
       }
     } else {
       if (held.has(id)) {
@@ -526,14 +545,17 @@ faq:
 
   function setStatus() {
     var ae = document.activeElement;
-    var on = ae === scroller;
+    if (ae !== scroller && capturing) { capturing = false; escRun = 0; scroller.setAttribute('role', 'group'); }
+    var on = ae === scroller && capturing;
     TT.$('#kbt-status').classList.toggle('is-on', on);
     scroller.classList.toggle('is-active', on);
     TT.$('#kbt-status-text').textContent = on
-      ? 'Capturing keys. Space, Tab, arrows and F-keys stay on this page. Press Esc twice to stop.'
+      ? 'Capturing keys. Space, Tab, arrows and F-keys stay on this page. Press Esc twice in a row to stop.'
       : isEditable(ae)
         ? 'Paused while a menu has focus: keys go to the menu, not the tester. Click the keyboard or Capture keys to carry on.'
-        : 'Not capturing: keys still register, but Space, Tab and arrows will scroll or move focus. Click the keyboard to capture them.';
+        : ae === scroller
+          ? 'Not capturing: press Enter or Space to capture keys, or Tab to move on. Keys still register, but Space, Tab and arrows will scroll or move focus.'
+          : 'Not capturing: keys still register, but Space, Tab and arrows will scroll or move focus. Click the keyboard or Capture keys to capture them.';
   }
 
   function reset() {
@@ -555,8 +577,10 @@ faq:
   document.addEventListener('focusout', setStatus);
   layoutSel.addEventListener('change', render);
   labelSel.addEventListener('change', render);
-  captureBtn.addEventListener('click', function () { scroller.focus({ preventScroll: true }); });
-  TT.$('#kbt-reset').addEventListener('click', function () { reset(); scroller.focus({ preventScroll: true }); });
+  function capture() { scroller.focus({ preventScroll: true }); setCapture(true); }
+  scroller.addEventListener('click', capture);
+  captureBtn.addEventListener('click', capture);
+  TT.$('#kbt-reset').addEventListener('click', reset);
   TT.$('#kbt-copy').addEventListener('click', function (e) {
     var lines = ['event\tkey\tcode\tkeyCode\tlocation\trepeat\ttiming\ttime_ms'];
     log.forEach(function (r) {
@@ -573,7 +597,6 @@ faq:
   render();
   showMods(null);
   checkOverflow();
-  scroller.focus({ preventScroll: true });
   setStatus();
 })();
 </script>

@@ -66,7 +66,7 @@ faq:
   <textarea id="wc-input" rows="10" placeholder="Start typing or paste your text here…"></textarea>
 </div>
 
-<div class="stats" aria-live="polite">
+<div class="stats">
   <div class="stat"><b id="wc-words">0</b><span>Words</span></div>
   <div class="stat"><b id="wc-chars">0</b><span>Characters</span></div>
   <div class="stat"><b id="wc-chars-ns">0</b><span>Characters (no spaces)</span></div>
@@ -75,6 +75,7 @@ faq:
   <div class="stat"><b id="wc-reading">0 sec</b><span>Reading time</span></div>
   <div class="stat"><b id="wc-speaking">0 sec</b><span>Speaking time</span></div>
 </div>
+<p class="visually-hidden" id="wc-status" role="status"></p>
 
 <div class="actions">
   <button class="btn secondary small" type="button" data-copy-target="#wc-input">Copy text</button>
@@ -109,19 +110,38 @@ faq:
     var words = cjk + (rest.match(/[\p{L}\p{N}\p{M}]+(?:['’\-][\p{L}\p{N}\p{M}]+|(?<=\p{N})[.,:]\p{N}+)*/gu) || []).length;
     // A period or comma between digits (3.5, 1,000) doesn't end a sentence.
     var sentenceText = text.replace(/(\p{N})[.,](?=\p{N})/gu, '$1');
-    var sentences = text.trim() ? (sentenceText.match(/[^.!?…。！？]*[\p{L}\p{N}][^.!?…。！？]*(?:[.!?…。！？]+|$)/gu) || []).length : 0;
+    // A sentence is a stretch between end marks that holds a letter or digit.
+    // Split + test is linear; a single matching regex backtracks
+    // quadratically on long runs of spaces or symbols.
+    var sentences = sentenceText.split(/[.!?…。！？]+/).filter(function (p) { return /[\p{L}\p{N}]/u.test(p); }).length;
     var paragraphs = text.split(/\n\s*\n/).filter(function (p) { return p.trim(); }).length;
     TT.$('#wc-words').textContent = words.toLocaleString();
-    TT.$('#wc-chars').textContent = graphemes(text).toLocaleString();
+    var chars = graphemes(text);
+    TT.$('#wc-chars').textContent = chars.toLocaleString();
     TT.$('#wc-chars-ns').textContent = graphemes(text.replace(/\s+/g, '')).toLocaleString();
     TT.$('#wc-sentences').textContent = sentences.toLocaleString();
     TT.$('#wc-paragraphs').textContent = paragraphs.toLocaleString();
     TT.$('#wc-reading').textContent = duration(words, 238);
     TT.$('#wc-speaking').textContent = duration(words, 150);
+    last = { words: words, chars: chars };
   }
 
-  input.addEventListener('input', update);
-  TT.$('#wc-clear').addEventListener('click', function () { input.value = ''; update(); input.focus(); });
+  // Screen readers get one labelled summary after typing pauses, instead of
+  // every bare number changing on every keystroke.
+  var last = { words: 0, chars: 0 };
+  var status = TT.$('#wc-status');
+  var announce = TT.debounce(function () {
+    status.textContent = last.words.toLocaleString() + (last.words === 1 ? ' word, ' : ' words, ') +
+      last.chars.toLocaleString() + (last.chars === 1 ? ' character' : ' characters');
+  }, 1000);
+  // Short text updates on every keystroke; very long text waits for a pause.
+  var updateLater = TT.debounce(update, 150);
+
+  input.addEventListener('input', function () {
+    if (input.value.length > 20000) updateLater(); else update();
+    announce();
+  });
+  TT.$('#wc-clear').addEventListener('click', function () { input.value = ''; update(); announce(); input.focus(); });
   update();
 })();
 </script>

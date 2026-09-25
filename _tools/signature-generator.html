@@ -30,7 +30,7 @@ howto: |
 
   ## PNG or SVG?
 
-  | | PNG | SVG |
+  | Feature | PNG | SVG |
   |---|---|---|
   | What it stores | Pixels, transparent background | Vector curves |
   | Enlarging | Blurs beyond its pixel size | Sharp at any size |
@@ -73,12 +73,12 @@ faq:
 ---
 <style>
 .sg-pad {
-  --sg-paper: #ffffff; --sg-guide: #c3c8cf; --sg-guide-text: #8b929c;
+  --sg-paper: #ffffff; --sg-guide: #c3c8cf; --sg-guide-text: #6b7280;
   position: relative; height: clamp(190px, 32vw, 290px); margin: 0 0 14px; overflow: hidden;
   background: var(--sg-paper); border: 1px solid var(--border); border-radius: 12px;
   touch-action: none; -webkit-user-select: none; user-select: none;
 }
-@media (prefers-color-scheme: dark) { .sg-pad { --sg-paper: #f1f2ef; } }
+@media (prefers-color-scheme: dark) { .sg-pad { --sg-paper: #f1f2ef; --sg-guide-text: #5f6670; } }
 .sg-pad canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: 100%; cursor: crosshair; touch-action: none; }
 .sg-pad:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sg-line { position: absolute; left: 7%; right: 7%; bottom: 25%; border-bottom: 1.5px solid var(--sg-guide); pointer-events: none; }
@@ -481,12 +481,17 @@ faq:
 
   // ---------- UI state ----------
   function updateUi() {
-    var has = strokes.length > 0;
+    var has = strokes.length > 0, focused = document.activeElement;
     pad.setAttribute('data-strokes', strokes.length);
     hint.hidden = has;
     undoBtn.disabled = history.length === 0;
     clearBtn.disabled = !has;
     pngBtn.disabled = svgBtn.disabled = copyBtn.disabled = !has;
+    // A button that disables itself while focused drops keyboard focus to the page (WCAG 2.4.3):
+    // after Clear focus moves to Undo, and when nothing is left to undo, to the thickness slider.
+    if ((focused === undoBtn || focused === clearBtn) && focused.disabled) {
+      (!undoBtn.disabled ? undoBtn : !clearBtn.disabled ? clearBtn : widthIn).focus();
+    }
     widthOut.textContent = widthIn.value + ' px';
     if (!has) { info.textContent = 'Draw your signature above to enable the downloads.'; return; }
     if (current) return;

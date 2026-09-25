@@ -92,6 +92,7 @@ faq:
 }
 .rexif-drop:hover, .rexif-drop.is-over { border-color: var(--accent); }
 .rexif-input:focus-visible + .rexif-drop { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rexif-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .rexif-drop strong { font-size: 1.05rem; }
 .rexif-drop strong span { color: var(--accent); text-decoration: underline; }
 .rexif-opts { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
@@ -204,11 +205,25 @@ faq:
   function decodeText(u) {
     try { return new TextDecoder('utf-8', { fatal: true }).decode(u); } catch (e) { return latin1.decode(u); }
   }
+  // Every step here is linear. Metadata comes from files other people send, so no regular
+  // expression may backtrack: /\0+$/ on a long run of NULs that is not at the end is quadratic.
   function tidy(s) {
-    return String(s || '').replace(/\0+$/, '').replace(/\0+/g, ' / ')
+    s = String(s || '');
+    let e = s.length;
+    while (e && s.charCodeAt(e - 1) === 0) e--;
+    return s.slice(0, e).replace(/\0+/g, ' / ')
       .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').replace(/\s+/g, ' ').trim();
   }
-  function short(s, n) { s = tidy(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  // Only the start of a value is shown, so never tidy megabytes of it: skip leading blanks and
+  // control characters (which tidy() would drop anyway), then look at the next 64K characters.
+  function short(s, n) {
+    s = String(s || '');
+    let b = 0;
+    while (b < s.length && (s.charCodeAt(b) <= 32 || s.charCodeAt(b) === 127)) b++;
+    const cut = s.length - b > 65536;
+    s = tidy(s.slice(b, b + 65536));
+    return s.length > n || (cut && s) ? s.slice(0, n - 1) + '…' : s;
+  }
   function concat(parts) {
     let n = 0;
     parts.forEach(p => { n += p.length; });
@@ -388,8 +403,20 @@ faq:
   // ---------- Other metadata readers ----------
   function readXmp(u) {
     const s = decodeText(u.subarray(0, 2000000));
-    const m = /CreatorTool(?:="([^"]*)"|>([^<]*)<)/.exec(s);
-    return { size: u.length, gps: /GPSLatitude|GPSLongitude/.test(s), tool: m ? short(m[1] || m[2], 80) : '' };
+    return { size: u.length, gps: /GPSLatitude|GPSLongitude/.test(s), tool: short(creatorTool(s), 80) };
+  }
+  // xmp:CreatorTool="…" or <xmp:CreatorTool>…<, found with indexOf. A regular expression here
+  // rescans the rest of the text for every repeat of "CreatorTool>" that has no "<" after it.
+  function creatorTool(s) {
+    const lastQ = s.lastIndexOf('"'), lastLt = s.lastIndexOf('<');
+    for (let i = s.indexOf('CreatorTool'); i >= 0; i = s.indexOf('CreatorTool', i + 11)) {
+      const p = i + 11, attr = s[p] === '=' && s[p + 1] === '"';
+      if (!attr && s[p] !== '>') continue;
+      const start = p + (attr ? 2 : 1);
+      if (start > (attr ? lastQ : lastLt)) continue;
+      return s.slice(start, s.indexOf(attr ? '"' : '<', start));
+    }
+    return '';
   }
   const IIM = { 5: 'Title', 25: 'Keywords', 80: 'By-line', 85: 'By-line title', 90: 'City', 92: 'Sub-location', 95: 'State/Province', 101: 'Country', 105: 'Headline', 110: 'Credit', 115: 'Source', 116: 'Copyright', 118: 'Contact', 120: 'Caption', 122: 'Writer' };
   function readIim(u) {
@@ -595,9 +622,13 @@ faq:
     return { chunks, end };
   }
   function rawProfile(v) {
-    const m = /^\s*([\w-]+)\s+(\d+)\s+([0-9a-fA-F\s]+)$/.exec(v);
+    // "\n<kind>\n<length>\n<hex…>". The header and the hex body are checked separately, since one
+    // regular expression with \s on both sides of the split backtracks quadratically on long spaces.
+    const m = /^\s*([\w-]+)\s+(\d+)/.exec(v);
     if (!m) return null;
-    const hex = m[3].replace(/\s+/g, ''), n = Math.min(hex.length >> 1, 4000000), b = new Uint8Array(n);
+    const body = v.slice(m[0].length);
+    if (!/^\s/.test(body) || /[^0-9a-fA-F\s]/.test(body)) return null;
+    const hex = body.replace(/\s+/g, ''), n = Math.min(hex.length >> 1, 4000000), b = new Uint8Array(n);
     for (let i = 0; i < n; i++) b[i] = parseInt(hex.substr(i * 2, 2), 16);
     return { kind: m[1].toLowerCase(), bytes: b };
   }
@@ -1047,11 +1078,14 @@ faq:
   }
 
   function clearAll() {
+    // The Clear button's row is hidden below, so hand focus to the sample button that reappears.
+    const refocus = $('#rexif-bulk').contains(document.activeElement);
     renderGen++;
     entries.forEach(e => { if (e.url) URL.revokeObjectURL(e.url); });
     entries.length = 0;
     list.textContent = '';
     summary();
+    if (refocus) $('#rexif-sample').focus();
   }
 
   // ---------- Sample photo ----------
@@ -1107,7 +1141,19 @@ faq:
     done.forEach((e, i) => setTimeout(() => TT.download(e.out.name, e.out.blob), i * 350));
   });
   $('#rexif-sample').addEventListener('click', async () => {
-    try { addFiles([await sample()]); } catch (e) { errEl.textContent = e.friendly ? e.message : 'Could not create the sample photo.'; }
+    let file;
+    try { file = await sample(); } catch (e) { errEl.textContent = e.friendly ? e.message : 'Could not create the sample photo.'; return; }
+    // Adding the photo hides this button, so move focus to its card straight away (the card is
+    // created synchronously), then to the card's Download button once it is cleaned.
+    const refocus = document.activeElement === $('#rexif-sample');
+    const done = addFiles([file]);
+    const card = entries.length ? entries[entries.length - 1].card : null;
+    if (refocus && card) { card.tabIndex = -1; card.focus(); }
+    await done;
+    if (refocus && card && card.isConnected && document.activeElement === card) {
+      const dl = card.querySelector('[data-rexif-dl]');
+      if (dl) dl.focus();
+    }
   });
   summary();
 })();

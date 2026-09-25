@@ -99,6 +99,39 @@ function jpegInfo(b) {
   return null;
 }
 
+// Lists a JPEG's marker segments up to EOI: [{ m, start, end }], plus the offset just after EOI.
+function jpegSegments(b) {
+  const segs = [];
+  let i = 2;
+  while (i + 1 < b.length) {
+    const m = b[i + 1];
+    if (m === 0xd9) return { segs, eoiEnd: i + 2 };
+    const end = i + 2 + b.readUInt16BE(i + 2);
+    if (m === 0xda) {
+      let j = end;
+      while (!(b[j] === 0xff && b[j + 1] !== 0 && !(b[j + 1] >= 0xd0 && b[j + 1] <= 0xd7))) j++;
+      segs.push({ m, start: i, end: j });
+      i = j;
+    } else {
+      segs.push({ m, start: i, end });
+      i = end;
+    }
+  }
+  throw new Error('no EOI');
+}
+// What the PDF should hold for a JPEG: the original minus APP1-APP13, APP15 and COM segments and
+// anything after EOI, with the JFIF APP0 kept (without a thumbnail).
+function metadataFree(b) {
+  const parts = [b.subarray(0, 2)];
+  for (const s of jpegSegments(b).segs) {
+    if ((s.m >= 0xe1 && s.m <= 0xef && s.m !== 0xee) || s.m === 0xfe) continue;
+    if (s.m === 0xe0) { const j = Buffer.from(b.subarray(s.start, s.start + 18)); j[3] = 16; j[16] = j[17] = 0; parts.push(j); continue; }
+    parts.push(b.subarray(s.start, s.end));
+  }
+  parts.push(Buffer.from([0xff, 0xd9]));
+  return Buffer.concat(parts);
+}
+
 const near = (assert, actual, expected, msg, tol = 0.002) => {
   assert.equal(actual.length, expected.length, msg);
   actual.forEach((v, i) => assert.ok(Math.abs(v - expected[i]) <= tol, `${msg}: got [${actual}] expected [${expected}]`));
@@ -140,6 +173,22 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(await names(), ['rot6.jpg', 'alpha.png', 'gray.jpg']);
   assert.equal(await page.locator('#itp-list .itp-up').first().isDisabled(), true);
   assert.equal(await page.locator('#itp-list .itp-down').last().isDisabled(), true);
+  // Keyboard focus survives the move buttons (WCAG 2.4.3): it stays on the pressed button, or moves to
+  // the item's other arrow or handle when that button becomes disabled at the end of the list.
+  const focused = () => page.evaluate(() => document.activeElement.getAttribute('aria-label') || document.activeElement.className);
+  await page.locator('#itp-list .itp-down').nth(1).focus(); // alpha.png, middle
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await names(), ['rot6.jpg', 'gray.jpg', 'alpha.png']);
+  assert.match(await focused(), /earlier.*alpha\.png|alpha\.png.*earlier/i, 'focus moves to "Move earlier" of the item now last');
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await names(), ['rot6.jpg', 'alpha.png', 'gray.jpg']);
+  assert.match(await focused(), /earlier.*alpha\.png|alpha\.png.*earlier/i, 'focus stays on the same button');
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await names(), ['alpha.png', 'rot6.jpg', 'gray.jpg']);
+  assert.match(await focused(), /later.*alpha\.png|alpha\.png.*later/i, 'first item: focus moves to "Move later"');
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await names(), ['rot6.jpg', 'alpha.png', 'gray.jpg']);
+  assert.match(await focused(), /later.*alpha\.png|alpha\.png.*later/i);
   // Keyboard reorder on the drag handle.
   await page.locator('#itp-list .itp-handle').nth(2).focus();
   await page.keyboard.press('ArrowLeft');
@@ -154,11 +203,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(pdf.pages.length, 3);
   assert.match(pdf.text, /\/Title <FEFF006D00790020007300630061006E0073>/, 'UTF-16 title "my scans"');
 
-  // Page 1: the JPEG is embedded byte for byte, rotated by the matrix (EXIF 6), portrait A4.
+  // Page 1: the JPEG data is copied without re-encoding, rotated by the matrix (EXIF 6), portrait A4.
+  // Only its EXIF segment (APP1) is left out; the scan data after SOF is identical.
   const rot6 = fs.readFileSync(fx('rot6.jpg'));
   let [p1, p2, p3] = pdf.pages;
-  assert.ok(buf.indexOf(rot6) > 0, 'original JPEG bytes are embedded unchanged');
-  assert.equal(Buffer.compare(p1.image.data, rot6), 0);
+  assert.equal(buf.indexOf(Buffer.from('Exif\0\0', 'latin1')), -1, 'no EXIF block in the PDF');
+  assert.equal(p1.image.data.length, rot6.length - 36, 'only the 36-byte APP1 is dropped');
+  assert.equal(Buffer.compare(p1.image.data, metadataFree(rot6)), 0);
+  assert.ok(buf.indexOf(rot6.subarray(56)) > 0, 'quantisation tables, Huffman tables and scan data copied unchanged');
   assert.deepEqual([p1.image.width, p1.image.height, p1.image.colorSpace, p1.image.filter], [64, 48, 'DeviceRGB', 'DCTDecode']);
   near(assert, p1.mediaBox, [0, 0, 595.28, 841.89], 'A4 portrait');
   near(assert, p1.cm, [0, -793.707, 595.28, 0, 0, 817.798], 'orientation 6 matrix');
@@ -171,7 +223,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(jpegInfo(p2.image.data), { width: 40, height: 30, comps: 3 });
 
   // Page 3: greyscale JPEG kept as DeviceGray.
-  assert.equal(Buffer.compare(p3.image.data, fs.readFileSync(fx('gray.jpg'))), 0);
+  assert.equal(Buffer.compare(p3.image.data, fs.readFileSync(fx('gray.jpg'))), 0, 'a JPEG with no metadata is copied byte for byte');
   assert.equal(p3.image.colorSpace, 'DeviceGray');
   near(assert, p3.cm, [595.28, 0, 0, 744.1, 0, 48.895], 'grey page placement');
 
@@ -281,7 +333,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   ({ buf, pdf } = await makePdf());
   assert.ok(pdf.text.startsWith('%PDF-1.7\n'), 'ICC version 4 profiles need PDF 1.5 or later; the file says 1.7');
   const [q1, q2, q3, q4, q5] = pdf.pages;
-  assert.equal(Buffer.compare(q1.image.data, p3jpg), 0, 'the P3 JPEG is still copied byte for byte');
+  assert.equal(Buffer.compare(q1.image.data, metadataFree(p3jpg)), 0, 'the P3 JPEG is copied without its APP2 segments');
+  assert.equal(q1.image.data.length, p3jpg.length - 2 * 3340);
   assert.equal(q1.image.colorSpace, 'ICCBased');
   assert.equal(q1.image.icc.n, 3);
   assert.equal(q1.image.icc.alternate, 'DeviceRGB');
@@ -290,10 +343,57 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(pdf.count, 4 + 3 * 5 + 1, 'xref covers the catalog, pages, info, 15 page objects and one profile');
   assert.equal(q3.image.colorSpace, 'DeviceGray', 'an RGB profile is not attached to a greyscale JPEG');
   assert.equal(q4.image.colorSpace, 'DeviceRGB', 'an incomplete profile is ignored');
-  assert.equal(Buffer.compare(q4.image.data, halfProfile), 0);
+  assert.equal(Buffer.compare(q4.image.data, metadataFree(halfProfile)), 0);
   near(assert, q1.mediaBox, [0, 0, 30, 15], 'P3 40x20 page');
   near(assert, q5.mediaBox, [0, 0, 3, 3], 'tiny image gets the 3 pt minimum page');
   near(assert, q5.cm, [1.5, 0, 0, 1.5, 0.75, 0.75], 'tiny image centred on its page');
+
+  // Privacy: a phone photo's EXIF (GPS position, camera serial, owner), XMP, ICC-less APP2, IPTC (APP13),
+  // comment and the motion-photo video appended after EOI must not end up in the PDF. Pixels must be
+  // unchanged, for baseline and progressive JPEGs.
+  await page.click('#itp-clear');
+  const gps = fs.readFileSync(fx('gps-motion.jpg'));
+  const prog = fs.readFileSync(fx('progressive.jpg'));
+  await page.setInputFiles('#itp-file', [fx('gps-motion.jpg'), fx('progressive.jpg')]);
+  await page.waitForFunction(() => document.querySelectorAll('#itp-list .itp-item').length === 2);
+  await page.waitForFunction(() => !document.querySelector('#itp-make').disabled);
+  ({ buf, pdf } = await makePdf());
+  for (const secret of ['Exif\0\0', 'Canon', 'Jane Example', '012345678901', 'Lightroom', 'ns.adobe.com', 'Photoshop 3.0', 'ftypmp42', 'SECRET-VIDEO']) {
+    assert.equal(buf.indexOf(Buffer.from(secret, 'latin1')), -1, `PDF does not contain ${JSON.stringify(secret)}`);
+  }
+  assert.ok(gps.indexOf('Canon') > 0 && gps.indexOf('SECRET-VIDEO') > 0 && prog.indexOf('Exif') > 0, 'fixtures do carry the metadata');
+  const [g1, g2] = pdf.pages;
+  assert.equal(g1.image.filter, 'DCTDecode');
+  assert.equal(g2.image.filter, 'DCTDecode');
+  assert.equal(Buffer.compare(g1.image.data, metadataFree(gps)), 0);
+  assert.equal(Buffer.compare(g2.image.data, metadataFree(prog)), 0);
+  const { segs, eoiEnd } = jpegSegments(g1.image.data);
+  assert.equal(eoiEnd, g1.image.data.length, 'nothing after EOI');
+  assert.deepEqual([...new Set(segs.map(x => x.m.toString(16)))].sort(), ['c0', 'c4', 'da', 'db', 'e0']);
+  near(assert, g1.cm, [0, -g1.mediaBox[3], g1.mediaBox[2], 0, 0, g1.mediaBox[3]], 'EXIF orientation 6 is still applied', 0.01);
+  // Reference decode of the untouched original, with its EXIF renamed so the browser does not apply the
+  // orientation (the PDF applies it with the page matrix instead).
+  const unrotated = jpeg => { const c = Buffer.from(jpeg); let k; while ((k = c.indexOf('Exif\0\0', 0, 'latin1')) !== -1) c[k + 3] = 0x78; return c; };
+  const samePixels = await page.evaluate(async pairs => {
+    const px = async bytes => {
+      const bmp = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }), { colorSpaceConversion: 'none' });
+      const c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext('2d');
+      x.drawImage(bmp, 0, 0);
+      return x.getImageData(0, 0, bmp.width, bmp.height).data;
+    };
+    const out = [];
+    for (const [a, b] of pairs) {
+      const [pa, pb] = [await px(a), await px(b)];
+      out.push(pa.length === pb.length && pa.every((v, i) => v === pb[i]));
+    }
+    return out;
+  }, [[[...unrotated(gps)], [...g1.image.data]], [[...unrotated(prog)], [...g2.image.data]]]);
+  assert.deepEqual(JSON.stringify(samePixels), JSON.stringify([true, true]), 'decoded pixels are identical to the original photos');
+  await page.click('#itp-clear');
+  await page.setInputFiles('#itp-file', [
+    { name: 'p3-a.jpg', mimeType: 'image/jpeg', buffer: p3jpg },
+  ]);
+  await page.waitForFunction(() => !document.querySelector('#itp-make').disabled);
 
   // Creating the PDF from the keyboard: the button is disabled while working, then gets focus back.
   await page.focus('#itp-make');

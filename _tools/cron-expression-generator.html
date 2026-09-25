@@ -135,11 +135,12 @@ faq:
 <div class="field">
   <label for="cr-expr">Cron expression <span class="hint">minute, hour, day of month, month, day of week</span></label>
   <div class="cr-exprrow">
-    <input type="text" id="cr-expr" class="mono cr-expr" value="0 9 * * 1-5" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="cr-desc">
+    <input type="text" id="cr-expr" class="mono cr-expr" value="0 9 * * 1-5" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="cr-err cr-desc">
     <button class="btn secondary" type="button" data-copy-target="#cr-expr">Copy</button>
   </div>
 </div>
-<p class="msg error cr-err" id="cr-err" role="alert"></p>
+<p class="msg error cr-err" id="cr-err"></p>
+<p class="visually-hidden" id="cr-err-status" role="status"></p>
 <div aria-live="polite">
   <p class="cr-desc" id="cr-desc"></p>
   <p class="msg cr-warn" id="cr-warn"></p>
@@ -719,6 +720,7 @@ faq:
     try { res = parse(input.value); } catch (e) { res = { error: 'This expression could not be read.', errors: [] }; }
     current = res;
     $('#cr-err').textContent = res.error || '';
+    errText = res.error || '';
     input.setAttribute('aria-invalid', res.error ? 'true' : 'false');
     var notes = [];
     if (res.error) {
@@ -830,6 +832,7 @@ faq:
     bHint.textContent = out.hint || '';
     input.value = out.expr;
     update(true);
+    sayError(true);
   }
 
   function hasOption(sel, v) {
@@ -867,7 +870,16 @@ faq:
   }
 
   // ---------- Events ----------
-  input.addEventListener('input', function () { update(false); });
+  // The error shows at once but is read out only when typing pauses (or the
+  // field is left), so unfinished expressions do not interrupt on every key.
+  var errStatus = $('#cr-err-status'), errText = '', errTimer = null;
+  function sayError(now) {
+    clearTimeout(errTimer);
+    var put = function () { if (errStatus.textContent !== errText) errStatus.textContent = errText; };
+    if (now) put(); else errTimer = setTimeout(put, 800);
+  }
+  input.addEventListener('input', function () { update(false); sayError(false); });
+  input.addEventListener('change', function () { sayError(true); });
   $('#cr-utc').addEventListener('change', renderRuns);
   TT.$$('.cr-builder select, .cr-builder input').forEach(function (el) {
     el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', applyBuilder);
@@ -876,6 +888,7 @@ faq:
     btn.addEventListener('click', function () {
       input.value = btn.getAttribute('data-cron');
       update(false);
+      sayError(true);
     });
   });
   setInterval(renderRuns, 30000);

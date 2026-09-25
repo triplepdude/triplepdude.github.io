@@ -89,7 +89,7 @@ faq:
 ---
 <style>
 .atc {
-  --atc-warn: #9a5b00;
+  --atc-warn: #875000;
   --atc-warn-soft: rgb(245 158 11 / 0.2);
 }
 @media (prefers-color-scheme: dark) {
@@ -250,10 +250,10 @@ faq:
   var RE_DQUOTE = /[\u201C-\u201F]/g;
   var RE_ELLIPSIS = /\u2026/g;
   var RE_COLLAPSE = /(?<=\S) {2,}/g;
-  // Repeated spaces that end a line are counted by the trailing whitespace option instead.
-  var RE_COLLAPSE_MID = /(?<=\S) {2,}(?![ \t]*(?:\n|$))/g;
-  var RE_TRIM = /[ \t]+(?=\n|$)/g;
-  var RE_VIEW = /[ \t]+(?=\n|$)| {2,}|[\p{Cf}\u034F\u115F\u1160\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\u2028\u2029\u0085\u2010-\u2015\u2212\u2E3A\u2E3B\u2018-\u201F\u2026]/gu;
+  // Whitespace runs are matched whole and the code checks what follows them. A lookahead
+  // such as [ \t]+(?=\n|$) backtracks quadratically on a long run that doesn't end a line.
+  var RE_WS_RUN = /[ \t]+/g;
+  var RE_VIEW = /[ \t]+|[\p{Cf}\u034F\u115F\u1160\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\u2028\u2029\u0085\u2010-\u2015\u2212\u2E3A\u2E3B\u2018-\u201F\u2026]/gu;
   var RE_PICT = /\p{Extended_Pictographic}/u;
   var RE_PICT_NEXT = /[\p{Extended_Pictographic}\u{1F9B0}-\u{1F9B3}]/u;
   var RE_LETTER = /[\p{L}\p{M}]/u;
@@ -302,19 +302,24 @@ faq:
   // A flag tag sequence (England, Scotland, Wales and other subdivisions, UTS #51): U+1F3F4, a
   // lowercase Unicode subdivision code (region + 1-4 letters or digits) in tag characters, then
   // the cancel tag U+E007F. Anything else hiding behind U+1F3F4, such as smuggled text, is removed.
+  // Every tag in a run gets the same answer, so it is worked out once per run: scanning the
+  // run again for each of its tags took quadratic time on a long run of tag characters.
+  var flagRun = { s: null, start: -1, end: -1, cancel: -1 };
   function inFlag(s, i) {
-    var j = i;
-    while (isTag(prevCp(s, j))) j -= 2;
-    if (prevCp(s, j) !== 0x1F3F4) return false;
-    var k = j, spec = '';
-    for (;;) {
-      var c = k < s.length ? s.codePointAt(k) : -1;
-      if (!isTag(c)) return false;
-      if (c === 0xE007F) break;
-      spec += String.fromCharCode(c - 0xE0000);
-      k += 2;
+    if (flagRun.s !== s || i < flagRun.start || i >= flagRun.end) {
+      var j = i;
+      while (isTag(prevCp(s, j))) j -= 2;
+      var k = j, spec = '', cancel = -1;
+      while (k < s.length && isTag(s.codePointAt(k))) {
+        var c = s.codePointAt(k);
+        if (c === 0xE007F) { if (cancel < 0) cancel = k; }
+        else if (cancel < 0) spec += String.fromCharCode(c - 0xE0000);
+        k += 2;
+      }
+      var ok = cancel >= 0 && prevCp(s, j) === 0x1F3F4 && /^(?:[a-z]{2}|[0-9]{3})[a-z0-9]{1,4}$/.test(spec);
+      flagRun = { s: s, start: j, end: k, cancel: ok ? cancel : -1 };
     }
-    return i <= k && /^(?:[a-z]{2}|[0-9]{3})[a-z0-9]{1,4}$/.test(spec);
+    return flagRun.cancel >= 0 && i <= flagRun.cancel;
   }
   // Old-style Hangul syllables are spelled with conjoining jamo, and the choseong filler U+115F
   // or jungseong filler U+1160 stands in for a missing part. A filler next to a real jamo is part
@@ -356,6 +361,27 @@ faq:
     if (/[,;:]/.test(before)) return ' ';
     if (/[(\[{]/.test(before)) return '';
     return ', ';
+  }
+
+  // True when only spaces and tabs sit between position i and the end of the line.
+  function endsLine(str, i) {
+    var c;
+    while (i < str.length && ((c = str.charCodeAt(i)) === 32 || c === 9)) i++;
+    return i === str.length || str.charCodeAt(i) === 10;
+  }
+  // Repeated spaces that end a line are counted by the trailing whitespace option instead.
+  function countCollapseMid(str) {
+    var n = 0;
+    str.replace(RE_COLLAPSE, function (m, off) { if (!endsLine(str, off + m.length)) n++; return m; });
+    return n;
+  }
+  function countTrim(str) {
+    var n = 0;
+    str.replace(RE_WS_RUN, function (m, off) { if (endsLine(str, off + m.length)) n++; return m; });
+    return n;
+  }
+  function trimLines(str) {
+    return str.replace(RE_WS_RUN, function (m, off) { return endsLine(str, off + m.length) ? '' : m; });
   }
 
   function readOptions() {
@@ -405,11 +431,11 @@ faq:
     n.ellipsis = count(RE_ELLIPSIS, s);
     if (o.ellipsis) s = s.replace(RE_ELLIPSIS, '...');
 
-    n.collapse = count(o.trim ? RE_COLLAPSE_MID : RE_COLLAPSE, s);
+    n.collapse = o.trim ? countCollapseMid(s) : count(RE_COLLAPSE, s);
     if (o.collapse) s = s.replace(RE_COLLAPSE, ' ');
 
-    n.trim = count(RE_TRIM, s);
-    if (o.trim) s = s.replace(RE_TRIM, '');
+    n.trim = countTrim(s);
+    if (o.trim) s = trimLines(s);
 
     return { text: s, counts: n, kept: kept };
   }
@@ -483,14 +509,18 @@ faq:
           t.textContent = tok.replace(/ /g, '\u00B7').replace(/\t/g, '\u2192');
           frag.appendChild(t);
           last = idx + tok.length;
-        } else if (!trailing && o.collapse && tok.length > 1 && idx > 0 && /\S/.test(s.charAt(idx - 1))) {
-          plain(idx + 1);
-          var c = document.createElement('span');
-          c.className = 'atc-ws';
-          c.title = (tok.length - 1) + ' extra space' + (tok.length > 2 ? 's' : '') + ': removed';
-          c.textContent = '\u00B7'.repeat(tok.length - 1);
-          frag.appendChild(c);
-          last = idx + tok.length;
+        } else if (!trailing && o.collapse && idx > 0 && /\S/.test(s.charAt(idx - 1))) {
+          // Only spaces right after a word are collapsed, not tabs or what follows them.
+          var lead = tok.length - tok.replace(/^ +/, '').length;
+          if (lead > 1) {
+            plain(idx + 1);
+            var c = document.createElement('span');
+            c.className = 'atc-ws';
+            c.title = (lead - 1) + ' extra space' + (lead > 2 ? 's' : '') + ': removed';
+            c.textContent = '\u00B7'.repeat(lead - 1);
+            frag.appendChild(c);
+            last = idx + lead;
+          }
         }
         continue;
       }

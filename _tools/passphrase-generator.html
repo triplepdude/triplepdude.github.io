@@ -93,6 +93,8 @@ faq:
 .pp-len { flex: 0 0 auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .pp-item .btn { flex: 0 0 auto; }
 .pp-empty { color: var(--muted); }
+.pp-placeholder .btn { visibility: hidden; }
+.pp-placeholder .pp-text { min-height: 1.45em; }
 #pp-error, #pp-dice-error { overflow-wrap: anywhere; }
 .pp-strength[data-level="weak"] { color: var(--danger); }
 .pp-strength[data-level="strong"], .pp-strength[data-level="very-strong"] { color: var(--accent); }
@@ -112,26 +114,42 @@ faq:
   .pp-text { flex-basis: 100%; }
   .pp-len { margin-right: auto; }
 }
+/* On phones a passphrase wraps to two or three lines depending on the words
+   drawn. Real rows and loading placeholders share the same minimum height, so
+   swapping one for the other never moves the options below. */
+@media (max-width: 900px) { .pp-item .pp-text { min-height: 2.9em; } }
+@media (max-width: 480px) {
+  .pp-item:first-child .pp-text { min-height: 4.35em; }
+}
+@media (max-width: 400px) { .pp-item .pp-text { min-height: 4.35em; } }
 </style>
 
 <div class="msg error" id="pp-error" role="alert"></div>
 
-<ol class="pp-list" id="pp-list" aria-live="polite" aria-label="Generated passphrases">
-  <li class="pp-empty">Loading the word list…</li>
+<!-- Five placeholder rows the size of real ones hold the space while the word list
+     loads, so nothing below jumps. The list is redrawn on every change, so it is not a
+     live region: a short summary is announced in #pp-status instead. -->
+<ol class="pp-list" id="pp-list" aria-label="Generated passphrases">
+  <li class="pp-item pp-placeholder"><span class="pp-text pp-empty">Loading the word list…</span><span class="pp-len">&nbsp;</span><span class="btn secondary small" aria-hidden="true">Copy</span></li>
+  <li class="pp-item pp-placeholder" aria-hidden="true"><span class="pp-text">&nbsp;</span><span class="pp-len">&nbsp;</span><span class="btn secondary small">Copy</span></li>
+  <li class="pp-item pp-placeholder" aria-hidden="true"><span class="pp-text">&nbsp;</span><span class="pp-len">&nbsp;</span><span class="btn secondary small">Copy</span></li>
+  <li class="pp-item pp-placeholder" aria-hidden="true"><span class="pp-text">&nbsp;</span><span class="pp-len">&nbsp;</span><span class="btn secondary small">Copy</span></li>
+  <li class="pp-item pp-placeholder" aria-hidden="true"><span class="pp-text">&nbsp;</span><span class="pp-len">&nbsp;</span><span class="btn secondary small">Copy</span></li>
 </ol>
+<p class="visually-hidden" id="pp-status" role="status"></p>
 
 <div class="actions">
   <button class="btn" type="button" id="pp-generate" disabled>Generate new</button>
   <button class="btn secondary" type="button" id="pp-copy-all" disabled>Copy all</button>
 </div>
 
-<div class="stats pp-stats" aria-live="polite">
+<div class="stats pp-stats">
   <div class="stat"><b id="pp-bits">–</b><span>Entropy</span></div>
   <div class="stat"><b id="pp-strength" class="pp-strength">–</b><span>Strength</span></div>
   <div class="stat pp-time-stat"><b id="pp-time">–</b><span>Average time to crack</span></div>
   <div class="stat"><b id="pp-space">–</b><span>Possible passphrases</span></div>
 </div>
-<p class="hint" id="pp-assumption"></p>
+<p class="hint" id="pp-assumption">Assumes the attacker knows the word list and your settings and makes 100 billion guesses a second. Average time is half of all possibilities.</p>
 
 <section class="pp-section" aria-labelledby="pp-options-h">
   <h2 id="pp-options-h">Options</h2>
@@ -358,7 +376,24 @@ faq:
     });
   }
 
-  function generate() {
+  // One short summary for screen readers once the controls settle, instead of
+  // re-reading every passphrase on each slider step.
+  var statusEl = $('#pp-status'), statusTimer = null;
+  function announce(text) {
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () {
+      statusEl.textContent = '';
+      setTimeout(function () { statusEl.textContent = text; }, 50);
+    }, 500);
+  }
+
+  function summary(s) {
+    return plural(s.n, 'word') + ', ' + entropyBits(s).toFixed(1) + ' bits, ' + strength(entropyBits(s))[0].toLowerCase() +
+      ', average time to crack ' + formatDuration(Math.pow(2, entropyBits(s) - 1) / s.rate) + '.';
+  }
+
+  // quiet: true on page load, when nothing should be announced.
+  function generate(quiet) {
     var s = settings();
     $('#pp-words-out').textContent = String(s.n);
     $('#pp-custom-field').hidden = sepEl.value !== 'custom';
@@ -367,6 +402,7 @@ faq:
     current = [];
     for (var i = 0; i < s.count; i++) current.push(makePassphrase(s));
     render(s);
+    if (quiet !== true) announce((s.count === 1 ? '1 new passphrase: ' : s.count + ' new passphrases: ') + summary(s));
   }
 
   function allText() {
@@ -407,7 +443,7 @@ faq:
       words = list;
       genBtn.disabled = false;
       copyAllBtn.disabled = false;
-      generate();
+      generate(true);
       lookupDice();
     }).catch(function () {
       errEl.textContent = 'The word list could not be loaded, so no passphrases can be made. Check your connection and reload the page.';
@@ -415,15 +451,19 @@ faq:
     });
   }
 
-  genBtn.addEventListener('click', generate);
+  genBtn.addEventListener('click', function () { generate(); });
   copyAllBtn.addEventListener('click', function () { TT.copy(allText(), copyAllBtn); });
-  wordsEl.addEventListener('input', generate);
-  [sepEl, caseEl, digitEl, symbolEl, countEl].forEach(function (el) { el.addEventListener('change', generate); });
-  rateEl.addEventListener('change', function () { updateStats(settings()); });
+  wordsEl.addEventListener('input', function () { generate(); });
+  [sepEl, caseEl, digitEl, symbolEl, countEl].forEach(function (el) { el.addEventListener('change', function () { generate(); }); });
+  rateEl.addEventListener('change', function () {
+    var s = settings();
+    updateStats(s);
+    announce('At ' + rateText(s.rate) + ' guesses a second: ' + summary(s));
+  });
   customEl.addEventListener('input', function () {
     // Re-join the current passphrases with the new separator rather than drawing new words.
     var s = settings();
-    if (words && current.length) render(s);
+    if (words && current.length) { render(s); announce('Passphrases now joined with ' + (s.sep ? '“' + s.sep + '”' : 'no separator') + '.'); }
   });
   $('#pp-dice').addEventListener('input', lookupDice);
 

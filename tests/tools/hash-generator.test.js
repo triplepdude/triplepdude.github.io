@@ -230,4 +230,58 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('#hg-clear');
   await expectAll(V[''], 'cleared');
   assert.equal(await page.inputValue('#hg-text'), '');
+
+  // BSD lines whose file name contains brackets still match.
+  r = await cmp(`SHA256 (abc (1).txt) = ${V[''].sha256[0]}`);
+  assert.match(r.cls, /\bok\b/); assert.match(r.msg, /SHA-256/);
+
+  // Crafted input in the expected-hash box is parsed in linear time (a trailing-'=' regex and
+  // the BSD "\(.*\)" pattern used to take over a second on 40,000 characters).
+  for (const expr of [`'='.repeat(40000) + 'x'`, `'SHA256 (' + ')= x'.repeat(20000)`, `'a(' + ')='.repeat(20000) + ' x'`, `'A'.repeat(40000) + '='.repeat(40000) + 'x'`]) {
+    const ms = await page.evaluate(expr => {
+      const el = document.querySelector('#hg-expected');
+      el.value = eval(expr);
+      const t = performance.now();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return performance.now() - t;
+    }, expr);
+    assert.ok(ms < 150, `${expr} took ${Math.round(ms)} ms`);
+    assert.match(await text('#hg-compare'), /^No match/, expr);
+  }
+  await page.fill('#hg-expected', '');
+
+  // Screen readers: the hash list, the compare message and input errors change on every
+  // keystroke, so none is a live region; one short sentence is announced once typing pauses.
+  assert.equal(await page.getAttribute('#hg-results', 'aria-live'), null);
+  assert.equal(await page.getAttribute('#hg-compare', 'aria-live'), null);
+  assert.equal(await page.getAttribute('#hg-msg', 'role'), null);
+  await page.waitForTimeout(800);
+  await page.evaluate(() => {
+    window.__live = [];
+    new MutationObserver(ms => ms.forEach(m => {
+      const n = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const reg = n && n.closest('[aria-live]:not([aria-live="off"]), [role=status], [role=alert]');
+      if (reg && reg.textContent) window.__live.push(reg.id + ':' + reg.textContent);
+    })).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  await page.type('#hg-text', 'hello world', { delay: 40 });
+  await page.waitForTimeout(1000);
+  assert.deepEqual(await page.evaluate(() => window.__live), ['hg-status:Hashes updated for 11 bytes of text.']);
+  await page.evaluate(() => { window.__live = []; });
+  await page.type('#hg-expected', '5eb63bbbe01eeed093cb22bb8f5acdc3', { delay: 20 }); // MD5 of "hello world"
+  await page.waitForTimeout(1000);
+  assert.deepEqual(await page.evaluate(() => window.__live), ['hg-status:Match: this is the MD5 hash of the input.']);
+  await page.evaluate(() => { window.__live = []; });
+  await page.fill('#hg-text', '');
+  await page.selectOption('#hg-enc', 'hex');
+  await page.type('#hg-text', 'abc', { delay: 40 });
+  await page.waitForTimeout(1000);
+  assert.deepEqual(await page.evaluate(() => window.__live),
+    ['hg-status:Hex input needs an even number of digits (two per byte); it has 3. Enter valid input first.']);
+  await page.selectOption('#hg-enc', 'utf8');
+  await page.click('#hg-clear');
+
+  // The selected Text/File segment has a --muted ring (5.5:1 on the track), not only a colour change.
+  const ring = await page.$eval('input[name="hg-src"]:checked + span', el => getComputedStyle(el).boxShadow);
+  assert.match(ring, /rgb\(91, 98, 112\)/, ring);
 };

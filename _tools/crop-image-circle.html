@@ -275,12 +275,15 @@ faq:
     if (frame) return;
     frame = requestAnimationFrame(() => { frame = 0; paint(); });
   }
+  // The editor's backing store is capped at 2x: a 3x phone screen would need 2.25 times the pixels
+  // for no visible gain, and rasterising that canvas cost a quarter of a second on slower phones.
+  const editorDpr = () => Math.min(2, window.devicePixelRatio || 1);
+  const editorSize = () => Math.max(100, Math.round((editor.getBoundingClientRect().width || 480) * editorDpr()));
   function paint() {
     if (!st.view) return;
     const o = opts();
-    const rect = editor.getBoundingClientRect();
-    const dpr = Math.min(3, window.devicePixelRatio || 1);
-    const size = Math.max(100, Math.round((rect.width || 480) * dpr));
+    const dpr = editorDpr();
+    const size = editorSize();
     if (editor.width !== size) { editor.width = size; editor.height = size; }
     const g = editor.getContext('2d');
     const c = size / 2, d = size * RING, r = d / 2;
@@ -623,7 +626,9 @@ faq:
     const f = e.clipboardData && Array.from(e.clipboardData.files || []).find(x => /^image\//.test(x.type));
     if (f) { e.preventDefault(); load(f); }
   });
-  if (typeof ResizeObserver === 'function') new ResizeObserver(draw).observe(editor);
+  // Redraw only when the canvas size really changes: the observer also fires once right after
+  // the first paint, and repainting the same picture then was a second long task at startup.
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (editorSize() !== editor.width) draw(); }).observe(editor);
   window.addEventListener('resize', draw);
   sample();
 })();

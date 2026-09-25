@@ -90,6 +90,7 @@ textarea.jwt-key { min-height: 150px; }
 .jwt-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; }
 .jwt-sec-head .hint { margin-left: 6px; }
 pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
+pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .jwt-json .jwt-k { color: var(--text); font-weight: 700; }
 .jwt-json .jwt-s { color: var(--accent); }
 .jwt-json .jwt-n, .jwt-json .jwt-b { color: var(--jwt-num); }
@@ -126,9 +127,13 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
   <button class="btn secondary small" type="button" id="jwt-clear">Clear</button>
 </div>
 
-<p class="msg error" id="jwt-msg" role="alert"></p>
+<!-- Not an alert: the message changes as the token is edited, so it is announced through
+     #jwt-status once typing pauses. -->
+<p class="msg error" id="jwt-msg"></p>
 
-<div id="jwt-out" aria-live="polite" hidden>
+<!-- Rebuilt on every edit of the token, so not a live region: a short summary is
+     announced in #jwt-status once typing pauses. -->
+<div id="jwt-out" hidden>
   <div class="jwt-badges">
     <span class="jwt-badge" id="jwt-alg-badge"></span>
     <span class="jwt-badge" id="jwt-time-badge"></span>
@@ -138,10 +143,10 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
   <p class="msg jwt-info" id="jwt-info"></p>
 
   <div class="jwt-sec-head"><span class="label">Header <span class="hint">algorithm and token type</span></span><button class="btn secondary small" type="button" data-copy-target="#jwt-header">Copy</button></div>
-  <pre class="output jwt-json" id="jwt-header"></pre>
+  <pre class="output jwt-json" id="jwt-header" tabindex="0" role="group" aria-label="Decoded header"></pre>
 
   <div class="jwt-sec-head"><span class="label">Payload <span class="hint">claims</span></span><button class="btn secondary small" type="button" data-copy-target="#jwt-payload">Copy</button></div>
-  <pre class="output jwt-json" id="jwt-payload"></pre>
+  <pre class="output jwt-json" id="jwt-payload" tabindex="0" role="group" aria-label="Decoded payload"></pre>
 
   <div id="jwt-claims-wrap">
     <p class="label">Registered claims</p>
@@ -165,8 +170,9 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
   <label for="jwt-key">Public key <span class="hint">PEM public key or certificate, JWK, or JWKS</span></label>
   <textarea id="jwt-key" class="mono jwt-key" rows="7" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-----BEGIN PUBLIC KEY-----&#10;…&#10;-----END PUBLIC KEY-----"></textarea>
 </div>
-<p class="msg" id="jwt-verify" aria-live="polite"></p>
+<p class="msg" id="jwt-verify"></p>
 <p class="msg jwt-info" id="jwt-key-note"></p>
+<p class="visually-hidden" id="jwt-status" role="status"></p>
 
 <script>
 (function () {
@@ -193,9 +199,22 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
   class UserError extends Error {}
 
   // ---------- Encoding helpers ----------
+  // Trims characters from both ends with loops. End-anchored regexes such as /=+$/ or
+  // /["']+$/ backtrack quadratically on a long run of those characters mid-text.
+  function trimChars(s, chars) {
+    let i = 0, j = s.length;
+    while (i < j && chars.indexOf(s[i]) >= 0) i++;
+    while (j > i && chars.indexOf(s[j - 1]) >= 0) j--;
+    return s.slice(i, j);
+  }
+  function trimEnd(s, chars) {
+    let j = s.length;
+    while (j > 0 && chars.indexOf(s[j - 1]) >= 0) j--;
+    return s.slice(0, j);
+  }
   function b64Bytes(str, what, enc) {
     const name = enc || 'Base64url';
-    let s = str.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+    let s = trimEnd(str.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/'), '=');
     if (/[^A-Za-z0-9+/]/.test(s)) throw new UserError('The ' + what + ' is not valid ' + name + '.');
     if (s.length % 4 === 1) throw new UserError('The ' + what + ' is not valid ' + name + ': its length is impossible, so a character is missing or extra.');
     s += '==='.slice(0, (4 - s.length % 4) % 4);
@@ -255,15 +274,38 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
 
   // ---------- Token decoding ----------
   function cleanToken(raw) {
-    return raw.trim().replace(/^(authorization\s*:\s*)?bearer\s+/i, '').replace(/^["']+|["']+$/g, '').replace(/\s+/g, '');
+    return trimChars(raw.trim().replace(/^(authorization\s*:\s*)?bearer\s+/i, ''), '"\'').replace(/\s+/g, '');
   }
 
   // A JWT inside other text: a JSON response, a callback URL (#id_token=...), a cookie header.
-  const EMBEDDED = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*)?/g;
+  // Finds what /eyJ[\w-]*\.[\w-]*\.[\w-]*(?:\.[\w-]*\.[\w-]*)?/g would, in linear time: that
+  // regex restarts at every "eyJ", so "eyJeyJeyJ…" without dots took seconds.
+  function findEmbedded(text) {
+    const found = [], runs = /[A-Za-z0-9_.-]+/g;
+    let m;
+    while ((m = runs.exec(text))) {
+      const run = m[0];
+      let from = 0;
+      for (;;) {
+        const start = run.indexOf('eyJ', from);
+        if (start < 0) break;
+        // Parts are separated by dots; take 5 parts when there are, otherwise 3.
+        const d1 = run.indexOf('.', start), d2 = d1 < 0 ? -1 : run.indexOf('.', d1 + 1);
+        if (d2 < 0) break; // later "eyJ"s in this run have even fewer dots after them
+        const d3 = run.indexOf('.', d2 + 1), d4 = d3 < 0 ? -1 : run.indexOf('.', d3 + 1);
+        let end;
+        if (d4 >= 0) { end = run.indexOf('.', d4 + 1); if (end < 0) end = run.length; }
+        else end = d3 < 0 ? run.length : d3;
+        found.push(run.slice(start, end));
+        from = end;
+      }
+    }
+    return found;
+  }
   function decodeInput(raw) {
     try { return decodeToken(cleanToken(raw)); } catch (e) {
       if (!(e instanceof UserError)) throw e;
-      const found = raw.match(EMBEDDED) || [];
+      const found = findEmbedded(raw);
       if (!found.length || found[0] === cleanToken(raw)) throw e;
       let t;
       try { t = decodeToken(found[0]); } catch (e2) { throw e2; }
@@ -343,7 +385,31 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
   // ---------- Rendering ----------
   const tokenEl = $('#jwt-token'), secretEl = $('#jwt-secret'), b64El = $('#jwt-secret-b64'), keyEl = $('#jwt-key');
   const msgEl = $('#jwt-msg'), outEl = $('#jwt-out');
-  let current = null, exampleActive = false, verifyJob = 0;
+  let current = null, exampleActive = false, verifyJob = 0, warnCount = 0;
+
+  // Screen readers get one short summary once typing pauses, not the whole decoded
+  // token on every keystroke. The text is built when the timer fires, so it includes
+  // the result of the (asynchronous) signature check.
+  const statusEl = $('#jwt-status');
+  let statusTimer = null;
+  function sayLater(textFn) {
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      const text = textFn();
+      statusEl.textContent = '';
+      if (text) setTimeout(() => { statusEl.textContent = text; }, 50);
+    }, 700);
+  }
+  const lower1 = t => t.charAt(0).toLowerCase() + t.slice(1);
+  function decodeSummary() {
+    if (!current) return msgEl.textContent;
+    const alg = typeof current.header.obj.alg === 'string' && current.header.obj.alg ? current.header.obj.alg : 'no alg in header';
+    const bits = [alg, $('#jwt-time-badge').textContent, $('#jwt-sig-badge').textContent].filter(Boolean).map(lower1);
+    bits[0] = alg;
+    return (current.extracted ? 'Found a token in the pasted text. ' : '') + 'Decoded: ' + bits.join(', ') + '.' +
+      (warnCount ? ' ' + warnCount + (warnCount === 1 ? ' warning' : ' warnings') + ' below.' : '');
+  }
+  const verifySummary = () => $('#jwt-verify').textContent || $('#jwt-sig-badge').textContent;
 
   function badge(id, text, kind) {
     const el = $('#' + id);
@@ -438,6 +504,7 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
       if (h.crit) info.push('The header lists critical extensions (crit: ' + JSON.stringify(h.crit) + '). A library that doesn\'t understand them must reject the token.');
     }
     if (t.extracted) info.unshift('Found ' + (t.extracted === 1 ? 'a token' : t.extracted + ' tokens') + ' inside the pasted text' + (t.extracted === 1 ? ' and decoded it.' : ' and decoded the first one.'));
+    warnCount = warnings.length;
     $('#jwt-warn').textContent = warnings.join(' ');
     $('#jwt-info').textContent = info.join(' ');
   }
@@ -706,6 +773,8 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
     if (t) render(t);
     verify();
   }
+  function edited() { update(); sayLater(decodeSummary); }
+  function keyEdited() { verify(); sayLater(verifySummary); }
 
   function loadExample() {
     tokenEl.value = EXAMPLE;
@@ -715,12 +784,13 @@ pre.jwt-json { max-height: 460px; margin-top: 0; overflow: auto; tab-size: 2; }
     exampleActive = true;
     update();
   }
+  function exampleClicked() { loadExample(); sayLater(decodeSummary); }
 
-  tokenEl.addEventListener('input', update);
-  secretEl.addEventListener('input', verify);
-  b64El.addEventListener('change', verify);
-  keyEl.addEventListener('input', verify);
-  $('#jwt-example').addEventListener('click', loadExample);
+  tokenEl.addEventListener('input', edited);
+  secretEl.addEventListener('input', keyEdited);
+  b64El.addEventListener('change', keyEdited);
+  keyEl.addEventListener('input', keyEdited);
+  $('#jwt-example').addEventListener('click', exampleClicked);
   $('#jwt-clear').addEventListener('click', () => {
     tokenEl.value = '';
     secretEl.value = '';

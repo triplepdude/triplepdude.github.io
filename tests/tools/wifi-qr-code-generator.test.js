@@ -223,4 +223,35 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
   assert.equal(await payload(), 'WIFI:T:WPA;S:\uFFFDa\u{1F600}b\uFFFD;P:correct horse battery staple;;');
+  // Screen readers: the payload is a named group, not a live region, and the details
+  // line is not live either, so typing is not read back keystroke by keystroke. One
+  // short summary is announced in #wq-status once typing pauses, and nothing on load.
+  await open();
+  assert.equal(await page.getAttribute('#wq-payload', 'role'), 'group');
+  assert.equal(await page.getAttribute('#wq-payload', 'aria-labelledby'), 'wq-payload-label');
+  for (const sel of ['#wq-payload', '#wq-meta']) assert.equal(await page.getAttribute(sel, 'aria-live'), null, `${sel} is not live`);
+  assert.equal(await page.textContent('#wq-status'), '');
+  await page.evaluate(() => {
+    window.__live = [];
+    new MutationObserver(ms => ms.forEach(m => {
+      const n = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const r = n && n.closest('[aria-live]:not([aria-live="off"]), [role=status], [role=alert], output');
+      if (r) window.__live.push(r.id + ':' + r.textContent);
+    })).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  await page.fill('#wq-ssid', 'C');
+  await page.type('#wq-ssid', 'afe Guest');
+  await page.waitForFunction(() => document.querySelector('#wq-status').textContent !== '');
+  await page.waitForTimeout(300);
+  const live = await page.evaluate(() => window.__live);
+  assert.deepEqual(live, ['wq-status:QR code updated: version 4, 56 bytes.'], JSON.stringify(live));
+  assert.match(await page.textContent('#wq-meta'), /^Version 4, 33 × 33 modules, .*, 56 bytes$/);
+  // Messages are rewritten only when they change, and a missing name clears the summary.
+  await page.evaluate(() => { window.__live = []; });
+  await page.fill('#wq-ssid', '');
+  await page.type('#wq-pass', 'xy');
+  await page.waitForTimeout(900);
+  const live2 = await page.evaluate(() => window.__live);
+  assert.equal(live2.filter(t => t.startsWith('wq-error:')).length, 1, JSON.stringify(live2));
+  assert.equal(await page.textContent('#wq-status'), '');
 };

@@ -325,4 +325,73 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#jwt-msg'), '');
   await page.click('#jwt-example');
   await verified('example again');
+
+  // Token search in pasted text: quotes are stripped, "eyJ" runs without two dots are skipped,
+  // and a token glued to other characters is still found.
+  await page.fill('#jwt-token', '"' + JWT_IO + '"');
+  assert.match(await text('#jwt-payload'), /"name": "John Doe"/);
+  assert.equal(await text('#jwt-info'), '');
+  await page.fill('#jwt-token', 'eyJnotatoken and ' + JWT_IO + ' and eyJa.b');
+  assert.match(await text('#jwt-payload'), /"name": "John Doe"/);
+  assert.match(await text('#jwt-info'), /^Found a token inside the pasted text and decoded it/);
+  await page.fill('#jwt-token', 'xx' + JWT_IO + '.extra');
+  assert.match(await text('#jwt-payload'), /"name": "John Doe"/);
+  assert.match(await text('#jwt-info'), /^Found a token inside/);
+
+  // Crafted pastes are handled in linear time: quote and "=" runs and "eyJ" repeated without
+  // dots used to block the page for seconds (end-anchored and restarting regexes).
+  for (const expr of [`'a' + '"'.repeat(40000) + 'a'`, `'eyJ'.repeat(50000)`, `'${JWT_IO.split('.').slice(0, 2).join('.')}.' + '='.repeat(40000) + 'x'`, `'eyJ.'.repeat(30000)`]) {
+    const ms = await page.evaluate(expr => {
+      const el = document.querySelector('#jwt-token');
+      el.value = eval(expr);
+      const t = performance.now();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return performance.now() - t;
+    }, expr);
+    assert.ok(ms < 150, `${expr} took ${Math.round(ms)} ms`);
+  }
+
+  // Long decoded JSON scrolls inside its box, which keyboard users can focus and scroll.
+  for (const [sel, name] of [['#jwt-header', 'Decoded header'], ['#jwt-payload', 'Decoded payload']]) {
+    assert.equal(await page.getAttribute(sel, 'tabindex'), '0', sel);
+    assert.equal(await page.getAttribute(sel, 'aria-label'), name, sel);
+  }
+  await page.fill('#jwt-token', makeToken({ alg: 'HS256' }, Object.fromEntries(Array.from({ length: 60 }, (_, i) => ['claim' + i, 'value ' + i])), hmac('sha256', 'x')));
+  await page.focus('#jwt-payload');
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => document.querySelector('#jwt-payload').scrollTop > 0);
+
+  // Screen readers: the decoded output, the error and the verification message change on
+  // every edit, so none is a live region or alert; #jwt-status says one short summary once
+  // typing pauses, built after the signature check has finished.
+  assert.equal(await page.getAttribute('#jwt-out', 'aria-live'), null);
+  assert.equal(await page.getAttribute('#jwt-verify', 'aria-live'), null);
+  assert.equal(await page.getAttribute('#jwt-msg', 'role'), null);
+  await page.evaluate(() => {
+    window.__live = [];
+    new MutationObserver(ms => ms.forEach(m => {
+      const n = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const reg = n && n.closest('[aria-live]:not([aria-live="off"]), [role=status], [role=alert]');
+      if (reg && reg.textContent) window.__live.push(reg.id + ':' + reg.textContent);
+    })).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  const heard = async () => { await page.waitForTimeout(1000); const l = await page.evaluate(() => window.__live); await page.evaluate(() => { window.__live = []; }); return l; };
+  await page.click('#jwt-example');
+  let live = await heard();
+  assert.equal(live.length, 1, JSON.stringify(live));
+  assert.match(live[0], /^jwt-status:Decoded: HS256, valid now, expires in \d+ years, signature verified\.$/);
+  await page.focus('#jwt-token');
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('abc', { delay: 40 });
+  live = await heard();
+  assert.equal(live.length, 1, JSON.stringify(live));
+  assert.match(live[0], /^jwt-status:Decoded: HS256, valid now, expires in \d+ years, invalid signature\.$/);
+  await page.fill('#jwt-secret', '');
+  await page.type('#jwt-secret', 'wrong', { delay: 40 });
+  assert.deepEqual(await heard(), ['jwt-status:Invalid signature: the token was changed after it was signed, or it was signed with a different secret.']);
+  await page.fill('#jwt-token', '');
+  await page.type('#jwt-token', 'abc', { delay: 40 });
+  assert.deepEqual(await heard(), ['jwt-status:This is not a JWT: it has no dots. A JWT has three Base64url parts joined by dots: header.payload.signature.']);
+  await page.click('#jwt-example');
+  await verified('example after the live-region checks');
 };

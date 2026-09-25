@@ -195,6 +195,34 @@ module.exports = async ({ page, open, assert }) => {
   await inspect('');
   assert.equal(await text('#uu-in-err'), '');
 
+  // Live regions: typing must not fire an announcement per key.
+  const record = () => page.evaluate(() => {
+    window.__live = [];
+    if (window.__liveOn) return;
+    window.__liveOn = true;
+    document.querySelectorAll('[aria-live], [role=alert], [role=status]').forEach(r => new MutationObserver(() =>
+      window.__live.push([r.id || r.className, r.getAttribute('role') || r.getAttribute('aria-live'), r.textContent.trim()])
+    ).observe(r, { childList: true, subtree: true, characterData: true }));
+  });
+  const heard = () => page.evaluate(() => window.__live);
+  assert.equal(await page.locator('#uu-in-err[role], .table-wrap[aria-live]').count(), 0, 'no alert or live table');
+  assert.equal(await page.getAttribute('#uu-in', 'aria-describedby'), 'uu-in-err');
+  await record();
+  await page.focus('#uu-in');
+  await page.keyboard.type('919108f7-52d1-4320-9bac-f847db4148a8', { delay: 20 });
+  assert.match(await text('#uu-in-err'), /^$/);
+  await page.waitForTimeout(1200);
+  let log = await heard();
+  assert.deepEqual(log, [['uu-in-status', 'status', 'Valid UUID. Version 4: Random.']], 'one status after 36 keys');
+  await record();
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  assert.equal(await text('#uu-in-err'), 'A UUID has 32 hex digits, but this has 30.', 'visible error is immediate');
+  await page.waitForTimeout(1200);
+  assert.deepEqual(await heard(), [['uu-in-status', 'status', 'A UUID has 32 hex digits, but this has 30.']]);
+  await page.click('[aria-label="Decode the RFC 9562 v7 example"]');
+  assert.equal(await text('#uu-in-status'), 'Valid UUID. Version 7: Unix Epoch time-based.', 'example buttons announce at once');
+
   // Without crypto.randomUUID (older browsers, pages not served over HTTPS)
   // the page falls back to getRandomValues and must still set the bits.
   const p2 = await page.context().newPage();

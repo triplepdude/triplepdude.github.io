@@ -149,7 +149,7 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
 <h2 class="uu-h">Decode a UUID</h2>
 <div class="field">
   <label for="uu-in">UUID to inspect</label>
-  <input type="text" id="uu-in" class="mono uu-in" value="017f22e2-79b0-7cc3-98c4-dc0c0c07398f" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <input type="text" id="uu-in" class="mono uu-in" value="017f22e2-79b0-7cc3-98c4-dc0c0c07398f" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="uu-in-err">
 </div>
 <div class="actions uu-examples">
   <span class="hint">RFC 9562 examples:</span>
@@ -161,8 +161,9 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
   <button class="btn secondary small" type="button" data-uuid="00000000-0000-0000-0000-000000000000" aria-label="Decode the Nil UUID">Nil</button>
   <button class="btn secondary small" type="button" data-uuid="FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" aria-label="Decode the Max UUID">Max</button>
 </div>
-<p class="msg error" id="uu-in-err" role="alert"></p>
-<div class="table-wrap" aria-live="polite">
+<p class="msg error" id="uu-in-err"></p>
+<p class="visually-hidden" id="uu-in-status" role="status"></p>
+<div class="table-wrap">
   <table class="data uu-info">
     <tbody id="uu-info"></tbody>
   </table>
@@ -372,6 +373,16 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     return rows;
   }
 
+  // Screen readers get one short status line (the error, or the status and
+  // version) instead of an alert per keystroke or the whole table. While
+  // typing it waits for a pause; a click or leaving the field says it at once.
+  var statusEl = $('#uu-in-status'), statusTimer = null, statusText = '';
+  function say(now) {
+    clearTimeout(statusTimer);
+    var put = function () { if (statusEl.textContent !== statusText) statusEl.textContent = statusText; };
+    if (now) put(); else statusTimer = setTimeout(put, 800);
+  }
+
   function inspect() {
     var body = $('#uu-info');
     body.textContent = '';
@@ -379,8 +390,11 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     try { r = parse(inp.value); } catch (e) { r = { error: 'This value could not be read.' }; }
     inErr.textContent = r.error || '';
     inp.setAttribute('aria-invalid', r.error ? 'true' : 'false');
-    if (r.error || r.empty) return;
-    rowsFor(r.hex).forEach(function (row) {
+    if (r.error || r.empty) { statusText = r.error || ''; return; }
+    var rows = rowsFor(r.hex);
+    statusText = rows.filter(function (row) { return row[0] === 'Status' || row[0] === 'Version'; })
+      .map(function (row) { return (row[1].badge || row[0] + ' ' + row[1]) + '.'; }).join(' ');
+    rows.forEach(function (row) {
       var tr = document.createElement('tr');
       var th = document.createElement('th');
       th.scope = 'row';
@@ -407,11 +421,13 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     });
   }
 
-  inp.addEventListener('input', inspect);
+  inp.addEventListener('input', function () { inspect(); say(false); });
+  inp.addEventListener('change', function () { say(true); });
   TT.$$('[data-uuid]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       inp.value = btn.getAttribute('data-uuid');
       inspect();
+      say(true);
     });
   });
 

@@ -235,4 +235,30 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(near(png.px(64, 64), GREEN) && near(png.px(10, 64), RED) && near(png.px(118, 64), BLUE), 'same crop without the worker');
   assert.deepEqual(p2errors, []);
   await p2.close();
+
+  // ---------- Startup on a 3x phone: one editor paint at 2x, redrawn only on a real resize ----------
+  const ctx3 = await page.context().browser().newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+  const p3 = await ctx3.newPage();
+  await p3.addInitScript(() => {
+    window.__paints = 0;
+    const clear = CanvasRenderingContext2D.prototype.clearRect;
+    CanvasRenderingContext2D.prototype.clearRect = function (...a) {
+      if (this.canvas.id === 'circ-editor') window.__paints++;
+      return clear.apply(this, a);
+    };
+  });
+  await p3.goto(url);
+  await p3.waitForFunction(() => window.__paints > 0);
+  await p3.waitForTimeout(600);
+  const at3 = await p3.evaluate(() => {
+    const e = document.querySelector('#circ-editor');
+    return { paints: window.__paints, w: e.width, css: e.getBoundingClientRect().width, dpr: devicePixelRatio };
+  });
+  assert.equal(at3.dpr, 3);
+  assert.equal(at3.paints, 1, 'the sample is painted once at startup, not again by the ResizeObserver');
+  assert.equal(at3.w, Math.round(at3.css * 2), `backing store capped at 2x: ${JSON.stringify(at3)}`);
+  await p3.setViewportSize({ width: 340, height: 844 });
+  await p3.waitForFunction(() => { const e = document.querySelector('#circ-editor'); return e.width === Math.round(e.getBoundingClientRect().width * 2); });
+  assert.ok(await p3.evaluate(() => window.__paints) >= 2, 'a real resize still redraws');
+  await ctx3.close();
 };

@@ -178,7 +178,10 @@ faq:
 
   <div class="wq-preview">
     <div class="wq-qr" id="wq-qr"></div>
-    <p class="wq-meta" id="wq-meta" aria-live="polite"></p>
+    <!-- The details line, the warnings and the payload below are redrawn on every keystroke,
+         so they are not live regions; a one-line summary is announced here once typing pauses. -->
+    <p class="wq-meta" id="wq-meta"></p>
+    <p class="visually-hidden" id="wq-status" role="status"></p>
     <div class="row">
       <div class="field">
         <label for="wq-ecl">Error correction</label>
@@ -207,10 +210,10 @@ faq:
 
   <div class="wq-text">
     <div class="msg error" id="wq-error" aria-live="polite"></div>
-    <div class="msg wq-warn" id="wq-warn" aria-live="polite"></div>
+    <div class="msg wq-warn" id="wq-warn"></div>
     <div class="field">
       <span class="label" id="wq-payload-label">Text inside the QR code</span>
-      <div class="output" id="wq-payload" aria-labelledby="wq-payload-label" aria-live="polite"></div>
+      <div class="output" id="wq-payload" role="group" aria-labelledby="wq-payload-label"></div>
     </div>
     <div class="actions">
       <button class="btn secondary small" type="button" data-copy-target="#wq-payload">Copy text</button>
@@ -397,7 +400,14 @@ faq:
     return 'wifi-qr' + (slug ? '-' + slug : '');
   }
 
+  // Messages are live regions: rewrite one only when its text changes, so it is not
+  // announced again on every keystroke.
+  function setMsg(el, text) {
+    if (el.textContent !== text) el.textContent = text;
+  }
+
   function setList(el, items) {
+    if (el.textContent === items.join('') && (items.length > 1) === !!el.querySelector('ul')) return;
     el.textContent = '';
     if (!items.length) return;
     if (items.length === 1) { el.textContent = items[0]; return; }
@@ -406,11 +416,22 @@ faq:
     el.appendChild(ul);
   }
 
+  // One short summary for screen readers (with any warnings), once typing pauses, so
+  // a passing warning such as a trailing space mid-word is not read out. Nothing on load.
+  var statusEl = $('#wq-status'), statusTimer = null, loaded = false, warnText = '';
+  function announce(text) {
+    clearTimeout(statusTimer);
+    if (!loaded) return;
+    statusTimer = setTimeout(function () { setMsg(statusEl, text); }, 700);
+  }
+
   function showEmpty(text) {
     qrBox.classList.add('wq-empty');
     qrBox.textContent = text;
     $('#wq-card-qr').textContent = '';
     metaEl.textContent = '';
+    // Errors are announced by #wq-error straight away; warnings with the summary.
+    announce(warnText);
   }
 
   function updateCard(o) {
@@ -443,12 +464,13 @@ faq:
     toggleBtn.disabled = passEl.disabled;
     var check = checkInput(o);
     setList(warnEl, check.warnings);
+    warnText = check.warnings.join(' ');
     updateCard(o);
     current = null;
     pngBtn.disabled = svgBtn.disabled = printBtn.disabled = true;
 
     if (!lib) {
-      errEl.textContent = 'The QR code library did not load. Reload the page and try again.';
+      setMsg(errEl, 'The QR code library did not load. Reload the page and try again.');
       payloadEl.textContent = '';
       return showEmpty('QR code unavailable');
     }
@@ -463,10 +485,10 @@ faq:
     try {
       qr = makeQr(payload, eclEl.value);
     } catch (e) {
-      errEl.textContent = 'This is too much text for a QR code. Shorten the network name or password.';
+      setMsg(errEl, 'This is too much text for a QR code. Shorten the network name or password.');
       return showEmpty('QR code unavailable');
     }
-    errEl.textContent = '';
+    setMsg(errEl, '');
     current = { qr: qr, payload: payload, ssid: o.ssid };
     var n = qr.getModuleCount();
     var version = (n - 17) / 4;
@@ -477,6 +499,7 @@ faq:
     placeSvg($('#wq-card-qr'), markup, 'QR code to join the Wi-Fi network ' + o.ssid);
     metaEl.textContent = 'Version ' + version + ', ' + n + ' × ' + n + ' modules, error correction ' +
       eclEl.value + ' (' + ECL_PCT[eclEl.value] + '%), ' + bytes(payload) + ' bytes';
+    announce('QR code updated: version ' + version + ', ' + bytes(payload) + ' bytes.' + (warnText ? ' ' + warnText : ''));
     pngBtn.disabled = svgBtn.disabled = printBtn.disabled = false;
   }
 
@@ -530,5 +553,6 @@ faq:
   window.addEventListener('beforeprint', syncPrint);
 
   update();
+  loaded = true;
 })();
 </script>

@@ -189,7 +189,7 @@ faq:
   const video = $('#wct-video'), stage = $('#wct-stage'), mirror = $('#wct-mirror');
   const errEl = $('#wct-error'), okEl = $('#wct-status');
   const canvas = $('#wct-canvas');
-  const st = { stream: null, starting: false, pending: false, gen: 0, timer: 0, vfc: 0, samples: [], frames: 0, darkSince: 0, darkWarned: false, lastQ: null, snapName: '' };
+  const st = { stream: null, starting: false, pending: false, gen: 0, timer: 0, vfc: 0, samples: [], frames: 0, darkSince: 0, darkWarned: false, lastQ: null, snapName: '', focusPending: false };
   const RATIOS = [[4, 3], [16, 9], [16, 10], [3, 2], [5, 4], [1, 1], [21, 9], [9, 16], [3, 4]];
 
   function setError(t) { errEl.textContent = t || ''; }
@@ -268,10 +268,18 @@ faq:
   // ---------- Start / stop ----------
   function updateButtons() {
     const running = !!st.stream;
+    const f = document.activeElement, lost = !f || f === document.body;
     startBtn.disabled = running || st.starting || !!insecureReason();
     stopBtn.disabled = !running;
     snapBtn.disabled = !running;
     fsBtn.disabled = !running;
+    // Start and Stop disable themselves when pressed: hand focus to whichever is
+    // usable, or wait (while the permission prompt is open) until one is.
+    if (([startBtn, stopBtn, snapBtn, fsBtn].includes(f) && f.disabled) || (st.focusPending && lost)) {
+      const to = !stopBtn.disabled ? stopBtn : !startBtn.disabled ? startBtn : null;
+      st.focusPending = !to;
+      if (to && document.activeElement !== to) to.focus();
+    } else if (!lost) st.focusPending = false;
   }
 
   function constraints() {

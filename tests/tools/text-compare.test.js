@@ -72,7 +72,9 @@ module.exports = async ({ page, open, assert }) => {
   assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 1, same: 0 });
   // Side by side in word mode: two panes, deletions left, insertions right.
   await view('split');
-  assert.deepEqual(await texts('.tc-pane h3'), ['Original', 'Changed']);
+  // Pane headings sit directly under the page's h1, so they are h2 (axe heading-order).
+  assert.deepEqual(await texts('.tc-pane h2'), ['Original', 'Changed']);
+  assert.equal(await page.locator('#tc-out h3').count(), 0);
   assert.equal(await page.locator('.tc-pane').nth(0).locator('ins').count(), 0);
   assert.equal(await page.locator('.tc-pane').nth(1).locator('del').count(), 0);
 
@@ -250,6 +252,56 @@ module.exports = async ({ page, open, assert }) => {
   assert.ok(await page.locator('.tc-flow pre.tc-blk').count() > 1);
   assert.equal(await page.textContent('#tc-tok-added'), '5,000');
   assert.equal(await page.textContent('#tc-tok-removed'), '5,000');
+
+  // ---- A worst-case patch (every row reordered) must not freeze the page ----
+  // Download before the worker answers builds the patch on the main thread; it used to run an
+  // unbounded diff (over 5 s for 20,000 reversed rows). Past its time limit the patch writes the
+  // rest as whole blocks, which must still turn the original into the changed text.
+  await mode('line');
+  const rowsA = Array.from({ length: 20000 }, (_, i) => `row ${i}`);
+  const rowsB = rowsA.slice().reverse();
+  const [pdl, blocked] = await Promise.all([page.waitForEvent('download'), page.evaluate(([x, y]) => {
+    document.querySelector('#tc-a').value = x;
+    const B = document.querySelector('#tc-b');
+    B.value = y;
+    B.dispatchEvent(new Event('input', { bubbles: true }));
+    const t = performance.now();
+    document.querySelector('#tc-download').click();
+    return performance.now() - t;
+  }, [rowsA.join('\n') + '\n', rowsB.join('\n') + '\n'])]);
+  assert.ok(blocked < 2000, `patch blocked the page for ${Math.round(blocked)} ms`);
+  assert.match(await page.textContent('#tc-ok'), /whole removed and added blocks/);
+  const applyPatch = (orig, patch) => {
+    const src = orig.split('\n'), res = [];
+    let pos = 0;
+    const pl = patch.split('\n');
+    for (let i = 2; i < pl.length; i++) {
+      const h = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@$/.exec(pl[i]);
+      if (h) {
+        const start = +h[1] - (h[2] === '0' ? 0 : 1);
+        while (pos < start) res.push(src[pos++]);
+        continue;
+      }
+      const l = pl[i];
+      if (l[0] === ' ') { assert.equal(src[pos], l.slice(1)); res.push(src[pos++]); }
+      else if (l[0] === '-') { assert.equal(src[pos], l.slice(1)); pos++; }
+      else if (l[0] === '+') res.push(l.slice(1));
+    }
+    while (pos < src.length) res.push(src[pos++]);
+    return res.join('\n');
+  };
+  assert.equal(applyPatch(rowsA.join('\n') + '\n', fs.readFileSync(await pdl.path(), 'utf8')), rowsB.join('\n') + '\n');
+  await page.waitForFunction(() => document.querySelector('#tc-out').getAttribute('aria-busy') === 'false', null, { timeout: 20000 });
+
+  // The focused segment of "Compare by" shows a ring whether or not it is the checked (filled) one.
+  await page.focus('input[name="tc-mode"]:checked');
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  const ring = () => page.$eval('input[name="tc-mode"]:focus-visible', el => getComputedStyle(el.closest('label')).boxShadow);
+  assert.match(await ring(), /inset.*inset/);
+  await page.keyboard.press('ArrowRight');
+  await settle();
+  assert.match(await ring(), /inset.*inset/);
 
   // The two file buttons have distinct accessible names.
   assert.equal(await page.getAttribute('[data-file="#tc-file-a"]', 'aria-label'), 'Open file as original text');

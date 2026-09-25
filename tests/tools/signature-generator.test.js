@@ -111,6 +111,35 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await strokes(), 0, 'Ctrl+Z undoes');
   assert.equal(await page.isDisabled('#sg-undo'), true);
 
+  // Keyboard focus is never dropped to the page when Clear or Undo disables itself (WCAG 2.4.3).
+  const focusedId = () => page.evaluate(() => document.activeElement.id);
+  await drawLine(60, 60, 260, 120);
+  await page.focus('#sg-clear');
+  await page.keyboard.press('Enter');
+  assert.equal(await strokes(), 0);
+  assert.equal(await focusedId(), 'sg-undo', 'after Clear, focus moves to Undo');
+  await page.keyboard.press('Enter');
+  assert.equal(await strokes(), 1);
+  assert.equal(await focusedId(), 'sg-undo', 'Undo keeps focus while there is more to undo');
+  await page.keyboard.press('Enter');
+  assert.equal(await strokes(), 0);
+  assert.equal(await page.isDisabled('#sg-undo'), true);
+  assert.equal(await focusedId(), 'sg-width', 'with nothing left to undo, focus moves to the thickness slider');
+  // The "Sign here" prompt meets 4.5:1 on the pad (WCAG 1.4.3), and the PNG/SVG table has no empty header.
+  for (const colorScheme of ['light', 'dark']) {
+  await page.emulateMedia({ colorScheme });
+  const hintContrast = await page.evaluate(() => {
+    const rgb = s => s.match(/\d+/g).slice(0, 3).map(Number);
+    const lum = c => { const [r, g, b] = c.map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+    const f = lum(rgb(getComputedStyle(document.querySelector('#sg-hint')).color));
+    const bg = lum(rgb(getComputedStyle(document.querySelector('#sg-pad')).backgroundColor));
+    return (Math.max(f, bg) + 0.05) / (Math.min(f, bg) + 0.05);
+  });
+  assert.ok(hintContrast >= 4.5, `${colorScheme}: "Sign here" contrast ${hintContrast.toFixed(2)}:1`);
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  for (const th of await page.locator('.sg-table th').allTextContents()) assert.ok(th.trim(), 'table header cell has text');
+
   // White background option.
   await drawLine(60, 60, 260, 120);
   await page.check('#sg-white');

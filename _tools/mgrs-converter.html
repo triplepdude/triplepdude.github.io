@@ -88,7 +88,8 @@ faq:
 .mg-seg label:last-child { border-right: 0; }
 .mg-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .mg-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
-.mg-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Two rings, so focus shows on both the filled (checked) and the plain segments. */
+.mg-seg label:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 4px var(--accent-text); outline: 2px solid transparent; }
 .mg-modes { min-width: 0; margin: 0 0 16px; padding: 0; border: 0; }
 .mg-modes legend { padding: 0; margin-bottom: 6px; }
 .row > .field.mg-grow { flex: 3 1 280px; }
@@ -187,7 +188,7 @@ faq:
   </div>
 </div>
 
-<p class="msg error" id="mg-error" role="alert"></p>
+<p class="msg error" id="mg-error" role="status"></p>
 <p class="msg mg-note" id="mg-note" aria-live="polite"></p>
 
 <div id="mg-out">
@@ -494,6 +495,22 @@ faq:
   var zoneInput = TT.$('#mg-zone'), hemiInput = TT.$('#mg-hemi'), eastInput = TT.$('#mg-east'), northInput = TT.$('#mg-north');
   var locateBtn = TT.$('#mg-locate');
   var current = null, followInput = false;
+  // While someone is typing, a half-finished coordinate is not an error yet: the message waits
+  // for a pause (or for the field to lose focus) so screen readers aren't interrupted per key.
+  var pendingError = null, errorTimer = 0;
+  function setError(msg, wait) {
+    clearTimeout(errorTimer);
+    pendingError = null;
+    if (!wait || !msg) { errorBox.textContent = msg; return; }
+    errorBox.textContent = '';
+    pendingError = msg;
+    errorTimer = setTimeout(flushError, 800);
+  }
+  function flushError() {
+    clearTimeout(errorTimer);
+    if (pendingError != null) errorBox.textContent = pendingError;
+    pendingError = null;
+  }
 
   function mode() { return TT.$('input[name="mg-mode"]:checked').value; }
 
@@ -523,8 +540,9 @@ faq:
     noteBox.textContent = notes.join(' ');
   }
 
-  function convert() {
-    errorBox.textContent = '';
+  function convert(e) {
+    var typing = !!(e && e.type === 'input');
+    setError('');
     try {
       var m = mode(), notes = [];
       if (m === 'll') {
@@ -554,7 +572,7 @@ faq:
         render(pt.lat, pt.lon, notes);
       }
     } catch (err) {
-      errorBox.textContent = err && err.message ? err.message : String(err);
+      setError(err && err.message ? err.message : String(err), typing);
       noteBox.textContent = '';
       out.hidden = true;
       current = null;
@@ -587,9 +605,9 @@ faq:
 
   llInput.addEventListener('input', convert);
   // A typed MGRS reference sets the output precision to its own.
-  mgrsInput.addEventListener('input', function () {
+  mgrsInput.addEventListener('input', function (e) {
     followInput = true;
-    convert();
+    convert(e);
     followInput = false;
   });
   [zoneInput, hemiInput, eastInput, northInput].forEach(function (el) {
@@ -597,6 +615,9 @@ faq:
     el.addEventListener('change', convert);
   });
   prec.addEventListener('change', convert);
+  [llInput, mgrsInput, zoneInput, eastInput, northInput].forEach(function (el) {
+    el.addEventListener('blur', flushError);
+  });
 
   TT.$$('[data-example]').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -608,7 +629,7 @@ faq:
   });
 
   locateBtn.addEventListener('click', function () {
-    errorBox.textContent = '';
+    setError('');
     if (!('geolocation' in navigator)) {
       errorBox.textContent = 'Your browser does not support location lookup. Type the coordinates instead.';
       return;

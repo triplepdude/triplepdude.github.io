@@ -304,6 +304,20 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(p2errors, []);
   await p2.close();
 
+  // ---------- Actual size: the scrolling stage can be focused and panned from the keyboard ----------
+  assert.equal(await page.getAttribute('#cmpi-stage', 'tabindex'), null, 'not a tab stop while it does not scroll');
+  await page.check('#cmpi-zoom');
+  const zs = await page.$eval('#cmpi-stage', s => ({ tab: s.getAttribute('tabindex'), role: s.getAttribute('role'), label: s.getAttribute('aria-label'),
+    scrolls: s.scrollWidth > s.clientWidth || s.scrollHeight > s.clientHeight }));
+  assert.deepEqual(zs, { tab: '0', role: 'region', label: 'Comparison at actual size (scroll to pan)', scrolls: true });
+  await page.focus('#cmpi-stage');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await page.waitForFunction(() => { const s = document.querySelector('#cmpi-stage'); return s.scrollLeft > 0 || s.scrollTop > 0; });
+  await page.uncheck('#cmpi-zoom');
+  assert.deepEqual(await page.$eval('#cmpi-stage', s => [s.getAttribute('tabindex'), s.getAttribute('role'), s.getAttribute('aria-label')]), [null, null, null]);
+
   // ---------- WebP at 100% quality is lossless, and the page says so ----------
   await page.selectOption('#cmpi-format', 'image/webp');
   await page.check('input[name="cmpi-mode"][value="quality"]');

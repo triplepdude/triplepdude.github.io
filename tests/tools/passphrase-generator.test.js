@@ -189,6 +189,64 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.textContent('#pp-list .pp-item:first-child .pp-len'), `${Array.from(emo).length} chars`);
   await page.selectOption('#pp-sep', '-');
 
+  // Screen readers: the list and the stats are redrawn on every slider step, so they
+  // are not live regions; one short summary is announced once the slider settles.
+  for (const sel of ['#pp-list', '.pp-stats']) assert.equal(await page.getAttribute(sel, 'aria-live'), null, `${sel} is not live`);
+  await page.evaluate(() => {
+    window.__live = [];
+    new MutationObserver(ms => ms.forEach(m => {
+      const n = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const r = n && n.closest('[aria-live]:not([aria-live="off"]), [role=status], [role=alert]');
+      if (r && r.textContent) window.__live.push(r.id + ':' + r.textContent);
+    })).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  // 10 words: 129.2 bits; 2^128.2 / 1e11 / year = 1.28e20 and / 1e3 = 1.28e28 (Python).
+  await setRange(6);
+  await page.focus('#pp-words');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => document.querySelector('#pp-status').textContent !== '');
+  await page.waitForTimeout(700);
+  let live = await page.evaluate(() => window.__live);
+  assert.deepEqual(live,
+    ['pp-status:5 new passphrases: 10 words, 129.2 bits, very strong, average time to crack about 1.3 × 10²⁰ years.'], JSON.stringify(live));
+  await page.evaluate(() => { window.__live = []; });
+  await page.selectOption('#pp-rate', '1e3');
+  await page.waitForTimeout(700);
+  assert.deepEqual(await page.evaluate(() => window.__live),
+    ['pp-status:At 1,000 guesses a second: 10 words, 129.2 bits, very strong, average time to crack about 1.3 × 10²⁸ years.']);
+  await page.selectOption('#pp-rate', '1e11');
+  await setRange(6);
+
+  // No layout shift while the word list loads: five placeholder rows the size of real
+  // ones hold the space, and the attacker assumption is in the page from the start.
+  // Measured with the list held back for a second, at desktop and phone sizes.
+  for (const [width, height] of [[1280, 900], [768, 1024], [390, 844], [360, 640]]) {
+    await page.setViewportSize({ width, height });
+    let release;
+    const held = new Promise(r => { release = r; });
+    await page.route('**/eff-large-wordlist.txt', async route => { await held; await route.continue(); });
+    await page.addInitScript(() => {
+      window.__cls = 0;
+      new PerformanceObserver(l => l.getEntries().forEach(e => { if (!e.hadRecentInput) window.__cls += e.value; }))
+        .observe({ type: 'layout-shift', buffered: true });
+    });
+    await open();
+    assert.equal(await page.$$eval('#pp-list .pp-placeholder', els => els.length), 5);
+    assert.equal(await page.textContent('#pp-list .pp-placeholder .pp-text'), 'Loading the word list…');
+    assert.match(await text('#pp-assumption'), /^Assumes the attacker .* 100 billion guesses a second\./);
+    const before = await page.$eval('.pp-section', el => el.getBoundingClientRect().top);
+    await page.waitForTimeout(1000);
+    release();
+    await page.waitForSelector('#pp-list .pp-item:not(.pp-placeholder)');
+    await page.waitForTimeout(300);
+    const cls = await page.evaluate(() => window.__cls);
+    assert.ok(cls < 0.05, `CLS ${cls} at ${width}x${height}`);
+    const after = await page.$eval('.pp-section', el => el.getBoundingClientRect().top);
+    assert.ok(Math.abs(after - before) <= 30, `options moved ${after - before}px at ${width}x${height}`);
+    await page.unroute('**/eff-large-wordlist.txt');
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   // Nothing is stored.
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
 };

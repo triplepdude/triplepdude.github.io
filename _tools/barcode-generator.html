@@ -95,6 +95,7 @@ faq:
 .bc-color input[type="color"] { width: 44px; height: 44px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; flex: 0 0 auto; }
 .bc-color input[type="text"] { min-width: 0; }
 .bc-color input[aria-invalid="true"] { border-color: var(--danger); }
+.bc-color-err { color: var(--danger); }
 .bc-ratio-note { margin: -4px 0 16px; }
 .bc-ratio-note:empty { display: none; }
 .bc-warn { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
@@ -186,15 +187,17 @@ faq:
       <label for="bc-fg">Bar colour</label>
       <div class="bc-color">
         <input type="color" id="bc-fg" value="#000000" aria-label="Pick bar colour">
-        <input type="text" id="bc-fg-hex" class="mono" value="#000000" maxlength="7" aria-label="Bar colour hex code" spellcheck="false">
+        <input type="text" id="bc-fg-hex" class="mono" value="#000000" maxlength="7" aria-label="Bar colour hex code" spellcheck="false" aria-describedby="bc-fg-err">
       </div>
+      <span class="hint bc-color-err" id="bc-fg-err" hidden></span>
     </div>
     <div class="field">
       <label for="bc-bg">Background colour</label>
       <div class="bc-color">
         <input type="color" id="bc-bg" value="#ffffff" aria-label="Pick background colour">
-        <input type="text" id="bc-bg-hex" class="mono" value="#ffffff" maxlength="7" aria-label="Background colour hex code" spellcheck="false">
+        <input type="text" id="bc-bg-hex" class="mono" value="#ffffff" maxlength="7" aria-label="Background colour hex code" spellcheck="false" aria-describedby="bc-bg-err">
       </div>
+      <span class="hint bc-color-err" id="bc-bg-err" hidden></span>
     </div>
   </div>
   <div class="checks">
@@ -708,14 +711,21 @@ faq:
       var v = normHex(hex.value);
       if (v) picker.value = v;
       // An unfinished or invalid code is ignored (the picker's colour is used) and flagged.
-      hex.setAttribute('aria-invalid', String(!v && hex.value.trim() !== ''));
+      setInvalid(!v && hex.value.trim() !== '');
       update();
     });
     hex.addEventListener('change', function () {
       // On leaving the box, show the colour actually in use.
       hex.value = picker.value;
-      hex.setAttribute('aria-invalid', 'false');
+      setInvalid(false);
     });
+    // Say in words what is wrong, not only with the red border (read via aria-describedby).
+    function setInvalid(bad) {
+      var err = document.getElementById(hex.getAttribute('aria-describedby'));
+      hex.setAttribute('aria-invalid', String(bad));
+      err.textContent = bad ? 'Enter a colour as #RRGGBB or #RGB, for example #1a237e. Until then ' + picker.value + ' is used.' : '';
+      err.hidden = !bad;
+    }
   }
   pairColour(fg, fgHex);
   pairColour(bg, bgHex);

@@ -262,8 +262,22 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#bc-fg-hex', '#12');
   assert.equal(await page.getAttribute('#bc-fg-hex', 'aria-invalid'), 'true');
   assert.equal(await page.getAttribute('#bc-preview g.bc-bars', 'fill'), '#ff0000');
+  // The problem is stated in text tied to the box, not shown by the red border alone (WCAG 1.4.1, 3.3.1).
+  for (const k of ['fg', 'bg']) assert.equal(await page.getAttribute(`#bc-${k}-hex`, 'aria-describedby'), `bc-${k}-err`);
+  assert.ok(await page.isVisible('#bc-fg-err'));
+  assert.match(await page.textContent('#bc-fg-err'), /^Enter a colour as #RRGGBB or #RGB, .* #ff0000 is used\.$/);
+  assert.equal(await page.isVisible('#bc-bg-err'), false);
+  await page.fill('#bc-bg-hex', '#zz12');
+  assert.equal(await page.getAttribute('#bc-bg-hex', 'aria-invalid'), 'true');
+  assert.match(await page.textContent('#bc-bg-err'), /#ffffff is used/);
+  await page.dispatchEvent('#bc-bg-hex', 'change');
+  assert.equal(await page.inputValue('#bc-bg-hex'), '#ffffff');
+  assert.equal(await page.getAttribute('#bc-bg-hex', 'aria-invalid'), 'false');
+  assert.equal(await page.isVisible('#bc-bg-err'), false);
+  assert.equal(await page.textContent('#bc-bg-err'), '');
   await page.fill('#bc-fg-hex', '000000');
   assert.equal(await page.getAttribute('#bc-fg-hex', 'aria-invalid'), 'false');
+  assert.equal(await page.isVisible('#bc-fg-err'), false);
   assert.equal(await page.getAttribute('#bc-preview g.bc-bars', 'fill'), '#000000');
 
   // ISBN-10 in the EAN-13 box: offered as its ISBN-13 (978 + 9 digits + GS1 check),

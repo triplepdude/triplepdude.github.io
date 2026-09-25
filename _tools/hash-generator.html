@@ -88,7 +88,7 @@ faq:
 .hg-seg label { position: relative; display: block; cursor: pointer; }
 .hg-seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .hg-seg span { display: block; min-width: 72px; padding: 6px 16px; border-radius: 7px; color: var(--muted); font-size: 14px; font-weight: 600; text-align: center; }
-.hg-seg input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+.hg-seg input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--muted); }
 .hg-seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
 .hg-textrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: -8px 0 16px; }
 .hg-textrow .field { display: flex; align-items: center; gap: 8px; margin: 0; }
@@ -175,14 +175,18 @@ faq:
   </div>
 </div>
 
-<p class="msg error" id="hg-msg" role="alert"></p>
+<!-- Not an alert: errors appear while typing (an odd number of hex digits), so they are
+     announced through #hg-status once typing pauses. -->
+<p class="msg error" id="hg-msg"></p>
 
 <div class="hg-bar">
   <span class="label" id="hg-summary">Hashes of an empty input</span>
   <label class="check"><input type="checkbox" id="hg-upper"> Uppercase hex</label>
 </div>
 
-<div class="hg-list" id="hg-results" aria-live="polite">
+<!-- The ten values below change on every keystroke, so they are not a live region:
+     a short summary is announced in #hg-status once typing pauses. -->
+<div class="hg-list" id="hg-results">
   <div class="hg-item" data-alg="md5">
     <div class="hg-alg"><b>MD5</b><small>128 bits</small><em>Match</em></div>
     <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-md5-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-md5-hex" aria-label="Copy MD5 hex">Copy</button></div>
@@ -219,7 +223,8 @@ faq:
   <label for="hg-expected">Compare with expected hash <span class="hint">hex or Base64, e.g. from a download page</span></label>
   <input type="text" id="hg-expected" class="mono" autocomplete="off" spellcheck="false" placeholder="Paste a checksum to check it">
 </div>
-<p class="msg" id="hg-compare" aria-live="polite"></p>
+<p class="msg" id="hg-compare"></p>
+<p class="visually-hidden" id="hg-status" role="status"></p>
 
 <script>
 (function () {
@@ -332,6 +337,12 @@ faq:
     do { v /= 1024; i++; } while (v >= 1024 && i < u.length - 1);
     return v.toFixed(v < 10 ? 2 : 1) + ' ' + u[i] + ' (' + n.toLocaleString() + ' bytes)';
   }
+  // Drops trailing '=' with a loop: /=+$/ backtracks quadratically on a long run of '='.
+  function trimEq(s) {
+    let j = s.length;
+    while (j > 0 && s.charCodeAt(j - 1) === 61) j--;
+    return s.slice(0, j);
+  }
   function parseHexInput(s) {
     const clean = s.replace(/0x/gi, '').replace(/[\s:,_-]/g, '');
     if (/[^0-9a-f]/i.test(clean)) {
@@ -346,7 +357,7 @@ faq:
   function parseB64Input(s) {
     let clean = s.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(clean)) throw new Error('This is not valid Base64. Only A-Z, a-z, 0-9, +, / (or - and _) and trailing = are allowed.');
-    clean = clean.replace(/=+$/, '');
+    clean = trimEq(clean);
     if (clean.length % 4 === 1) throw new Error('This Base64 text has an impossible length; a character is probably missing.');
     clean += '===='.slice(0, (4 - clean.length % 4) % 4);
     let bin;
@@ -403,6 +414,30 @@ faq:
   const fileEl = $('#hg-file'), drop = $('#hg-drop'), msgEl = $('#hg-msg'), listEl = $('#hg-results');
   const state = { src: 'text', results: { text: null, file: null }, summary: { text: '', file: 'Choose a file to see its hashes' }, error: { text: '', file: '' }, busy: { text: false, file: false }, textJob: 0, fileJob: 0 };
 
+  // Screen readers get one short sentence once input pauses, not every hash on each keystroke.
+  const statusEl = $('#hg-status');
+  let statusTimer = null;
+  function sayLater(textFn) {
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      const text = textFn();
+      statusEl.textContent = '';
+      if (text) setTimeout(() => { statusEl.textContent = text; }, 50);
+    }, 700);
+  }
+  // The first sentence of the compare message: "Match: this is the SHA-256 hash of the input." or "No match."
+  function compareShort() {
+    const t = $('#hg-compare').textContent;
+    const m = t.match(/^[^.]*\./);
+    return m ? m[0] : t;
+  }
+  function statusText() {
+    const err = state.error[state.src];
+    const main = err || (state.results[state.src] ? state.summary[state.src].replace(/^Hashes of/, 'Hashes updated for') + '.' : '');
+    const cmp = expEl.value.trim() ? compareShort() : '';
+    return [main, cmp].filter(Boolean).join(' ');
+  }
+
   function hexOf(d) { const h = toHex(d); return upperEl.checked ? h.toUpperCase() : h; }
 
   function render() {
@@ -427,7 +462,7 @@ faq:
   const isDigestHex = v => /^[0-9a-f]+$/i.test(v) && ALGS.some(a => a.hexLen === v.length);
   function isDigestB64(v) {
     if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(v)) return false;
-    const n = v.replace(/=+$/, '').length;
+    const n = trimEq(v).length;
     return ALGS.some(a => Math.ceil(a.hexLen / 2 * 4 / 3) === n);
   }
   const stripPrefix = v => v.replace(/^\*/, '').replace(/^(md5|sha-?1|sha-?256|sha-?384|sha-?512)[:=-]/i, '').replace(/^0x/i, '');
@@ -444,7 +479,10 @@ faq:
       if (isDigestHex(run.join(''))) return run.join('');
       run = [];
     }
-    const bsd = s.match(/^[\w-]+\s*\(.*\)\s*=\s*(\S+)$/);
+    // BSD: "ALG (file) = hash". Split at the last ")" instead of matching "\(.*\)", which
+    // backtracks quadratically; a file name may itself contain brackets.
+    const close = s.lastIndexOf(')');
+    const bsd = close > 0 && /^[\w-]+\s*\(/.test(s) ? s.slice(close + 1).match(/^\s*=\s*(\S+)$/) : null;
     if (bsd) return stripPrefix(bsd[1]);
     const tokens = s.split(/[\s"'`,;()<>[\]{}|]+/).map(stripPrefix).filter(Boolean);
     const first = tokens[0] || '';
@@ -472,8 +510,8 @@ faq:
       match = ALGS.find(a => r[a.id] && toHex(r[a.id]) === lower);
     }
     if (!match) {
-      const b = v.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
-      match = ALGS.find(a => r[a.id] && toB64(r[a.id]).replace(/=+$/, '') === b);
+      const b = trimEq(v.replace(/-/g, '+').replace(/_/g, '/'));
+      match = ALGS.find(a => r[a.id] && trimEq(toB64(r[a.id])) === b);
     }
     if (match) {
       out.className = 'msg ok';
@@ -573,6 +611,7 @@ faq:
     $('#hg-progress-wrap').hidden = true;
     state.busy.file = false;
     render();
+    sayLater(statusText);
   }
 
   function resetFilePicker() {
@@ -592,10 +631,10 @@ faq:
   }
 
   TT.$$('input[name="hg-src"]').forEach(r => r.addEventListener('change', () => { if (r.checked) setSource(r.value); }));
-  textEl.addEventListener('input', hashText);
-  encEl.addEventListener('change', hashText);
+  textEl.addEventListener('input', () => { hashText(); sayLater(statusText); });
+  encEl.addEventListener('change', () => { hashText(); sayLater(statusText); });
   upperEl.addEventListener('change', render);
-  expEl.addEventListener('input', compare);
+  expEl.addEventListener('input', () => { compare(); sayLater(compareShort); });
   fileEl.addEventListener('change', () => { if (fileEl.files && fileEl.files[0]) hashFile(fileEl.files[0]); });
   $('#hg-cancel').addEventListener('click', () => {
     state.fileJob++;

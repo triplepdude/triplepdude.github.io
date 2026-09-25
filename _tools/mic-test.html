@@ -42,8 +42,8 @@ howto: |
   | Clipping | Samples hit full scale and are flattened; lower the input gain |
   {: .data .mict-gt}
 
-  The fill colour follows the same bands: green up to −18 dBFS, amber to
-  −6 dBFS, and red above.
+  The fill colour follows the same bands: amber while the peak is below
+  −25 dBFS, green from −25 to −6 dBFS, and red above.
 
   ## Echo cancellation, noise suppression and auto gain
 
@@ -70,7 +70,7 @@ howto: |
     localhost.
 faq:
   - q: Is my voice recorded or uploaded anywhere?
-    a: No. The audio is analysed by your browser's Web Audio engine on your own device. A test clip stays in the page's memory until you record a new one, reload or close the tab, and it leaves your computer only if you press Download.
+    a: No. The audio is analysed by your browser's Web Audio engine on your own device. A test clip stays in the page's memory until you record a new one, reload or close the tab, Download saves a copy to your device; nothing is sent over the network.
   - q: The meter moves here, but people cannot hear me in Zoom or Teams. Why?
     a: Call apps pick their own input device. Open the app's audio settings and choose the same microphone that works here, and check that it is not muted inside the app or by a headset mute button.
   - q: What is a good microphone level?
@@ -85,7 +85,8 @@ faq:
 .mict-meter {
   position: relative; height: 24px; overflow: hidden;
   border: 1px solid var(--border); border-radius: 6px;
-  background: linear-gradient(90deg, var(--accent) 0 70%, #d99a00 70% 90%, var(--danger) 90% 100%);
+  /* Same bands as the level table on a -60..0 dBFS scale: quiet below -25 (58.333%), good to -6 (90%), loud above. */
+  background: linear-gradient(90deg, #d99a00 0 58.333%, var(--accent) 58.333% 90%, var(--danger) 90% 100%);
 }
 .mict-cover { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--surface-2); }
 .mict-mark { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--text); opacity: 0; }
@@ -171,6 +172,7 @@ faq:
   <button class="btn" type="button" id="mict-rec" disabled>Record</button>
 </div>
 <div class="mict-progress" aria-hidden="true"><div id="mict-rec-bar"></div></div>
+<p class="hint" id="mict-rec-time" hidden></p>
 <p class="hint" id="mict-rec-status" aria-live="polite">Start the microphone to record a test clip.</p>
 <audio class="mict-audio" id="mict-audio" controls hidden></audio>
 <div class="actions">
@@ -191,7 +193,7 @@ faq:
   const sel = $('#mict-device'), startBtn = $('#mict-start'), stopBtn = $('#mict-stop');
   const errEl = $('#mict-error'), okEl = $('#mict-status');
   const wave = $('#mict-wave'), hist = $('#mict-hist');
-  const recBtn = $('#mict-rec'), recStatus = $('#mict-rec-status'), recBar = $('#mict-rec-bar');
+  const recBtn = $('#mict-rec'), recStatus = $('#mict-rec-status'), recBar = $('#mict-rec-bar'), recTime = $('#mict-rec-time');
   const audio = $('#mict-audio'), dlBtn = $('#mict-dl');
   const ec = $('#mict-ec'), ns = $('#mict-ns'), agc = $('#mict-agc'), mon = $('#mict-monitor');
   const MIN_DB = -60, HEARD_DB = -45, CLIP = 0.99;
@@ -201,7 +203,7 @@ faq:
     stream: null, ctx: null, src: null, an: null, monitor: null, buf: null, raf: 0, starting: false, pending: false, gen: 0,
     peakHold: -Infinity, clipCount: 0, clipping: false, meterDb: MIN_DB, markDb: -Infinity, markT: 0, lastT: 0,
     heard: false, startT: 0, warned: false, textT: 0, histMax: -Infinity, histT: 0, history: [],
-    recorder: null, recTimer: 0, recStart: 0, recLen: 5, recBlob: null, recUrl: null, recExt: 'webm'
+    recorder: null, recTimer: 0, recStart: 0, recLen: 5, recBlob: null, recUrl: null, recExt: 'webm', focusPending: false
   };
   let colors = {};
 
@@ -346,8 +348,16 @@ faq:
   // ---------- Start / stop ----------
   function updateButtons() {
     const running = !!st.stream;
+    const f = document.activeElement, lost = !f || f === document.body;
     startBtn.disabled = running || st.starting || !!insecureReason();
     stopBtn.disabled = !running;
+    // Start and Stop disable themselves when pressed: hand focus to whichever is
+    // usable, or wait (while the permission prompt is open) until one is.
+    if (([startBtn, stopBtn].includes(f) && f.disabled) || (st.focusPending && lost)) {
+      const to = !stopBtn.disabled ? stopBtn : !startBtn.disabled ? startBtn : null;
+      st.focusPending = !to;
+      if (to && document.activeElement !== to) to.focus();
+    } else if (!lost) st.focusPending = false;
     const recording = !!(st.recorder && st.recorder.state === 'recording');
     recBtn.disabled = !running && !recording;
     recBtn.textContent = recording ? 'Stop recording' : 'Record ' + $('#mict-len').value + ' s clip';
@@ -541,7 +551,8 @@ faq:
       if (st.recorder && st.recorder.state === 'recording') {
         const el = (now - st.recStart) / 1000;
         recBar.style.width = Math.min(100, el / st.recLen * 100) + '%';
-        recStatus.textContent = 'Recording… ' + Math.min(el, st.recLen).toFixed(1) + ' s of ' + st.recLen + ' s';
+        // Visible counter only: the live status is announced once at the start and end.
+        recTime.textContent = Math.min(el, st.recLen).toFixed(1) + ' s of ' + st.recLen + ' s';
       }
     }
   }
@@ -574,6 +585,7 @@ faq:
       const secs = Math.min((performance.now() - st.recStart) / 1000, st.recLen);
       if (st.recorder === rec) st.recorder = null;
       recBar.style.width = '0%';
+      recTime.hidden = true; recTime.textContent = '';
       updateButtons();
       const type = rec.mimeType || mime || 'audio/webm';
       const blob = new Blob(chunks, { type });
@@ -587,7 +599,9 @@ faq:
     st.recorder = rec;
     st.recStart = performance.now();
     st.recTimer = setTimeout(() => { if (rec.state === 'recording') rec.stop(); }, st.recLen * 1000);
-    recStatus.textContent = 'Recording… 0.0 s of ' + st.recLen + ' s';
+    recStatus.textContent = 'Recording a ' + st.recLen + '-second clip…';
+    recTime.textContent = '0.0 s of ' + st.recLen + ' s';
+    recTime.hidden = false;
     updateButtons();
   }
 
