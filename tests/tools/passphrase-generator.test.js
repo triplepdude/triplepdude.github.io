@@ -2,7 +2,15 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const LIST_FILE = path.join(__dirname, '..', '..', 'assets', 'data', 'passphrase-generator', 'eff-large-wordlist.txt');
+const DATA = path.join(__dirname, '..', '..', 'assets', 'data', 'passphrase-generator');
+const LIST_FILE = path.join(DATA, 'eff-large-wordlist.txt');
+// The short lists, words only. SHA-256 computed from eff.org's eff_short_wordlist_1.txt
+// (sha256 8f5ca830...7ae69) and eff_short_wordlist_2_0.txt (sha256 22b45c52...625e4)
+// with the dice column removed, in Python.
+const SHORT = {
+  short1: ['eff-short-wordlist-1.txt', '36ecca49e4fa20ca84b176c32f2e9c82f98f446585190e75f9879a95c08247bf'],
+  short2: ['eff-short-wordlist-2.txt', '7aa57a4d3ecf6581729992bad9575bacdebf7c28378af2aec6a50f11aec326f5'],
+};
 
 module.exports = async ({ page, open, assert }) => {
   // The word list must be the EFF long list unchanged: 7,776 words in dice order.
@@ -16,6 +24,18 @@ module.exports = async ({ page, open, assert }) => {
   // The how-to says no word is the start of another, so "no separator" loses nothing.
   const sorted = [...list].sort();
   for (let i = 1; i < sorted.length; i++) assert.ok(!sorted[i].startsWith(sorted[i - 1]), `${sorted[i - 1]} is a prefix of ${sorted[i]}`);
+  const shortLists = {};
+  for (const [key, [file, hash]] of Object.entries(SHORT)) {
+    const t = fs.readFileSync(path.join(DATA, file), 'utf8');
+    assert.equal(crypto.createHash('sha256').update(t).digest('hex'), hash, file);
+    const ws = t.trim().split('\n');
+    assert.equal(ws.length, 1296);
+    const so = [...ws].sort();
+    for (let i = 1; i < so.length; i++) assert.ok(!so[i].startsWith(so[i - 1]), `${file}: ${so[i - 1]} is a prefix of ${so[i]}`);
+    shortLists[key] = ws;
+  }
+  // The how-to says every word in short list 2 has its own first three letters.
+  assert.equal(new Set(shortLists.short2.map(w => w.slice(0, 3))).size, 1296);
 
   // Instrument randomness before any page script runs: queued values are fed
   // to crypto.getRandomValues first, and Math.random must never be used.
@@ -249,4 +269,104 @@ module.exports = async ({ page, open, assert }) => {
 
   // Nothing is stored.
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
+
+  // ---------- The EFF short lists ----------
+  await open();
+  await page.waitForSelector('#pp-list .pp-item:not(.pp-placeholder)');
+  // 10.340 bits a word (log2 1296); times at 1e11 guesses a second from Python:
+  // 5 words = 51.7 bits, exactly as 4 long-list words (6^20); 6 words = 2.37e7 s = 274 days;
+  // 8 words = 1.26 million years.
+  await page.selectOption('#pp-wordlist', 'short1');
+  await page.waitForFunction(() => document.querySelector('#pp-bits').textContent === '62.0 bits');
+  await page.waitForFunction(() => !document.querySelector('#pp-generate').disabled);
+  assert.equal(await text('#pp-strength'), 'Good');
+  assert.equal(await text('#pp-time'), 'about 270 days');
+  assert.match(await text('#pp-list-hint'), /1,296 short words .* four dice/);
+  const inShort1 = new Set(shortLists.short1);
+  for (const parts of await partsOf()) {
+    assert.equal(parts.length, 6);
+    for (const w of parts) assert.ok(inShort1.has(w), `${w} is in short list 1`);
+  }
+  for (const [n, bits, time] of [[5, '51.7 bits', 'about 5.1 hours'], [8, '82.7 bits', 'about 1.3 million years']]) {
+    await setRange(n);
+    assert.equal(await text('#pp-bits'), bits);
+    assert.equal(await text('#pp-time'), time);
+  }
+  // Rejection sampling with 1,296 words: limit = floor(2^32 / 1296) * 1296 = 4294966032.
+  await setRange(3);
+  await page.selectOption('#pp-count', '1');
+  await page.evaluate(() => { window.__queue.push(0xFFFFFFFF, 0, 1295, 4294966032, 4294966031); });
+  await page.click('#pp-generate');
+  assert.equal((await phrases())[0], 'acid-zoom-zoom');
+  await page.selectOption('#pp-wordlist', 'short2');
+  await page.waitForFunction(() => !document.querySelector('#pp-generate').disabled);
+  await page.evaluate(() => { window.__queue.push(0, 1295, 216); });
+  await page.click('#pp-generate');
+  // Index 216 = dice 2111 (the first word of the second block).
+  assert.equal((await phrases())[0], ['aardvark', 'zucchini', shortLists.short2[216]].join('-'));
+  // Dice lookup follows the list: four dice per word; a group being typed is not an error yet.
+  await page.fill('#pp-dice', '1111 6666 2111');
+  assert.equal(await text('#pp-dice-out'), `aardvark zucchini ${shortLists.short2[216]}`);
+  assert.match(await text('#pp-dice-label'), /^Four dice per word/);
+  await page.fill('#pp-dice', '1111 66');
+  assert.equal(await text('#pp-dice-error'), '');
+  assert.equal(await text('#pp-dice-out'), 'aardvark');
+  await page.fill('#pp-dice', '1111 66 ');
+  assert.match(await text('#pp-dice-error'), /exactly four dice, each 1 to 6\. Check: 66$/);
+  assert.equal(await page.getAttribute('#pp-dice', 'aria-invalid'), 'true');
+  await page.fill('#pp-dice', '11111');
+  assert.match(await text('#pp-dice-error'), /Check: 11111/);
+  await page.selectOption('#pp-wordlist', 'long');
+  await page.waitForFunction(() => document.querySelector('#pp-dice-out').textContent === 'abacus');
+  assert.match(await text('#pp-dice-label'), /^Five dice per word/);
+  await page.fill('#pp-dice', '');
+  // One summary for the dice lookup once typing pauses, not on every keystroke.
+  await page.waitForTimeout(800); // let the list-change summary go first
+  await page.evaluate(() => {
+    window.__st = [];
+    new MutationObserver(() => { const t = document.querySelector('#pp-status').textContent; if (t) window.__st.push(t); })
+      .observe(document.querySelector('#pp-status'), { childList: true, characterData: true, subtree: true });
+  });
+  await page.locator('#pp-dice').pressSequentially('11111 66666', { delay: 40 });
+  await page.waitForTimeout(1300);
+  assert.deepEqual(await page.evaluate(() => window.__st), ['Words: abacus zoom']);
+  await page.fill('#pp-dice', '');
+
+  // 100 at once; Copy all uses the separator the list was drawn with.
+  await page.selectOption('#pp-count', '100');
+  assert.equal((await phrases()).length, 100);
+  await page.selectOption('#pp-sep', ' ');
+  const hundred = await phrases();
+  await page.click('#pp-copy-all');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), hundred.join('\n'));
+  await page.selectOption('#pp-count', '5');
+  await page.selectOption('#pp-sep', '-');
+
+  // A short list that fails to load (here a truncated file, which is rejected without a
+  // console error) is reported; the long list keeps working.
+  await page.route('**/eff-short-wordlist-1.txt', route => route.fulfill({ status: 200, contentType: 'text/plain', body: 'acid\nacorn\n' }));
+  await open();
+  await page.waitForSelector('#pp-list .pp-item:not(.pp-placeholder)');
+  const before = await phrases();
+  await page.selectOption('#pp-wordlist', 'short1');
+  await page.waitForFunction(() => document.querySelector('#pp-error').textContent !== '');
+  assert.match(await text('#pp-error'), /The EFF short list 1 could not be loaded/);
+  assert.equal(await page.isDisabled('#pp-generate'), true);
+  assert.deepEqual(await phrases(), before, 'the previous passphrases stay on screen');
+  await page.selectOption('#pp-wordlist', 'long');
+  assert.equal(await text('#pp-error'), '');
+  assert.equal(await page.isEnabled('#pp-generate'), true);
+  await page.unroute('**/eff-short-wordlist-1.txt');
+  // Switching again while a list is still loading: only the last choice draws words.
+  let releaseShort;
+  const heldShort = new Promise(r => { releaseShort = r; });
+  await page.route('**/eff-short-wordlist-1.txt', async route => { await heldShort; await route.continue(); });
+  await page.selectOption('#pp-wordlist', 'short1');
+  await page.selectOption('#pp-wordlist', 'short2');
+  await page.waitForFunction(() => !document.querySelector('#pp-generate').disabled);
+  releaseShort();
+  await page.waitForTimeout(300);
+  const inShort2 = new Set(shortLists.short2);
+  for (const parts of await partsOf()) for (const w of parts) assert.ok(inShort2.has(w), `${w} is from short list 2`);
+  assert.equal(await text('#pp-error'), '');
 };

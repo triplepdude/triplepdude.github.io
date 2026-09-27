@@ -1,88 +1,98 @@
 ---
-title: Passphrase Generator (Diceware, EFF List)
-description: Generate strong, memorable passphrases from the EFF Diceware word list with your browser's secure random generator. See entropy and crack time instantly.
+title: Passphrase Generator (Diceware, EFF Lists)
+description: Generate strong, memorable Diceware passphrases from the EFF long or short word lists with your browser's secure random generator. See entropy instantly.
 category: Generators
-keywords: [passphrase generator, diceware password generator, eff wordlist, random word password generator, memorable password generator, xkcd password generator, strong passphrase]
+keywords: [passphrase generator, diceware password generator, eff wordlist, eff short wordlist, random word password generator, memorable password generator, xkcd password generator]
 howto: |
   ## How to use it
 
-  Five passphrases appear as soon as the page loads. Pick one you like and
-  copy it, or press **Generate new** for another batch. Changing any setting
-  makes a fresh batch straight away.
+  Five passphrases appear as soon as the page loads. Copy one you like, or
+  press **Generate new** for another batch; changing a setting makes a fresh
+  batch straight away.
 
-  - **Words**: six is the usual recommendation. Each extra word multiplies
-    the number of possible passphrases by 7,776.
+  - **Word list** and **Words** set the strength (see below). Six words from
+    the long list is the usual recommendation.
   - **Separator** and **capitalisation** only change how the words are
-    joined and written, to fit a site's password rules. They add no
-    strength, because an attacker is assumed to know your settings. No word
-    in the list is the start of another word, so even with no separator a
-    passphrase splits back into its words only one way and loses nothing.
-  - **Add a digit / a symbol** puts one random digit or one random symbol
-    from `! # $ % & * + = ? @` at the end of a random word, for sites that
-    insist on them. Each adds about 3.3 bits.
+    written, to fit a site's password rules. They add no strength, because an
+    attacker is assumed to know your settings. In all three lists no word is
+    the start of another, so even with no separator a passphrase splits back
+    into its words only one way.
+  - **Add a digit / a symbol** puts one random digit or one of
+    `! # $ % & * + = ? @` at the end of a random word, for sites that insist;
+    each adds about 3.3 bits.
+  - **How many** makes 1 to 100 passphrases at once.
+
+  ## The three EFF word lists
+
+  | List | Words | Dice per word | Bits per word |
+  |---|---|---|---|
+  | Long list | 7,776, mostly 5 to 9 letters | 5 | 12.925 |
+  | Short list 1 | 1,296 of at most 5 letters | 4 | 10.340 |
+  | Short list 2 | 1,296 longer, distinctive words | 4 | 10.340 |
+
+  The Electronic Frontier Foundation made the lists for Diceware, where dice
+  pick each word (6⁵ = 7,776 and 6⁴ = 1,296). The short lists are quicker to
+  type, so use more words: five short words give exactly the strength of four
+  long ones (6²⁰ possibilities each), and eight short words (82.7 bits) beat
+  six long ones (77.5 bits). In short list 2 every word has a unique first
+  three letters and differs from every other word by at least three letters,
+  so a typo cannot turn one word into another.
 
   ## Where the randomness comes from
 
-  Words are drawn from the EFF Long Wordlist of 7,776 words, the list the
-  Electronic Frontier Foundation published for Diceware, where five dice rolls
-  (6⁵ = 7,776) pick each word. Here the dice are replaced by
-  `crypto.getRandomValues`, the browser's cryptographically secure random
-  number generator. A random 32-bit number is only used if it falls below
-  the largest multiple of 7,776 that fits in 32 bits; otherwise it is
-  thrown away and a new one is drawn. This *rejection sampling* avoids the
-  small bias that a plain remainder would give, so every word is exactly
-  equally likely. Nothing is predictable from the time, and nothing is sent
-  anywhere.
+  The dice are replaced by `crypto.getRandomValues`, the browser's
+  cryptographically secure random number generator. A random 32-bit number is
+  only used if it falls below the largest multiple of the list size that fits
+  in 32 bits; otherwise it is thrown away and a new one is drawn. This
+  *rejection sampling* avoids the small bias of a plain remainder, so every
+  word is exactly equally likely. Nothing is sent anywhere.
 
   ## How strength is calculated
 
-  Strength is measured in bits of entropy, assuming the attacker knows the
-  word list and every setting you chose. Each word adds log2(7,776) ≈
-  12.925 bits. Writing one random word in capitals adds log2 of the number
-  of words, and a digit or a symbol adds log2(10) ≈ 3.32 bits each. Where the
-  digit or symbol lands is not counted, which keeps the estimate on the safe
-  side.
+  Strength is bits of entropy, assuming the attacker knows the list and every
+  setting. Each word adds log2 of the list size. One random word in capitals
+  adds log2 of the number of words, and a digit or a symbol adds log2(10)
+  ≈ 3.32 bits each. Where the digit or symbol lands is not counted, which
+  keeps the estimate on the safe side.
 
-  | Words | Entropy | Average time at 100 billion guesses a second |
-  |---|---|---|
-  | 4 | 51.7 bits | about 5 hours |
-  | 5 | 64.6 bits | about 4.5 years |
-  | 6 | 77.5 bits | about 35 thousand years |
-  | 7 | 90.5 bits | about 270 million years |
+  | Words | Long list | Short list | Long list, average crack time |
+  |---|---|---|---|
+  | 4 | 51.7 bits | 41.4 bits | about 5 hours |
+  | 5 | 64.6 bits | 51.7 bits | about 4.5 years |
+  | 6 | 77.5 bits | 62.0 bits | about 35 thousand years |
+  | 8 | 103.4 bits | 82.7 bits | about 2.1 trillion years |
 
-  The crack time is the average: half of all possible passphrases, divided
-  by the guessing speed you choose. 100 billion guesses per second is
-  roughly one high-end graphics card attacking a fast hash such as MD5. A
-  login page that limits attempts is millions of times slower, while a site
-  that stores passwords with a slow hash such as bcrypt or Argon2 slows
-  offline attacks enormously.
+  The crack time is half of all possible passphrases divided by the guessing
+  speed, here 100 billion a second: roughly one high-end graphics card against
+  a fast hash such as MD5. Rate-limited logins and slow hashes such as bcrypt
+  or Argon2 are millions of times slower to attack.
 
   ## Tips
 
-  - Use a passphrase for the few secrets you must remember: your password
-    manager, computer login and email. Let the password manager create the
-    rest.
-  - Do not swap words for ones you like better or reorder them to form a
-    sentence. Any human choice reduces the randomness.
-  - Prefer real dice? Roll five dice per word and type the results into the
-    lookup box to get the matching words from the same list.
+  - Use a passphrase for the few secrets you must remember, such as your
+    password manager and computer login, and let the manager create the rest.
+  - Do not swap or reorder words to form a sentence you like. Any human
+    choice reduces the randomness.
+  - Prefer real dice? Roll five dice per word (four for the short lists) and
+    type the results into the lookup box to get the matching words.
 
   ## Word list credit
 
-  The EFF Long Wordlist is by the Electronic Frontier Foundation (eff.org),
-  published under the Creative Commons Attribution 3.0 United States licence
-  (CC BY 3.0 US). This page uses the words unchanged, without the dice numbers.
+  The EFF Long Wordlist and EFF Short Wordlists 1 and 2 are by the Electronic
+  Frontier Foundation (eff.org), published under the Creative Commons
+  Attribution 3.0 United States licence (CC BY 3.0 US). This page uses the
+  words unchanged, without the dice numbers.
 faq:
   - q: Is it safe to generate a passphrase on a website?
     a: This page makes passphrases entirely in your browser with the Web Crypto random generator. They are never sent to a server, logged or stored, and they are gone when you close the tab. You can disconnect from the internet after the page loads and it keeps working.
   - q: How many words should my passphrase have?
-    a: Six words (about 77.5 bits) is a good default for important accounts such as a password manager. Five is reasonable where attempts are rate-limited, and seven or more suits encryption keys that could face offline attacks.
+    a: With the long list, six words (about 77.5 bits) is a good default for important accounts such as a password manager, and seven or more suits encryption keys that could face offline attacks. With a short list, use eight words for a similar strength.
+  - q: Should I use the long list or a short list?
+    a: The long list gives the most strength per word. The short lists have shorter or more distinctive words that are quicker to type on a phone or TV remote, at 10.3 instead of 12.9 bits a word, so add words to make up the difference.
   - q: Is a passphrase better than a random password?
     a: Bit for bit they are equally strong. A six-word passphrase and a 12-character random password of letters, digits and symbols both have about 77 to 79 bits of entropy, but the words are far easier to remember and type.
   - q: Why does adding a capital letter or a separator not increase the strength?
     a: Strength counts only the random choices. If every word is capitalised, or the words are always joined with a hyphen, an attacker who knows the method tries that form first, so it adds nothing. Writing one randomly chosen word in capitals does add a little, and the entropy figure includes it.
-  - q: What is the EFF word list?
-    a: A list of 7,776 common English words chosen by the Electronic Frontier Foundation for Diceware, with offensive and hard-to-spell words removed. EFF also publishes shorter lists for four dice; this page uses the long list, the one intended for five dice.
 ---
 <style>
 .pp-list { display: grid; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
@@ -108,6 +118,7 @@ faq:
 @media (min-width: 360px) { .pp-stats .pp-time-stat { grid-column: span 2; } }
 .pp-section .row > .pp-count-field { flex: 0 1 180px; }
 .pp-section .row > .pp-rate-field { flex: 2 1 260px; }
+.pp-section .row > .pp-list-field { flex: 0 1 420px; }
 #pp-dice-out:empty::before { content: 'The words appear here.'; color: var(--muted); font-family: system-ui, sans-serif; }
 @media (max-width: 480px) {
   .pp-item { flex-wrap: wrap; }
@@ -153,6 +164,17 @@ faq:
 
 <section class="pp-section" aria-labelledby="pp-options-h">
   <h2 id="pp-options-h">Options</h2>
+  <div class="row">
+    <div class="field pp-list-field">
+      <label for="pp-wordlist">Word list</label>
+      <select id="pp-wordlist" aria-describedby="pp-list-hint">
+        <option value="long" selected>EFF long list (12.9 bits a word)</option>
+        <option value="short1">EFF short list 1 (10.3 bits a word)</option>
+        <option value="short2">EFF short list 2 (10.3 bits a word)</option>
+      </select>
+      <span class="hint" id="pp-list-hint">7,776 words for five dice, mostly 5 to 9 letters long.</span>
+    </div>
+  </div>
   <div class="row">
     <div class="field">
       <label for="pp-words">Words</label>
@@ -200,6 +222,7 @@ faq:
         <option value="10">10</option>
         <option value="20">20</option>
         <option value="50">50</option>
+        <option value="100">100</option>
       </select>
     </div>
     <div class="field pp-rate-field">
@@ -217,31 +240,38 @@ faq:
 <section class="pp-section" aria-labelledby="pp-dice-h">
   <h2 id="pp-dice-h">Look up your own dice rolls</h2>
   <div class="field">
-    <label for="pp-dice">Five dice per word, separated by spaces</label>
-    <input type="text" id="pp-dice" class="mono" placeholder="e.g. 16655 43152 21316" autocomplete="off" inputmode="numeric" spellcheck="false">
+    <label for="pp-dice" id="pp-dice-label">Five dice per word, separated by spaces</label>
+    <input type="text" id="pp-dice" class="mono" placeholder="e.g. 16655 43152 21316" autocomplete="off" inputmode="numeric" spellcheck="false" aria-describedby="pp-dice-error">
   </div>
-  <div class="msg error" id="pp-dice-error" aria-live="polite"></div>
-  <div class="output" id="pp-dice-out" aria-live="polite"></div>
+  <div class="msg error" id="pp-dice-error"></div>
+  <div class="output" id="pp-dice-out"></div>
   <div class="actions">
     <button class="btn secondary small" type="button" data-copy-target="#pp-dice-out">Copy words</button>
   </div>
 </section>
 
-<p class="hint pp-credit">Word list: <a href="https://www.eff.org/dice" rel="noopener">EFF Long Wordlist</a> by the Electronic Frontier Foundation, used under <a href="https://creativecommons.org/licenses/by/3.0/us/" rel="noopener license">CC BY 3.0 US</a>.</p>
+<p class="hint pp-credit">Word lists: <a href="https://www.eff.org/dice" rel="noopener">EFF Long Wordlist and Short Wordlists 1 and 2</a> by the Electronic Frontier Foundation, used under <a href="https://creativecommons.org/licenses/by/3.0/us/" rel="noopener license">CC BY 3.0 US</a>.</p>
 
 <script>
 (function () {
   'use strict';
   var $ = TT.$;
-  var LIST_URL = "{{ '/assets/data/passphrase-generator/eff-large-wordlist.txt' | relative_url }}";
-  var LIST_SIZE = 7776;
+  var LISTS = {
+    long: { url: "{{ '/assets/data/passphrase-generator/eff-large-wordlist.txt' | relative_url }}", size: 7776, dice: 5, name: 'EFF long list',
+      hint: '7,776 words for five dice, mostly 5 to 9 letters long.' },
+    short1: { url: "{{ '/assets/data/passphrase-generator/eff-short-wordlist-1.txt' | relative_url }}", size: 1296, dice: 4, name: 'EFF short list 1',
+      hint: '1,296 short words (3 to 5 letters) for four dice. Use about 8 words for the strength of 6 from the long list.' },
+    short2: { url: "{{ '/assets/data/passphrase-generator/eff-short-wordlist-2.txt' | relative_url }}", size: 1296, dice: 4, name: 'EFF short list 2',
+      hint: '1,296 distinctive words for four dice, each with a unique first three letters. Use about 8 words for the strength of 6 from the long list.' }
+  };
   var SYMBOLS = '!#$%&*+=?@';
   var YEAR = 365.25 * 24 * 3600;
-  var words = null, current = [];
+  var loadedLists = {}, loading = {}, words = null, current = [], currentSep = '-';
+  var DICE_WORDS = ['', 'One', 'Two', 'Three', 'Four', 'Five'];
 
   var listEl = $('#pp-list'), errEl = $('#pp-error');
   var genBtn = $('#pp-generate'), copyAllBtn = $('#pp-copy-all');
-  var wordsEl = $('#pp-words'), sepEl = $('#pp-sep'), customEl = $('#pp-custom'), caseEl = $('#pp-case');
+  var wordlistEl = $('#pp-wordlist'), wordsEl = $('#pp-words'), sepEl = $('#pp-sep'), customEl = $('#pp-custom'), caseEl = $('#pp-case');
   var digitEl = $('#pp-digit'), symbolEl = $('#pp-symbol'), countEl = $('#pp-count'), rateEl = $('#pp-rate');
 
   // Uniform integer in [0, n) from crypto.getRandomValues, with rejection sampling.
@@ -255,7 +285,10 @@ faq:
 
   function settings() {
     var n = Math.min(12, Math.max(3, parseInt(wordsEl.value, 10) || 6));
+    var list = LISTS[wordlistEl.value] ? wordlistEl.value : 'long';
     return {
+      list: list,
+      size: LISTS[list].size,
       n: n,
       sep: sepEl.value === 'custom' ? customEl.value : sepEl.value,
       caps: caseEl.value,
@@ -267,7 +300,7 @@ faq:
   }
 
   function entropyBits(s) {
-    var bits = s.n * Math.log2(LIST_SIZE);
+    var bits = s.n * Math.log2(s.size);
     if (s.caps === 'one') bits += Math.log2(s.n);
     if (s.digit) bits += Math.log2(10);
     if (s.symbol) bits += Math.log2(SYMBOLS.length);
@@ -279,7 +312,7 @@ faq:
   // Returns the parts of one passphrase: [{word}, {sep}, ...] so it can be shown and copied.
   function makePassphrase(s) {
     var picked = [];
-    for (var i = 0; i < s.n; i++) picked.push(words[randomInt(LIST_SIZE)]);
+    for (var i = 0; i < s.n; i++) picked.push(words[randomInt(s.size)]);
     if (s.caps === 'title') picked = picked.map(capitalise);
     else if (s.caps === 'upper') picked = picked.map(function (w) { return w.toUpperCase(); });
     else if (s.caps === 'one') { var k = randomInt(s.n); picked[k] = picked[k].toUpperCase(); }
@@ -297,24 +330,22 @@ faq:
   }
   function plural(v, unit) { return v + ' ' + unit + (v === 1 ? '' : 's'); }
 
+  // Each unit is used only while the rounded value stays below the next unit, so
+  // 59.7 seconds reads "about 1 minute", not "about 60 seconds".
   function formatDuration(seconds) {
     if (!isFinite(seconds)) return 'longer than the age of the universe';
     if (seconds < 1) return 'less than a second';
-    if (seconds < 60) return 'about ' + plural(sig2(seconds), 'second');
-    if (seconds < 3600) return 'about ' + plural(sig2(seconds / 60), 'minute');
-    if (seconds < 86400) return 'about ' + plural(sig2(seconds / 3600), 'hour');
-    if (seconds < YEAR) return 'about ' + plural(sig2(seconds / 86400), 'day');
+    var small = [[1, 'second', 60], [60, 'minute', 60], [3600, 'hour', 24], [86400, 'day', 365.25]];
+    for (var i = 0; i < small.length; i++) {
+      var v = sig2(seconds / small[i][0]);
+      if (v < small[i][2]) return 'about ' + plural(v, small[i][1]);
+    }
     var y = seconds / YEAR;
-    if (y < 1000) return 'about ' + plural(sig2(y), 'year');
-    var names = [[1e12, 'trillion'], [1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']];
-    if (y < 1e15) {
-      for (var i = 0; i < names.length; i++) {
-        if (y >= names[i][0]) {
-          var v = sig2(y / names[i][0]);
-          if (v >= 1000 && i > 0) return 'about ' + sig2(v / 1000) + ' ' + names[i - 1][1] + ' years';
-          return 'about ' + v + ' ' + names[i][1] + ' years';
-        }
-      }
+    if (sig2(y) < 1000) return 'about ' + plural(sig2(y), 'year');
+    var names = [[1e3, 'thousand'], [1e6, 'million'], [1e9, 'billion'], [1e12, 'trillion']];
+    for (var k = 0; k < names.length; k++) {
+      var w = sig2(y / names[k][0]);
+      if (w < 1000) return 'about ' + w + ' ' + names[k][1] + ' years';
     }
     return 'about ' + sci(y) + ' years';
   }
@@ -344,6 +375,7 @@ faq:
   }
 
   function render(s) {
+    currentSep = s.sep;
     listEl.textContent = '';
     current.forEach(function (parts, idx) {
       var li = document.createElement('li');
@@ -387,6 +419,12 @@ faq:
     }, 500);
   }
 
+  function announceNow(text) {
+    clearTimeout(statusTimer);
+    statusEl.textContent = '';
+    statusTimer = setTimeout(function () { statusEl.textContent = text; }, 50);
+  }
+
   function summary(s) {
     return plural(s.n, 'word') + ', ' + entropyBits(s).toFixed(1) + ' bits, ' + strength(entropyBits(s))[0].toLowerCase() +
       ', average time to crack ' + formatDuration(Math.pow(2, entropyBits(s) - 1) / s.rate) + '.';
@@ -397,8 +435,12 @@ faq:
     var s = settings();
     $('#pp-words-out').textContent = String(s.n);
     $('#pp-custom-field').hidden = sepEl.value !== 'custom';
+    $('#pp-list-hint').textContent = LISTS[s.list].hint;
     updateStats(s);
-    if (!words) return;
+    words = loadedLists[s.list] || null;
+    genBtn.disabled = copyAllBtn.disabled = !words;
+    if (!words) { loadList(s.list, quiet); return; }
+    if (errEl.textContent) errEl.textContent = '';
     current = [];
     for (var i = 0; i < s.count; i++) current.push(makePassphrase(s));
     render(s);
@@ -406,48 +448,65 @@ faq:
   }
 
   function allText() {
-    var sep = settings().sep;
-    return current.map(function (p) { return p.join(sep); }).join('\n');
+    return current.map(function (p) { return p.join(currentSep); }).join('\n');
   }
 
-  // Five dice (1-6) map to a list index in base 6: 11111 is the first word, 66666 the last.
+  // Dice (1-6) map to a list index in base 6: 11111 is the first word of the long list,
+  // 66666 the last; the short lists take four dice. A group still being typed at the
+  // end is not flagged until it is finished.
+  var diceStatus = TT.debounce(function (text) { if (text) announceNow(text); }, 900);
   function lookupDice() {
-    var out = $('#pp-dice-out'), err = $('#pp-dice-error');
-    var groups = $('#pp-dice').value.trim().split(/[\s,;]+/).filter(Boolean);
+    var s = settings(), list = LISTS[s.list], nd = list.dice;
+    var out = $('#pp-dice-out'), err = $('#pp-dice-error'), raw = $('#pp-dice').value;
+    $('#pp-dice-label').textContent = DICE_WORDS[nd] + ' dice per word, separated by spaces';
+    $('#pp-dice').placeholder = nd === 5 ? 'e.g. 16655 43152 21316' : 'e.g. 1665 4315 2131';
+    var groups = raw.trim().split(/[\s,;]+/).filter(Boolean);
     out.textContent = '';
     err.textContent = '';
-    if (!groups.length) return;
-    if (!words) { err.textContent = 'The word list is still loading.'; return; }
-    var bad = groups.filter(function (g) { return !/^[1-6]{5}$/.test(g); });
+    $('#pp-dice').setAttribute('aria-invalid', 'false');
+    if (!groups.length) { diceStatus(''); return; }
+    var dice = loadedLists[s.list];
+    if (!dice) { err.textContent = 'The word list is still loading.'; loadList(s.list, true); return; }
+    var typing = !/[\s,;]$/.test(raw) && new RegExp('^[1-6]{1,' + (nd - 1) + '}$').test(groups[groups.length - 1]);
+    var done = typing ? groups.slice(0, -1) : groups;
+    var valid = new RegExp('^[1-6]{' + nd + '}$');
+    var bad = done.filter(function (g) { return !valid.test(g); });
     if (bad.length) {
       // Echo at most five groups, each cut short, so a long paste cannot flood the message.
-      err.textContent = 'Each word needs exactly five dice, each 1 to 6. Check: ' + bad.slice(0, 5).map(function (g) {
+      err.textContent = 'Each word needs exactly ' + DICE_WORDS[nd].toLowerCase() + ' dice, each 1 to 6. Check: ' + bad.slice(0, 5).map(function (g) {
         return g.length > 12 ? g.slice(0, 12) + '…' : g;
       }).join(', ') + (bad.length > 5 ? ' and ' + (bad.length - 5) + ' more' : '');
+      $('#pp-dice').setAttribute('aria-invalid', 'true');
+      diceStatus(err.textContent);
       return;
     }
-    out.textContent = groups.map(function (g) {
+    out.textContent = done.map(function (g) {
       var idx = 0;
-      for (var i = 0; i < 5; i++) idx = idx * 6 + (Number(g.charAt(i)) - 1);
-      return words[idx];
+      for (var i = 0; i < nd; i++) idx = idx * 6 + (Number(g.charAt(i)) - 1);
+      return dice[idx];
     }).join(' ');
+    diceStatus(out.textContent ? 'Words: ' + out.textContent : '');
   }
 
-  function loadList() {
-    fetch(LIST_URL).then(function (r) {
+  function loadList(key, quiet) {
+    if (loadedLists[key] || loading[key]) return;
+    var list = LISTS[key];
+    errEl.textContent = '';
+    loading[key] = fetch(list.url).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
     }).then(function (txt) {
-      var list = txt.split(/\r?\n/).map(function (w) { return w.trim(); }).filter(Boolean);
-      if (list.length !== LIST_SIZE) throw new Error('unexpected list length ' + list.length);
-      words = list;
-      genBtn.disabled = false;
-      copyAllBtn.disabled = false;
-      generate(true);
-      lookupDice();
+      var arr = txt.split(/\r?\n/).map(function (w) { return w.trim(); }).filter(Boolean);
+      if (arr.length !== list.size) throw new Error('unexpected list length ' + arr.length);
+      loadedLists[key] = arr;
+      delete loading[key];
+      // Only the list still selected draws passphrases when it arrives.
+      if (settings().list === key) { generate(quiet); lookupDice(); }
     }).catch(function () {
-      errEl.textContent = 'The word list could not be loaded, so no passphrases can be made. Check your connection and reload the page.';
-      listEl.textContent = '';
+      delete loading[key];
+      if (settings().list !== key) return;
+      errEl.textContent = 'The ' + list.name + ' could not be loaded, so no passphrases can be made from it. Check your connection and try again.';
+      if (!current.length) listEl.textContent = '';
     });
   }
 
@@ -455,6 +514,7 @@ faq:
   copyAllBtn.addEventListener('click', function () { TT.copy(allText(), copyAllBtn); });
   wordsEl.addEventListener('input', function () { generate(); });
   [sepEl, caseEl, digitEl, symbolEl, countEl].forEach(function (el) { el.addEventListener('change', function () { generate(); }); });
+  wordlistEl.addEventListener('change', function () { generate(); lookupDice(); });
   rateEl.addEventListener('change', function () {
     var s = settings();
     updateStats(s);
@@ -468,6 +528,6 @@ faq:
   $('#pp-dice').addEventListener('input', lookupDice);
 
   updateStats(settings());
-  loadList();
+  generate(true);
 })();
 </script>

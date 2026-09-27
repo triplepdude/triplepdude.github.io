@@ -165,7 +165,18 @@ module.exports = async ({ page, open, assert }) => {
   await page.setInputFiles('#tc-file-b', { name: 'b.txt', mimeType: 'text/plain', buffer: Buffer.from('one\ntwo\n', 'utf8') });
   await page.waitForFunction(() => document.querySelector('#tc-b').value === 'one\ntwo\n');
   await settle();
-  assert.equal(await page.textContent('#tc-ok'), 'The two texts are identical.');
+  assert.equal(await page.textContent('#tc-ok'), 'No differences, ignoring line endings.');
+  assert.equal(await page.textContent('#tc-info-a'), 'a.txt · UTF-8 with BOM · Windows line endings (CRLF)');
+  assert.equal(await page.textContent('#tc-info-b'), 'b.txt · UTF-8 · Unix line endings (LF)');
+  // With line endings compared, both lines differ and each carriage return is shown as a label.
+  await setOpt('#tc-eol', false);
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 2, same: 0 });
+  assert.deepEqual(await texts('.tc-split del .tc-inv'), ['␍', '␍']);
+  assert.equal(await page.locator('.tc-split ins').count(), 0);
+  // GNU diff -u of the two files (CRLF lines keep their CR, as diff writes them).
+  let [eolDl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
+  assert.equal(fs.readFileSync(await eolDl.path(), 'utf8'), '--- a.txt\n+++ b.txt\n@@ -1,2 +1,2 @@\n-one\r\n-two\r\n+one\n+two\n');
+  await setOpt('#tc-eol', true);
   await page.setInputFiles('#tc-file-b', { name: 'bin.dat', mimeType: 'application/octet-stream', buffer: Buffer.from([0, 1, 2, 0, 255]) });
   await page.waitForFunction(() => /binary/.test(document.querySelector('#tc-error').textContent));
   // UTF-16 with a byte order mark (Windows "Unicode" text) is decoded, not rejected as binary.
@@ -173,7 +184,8 @@ module.exports = async ({ page, open, assert }) => {
   await page.waitForFunction(() => document.querySelector('#tc-a').value === 'one\ntwo\n');
   await settle();
   assert.equal(await page.textContent('#tc-error'), '');
-  assert.equal(await page.textContent('#tc-ok'), 'The two texts are identical.');
+  assert.equal(await page.textContent('#tc-ok'), 'No differences, ignoring line endings.');
+  assert.match(await page.textContent('#tc-info-a'), /^u16le\.txt \u00B7 UTF-16 LE \u00B7 Windows line endings/);
   await page.setInputFiles('#tc-file-a', { name: 'u16be.txt', mimeType: 'text/plain', buffer: Buffer.concat([Buffer.from([0xFE, 0xFF]), Buffer.from('caf\u00E9\n', 'utf16le').swap16()]) });
   await page.waitForFunction(() => document.querySelector('#tc-a').value === 'caf\u00E9\n');
 
@@ -253,6 +265,30 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.textContent('#tc-tok-added'), '5,000');
   assert.equal(await page.textContent('#tc-tok-removed'), '5,000');
 
+  // ---- Very long texts: unchanged lines fold on their own, and at most 12,000 rows are drawn
+  // (a 2.8 MB minified JSON laid out as 360,000 lines froze the page for 6 seconds). ----
+  await mode('line');
+  await view('split');
+  const longA = Array.from({ length: 25000 }, (_, i) => `entry ${i}`);
+  const longB = longA.slice();
+  longB[12345] = 'entry changed';
+  await compare(longA.join('\n'), longB.join('\n'));
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 1, same: 24999 });
+  assert.match(await page.textContent('#tc-status'), /Unchanged lines are folded because these texts are long/);
+  assert.equal(await page.locator('.tc-split tr').count(), 9);
+  assert.equal(await page.isChecked('#tc-hide'), false);
+  const diffA = Array.from({ length: 13000 }, (_, i) => `left ${i}`), diffB = Array.from({ length: 13000 }, (_, i) => `right ${i}`);
+  await compare(diffA.join('\n'), diffB.join('\n'));
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 13000, same: 0 });
+  assert.equal(await page.locator('.tc-split tr:not(.tc-cut)').count(), 12000);
+  assert.match(await page.textContent('.tc-cut'), /longer than 12,000 rows/);
+  assert.match(await page.textContent('#tc-status'), /Only the first 12,000 rows are shown/);
+  // Word mode still counts every changed word past the limit.
+  await mode('word');
+  assert.equal(await page.textContent('#tc-tok-added'), '13,000');
+  assert.equal(await page.locator('.tc-flow .tc-cut').count(), 2);
+  await mode('line');
+
   // ---- A worst-case patch (every row reordered) must not freeze the page ----
   // Download before the worker answers builds the patch on the main thread; it used to run an
   // unbounded diff (over 5 s for 20,000 reversed rows). Past its time limit the patch writes the
@@ -292,6 +328,128 @@ module.exports = async ({ page, open, assert }) => {
   };
   assert.equal(applyPatch(rowsA.join('\n') + '\n', fs.readFileSync(await pdl.path(), 'utf8')), rowsB.join('\n') + '\n');
   await page.waitForFunction(() => document.querySelector('#tc-out').getAttribute('aria-busy') === 'false', null, { timeout: 20000 });
+
+  // ---- Regression: a Windows-1252 ("ANSI") file lost its accented letters (caf�). ----
+  await page.setInputFiles('#tc-file-a', { name: 'ansi.txt', mimeType: 'text/plain', buffer: Buffer.from([0x63, 0x61, 0x66, 0xE9, 0x20, 0x80, 0x0A]) });
+  await page.waitForFunction(() => document.querySelector('#tc-a').value === 'café €\n');
+  assert.match(await page.textContent('#tc-info-a'), /^ansi\.txt · Windows-1252 \(not valid UTF-8\)/);
+
+  // ---- CRLF files: the patch keeps their line endings, as `diff -u` does, so it applies to them.
+  // Reference: GNU diff 3 on the same bytes. ----
+  await page.setInputFiles('#tc-file-a', { name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('one\r\ntwo\r\nthree\r\n') });
+  await page.setInputFiles('#tc-file-b', { name: 'b.txt', mimeType: 'text/plain', buffer: Buffer.from('one\r\nTWO\r\nthree\r\n') });
+  await page.waitForFunction(() => document.querySelector('#tc-b').value === 'one\nTWO\nthree\n');
+  await settle();
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 1, same: 2 });
+  [dl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
+  assert.equal(fs.readFileSync(await dl.path(), 'utf8'), '--- a.txt\n+++ b.txt\n@@ -1,3 +1,3 @@\n one\r\n-two\r\n+TWO\r\n three\r\n');
+  // Editing a CRLF file keeps its line endings in the exact text, and the info line says it was edited.
+  await compare('one\ntwo\nthree\n', 'one\nTWO\nthree\nfour\n');
+  assert.match(await page.textContent('#tc-info-b'), /· edited$/);
+  [dl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
+  assert.equal(fs.readFileSync(await dl.path(), 'utf8'), '--- a.txt\n+++ b.txt\n@@ -1,3 +1,4 @@\n one\r\n-two\r\n+TWO\r\n three\r\n+four\r\n');
+  // Swapping moves the file details with the text.
+  await page.click('#tc-swap');
+  await settle();
+  assert.match(await page.textContent('#tc-info-a'), /^b\.txt/);
+  assert.match(await page.textContent('#tc-info-b'), /^a\.txt/);
+
+  // ---- Dropping a file on a box opens it there instead of leaving the page. ----
+  const drop = (sel, files) => page.evaluate(([s, list]) => {
+    const dt = new DataTransfer();
+    for (const [name, text] of list) dt.items.add(new File([text], name, { type: 'text/plain' }));
+    const el = document.querySelector(s);
+    el.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    return el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [sel, files]);
+  assert.equal(await drop('#tc-b', [['dropped.log', 'x\ny\n']]), false, 'drop default prevented');
+  await page.waitForFunction(() => document.querySelector('#tc-b').value === 'x\ny\n');
+  assert.match(await page.textContent('#tc-info-b'), /^dropped\.log/);
+  // Two files dropped together fill both sides, in order.
+  await drop('#tc-a', [['first.csv', 'id,name\n1,Ann\n'], ['second.csv', 'id,name\n1,Anne\n']]);
+  await page.waitForFunction(() => document.querySelector('#tc-a').value === 'id,name\n1,Ann\n' && document.querySelector('#tc-b').value === 'id,name\n1,Anne\n');
+  await settle();
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 1, same: 1 });
+
+  // ---- Invisible characters that make lines differ are drawn as labels. ----
+  await page.click('#tc-clear');
+  await mode('char');
+  await compare('zero\u200Bwidth \u202Eflip', 'zerowidth flip');
+  assert.deepEqual(await texts('.tc-flow del'), ['ZWSP', 'RLO']);
+  assert.equal(await page.getAttribute('.tc-flow del .tc-inv', 'title'), 'U+200B zero width space');
+  await mode('line');
+
+  // ---- JSON: parsed, keys sorted and laid out the same way. Reference: Python json.dumps
+  // (indent=2, sort_keys=True) of both texts, then GNU diff -u. ----
+  const jsonA = '{"name":"x","tags":["a","b"],"id":12345678901234567890,"e":"caf\\u00e9"}';
+  const jsonB = '{"tags":["a","c"],"id":12345678901234567891,"name":"x","e":"café"}';
+  assert.equal(await page.isDisabled('#tc-sort'), true);
+  await compare(jsonA, jsonB);
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 1, same: 0 });
+  await setOpt('#tc-json', true);
+  assert.equal(await page.isDisabled('#tc-sort'), false);
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 2, same: 7 });
+  [dl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
+  assert.equal(fs.readFileSync(await dl.path(), 'utf8'), ['--- original.json', '+++ changed.json', '@@ -1,9 +1,9 @@', ' {', '   "e": "café",',
+    '-  "id": 12345678901234567890,', '+  "id": 12345678901234567891,', '   "name": "x",', '   "tags": [', '     "a",', '-    "b"', '+    "c"', '   ]', ' }', ''].join('\n'));
+  // Same data, different key order, spacing, number spelling and escapes: equivalent.
+  await compare('{"b": 1, "a": [1, 2, {"y": true, "x": null}], "n": 1.0, "k": 1e3, "s": "\\u00e9"}', '{"s":"é","k":1000,"n":1,"a":[1,2,{"x":null,"y":true}],"b":1}');
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 0, same: 14 });
+  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: only formatting and key order differ.');
+  await setOpt('#tc-sort', false);
+  assert.ok((await stats()).changed + (await stats()).added > 0, 'key order counts when not sorted');
+  await setOpt('#tc-sort', true);
+  // Comments and trailing commas (tsconfig style) are accepted.
+  await compare('{\n  // compiler\n  "strict": true, /* on */\n  "lib": ["dom",],\n}', '{"lib":["dom"],"strict":true}');
+  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: only formatting and key order differ.');
+  assert.equal(await page.textContent('#tc-json-msg'), '');
+  // Invalid JSON: Python reports "Expecting value: line 4 column 1"; the texts are compared as plain text.
+  await compare('{\n  "a": 1,\n  "b": \n}', '{"a": 1}');
+  assert.equal(await page.textContent('#tc-json-msg'), 'Original text is not valid JSON: unexpected "}" at line 4, column 1. The texts are compared as plain text instead.');
+  assert.equal(await page.getAttribute('#tc-json-msg', 'role'), null);
+  assert.deepEqual(await stats(), { added: 0, removed: 3, changed: 1, same: 0 });
+  await compare('[1, 2', '[1, 2]');
+  assert.match(await page.textContent('#tc-json-msg'), /^Original text is not valid JSON: the text ends before the array is closed at line 1, column 6\./);
+  // Duplicate keys: the last value counts, as in JavaScript, and they are pointed out.
+  await compare('{"a": 1, "a": 2}', '{"a": 2}');
+  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: only formatting and key order differ.');
+  assert.equal(await page.textContent('#tc-json-msg'), 'Duplicate key: "a" (original text, line 1, column 10). The last value of each is compared.');
+  await setOpt('#tc-json', false);
+  assert.equal(await page.textContent('#tc-json-msg'), '');
+
+  // ---- HTML report: the comparison as shown, self-contained. ----
+  await page.click('#tc-example');
+  await settle();
+  const [hdl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-html')]);
+  assert.equal(hdl.suggestedFilename(), 'text-compare.html');
+  const report = fs.readFileSync(await hdl.path(), 'utf8');
+  assert.match(report, /^<!doctype html>/);
+  assert.match(report, /<title>Comparison of original\.txt and changed\.txt<\/title>/);
+  assert.match(report, /<li class="add"><b>1<\/b> line added<\/li><li class="del"><b>0<\/b> lines removed<\/li><li class=""><b>4<\/b> lines changed<\/li>/);
+  assert.doesNotMatch(report, /(?:src|href)=|@import|url\(/, 'no external resources');
+  const viewer = await page.context().newPage();
+  await viewer.setContent(report);
+  assert.deepEqual((await viewer.$$eval('.tc-out del', els => els.map(e => e.textContent))).slice(0, 3), ['3', 'second', 'Do we need a French translation']);
+  const delBg = await viewer.$eval('.tc-out del', el => getComputedStyle(el).backgroundColor);
+  assert.notEqual(delBg, 'rgba(0, 0, 0, 0)', 'styles travel with the report');
+  await viewer.close();
+  // Saving right after typing waits for the comparison, then saves the new result.
+  const [hdl2] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => {
+    const B = document.querySelector('#tc-b');
+    B.value = 'completely new';
+    B.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#tc-html').click();
+  })]);
+  assert.match(fs.readFileSync(await hdl2.path(), 'utf8'), /completely new/);
+  await settle();
+
+  // ---- Screen readers hear one summary after the result settles, not the whole stats grid. ----
+  assert.equal(await page.getAttribute('.tc-stats', 'aria-live'), null);
+  await compare('a\nb\nc', 'a\nB\nc\nd');
+  await page.waitForFunction(() => document.querySelector('#tc-announce').textContent === '1 line added, 0 removed, 1 changed.');
+  await page.click('#tc-clear');
+  await settle();
+  assert.equal(await page.textContent('#tc-info-a'), '');
 
   // The focused segment of "Compare by" shows a ring whether or not it is the checked (filled) one.
   await page.focus('input[name="tc-mode"]:checked');

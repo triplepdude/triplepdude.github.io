@@ -241,7 +241,10 @@ faq:
 </div>
 
 <p class="label">Held now</p>
-<p class="output kbt-held" id="kbt-held" aria-live="polite">None</p>
+<p class="output kbt-held" id="kbt-held">None</p>
+<!-- The panels change on every key event, so they are not live regions; one
+     short summary is announced once the keys pause. -->
+<p class="visually-hidden" id="kbt-sr" role="status"></p>
 
 <div id="kbt-chatter-wrap" hidden>
   <p class="label" id="kbt-chatter-label">Keys with possible chatter</p>
@@ -253,21 +256,21 @@ faq:
   <div class="field">
     <label for="kbt-roll">Keys to hold together</label>
     <select id="kbt-roll">
-      <option value="KeyW KeyA KeyS KeyD ShiftLeft Space">Gaming: W A S D + Shift + Space (6 keys)</option>
-      <option value="KeyQ KeyW KeyE KeyR KeyT KeyY">Six letters: Q W E R T Y (6 keys)</option>
-      <option value="KeyA KeyS KeyD KeyF KeyJ KeyK KeyL Semicolon">Home row: A S D F J K L ; (8 keys)</option>
-      <option value="ControlLeft ShiftLeft AltLeft KeyZ KeyX KeyC KeyV KeyB">Modifiers: Ctrl Shift Alt + Z X C V B (8 keys)</option>
-      <option value="KeyQ KeyW KeyE KeyR KeyT KeyY KeyU KeyI KeyO KeyP">Ten fingers: Q to P (10 keys)</option>
+      <option value="KeyW KeyA KeyS KeyD ShiftLeft Space">Gaming: W A S D + Shift + Space</option>
+      <option value="KeyQ KeyW KeyE KeyR KeyT KeyY">Six letters: Q W E R T Y</option>
+      <option value="KeyA KeyS KeyD KeyF KeyJ KeyK KeyL Semicolon">Home row: A S D F J K L ;</option>
+      <option value="ControlLeft ShiftLeft AltLeft KeyZ KeyX KeyC KeyV KeyB">Modifiers: Ctrl Shift Alt + Z X C V B</option>
+      <option value="KeyQ KeyW KeyE KeyR KeyT KeyY KeyU KeyI KeyO KeyP">Ten keys: Q to P</option>
     </select>
   </div>
   <button class="btn secondary" type="button" id="kbt-roll-reset">Clear result</button>
 </div>
 <p class="hint">Capture keys first, then hold every key below at the same time. Each one lights up while the keyboard reports it.</p>
 <ul class="kbt-chips kbt-roll-keys" id="kbt-roll-keys" aria-label="Keys in the rollover test"></ul>
-<p class="kbt-roll-best" id="kbt-roll-best" aria-live="polite"></p>
+<p class="kbt-roll-best" id="kbt-roll-best"></p>
 
 <h2 class="kbt-h">Last key event</h2>
-<div class="stats kbt-last" aria-live="polite">
+<div class="stats kbt-last">
   <div class="stat"><b id="kbt-ev-type">–</b><span>Event</span></div>
   <div class="stat"><b id="kbt-ev-key">–</b><span>event.key</span></div>
   <div class="stat"><b id="kbt-ev-code">–</b><span>event.code</span></div>
@@ -457,6 +460,20 @@ faq:
   var escRun = 0;         // Escape keydowns in a row with no other key between
   var log = [];           // full log, capped
   var LOG_MAX = 500, LOG_SHOW = 10;
+
+  // Screen reader summary: the last key and, when it changed, the rollover
+  // result, once key events pause for a moment.
+  var srEl = TT.$('#kbt-sr'), srTimer = 0, srLastRoll = '';
+  function srSay(e) {
+    clearTimeout(srTimer);
+    srTimer = setTimeout(function () {
+      var roll = TT.$('#kbt-roll-best').textContent;
+      var text = (e.code || 'Unidentified key') + ', key ' + keyText(e.key) + ', keyCode ' + e.keyCode + '. ' + TT.$('#kbt-tested').textContent.replace(' / ', ' of ') + ' tested.';
+      if (roll !== srLastRoll && roll.indexOf('Not tried') !== 0) text += ' Rollover: ' + roll.split('. ')[0] + '.';
+      srLastRoll = roll;
+      srEl.textContent = text;
+    }, 400);
+  }
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c]; });
@@ -722,6 +739,7 @@ faq:
     addLog(e, timing, chatter);
     updateStats();
     rollCheck();
+    srSay(e);
   }
 
   function clearHeld() {

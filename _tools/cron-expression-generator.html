@@ -1,103 +1,96 @@
 ---
 title: Cron Expression Generator & Explainer
-description: Build or paste a cron expression and get it in plain English with the next 10 run times. Covers crontab syntax, names, steps and @daily-style shortcuts.
+description: Build or paste cron schedules for crontab, Kubernetes, GitHub Actions, AWS, Quartz or Spring, and see them in plain English with the next run times.
 category: Developer
-keywords: [cron expression generator, cron expression explainer, crontab generator, crontab syntax, cron every 5 minutes, cron next run time, cron schedule examples]
+keywords: [cron expression generator, cron expression explainer, crontab generator, quartz cron expression, aws cron expression, github actions cron, kubernetes cronjob schedule, cron next run time]
 howto: |
   ## How to use it
 
-  Type or paste an expression into the box at the top. The plain-English
-  description, the field-by-field breakdown and the next 10 run times update
-  as you type. If something is wrong, the message names the field and the
-  value at fault, for example *Hour field: 24 is out of range*.
+  Pick where the schedule will run under **Format**, then type or paste an
+  expression. The plain-English description, the field breakdown and the next
+  10 run times update as you type, and errors name the field and value at
+  fault. Or pick a schedule under **Build a schedule** and the expression is
+  written for you. Switching the format converts the current expression when
+  the other system can express it, and **Same schedule elsewhere** shows it in
+  every other format, including a systemd timer.
 
-  To generate an expression instead, pick a schedule under **Build a
-  schedule**, such as every 15 minutes, weekdays at 09:00 or the 1st of every
-  month, and the expression is written for you. Editing the expression by hand
-  moves the builder to the matching schedule when there is one.
-
-  Run times are calculated in your browser's time zone. Many servers run on
-  UTC, so tick **Use UTC** to see when the job fires on such a machine. The
-  command `timedatectl` or `date` on the server shows its zone.
+  Run times are shown in the time zone you choose. Crontab, Quartz and Spring
+  use the server's zone; GitHub Actions and AWS EventBridge rules use UTC; a
+  Kubernetes CronJob uses its `timeZone` field.
 
   ## Cron syntax
 
-  A crontab line has five time fields followed by the command:
+  Each field takes `*` for every value, a value, a range such as `9-17`, a
+  list such as `1,15`, or a step: `*/15` is every 15th value from the start of
+  the range, and `1-10/2` means 1, 3, 5, 7, 9. Month and weekday names such as
+  `JAN` and `MON-FRI` work too. A step restarts every hour or day, so `*/7` in
+  the minute field fires at :56 and again at :00.
 
-  | Field | Allowed values | Names |
-  |---|---|---|
-  | Minute | 0–59 | |
-  | Hour | 0–23 | |
-  | Day of month | 1–31 | |
-  | Month | 1–12 | JAN–DEC |
-  | Day of week | 0–7, where 0 and 7 are Sunday | SUN–SAT |
+  ## The formats compared
 
-  Each field takes `*` for every value, a single value, a range such as `9-17`,
-  a list such as `1,15`, or a step: `*/15` means every 15th value from the
-  start of the range (0, 15, 30, 45) and `1-10/2` means 1, 3, 5, 7, 9. Names
-  are not case sensitive and also work in ranges, as in `MON-FRI`, but the
-  `@` shortcuts below must be lower case. A step
-  restarts at every hour or day, so `*/7` in the minute field fires at :56 and
-  again at :00, four minutes later. Pick a step that divides 60 (or 24 for
-  hours) for even spacing.
+  | Format | Fields | Sunday is | Both day fields set |
+  |---|---|---|---|
+  | crontab, GitHub, Kubernetes | min hour day month weekday | 0 or 7 | either one matches |
+  | Spring, node-cron | sec min hour day month weekday | 0 or 7 | both must match |
+  | Quartz | sec min hour day month weekday [year] | 1 | not allowed: one must be `?` |
+  | AWS EventBridge | `cron(min hour day month weekday year)` | 1 | not allowed: one must be `?` |
+
+  Quartz, Spring and AWS add special values: `L` is the last day of the month
+  (`L-3` three days before it), `15W` the weekday nearest the 15th, `LW` the
+  last weekday, `FRI#3` the third Friday and `FRIL` or `6L` the last Friday.
+  Mind the weekday numbers: `5` is Friday in crontab but Thursday in Quartz and
+  AWS, so the page writes names when it converts.
+
+  In crontab, when both day fields are restricted the job runs on days that
+  match **either**: `0 12 13 * 5` runs on every 13th and every Friday. In
+  Vixie cron and cronie a field that starts with `*`, even `*/2`, counts as
+  unrestricted, so `0 0 */2 * 1` runs only on odd-numbered Mondays.
+  Kubernetes treats `*/2` as a restriction and would also run on every Monday.
+
+  AWS also takes `rate(5 minutes)`, which counts from when the rule was
+  created, and GitHub runs scheduled workflows at most every 5 minutes, often
+  a little late at the top of the hour.
 
   ## Shortcuts
 
-  | Shortcut | Same as |
-  |---|---|
-  | `@yearly`, `@annually` | `0 0 1 1 *` |
-  | `@monthly` | `0 0 1 * *` |
-  | `@weekly` | `0 0 * * 0` |
-  | `@daily`, `@midnight` | `0 0 * * *` |
-  | `@hourly` | `0 * * * *` |
-  | `@reboot` | once, when the cron daemon starts |
+  Crontab, Kubernetes and Spring accept `@yearly` (`@annually`), `@monthly`,
+  `@weekly`, `@daily` (`@midnight`) and `@hourly`, which stand for
+  `0 0 1 1 *`, `0 0 1 * *`, `0 0 * * 0`, `0 0 * * *` and `0 * * * *`.
+  Crontab's `@reboot` runs once when the cron daemon starts.
 
-  ## Day of month and day of week together
+  ## Daylight saving time
 
-  When both day fields are restricted, cron runs the job on days that match
-  **either** of them. `0 12 13 * 5` runs at noon on every 13th and on every
-  Friday, not only on Friday the 13th. This is old Unix behaviour, and Vixie
-  cron and its descendants (cronie on Fedora and RHEL, Debian's cron) keep
-  it. In those crons a field that starts with `*` counts as unrestricted, and
-  that includes steps like `*/2`: `0 0 */2 * 1` fires only on odd-numbered
-  days that are also Mondays. BusyBox cron and many libraries treat `*/2` as
-  a restriction and would also run it on every Monday.
-
-  To require both, schedule on one field and test the other in the command,
-  for example `0 12 13 * * [ "$(date +\%u)" = 5 ] && /path/to/job`. The
-  backslash matters: in a crontab, an unescaped `%` ends the command.
-
-  ## Time zones and daylight saving
-
-  Cron uses the server's local time unless it supports a setting such as
-  cronie's `CRON_TZ`. The run list follows what Vixie cron and cronie do when
-  clocks change. On the night clocks go forward, a fixed-time job such as
-  `30 2 * * *` runs right after the jump, at 03:00, while a job with `*` in
-  the minute or hour field simply skips the missing times. When an hour
-  repeats in autumn, fixed-time jobs run once and `*` jobs run in both copies.
-  Other schedulers may differ, so keep important jobs out of the
-  01:00–03:00 window or run the server on UTC.
+  For crontab the run list follows Vixie cron and cronie: on the night clocks
+  go forward, a fixed-time job such as `30 2 * * *` runs right after the jump,
+  while `*` jobs skip the missing times; when an hour repeats, fixed-time jobs
+  run once and `*` jobs run in both copies. Other schedulers differ, so the
+  list only flags such runs for them. Keep important jobs out of the
+  01:00–03:00 window, or run them on UTC.
 faq:
   - q: How do I run a cron job every 5 minutes?
-    a: Use `*/5 * * * *`. It fires at minute 0, 5, 10 and so on of every hour. For every 5 minutes during office hours on weekdays, use `*/5 9-17 * * 1-5`.
+    a: Use `*/5 * * * *` in crontab, GitHub Actions or Kubernetes, `0 */5 * * * *` in Spring, `0 0/5 * * * ?` in Quartz and `cron(0/5 * * * ? *)` or `rate(5 minutes)` in AWS EventBridge.
   - q: Is Sunday 0 or 7 in cron?
-    a: Both. Standard cron accepts 0 and 7 for Sunday, 1 for Monday and 6 for Saturday. You can also write the names `SUN` to `SAT`.
+    a: Both, in crontab, Kubernetes, GitHub Actions and Spring. Quartz and AWS number the days from 1 (Sunday) to 7 (Saturday) instead. Writing the names `SUN` to `SAT` avoids the confusion.
   - q: Why does my job run on more days than I expected?
-    a: If you set both the day of month and the day of week, cron runs on days that match either one. `0 0 1 * 1` runs on the 1st of every month and on every Monday. Set one of the two fields to `*` to use only the other.
+    a: In crontab, if you set both the day of month and the day of week, the job runs on days that match either one, so `0 0 1 * 1` runs on the 1st and on every Monday. Set one field to `*` to use only the other.
   - q: Can cron run a job every few seconds?
-    a: No. Standard cron has minute precision and five fields. Six- and seven-field expressions with seconds or years belong to other schedulers such as Quartz or Spring. For sub-minute jobs use a systemd timer or a loop with `sleep`.
+    a: Not crontab, which has minute precision. Quartz and Spring have a seconds field, so `*/10 * * * * *` in Spring runs every 10 seconds. For a system job, a systemd timer can run every few seconds too.
   - q: Is my cron expression sent anywhere?
-    a: No. Parsing, the description and the run times are all computed by JavaScript in your browser. Nothing you type is uploaded or stored.
+    a: No. Parsing, the description, the conversions and the run times are all computed by JavaScript in your browser. Nothing you type is uploaded or stored.
 ---
 <style>
 .tool-page:has(#cr-expr) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
 .tool-page:has(#cr-expr) .prose th, .tool-page:has(#cr-expr) .prose td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .tool-page:has(#cr-expr) .prose th { color: var(--muted); font-weight: 600; }
+.tool-page:has(#cr-expr) .prose code { overflow-wrap: anywhere; }
+.cr-top { margin-bottom: 14px; }
+.cr-top > .field.cr-fmt { flex: 1 1 220px; }
+.cr-top > .field.cr-tzf { flex: 1 1 220px; }
 .cr-exprrow { display: flex; gap: 10px; align-items: stretch; }
-.cr-exprrow input.cr-expr { flex: 1 1 auto; min-width: 0; font-size: clamp(1.15rem, 4vw, 1.5rem); letter-spacing: 0.03em; }
+.cr-exprrow input.cr-expr { flex: 1 1 auto; min-width: 0; font-size: clamp(1.1rem, 4vw, 1.5rem); letter-spacing: 0.03em; }
 .cr-desc { margin: 0 0 14px; font-size: clamp(1.1rem, 3.4vw, 1.35rem); font-weight: 650; line-height: 1.4; }
 .cr-desc:empty { display: none; }
-.msg.cr-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.msg.cr-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); white-space: pre-line; }
 .msg.cr-warn { background: var(--danger-soft); color: var(--text); border-left: 3px solid var(--danger); white-space: pre-line; }
 .msg.cr-err { white-space: pre-line; }
 .cr-desc, .msg.cr-err, .msg.cr-warn, .msg.cr-note { overflow-wrap: anywhere; }
@@ -124,16 +117,43 @@ faq:
 .cr-runs .cr-dst { display: block; margin-top: 2px; color: var(--text); font-size: 13px; line-height: 1.4; }
 .cr-runhead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
 .cr-runhead .cr-h { margin-bottom: 4px; }
-.cr-utc { margin-bottom: 8px; }
 .cr-empty { color: var(--muted); }
+.cr-trans th[scope="row"] { width: 1%; color: var(--text); white-space: nowrap; }
+.cr-trans td { vertical-align: middle; }
+.cr-trans td pre { margin: 0; font-family: var(--mono); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cr-trans td.cr-na { color: var(--muted); font-size: 14px; }
+.cr-trans td:last-child { width: 1%; text-align: right; }
 @media (max-width: 560px) {
   .cr-builder { padding: 14px 12px 2px; }
   table.data.cr-fields th, table.data.cr-fields td, table.data.cr-runs td { padding: 8px 6px; }
+  table.data.cr-trans, .cr-trans tbody { display: block; }
+  table.data.cr-trans tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  table.data.cr-trans th, table.data.cr-trans td { display: block; width: auto; padding: 0; border: 0; }
+  .cr-trans th[scope="row"] { grid-column: 1; grid-row: 1; }
+  .cr-trans td.cr-code { grid-column: 1 / -1; grid-row: 2; }
+  .cr-trans td:last-child { grid-column: 2; grid-row: 1; }
 }
 </style>
 
+<div class="row cr-top">
+  <div class="field cr-fmt">
+    <label for="cr-dialect">Format</label>
+    <select id="cr-dialect">
+      <option value="unix" selected>Unix crontab (5 fields)</option>
+      <option value="k8s">Kubernetes CronJob</option>
+      <option value="github">GitHub Actions (UTC)</option>
+      <option value="aws">AWS EventBridge cron() and rate()</option>
+      <option value="quartz">Quartz (seconds, optional year)</option>
+      <option value="spring">Spring and node-cron (with seconds)</option>
+    </select>
+  </div>
+  <div class="field cr-tzf">
+    <label for="cr-tz">Time zone for run times</label>
+    <select id="cr-tz"></select>
+  </div>
+</div>
 <div class="field">
-  <label for="cr-expr">Cron expression <span class="hint">minute, hour, day of month, month, day of week</span></label>
+  <label for="cr-expr">Cron expression <span class="hint" id="cr-fields-hint">minute, hour, day of month, month, day of week</span></label>
   <div class="cr-exprrow">
     <input type="text" id="cr-expr" class="mono cr-expr" value="0 9 * * 1-5" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="cr-err cr-desc">
     <button class="btn secondary" type="button" data-copy-target="#cr-expr">Copy</button>
@@ -153,6 +173,7 @@ faq:
     <div class="field cr-type">
       <label for="cr-b-type">Run</label>
       <select id="cr-b-type">
+        <option value="seconds">Every N seconds</option>
         <option value="minutes">Every N minutes</option>
         <option value="hours">Every N hours</option>
         <option value="daily">Every day at a set time</option>
@@ -161,6 +182,17 @@ faq:
         <option value="monthly">Once a month</option>
         <option value="yearly">Once a year</option>
         <option value="custom" disabled>Custom (edited by hand)</option>
+      </select>
+    </div>
+    <div class="field cr-narrow" data-show="seconds">
+      <label for="cr-b-sstep">Every</label>
+      <select id="cr-b-sstep">
+        <option value="1">1 second</option>
+        <option value="5">5 seconds</option>
+        <option value="10" selected>10 seconds</option>
+        <option value="15">15 seconds</option>
+        <option value="20">20 seconds</option>
+        <option value="30">30 seconds</option>
       </select>
     </div>
     <div class="field cr-narrow" data-show="minutes">
@@ -236,16 +268,7 @@ faq:
   <p class="hint cr-bhint" id="cr-b-hint" aria-live="polite"></p>
 </div>
 
-<div class="actions cr-examples">
-  <span class="hint">Examples:</span>
-  <button class="btn secondary small" type="button" data-cron="*/15 9-17 * * 1-5" title="Every 15 minutes in office hours on weekdays">*/15 9-17 * * 1-5</button>
-  <button class="btn secondary small" type="button" data-cron="0 0 1,15 * *" title="Twice a month">0 0 1,15 * *</button>
-  <button class="btn secondary small" type="button" data-cron="30 2 * * 0" title="Sunday night maintenance">30 2 * * 0</button>
-  <button class="btn secondary small" type="button" data-cron="0 0 1 */3 *" title="Start of every quarter">0 0 1 */3 *</button>
-  <button class="btn secondary small" type="button" data-cron="0 12 13 * 5" title="Day of month OR day of week">0 12 13 * 5</button>
-  <button class="btn secondary small" type="button" data-cron="@hourly">@hourly</button>
-  <button class="btn secondary small" type="button" data-cron="@reboot">@reboot</button>
-</div>
+<div class="actions cr-examples" id="cr-examples"></div>
 
 <div class="cols cr-cols">
   <div>
@@ -262,7 +285,6 @@ faq:
       <h2 class="cr-h">Next 10 runs</h2>
       <span class="hint" id="cr-zone"></span>
     </div>
-    <label class="check cr-utc"><input type="checkbox" id="cr-utc"> Use UTC instead of local time</label>
     <div class="table-wrap">
       <table class="data cr-runs">
         <thead><tr><th scope="col">When</th><th scope="col">From now</th></tr></thead>
@@ -270,6 +292,13 @@ faq:
       </table>
     </div>
   </div>
+</div>
+
+<h2 class="cr-h">Same schedule elsewhere</h2>
+<div class="table-wrap">
+  <table class="data cr-trans">
+    <tbody id="cr-trans"></tbody>
+  </table>
 </div>
 
 <script>
@@ -281,145 +310,339 @@ faq:
   var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   var MON3 = MONTHS.map(function (m) { return m.slice(0, 3).toUpperCase(); });
   var DAY3 = DAYS.map(function (d) { return d.slice(0, 3).toUpperCase(); });
-  var FIELDS = [
-    { label: 'Minute', min: 0, max: 59, allowed: '0–59', any: 'every minute' },
-    { label: 'Hour', min: 0, max: 23, allowed: '0–23', any: 'every hour' },
-    { label: 'Day of month', min: 1, max: 31, allowed: '1–31', any: 'every day' },
-    { label: 'Month', min: 1, max: 12, allowed: '1–12 or JAN–DEC', any: 'every month', names: MON3, base: 1 },
-    { label: 'Day of week', min: 0, max: 7, allowed: '0–7 (0 and 7 are Sunday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 0 }
-  ];
+  var ORD = ['', 'first', 'second', 'third', 'fourth', 'fifth'];
   var MACROS = {
     '@yearly': '0 0 1 1 *', '@annually': '0 0 1 1 *', '@monthly': '0 0 1 * *', '@weekly': '0 0 * * 0',
     '@daily': '0 0 * * *', '@midnight': '0 0 * * *', '@hourly': '0 * * * *'
   };
   var DIM = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  var NAME_RE ='(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|SUN|MON|TUE|WED|THU|FRI|SAT)';
-  var FIELDLIKE = new RegExp('^(?:[0-9*?/,LW#-]*[0-9*?][0-9*?/,LW#-]*|' + NAME_RE + '(?:[-,/](?:' + NAME_RE + '|\\d+))*)$', 'i');
+  var NAME_RE = '(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|SUN|MON|TUE|WED|THU|FRI|SAT)';
+  // A lookahead instead of "[...]*[0-9*?][...]*", which backtracks quadratically on long tokens.
+  var FIELDLIKE = new RegExp('^(?:(?=[^0-9*?]*[0-9*?])[0-9*?/,LW#-]+|' + NAME_RE + '(?:[-,/](?:' + NAME_RE + '|\\d+))*)$', 'i');
 
-  var input = $('#cr-expr');
+  // How each scheduler reads an expression.
+  //  day: how the two day fields combine. vixie: both must match if either starts with *,
+  //  else either; robfig (Kubernetes): the same, but only a plain * or ? counts as *;
+  //  quartz: one of them must be ?; and: both must match (Spring, node-cron).
+  var DIALECTS = {
+    unix: { name: 'crontab', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, macros: true, reboot: true, command: true, day: 'vixie', single: 'warn', backwards: 'cronie', zone: 'local' },
+    k8s: { name: 'Kubernetes', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, macros: true, qmark: true, day: 'robfig', zone: 'UTC' },
+    github: { name: 'GitHub Actions', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, day: 'vixie', single: 'warn', zone: 'UTC', fixedZone: true },
+    aws: { name: 'AWS EventBridge', fields: ['min', 'hour', 'dom', 'mon', 'dow', 'year'], dowBase: 1, qmark: 'one', specials: true, day: 'quartz', zone: 'UTC', yearMax: 2199 },
+    quartz: { name: 'Quartz', fields: ['sec', 'min', 'hour', 'dom', 'mon', 'dow', 'year'], optionalYear: true, dowBase: 1, qmark: 'one', specials: true, day: 'quartz', zone: 'local', yearMax: 2099 },
+    spring: { name: 'Spring', fields: ['sec', 'min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, macros: true, qmark: true, specials: true, day: 'and', zone: 'local', fiveOk: true }
+  };
+  var FIELD_NAMES = { sec: 'second', min: 'minute', hour: 'hour', dom: 'day of month', mon: 'month', dow: 'day of week', year: 'year' };
+
+  function spec(key, dl) {
+    switch (key) {
+      case 'sec': return { key: key, label: 'Second', min: 0, max: 59, allowed: '0–59', any: 'every second' };
+      case 'min': return { key: key, label: 'Minute', min: 0, max: 59, allowed: '0–59', any: 'every minute' };
+      case 'hour': return { key: key, label: 'Hour', min: 0, max: 23, allowed: '0–23', any: 'every hour' };
+      case 'dom': return { key: key, label: 'Day of month', min: 1, max: 31, allowed: '1–31', any: 'every day' };
+      case 'mon': return { key: key, label: 'Month', min: 1, max: 12, allowed: '1–12 or JAN–DEC', any: 'every month', names: MON3, base: 1 };
+      case 'dow': return dl.dowBase === 1
+        ? { key: key, label: 'Day of week', min: 1, max: 7, allowed: '1–7 (1 is Sunday, 7 is Saturday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 1 }
+        : { key: key, label: 'Day of week', min: 0, max: 7, allowed: '0–7 (0 and 7 are Sunday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 0 };
+      default: return { key: key, label: 'Year', min: 1970, max: dl.yearMax, allowed: '1970–' + dl.yearMax, any: 'every year' };
+    }
+  }
+  // Internal values: weekdays 0 = Sunday to 6 = Saturday, whatever the dialect's numbering.
+  function norm(f, v) { return f.key === 'dow' ? (f.base === 1 ? v - 1 : v % 7) : v; }
+
+  var input = $('#cr-expr'), dialectSel = $('#cr-dialect'), tzSel = $('#cr-tz');
+  function dialect() { return DIALECTS[dialectSel.value] ? dialectSel.value : 'unix'; }
 
   // ---------- Parsing ----------
   function CronError(message, field) { this.message = message; this.field = field; }
-  function fail(fi, text) { return new CronError(FIELDS[fi].label + ' field: ' + text, fi); }
+  function failF(f, text) { return new CronError(f.label + ' field: ' + text, f.key); }
 
-  function parseValue(s, fi) {
-    var f = FIELDS[fi];
+  function parseValue(s, f) {
     if (/^\d+$/.test(s)) {
       var n = parseInt(s, 10);
-      if (n < f.min || n > f.max) throw fail(fi, s + ' is out of range. Allowed: ' + f.allowed + '.');
+      if (n < f.min || n > f.max) throw failF(f, s + ' is out of range. Allowed: ' + f.allowed + '.');
       return n;
     }
     if (f.names && /^[A-Za-z]+$/.test(s)) {
       var up = s.toUpperCase(), i = f.names.indexOf(up);
       if (i >= 0) return i + f.base;
       var j = f.names.indexOf(up.slice(0, 3));
-      if (j >= 0) throw fail(fi, 'write the three-letter name ' + f.names[j] + ' instead of "' + s + '".');
+      if (j >= 0) throw failF(f, 'write the three-letter name ' + f.names[j] + ' instead of "' + s + '".');
     }
-    if (/^(\?|L|LW|\d*L|\d+W|\d+#\d+)$/i.test(s)) {
-      throw fail(fi, '"' + s + '" is a Quartz or AWS extension (? L W #) that standard cron does not support.');
-    }
-    if (/^-\d+$/.test(s)) throw fail(fi, 'negative numbers are not allowed. Allowed: ' + f.allowed + '.');
-    if (/[\u2012-\u2015\u2212]/.test(s)) throw fail(fi, '"' + s + '" contains a typographic dash. Write ranges with a plain hyphen, as in 1-5.');
-    throw fail(fi, '"' + s + '" is not a valid value. Allowed: ' + f.allowed + '.');
+    if (/^-\d+$/.test(s)) throw failF(f, 'negative numbers are not allowed. Allowed: ' + f.allowed + '.');
+    if (/[\u2012-\u2015\u2212]/.test(s)) throw failF(f, '"' + s + '" contains a typographic dash. Write ranges with a plain hyphen, as in 1-5.');
+    throw failF(f, '"' + s + '" is not a valid value. Allowed: ' + f.allowed + '.');
   }
 
-  function parseField(tok, fi) {
-    var f = FIELDS[fi], set = new Set(), warn = [];
-    var parts = tok.split(',');
+  function wrapHint(f, lo, hi) {
+    var top = f.key === 'dow' ? (f.base === 1 ? 7 : 6) : f.max, bottom = f.min;
+    if (f.key === 'dow' && f.base === 0 && hi === 0) return lo + '-7';
+    return (lo === top ? String(lo) : lo + '-' + top) + ',' + (hi === bottom ? String(hi) : bottom + '-' + hi);
+  }
+
+  // Quartz, Spring and AWS day specials: L, L-3, LW, 15W; FRI#3, 5#3, FRIL, 5L, and L alone.
+  function parseSpecial(tok, f, dl) {
+    var t = tok.toUpperCase(), m;
+    if (f.key === 'dom') {
+      if (t === 'L') return { kind: 'last', off: 0 };
+      if ((m = /^L-(\d+)$/.exec(t))) {
+        var off = parseInt(m[1], 10);
+        if (off < 1 || off > 30) throw failF(f, 'the offset in "' + tok + '" must be from 1 to 30.');
+        return { kind: 'last', off: off };
+      }
+      if (t === 'LW') return { kind: 'lastWeekday' };
+      if ((m = /^(\d+)W$/.exec(t))) return { kind: 'nearest', day: parseValue(m[1], f) };
+      return null;
+    }
+    if (t === 'L') {
+      if (dl === DIALECTS.spring) throw failF(f, 'write the weekday instead of a bare "L" (for example SAT), or a last-in-month form such as FRIL.');
+      return { kind: 'set', set: new Set([6]) }; // Quartz and AWS: L alone is day 7, Saturday
+    }
+    if ((m = /^([0-7]|[A-Z]{3})(L|#(\d+))$/.exec(t))) {
+      var d = norm(f, parseValue(m[1], f));
+      if (m[2] === 'L') return { kind: 'lastDow', dow: d };
+      var k = parseInt(m[3], 10);
+      if (k < 1 || k > 5) throw failF(f, 'in "' + tok + '" the number after # must be from 1 to 5: a month has at most five of each weekday.');
+      return { kind: 'nth', dow: d, k: k };
+    }
+    return null;
+  }
+
+  function parseField(tok, key, dl) {
+    var f = spec(key, dl), set = new Set(), warn = [], full = function () { for (var v = f.min; v <= f.max; v++) set.add(norm(f, v)); };
+    if (tok === '?') {
+      if (key !== 'dom' && key !== 'dow') throw failF(f, '"?" is only allowed in the day-of-month and day-of-week fields.');
+      if (!dl.qmark) throw failF(f, '"?" is a Quartz, Spring and AWS symbol that ' + dl.name + ' does not accept. Use * instead.');
+      full();
+      return { tok: tok, set: set, star: true, starB: true, any: true, warn: warn, f: f };
+    }
+    if ((key === 'dom' || key === 'dow') && /[LW#]/i.test(tok) && !/^[A-Za-z]{3}(?:[-,][A-Za-z]{3})*$/.test(tok)) {
+      var sp = null;
+      if (dl.specials) {
+        if (tok.indexOf(',') >= 0) throw failF(f, '"' + tok + '": L, W and # values must stand alone in the field, without a list.');
+        sp = parseSpecial(tok, f, dl);
+      }
+      if (!sp && /^(L|LW|L-\d+|\d+W|[0-7A-Za-z]{1,3}L|[0-7A-Za-z]{1,3}#\d+)$/i.test(tok)) {
+        throw failF(f, '"' + tok + '" is a Quartz, Spring and AWS extension (L, W, #) that ' + (dl === DIALECTS.unix ? 'standard cron' : dl.name) + ' does not support.');
+      }
+      if (sp && sp.kind === 'set') return { tok: tok, set: sp.set, star: false, starB: false, warn: warn, f: f };
+      if (sp) {
+        if (dl === DIALECTS.aws && sp.kind === 'last' && sp.off) warn.push('Day of month field: "' + tok + '" works in Quartz and Spring, but AWS documents only L, W and # without an offset. Check that EventBridge accepts it.');
+        if (dl === DIALECTS.aws && sp.kind === 'lastWeekday') warn.push('Day of month field: "LW" works in Quartz and Spring, but AWS does not document it. Check that EventBridge accepts it.');
+        return { tok: tok, set: new Set(), star: false, starB: false, special: sp, warn: warn, f: f };
+      }
+    }
+    if (tok === '?' || /\?/.test(tok)) throw failF(f, '"' + tok + '": "?" must stand alone in the field.');
+    var parts = tok.split(','), starB = false;
     for (var k = 0; k < parts.length; k++) {
       var part = parts[k];
-      if (part === '') throw fail(fi, parts.length > 1 ? 'the list "' + tok + '" has an empty item. Remove the extra comma.' : 'the value is empty.');
+      if (part === '') throw failF(f, parts.length > 1 ? 'the list "' + tok + '" has an empty item. Remove the extra comma.' : 'the value is empty.');
       var sl = part.split('/');
-      if (sl.length > 2) throw fail(fi, '"' + part + '" has more than one "/".');
+      if (sl.length > 2) throw failF(f, '"' + part + '" has more than one "/".');
       var base = sl[0], step = 1;
       if (sl.length === 2) {
-        if (!/^\d+$/.test(sl[1])) throw fail(fi, 'the step in "' + part + '" must be a whole number, as in */5.');
+        if (!/^\d+$/.test(sl[1])) throw failF(f, 'the step in "' + part + '" must be a whole number, as in */5.');
         step = parseInt(sl[1], 10);
-        if (step === 0) throw fail(fi, 'the step in "' + part + '" cannot be 0.');
+        if (step === 0) throw failF(f, 'the step in "' + part + '" cannot be 0.');
       }
       var lo, hi;
-      if (base === '*') { lo = f.min; hi = f.max; }
-      else if (base === '') throw fail(fi, '"' + part + '" needs a value or * before the "/".');
+      if (base === '*') { lo = f.min; hi = f.max; if (k === 0 && step <= 1) starB = true; }
+      else if (base === '') throw failF(f, '"' + part + '" needs a value or * before the "/".');
       else if (base.indexOf('-') > 0) {
         var r = base.split('-');
-        if (r.length !== 2 || r[1] === '') throw fail(fi, '"' + base + '" is not a valid range. Write it as start-end, like ' + (fi === 4 ? '1-5' : fi === 3 ? '3-10' : fi === 2 ? '1-15' : fi === 1 ? '9-17' : '0-29') + '.');
-        lo = parseValue(r[0], fi);
-        hi = parseValue(r[1], fi);
-        if (lo > hi && fi === 4 && hi === 0 && sl.length === 1) {
+        if (r.length !== 2 || r[1] === '') throw failF(f, '"' + base + '" is not a valid range. Write it as start-end, like ' + ({ sec: '0-29', min: '0-29', hour: '9-17', dom: '1-15', mon: '3-10', dow: dl.dowBase ? '2-6' : '1-5', year: '2027-2029' }[key]) + '.');
+        lo = parseValue(r[0], f);
+        hi = parseValue(r[1], f);
+        if (lo > hi && key === 'dow' && f.base === 0 && hi === 0 && sl.length === 1 && dl.backwards === 'cronie') {
           // cronie reads FRI-SUN (5-0) as 5-7; Debian's Vixie cron rejects it.
           hi = 7;
           warn.push('Day of week field: cronie reads "' + base + '" as ' + lo + '-7, but the Vixie cron in Debian and Ubuntu rejects a range that runs backwards. Write ' + lo + '-7 so it works everywhere.');
         } else if (lo > hi) {
-          throw fail(fi, 'the range ' + base + ' runs backwards. Cron ranges cannot wrap around; split it into two, like ' + wrapHint(fi, lo, hi) + '.');
+          throw failF(f, 'the range ' + base + ' runs backwards. Ranges cannot wrap around; split it into two, like ' + wrapHint(f, lo, hi) + '.');
         }
       } else {
-        lo = hi = parseValue(base, fi);
+        lo = hi = parseValue(base, f);
         if (sl.length === 2) {
           hi = f.max;
-          warn.push(FIELDS[fi].label + ' field: Vixie cron and cronie reject a step after a single value such as "' + part + '", and BusyBox cron runs it only at ' + base + '. Many libraries read it as ' + base + '-' + f.max + '/' + step + ', which is what is shown here. Write ' + base + '-' + f.max + '/' + step + ' so it works everywhere.');
+          if (dl.single === 'warn') {
+            warn.push(f.label + ' field: Vixie cron and cronie reject a step after a single value such as "' + part + '", and BusyBox cron runs it only at ' + base + '. Many other schedulers read it as ' + base + '-' + f.max + '/' + step + ', which is what is shown here. Write ' + base + '-' + f.max + '/' + step + ' so it works everywhere.');
+          }
         }
       }
-      for (var v = lo; v <= hi; v += step) set.add(fi === 4 && v === 7 ? 0 : v);
+      for (var v = lo; v <= hi; v += step) set.add(norm(f, v));
     }
-    return { tok: tok, set: set, star: tok.charAt(0) === '*', warn: warn };
+    return { tok: tok, set: set, star: tok.charAt(0) === '*', starB: starB, warn: warn, f: f };
   }
 
-  function wrapHint(fi, lo, hi) {
-    var top = fi === 4 ? 6 : FIELDS[fi].max, bottom = FIELDS[fi].min;
-    if (fi === 4 && hi === 0) return lo + '-7';
-    return (lo === top ? String(lo) : lo + '-' + top) + ',' + (hi === bottom ? String(hi) : bottom + '-' + hi);
+  function parseRate(inner) {
+    var m = /^\s*(\d+)\s+([a-z]+)\s*$/i.exec(inner);
+    if (!m) return { error: 'Write a rate as rate(value unit), for example rate(5 minutes) or rate(1 hour).' };
+    var n = parseInt(m[1], 10), unit = m[2].toLowerCase();
+    var base = unit.replace(/s$/, '');
+    if (['minute', 'hour', 'day'].indexOf(base) < 0) return { error: '"' + m[2] + '" is not a rate unit. Use minute(s), hour(s) or day(s).' };
+    if (n < 1) return { error: 'The rate value must be a positive whole number.' };
+    if (n === 1 && unit !== base) return { error: 'AWS wants the singular unit for a value of 1: rate(1 ' + base + ').' };
+    if (n > 1 && unit === base) return { error: 'AWS wants the plural unit for values above 1: rate(' + n + ' ' + base + 's).' };
+    return { rate: { n: n, unit: base, ms: n * { minute: 60000, hour: 3600000, day: 86400000 }[base] } };
   }
 
-  function parse(raw) {
-    var text = raw.trim();
-    if (!text) return { error: 'Enter a cron expression, for example */5 * * * *.', errors: [] };
+  function parse(raw, dk) {
+    var dl = DIALECTS[dk], text = raw.trim();
+    if (!text) return { error: 'Enter a cron expression, for example ' + ({ aws: 'cron(0/5 * * * ? *)', quartz: '0 0/5 * * * ?', spring: '0 */5 * * * *' }[dk] || '*/5 * * * *') + '.', errors: [] };
+    var res = { dk: dk, tokens: null, macro: null, reboot: false, command: '', errors: [], warnings: [], notes: [] };
+    if (dk === 'aws') {
+      var cm = /^(cron|rate|at)\s*\(([\s\S]*)\)$/i.exec(text);
+      if (cm && cm[1].toLowerCase() !== cm[1]) { res.error = 'Write ' + cm[1].toLowerCase() + '( ) in lower case, as AWS expects.'; return res; }
+      if (cm && cm[1] === 'rate') { var rr = parseRate(cm[2]); if (rr.error) { res.error = rr.error; return res; } res.rate = rr.rate; return res; }
+      if (cm && cm[1] === 'at') {
+        var am = /^\s*(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\s*$/.exec(cm[2]);
+        if (!am) { res.error = 'Write a one-time schedule as at(yyyy-mm-ddThh:mm:ss), for example at(2026-12-24T18:00:00).'; return res; }
+        var at = am.slice(1).map(Number);
+        var chk = new Date(Date.UTC(at[0], at[1] - 1, at[2], at[3], at[4], at[5]));
+        if (chk.getUTCMonth() !== at[1] - 1 || chk.getUTCDate() !== at[2] || at[3] > 23 || at[4] > 59 || at[5] > 59) { res.error = 'at(' + cm[2].trim() + ') is not a real date and time.'; return res; }
+        res.at = at;
+        return res;
+      }
+      if (cm) text = cm[2].trim();
+      else if (/^(cron|rate|at)\b/i.test(text)) { res.error = 'Close the brackets: cron( … ), rate( … ) or at( … ).'; return res; }
+      else res.notes.push('EventBridge expects the expression wrapped as cron(' + text + ').');
+    }
+    if (dk === 'k8s' && /^(CRON_)?TZ=/i.test(text)) {
+      res.error = 'Kubernetes rejects a time zone inside the schedule. Remove "' + text.split(/\s+/)[0] + '" and set spec.timeZone instead; pick the zone above to see it in the YAML.';
+      return res;
+    }
     var tokens = text.split(/\s+/);
-    var res = { tokens: null, macro: null, reboot: false, command: '', fields: null, errors: [], warnings: [] };
     if (tokens[0].charAt(0) === '@') {
       var name = tokens[0], lower = name.toLowerCase();
-      res.command = tokens.slice(1).join(' ');
-      if (name === '@reboot') { res.reboot = true; res.macro = '@reboot'; return res; }
+      if (!dl.macros) { res.error = dl.name + ' does not accept shortcuts like ' + lower + '. Write the fields out' + (MACROS[lower] ? ', for example ' + emitMacro(lower, dk) + '.' : '.'); return res; }
+      if (name === '@reboot' && dl.reboot) { res.reboot = true; res.macro = '@reboot'; res.command = tokens.slice(1).join(' '); return res; }
+      if (lower === '@reboot' && !dl.reboot) { res.error = dl.name + ' has no @reboot: it only runs jobs on a clock schedule.'; return res; }
       if (!MACROS[name]) {
         // Vixie cron, cronie and BusyBox compare shortcut names case-sensitively.
         res.error = MACROS[lower] || lower === '@reboot'
-          ? 'Write ' + lower + ' in lower case. Cron does not recognise "' + name + '".'
-          : 'Unknown shortcut "' + name + '". Use @yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly or @reboot.';
+          ? 'Write ' + lower + ' in lower case. ' + (dk === 'unix' ? 'Cron' : dl.name) + ' does not recognise "' + name + '".'
+          : 'Unknown shortcut "' + name + '". Use @yearly, @annually, @monthly, @weekly, @daily, @midnight' + (dl.reboot ? ', @hourly or @reboot.' : ' or @hourly.');
         return res;
       }
+      if (tokens.length > 1 && !dl.command) { res.error = 'Only the shortcut is allowed here; remove "' + tokens.slice(1).join(' ') + '".'; return res; }
       res.macro = name;
+      res.command = tokens.slice(1).join(' ');
       tokens = MACROS[name].split(' ');
-    } else if (tokens.length < 5) {
-      res.error = 'Expected 5 fields (minute, hour, day of month, month, day of week) but found ' + tokens.length + '.';
-      res.tokens = tokens;
-      return res;
-    } else if (tokens.length > 5) {
-      if (FIELDLIKE.test(tokens[5]) && tokens.length <= 7) {
-        res.error = 'Found ' + tokens.length + ' fields. Standard cron uses 5: minute, hour, day of month, month and day of week. A leading seconds field (Quartz, Spring) or a trailing year field is not supported. Remove it.';
-        res.tokens = tokens.slice(0, 5);
+      if (dl.fields[0] === 'sec') tokens.unshift('0');
+    } else {
+      var want = dl.fields.length, got = tokens.length, fieldsText = dl.fields.map(function (k) { return FIELD_NAMES[k]; }).join(', ');
+      if (dl.optionalYear && got <= 6) want = 6;
+      if (dl.fiveOk && got === 5) {
+        tokens.unshift('0');
+        res.notes.push('Five fields: node-cron reads this as second 0, but Spring requires all 6 fields. For Spring write 0 ' + text + '.');
+        want = 6;
+      }
+      if (dk === 'unix' && got > 5) {
+        if (FIELDLIKE.test(tokens[5]) && got <= 7) {
+          res.error = 'Found ' + got + ' fields. Standard cron uses 5: minute, hour, day of month, month and day of week. A leading seconds field (Quartz, Spring) or a trailing year field is not supported. Remove it, or pick that format above.';
+          res.tokens = tokens.slice(0, 5);
+          return res;
+        }
+        res.command = tokens.slice(5).join(' ');
+        tokens = tokens.slice(0, 5);
+      } else if (tokens.length < want) {
+        res.error = 'Expected ' + (dl.optionalYear ? '6 or 7' : want) + ' fields (' + fieldsText + (dl.optionalYear ? ', the year being optional' : '') + ') but found ' + tokens.length + '.';
+        res.tokens = tokens;
+        return res;
+      } else if (tokens.length > want) {
+        res.error = 'Found ' + tokens.length + ' fields, but ' + dl.name + ' uses ' + (dl.optionalYear ? '6 or 7' : want) + ': ' + fieldsText + (dl.optionalYear ? ' (the year is optional)' : '') + '.' +
+          (want === 5 && tokens.length === 6 ? ' A seconds field belongs to Quartz or Spring.' : '');
+        res.tokens = tokens;
         return res;
       }
-      res.command = tokens.slice(5).join(' ');
-      tokens = tokens.slice(0, 5);
     }
+    var keys = dl.fields.slice(0, tokens.length);
     res.tokens = tokens;
-    var fields = [];
-    for (var i = 0; i < 5; i++) {
+    res.keys = keys;
+    var parsed = {};
+    for (var i = 0; i < keys.length; i++) {
       try {
-        fields.push(parseField(tokens[i], i));
-        res.warnings = res.warnings.concat(fields[i].warn);
+        parsed[keys[i]] = parseField(tokens[i], keys[i], dl);
+        res.warnings = res.warnings.concat(parsed[keys[i]].warn);
       } catch (e) {
         if (!(e instanceof CronError)) throw e;
-        fields.push(null);
+        parsed[keys[i]] = null;
         res.errors.push(e);
       }
     }
+    if (!res.errors.length && dl.qmark === 'one') {
+      var domQ = parsed.dom.any, dowQ = parsed.dow.any;
+      if (!domQ && !dowQ) res.errors.push(new CronError(dl.name + ' does not allow both day fields to be set. Put ? in the one you don\u2019t use: "' + exampleQ(dk, tokens, keys, 'dow') + '" for a day of the month, or "' + exampleQ(dk, tokens, keys, 'dom') + '" for a day of the week.', 'dow'));
+      else if (domQ && dowQ) res.errors.push(new CronError('Only one of the day fields can be ?. Put * in the other, as in ' + (dk === 'aws' ? 'cron(0 12 * * ? *)' : '0 0 12 * * ?') + '.', 'dom'));
+    }
     if (res.errors.length) {
       res.error = res.errors.map(function (e) { return e.message; }).join('\n');
-      res.partial = fields;
+      res.partial = parsed;
       return res;
     }
-    res.fields = { minute: fields[0], hour: fields[1], dom: fields[2], month: fields[3], dow: fields[4], list: fields };
+    res.f = parsed;
+    if (!parsed.sec) parsed.sec = { tok: '', set: new Set([0]), star: false, f: spec('sec', dl), implicit: true };
+    res.dayMode = dayModeOf(dl, parsed.dom, parsed.dow);
     return res;
+  }
+  function exampleQ(dk, tokens, keys, qField) {
+    var t = tokens.slice();
+    t[keys.indexOf(qField)] = '?';
+    return dk === 'aws' ? 'cron(' + t.join(' ') + ')' : t.join(' ');
+  }
+  function dayModeOf(dl, dom, dow) {
+    if (dl.day === 'quartz') return dom.any ? 'dow' : 'dom';
+    if (dl.day === 'and') return 'and';
+    if (dl.day === 'robfig') return dom.starB || dow.starB ? 'and' : 'or';
+    return dom.star || dow.star ? 'and' : 'or';
+  }
+
+  // ---------- Day matching ----------
+  function daysIn(y, m) { return new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); }
+  function weekdayOf(y, m, d) { return new Date(Date.UTC(y, m, d)).getUTCDay(); }
+  // Quartz rules for "15W": the nearest weekday in the same month.
+  function nearestWeekday(y, m, day, dim) {
+    if (day > dim) return -1;
+    var wd = weekdayOf(y, m, day);
+    if (wd === 6) return day === 1 ? 3 : day - 1;
+    if (wd === 0) return day === dim ? day - 2 : day + 1;
+    return day;
+  }
+  function lastWeekday(y, m, dim) {
+    var wd = weekdayOf(y, m, dim);
+    return wd === 6 ? dim - 1 : wd === 0 ? dim - 2 : dim;
+  }
+  function domMatches(fd, y, m, d, dim) {
+    var s = fd.special;
+    if (!s) return fd.set.has(d);
+    if (s.kind === 'last') return d === dim - s.off;
+    if (s.kind === 'lastWeekday') return d === lastWeekday(y, m, dim);
+    return d === nearestWeekday(y, m, s.day, dim);
+  }
+  function dowMatches(fw, d, wd, dim) {
+    var s = fw.special;
+    if (!s) return fw.set.has(wd);
+    if (s.kind === 'nth') return wd === s.dow && Math.ceil(d / 7) === s.k;
+    return wd === s.dow && d + 7 > dim;
+  }
+  function dayMatches(p, y, m, d, wd, dim) {
+    var a = domMatches(p.f.dom, y, m, d, dim), b = dowMatches(p.f.dow, d, wd, dim);
+    switch (p.dayMode) {
+      case 'dom': return a;
+      case 'dow': return b;
+      case 'and': return a && b;
+      default: return a || b;
+    }
+  }
+  function restricted(fld, size) { return !!fld.special || (!fld.any && fld.set.size < size); }
+  // Which day fields really limit the days. With "either matches", a field that covers
+  // every day makes every day match; with Quartz's ?, only the other field counts.
+  function effDays(p) {
+    var dom = restricted(p.f.dom, 31), dow = restricted(p.f.dow, 7);
+    if (p.dayMode === 'or' && dom !== dow) dom = dow = false;
+    if (p.dayMode === 'dom') dow = false;
+    if (p.dayMode === 'dow') dom = false;
+    return { dom: dom, dow: dow };
   }
 
   // ---------- Describing ----------
@@ -460,9 +683,9 @@ faq:
     }
     return out;
   }
-  function times(H, M) {
+  function times(H, M, S) {
     var out = [];
-    H.forEach(function (h) { M.forEach(function (m) { out.push(hhmm(h, m)); }); });
+    H.forEach(function (h) { M.forEach(function (m) { S.forEach(function (s) { out.push(hhmm(h, m) + (S.length === 1 && S[0] === 0 ? '' : ':' + pad2(s))); }); }); });
     return out;
   }
 
@@ -496,7 +719,7 @@ faq:
       if (m.n === 1) return m.lo === 0 ? 'Every hour, on the hour' : 'At ' + m.lo + ' minute' + (m.lo === 1 ? '' : 's') + ' past every hour';
       return cap(minutePhrase(M, m)) + ' of every hour';
     }
-    if (m.n * h.n <= 6) return 'At ' + joinList(times(H, M));
+    if (m.n * h.n <= 6) return 'At ' + joinList(times(H, M, [0]));
     if (m.n === 1 && h.step) return (h.step === 1 ? 'Every hour' : 'Every ' + h.step + ' hours') + ' from ' + hhmm(h.lo, m.lo) + ' through ' + hhmm(h.hi, m.lo);
     var groups = hourGroups(H);
     if ((m.full || m.every) && groups.length <= 3) {
@@ -506,6 +729,23 @@ faq:
     }
     return cap(minutePhrase(M, m)) + ', ' + hourPhrase(H, h);
   }
+  // Adds a seconds field to the time phrase ("Every 10 seconds", "At 09:00:30").
+  function timePhraseS(S, M, H) {
+    var s = seq(S, 60), m = seq(M, 60), h = seq(H, 24);
+    if (s.n === 1 && s.lo === 0) return timePhrase(M, H);
+    if (m.full && h.full) {
+      if (s.full) return 'Every second';
+      if (s.every) return 'Every ' + s.step + ' seconds';
+      if (s.n === 1) return 'At second ' + s.lo + ' of every minute';
+    }
+    if (s.n === 1 && m.n * h.n <= 6) return 'At ' + joinList(times(H, M, S));
+    var sp = s.full ? 'Every second' : s.every ? 'Every ' + s.step + ' seconds' : s.n === 1 ? 'At second ' + s.lo : 'At seconds ' + joinList(runs(S, String));
+    if (m.full) {
+      return sp + ' ' + joinList(hourGroups(H).map(function (g) { return 'from ' + hhmm(g[0], 0) + ':00 through ' + hhmm(g[1], 59) + ':59'; }));
+    }
+    var t = timePhrase(M, H);
+    return sp + ', ' + t.charAt(0).toLowerCase() + t.slice(1);
+  }
 
   function domPhrase(D, of) {
     var d = seq(D, 31);
@@ -514,6 +754,14 @@ faq:
     if (d.step && d.n >= 3) return 'on every ' + ordinal(d.step) + ' day of ' + of + ' from the ' + ordinal(d.lo) + ' through the ' + ordinal(d.hi);
     if (d.n <= 6) return 'on the ' + joinList(D.map(ordinal)) + ' of ' + of;
     return 'on days ' + joinList(runs(D, String)) + ' of ' + of;
+  }
+  function specialDomPhrase(s, of) {
+    if (s.kind === 'last') return s.off ? 'on the day ' + s.off + (s.off === 1 ? ' day' : ' days') + ' before the last day of ' + of : 'on the last day of ' + of;
+    if (s.kind === 'lastWeekday') return 'on the last weekday (Monday to Friday) of ' + of;
+    return 'on the weekday nearest the ' + ordinal(s.day) + ' of ' + of;
+  }
+  function specialDowPhrase(s, of) {
+    return 'on the ' + (s.kind === 'nth' ? ORD[s.k] : 'last') + ' ' + DAYS[s.dow] + ' of ' + of;
   }
   // Day-of-week set as a phrase. Tries Sunday-first and Monday-first order so
   // that 5-7 reads "Friday through Sunday".
@@ -531,121 +779,210 @@ faq:
     if (s.step === 1 && s.n >= 3) return ', ' + MONTHS[s.lo - 1] + ' through ' + MONTHS[s.hi - 1];
     return ' in ' + joinList(monthNames(Mo));
   }
+  function yearPhrase(Y) {
+    if (!Y) return '';
+    var s = seq(Y, Y.length);
+    if (Y.length === 1) return ' in ' + Y[0];
+    if (s.step === 1) return ', ' + Y[0] + ' through ' + Y[Y.length - 1];
+    return ' in ' + joinList(runs(Y, String));
+  }
 
   function describe(p) {
-    var M = sorted(p.minute.set), H = sorted(p.hour.set), D = sorted(p.dom.set), W = sorted(p.dow.set), Mo = sorted(p.month.set);
-    var dFull = D.length === 31, wFull = W.length === 7, moFull = Mo.length === 12, hFull = H.length === 24;
-    var andMode = p.dom.star || p.dow.star;
-    var t = timePhrase(M, H), s = '', monthDone = moFull;
+    var f = p.f, S = sorted(f.sec.set), M = sorted(f.min.set), H = sorted(f.hour.set), D = sorted(f.dom.set), W = sorted(f.dow.set), Mo = sorted(f.mon.set);
+    var eff = effDays(p), domR = eff.dom, dowR = eff.dow, moFull = Mo.length === 12;
+    var t = timePhraseS(S, M, H), s = '', monthDone = moFull;
     var moSeq = seq(Mo, 12);
     var ofMonth = 'the month';
     if (!moFull && !(moSeq.step === 1 && moSeq.n >= 3) && Mo.length <= 4) ofMonth = joinList(monthNames(Mo));
     var dw = dowInfo(W);
-    if (andMode) {
-      if (!dFull && wFull) { s = ' ' + domPhrase(D, ofMonth); monthDone = monthDone || ofMonth !== 'the month'; }
-      else if (dFull && !wFull) s = dw.range ? ', ' + dw.text : ' on ' + dw.text;
-      else if (!dFull && !wFull) s = ' ' + domPhrase(D, 'the month') + ', but only if that day is a ' + joinList(dw.names, 'or');
-    } else if (!dFull && !wFull) {
-      s = ' ' + domPhrase(D, 'the month') + (dw.range || dw.names.length > 1 ? ' and on ' + dw.text : ' and every ' + dw.text);
+    var domText = function (of) { return f.dom.special ? specialDomPhrase(f.dom.special, of) : domPhrase(D, of); };
+    var dowText = function (lead) { return f.dow.special ? specialDowPhrase(f.dow.special, ofMonth) : dw.range ? ', ' + dw.text : lead + dw.text; };
+    var mode = p.dayMode;
+    if (mode === 'dom' || ((mode === 'and' || mode === 'or') && domR && !dowR)) {
+      if (domR) { s = ' ' + domText(ofMonth); monthDone = monthDone || ofMonth !== 'the month'; }
+    } else if (mode === 'dow' || ((mode === 'and' || mode === 'or') && dowR && !domR)) {
+      if (dowR) {
+        if (f.dow.special) { s = ' ' + specialDowPhrase(f.dow.special, ofMonth); monthDone = monthDone || ofMonth !== 'the month'; }
+        else s = dowText(' on ');
+      }
+    } else if (mode === 'and' && domR && dowR) {
+      s = ' ' + domText('the month') + ', but only if that day is ' + (f.dow.special ? 'the ' + (f.dow.special.kind === 'nth' ? ORD[f.dow.special.k] : 'last') + ' ' + DAYS[f.dow.special.dow] + ' of the month' : 'a ' + joinList(dw.names, 'or'));
+    } else if (mode === 'or' && domR && dowR) {
+      s = ' ' + domText('the month') + (dw.range || dw.names.length > 1 ? ' and on ' + dw.text : ' and every ' + dw.text);
     }
     if (!s && /^At \d\d:/.test(t)) s = ' every day';
     if (!monthDone) s += monthPhrase(Mo);
+    if (f.year && !f.year.star) s += yearPhrase(sorted(f.year.set));
     return t + s + '.';
   }
 
-  function fieldMatches(fi, fld) {
-    var f = FIELDS[fi];
+  function fieldMatches(fld) {
+    var f = fld.f;
+    if (fld.implicit) return '';
+    if (fld.any) return 'no specific value (?)';
+    if (fld.special) {
+      var s = fld.special;
+      if (s.kind === 'last') return s.off ? 'last day − ' + s.off : 'last day of the month';
+      if (s.kind === 'lastWeekday') return 'last weekday of the month';
+      if (s.kind === 'nearest') return 'weekday nearest the ' + ordinal(s.day);
+      return (s.kind === 'nth' ? ORD[s.k] : 'last') + ' ' + DAYS[s.dow];
+    }
     var arr = sorted(fld.set);
-    var size = fi === 4 ? 7 : f.max - f.min + 1;
+    var size = f.key === 'dow' ? 7 : f.max - f.min + 1;
     if (arr.length === size) return fld.tok === '*' ? f.any : f.any + ' (' + fld.tok + ')';
-    var fmt = fi === 3 ? function (m) { return MONTHS[m - 1].slice(0, 3); } : fi === 4 ? function (d) { return DAYS[d % 7].slice(0, 3); } : String;
-    if (fi === 4) arr = arr.map(function (d) { return d === 0 ? 7 : d; }).sort(num);
-    var s = seq(arr, size);
-    if (s.step > 1 && s.n > 6) return 'every ' + s.step + ': ' + fmt(arr[0]) + ', ' + fmt(arr[1]) + ', ' + fmt(arr[2]) + ' … ' + fmt(arr[arr.length - 1]);
+    var fmt = f.key === 'mon' ? function (m) { return MONTHS[m - 1].slice(0, 3); } : f.key === 'dow' ? function (d) { return DAYS[d % 7].slice(0, 3); } : String;
+    if (f.key === 'dow') arr = arr.map(function (d) { return d === 0 ? 7 : d; }).sort(num);
+    var s2 = seq(arr, size);
+    if (s2.step > 1 && s2.n > 6) return 'every ' + s2.step + ': ' + fmt(arr[0]) + ', ' + fmt(arr[1]) + ', ' + fmt(arr[2]) + ' … ' + fmt(arr[arr.length - 1]);
     return runs(arr, fmt).join(', ');
   }
 
-  // ---------- Next run times ----------
-  function dayMatches(p, dom, dow) {
-    var a = p.dom.set.has(dom), b = p.dow.set.has(dow);
-    return (p.dom.star || p.dow.star) ? (a && b) : (a || b);
+  // ---------- Time zones ----------
+  // wall(ms): the date and time on the clock in the zone; off(ms): its offset from UTC in ms.
+  var LOCAL_TZ = (function () {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; }
+  })();
+  var zoneCache = {};
+  function zone(tz) {
+    if (zoneCache[tz]) return zoneCache[tz];
+    var z;
+    if (tz === 'local') {
+      z = {
+        wall: function (ms) { var t = new Date(ms); return { y: t.getFullYear(), mo: t.getMonth(), d: t.getDate(), h: t.getHours(), mi: t.getMinutes(), s: t.getSeconds(), wd: t.getDay() }; },
+        off: function (ms) { return -new Date(ms).getTimezoneOffset() * 60000; }
+      };
+    } else if (tz === 'UTC') {
+      z = {
+        wall: function (ms) { var t = new Date(ms); return { y: t.getUTCFullYear(), mo: t.getUTCMonth(), d: t.getUTCDate(), h: t.getUTCHours(), mi: t.getUTCMinutes(), s: t.getUTCSeconds(), wd: t.getUTCDay() }; },
+        off: function () { return 0; }
+      };
+    } else {
+      var fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+      var wall = function (ms) {
+        var o = {};
+        fmt.formatToParts(new Date(ms)).forEach(function (p) { if (p.type !== 'literal') o[p.type] = parseInt(p.value, 10); });
+        var y = o.year, mo = o.month - 1, d = o.day, h = o.hour % 24;
+        return { y: y, mo: mo, d: d, h: h, mi: o.minute, s: o.second, wd: weekdayOf(y, mo, d) };
+      };
+      z = {
+        wall: wall,
+        off: function (ms) { var w = wall(ms); return Date.UTC(w.y, w.mo, w.d, w.h, w.mi, w.s) - Math.floor(ms / 1000) * 1000; }
+      };
+    }
+    z.name = tz;
+    zoneCache[tz] = z;
+    return z;
+  }
+  // The instant of a wall-clock time; valid is false when that time does not exist
+  // (skipped as clocks go forward), and ms is then just after the jump.
+  // When the time happens twice (clocks going back), this is the first of the two.
+  function toInstant(z, y, mo, d, h, mi, s) {
+    var guess = Date.UTC(y, mo, d, h, mi, s);
+    var before = z.off(guess - 43200000), after = z.off(guess + 43200000);
+    var cands = before === after ? [guess - before] : [guess - before, guess - after].sort(num);
+    for (var i = 0; i < cands.length; i++) {
+      var w = z.wall(cands[i]);
+      if (w.d === d && w.h === h && w.mi === mi && w.s === s) return { ms: cands[i], valid: true };
+    }
+    return { ms: guess - before, valid: false };
   }
   // First instant after a forward clock jump, given an instant just after it.
-  function gapEnd(ms) {
-    var off = new Date(ms).getTimezoneOffset();
-    for (var k = 0; k < 240 && new Date(ms - 60000).getTimezoneOffset() === off; k++) ms -= 60000;
+  function gapEnd(z, ms) {
+    var off = z.off(ms);
+    for (var k = 0; k < 240 && z.off(ms - 60000) === off; k++) ms -= 60000;
     return ms;
   }
-  // Second instant with the same local wall time (clocks going back), if any.
-  function repeatOf(ms) {
-    var t = new Date(ms), steps = [30, 60, 120];
+  // Second instant with the same wall time (clocks going back), if any.
+  function repeatOf(z, ms) {
+    var t = z.wall(ms), steps = [30, 60, 120];
     for (var k = 0; k < steps.length; k++) {
-      var u = new Date(ms + steps[k] * 60000);
-      if (u.getDate() === t.getDate() && u.getHours() === t.getHours() && u.getMinutes() === t.getMinutes()) return u.getTime();
+      var u = z.wall(ms + steps[k] * 60000);
+      if (u.d === t.d && u.h === t.h && u.mi === t.mi) return ms + steps[k] * 60000;
     }
     return null;
   }
-  // Walks matching months and days in the chosen zone, then the matching hours
-  // and minutes, up to 400 years ahead (a full Gregorian cycle) so that rare
-  // schedules such as Feb 29 on a given weekday are still found.
-  // Daylight-saving changes follow cronie and Vixie cron: a fixed-time job
-  // whose time is skipped runs right after the jump, a job with * in the
-  // minute or hour field skips the missing minutes, and in a repeated hour
-  // only * jobs run twice.
+
+  // ---------- Next run times ----------
+  // Walks matching years, months and days in the chosen zone, then the matching times,
+  // up to 400 years ahead (a full Gregorian cycle) so that rare schedules such as Feb 29
+  // on a given weekday are still found. For crontab, daylight-saving changes follow
+  // cronie and Vixie cron: a fixed-time job whose time is skipped runs right after the
+  // jump, a job with * in the minute or hour field skips the missing minutes, and in a
+  // repeated hour only * jobs run twice. Other formats get the plain matching times,
+  // with the affected runs flagged.
   var HORIZON_YEARS = 400;
-  function nextRuns(p, fromMs, count, utc) {
-    var out = [], start = new Date(fromMs);
-    var y = utc ? start.getUTCFullYear() : start.getFullYear();
-    var mo = utc ? start.getUTCMonth() : start.getMonth();
-    var d = utc ? start.getUTCDate() : start.getDate();
-    var H = sorted(p.hour.set), M = sorted(p.minute.set);
-    var wild = p.minute.star || p.hour.star;
-    for (var i = 0; i <= 12 * HORIZON_YEARS && out.length < count; i++) {
-      var cy = y + Math.floor((mo + i) / 12), cm = (mo + i) % 12;
-      if (!p.month.set.has(cm + 1)) continue;
-      var dim = new Date(Date.UTC(cy, cm + 1, 0)).getUTCDate();
-      for (var cd = i === 0 ? d : 1; cd <= dim && out.length < count; cd++) {
-        if (!dayMatches(p, cd, new Date(Date.UTC(cy, cm, cd)).getUTCDay())) continue;
-        out = out.concat(runsOnDay(cy, cm, cd));
+  function nextRuns(p, fromMs, count, z) {
+    var out = [], start = z.wall(fromMs), dk = p.dk;
+    var S = sorted(p.f.sec.set), H = sorted(p.f.hour.set), M = sorted(p.f.min.set);
+    var years = p.f.year && !p.f.year.star ? p.f.year.set : null, maxYear = years ? Math.max.apply(null, Array.from(years)) : Infinity;
+    var vixie = dk === 'unix', wild = p.f.min.star || p.f.hour.star, fixedZone = z.name === 'UTC';
+    var endYear = start.y + HORIZON_YEARS;
+    for (var i = 0; out.length < count; i++) {
+      var cy = start.y + Math.floor((start.mo + i) / 12), cm = (start.mo + i) % 12;
+      if (cy > endYear || cy > maxYear) break;
+      if (years && !years.has(cy)) { i += 11 - cm; continue; }
+      if (!p.f.mon.set.has(cm + 1)) continue;
+      var dim = daysIn(cy, cm), wd1 = weekdayOf(cy, cm, 1);
+      for (var cd = i === 0 ? start.d : 1; cd <= dim && out.length < count; cd++) {
+        if (!dayMatches(p, cy, cm, cd, (wd1 + cd - 1) % 7, dim)) continue;
+        out = out.concat(runsOnDay(cy, cm, cd, count - out.length));
       }
     }
     return out.slice(0, count);
 
-    function runsOnDay(cy, cm, cd) {
+    function runsOnDay(cy, cm, cd, need) {
       var day = [];
+      // No clock change today: instants are plain arithmetic, in order, so stop early.
+      var next = new Date(Date.UTC(cy, cm, cd + 1));
+      var t0 = toInstant(z, cy, cm, cd, 0, 0, 0), t1 = toInstant(z, next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate(), 0, 0, 0);
+      var steady = fixedZone || (t0.valid && t1.valid && t1.ms - t0.ms === 86400000);
+      if (steady) {
+        var base = Date.UTC(cy, cm, cd) - z.off(t0.ms);
+        for (var a = 0; a < H.length; a++) {
+          for (var b = 0; b < M.length; b++) {
+            for (var c = 0; c < S.length; c++) {
+              var ms = base + H[a] * 3600000 + M[b] * 60000 + S[c] * 1000;
+              if (ms > fromMs) { day.push({ ms: ms }); if (day.length >= need) return day; }
+            }
+          }
+        }
+        return day;
+      }
       for (var hi = 0; hi < H.length; hi++) {
         for (var mi = 0; mi < M.length; mi++) {
-          if (utc) {
-            var u = Date.UTC(cy, cm, cd, H[hi], M[mi]);
-            if (u > fromMs) day.push({ ms: u });
-            continue;
-          }
-          var t = new Date(cy, cm, cd, H[hi], M[mi]), wall = hhmm(H[hi], M[mi]);
-          if (t.getDate() !== cd || t.getHours() !== H[hi] || t.getMinutes() !== M[mi]) {
-            if (!wild) {
-              var g = gapEnd(t.getTime());
-              if (g > fromMs) day.push({ ms: g, note: wall + ' is skipped as clocks go forward; cron runs the job right after the change.' });
+          for (var si = 0; si < S.length; si++) {
+            var wall = hhmm(H[hi], M[mi]) + (dk === 'quartz' || dk === 'spring' ? ':' + pad2(S[si]) : '');
+            var t = toInstant(z, cy, cm, cd, H[hi], M[mi], S[si]);
+            if (!t.valid) {
+              if (vixie && !wild) {
+                var g = gapEnd(z, t.ms);
+                if (g > fromMs) day.push({ ms: g, note: wall + ' is skipped as clocks go forward; cron runs the job right after the change.' });
+              } else if (!vixie && t.ms > fromMs) {
+                day.push({ ms: gapEnd(z, t.ms), skipped: true, note: wall + ' does not exist on this day (clocks go forward). Schedulers differ: some run the job right after the change, some skip it.' });
+              }
+              continue;
             }
-            continue;
+            var again = repeatOf(z, t.ms);
+            if (t.ms > fromMs) {
+              day.push({ ms: t.ms, note: again ? (vixie ? (wild ? '' : wall + ' happens twice as clocks go back; a fixed-time job runs only the first time.') : wall + ' happens twice as clocks go back; check whether ' + DIALECTS[dk].name + ' runs the job once or twice.') : '' });
+            }
+            if (again && vixie && wild && again > fromMs) day.push({ ms: again, note: wall + ' again, after clocks go back.' });
           }
-          var ms = t.getTime(), again = repeatOf(ms);
-          if (ms > fromMs) day.push({ ms: ms, note: again && !wild ? wall + ' happens twice as clocks go back; a fixed-time job runs only the first time.' : '' });
-          if (again && wild && again > fromMs) day.push({ ms: again, note: wall + ' again, after clocks go back.' });
         }
       }
-      day.sort(function (a, b) { return a.ms - b.ms; });
+      day.sort(function (x, y) { return x.ms - y.ms; });
       return day;
     }
   }
 
   var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  function fmtRun(ms, utc) {
-    var t = new Date(ms);
-    if (utc) return WD[t.getUTCDay()] + ' ' + t.getUTCFullYear() + '-' + pad2(t.getUTCMonth() + 1) + '-' + pad2(t.getUTCDate()) + ' ' + hhmm(t.getUTCHours(), t.getUTCMinutes());
-    return WD[t.getDay()] + ' ' + t.getFullYear() + '-' + pad2(t.getMonth() + 1) + '-' + pad2(t.getDate()) + ' ' + hhmm(t.getHours(), t.getMinutes());
+  function fmtRun(ms, z, withSec) {
+    var w = z.wall(ms);
+    return WD[w.wd] + ' ' + w.y + '-' + pad2(w.mo + 1) + '-' + pad2(w.d) + ' ' + hhmm(w.h, w.mi) + (withSec ? ':' + pad2(w.s) : '');
   }
-  function fmtRel(diffMs) {
-    var mins = Math.round(diffMs / 60000);
+  function fmtRel(diffMs, withSec) {
+    var secs = Math.round(diffMs / 1000), mins = Math.round(diffMs / 60000);
+    if (withSec && secs < 60) return 'in ' + Math.max(secs, 1) + ' sec';
     if (mins < 1) return 'in under a minute';
     if (mins < 60) return 'in ' + mins + ' min';
     var h = Math.floor(mins / 60), m = mins % 60;
@@ -655,9 +992,148 @@ faq:
     return 'in ' + days.toLocaleString('en-US') + ' days';
   }
 
-  var LOCAL_TZ = (function () {
-    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time'; } catch (e) { return 'local time'; }
-  })();
+  // ---------- Converting between formats ----------
+  // Writes a set of values in cron syntax: *, */n, a-b, a-b/n or a list.
+  function compress(vals, f, target, noStar) {
+    var size = f.key === 'dow' ? 7 : f.max - f.min + 1, min = f.key === 'dow' ? 0 : f.min, max = f.key === 'dow' ? 6 : f.max;
+    if (vals.length === size) return '*';
+    var names = f.key === 'dow' && target.dowNames;
+    var show = function (v) {
+      if (f.key !== 'dow') return String(v);
+      if (names) return DAY3[v];
+      return String(target.dowBase === 1 ? v + 1 : v);
+    };
+    var s = seq(vals, size);
+    if (vals.length >= 3 && s.step > 1) {
+      if (s.hi + s.step > max) {
+        if (target.startStep || (vals[0] !== min && !names)) return (target.startStep ? show(vals[0]) : show(vals[0]) + '-' + show(max)) + '/' + s.step;
+        if (vals[0] === min) return noStar ? show(min) + '-' + show(max) + '/' + s.step : '*/' + s.step;
+      }
+      if (!target.startStep && !names) return show(s.lo) + '-' + show(s.hi) + '/' + s.step;
+    }
+    var out = [], i = 0;
+    while (i < vals.length) {
+      var j = i;
+      while (j + 1 < vals.length && vals[j + 1] === vals[j] + 1) j++;
+      if (j - i >= 2) out.push(show(vals[i]) + '-' + show(vals[j]));
+      else for (var k = i; k <= j; k++) out.push(show(vals[k]));
+      i = j + 1;
+    }
+    return out.join(',');
+  }
+  var TARGET = {
+    unix: { dowBase: 0 }, k8s: { dowBase: 0 }, github: { dowBase: 0 },
+    aws: { dowBase: 1, dowNames: true, startStep: true }, quartz: { dowBase: 1, dowNames: true }, spring: { dowBase: 0, dowNames: true }
+  };
+  function specialText(fld, tk) {
+    var s = fld.special;
+    if (s.kind === 'last') return s.off ? 'L-' + s.off : 'L';
+    if (s.kind === 'lastWeekday') return 'LW';
+    if (s.kind === 'nearest') return s.day + 'W';
+    var d = tk === 'spring' ? DAY3[s.dow] : String(s.dow + 1);
+    return s.kind === 'nth' ? d + '#' + s.k : d + 'L';
+  }
+  // The same schedule in another format, or { why } when it can't be written there.
+  function emit(p, tk) {
+    var dl = DIALECTS[tk], tg = TARGET[tk], f = p.f;
+    var sec = sorted(f.sec.set), hasSec = !(sec.length === 1 && sec[0] === 0);
+    if (hasSec && dl.fields[0] !== 'sec') return { why: 'No seconds field.' };
+    var yearR = f.year && !f.year.star;
+    if (yearR && dl.fields.indexOf('year') < 0) return { why: 'No year field.' };
+    var eff = effDays(p), domR = eff.dom, dowR = eff.dow;
+    if (((domR && f.dom.special) || (dowR && f.dow.special)) && !dl.specials) return { why: 'No L, W or # values.' };
+    var both = domR && dowR;
+    var col = function (fld, key) {
+      if (fld.special) return specialText(fld, tk);
+      return compress(sorted(fld.set), spec(key, dl), tg);
+    };
+    var dom = domR ? col(f.dom, 'dom') : '*', dow = dowR ? col(f.dow, 'dow') : '*';
+    if (both && p.dayMode === 'or') {
+      if (dl.day !== 'vixie' && dl.day !== 'robfig') return { why: 'Runs when either day field matches, which ' + dl.name + ' can\u2019t express.' };
+      if (f.dom.special || f.dow.special) return { why: 'Not expressible.' };
+      // In crontab a day field starting with * would make both required: write 1-31/2, not */2.
+      if (dl.day === 'vixie') { dom = compress(sorted(f.dom.set), spec('dom', dl), tg, true); dow = compress(sorted(f.dow.set), spec('dow', dl), tg, true); }
+    }
+    if (both && p.dayMode === 'and') {
+      // crontab keeps "both must match" only when a day field starts with *, as */2 does.
+      if (dl.day === 'robfig' || dl.day === 'quartz' || (dl.day === 'vixie' && dom.charAt(0) !== '*' && dow.charAt(0) !== '*')) {
+        return { why: 'Needs both day fields to match, which ' + dl.name + ' can\u2019t express.' };
+      }
+    }
+    if (dl.day === 'quartz') {
+      if (dowR && !domR) dom = '?';
+      else dow = '?';
+    }
+    var parts = [col(f.min, 'min'), col(f.hour, 'hour'), dom, col(f.mon, 'mon'), dow];
+    if (dl.fields[0] === 'sec') parts.unshift(hasSec ? col(f.sec, 'sec') : '0');
+    if (tk === 'aws') parts.push(yearR ? col(f.year, 'year') : '*');
+    else if (tk === 'quartz' && yearR) parts.push(col(f.year, 'year'));
+    var text = parts.join(' ');
+    return { text: tk === 'aws' ? 'cron(' + text + ')' : text };
+  }
+  function emitMacro(m, dk) {
+    var t = MACROS[m];
+    return dk === 'quartz' ? '0 ' + t.replace(/\*$/, '?') : dk === 'aws' ? 'cron(' + t.replace(/\*$/, '?') + ' *)' : t;
+  }
+
+  // systemd OnCalendar: "Weekdays Year-Month-Day Hour:Minute:Second [zone]".
+  function sdList(vals, min, max, width) {
+    var size = max - min + 1;
+    if (vals.length === size) return '*';
+    var p = function (v) { return String(v).padStart(width, '0'); };
+    var s = seq(vals, size);
+    if (vals.length >= 3 && s.step > 1) return p(s.lo) + (s.hi + s.step > max ? '' : '..' + p(s.hi)) + '/' + s.step;
+    var out = [], i = 0;
+    while (i < vals.length) {
+      var j = i;
+      while (j + 1 < vals.length && vals[j + 1] === vals[j] + 1) j++;
+      if (j - i >= 2) out.push(p(vals[i]) + '..' + p(vals[j]));
+      else for (var k = i; k <= j; k++) out.push(p(vals[k]));
+      i = j + 1;
+    }
+    return out.join(',');
+  }
+  var SD_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function sdDays(W) {
+    var mon = W.map(function (d) { return d === 0 ? 7 : d; }).sort(num), out = [], i = 0;
+    while (i < mon.length) {
+      var j = i;
+      while (j + 1 < mon.length && mon[j + 1] === mon[j] + 1) j++;
+      if (j - i >= 2) out.push(SD_DAYS[mon[i] % 7] + '..' + SD_DAYS[mon[j] % 7]);
+      else for (var k = i; k <= j; k++) out.push(SD_DAYS[mon[k] % 7]);
+      i = j + 1;
+    }
+    return out.join(',');
+  }
+  function systemd(p, tz) {
+    var f = p.f, eff = effDays(p), domR = eff.dom, dowR = eff.dow;
+    if (domR && f.dom.special && f.dom.special.kind !== 'last') return { why: 'No equivalent for W or LW.' };
+    var time = sdList(sorted(f.hour.set), 0, 23, 2) + ':' + sdList(sorted(f.min.set), 0, 59, 2) + ':' + sdList(sorted(f.sec.set), 0, 59, 2);
+    var year = f.year && !f.year.star ? sdList(sorted(f.year.set), 1970, 2199, 4) : '*';
+    var month = sdList(sorted(f.mon.set), 1, 12, 2);
+    var zoneSuffix = tz === 'UTC' ? ' UTC' : tz !== 'local' ? ' ' + tz : '';
+    var line = function (days, dayPart) { return 'OnCalendar=' + (days ? days + ' ' : '') + year + '-' + month + dayPart + ' ' + time + zoneSuffix; };
+    var domPart = function () {
+      if (f.dom.special) return '~' + pad2(f.dom.special.off + 1);
+      return '-' + (domR ? sdList(sorted(f.dom.set), 1, 31, 2) : '*');
+    };
+    var dowPart = function () {
+      var s = f.dow.special;
+      if (!s) return [dowR ? sdDays(sorted(f.dow.set)) : '', null];
+      if (s.kind === 'nth') return [SD_DAYS[s.dow], '-' + pad2(7 * s.k - 6) + '..' + pad2(Math.min(31, 7 * s.k))];
+      return [SD_DAYS[s.dow], '~07/1'];
+    };
+    var w = dowPart();
+    if (p.dayMode === 'or' && domR && dowR) {
+      return { text: line(w[0], w[1] || '-*') + '\n' + line('', domPart()) };
+    }
+    if (!domR && dowR) return { text: line(w[0], w[1] || '-*') };
+    if (domR && dowR) {
+      if (w[1]) return { why: 'Not expressible.' };
+      return { text: line(w[0], domPart()) };
+    }
+    return { text: line('', domR ? domPart() : '-*') };
+  }
 
   // ---------- Rendering ----------
   var current = null;
@@ -670,26 +1146,39 @@ faq:
   }
 
   function renderFields(res) {
-    var body = $('#cr-fields');
+    var body = $('#cr-fields'), dl = DIALECTS[res && res.dk || dialect()];
     body.textContent = '';
-    for (var i = 0; i < 5; i++) {
-      var tr = document.createElement('tr');
-      var th = cell('th', FIELDS[i].label);
+    var keys = dl.fields.slice();
+    if (dl.optionalYear && !(res && res.tokens && res.tokens.length === 7)) keys.pop();
+    if (res && (res.rate || res.at)) {
+      var tr0 = document.createElement('tr'), td0 = cell('td', res.rate ? 'A rate has no clock fields: it repeats every ' + res.rate.n + ' ' + res.rate.unit + (res.rate.n === 1 ? '' : 's') + '.' : 'A one-time schedule has no repeating fields.', 'cr-empty');
+      td0.colSpan = 3;
+      tr0.appendChild(td0);
+      body.appendChild(tr0);
+      return;
+    }
+    keys.forEach(function (key, i) {
+      var f = spec(key, dl), tr = document.createElement('tr');
+      var th = cell('th', f.label);
       th.scope = 'row';
       tr.appendChild(th);
       var tok = res && res.tokens ? res.tokens[i] : undefined;
-      var fld = res && res.fields ? res.fields.list[i] : res && res.partial ? res.partial[i] : null;
-      var bad = res && res.errors && res.errors.some(function (e) { return e.field === i; });
+      var fld = res && res.f ? res.f[key] : res && res.partial ? res.partial[key] : null;
+      var bad = res && res.errors && res.errors.some(function (e) { return e.field === key; });
       tr.appendChild(cell('td', tok === undefined ? '–' : tok, 'cr-tok'));
-      tr.appendChild(cell('td', bad ? 'invalid' : fld ? fieldMatches(i, fld) : '–'));
+      tr.appendChild(cell('td', bad ? 'invalid' : fld ? fieldMatches(fld) : '–'));
       if (bad || (res && res.tokens && tok === undefined)) tr.className = 'cr-bad';
       body.appendChild(tr);
-    }
+    });
   }
 
+  function zoneName() {
+    var tz = tzSel.value;
+    return tz === 'local' ? (LOCAL_TZ || 'your time zone') : tz;
+  }
   function renderRuns() {
-    var utc = $('#cr-utc').checked;
-    $('#cr-zone').textContent = utc ? 'Times in UTC' : 'Times in ' + LOCAL_TZ;
+    var tz = tzSel.value, z = zone(tz), dk = dialect();
+    $('#cr-zone').textContent = 'Times in ' + zoneName();
     var body = $('#cr-runs');
     body.textContent = '';
     var row = function (text) {
@@ -701,47 +1190,128 @@ faq:
     };
     if (!current || current.error) { row('–'); return; }
     if (current.reboot) { row('Runs once each time the cron daemon starts, usually at boot. It has no clock schedule.'); return; }
-    var now = Date.now();
-    var list = nextRuns(current.fields, now, 10, utc);
+    var now = Date.now(), list, withSec = dk === 'quartz' || dk === 'spring';
+    if (current.rate) {
+      list = [];
+      for (var k = 1; k <= 10; k++) list.push({ ms: now + k * current.rate.ms });
+      withSec = true;
+    } else if (current.at) {
+      var a = current.at, t = toInstant(z, a[0], a[1] - 1, a[2], a[3], a[4], a[5]);
+      list = t.ms > now ? [{ ms: t.ms }] : [];
+      if (!list.length) { row('This time has passed, so the schedule will not run again.'); return; }
+      withSec = true;
+    } else {
+      list = nextRuns(current, now, 10, z);
+    }
     if (!list.length) { row('No date matches this schedule, so it never runs.'); return; }
     list.forEach(function (run) {
       var tr = document.createElement('tr');
-      tr.appendChild(cell('td', fmtRun(run.ms, utc), 'cr-when'));
-      var rel = cell('td', fmtRel(run.ms - now), 'cr-rel');
+      tr.appendChild(cell('td', fmtRun(run.ms, z, withSec), 'cr-when'));
+      var rel = cell('td', fmtRel(run.ms - now, withSec), 'cr-rel');
       if (run.note) rel.appendChild(cell('span', run.note, 'cr-dst'));
       tr.appendChild(rel);
       body.appendChild(tr);
     });
-    if (list.length < 10) row('No further runs in the next ' + HORIZON_YEARS + ' years.');
+    if (current.rate) row('Counted from now, as if the rule were created at this moment: a rate runs every ' + current.rate.n + ' ' + current.rate.unit + (current.rate.n === 1 ? '' : 's') + ' from when the rule is created or updated.');
+    else if (current.at) row('Runs once.');
+    else if (list.length < 10) row('No further runs ' + (current.f.year && !current.f.year.star ? 'in the chosen years.' : 'in the next ' + HORIZON_YEARS + ' years.'));
+  }
+
+  var TRANS = [
+    ['unix', 'Crontab'], ['k8s', 'Kubernetes'], ['github', 'GitHub Actions'], ['aws', 'AWS EventBridge'], ['quartz', 'Quartz'], ['spring', 'Spring'], ['systemd', 'systemd timer']
+  ];
+  function k8sZone() { var tz = tzSel.value; return tz === 'local' ? (LOCAL_TZ || 'Etc/UTC') : tz === 'UTC' ? 'Etc/UTC' : tz; }
+  function renderTrans() {
+    var body = $('#cr-trans'), dk = dialect();
+    body.textContent = '';
+    TRANS.forEach(function (t, i) {
+      if (t[0] === dk) return;
+      var tr = document.createElement('tr'), th = cell('th', t[1]);
+      th.scope = 'row';
+      tr.appendChild(th);
+      var r;
+      if (!current || current.error) r = { why: '–' };
+      else if (current.reboot) r = { why: t[0] === 'unix' ? '@reboot' : t[0] === 'systemd' ? 'Use OnBootSec= instead of OnCalendar=.' : 'No @reboot.' };
+      else if (current.rate || current.at) r = { why: current.rate ? 'A rate has no fixed clock times.' : 'A one-time schedule.' };
+      else r = t[0] === 'systemd' ? systemd(current, tzSel.value) : emit(current, t[0]);
+      var td = document.createElement('td');
+      if (r.text) {
+        var text = r.text;
+        if (t[0] === 'github') text = "on:\n  schedule:\n    - cron: '" + r.text + "'";
+        if (t[0] === 'k8s') text = 'schedule: "' + r.text + '"\ntimeZone: "' + k8sZone() + '"';
+        var pre = cell('pre', text);
+        pre.id = 'cr-trans-' + t[0];
+        td.className = 'cr-code';
+        td.appendChild(pre);
+        tr.appendChild(td);
+        var tdb = document.createElement('td'), btn = cell('button', 'Copy', 'btn secondary small');
+        btn.type = 'button';
+        btn.setAttribute('data-copy-target', '#' + pre.id);
+        btn.setAttribute('aria-label', 'Copy the ' + t[1] + ' version');
+        tdb.appendChild(btn);
+        tr.appendChild(tdb);
+      } else {
+        td.className = 'cr-code cr-na';
+        td.textContent = r.why;
+        tr.appendChild(td);
+        tr.appendChild(document.createElement('td'));
+      }
+      tr.setAttribute('data-target', t[0]);
+      body.appendChild(tr);
+    });
+  }
+
+  function timeGapMinutes(p) {
+    // Smallest gap between runs across a day, in minutes (for GitHub's 5-minute floor).
+    var H = sorted(p.f.hour.set), M = sorted(p.f.min.set), all = [];
+    H.forEach(function (h) { M.forEach(function (m) { all.push(h * 60 + m); }); });
+    var best = Infinity;
+    for (var i = 1; i < all.length; i++) best = Math.min(best, all[i] - all[i - 1]);
+    if (all.length > 1 && H.length === 24) best = Math.min(best, all[0] + 1440 - all[all.length - 1]);
+    return best;
   }
 
   function update(fromBuilder) {
-    var res;
-    try { res = parse(input.value); } catch (e) { res = { error: 'This expression could not be read.', errors: [] }; }
+    var res, dk = dialect(), dl = DIALECTS[dk];
+    try { res = parse(input.value, dk); } catch (e) { res = { error: 'This expression could not be read.', errors: [] }; }
     current = res;
     $('#cr-err').textContent = res.error || '';
     errText = res.error || '';
     input.setAttribute('aria-invalid', res.error ? 'true' : 'false');
-    var notes = [];
+    var notes = (res.notes || []).slice(), warns = (res.warnings || []).slice();
     if (res.error) {
       $('#cr-desc').textContent = '';
     } else if (res.reboot) {
       $('#cr-desc').textContent = 'Once, each time the cron daemon starts (usually when the system boots).';
+    } else if (res.rate) {
+      $('#cr-desc').textContent = 'Every ' + (res.rate.n === 1 ? res.rate.unit : res.rate.n + ' ' + res.rate.unit + 's') + ', counted from when the rule is created.';
+    } else if (res.at) {
+      var a = res.at;
+      $('#cr-desc').textContent = 'Once, on ' + DAYS[weekdayOf(a[0], a[1] - 1, a[2])] + ', ' + MONTHS[a[1] - 1] + ' ' + a[2] + ', ' + a[0] + ' at ' + hhmm(a[3], a[4]) + ':' + pad2(a[5]) + '.';
     } else {
-      var p = res.fields;
-      $('#cr-desc').textContent = describe(p);
-      if (res.macro) notes.push(res.macro + ' is shorthand for ' + MACROS[res.macro] + '.');
-      var dRestricted = p.dom.set.size < 31, wRestricted = p.dow.set.size < 7;
-      var andMode = p.dom.star || p.dow.star;
-      if (!andMode && dRestricted && wRestricted) {
-        notes.push('Both day fields are restricted, so the job runs when either the day of month or the day of week matches, as in Vixie cron and cronie.');
-      } else if (!andMode && (dRestricted || wRestricted)) {
-        notes.push('Both day fields are set and one of them covers every day, so the job runs every day: cron runs when either day field matches.');
-      } else if (andMode && dRestricted && wRestricted) {
-        notes.push('Because a day field starts with *, Vixie cron and cronie require both the day of month and the day of week to match. BusyBox cron and some libraries treat */N as a restriction and would run when either matches.');
+      var p = res.f;
+      $('#cr-desc').textContent = describe(res);
+      if (res.macro) notes.push(res.macro + ' is shorthand for ' + MACROS[res.macro] + (dl.fields[0] === 'sec' ? ' with second 0' : '') + '.');
+      var dRestricted = restricted(p.dom, 31), wRestricted = restricted(p.dow, 7);
+      if (dl.day === 'quartz') { dRestricted = dRestricted && !p.dom.any; wRestricted = wRestricted && !p.dow.any; }
+      var mode = res.dayMode;
+      if (dl.day === 'vixie' || dl.day === 'robfig') {
+        if (mode === 'or' && dRestricted && wRestricted) {
+          notes.push('Both day fields are restricted, so the job runs when either the day of month or the day of week matches' + (dk === 'unix' ? ', as in Vixie cron and cronie.' : '.'));
+        } else if (mode === 'or' && (dRestricted || wRestricted)) {
+          notes.push('Both day fields are set and one of them covers every day, so the job runs every day: cron runs when either day field matches.');
+        } else if (mode === 'and' && dRestricted && wRestricted) {
+          notes.push(dk === 'k8s'
+            ? 'Because a day field is *, both the day of month and the day of week must match.'
+            : 'Because a day field starts with *, Vixie cron and cronie require both the day of month and the day of week to match. BusyBox cron, Kubernetes and some libraries treat */N as a restriction and would run when either matches.');
+        }
+      } else if (dl.day === 'and' && dRestricted && wRestricted) {
+        notes.push('Spring and node-cron run only on days that match both the day of month and the day of week, unlike crontab, which runs when either matches.');
       }
-      if (dRestricted && !wRestricted && p.dom.tok.indexOf('/') < 0) {
-        var Mo = sorted(p.month.set), Dd = sorted(p.dom.set);
+      if ((dl.dowBase === 1) && /\d/.test(p.dow.tok.replace(/#\d+/, ''))) notes.push(dl.name + ' numbers weekdays from 1 (Sunday) to 7 (Saturday), not from 0 as crontab does.');
+      if (dk === 'spring' && (p.dom.special || p.dow.special || p.dom.any || p.dow.any)) notes.push('L, W, # and ? work in Spring but not in node-cron.');
+      if (dRestricted && !wRestricted && !p.dom.special && p.dom.tok.indexOf('/') < 0) {
+        var Mo = sorted(p.mon.set), Dd = sorted(p.dom.set);
         var missing = Dd.filter(function (d) {
           return d >= 29 && Mo.some(function (m) { return d > (m === 2 ? 28 : DIM[m - 1]); });
         });
@@ -751,23 +1321,33 @@ faq:
         } else if (missing.length === 1 && missing[0] === 29 && Mo.length === 1 && Mo[0] === 2) {
           notes.push('February 29 exists only in leap years, so this runs only in leap years.');
         } else if (missing.length) {
-          notes.push('Months that have no day ' + joinList(missing, 'or') + ' are skipped on that day. Cron has no "last day of the month" value.');
+          notes.push('Months that have no day ' + joinList(missing, 'or') + ' are skipped on that day. ' + (dl.specials ? 'Use L for the last day of the month.' : 'Cron has no "last day of the month" value.'));
         }
       }
+      if (dk === 'github') {
+        if (timeGapMinutes(res) < 5) warns.push('GitHub Actions runs scheduled workflows at most once every 5 minutes, so it will not keep to this schedule.');
+        if (p.min.set.has(0) && p.min.set.size === 1) notes.push('GitHub delays or drops scheduled runs when load is high, which is worst at the start of each hour. A minute other than 0 is more reliable.');
+      }
     }
+    if (dk === 'github') notes.push('GitHub runs schedules in UTC, from the latest commit on the default branch.');
     if (!res.error && res.command) notes.push('The rest of the line is the command: ' + res.command);
-    $('#cr-warn').textContent = res.error ? '' : (res.warnings || []).join('\n');
-    $('#cr-note').textContent = notes.join(' ');
+    $('#cr-warn').textContent = res.error ? '' : warns.join('\n');
+    $('#cr-note').textContent = res.error ? '' : notes.join(' ');
     renderFields(res);
     renderRuns();
+    renderTrans();
     if (!fromBuilder) syncBuilder(res);
   }
 
   // ---------- Builder ----------
-  var bType = $('#cr-b-type'), bMStep = $('#cr-b-mstep'), bHStep = $('#cr-b-hstep'), bAtMin = $('#cr-b-atmin');
+  var bType = $('#cr-b-type'), bSStep = $('#cr-b-sstep'), bMStep = $('#cr-b-mstep'), bHStep = $('#cr-b-hstep'), bAtMin = $('#cr-b-atmin');
   var bMonth = $('#cr-b-month'), bDom = $('#cr-b-dom'), bTime = $('#cr-b-time'), bHint = $('#cr-b-hint');
 
   function showBuilderFields() {
+    var secOk = DIALECTS[dialect()].fields[0] === 'sec';
+    var opt = bType.querySelector('option[value="seconds"]');
+    opt.hidden = opt.disabled = !secOk;
+    if (!secOk && bType.value === 'seconds') bType.value = 'minutes';
     TT.$$('.cr-builder [data-show]').forEach(function (el) {
       el.hidden = el.getAttribute('data-show').split(' ').indexOf(bType.value) < 0;
     });
@@ -783,14 +1363,19 @@ faq:
     return runs(days, String).join(',').replace(/–/g, '-');
   }
 
+  // Builds a crontab-style expression (plus seconds), then writes it in the chosen format.
   function builderExpr() {
-    var type = bType.value, hint = '';
+    var type = bType.value;
     var tm = /^(\d{1,2}):(\d{2})/.exec(bTime.value || '');
     var needTime = ['daily', 'weekdays', 'weekly', 'monthly', 'yearly'].indexOf(type) >= 0;
     if (needTime && !tm) return { error: 'Enter a time.' };
     var hh = tm ? +tm[1] : 0, mm = tm ? +tm[2] : 0;
-    var expr;
-    if (type === 'minutes') {
+    var expr, sec = '0';
+    if (type === 'seconds') {
+      var s = +bSStep.value;
+      sec = s === 1 ? '*' : '*/' + s;
+      expr = '* * * * *';
+    } else if (type === 'minutes') {
       var n = +bMStep.value;
       expr = n === 1 ? '* * * * *' : '*/' + n + ' * * * *';
     } else if (type === 'hours') {
@@ -815,7 +1400,11 @@ faq:
         expr = mm + ' ' + hh + ' ' + dom + ' ' + mon + ' *';
       }
     } else return null;
-    return { expr: expr, hint: hint };
+    var dk = dialect();
+    if (dk === 'unix' || dk === 'github' || dk === 'k8s') return { expr: expr };
+    var p = parse(sec + ' ' + expr, 'spring');
+    var out = emit(p, dk);
+    return out.text ? { expr: out.text } : { error: out.why };
   }
 
   function applyBuilder() {
@@ -829,7 +1418,7 @@ faq:
       bHint.textContent = out.error;
       return;
     }
-    bHint.textContent = out.hint || '';
+    bHint.textContent = '';
     input.value = out.expr;
     update(true);
     sayError(true);
@@ -841,25 +1430,33 @@ faq:
   // Moves the builder to the schedule a hand-typed expression matches, if any.
   function syncBuilder(res) {
     var type = 'custom';
-    if (res && res.fields && !res.reboot) {
-      var t = res.tokens, p = res.fields;
+    if (res && res.f && !res.reboot) {
+      // Read the schedule as crontab fields (plus seconds), whatever the format.
+      var sec = sorted(res.f.sec.set), secTok = sec.length === 60 ? '*' : sec.length === 1 ? String(sec[0]) : (seq(sec, 60).every ? '*/' + seq(sec, 60).step : null);
+      var u = emit(Object.assign({}, res, { f: Object.assign({}, res.f, { sec: { set: new Set([0]) } }) }), 'unix');
+      var t = u.text ? u.text.split(' ') : null;
+      var p = res.f;
       var isNum = function (s) { return /^\d{1,2}$/.test(s); };
       var stars = function (a) { return a.every(function (x) { return x === '*'; }); };
       var stepOf = function (s) { var m = /^\*\/(\d+)$/.exec(s); return s === '*' ? '1' : m ? String(+m[1]) : null; };
       var setTime = function () { bTime.value = hhmm(+t[1], +t[0]); };
-      if (stars(t.slice(1)) && stepOf(t[0]) && hasOption(bMStep, stepOf(t[0]))) {
-        type = 'minutes'; bMStep.value = stepOf(t[0]);
-      } else if (isNum(t[0]) && stars(t.slice(2)) && stepOf(t[1]) && hasOption(bHStep, stepOf(t[1]))) {
-        type = 'hours'; bHStep.value = stepOf(t[1]); bAtMin.value = String(+t[0]);
-      } else if (isNum(t[0]) && isNum(t[1])) {
-        if (stars(t.slice(2))) { type = 'daily'; setTime(); }
-        else if (t[2] === '*' && t[3] === '*' && /^(1-5|mon-fri)$/i.test(t[4])) { type = 'weekdays'; setTime(); }
-        else if (t[2] === '*' && t[3] === '*' && p.dow.set.size < 7) {
-          type = 'weekly'; setTime();
-          TT.$$('#cr-b-days input').forEach(function (c) { c.checked = p.dow.set.has(+c.value); });
-        } else if (isNum(t[2]) && t[3] === '*' && t[4] === '*') { type = 'monthly'; setTime(); bDom.value = String(+t[2]); }
-        else if (isNum(t[2]) && p.month.set.size === 1 && !/[,\-\/*]/.test(t[3]) && t[4] === '*') {
-          type = 'yearly'; setTime(); bDom.value = String(+t[2]); bMonth.value = String(sorted(p.month.set)[0]);
+      if (t && secTok && secTok !== '0') {
+        if (stars(t) && hasOption(bSStep, stepOf(secTok))) { type = 'seconds'; bSStep.value = stepOf(secTok); }
+      } else if (t && secTok === '0') {
+        if (stars(t.slice(1)) && stepOf(t[0]) && hasOption(bMStep, stepOf(t[0]))) {
+          type = 'minutes'; bMStep.value = stepOf(t[0]);
+        } else if (isNum(t[0]) && stars(t.slice(2)) && stepOf(t[1]) && hasOption(bHStep, stepOf(t[1]))) {
+          type = 'hours'; bHStep.value = stepOf(t[1]); bAtMin.value = String(+t[0]);
+        } else if (isNum(t[0]) && isNum(t[1])) {
+          if (stars(t.slice(2))) { type = 'daily'; setTime(); }
+          else if (t[2] === '*' && t[3] === '*' && t[4] === '1-5') { type = 'weekdays'; setTime(); }
+          else if (t[2] === '*' && t[3] === '*' && p.dow.set.size < 7 && !p.dow.special) {
+            type = 'weekly'; setTime();
+            TT.$$('#cr-b-days input').forEach(function (c) { c.checked = p.dow.set.has(+c.value); });
+          } else if (isNum(t[2]) && t[3] === '*' && t[4] === '*') { type = 'monthly'; setTime(); bDom.value = String(+t[2]); }
+          else if (isNum(t[2]) && p.mon.set.size === 1 && isNum(t[3]) && t[4] === '*') {
+            type = 'yearly'; setTime(); bDom.value = String(+t[2]); bMonth.value = String(sorted(p.mon.set)[0]);
+          }
         }
       }
     }
@@ -867,6 +1464,70 @@ faq:
     bHint.className = 'hint cr-bhint';
     bHint.textContent = '';
     showBuilderFields();
+  }
+
+  // ---------- Examples, time zones and formats ----------
+  var EXAMPLES = {
+    unix: [['*/15 9-17 * * 1-5', 'Every 15 minutes in office hours on weekdays'], ['0 0 1,15 * *', 'Twice a month'], ['30 2 * * 0', 'Sunday night maintenance'], ['0 0 1 */3 *', 'Start of every quarter'], ['0 12 13 * 5', 'Day of month OR day of week'], ['@hourly', ''], ['@reboot', '']],
+    k8s: [['*/5 * * * *', 'Every 5 minutes'], ['0 3 * * 0', 'Sunday at 03:00'], ['@daily', 'Every day at midnight'], ['0 0 1 * *', 'Monthly']],
+    github: [['17 */6 * * *', 'Every 6 hours, off the hour'], ['30 5 * * 1-5', 'Weekday mornings (UTC)'], ['0 0 * * 0', 'Weekly on Sunday'], ['*/15 * * * *', 'Every 15 minutes']],
+    aws: [['cron(0/15 * * * ? *)', 'Every 15 minutes'], ['cron(0 18 ? * MON-FRI *)', 'Weekdays at 18:00 UTC'], ['cron(0 10 L * ? *)', 'Last day of the month'], ['cron(0 8 ? * 2#1 *)', 'First Monday of the month'], ['rate(5 minutes)', ''], ['rate(1 day)', '']],
+    quartz: [['0 0 12 ? * WED', 'Every Wednesday at noon'], ['0 0/5 14 * * ?', 'Every 5 minutes from 14:00'], ['0 15 10 L * ?', 'Last day of the month'], ['0 15 10 ? * 6#3', 'Third Friday'], ['0 0 9 LW * ?', 'Last weekday of the month'], ['0 0 0 1 1 ? 2030', 'Once, in 2030']],
+    spring: [['*/10 * * * * *', 'Every 10 seconds'], ['0 0 9-17 * * MON-FRI', 'On the hour, office hours'], ['0 0 0 L * *', 'Last day of the month'], ['0 0 0 ? * MON#1', 'First Monday of the month'], ['0 0 0 * * FRIL', 'Last Friday of the month']]
+  };
+  function renderExamples() {
+    var box = $('#cr-examples');
+    box.textContent = '';
+    box.appendChild(cell('span', 'Examples:', 'hint'));
+    EXAMPLES[dialect()].forEach(function (ex) {
+      var b = cell('button', ex[0], 'btn secondary small');
+      b.type = 'button';
+      b.setAttribute('data-cron', ex[0]);
+      if (ex[1]) b.title = ex[1];
+      box.appendChild(b);
+    });
+  }
+  function fillZones() {
+    var list = [];
+    try { list = Intl.supportedValuesOf('timeZone'); } catch (e) { list = []; }
+    if (!list.length) list = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Sao_Paulo', 'Europe/London', 'Europe/Berlin', 'Europe/Paris', 'Europe/Rome', 'Asia/Kolkata', 'Asia/Shanghai', 'Asia/Tokyo', 'Australia/Sydney'];
+    var add = function (v, t) { var o = document.createElement('option'); o.value = v; o.textContent = t; tzSel.appendChild(o); };
+    add('local', 'Your time zone' + (LOCAL_TZ ? ' (' + LOCAL_TZ + ')' : ''));
+    add('UTC', 'UTC');
+    list.forEach(function (z) { if (z !== 'UTC' && z !== 'Etc/UTC') add(z, z.replace(/_/g, ' ')); });
+  }
+  var zonePicked = false;
+  function applyDialectZone() {
+    var dl = DIALECTS[dialect()];
+    tzSel.disabled = !!dl.fixedZone;
+    if (dl.fixedZone) tzSel.value = 'UTC';
+    else if (!zonePicked) tzSel.value = dl.zone;
+  }
+  function fieldsHint() {
+    var dl = DIALECTS[dialect()];
+    $('#cr-fields-hint').textContent = dialect() === 'aws' ? 'cron(minute hour day-of-month month day-of-week year) or rate(5 minutes)'
+      : dl.fields.map(function (k) { return FIELD_NAMES[k]; }).join(', ') + (dl.optionalYear ? ' (optional)' : '');
+  }
+
+  var lastDialect = dialect();
+  function changeDialect() {
+    var from = lastDialect, to = dialect();
+    lastDialect = to;
+    // Convert the current expression when the new format can express it.
+    var old = parse(input.value, from), msg = '';
+    if (old && old.f && !old.reboot) {
+      var out = emit(old, to);
+      if (out.text) input.value = out.text;
+      else msg = 'Kept as typed: ' + DIALECTS[to].name + ' can\u2019t express this schedule. ' + out.why;
+    }
+    applyDialectZone();
+    fieldsHint();
+    renderExamples();
+    update(false);
+    showBuilderFields();
+    if (msg && !$('#cr-err').textContent) $('#cr-note').textContent = msg + ' ' + $('#cr-note').textContent;
+    else if (msg) $('#cr-err').textContent = msg + '\n' + $('#cr-err').textContent;
+    sayError(true);
   }
 
   // ---------- Events ----------
@@ -880,19 +1541,24 @@ faq:
   }
   input.addEventListener('input', function () { update(false); sayError(false); });
   input.addEventListener('change', function () { sayError(true); });
-  $('#cr-utc').addEventListener('change', renderRuns);
+  tzSel.addEventListener('change', function () { zonePicked = true; renderRuns(); renderTrans(); });
+  dialectSel.addEventListener('change', changeDialect);
   TT.$$('.cr-builder select, .cr-builder input').forEach(function (el) {
     el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', applyBuilder);
   });
-  TT.$$('[data-cron]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      input.value = btn.getAttribute('data-cron');
-      update(false);
-      sayError(true);
-    });
+  $('#cr-examples').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-cron]');
+    if (!btn) return;
+    input.value = btn.getAttribute('data-cron');
+    update(false);
+    sayError(true);
   });
   setInterval(renderRuns, 30000);
 
+  fillZones();
+  applyDialectZone();
+  fieldsHint();
+  renderExamples();
   update(false);
 })();
 </script>

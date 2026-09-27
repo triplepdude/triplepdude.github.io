@@ -372,6 +372,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.deepEqual(await chips(), ['A', 'S', 'D', 'F', 'J', 'K', 'L', ';']);
   assert.match(await text('#kbt-roll-best'), /^Not tried yet. Hold all 8 keys/);
 
+  // Regression: the event panel and the held-keys line were live regions, so
+  // every key event read out six values. One short summary follows a pause.
+  for (const sel of ['.kbt-last', '#kbt-held', '#kbt-roll-best', '#kbt-log']) {
+    assert.equal(await page.locator(sel).evaluate(el => !!el.closest('[aria-live]:not([aria-live="off"]), [role="alert"], [role="status"]')), false, `${sel} is not live`);
+  }
+  await page.keyboard.press('KeyM');
+  await page.waitForFunction(() => /^KeyM, key m, keyCode 77\. \d+ of 104 tested\.$/.test(document.querySelector('#kbt-sr').textContent));
+
   // Chatter report: each flagged key with its count and shortest gap (the
   // rollover presses above were machine-fast, so start from a reset).
   await page.click('#kbt-reset');

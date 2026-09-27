@@ -1,89 +1,93 @@
 ---
-title: "Hash Generator: MD5, SHA-1, SHA-256, SHA-512"
-description: Generate MD5, SHA-1, SHA-256, SHA-384 and SHA-512 hashes of text or files in hex or Base64, and check a download against its expected checksum.
+title: "Hash Generator: SHA-256, SHA-3, BLAKE3, MD5"
+description: Hash text or files with MD5, SHA-1, SHA-2, SHA-3, Keccak-256, BLAKE2, BLAKE3, RIPEMD-160 or CRC-32, make HMACs, and check a file against its checksum.
 category: Security & Network
-keywords: [hash generator, md5 hash generator, sha256 hash generator, sha512 generator, sha1 hash, file checksum, checksum calculator, verify file hash]
+keywords: [hash generator, sha256 hash generator, md5 hash generator, sha3 hash generator, blake3 hash, keccak256 online, hmac generator, file checksum calculator]
 howto: |
   ## How to use the hash generator
 
-  Type or paste text, or switch to **File** and choose or drop a file. All five
-  hashes appear at once, in hexadecimal and in Base64. Tick **Uppercase hex** if
-  the checksum you compare against is written in capitals.
+  Type or paste text, or switch to **File** and choose or drop a file. Tick
+  the algorithms you want; each result shows in hexadecimal and in Base64.
+  Text is hashed as UTF-8, so it matches `sha256sum` run on a UTF-8 file with
+  the same content. Set **Input is** to *Hex bytes* or *Base64* to hash raw
+  bytes instead. Files are read in 4 MB pieces in a background worker, so
+  even large files keep the page responsive, and nothing is uploaded.
 
-  To check a download, paste the checksum published next to it into **Compare
-  with expected hash**. The page tells you which algorithm matches, or that none
-  does. Besides a bare hash it accepts a line copied from `sha256sum` output
-  (`hash  filename`), the BSD format `SHA256 (file) = hash`, OpenSSL's
-  `SHA2-256(file)= hash`, the output of PowerShell's `Get-FileHash` or Windows
-  `certutil -hashfile`, and Subresource Integrity values such as `sha384-oqVu…`.
+  To check a download, paste the published checksum into **Compare with
+  expected hash**. The page names the algorithm that matches, and ticks it if
+  it was hidden. Besides a bare value it reads `sha256sum` and `b3sum` lines
+  (`hash  filename`), the BSD format `SHA256 (file) = hash`, OpenSSL output,
+  PowerShell's `Get-FileHash`, `certutil`, `0x`-prefixed Ethereum hashes and
+  Subresource Integrity values such as `sha384-oqVu…`.
 
-  Text is hashed as UTF-8, the encoding of most text files and web pages, so the
-  result matches `sha256sum` run on a UTF-8 file with the same content. Set
-  **Input is** to *Hex bytes* or *Base64* to hash raw bytes instead, for example
-  a key or a value copied from a packet dump.
+  ## The algorithms
 
-  ## How it works
+  | Algorithm | Output | Standard | Use it for |
+  |---|---|---|---|
+  | SHA-256, SHA-384, SHA-512 | 256–512 bits | FIPS 180-4 | checksums, signatures, SRI |
+  | SHA3-224 to SHA3-512 | 224–512 bits | FIPS 202 | a SHA-2 alternative with a different design |
+  | SHAKE128, SHAKE256 | any length | FIPS 202 | variable-length output |
+  | Keccak-256 | 256 bits | original Keccak | Ethereum addresses and function selectors |
+  | BLAKE2b, BLAKE2s | 512, 256 bits | RFC 7693 | fast hashing, keyed MACs |
+  | BLAKE3 | 256 bits or more | BLAKE3 spec | very fast checksums (`b3sum`) |
+  | RIPEMD-160 | 160 bits | ISO/IEC 10118-3 | Bitcoin addresses |
+  | MD5, SHA-1 | 128, 160 bits | RFC 1321, FIPS 180-4 | legacy checksums only |
+  | CRC-32, CRC-32C | 32 bits | zip/PNG; iSCSI | detecting accidental corruption |
 
-  The SHA hashes come from the Web Crypto API (`crypto.subtle.digest`), the
-  browser's native cryptography code. Web Crypto does not offer MD5, so this page
-  computes MD5 with its own JavaScript implementation of RFC 1321. Files are
-  read with the File API in 4 MB pieces: MD5 is updated piece by piece, a
-  progress bar tracks big files, and the page stays responsive. Nothing is
-  uploaded.
+  **Keccak-256 is not SHA3-256.** Ethereum adopted Keccak before NIST changed
+  its padding, so the two give different results: the empty string is
+  `c5d2460186f7…` in Keccak-256 and `a7ffc6f8bf1e…` in SHA3-256. For SHAKE
+  and BLAKE3 you can set the output length in bits; a shorter output is the
+  start of a longer one.
 
-  MD5 is specified in RFC 1321; SHA-1 and the SHA-2 family (SHA-256, SHA-384,
-  SHA-512) in NIST's FIPS 180-4.
+  SHA-1 and SHA-2 come from the browser's Web Crypto API. The others are
+  implemented on this page and checked against the NIST, RFC 7693 and BLAKE3
+  test vectors and Python's hashlib. CRCs are shown most significant byte first
+  (`cbf43926` for `123456789`), the form `crc32` tools print; the Base64 form
+  matches Google Cloud Storage's `crc32c` value.
 
-  | Algorithm | Digest size | Collisions |
-  |---|---|---|
-  | MD5 | 128 bits, 32 hex characters | Broken |
-  | SHA-1 | 160 bits, 40 hex characters | Broken |
-  | SHA-256 | 256 bits, 64 hex characters | No practical attack |
-  | SHA-384 | 384 bits, 96 hex characters | No practical attack |
-  | SHA-512 | 512 bits, 128 hex characters | No practical attack |
+  ## HMAC and keyed hashes
 
-  Hex and Base64 are the same bytes written two ways: the 16 bytes of an MD5
-  digest become 32 hex characters or 24 Base64 characters ending in `==`.
+  Enter a key to turn the hashes into message authentication codes: HMAC
+  (RFC 2104) for MD5, SHA-1, SHA-2, SHA-3 and RIPEMD-160, and the built-in
+  keyed modes of BLAKE2 (key up to 64 or 32 bytes) and BLAKE3 (exactly 32
+  bytes). The key can be text, hex or Base64. HMAC-SHA-256 is what webhooks
+  from services like GitHub and Stripe sign with, so you can recompute a
+  signature by hand.
 
   ## Which hash to use
 
-  To detect a download that was cut short or corrupted, any of them works: use
-  the one the publisher lists. When someone might swap the file on purpose,
-  rely on SHA-256 or longer. MD5 collisions (two different files with the same
-  hash) take seconds on an ordinary computer, and a practical SHA-1 collision
-  was published in 2017. A checksum only protects you if it comes from a source
-  the attacker can't change: someone who can replace the file on a mirror may
-  be able to replace a checksum stored next to it as well.
-
-  None of these is suitable on its own for storing passwords. They are designed
-  to be fast, which helps anyone guessing passwords. Use a deliberately slow
-  password hash such as Argon2id, scrypt or bcrypt.
+  Any of them spots a corrupted download; use the one the publisher lists.
+  When someone might swap the file on purpose, use SHA-256, SHA-3 or BLAKE3:
+  MD5 and SHA-1 collisions can be made deliberately, and a CRC is not
+  cryptographic at all. None of these is fit for storing passwords, because
+  they are designed to be fast; use Argon2id, scrypt or bcrypt.
 
   ## Why a hash might not match
 
   - **Trailing newline.** `echo "abc" | sha256sum` hashes `abc` plus a line
-    feed. Use `printf '%s' "abc"` or `echo -n` to get the value shown here.
-  - **Line endings.** A browser text box turns every line break into a single
-    line feed (LF). If the original text used Windows CRLF line breaks, hash the
-    file itself rather than pasting its contents.
-  - **Encoding.** The same characters stored as UTF-16 or Latin-1 are different
-    bytes, and so give a different hash.
-  - **Invisible characters.** A copied string can carry a leading space, a
-    non-breaking space or a zero-width character. The byte count under the text
-    box helps you spot them.
+    feed. Use `printf '%s' "abc"` to get the value shown here.
+  - **Line endings and encoding.** A text box turns line breaks into LF, and
+    UTF-16 or Latin-1 text is different bytes. Hash the file itself instead.
+  - **Invisible characters.** A copied string can carry a space or a
+    zero-width character; the byte count under the text box helps spot them.
 faq:
   - q: Is my text or file uploaded anywhere?
-    a: No. The hashes are calculated in your browser with JavaScript and the Web Crypto API. Your text and files never leave your device, and nothing is stored.
+    a: No. The hashes are calculated in your browser, partly with the Web Crypto API and partly with JavaScript on this page. Your text, keys and files never leave your device, and nothing is stored.
+  - q: Why does my SHA3-256 hash differ from the Keccak-256 in Ethereum?
+    a: Ethereum uses the original Keccak submission, which pads the message differently from the final SHA-3 standard (FIPS 202). Both are shown here; pick Keccak-256 for Ethereum.
   - q: Why is my hash different from the one my terminal prints?
     a: Usually because `echo` adds a newline. `echo "hello" | md5sum` hashes six bytes, not five. Run `printf '%s' "hello" | md5sum` instead, or hash the file itself here.
-  - q: Can a hash be decrypted back to the original text?
-    a: No. A hash is a one-way fingerprint, not encryption. Short or common inputs can still be found by guessing and comparing, which is why unsalted fast hashes should never protect passwords.
   - q: How large a file can I hash?
-    a: Hundreds of megabytes work on a typical computer. Web Crypto needs the whole file in memory for the SHA hashes, so a file of several gigabytes can exceed what the browser allows; the page shows a message if that happens.
-  - q: Is MD5 still safe to use?
-    a: For spotting accidental corruption, yes. For anything security-related, no. Anyone can create two different files with the same MD5 hash, so use SHA-256 when tampering is a concern.
+    a: Hundreds of megabytes work on a typical computer. The SHA-1 and SHA-2 hashes need the whole file in memory for Web Crypto; the other algorithms read it piece by piece, so with only those ticked there is no size limit beyond your patience.
+  - q: Can a hash be decrypted back to the original text?
+    a: No. A hash is a one-way fingerprint, not encryption. Short or common inputs can still be found by guessing and comparing, which is why unsalted fast hashes must never protect passwords.
 ---
 <style>
+.tool-page:has(#hg-text) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
+.tool-page:has(#hg-text) .prose th, .tool-page:has(#hg-text) .prose td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.tool-page:has(#hg-text) .prose th { color: var(--muted); font-weight: 600; }
+.tool-page:has(#hg-text) .prose code { overflow-wrap: anywhere; }
 .hg-seg { display: inline-flex; gap: 2px; margin: 0 0 16px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
 .hg-seg label { position: relative; display: block; cursor: pointer; }
 .hg-seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
@@ -107,22 +111,35 @@ faq:
 .hg-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; }
 .hg-progress progress { flex: 1 1 200px; height: 10px; accent-color: var(--accent); }
 .hg-progress .hint { min-width: 9em; font-variant-numeric: tabular-nums; }
+.hg-keyrow { margin-bottom: 6px; }
+.hg-keyrow > .field.hg-grow { flex: 3 1 240px; }
+.hg-keyrow > .field.hg-keyenc { flex: 1 1 140px; }
+.hg-keyinfo { margin: 0 0 16px; }
+.hg-keyinfo:empty { display: none; }
+.hg-algs { margin: 0 0 16px; padding: 12px 14px 4px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.hg-algs legend { padding: 0 6px; font-size: 14px; font-weight: 600; }
+.hg-algs .checks { gap: 2px 18px; margin-bottom: 6px; }
+.hg-algs .check { font-size: 14px; }
+.hg-algs .actions { margin: 4px 0 8px; }
 .hg-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin: 0 0 10px; }
 .hg-bar .label { overflow-wrap: anywhere; }
 .hg-bar .check { font-size: 14px; }
 .hg-list { display: grid; gap: 8px; margin: 0 0 16px; }
 .hg-item {
-  display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: 4px 12px; padding: 10px 12px;
+  display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 4px 12px; padding: 10px 12px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
 }
 .hg-item.is-match { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
-.hg-alg { grid-row: span 2; display: flex; flex-direction: column; justify-content: center; line-height: 1.3; }
-.hg-alg b { font-size: 15px; }
+.hg-alg { grid-row: span 2; display: flex; flex-direction: column; justify-content: center; line-height: 1.3; min-width: 0; }
+.hg-alg b { font-size: 15px; overflow-wrap: anywhere; }
 .hg-alg small { color: var(--muted); font-size: 12px; }
 .hg-alg em { display: none; margin-top: 2px; color: var(--accent); font-size: 12px; font-style: normal; font-weight: 700; }
 .hg-item.is-match .hg-alg em { display: block; }
+.hg-xof { display: flex; align-items: center; gap: 4px; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.hg-xof input { width: 5.2em; min-height: 30px; padding: 2px 6px; font-size: 13px; }
 .hg-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .hg-line code { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 14px; line-height: 1.45; word-break: break-all; }
+.hg-line code.hg-na { font-family: inherit; color: var(--muted); word-break: normal; }
 .hg-line.hg-b64 code { color: var(--muted); font-size: 13px; }
 .hg-line .hg-k { flex: none; width: 3.6rem; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .hg-line .btn.small { flex: none; min-height: 30px; padding: 0 10px; font-size: 13px; }
@@ -130,8 +147,9 @@ faq:
 #hg-text { min-height: 140px; }
 @media (max-width: 560px) {
   .hg-item { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .hg-alg { grid-row: auto; flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 8px; }
+  .hg-alg { grid-row: auto; flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: flex-start; gap: 2px 8px; }
   .hg-alg em { margin: 0; }
+  .hg-xof { margin-top: 0; }
   .hg-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; }
   .hg-line .hg-k { grid-column: 1 / -1; width: auto; }
 }
@@ -145,7 +163,7 @@ faq:
 <div id="hg-text-pane">
   <div class="field">
     <label for="hg-text">Text to hash</label>
-    <textarea id="hg-text" class="mono" rows="6" spellcheck="false" autocomplete="off" placeholder="Type or paste text here. Hashes update as you type."></textarea>
+    <textarea id="hg-text" class="mono" rows="6" spellcheck="false" autocomplete="off" placeholder="Type or paste text here. Hashes update as you type." aria-describedby="hg-msg"></textarea>
   </div>
   <div class="hg-textrow">
     <div class="field">
@@ -170,10 +188,58 @@ faq:
   </div>
   <div class="hg-progress" id="hg-progress-wrap" hidden>
     <progress id="hg-progress" max="1" value="0" aria-label="Hashing progress"></progress>
-    <span class="hint" id="hg-progress-text" aria-live="polite">Reading…</span>
+    <span class="hint" id="hg-progress-text">Reading…</span>
     <button class="btn secondary small" type="button" id="hg-cancel">Cancel</button>
   </div>
 </div>
+
+<div class="row hg-keyrow">
+  <div class="field hg-grow">
+    <label for="hg-key">HMAC key <span class="hint">optional; with a key you get HMACs and keyed BLAKE hashes</span></label>
+    <input type="text" id="hg-key" class="mono" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Leave empty for plain hashes" aria-describedby="hg-key-info">
+  </div>
+  <div class="field hg-keyenc">
+    <label for="hg-key-enc">Key is</label>
+    <select id="hg-key-enc">
+      <option value="utf8" selected>Text (UTF-8)</option>
+      <option value="hex">Hex</option>
+      <option value="base64">Base64</option>
+    </select>
+  </div>
+</div>
+<p class="hint hg-keyinfo" id="hg-key-info"></p>
+
+<fieldset class="hg-algs">
+  <legend>Algorithms <span class="hint" id="hg-alg-count"></span></legend>
+  <div class="checks">
+    <label class="check"><input type="checkbox" data-alg="md5" checked> MD5</label>
+    <label class="check"><input type="checkbox" data-alg="sha1" checked> SHA-1</label>
+    <label class="check"><input type="checkbox" data-alg="sha256" checked> SHA-256</label>
+    <label class="check"><input type="checkbox" data-alg="sha384" checked> SHA-384</label>
+    <label class="check"><input type="checkbox" data-alg="sha512" checked> SHA-512</label>
+  </div>
+  <div class="checks">
+    <label class="check"><input type="checkbox" data-alg="sha3-224"> SHA3-224</label>
+    <label class="check"><input type="checkbox" data-alg="sha3-256" checked> SHA3-256</label>
+    <label class="check"><input type="checkbox" data-alg="sha3-384"> SHA3-384</label>
+    <label class="check"><input type="checkbox" data-alg="sha3-512"> SHA3-512</label>
+    <label class="check"><input type="checkbox" data-alg="keccak256"> Keccak-256</label>
+    <label class="check"><input type="checkbox" data-alg="shake128"> SHAKE128</label>
+    <label class="check"><input type="checkbox" data-alg="shake256"> SHAKE256</label>
+  </div>
+  <div class="checks">
+    <label class="check"><input type="checkbox" data-alg="blake2b512"> BLAKE2b-512</label>
+    <label class="check"><input type="checkbox" data-alg="blake2s256"> BLAKE2s-256</label>
+    <label class="check"><input type="checkbox" data-alg="blake3"> BLAKE3</label>
+    <label class="check"><input type="checkbox" data-alg="ripemd160"> RIPEMD-160</label>
+    <label class="check"><input type="checkbox" data-alg="crc32"> CRC-32</label>
+    <label class="check"><input type="checkbox" data-alg="crc32c"> CRC-32C</label>
+  </div>
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="hg-pick-common">Common only</button>
+    <button class="btn secondary small" type="button" id="hg-pick-all">All</button>
+  </div>
+</fieldset>
 
 <!-- Not an alert: errors appear while typing (an odd number of hex digits), so they are
      announced through #hg-status once typing pauses. -->
@@ -184,35 +250,9 @@ faq:
   <label class="check"><input type="checkbox" id="hg-upper"> Uppercase hex</label>
 </div>
 
-<!-- The ten values below change on every keystroke, so they are not a live region:
+<!-- The values below change on every keystroke, so they are not a live region:
      a short summary is announced in #hg-status once typing pauses. -->
-<div class="hg-list" id="hg-results">
-  <div class="hg-item" data-alg="md5">
-    <div class="hg-alg"><b>MD5</b><small>128 bits</small><em>Match</em></div>
-    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-md5-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-md5-hex" aria-label="Copy MD5 hex">Copy</button></div>
-    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-md5-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-md5-b64" aria-label="Copy MD5 Base64">Copy</button></div>
-  </div>
-  <div class="hg-item" data-alg="sha1">
-    <div class="hg-alg"><b>SHA-1</b><small>160 bits</small><em>Match</em></div>
-    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-sha1-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha1-hex" aria-label="Copy SHA-1 hex">Copy</button></div>
-    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-sha1-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha1-b64" aria-label="Copy SHA-1 Base64">Copy</button></div>
-  </div>
-  <div class="hg-item" data-alg="sha256">
-    <div class="hg-alg"><b>SHA-256</b><small>256 bits</small><em>Match</em></div>
-    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-sha256-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha256-hex" aria-label="Copy SHA-256 hex">Copy</button></div>
-    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-sha256-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha256-b64" aria-label="Copy SHA-256 Base64">Copy</button></div>
-  </div>
-  <div class="hg-item" data-alg="sha384">
-    <div class="hg-alg"><b>SHA-384</b><small>384 bits</small><em>Match</em></div>
-    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-sha384-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha384-hex" aria-label="Copy SHA-384 hex">Copy</button></div>
-    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-sha384-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha384-b64" aria-label="Copy SHA-384 Base64">Copy</button></div>
-  </div>
-  <div class="hg-item" data-alg="sha512">
-    <div class="hg-alg"><b>SHA-512</b><small>512 bits</small><em>Match</em></div>
-    <div class="hg-line"><span class="hg-k">Hex</span><code id="hg-sha512-hex">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha512-hex" aria-label="Copy SHA-512 hex">Copy</button></div>
-    <div class="hg-line hg-b64"><span class="hg-k">Base64</span><code id="hg-sha512-b64">–</code><button class="btn secondary small" type="button" data-copy-target="#hg-sha512-b64" aria-label="Copy SHA-512 Base64">Copy</button></div>
-  </div>
-</div>
+<div class="hg-list" id="hg-results"></div>
 
 <div class="actions">
   <button class="btn secondary small" type="button" id="hg-copy-all">Copy all (hex)</button>
@@ -221,7 +261,7 @@ faq:
 
 <div class="field">
   <label for="hg-expected">Compare with expected hash <span class="hint">hex or Base64, e.g. from a download page</span></label>
-  <input type="text" id="hg-expected" class="mono" autocomplete="off" spellcheck="false" placeholder="Paste a checksum to check it">
+  <input type="text" id="hg-expected" class="mono" autocomplete="off" spellcheck="false" placeholder="Paste a checksum to check it" aria-describedby="hg-compare">
 </div>
 <p class="msg" id="hg-compare"></p>
 <p class="visually-hidden" id="hg-status" role="status"></p>
@@ -230,94 +270,669 @@ faq:
 (function () {
   'use strict';
   const $ = TT.$;
-  const ALGS = [
-    { id: 'md5', name: 'MD5', hexLen: 32 },
-    { id: 'sha1', name: 'SHA-1', hexLen: 40, subtle: 'SHA-1' },
-    { id: 'sha256', name: 'SHA-256', hexLen: 64, subtle: 'SHA-256' },
-    { id: 'sha384', name: 'SHA-384', hexLen: 96, subtle: 'SHA-384' },
-    { id: 'sha512', name: 'SHA-512', hexLen: 128, subtle: 'SHA-512' }
-  ];
-  const CHUNK = 4 * 1024 * 1024;
-  const PROGRESS_FROM = 8 * 1024 * 1024;
-  const subtle = window.crypto && window.crypto.subtle && typeof window.crypto.subtle.digest === 'function' ? window.crypto.subtle : null;
+  // Everything in hashLib() is self-contained so the same source can run in a Web
+  // Worker (built from a Blob of its text) and on the page for short inputs.
+  // Each hasher has update(Uint8Array) and digest(outBytes) returning a Uint8Array.
+  function hashLib() {
+    'use strict';
+    // ---------- MD5 (RFC 1321) ----------
+    const MD5K = new Int32Array(64);
+    for (let i = 0; i < 64; i++) MD5K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296);
+    const MD5S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
 
-  // ---------- MD5 (RFC 1321), incremental ----------
-  const K = new Int32Array([
-    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
-    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
-    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
-    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
-    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
-    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
-    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
-    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
-  ]);
-  const S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+    // Merkle-Damgard helper for 64-byte blocks with a 64-bit bit-length trailer.
+    class Block64 {
+      constructor(bigEndian) { this.buf = new Uint8Array(64); this.n = 0; this.total = 0; this.be = bigEndian; }
+      update(d) {
+        let o = 0;
+        const len = d.length;
+        this.total += len;
+        if (this.n) {
+          const take = Math.min(64 - this.n, len);
+          this.buf.set(d.subarray(0, take), this.n);
+          this.n += take; o = take;
+          if (this.n < 64) return this;
+          this.block(this.buf, 0); this.n = 0;
+        }
+        for (; o + 64 <= len; o += 64) this.block(d, o);
+        if (o < len) { this.buf.set(d.subarray(o), 0); this.n = len - o; }
+        return this;
+      }
+      pad() {
+        const total = this.total, bits = total * 8;
+        const pad = new Uint8Array((this.n < 56 ? 56 : 120) - this.n + 8);
+        pad[0] = 0x80;
+        const lo = bits % 4294967296, hi = Math.floor(bits / 4294967296), p = pad.length - 8;
+        for (let i = 0; i < 4; i++) {
+          if (this.be) { pad[p + 7 - i] = (lo >>> (8 * i)) & 255; pad[p + 3 - i] = (hi >>> (8 * i)) & 255; }
+          else { pad[p + i] = (lo >>> (8 * i)) & 255; pad[p + 4 + i] = (hi >>> (8 * i)) & 255; }
+        }
+        this.update(pad);
+        this.total = total;
+      }
+      wordsLE(outWords) {
+        const out = new Uint8Array(outWords.length * 4);
+        for (let i = 0; i < outWords.length; i++) for (let j = 0; j < 4; j++) out[i * 4 + j] = (outWords[i] >>> (8 * j)) & 255;
+        return out;
+      }
+    }
 
-  class Md5 {
-    constructor() {
-      this.h = new Int32Array([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476]);
-      this.tail = new Uint8Array(64);
-      this.tailLen = 0;
-      this.total = 0;
-      this.w = new Int32Array(16);
+    class Md5 extends Block64 {
+      constructor() { super(false); this.h = new Int32Array([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476]); this.w = new Int32Array(16); }
+      block(m, o) {
+        const w = this.w, h = this.h;
+        for (let i = 0; i < 16; i++, o += 4) w[i] = m[o] | (m[o + 1] << 8) | (m[o + 2] << 16) | (m[o + 3] << 24);
+        let a = h[0], b = h[1], c = h[2], d = h[3], t, s, i;
+        for (i = 0; i < 16; i++) { s = MD5S[i & 3]; t = (a + ((b & c) | (~b & d)) + MD5K[i] + w[i]) | 0; a = d; d = c; c = b; b = (b + ((t << s) | (t >>> (32 - s)))) | 0; }
+        for (; i < 32; i++) { s = MD5S[4 + (i & 3)]; t = (a + ((d & b) | (~d & c)) + MD5K[i] + w[(5 * i + 1) & 15]) | 0; a = d; d = c; c = b; b = (b + ((t << s) | (t >>> (32 - s)))) | 0; }
+        for (; i < 48; i++) { s = MD5S[8 + (i & 3)]; t = (a + (b ^ c ^ d) + MD5K[i] + w[(3 * i + 5) & 15]) | 0; a = d; d = c; c = b; b = (b + ((t << s) | (t >>> (32 - s)))) | 0; }
+        for (; i < 64; i++) { s = MD5S[12 + (i & 3)]; t = (a + (c ^ (b | ~d)) + MD5K[i] + w[(7 * i) & 15]) | 0; a = d; d = c; c = b; b = (b + ((t << s) | (t >>> (32 - s)))) | 0; }
+        h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+      }
+      digest() { this.pad(); return this.wordsLE(this.h); }
     }
-    block(m, o) {
-      const w = this.w, h = this.h;
-      for (let i = 0; i < 16; i++, o += 4) w[i] = m[o] | (m[o + 1] << 8) | (m[o + 2] << 16) | (m[o + 3] << 24);
-      let a = h[0], b = h[1], c = h[2], d = h[3], t, s, i;
-      for (i = 0; i < 16; i++) {
-        s = S[i & 3];
-        t = (a + ((b & c) | (~b & d)) + K[i] + w[i]) | 0; a = d; d = c; c = b;
-        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
-      }
-      for (; i < 32; i++) {
-        s = S[4 + (i & 3)];
-        t = (a + ((d & b) | (~d & c)) + K[i] + w[(5 * i + 1) & 15]) | 0; a = d; d = c; c = b;
-        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
-      }
-      for (; i < 48; i++) {
-        s = S[8 + (i & 3)];
-        t = (a + (b ^ c ^ d) + K[i] + w[(3 * i + 5) & 15]) | 0; a = d; d = c; c = b;
-        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
-      }
-      for (; i < 64; i++) {
-        s = S[12 + (i & 3)];
-        t = (a + (c ^ (b | ~d)) + K[i] + w[(7 * i) & 15]) | 0; a = d; d = c; c = b;
-        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
-      }
-      h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+
+    // ---------- RIPEMD-160 ----------
+    const RL = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5, 2, 14, 11, 8,
+      3, 10, 14, 4, 9, 15, 8, 1, 2, 7, 0, 6, 13, 11, 5, 12, 1, 9, 11, 10, 0, 8, 12, 4, 13, 3, 7, 15, 14, 5, 6, 2,
+      4, 0, 5, 9, 7, 12, 2, 10, 14, 1, 3, 8, 11, 6, 15, 13];
+    const RR = [5, 14, 7, 0, 9, 2, 11, 4, 13, 6, 15, 8, 1, 10, 3, 12, 6, 11, 3, 7, 0, 13, 5, 10, 14, 15, 8, 12, 4, 9, 1, 2,
+      15, 5, 1, 3, 7, 14, 6, 9, 11, 8, 12, 2, 10, 0, 4, 13, 8, 6, 4, 1, 3, 11, 15, 0, 5, 12, 2, 13, 9, 7, 10, 14,
+      12, 15, 10, 4, 1, 5, 8, 7, 6, 2, 13, 14, 0, 3, 9, 11];
+    const SL = [11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8, 7, 6, 8, 13, 11, 9, 7, 15, 7, 12, 15, 9, 11, 7, 13, 12,
+      11, 13, 6, 7, 14, 9, 13, 15, 14, 8, 13, 6, 5, 12, 7, 5, 11, 12, 14, 15, 14, 15, 9, 8, 9, 14, 5, 6, 8, 6, 5, 12,
+      9, 15, 5, 11, 6, 8, 13, 12, 5, 12, 13, 14, 11, 8, 5, 6];
+    const SR = [8, 9, 9, 11, 13, 15, 15, 5, 7, 7, 8, 11, 14, 14, 12, 6, 9, 13, 15, 7, 12, 8, 9, 11, 7, 7, 12, 7, 6, 15, 13, 11,
+      9, 7, 15, 11, 8, 6, 6, 14, 12, 13, 5, 14, 13, 13, 7, 5, 15, 5, 8, 11, 14, 14, 6, 14, 6, 9, 12, 9, 12, 5, 15, 8,
+      8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11];
+    const KL = [0, 0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xa953fd4e], KR = [0x50a28be6, 0x5c4dd124, 0x6d703ef3, 0x7a6d76e9, 0];
+    function rf(j, x, y, z) {
+      return j < 16 ? x ^ y ^ z : j < 32 ? (x & y) | (~x & z) : j < 48 ? (x | ~y) ^ z : j < 64 ? (x & z) | (y & ~z) : x ^ (y | ~z);
     }
-    update(bytes) {
-      const n = bytes.length;
-      let o = 0;
-      this.total += n;
-      if (this.tailLen) {
-        const take = Math.min(64 - this.tailLen, n);
-        this.tail.set(bytes.subarray(0, take), this.tailLen);
-        this.tailLen += take;
-        o = take;
-        if (this.tailLen < 64) return this;
-        this.block(this.tail, 0);
-        this.tailLen = 0;
+    class Ripemd160 extends Block64 {
+      constructor() { super(false); this.h = new Int32Array([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0]); this.w = new Int32Array(16); }
+      block(m, o) {
+        const w = this.w, h = this.h;
+        for (let i = 0; i < 16; i++, o += 4) w[i] = m[o] | (m[o + 1] << 8) | (m[o + 2] << 16) | (m[o + 3] << 24);
+        let al = h[0], bl = h[1], cl = h[2], dl = h[3], el = h[4], ar = al, br = bl, cr = cl, dr = dl, er = el, t;
+        for (let j = 0; j < 80; j++) {
+          const r = j >> 4;
+          t = (al + rf(j, bl, cl, dl) + w[RL[j]] + KL[r]) | 0;
+          t = ((t << SL[j]) | (t >>> (32 - SL[j]))) + el | 0;
+          al = el; el = dl; dl = (cl << 10) | (cl >>> 22); cl = bl; bl = t;
+          t = (ar + rf(79 - j, br, cr, dr) + w[RR[j]] + KR[r]) | 0;
+          t = ((t << SR[j]) | (t >>> (32 - SR[j]))) + er | 0;
+          ar = er; er = dr; dr = (cr << 10) | (cr >>> 22); cr = br; br = t;
+        }
+        t = (h[1] + cl + dr) | 0; h[1] = (h[2] + dl + er) | 0; h[2] = (h[3] + el + ar) | 0;
+        h[3] = (h[4] + al + br) | 0; h[4] = (h[0] + bl + cr) | 0; h[0] = t;
       }
-      for (; o + 64 <= n; o += 64) this.block(bytes, o);
-      if (o < n) { this.tail.set(bytes.subarray(o), 0); this.tailLen = n - o; }
-      return this;
+      digest() { this.pad(); return this.wordsLE(this.h); }
     }
-    digest() {
-      const total = this.total, bits = total * 8;
-      const pad = new Uint8Array((this.tailLen < 56 ? 56 : 120) - this.tailLen + 8);
-      pad[0] = 0x80;
-      const lo = bits % 4294967296, hi = Math.floor(bits / 4294967296), p = pad.length - 8;
-      for (let i = 0; i < 4; i++) { pad[p + i] = (lo >>> (8 * i)) & 255; pad[p + 4 + i] = (hi >>> (8 * i)) & 255; }
-      this.update(pad);
-      this.total = total;
-      const out = new Uint8Array(16);
-      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) out[i * 4 + j] = (this.h[i] >>> (8 * j)) & 255;
-      return out;
+
+    // ---------- Keccak-f[1600]: SHA-3, SHAKE and Keccak-256 (FIPS 202) ----------
+    // Lanes as (lo, hi) 32-bit pairs: lane i is s[2i], s[2i+1].
+    const RC = new Uint32Array([
+      1, 0, 0x8082, 0, 0x808a, 0x80000000, 0x80008000, 0x80000000, 0x808b, 0, 0x80000001, 0, 0x80008081, 0x80000000, 0x8009, 0x80000000,
+      0x8a, 0, 0x88, 0, 0x80008009, 0, 0x8000000a, 0, 0x8000808b, 0, 0x8b, 0x80000000, 0x8089, 0x80000000, 0x8003, 0x80000000,
+      0x8002, 0x80000000, 0x80, 0x80000000, 0x800a, 0, 0x8000000a, 0x80000000, 0x80008081, 0x80000000, 0x8080, 0x80000000,
+      0x80000001, 0, 0x80008008, 0x80000000]);
+    // Unrolled, with the 50 words in local variables (generated; one round per loop pass).
+    function keccakF(s) {
+      let a0 = s[0], a1 = s[1], a2 = s[2], a3 = s[3], a4 = s[4], a5 = s[5], a6 = s[6], a7 = s[7], a8 = s[8], a9 = s[9],
+      a10 = s[10], a11 = s[11], a12 = s[12], a13 = s[13], a14 = s[14], a15 = s[15], a16 = s[16], a17 = s[17], a18 = s[18], a19 = s[19],
+      a20 = s[20], a21 = s[21], a22 = s[22], a23 = s[23], a24 = s[24], a25 = s[25], a26 = s[26], a27 = s[27], a28 = s[28], a29 = s[29],
+      a30 = s[30], a31 = s[31], a32 = s[32], a33 = s[33], a34 = s[34], a35 = s[35], a36 = s[36], a37 = s[37], a38 = s[38], a39 = s[39],
+      a40 = s[40], a41 = s[41], a42 = s[42], a43 = s[43], a44 = s[44], a45 = s[45], a46 = s[46], a47 = s[47], a48 = s[48], a49 = s[49];
+      let c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, d0, d1, t0, t1;
+      let b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11,
+      b12, b13, b14, b15, b16, b17, b18, b19, b20, b21, b22, b23,
+      b24, b25, b26, b27, b28, b29, b30, b31, b32, b33, b34, b35,
+      b36, b37, b38, b39, b40, b41, b42, b43, b44, b45, b46, b47,
+      b48, b49;
+      for (let r = 0; r < 48; r += 2) {
+        c0 = a0 ^ a10 ^ a20 ^ a30 ^ a40; c1 = a1 ^ a11 ^ a21 ^ a31 ^ a41;
+        c2 = a2 ^ a12 ^ a22 ^ a32 ^ a42; c3 = a3 ^ a13 ^ a23 ^ a33 ^ a43;
+        c4 = a4 ^ a14 ^ a24 ^ a34 ^ a44; c5 = a5 ^ a15 ^ a25 ^ a35 ^ a45;
+        c6 = a6 ^ a16 ^ a26 ^ a36 ^ a46; c7 = a7 ^ a17 ^ a27 ^ a37 ^ a47;
+        c8 = a8 ^ a18 ^ a28 ^ a38 ^ a48; c9 = a9 ^ a19 ^ a29 ^ a39 ^ a49;
+        d0 = c8 ^ ((c2 << 1) | (c3 >>> 31)); d1 = c9 ^ ((c3 << 1) | (c2 >>> 31));
+        a0 ^= d0; a1 ^= d1; a10 ^= d0; a11 ^= d1; a20 ^= d0; a21 ^= d1; a30 ^= d0; a31 ^= d1; a40 ^= d0; a41 ^= d1;
+        d0 = c0 ^ ((c4 << 1) | (c5 >>> 31)); d1 = c1 ^ ((c5 << 1) | (c4 >>> 31));
+        a2 ^= d0; a3 ^= d1; a12 ^= d0; a13 ^= d1; a22 ^= d0; a23 ^= d1; a32 ^= d0; a33 ^= d1; a42 ^= d0; a43 ^= d1;
+        d0 = c2 ^ ((c6 << 1) | (c7 >>> 31)); d1 = c3 ^ ((c7 << 1) | (c6 >>> 31));
+        a4 ^= d0; a5 ^= d1; a14 ^= d0; a15 ^= d1; a24 ^= d0; a25 ^= d1; a34 ^= d0; a35 ^= d1; a44 ^= d0; a45 ^= d1;
+        d0 = c4 ^ ((c8 << 1) | (c9 >>> 31)); d1 = c5 ^ ((c9 << 1) | (c8 >>> 31));
+        a6 ^= d0; a7 ^= d1; a16 ^= d0; a17 ^= d1; a26 ^= d0; a27 ^= d1; a36 ^= d0; a37 ^= d1; a46 ^= d0; a47 ^= d1;
+        d0 = c6 ^ ((c0 << 1) | (c1 >>> 31)); d1 = c7 ^ ((c1 << 1) | (c0 >>> 31));
+        a8 ^= d0; a9 ^= d1; a18 ^= d0; a19 ^= d1; a28 ^= d0; a29 ^= d1; a38 ^= d0; a39 ^= d1; a48 ^= d0; a49 ^= d1;
+        b0 = a0; b1 = a1;
+        b20 = (a2 << 1) | (a3 >>> 31); b21 = (a3 << 1) | (a2 >>> 31);
+        b40 = (a5 << 30) | (a4 >>> 2); b41 = (a4 << 30) | (a5 >>> 2);
+        b10 = (a6 << 28) | (a7 >>> 4); b11 = (a7 << 28) | (a6 >>> 4);
+        b30 = (a8 << 27) | (a9 >>> 5); b31 = (a9 << 27) | (a8 >>> 5);
+        b32 = (a11 << 4) | (a10 >>> 28); b33 = (a10 << 4) | (a11 >>> 28);
+        b2 = (a13 << 12) | (a12 >>> 20); b3 = (a12 << 12) | (a13 >>> 20);
+        b22 = (a14 << 6) | (a15 >>> 26); b23 = (a15 << 6) | (a14 >>> 26);
+        b42 = (a17 << 23) | (a16 >>> 9); b43 = (a16 << 23) | (a17 >>> 9);
+        b12 = (a18 << 20) | (a19 >>> 12); b13 = (a19 << 20) | (a18 >>> 12);
+        b14 = (a20 << 3) | (a21 >>> 29); b15 = (a21 << 3) | (a20 >>> 29);
+        b34 = (a22 << 10) | (a23 >>> 22); b35 = (a23 << 10) | (a22 >>> 22);
+        b4 = (a25 << 11) | (a24 >>> 21); b5 = (a24 << 11) | (a25 >>> 21);
+        b24 = (a26 << 25) | (a27 >>> 7); b25 = (a27 << 25) | (a26 >>> 7);
+        b44 = (a29 << 7) | (a28 >>> 25); b45 = (a28 << 7) | (a29 >>> 25);
+        b46 = (a31 << 9) | (a30 >>> 23); b47 = (a30 << 9) | (a31 >>> 23);
+        b16 = (a33 << 13) | (a32 >>> 19); b17 = (a32 << 13) | (a33 >>> 19);
+        b36 = (a34 << 15) | (a35 >>> 17); b37 = (a35 << 15) | (a34 >>> 17);
+        b6 = (a36 << 21) | (a37 >>> 11); b7 = (a37 << 21) | (a36 >>> 11);
+        b26 = (a38 << 8) | (a39 >>> 24); b27 = (a39 << 8) | (a38 >>> 24);
+        b28 = (a40 << 18) | (a41 >>> 14); b29 = (a41 << 18) | (a40 >>> 14);
+        b48 = (a42 << 2) | (a43 >>> 30); b49 = (a43 << 2) | (a42 >>> 30);
+        b18 = (a45 << 29) | (a44 >>> 3); b19 = (a44 << 29) | (a45 >>> 3);
+        b38 = (a47 << 24) | (a46 >>> 8); b39 = (a46 << 24) | (a47 >>> 8);
+        b8 = (a48 << 14) | (a49 >>> 18); b9 = (a49 << 14) | (a48 >>> 18);
+        a0 = b0 ^ (~b2 & b4); a1 = b1 ^ (~b3 & b5);
+        a2 = b2 ^ (~b4 & b6); a3 = b3 ^ (~b5 & b7);
+        a4 = b4 ^ (~b6 & b8); a5 = b5 ^ (~b7 & b9);
+        a6 = b6 ^ (~b8 & b0); a7 = b7 ^ (~b9 & b1);
+        a8 = b8 ^ (~b0 & b2); a9 = b9 ^ (~b1 & b3);
+        a10 = b10 ^ (~b12 & b14); a11 = b11 ^ (~b13 & b15);
+        a12 = b12 ^ (~b14 & b16); a13 = b13 ^ (~b15 & b17);
+        a14 = b14 ^ (~b16 & b18); a15 = b15 ^ (~b17 & b19);
+        a16 = b16 ^ (~b18 & b10); a17 = b17 ^ (~b19 & b11);
+        a18 = b18 ^ (~b10 & b12); a19 = b19 ^ (~b11 & b13);
+        a20 = b20 ^ (~b22 & b24); a21 = b21 ^ (~b23 & b25);
+        a22 = b22 ^ (~b24 & b26); a23 = b23 ^ (~b25 & b27);
+        a24 = b24 ^ (~b26 & b28); a25 = b25 ^ (~b27 & b29);
+        a26 = b26 ^ (~b28 & b20); a27 = b27 ^ (~b29 & b21);
+        a28 = b28 ^ (~b20 & b22); a29 = b29 ^ (~b21 & b23);
+        a30 = b30 ^ (~b32 & b34); a31 = b31 ^ (~b33 & b35);
+        a32 = b32 ^ (~b34 & b36); a33 = b33 ^ (~b35 & b37);
+        a34 = b34 ^ (~b36 & b38); a35 = b35 ^ (~b37 & b39);
+        a36 = b36 ^ (~b38 & b30); a37 = b37 ^ (~b39 & b31);
+        a38 = b38 ^ (~b30 & b32); a39 = b39 ^ (~b31 & b33);
+        a40 = b40 ^ (~b42 & b44); a41 = b41 ^ (~b43 & b45);
+        a42 = b42 ^ (~b44 & b46); a43 = b43 ^ (~b45 & b47);
+        a44 = b44 ^ (~b46 & b48); a45 = b45 ^ (~b47 & b49);
+        a46 = b46 ^ (~b48 & b40); a47 = b47 ^ (~b49 & b41);
+        a48 = b48 ^ (~b40 & b42); a49 = b49 ^ (~b41 & b43);
+        a0 ^= RC[r]; a1 ^= RC[r + 1];
+      }
+      s[0] = a0; s[1] = a1; s[2] = a2; s[3] = a3; s[4] = a4; s[5] = a5; s[6] = 
+      a6; s[7] = a7; s[8] = a8; s[9] = a9; s[10] = a10; s[11] = a11; s[12] = a12; s[13] 
+      = a13; s[14] = a14; s[15] = a15; s[16] = a16; s[17] = a17; s[18] = a18; s[19] = a19; 
+      s[20] = a20; s[21] = a21; s[22] = a22; s[23] = a23; s[24] = a24; s[25] = a25; s[26] = 
+      a26; s[27] = a27; s[28] = a28; s[29] = a29; s[30] = a30; s[31] = a31; s[32] = a32; s[33] 
+      = a33; s[34] = a34; s[35] = a35; s[36] = a36; s[37] = a37; s[38] = a38; s[39] = a39; 
+      s[40] = a40; s[41] = a41; s[42] = a42; s[43] = a43; s[44] = a44; s[45] = a45; s[46] = 
+      a46; s[47] = a47; s[48] = a48; s[49] = a49;
     }
+    class Keccak {
+      constructor(rate) { this.rate = rate; this.s = new Uint32Array(50); this.buf = new Uint8Array(rate); this.n = 0; }
+      absorb(m, o) {
+        const s = this.s;
+        for (let i = 0; i < this.rate; i += 4) s[i >> 2] ^= m[o + i] | (m[o + i + 1] << 8) | (m[o + i + 2] << 16) | (m[o + i + 3] << 24);
+        keccakF(s);
+      }
+      update(d) {
+        const rate = this.rate, len = d.length;
+        let o = 0;
+        if (this.n) {
+          const take = Math.min(rate - this.n, len);
+          this.buf.set(d.subarray(0, take), this.n);
+          this.n += take; o = take;
+          if (this.n < rate) return this;
+          this.absorb(this.buf, 0); this.n = 0;
+        }
+        for (; o + rate <= len; o += rate) this.absorb(d, o);
+        if (o < len) { this.buf.set(d.subarray(o), 0); this.n = len - o; }
+        return this;
+      }
+      // Pads with the domain byte (0x06 SHA-3, 0x1f SHAKE, 0x01 original Keccak) and
+      // squeezes outLen bytes. The absorbing state is left untouched, so one absorber
+      // can finish as several functions of the same rate.
+      digest(outLen, domain) {
+        const s = new Uint32Array(this.s), rate = this.rate, last = new Uint8Array(rate);
+        last.set(this.buf.subarray(0, this.n));
+        last[this.n] ^= domain;
+        last[rate - 1] ^= 0x80;
+        for (let i = 0; i < rate; i += 4) s[i >> 2] ^= last[i] | (last[i + 1] << 8) | (last[i + 2] << 16) | (last[i + 3] << 24);
+        keccakF(s);
+        const out = new Uint8Array(outLen);
+        for (let o = 0; o < outLen;) {
+          for (let i = 0; i < rate && o < outLen; i++, o++) out[o] = (s[i >> 2] >>> (8 * (i & 3))) & 255;
+          if (o < outLen) keccakF(s);
+        }
+        return out;
+      }
+    }
+
+    // ---------- BLAKE2b and BLAKE2s (RFC 7693) ----------
+    const SIGMA = [
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+      [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4], [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+      [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13], [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+      [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11], [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+      [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5], [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0]];
+    const IV32 = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+    // BLAKE2b's IV is SHA-512's: the same high words, and these low words.
+    const IV64 = new Uint32Array([0xf3bcc908, 0x6a09e667, 0x84caa73b, 0xbb67ae85, 0xfe94f82b, 0x3c6ef372, 0x5f1d36f1, 0xa54ff53a,
+      0xade682d1, 0x510e527f, 0x2b3e6c1f, 0x9b05688c, 0xfb41bd6b, 0x1f83d9ab, 0x137e2179, 0x5be0cd19]);
+
+    class Blake2 {
+      // wide: BLAKE2b (64-bit words, 128-byte blocks, 12 rounds); else BLAKE2s.
+      constructor(wide, outLen, key) {
+        this.wide = wide; this.bs = wide ? 128 : 64; this.outLen = outLen;
+        this.h = new Uint32Array(wide ? IV64 : IV32);
+        this.v = new Uint32Array(wide ? 32 : 16); this.m = new Uint32Array(wide ? 32 : 16);
+        const kk = key ? key.length : 0;
+        this.h[0] ^= 0x01010000 ^ (kk << 8) ^ outLen;
+        this.buf = new Uint8Array(this.bs); this.n = 0; this.t = 0;
+        if (kk) { this.buf.set(key); this.n = this.bs; }
+      }
+      update(d) {
+        const bs = this.bs, len = d.length;
+        let o = 0;
+        // The final block is compressed with the "last" flag, so a full buffer waits
+        // until more data arrives.
+        while (o < len) {
+          if (this.n === bs) { this.t += bs; this.compress(this.buf, 0, false); this.n = 0; }
+          if (this.n === 0 && len - o > bs) {
+            for (; len - o > bs; o += bs) { this.t += bs; this.compress(d, o, false); }
+            continue;
+          }
+          const take = Math.min(bs - this.n, len - o);
+          this.buf.set(d.subarray(o, o + take), this.n);
+          this.n += take; o += take;
+        }
+        return this;
+      }
+      digest() {
+        this.t += this.n;
+        this.buf.fill(0, this.n);
+        this.compress(this.buf, 0, true);
+        const out = new Uint8Array(this.outLen), h = this.h;
+        for (let i = 0; i < this.outLen; i++) out[i] = (h[i >> 2] >>> (8 * (i & 3))) & 255;
+        return out;
+      }
+      compress(b, o, last) {
+        const v = this.v, m = this.m, h = this.h;
+        const words = this.wide ? 32 : 16;
+        for (let i = 0; i < words; i++, o += 4) m[i] = b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24);
+        if (this.wide) {
+          v.set(h, 0); v.set(IV64, 16);
+          v[24] ^= this.t % 4294967296; v[25] ^= Math.floor(this.t / 4294967296);
+          if (last) { v[28] = ~v[28]; v[29] = ~v[29]; }
+          blake2bRounds(v, m);
+          for (let i = 0; i < 16; i++) h[i] ^= v[i] ^ v[i + 16];
+        } else {
+          v.set(h, 0); v.set(IV32, 8);
+          v[12] ^= this.t; v[13] ^= Math.floor(this.t / 4294967296);
+          if (last) v[14] = ~v[14];
+          rounds32(v, m, 10, SIGMA);
+          for (let i = 0; i < 8; i++) h[i] ^= v[i] ^ v[i + 8];
+        }
+      }
+    }
+    const SIGMA2 = SIGMA.map(row => row.map(i => 2 * i)); // BLAKE2b reads (lo, hi) word pairs
+    function blake2bRounds(v, m) {
+      let v0 = v[0], v1 = v[1], v2 = v[2], v3 = v[3], v4 = v[4], v5 = v[5], v6 = v[6], v7 = v[7],
+      v8 = v[8], v9 = v[9], v10 = v[10], v11 = v[11], v12 = v[12], v13 = v[13], v14 = v[14], v15 = v[15],
+      v16 = v[16], v17 = v[17], v18 = v[18], v19 = v[19], v20 = v[20], v21 = v[21], v22 = v[22], v23 = v[23],
+      v24 = v[24], v25 = v[25], v26 = v[26], v27 = v[27], v28 = v[28], v29 = v[29], v30 = v[30], v31 = v[31];
+      let t, u, s;
+      for (let r = 0; r < 12; r++) {
+        s = SIGMA2[r % 10];
+          t = v0 + v8 + m[s[0]]; v1 = v1 + v9 + m[s[0] + 1] + ((t / 4294967296) | 0); v0 = t >>> 0;
+          t = v24 ^ v0; v24 = (v25 ^ v1) >>> 0; v25 = t;
+          t = v16 + v24; v17 = (v17 + v25 + ((t / 4294967296) | 0)) >>> 0; v16 = t >>> 0;
+          t = v8 ^ v16; u = v9 ^ v17; v8 = ((t >>> 24) | (u << 8)) >>> 0; v9 = (u >>> 24) | (t << 8);
+          t = v0 + v8 + m[s[1]]; v1 = (v1 + v9 + m[s[1] + 1] + ((t / 4294967296) | 0)) >>> 0; v0 = t >>> 0;
+          t = v24 ^ v0; u = v25 ^ v1; v24 = ((t >>> 16) | (u << 16)) >>> 0; v25 = ((u >>> 16) | (t << 16)) >>> 0;
+          t = v16 + v24; v17 = (v17 + v25 + ((t / 4294967296) | 0)) >>> 0; v16 = t >>> 0;
+          t = v8 ^ v16; u = v9 ^ v17; v8 = ((u >>> 31) | (t << 1)) >>> 0; v9 = ((t >>> 31) | (u << 1)) >>> 0;
+          t = v2 + v10 + m[s[2]]; v3 = v3 + v11 + m[s[2] + 1] + ((t / 4294967296) | 0); v2 = t >>> 0;
+          t = v26 ^ v2; v26 = (v27 ^ v3) >>> 0; v27 = t;
+          t = v18 + v26; v19 = (v19 + v27 + ((t / 4294967296) | 0)) >>> 0; v18 = t >>> 0;
+          t = v10 ^ v18; u = v11 ^ v19; v10 = ((t >>> 24) | (u << 8)) >>> 0; v11 = (u >>> 24) | (t << 8);
+          t = v2 + v10 + m[s[3]]; v3 = (v3 + v11 + m[s[3] + 1] + ((t / 4294967296) | 0)) >>> 0; v2 = t >>> 0;
+          t = v26 ^ v2; u = v27 ^ v3; v26 = ((t >>> 16) | (u << 16)) >>> 0; v27 = ((u >>> 16) | (t << 16)) >>> 0;
+          t = v18 + v26; v19 = (v19 + v27 + ((t / 4294967296) | 0)) >>> 0; v18 = t >>> 0;
+          t = v10 ^ v18; u = v11 ^ v19; v10 = ((u >>> 31) | (t << 1)) >>> 0; v11 = ((t >>> 31) | (u << 1)) >>> 0;
+          t = v4 + v12 + m[s[4]]; v5 = v5 + v13 + m[s[4] + 1] + ((t / 4294967296) | 0); v4 = t >>> 0;
+          t = v28 ^ v4; v28 = (v29 ^ v5) >>> 0; v29 = t;
+          t = v20 + v28; v21 = (v21 + v29 + ((t / 4294967296) | 0)) >>> 0; v20 = t >>> 0;
+          t = v12 ^ v20; u = v13 ^ v21; v12 = ((t >>> 24) | (u << 8)) >>> 0; v13 = (u >>> 24) | (t << 8);
+          t = v4 + v12 + m[s[5]]; v5 = (v5 + v13 + m[s[5] + 1] + ((t / 4294967296) | 0)) >>> 0; v4 = t >>> 0;
+          t = v28 ^ v4; u = v29 ^ v5; v28 = ((t >>> 16) | (u << 16)) >>> 0; v29 = ((u >>> 16) | (t << 16)) >>> 0;
+          t = v20 + v28; v21 = (v21 + v29 + ((t / 4294967296) | 0)) >>> 0; v20 = t >>> 0;
+          t = v12 ^ v20; u = v13 ^ v21; v12 = ((u >>> 31) | (t << 1)) >>> 0; v13 = ((t >>> 31) | (u << 1)) >>> 0;
+          t = v6 + v14 + m[s[6]]; v7 = v7 + v15 + m[s[6] + 1] + ((t / 4294967296) | 0); v6 = t >>> 0;
+          t = v30 ^ v6; v30 = (v31 ^ v7) >>> 0; v31 = t;
+          t = v22 + v30; v23 = (v23 + v31 + ((t / 4294967296) | 0)) >>> 0; v22 = t >>> 0;
+          t = v14 ^ v22; u = v15 ^ v23; v14 = ((t >>> 24) | (u << 8)) >>> 0; v15 = (u >>> 24) | (t << 8);
+          t = v6 + v14 + m[s[7]]; v7 = (v7 + v15 + m[s[7] + 1] + ((t / 4294967296) | 0)) >>> 0; v6 = t >>> 0;
+          t = v30 ^ v6; u = v31 ^ v7; v30 = ((t >>> 16) | (u << 16)) >>> 0; v31 = ((u >>> 16) | (t << 16)) >>> 0;
+          t = v22 + v30; v23 = (v23 + v31 + ((t / 4294967296) | 0)) >>> 0; v22 = t >>> 0;
+          t = v14 ^ v22; u = v15 ^ v23; v14 = ((u >>> 31) | (t << 1)) >>> 0; v15 = ((t >>> 31) | (u << 1)) >>> 0;
+          t = v0 + v10 + m[s[8]]; v1 = v1 + v11 + m[s[8] + 1] + ((t / 4294967296) | 0); v0 = t >>> 0;
+          t = v30 ^ v0; v30 = (v31 ^ v1) >>> 0; v31 = t;
+          t = v20 + v30; v21 = (v21 + v31 + ((t / 4294967296) | 0)) >>> 0; v20 = t >>> 0;
+          t = v10 ^ v20; u = v11 ^ v21; v10 = ((t >>> 24) | (u << 8)) >>> 0; v11 = (u >>> 24) | (t << 8);
+          t = v0 + v10 + m[s[9]]; v1 = (v1 + v11 + m[s[9] + 1] + ((t / 4294967296) | 0)) >>> 0; v0 = t >>> 0;
+          t = v30 ^ v0; u = v31 ^ v1; v30 = ((t >>> 16) | (u << 16)) >>> 0; v31 = ((u >>> 16) | (t << 16)) >>> 0;
+          t = v20 + v30; v21 = (v21 + v31 + ((t / 4294967296) | 0)) >>> 0; v20 = t >>> 0;
+          t = v10 ^ v20; u = v11 ^ v21; v10 = ((u >>> 31) | (t << 1)) >>> 0; v11 = ((t >>> 31) | (u << 1)) >>> 0;
+          t = v2 + v12 + m[s[10]]; v3 = v3 + v13 + m[s[10] + 1] + ((t / 4294967296) | 0); v2 = t >>> 0;
+          t = v24 ^ v2; v24 = (v25 ^ v3) >>> 0; v25 = t;
+          t = v22 + v24; v23 = (v23 + v25 + ((t / 4294967296) | 0)) >>> 0; v22 = t >>> 0;
+          t = v12 ^ v22; u = v13 ^ v23; v12 = ((t >>> 24) | (u << 8)) >>> 0; v13 = (u >>> 24) | (t << 8);
+          t = v2 + v12 + m[s[11]]; v3 = (v3 + v13 + m[s[11] + 1] + ((t / 4294967296) | 0)) >>> 0; v2 = t >>> 0;
+          t = v24 ^ v2; u = v25 ^ v3; v24 = ((t >>> 16) | (u << 16)) >>> 0; v25 = ((u >>> 16) | (t << 16)) >>> 0;
+          t = v22 + v24; v23 = (v23 + v25 + ((t / 4294967296) | 0)) >>> 0; v22 = t >>> 0;
+          t = v12 ^ v22; u = v13 ^ v23; v12 = ((u >>> 31) | (t << 1)) >>> 0; v13 = ((t >>> 31) | (u << 1)) >>> 0;
+          t = v4 + v14 + m[s[12]]; v5 = v5 + v15 + m[s[12] + 1] + ((t / 4294967296) | 0); v4 = t >>> 0;
+          t = v26 ^ v4; v26 = (v27 ^ v5) >>> 0; v27 = t;
+          t = v16 + v26; v17 = (v17 + v27 + ((t / 4294967296) | 0)) >>> 0; v16 = t >>> 0;
+          t = v14 ^ v16; u = v15 ^ v17; v14 = ((t >>> 24) | (u << 8)) >>> 0; v15 = (u >>> 24) | (t << 8);
+          t = v4 + v14 + m[s[13]]; v5 = (v5 + v15 + m[s[13] + 1] + ((t / 4294967296) | 0)) >>> 0; v4 = t >>> 0;
+          t = v26 ^ v4; u = v27 ^ v5; v26 = ((t >>> 16) | (u << 16)) >>> 0; v27 = ((u >>> 16) | (t << 16)) >>> 0;
+          t = v16 + v26; v17 = (v17 + v27 + ((t / 4294967296) | 0)) >>> 0; v16 = t >>> 0;
+          t = v14 ^ v16; u = v15 ^ v17; v14 = ((u >>> 31) | (t << 1)) >>> 0; v15 = ((t >>> 31) | (u << 1)) >>> 0;
+          t = v6 + v8 + m[s[14]]; v7 = v7 + v9 + m[s[14] + 1] + ((t / 4294967296) | 0); v6 = t >>> 0;
+          t = v28 ^ v6; v28 = (v29 ^ v7) >>> 0; v29 = t;
+          t = v18 + v28; v19 = (v19 + v29 + ((t / 4294967296) | 0)) >>> 0; v18 = t >>> 0;
+          t = v8 ^ v18; u = v9 ^ v19; v8 = ((t >>> 24) | (u << 8)) >>> 0; v9 = (u >>> 24) | (t << 8);
+          t = v6 + v8 + m[s[15]]; v7 = (v7 + v9 + m[s[15] + 1] + ((t / 4294967296) | 0)) >>> 0; v6 = t >>> 0;
+          t = v28 ^ v6; u = v29 ^ v7; v28 = ((t >>> 16) | (u << 16)) >>> 0; v29 = ((u >>> 16) | (t << 16)) >>> 0;
+          t = v18 + v28; v19 = (v19 + v29 + ((t / 4294967296) | 0)) >>> 0; v18 = t >>> 0;
+          t = v8 ^ v18; u = v9 ^ v19; v8 = ((u >>> 31) | (t << 1)) >>> 0; v9 = ((t >>> 31) | (u << 1)) >>> 0;
+      }
+      v[0] = v0; v[1] = v1; v[2] = v2; v[3] = v3; v[4] = v4; v[5] = v5; v[6] = v6; v[7] = v7; 
+      v[8] = v8; v[9] = v9; v[10] = v10; v[11] = v11; v[12] = v12; v[13] = v13; v[14] = v14; v[15] = v15; 
+      v[16] = v16; v[17] = v17; v[18] = v18; v[19] = v19; v[20] = v20; v[21] = v21; v[22] = v22; v[23] = v23; 
+      v[24] = v24; v[25] = v25; v[26] = v26; v[27] = v27; v[28] = v28; v[29] = v29; v[30] = v30; v[31] = v31;
+    }
+    // rounds: 10 for BLAKE2s (message order from SIGMA2), 7 for BLAKE3 (from B3_ORDER).
+    function rounds32(v, m, rounds, order) {
+      let v0 = v[0], v1 = v[1], v2 = v[2], v3 = v[3], v4 = v[4], v5 = v[5], v6 = v[6], v7 = v[7],
+      v8 = v[8], v9 = v[9], v10 = v[10], v11 = v[11], v12 = v[12], v13 = v[13], v14 = v[14], v15 = v[15];
+      let t, s;
+      for (let r = 0; r < rounds; r++) {
+        s = order[r];
+          v0 = (v0 + v4 + m[s[0]]) | 0; t = v12 ^ v0; v12 = (t >>> 16) | (t << 16);
+          v8 = (v8 + v12) | 0; t = v4 ^ v8; v4 = (t >>> 12) | (t << 20);
+          v0 = (v0 + v4 + m[s[1]]) | 0; t = v12 ^ v0; v12 = (t >>> 8) | (t << 24);
+          v8 = (v8 + v12) | 0; t = v4 ^ v8; v4 = (t >>> 7) | (t << 25);
+          v1 = (v1 + v5 + m[s[2]]) | 0; t = v13 ^ v1; v13 = (t >>> 16) | (t << 16);
+          v9 = (v9 + v13) | 0; t = v5 ^ v9; v5 = (t >>> 12) | (t << 20);
+          v1 = (v1 + v5 + m[s[3]]) | 0; t = v13 ^ v1; v13 = (t >>> 8) | (t << 24);
+          v9 = (v9 + v13) | 0; t = v5 ^ v9; v5 = (t >>> 7) | (t << 25);
+          v2 = (v2 + v6 + m[s[4]]) | 0; t = v14 ^ v2; v14 = (t >>> 16) | (t << 16);
+          v10 = (v10 + v14) | 0; t = v6 ^ v10; v6 = (t >>> 12) | (t << 20);
+          v2 = (v2 + v6 + m[s[5]]) | 0; t = v14 ^ v2; v14 = (t >>> 8) | (t << 24);
+          v10 = (v10 + v14) | 0; t = v6 ^ v10; v6 = (t >>> 7) | (t << 25);
+          v3 = (v3 + v7 + m[s[6]]) | 0; t = v15 ^ v3; v15 = (t >>> 16) | (t << 16);
+          v11 = (v11 + v15) | 0; t = v7 ^ v11; v7 = (t >>> 12) | (t << 20);
+          v3 = (v3 + v7 + m[s[7]]) | 0; t = v15 ^ v3; v15 = (t >>> 8) | (t << 24);
+          v11 = (v11 + v15) | 0; t = v7 ^ v11; v7 = (t >>> 7) | (t << 25);
+          v0 = (v0 + v5 + m[s[8]]) | 0; t = v15 ^ v0; v15 = (t >>> 16) | (t << 16);
+          v10 = (v10 + v15) | 0; t = v5 ^ v10; v5 = (t >>> 12) | (t << 20);
+          v0 = (v0 + v5 + m[s[9]]) | 0; t = v15 ^ v0; v15 = (t >>> 8) | (t << 24);
+          v10 = (v10 + v15) | 0; t = v5 ^ v10; v5 = (t >>> 7) | (t << 25);
+          v1 = (v1 + v6 + m[s[10]]) | 0; t = v12 ^ v1; v12 = (t >>> 16) | (t << 16);
+          v11 = (v11 + v12) | 0; t = v6 ^ v11; v6 = (t >>> 12) | (t << 20);
+          v1 = (v1 + v6 + m[s[11]]) | 0; t = v12 ^ v1; v12 = (t >>> 8) | (t << 24);
+          v11 = (v11 + v12) | 0; t = v6 ^ v11; v6 = (t >>> 7) | (t << 25);
+          v2 = (v2 + v7 + m[s[12]]) | 0; t = v13 ^ v2; v13 = (t >>> 16) | (t << 16);
+          v8 = (v8 + v13) | 0; t = v7 ^ v8; v7 = (t >>> 12) | (t << 20);
+          v2 = (v2 + v7 + m[s[13]]) | 0; t = v13 ^ v2; v13 = (t >>> 8) | (t << 24);
+          v8 = (v8 + v13) | 0; t = v7 ^ v8; v7 = (t >>> 7) | (t << 25);
+          v3 = (v3 + v4 + m[s[14]]) | 0; t = v14 ^ v3; v14 = (t >>> 16) | (t << 16);
+          v9 = (v9 + v14) | 0; t = v4 ^ v9; v4 = (t >>> 12) | (t << 20);
+          v3 = (v3 + v4 + m[s[15]]) | 0; t = v14 ^ v3; v14 = (t >>> 8) | (t << 24);
+          v9 = (v9 + v14) | 0; t = v4 ^ v9; v4 = (t >>> 7) | (t << 25);
+      }
+      v[0] = v0; v[1] = v1; v[2] = v2; v[3] = v3; v[4] = v4; v[5] = v5; v[6] = v6; v[7] = v7; 
+      v[8] = v8; v[9] = v9; v[10] = v10; v[11] = v11; v[12] = v12; v[13] = v13; v[14] = v14; v[15] = v15;
+    }
+    // ---------- BLAKE3 (hash and keyed_hash modes, any output length) ----------
+    const B3_PERM = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8];
+    // Message word order in each of the 7 rounds: the permutation applied r times.
+    const B3_ORDER = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]];
+    for (let r = 1; r < 7; r++) B3_ORDER.push(B3_PERM.map(i => B3_ORDER[r - 1][i]));
+    const CHUNK_START = 1, CHUNK_END = 2, PARENT = 4, ROOT = 8, KEYED = 16;
+    const B3S = new Uint32Array(16), B3M = new Uint32Array(16);
+    // Returns the 16-word compression output in `out`.
+    function b3compress(cv, m, counter, len, flags, out) {
+      const s = B3S, w = B3M;
+      s.set(cv, 0); s[8] = IV32[0]; s[9] = IV32[1]; s[10] = IV32[2]; s[11] = IV32[3];
+      s[12] = counter % 4294967296; s[13] = Math.floor(counter / 4294967296); s[14] = len; s[15] = flags;
+      w.set(m);
+      rounds32(s, w, 7, B3_ORDER);
+      for (let i = 0; i < 8; i++) { out[i] = s[i] ^ s[i + 8]; out[i + 8] = s[i + 8] ^ cv[i]; }
+    }
+    class Blake3 {
+      constructor(key) {
+        this.key = new Uint32Array(8);
+        if (key) { for (let i = 0; i < 8; i++) this.key[i] = key[4 * i] | (key[4 * i + 1] << 8) | (key[4 * i + 2] << 16) | (key[4 * i + 3] << 24); this.flags = KEYED; }
+        else { this.key.set(IV32); this.flags = 0; }
+        this.stack = []; this.chunks = 0;
+        this.cv = new Uint32Array(this.key); this.block = new Uint8Array(64); this.bn = 0; this.blocks = 0;
+        this.m = new Uint32Array(16); this.out = new Uint32Array(16);
+      }
+      words(b, o) { const m = this.m; for (let i = 0; i < 16; i++, o += 4) m[i] = b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24); return m; }
+      chunkBlock(b, o, end) {
+        const fl = this.flags | (this.blocks === 0 ? CHUNK_START : 0) | (end ? CHUNK_END : 0);
+        b3compress(this.cv, this.words(b, o), this.chunks, 64, fl, this.out);
+        this.cv.set(this.out.subarray(0, 8));
+        this.blocks++;
+      }
+      // A finished chunk joins the tree: merge with the stack while the chunk count is even.
+      pushChunk() {
+        let cv = new Uint32Array(this.cv), total = ++this.chunks;
+        while ((total & 1) === 0) {
+          const left = this.stack.pop(), m = new Uint32Array(16);
+          m.set(left, 0); m.set(cv, 8);
+          b3compress(this.key, m, 0, 64, this.flags | PARENT, this.out);
+          cv = new Uint32Array(this.out.subarray(0, 8));
+          total /= 2;
+        }
+        this.stack.push(cv);
+        this.cv.set(this.key); this.blocks = 0;
+      }
+      update(d) {
+        const len = d.length;
+        let o = 0;
+        while (o < len) {
+          // A full block is compressed only once more input follows, since the last
+          // block of the last chunk is finished differently.
+          if (this.bn === 64) {
+            const end = this.blocks === 15;
+            this.chunkBlock(this.block, 0, end);
+            this.bn = 0;
+            if (end) this.pushChunk();
+          }
+          if (this.bn === 0) {
+            while (len - o > 64) {
+              const end = this.blocks === 15;
+              this.chunkBlock(d, o, end);
+              o += 64;
+              if (end) this.pushChunk();
+            }
+          }
+          const take = Math.min(64 - this.bn, len - o);
+          this.block.set(d.subarray(o, o + take), this.bn);
+          this.bn += take; o += take;
+        }
+        return this;
+      }
+      digest(outLen) {
+        // The last (partial) block of the current chunk, then the parents up the stack.
+        const blk = new Uint8Array(64);
+        blk.set(this.block.subarray(0, this.bn));
+        let cv = new Uint32Array(this.cv), m = new Uint32Array(this.words(blk, 0));
+        let counter = this.chunks, len = this.bn, flags = this.flags | (this.blocks === 0 ? CHUNK_START : 0) | CHUNK_END;
+        for (let i = this.stack.length - 1; i >= 0; i--) {
+          b3compress(cv, m, counter, len, flags, this.out);
+          const right = this.out.subarray(0, 8);
+          m = new Uint32Array(16); m.set(this.stack[i], 0); m.set(right, 8);
+          cv = new Uint32Array(this.key); counter = 0; len = 64; flags = this.flags | PARENT;
+        }
+        const out = new Uint8Array(outLen), o16 = new Uint32Array(16);
+        for (let block = 0, o = 0; o < outLen; block++) {
+          b3compress(cv, m, block, len, flags | ROOT, o16);
+          for (let i = 0; i < 64 && o < outLen; i++, o++) out[o] = (o16[i >> 2] >>> (8 * (i & 3))) & 255;
+        }
+        return out;
+      }
+    }
+
+    // ---------- CRC-32 (ISO-HDLC, as in zip and PNG) and CRC-32C (Castagnoli) ----------
+    function crcTable(poly) {
+      const t = new Int32Array(256);
+      for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ poly : c >>> 1; t[n] = c; }
+      return t;
+    }
+    const CRC_T = { crc32: crcTable(0xedb88320), crc32c: crcTable(0x82f63b78) };
+    class Crc {
+      constructor(name) { this.t = CRC_T[name]; this.c = -1; }
+      update(d) { const t = this.t; let c = this.c; for (let i = 0; i < d.length; i++) c = t[(c ^ d[i]) & 255] ^ (c >>> 8); this.c = c; return this; }
+      digest() { const c = ~this.c; return new Uint8Array([(c >>> 24) & 255, (c >>> 16) & 255, (c >>> 8) & 255, c & 255]); }
+    }
+
+    // ---------- HMAC (RFC 2104) over any of the block hashes above ----------
+    class Hmac {
+      constructor(make, blockSize, key) {
+        if (key.length > blockSize) key = make().update(key).digest();
+        const k = new Uint8Array(blockSize);
+        k.set(key);
+        const ipad = k.map(b => b ^ 0x36), opad = k.map(b => b ^ 0x5c);
+        this.make = make; this.opad = opad;
+        this.inner = make().update(ipad);
+      }
+      update(d) { this.inner.update(d); return this; }
+      digest() { return this.make().update(this.opad).update(this.inner.digest()).digest(); }
+    }
+
+    // ---------- Which hasher computes what ----------
+    // Keccak family: [rate in bytes, domain byte, output bytes (0 = variable length)].
+    const KECCAK = {
+      'sha3-224': [144, 6, 28], 'sha3-256': [136, 6, 32], 'sha3-384': [104, 6, 48], 'sha3-512': [72, 6, 64],
+      keccak256: [136, 1, 32], shake128: [168, 0x1f, 0], shake256: [136, 0x1f, 0]
+    };
+    const SUBTLE = { sha1: 'SHA-1', sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' };
+    function sha3Maker(id) {
+      const k = KECCAK[id];
+      return () => { const h = new Keccak(k[0]); return { update(d) { h.update(d); return this; }, digest() { return h.digest(k[2], k[1]); } }; };
+    }
+    // algs: ids to compute; key: HMAC key bytes or null; xof: output bytes for shake128,
+    // shake256 and blake3. SHA-1 and SHA-2 use Web Crypto, which needs all the data at once.
+    function plan(algs, key, xof) {
+      const jobs = [], subtleIds = [], errors = {}, absorbers = {};
+      for (const id of algs) {
+        if (SUBTLE[id]) { subtleIds.push(id); continue; }
+        if (key) {
+          if (id === 'md5') jobs.push({ id: id, h: new Hmac(() => new Md5(), 64, key) });
+          else if (id === 'ripemd160') jobs.push({ id: id, h: new Hmac(() => new Ripemd160(), 64, key) });
+          else if (/^sha3-/.test(id)) jobs.push({ id: id, h: new Hmac(sha3Maker(id), KECCAK[id][0], key) });
+          else if (id === 'blake2b512' && key.length <= 64) jobs.push({ id: id, h: new Blake2(true, 64, key) });
+          else if (id === 'blake2b512') errors[id] = 'BLAKE2b takes a key of at most 64 bytes; this one has ' + key.length + '.';
+          else if (id === 'blake2s256' && key.length <= 32) jobs.push({ id: id, h: new Blake2(false, 32, key) });
+          else if (id === 'blake2s256') errors[id] = 'BLAKE2s takes a key of at most 32 bytes; this one has ' + key.length + '.';
+          else if (id === 'blake3' && key.length === 32) jobs.push({ id: id, h: new Blake3(key), n: xof.blake3 });
+          else if (id === 'blake3') errors[id] = 'BLAKE3’s keyed mode needs a key of exactly 32 bytes; this one has ' + key.length + '.';
+          else errors[id] = 'No keyed version: clear the key to see this hash.';
+          continue;
+        }
+        if (KECCAK[id]) {
+          const rate = KECCAK[id][0];
+          (absorbers[rate] = absorbers[rate] || { keccak: true, h: new Keccak(rate), ids: [] }).ids.push(id);
+          continue;
+        }
+        if (id === 'md5') jobs.push({ id: id, h: new Md5() });
+        else if (id === 'ripemd160') jobs.push({ id: id, h: new Ripemd160() });
+        else if (id === 'blake2b512') jobs.push({ id: id, h: new Blake2(true, 64) });
+        else if (id === 'blake2s256') jobs.push({ id: id, h: new Blake2(false, 32) });
+        else if (id === 'blake3') jobs.push({ id: id, h: new Blake3(), n: xof.blake3 });
+        else if (id === 'crc32' || id === 'crc32c') jobs.push({ id: id, h: new Crc(id) });
+      }
+      // One absorber per rate serves every function of that rate (SHA3-256, Keccak-256, SHAKE256).
+      for (const r in absorbers) jobs.push(absorbers[r]);
+      return {
+        needAll: subtleIds.length > 0,
+        update(d) { for (const j of jobs) j.h.update(d); },
+        async finish(all, subtle) {
+          const out = {};
+          for (const j of jobs) {
+            if (j.keccak) for (const id of j.ids) out[id] = j.h.digest(KECCAK[id][2] || xof[id], KECCAK[id][1]);
+            else out[j.id] = j.n ? j.h.digest(j.n) : j.h.digest();
+          }
+          for (const id of subtleIds) {
+            if (!subtle) { errors[id] = 'Unavailable: Web Crypto needs a secure (https) page.'; continue; }
+            if (key) {
+              const k = await subtle.importKey('raw', key, { name: 'HMAC', hash: SUBTLE[id] }, false, ['sign']);
+              out[id] = new Uint8Array(await subtle.sign('HMAC', k, all));
+            } else out[id] = new Uint8Array(await subtle.digest(SUBTLE[id], all));
+          }
+          return { out: out, errors: errors };
+        }
+      };
+    }
+
+    return { Md5: Md5, Ripemd160: Ripemd160, Keccak: Keccak, Blake2: Blake2, Blake3: Blake3, Crc: Crc, Hmac: Hmac, plan: plan };
   }
+
+  // Runs in a Web Worker: reads the file (or bytes) in pieces, feeds every hasher,
+  // and reports progress. Terminating the worker cancels the job.
+  function workerMain(hashLib) {
+    const L = hashLib();
+    self.onmessage = async e => {
+      const m = e.data;
+      try {
+        const p = L.plan(m.algs, m.key, m.xof);
+        const isBlob = !(m.src instanceof Uint8Array);
+        const size = isBlob ? m.src.size : m.src.length;
+        let all = null;
+        if (p.needAll) {
+          if (!isBlob) all = m.src;
+          else {
+            try { all = new Uint8Array(size); } catch (err) { self.postMessage({ id: m.id, error: 'memory' }); return; }
+          }
+        }
+        const CH = 4 << 20;
+        for (let off = 0; off < size; off += CH) {
+          const piece = isBlob ? new Uint8Array(await m.src.slice(off, off + CH).arrayBuffer()) : m.src.subarray(off, off + CH);
+          if (all && isBlob) all.set(piece, off);
+          p.update(piece);
+          self.postMessage({ id: m.id, done: Math.min(size, off + CH), size: size });
+        }
+        if (p.needAll) self.postMessage({ id: m.id, done: size, size: size, stage: 'Web Crypto' });
+        const r = await p.finish(all || new Uint8Array(0), self.crypto && self.crypto.subtle);
+        self.postMessage({ id: m.id, out: r.out, errors: r.errors });
+      } catch (err) {
+        self.postMessage({ id: m.id, error: err && err.name === 'NotReadableError' ? 'unreadable' : String(err && err.message ? err.message : err) });
+      }
+    };
+  }
+
+  const L = hashLib();
+  const subtle = window.crypto && window.crypto.subtle && typeof window.crypto.subtle.digest === 'function' ? window.crypto.subtle : null;
+  // id, display name, output bits (0 = variable), name when keyed, common default
+  const ALGS = [
+    ['md5', 'MD5', 128, 'HMAC-MD5'], ['sha1', 'SHA-1', 160, 'HMAC-SHA-1'], ['sha256', 'SHA-256', 256, 'HMAC-SHA-256'],
+    ['sha384', 'SHA-384', 384, 'HMAC-SHA-384'], ['sha512', 'SHA-512', 512, 'HMAC-SHA-512'],
+    ['sha3-224', 'SHA3-224', 224, 'HMAC-SHA3-224'], ['sha3-256', 'SHA3-256', 256, 'HMAC-SHA3-256'], ['sha3-384', 'SHA3-384', 384, 'HMAC-SHA3-384'],
+    ['sha3-512', 'SHA3-512', 512, 'HMAC-SHA3-512'], ['keccak256', 'Keccak-256', 256, ''], ['shake128', 'SHAKE128', 0, ''], ['shake256', 'SHAKE256', 0, ''],
+    ['blake2b512', 'BLAKE2b-512', 512, 'BLAKE2b-512 keyed'], ['blake2s256', 'BLAKE2s-256', 256, 'BLAKE2s-256 keyed'], ['blake3', 'BLAKE3', 0, 'BLAKE3 keyed'],
+    ['ripemd160', 'RIPEMD-160', 160, 'HMAC-RIPEMD-160'], ['crc32', 'CRC-32', 32, ''], ['crc32c', 'CRC-32C', 32, '']
+  ].map(a => ({ id: a[0], name: a[1], bits: a[2], keyedName: a[3] }));
+  const BY_ID = Object.fromEntries(ALGS.map(a => [a.id, a]));
+  const COMMON = ['md5', 'sha1', 'sha256', 'sha384', 'sha512', 'sha3-256'];
+  const XOF_DEFAULT = { shake128: 256, shake256: 512, blake3: 256 };
+  const XOF_TEXT = 256; // bytes squeezed for short text, so longer expected values can still match
+  const SMALL = 64 * 1024; // text up to this size is hashed on the page with every algorithm
+  const PROGRESS_FROM = 8 * 1024 * 1024;
 
   // ---------- Encoding helpers ----------
   function toHex(u8) {
@@ -343,78 +958,315 @@ faq:
     while (j > 0 && s.charCodeAt(j - 1) === 61) j--;
     return s.slice(0, j);
   }
-  function parseHexInput(s) {
+  function parseHexInput(s, what) {
     const clean = s.replace(/0x/gi, '').replace(/[\s:,_-]/g, '');
     if (/[^0-9a-f]/i.test(clean)) {
       const bad = clean.match(/[^0-9a-f]/i)[0];
-      throw new Error('"' + bad + '" is not a hex digit. Hex input may contain 0-9, a-f, spaces and colons.');
+      throw new Error('"' + bad + '" is not a hex digit. ' + what + ' may contain 0-9, a-f, spaces and colons.');
     }
-    if (clean.length % 2) throw new Error('Hex input needs an even number of digits (two per byte); it has ' + clean.length + '.');
+    if (clean.length % 2) throw new Error(what + ' needs an even number of digits (two per byte); it has ' + clean.length + '.');
     const out = new Uint8Array(clean.length / 2);
     for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
     return out;
   }
-  function parseB64Input(s) {
+  function parseB64Input(s, what) {
     let clean = s.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(clean)) throw new Error('This is not valid Base64. Only A-Z, a-z, 0-9, +, / (or - and _) and trailing = are allowed.');
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(clean)) throw new Error(what + ' is not valid Base64. Only A-Z, a-z, 0-9, +, / (or - and _) and trailing = are allowed.');
     clean = trimEq(clean);
-    if (clean.length % 4 === 1) throw new Error('This Base64 text has an impossible length; a character is probably missing.');
+    if (clean.length % 4 === 1) throw new Error(what + ' has an impossible Base64 length; a character is probably missing.');
     clean += '===='.slice(0, (4 - clean.length % 4) % 4);
     let bin;
-    try { bin = atob(clean); } catch (e) { throw new Error('This is not valid Base64.'); }
+    try { bin = atob(clean); } catch (e) { throw new Error(what + ' is not valid Base64.'); }
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
   }
-
-  // ---------- Hashing ----------
-  const nextFrame = () => new Promise(r => setTimeout(r, 0));
-
-  // src is a Uint8Array or a Blob/File. isLive() returns false once the job is stale.
-  async function hashAll(src, isLive, onProgress) {
-    const isBlob = !(src instanceof Uint8Array);
-    const size = isBlob ? src.size : src.length;
-    let all = isBlob ? null : src;
-    if (isBlob) {
-      try { all = new Uint8Array(size); } catch (e) {
-        throw new Error('This file (' + fmtBytes(size) + ') is too large for your browser to hold in memory, which Web Crypto needs for the SHA hashes.');
-      }
-    }
-    const md5 = new Md5();
-    for (let off = 0; off < size || (off === 0 && size === 0); off += CHUNK) {
-      let piece;
-      if (isBlob) {
-        piece = new Uint8Array(await src.slice(off, off + CHUNK).arrayBuffer());
-        if (!isLive()) return null;
-        all.set(piece, off);
-      } else {
-        piece = src.subarray(off, off + CHUNK);
-      }
-      md5.update(piece);
-      if (size === 0) break;
-      if (off + CHUNK < size) {
-        if (onProgress) onProgress(off + piece.length, size, 'Reading');
-        await nextFrame();
-        if (!isLive()) return null;
-      }
-    }
-    const res = { md5: md5.digest(), size: size };
-    for (const a of ALGS) {
-      if (!a.subtle) continue;
-      if (!subtle) { res[a.id] = null; continue; }
-      if (onProgress) onProgress(size, size, 'Computing ' + a.name);
-      res[a.id] = new Uint8Array(await subtle.digest(a.subtle, all));
-      if (!isLive()) return null;
-    }
-    return res;
+  function decodeAs(s, enc, what) {
+    if (enc === 'hex') return parseHexInput(s, what);
+    if (enc === 'base64') return parseB64Input(s, what);
+    return new TextEncoder().encode(s);
   }
 
-  // ---------- State and rendering ----------
-  const textEl = $('#hg-text'), encEl = $('#hg-enc'), upperEl = $('#hg-upper'), expEl = $('#hg-expected');
-  const fileEl = $('#hg-file'), drop = $('#hg-drop'), msgEl = $('#hg-msg'), listEl = $('#hg-results');
-  const state = { src: 'text', results: { text: null, file: null }, summary: { text: '', file: 'Choose a file to see its hashes' }, error: { text: '', file: '' }, busy: { text: false, file: false }, textJob: 0, fileJob: 0 };
+  // ---------- Background worker ----------
+  const WORKER_SRC = '"use strict";\n' + hashLib.toString() + '\n(' + workerMain.toString() + ')(hashLib);';
+  const workers = {}; // one per source ("text", "file"), so a file job and typing don't cancel each other
+  let workerUrl = null, workersBroken = false, jobSeq = 0;
+  function newWorker(kind) {
+    if (workersBroken) return null;
+    try {
+      if (!workerUrl) workerUrl = URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' }));
+      const w = new Worker(workerUrl);
+      w.pending = null;
+      w.onmessage = e => {
+        const d = e.data, job = w.pending;
+        if (!job || d.id !== job.id) return;
+        if (d.done !== undefined) { if (job.onProgress) job.onProgress(d.done, d.size, d.stage); return; }
+        w.pending = null;
+        if (d.error) job.reject(d.error === 'memory' ? Object.assign(new Error('memory'), { memory: true }) : d.error === 'unreadable' ? Object.assign(new Error('unreadable'), { name: 'NotReadableError' }) : new Error(d.error));
+        else job.resolve({ out: d.out, errors: d.errors });
+      };
+      w.onerror = ev => {
+        ev.preventDefault();
+        if (w.pending) { const job = w.pending; w.pending = null; workersBroken = true; delete workers[kind]; job.fallback(); }
+      };
+      workers[kind] = w;
+      return w;
+    } catch (e) {
+      workersBroken = true;
+      return null;
+    }
+  }
+  function stopWorker(kind) {
+    const w = workers[kind];
+    if (!w) return;
+    w.terminate();
+    delete workers[kind];
+  }
+  // Same work on the page, in 1 MB steps with pauses, for browsers without workers.
+  async function runHere(src, algs, key, xof, onProgress, isLive) {
+    const p = L.plan(algs, key, xof);
+    const isBlob = !(src instanceof Uint8Array);
+    const size = isBlob ? src.size : src.length;
+    let all = null;
+    if (p.needAll) {
+      if (!isBlob) all = src;
+      else { try { all = new Uint8Array(size); } catch (e) { throw Object.assign(new Error('memory'), { memory: true }); } }
+    }
+    const CH = 1 << 20;
+    for (let off = 0; off < size; off += CH) {
+      const piece = isBlob ? new Uint8Array(await src.slice(off, off + CH).arrayBuffer()) : src.subarray(off, off + CH);
+      if (!isLive()) return null;
+      if (all && isBlob) all.set(piece, off);
+      p.update(piece);
+      if (onProgress) onProgress(Math.min(size, off + CH), size);
+      await new Promise(r => setTimeout(r, 0));
+      if (!isLive()) return null;
+    }
+    return p.finish(all || new Uint8Array(0), subtle);
+  }
+  function runJob(kind, src, algs, key, xof, onProgress, isLive) {
+    stopWorker(kind); // a newer job replaces an older one of the same kind
+    const w = newWorker(kind);
+    if (!w) return runHere(src, algs, key, xof, onProgress, isLive);
+    return new Promise((resolve, reject) => {
+      const id = ++jobSeq;
+      w.pending = { id: id, resolve: resolve, reject: reject, onProgress: onProgress, fallback: () => runHere(src, algs, key, xof, onProgress, isLive).then(resolve, reject) };
+      w.postMessage({ id: id, src: src, algs: algs, key: key, xof: xof });
+    });
+  }
 
-  // Screen readers get one short sentence once input pauses, not every hash on each keystroke.
+  // ---------- State ----------
+  const textEl = $('#hg-text'), encEl = $('#hg-enc'), upperEl = $('#hg-upper'), expEl = $('#hg-expected');
+  const keyEl = $('#hg-key'), keyEncEl = $('#hg-key-enc');
+  const fileEl = $('#hg-file'), drop = $('#hg-drop'), msgEl = $('#hg-msg'), listEl = $('#hg-results');
+  const blank = () => ({ res: null, summary: '', error: '', busy: false, job: 0 });
+  const state = { src: 'text', text: blank(), file: Object.assign(blank(), { summary: 'Choose a file to see its hashes' }), fileObj: null, key: null, keyError: '' };
+
+  const selected = () => TT.$$('.hg-algs input[data-alg]').filter(c => c.checked).map(c => c.getAttribute('data-alg'));
+  const xofBits = id => {
+    const el = $('#hg-' + id + '-len');
+    const n = el ? parseInt(el.value, 10) : NaN;
+    return Number.isInteger(n) && n >= 8 && n <= 8192 && n % 8 === 0 ? n : null;
+  };
+  const xofBytes = () => ({ shake128: (xofBits('shake128') || 256) / 8, shake256: (xofBits('shake256') || 512) / 8, blake3: (xofBits('blake3') || 256) / 8 });
+
+  // ---------- Result list ----------
+  ALGS.forEach(a => {
+    const item = document.createElement('div');
+    item.className = 'hg-item';
+    item.dataset.alg = a.id;
+    const head = document.createElement('div');
+    head.className = 'hg-alg';
+    head.innerHTML = '<b></b><small></small><em>Match</em>';
+    item.appendChild(head);
+    if (!a.bits) {
+      const lab = document.createElement('label');
+      lab.className = 'hg-xof';
+      lab.innerHTML = '<input type="number" min="8" max="8192" step="8" inputmode="numeric"> bits';
+      const inp = lab.querySelector('input');
+      inp.id = 'hg-' + a.id + '-len';
+      inp.value = String(XOF_DEFAULT[a.id]);
+      inp.setAttribute('aria-label', a.name + ' output length in bits');
+      head.appendChild(lab);
+    }
+    [['hex', 'Hex'], ['b64', 'Base64']].forEach(([k, label]) => {
+      const line = document.createElement('div');
+      line.className = 'hg-line' + (k === 'b64' ? ' hg-b64' : '');
+      line.innerHTML = '<span class="hg-k">' + label + '</span><code>–</code><button class="btn secondary small" type="button">Copy</button>';
+      const code = line.querySelector('code'), btn = line.querySelector('button');
+      code.id = 'hg-' + a.id + '-' + k;
+      btn.setAttribute('data-copy-target', '#' + code.id);
+      btn.setAttribute('aria-label', 'Copy ' + a.name + ' ' + label);
+      item.appendChild(line);
+    });
+    listEl.appendChild(item);
+  });
+
+  function hexOf(d) { const h = toHex(d); return upperEl.checked ? h.toUpperCase() : h; }
+  function outFor(id, r) {
+    const d = r && r.out[id];
+    if (!d) return null;
+    const a = BY_ID[id];
+    return a.bits ? d : d.subarray(0, (xofBits(id) || XOF_DEFAULT[id]) / 8);
+  }
+
+  function render() {
+    const cur = state[state.src], r = cur.res, keyed = !!(r && r.keyed);
+    msgEl.textContent = cur.error || state.keyError;
+    $('#hg-summary').textContent = cur.summary;
+    listEl.dataset.busy = cur.busy ? '1' : '';
+    const sel = new Set(selected());
+    $('#hg-alg-count').textContent = sel.size + ' of ' + ALGS.length;
+    ALGS.forEach(a => {
+      const item = listEl.querySelector('[data-alg="' + a.id + '"]');
+      item.hidden = !sel.has(a.id);
+      item.querySelector('b').textContent = keyed && a.keyedName ? a.keyedName : a.name;
+      const bits = a.bits || xofBits(a.id) || XOF_DEFAULT[a.id];
+      item.querySelector('small').textContent = a.bits ? bits + ' bits' : 'variable length';
+      const hexEl = $('#hg-' + a.id + '-hex'), b64El = $('#hg-' + a.id + '-b64');
+      const err = r && r.errors[a.id];
+      const d = outFor(a.id, r);
+      hexEl.className = err ? 'hg-na' : '';
+      if (err) { hexEl.textContent = err; b64El.textContent = '–'; }
+      else if (!a.bits && xofBits(a.id) === null) { hexEl.textContent = 'Enter a length from 8 to 8,192 bits, in steps of 8.'; hexEl.className = 'hg-na'; b64El.textContent = '–'; }
+      else if (!d) { hexEl.textContent = '–'; b64El.textContent = '–'; }
+      else { hexEl.textContent = hexOf(d); b64El.textContent = toB64(d); }
+      // Nothing to copy for a message, and no Base64 line under it.
+      const has = !hexEl.className && !!d;
+      b64El.parentNode.hidden = hexEl.className === 'hg-na';
+      TT.$$('button', item).forEach(btn => { btn.disabled = !has; });
+    });
+    compare();
+  }
+
+  // ---------- Hashing ----------
+  function readKey() {
+    state.keyError = '';
+    keyEl.setAttribute('aria-invalid', 'false');
+    const info = $('#hg-key-info');
+    if (!keyEl.value) { state.key = null; info.textContent = ''; return; }
+    try {
+      state.key = decodeAs(keyEl.value, keyEncEl.value, 'The key');
+      if (!state.key.length) throw new Error('The key decodes to zero bytes.');
+      info.textContent = 'Key: ' + state.key.length + (state.key.length === 1 ? ' byte' : ' bytes') + '. Hashes below are HMACs, or BLAKE keyed hashes; Keccak-256, SHAKE and CRCs have no keyed form.';
+    } catch (e) {
+      state.key = null;
+      state.keyError = e.message;
+      keyEl.setAttribute('aria-invalid', 'true');
+      info.textContent = '';
+    }
+  }
+
+  async function hashText() {
+    const cur = state.text, job = ++cur.job;
+    let bytes;
+    try {
+      bytes = decodeAs(textEl.value, encEl.value, encEl.value === 'hex' ? 'Hex input' : 'The input');
+    } catch (e) {
+      stopWorker('text');
+      cur.error = e.message; cur.res = null; cur.busy = false;
+      cur.summary = 'Fix the input to see its hashes';
+      $('#hg-bytes').textContent = '';
+      if (state.src === 'text') render();
+      return;
+    }
+    cur.error = '';
+    const n = bytes.length, mode = encEl.value;
+    $('#hg-bytes').textContent = n.toLocaleString() + (n === 1 ? ' byte' : ' bytes') + (mode === 'utf8' ? ' in UTF-8' : '');
+    if (state.keyError) { cur.res = null; cur.summary = 'Fix the key to see the HMACs'; if (state.src === 'text') render(); return; }
+    const key = state.key, small = n <= SMALL;
+    // Short text: every algorithm, with long XOF output; longer text: the ticked ones, in the worker.
+    const algs = small ? ALGS.map(a => a.id) : selected();
+    const xb = xofBytes(), xof = small ? { shake128: Math.max(xb.shake128, XOF_TEXT), shake256: Math.max(xb.shake256, XOF_TEXT), blake3: Math.max(xb.blake3, XOF_TEXT) } : xb;
+    cur.busy = !small;
+    if (!small && state.src === 'text') listEl.dataset.busy = '1';
+    try {
+      let r;
+      if (small) {
+        stopWorker('text');
+        const p = L.plan(algs, key, xof);
+        p.update(bytes);
+        r = await p.finish(bytes, subtle);
+      } else {
+        r = await runJob('text', bytes.slice(), algs, key, xof, null, () => job === cur.job);
+      }
+      if (!r || job !== cur.job) return;
+      cur.res = { out: r.out, errors: r.errors, algs: new Set(algs), xof: xof, keyed: !!key, all: small };
+      cur.summary = (key ? 'HMACs of ' : 'Hashes of ') + (n === 0 ? 'an empty input' : n.toLocaleString() + (n === 1 ? ' byte' : ' bytes') + (mode === 'utf8' ? ' of text' : ''));
+    } catch (e) {
+      if (job !== cur.job) return;
+      cur.res = null;
+      cur.error = 'Could not compute the hashes: ' + (e && e.message ? e.message : e);
+    }
+    cur.busy = false;
+    if (state.src === 'text') render();
+  }
+
+  function showProgress(done, total, stage) {
+    const wrap = $('#hg-progress-wrap');
+    if (total < PROGRESS_FROM) return;
+    wrap.hidden = false;
+    $('#hg-progress').value = total ? done / total : 1;
+    $('#hg-progress-text').textContent = stage ? 'Computing ' + stage + '…' : 'Reading… ' + Math.floor(done / total * 100) + '%';
+  }
+
+  async function hashFile() {
+    const file = state.fileObj, cur = state.file;
+    if (!file) return;
+    const job = ++cur.job;
+    cur.error = ''; cur.res = null; cur.busy = true;
+    cur.summary = 'Hashing ' + (file.name || 'file') + '…';
+    if (state.src === 'file') render();
+    if (state.keyError) {
+      stopWorker('file');
+      cur.busy = false; cur.summary = 'Fix the key to see the HMACs';
+      if (state.src === 'file') render();
+      return;
+    }
+    const algs = selected(), key = state.key, xof = xofBytes();
+    try {
+      const r = await runJob('file', file, algs, key, xof, (d, t, s) => { if (job === cur.job) showProgress(d, t, s); }, () => job === cur.job);
+      if (!r || job !== cur.job) return;
+      cur.res = { out: r.out, errors: r.errors, algs: new Set(algs), xof: xof, keyed: !!key, all: false };
+      cur.summary = (key ? 'HMACs of ' : 'Hashes of ') + (file.name || 'the file') + ' (' + fmtBytes(file.size).replace(/ \(.*\)$/, '') + ')';
+    } catch (e) {
+      if (job !== cur.job) return;
+      cur.res = null;
+      cur.summary = 'Choose a file to see its hashes';
+      cur.error = e && e.name === 'NotReadableError'
+        ? 'The file could not be read. It may have been moved, or the browser lost permission to read it. Choose it again.'
+        : e && e.memory
+          ? 'This file (' + fmtBytes(file.size) + ') is too large for your browser to hold in memory, which Web Crypto needs for SHA-1 and SHA-2. Untick those to hash it with the other algorithms, which read it piece by piece.'
+          : 'The file could not be hashed: ' + (e && e.message ? e.message : e);
+    }
+    if (job !== cur.job) return;
+    $('#hg-progress-wrap').hidden = true;
+    cur.busy = false;
+    if (state.src === 'file') render();
+    sayLater(statusText);
+  }
+
+  function pickFile(file) {
+    state.fileObj = file;
+    setSource('file');
+    $('#hg-drop-title').textContent = file.name || 'Unnamed file';
+    $('#hg-drop-hint').textContent = fmtBytes(file.size) + '. Choose or drop another file to replace it.';
+    hashFile();
+  }
+
+  // Recomputes whatever the current settings need: short text has every algorithm
+  // already; longer text and files are hashed again if a ticked algorithm is missing.
+  function refresh(force) {
+    const r = state.text.res;
+    const sel = selected(), xb = xofBytes();
+    const textOk = r && r.all && ['shake128', 'shake256', 'blake3'].every(id => r.xof[id] >= xb[id]);
+    if (force || !textOk || (!r.all && sel.some(id => !r.algs.has(id)))) hashText(); else if (state.src === 'text') render();
+    const f = state.file.res;
+    if (state.fileObj && (force || !f || sel.some(id => !f.algs.has(id)) || ['shake128', 'shake256', 'blake3'].some(id => sel.includes(id) && f.xof[id] !== xb[id]))) hashFile();
+    else if (state.src === 'file') render();
+  }
+
+  // ---------- Screen reader status ----------
   const statusEl = $('#hg-status');
   let statusTimer = null;
   function sayLater(textFn) {
@@ -432,51 +1284,33 @@ faq:
     return m ? m[0] : t;
   }
   function statusText() {
-    const err = state.error[state.src];
-    const main = err || (state.results[state.src] ? state.summary[state.src].replace(/^Hashes of/, 'Hashes updated for') + '.' : '');
+    const cur = state[state.src], err = cur.error || state.keyError;
+    const main = err || (cur.res ? cur.summary.replace(/^(Hashes|HMACs) of/, '$1 updated for') + '.' : '');
     const cmp = expEl.value.trim() ? compareShort() : '';
     return [main, cmp].filter(Boolean).join(' ');
   }
 
-  function hexOf(d) { const h = toHex(d); return upperEl.checked ? h.toUpperCase() : h; }
-
-  function render() {
-    const r = state.results[state.src];
-    msgEl.textContent = state.error[state.src];
-    $('#hg-summary').textContent = state.summary[state.src];
-    listEl.dataset.busy = state.busy[state.src] ? '1' : '';
-    ALGS.forEach(a => {
-      const hexEl = $('#hg-' + a.id + '-hex'), b64El = $('#hg-' + a.id + '-b64');
-      if (!r) { hexEl.textContent = '–'; b64El.textContent = '–'; return; }
-      const d = r[a.id];
-      if (!d) { hexEl.textContent = 'Unavailable: Web Crypto needs a secure (https) page'; b64El.textContent = '–'; return; }
-      hexEl.textContent = hexOf(d);
-      b64El.textContent = toB64(d);
-    });
-    compare();
-  }
-
-  // Pull the hash out of what people paste: bare values, "hash  file" (sha256sum),
+  // ---------- Compare ----------
+  // Pull the hash out of what people paste: bare values, "hash  file" (sha256sum, b3sum),
   // "SHA256 (file) = hash" (BSD), "SHA2-256(file)= hash" (OpenSSL), Get-FileHash and
   // certutil output, "sha256-BASE64" (Subresource Integrity), "0x..." and grouped hex.
-  const isDigestHex = v => /^[0-9a-f]+$/i.test(v) && ALGS.some(a => a.hexLen === v.length);
+  const isDigestHex = v => /^[0-9a-f]+$/i.test(v) && v.length % 2 === 0 && v.length >= 8;
   function isDigestB64(v) {
     if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(v)) return false;
     const n = trimEq(v).length;
-    return ALGS.some(a => Math.ceil(a.hexLen / 2 * 4 / 3) === n);
+    return [4, 16, 20, 28, 32, 48, 64].some(b => Math.ceil(b * 4 / 3) === n);
   }
-  const stripPrefix = v => v.replace(/^\*/, '').replace(/^(md5|sha-?1|sha-?256|sha-?384|sha-?512)[:=-]/i, '').replace(/^0x/i, '');
+  const stripPrefix = v => v.replace(/^\*/, '').replace(/^(md5|sha-?1|sha-?224|sha-?256|sha-?384|sha-?512|sha3-?\d+|keccak-?256|shake\d+|blake2[bs]\d*|blake3|ripemd-?160|crc-?32c?)[:=-]/i, '').replace(/^0x/i, '');
   function extractExpected(raw) {
     const s = raw.trim();
     if (!s) return '';
-    // The whole value is hex, possibly grouped with spaces or colons.
     const squashed = s.replace(/[\s:]/g, '').replace(/^0x/i, '');
-    if (isDigestHex(squashed)) return squashed;
+    if (isDigestHex(squashed) && squashed.length <= 2048) return squashed;
     // A run of space- or colon-separated hex bytes inside other text (older certutil output).
     let run = [];
     for (const tok of s.split(/[\s:]+/).concat([''])) {
       if (/^[0-9a-f]{2}$/i.test(tok)) { run.push(tok); continue; }
-      if (isDigestHex(run.join(''))) return run.join('');
+      if (run.length >= 4 && isDigestHex(run.join(''))) return run.join('');
       run = [];
     }
     // BSD: "ALG (file) = hash". Split at the last ")" instead of matching "\(.*\)", which
@@ -486,142 +1320,91 @@ faq:
     if (bsd) return stripPrefix(bsd[1]);
     const tokens = s.split(/[\s"'`,;()<>[\]{}|]+/).map(stripPrefix).filter(Boolean);
     const first = tokens[0] || '';
-    // Nothing shaped like a digest: keep a lone or hex first token so the message can say what is wrong with it.
-    return tokens.find(isDigestHex) || tokens.find(isDigestB64) || (tokens.length === 1 || /^[0-9a-f]+$/i.test(first) ? first : s);
+    return tokens.find(t => isDigestHex(t) && t.length >= 16) || tokens.find(isDigestB64) || tokens.find(isDigestHex) ||
+      (tokens.length === 1 || /^[0-9a-f]+$/i.test(first) ? first : s);
   }
+  function b64ToBytes(v) {
+    try { return parseB64Input(v, 'x'); } catch (e) { return null; }
+  }
+  const eqBytes = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const nameList = arr => (arr.length < 2 ? arr.join('') : arr.slice(0, -1).join(', ') + ' or ' + arr[arr.length - 1]);
 
   function compare() {
     const out = $('#hg-compare');
     TT.$$('.hg-item').forEach(el => el.classList.remove('is-match'));
     out.className = 'msg';
     out.textContent = '';
+    expEl.setAttribute('aria-invalid', 'false');
     const v = extractExpected(expEl.value);
     if (!v) return;
-    const r = state.results[state.src];
+    const cur = state[state.src], r = cur.res, what = state.src === 'file' ? 'file' : 'input';
     if (!r) {
       out.className = 'msg error';
       out.textContent = state.src === 'file' ? 'Choose a file first, then the expected hash is compared with its hashes.' : 'Enter valid input first.';
       return;
     }
-    let match = null;
     const isHex = /^[0-9a-f]+$/i.test(v);
-    if (isHex) {
-      const lower = v.toLowerCase();
-      match = ALGS.find(a => r[a.id] && toHex(r[a.id]) === lower);
-    }
-    if (!match) {
-      const b = trimEq(v.replace(/-/g, '+').replace(/_/g, '/'));
-      match = ALGS.find(a => r[a.id] && trimEq(toB64(r[a.id])) === b);
+    const cands = [];
+    if (isHex && v.length % 2 === 0) cands.push(parseHexInput(v, 'x'));
+    const b = /^[A-Za-z0-9+/_-]+={0,2}$/.test(v) ? b64ToBytes(v) : null;
+    if (b && b.length) cands.push(b);
+    const keyed = r.keyed;
+    let match = null, matchLen = 0;
+    for (const want of cands) {
+      for (const a of ALGS) {
+        const d = r.out[a.id];
+        if (!d) continue;
+        // A shorter SHAKE or BLAKE3 output is the start of a longer one.
+        if (a.bits ? eqBytes(d, want) : (want.length >= 16 && want.length <= d.length && eqBytes(d.subarray(0, want.length), want))) { match = a; matchLen = want.length; break; }
+      }
+      if (match) break;
     }
     if (match) {
+      const box = $('.hg-algs input[data-alg="' + match.id + '"]');
+      let extra = '';
+      if (box && !box.checked) { box.checked = true; extra = ' It was not ticked, so it is shown now.'; }
+      if (!match.bits && xofBits(match.id) !== matchLen * 8) { $('#hg-' + match.id + '-len').value = String(matchLen * 8); extra += ' The output length was set to ' + matchLen * 8 + ' bits.'; }
+      if (extra) { render(); return; }
       out.className = 'msg ok';
-      out.textContent = 'Match: this is the ' + match.name + ' hash of the ' + (state.src === 'file' ? 'file' : 'input') + '.';
+      out.textContent = 'Match: this is the ' + (keyed && match.keyedName ? match.keyedName : match.name) + (match.bits ? '' : ' (' + matchLen * 8 + '-bit)') + ' ' + (keyed ? 'value' : 'hash') + ' of the ' + what + '.' + extra;
       const item = $('.hg-item[data-alg="' + match.id + '"]');
       if (item) item.classList.add('is-match');
       return;
     }
     out.className = 'msg error';
-    if (isHex) {
-      const alg = ALGS.find(a => a.hexLen === v.length);
-      if (alg) {
-        out.textContent = 'No match. A ' + v.length + '-character hex value is normally a ' + alg.name + ' hash, and the ' + alg.name +
-          ' of this ' + (state.src === 'file' ? 'file' : 'input') + ' is different. The data is not the same as what the checksum was made from.';
+    expEl.setAttribute('aria-invalid', 'true');
+    if (isHex && v.length % 2) {
+      out.textContent = 'No match. The expected value has ' + v.length + ' hex characters, an odd number, so it is not a whole number of bytes. Check that it was copied completely.';
+    } else if (isHex) {
+      const bits = v.length * 4;
+      const fixed = ALGS.filter(a => a.bits === bits);
+      const same = fixed.concat(bits >= 128 && bits <= 8192 ? ALGS.filter(a => !a.bits) : []);
+      const checked = same.filter(a => r.algs.has(a.id) && r.out[a.id]);
+      const unchecked = same.filter(a => !r.algs.has(a.id));
+      if (same.length) {
+        let t = 'No match. A ' + v.length + '-character hex value is ' + bits + ' bits, like ' + nameList(fixed.length ? fixed.map(a => a.name) : same.map(a => a.name)) +
+          (checked.length ? '; ' + (checked.length === 1 ? 'the ' + checked[0].name + ' of this ' + what + ' is different' : 'none of ' + nameList(checked.map(a => a.name)) + ' matches') + '.' : '.');
+        if (unchecked.length) t += ' Tick ' + nameList(unchecked.map(a => a.name)) + ' to check ' + (unchecked.length === 1 ? 'it' : 'them') + ' too.';
+        else t += ' The data is not the same as what the checksum was made from.';
+        out.textContent = t;
       } else {
-        out.textContent = 'No match. The expected value has ' + v.length + ' hex characters, but MD5, SHA-1, SHA-256, SHA-384 and SHA-512 have 32, 40, 64, 96 and 128. Check that it was copied completely.';
+        out.textContent = 'No match. The expected value has ' + v.length + ' hex characters, which is not the length of any of these hashes. Check that it was copied completely.';
       }
     } else if (/^[A-Za-z0-9+/_-]+={0,2}$/.test(v)) {
-      out.textContent = 'No match. The value was read as Base64 and does not equal any of the hashes above.';
+      out.textContent = 'No match. The value was read as Base64 and does not equal any of the ' + (keyed ? 'values' : 'hashes') + ' computed for this ' + what + '.';
     } else {
       out.textContent = 'No match. This does not look like a hash: checksums are written in hex (0-9 and a-f) or Base64.';
     }
   }
 
-  // ---------- Text ----------
-  async function hashText() {
-    const job = ++state.textJob;
-    let bytes;
-    const mode = encEl.value;
-    try {
-      if (mode === 'hex') bytes = parseHexInput(textEl.value);
-      else if (mode === 'base64') bytes = parseB64Input(textEl.value);
-      else bytes = new TextEncoder().encode(textEl.value);
-    } catch (e) {
-      state.error.text = e.message;
-      state.results.text = null;
-      state.summary.text = 'Fix the input to see its hashes';
-      state.busy.text = false;
-      $('#hg-bytes').textContent = '';
-      if (state.src === 'text') render();
-      return;
-    }
-    state.error.text = '';
-    const n = bytes.length;
-    $('#hg-bytes').textContent = n.toLocaleString() + (n === 1 ? ' byte' : ' bytes') + (mode === 'utf8' ? ' in UTF-8' : '');
-    if (n > CHUNK) {
-      state.busy.text = true;
-      if (state.src === 'text') listEl.dataset.busy = '1';
-    }
-    try {
-      const res = await hashAll(bytes, () => job === state.textJob);
-      if (!res) return;
-      state.results.text = res;
-      state.summary.text = n === 0 ? 'Hashes of an empty input' : 'Hashes of ' + n.toLocaleString() + (n === 1 ? ' byte' : ' bytes') + (mode === 'utf8' ? ' of text' : '');
-    } catch (e) {
-      if (job !== state.textJob) return;
-      state.results.text = null;
-      state.error.text = 'Could not compute the hashes: ' + (e && e.message ? e.message : e);
-    }
-    state.busy.text = false;
-    if (state.src === 'text') render();
-  }
-
-  // ---------- File ----------
-  function showProgress(done, total, stage) {
-    const wrap = $('#hg-progress-wrap');
-    if (total < PROGRESS_FROM) return;
-    wrap.hidden = false;
-    $('#hg-progress').value = total ? done / total : 1;
-    $('#hg-progress-text').textContent = stage === 'Reading' ? 'Reading… ' + Math.floor(done / total * 100) + '%' : stage + '…';
-  }
-
-  async function hashFile(file) {
-    const job = ++state.fileJob;
-    setSource('file');
-    $('#hg-drop-title').textContent = file.name || 'Unnamed file';
-    $('#hg-drop-hint').textContent = fmtBytes(file.size) + '. Choose or drop another file to replace it.';
-    state.error.file = '';
-    state.results.file = null;
-    state.summary.file = 'Hashing ' + (file.name || 'file') + '…';
-    state.busy.file = true;
-    render();
-    try {
-      const res = await hashAll(file, () => job === state.fileJob, showProgress);
-      if (!res) return;
-      state.results.file = res;
-      state.summary.file = 'Hashes of ' + (file.name || 'the file') + ' (' + fmtBytes(file.size).replace(/ \(.*\)$/, '') + ')';
-    } catch (e) {
-      if (job !== state.fileJob) return;
-      state.results.file = null;
-      state.summary.file = 'Choose a file to see its hashes';
-      state.error.file = e && e.name === 'NotReadableError'
-        ? 'The file could not be read. It may have been moved, or the browser lost permission to read it. Choose it again.'
-        : (e && e.message ? e.message : 'The file could not be hashed.');
-    }
-    if (job !== state.fileJob) return;
-    $('#hg-progress-wrap').hidden = true;
-    state.busy.file = false;
-    render();
-    sayLater(statusText);
-  }
-
+  // ---------- Events ----------
   function resetFilePicker() {
     fileEl.value = '';
     $('#hg-progress-wrap').hidden = true;
-    state.busy.file = false;
+    state.file.busy = false;
     $('#hg-drop-title').innerHTML = '<span>Choose a file</span> or drop it here';
     $('#hg-drop-hint').textContent = 'Any file type. It is read on your device and never uploaded.';
   }
-
   function setSource(src) {
     state.src = src;
     TT.$$('input[name="hg-src"]').forEach(r => { r.checked = r.value === src; });
@@ -633,14 +1416,23 @@ faq:
   TT.$$('input[name="hg-src"]').forEach(r => r.addEventListener('change', () => { if (r.checked) setSource(r.value); }));
   textEl.addEventListener('input', () => { hashText(); sayLater(statusText); });
   encEl.addEventListener('change', () => { hashText(); sayLater(statusText); });
+  const keyChanged = () => { readKey(); refresh(true); sayLater(statusText); };
+  keyEl.addEventListener('input', TT.debounce(keyChanged, 120));
+  keyEncEl.addEventListener('change', keyChanged);
   upperEl.addEventListener('change', render);
+  TT.$$('.hg-algs input[data-alg]').forEach(c => c.addEventListener('change', () => refresh(false)));
+  TT.$$('.hg-xof input').forEach(inp => inp.addEventListener('input', TT.debounce(() => refresh(false), 250)));
+  $('#hg-pick-common').addEventListener('click', () => { TT.$$('.hg-algs input[data-alg]').forEach(c => { c.checked = COMMON.indexOf(c.getAttribute('data-alg')) >= 0; }); refresh(false); });
+  $('#hg-pick-all').addEventListener('click', () => { TT.$$('.hg-algs input[data-alg]').forEach(c => { c.checked = true; }); refresh(false); });
   expEl.addEventListener('input', () => { compare(); sayLater(compareShort); });
-  fileEl.addEventListener('change', () => { if (fileEl.files && fileEl.files[0]) hashFile(fileEl.files[0]); });
+  fileEl.addEventListener('change', () => { if (fileEl.files && fileEl.files[0]) pickFile(fileEl.files[0]); });
   $('#hg-cancel').addEventListener('click', () => {
-    state.fileJob++;
+    state.file.job++;
+    stopWorker('file');
+    state.fileObj = null;
     resetFilePicker();
-    state.results.file = null;
-    state.summary.file = 'Hashing cancelled. Choose a file to start again.';
+    state.file.res = null;
+    state.file.summary = 'Hashing cancelled. Choose a file to start again.';
     render();
     fileEl.focus();
   });
@@ -659,13 +1451,14 @@ faq:
     e.preventDefault();
     drop.classList.remove('is-over');
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) hashFile(f);
+    if (f) pickFile(f);
   });
 
   $('#hg-copy-all').addEventListener('click', e => {
-    const r = state.results[state.src];
+    const r = state[state.src].res;
     if (!r) { TT.flash(e.currentTarget, 'Nothing to copy'); return; }
-    const lines = ALGS.filter(a => r[a.id]).map(a => a.name + ': ' + hexOf(r[a.id]));
+    const lines = ALGS.filter(a => selected().indexOf(a.id) >= 0 && outFor(a.id, r) && !r.errors[a.id])
+      .map(a => (r.keyed && a.keyedName ? a.keyedName : a.name) + ': ' + hexOf(outFor(a.id, r)));
     TT.copy(lines.join('\n'), e.currentTarget);
   });
   $('#hg-clear').addEventListener('click', () => {
@@ -675,11 +1468,13 @@ faq:
       hashText();
       textEl.focus();
     } else {
-      state.fileJob++;
+      state.file.job++;
+      stopWorker('file');
+      state.fileObj = null;
       resetFilePicker();
-      state.results.file = null;
-      state.error.file = '';
-      state.summary.file = 'Choose a file to see its hashes';
+      state.file.res = null;
+      state.file.error = '';
+      state.file.summary = 'Choose a file to see its hashes';
       render();
     }
   });

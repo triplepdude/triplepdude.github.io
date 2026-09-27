@@ -1,18 +1,19 @@
 ---
 title: "Text Compare: Online Diff Checker"
-description: Compare two texts and see every difference highlighted by line, word or character. Side-by-side or inline view, ignore whitespace or case, in your browser.
+description: Compare two texts or files and see every difference by line, word or character. Compare JSON with sorted keys, then save a .diff patch or HTML report.
 category: Text
-keywords: [text compare, diff checker, compare text online, text difference checker, compare two texts, diff tool, find differences between two texts, compare documents]
+keywords: [text compare, diff checker, compare text online, compare two files, json compare, find differences between two texts, diff tool, compare documents]
 howto: |
   ## How to compare two texts
 
   Paste the original text on the left and the changed text on the right, or
-  open a file on either side. The differences appear as you type. Removed text
-  has a red background and is struck through; added text has a green
-  background and is underlined. In line mode each changed line also gets a
-  minus or plus sign, so nothing depends on telling the colours apart.
-  **Swap** exchanges the two sides and **Download .diff** saves the changes as
-  a patch file.
+  open or drop a file on either side. Any plain-text file works: .txt, .csv,
+  .json, .xml, .log, source code and so on. The differences appear as you
+  type. Removed text has a red background and is struck through; added text
+  has a green background and is underlined, and in line mode each changed line
+  also gets a minus or plus sign, so nothing depends on colour. Invisible
+  characters that often cause puzzling differences, such as a zero-width
+  space, a byte order mark or a right-to-left override, are shown as labels.
 
   ## Line, word or character?
 
@@ -22,66 +23,73 @@ howto: |
   | Word | Prose, contracts, articles | Individual words and punctuation, in running text |
   | Character | Short strings, IDs, typos | Single characters |
 
-  **Side by side** shows the original and changed versions in two columns;
-  **Inline** merges them into one column, which reads better on a phone.
-  **Hide unchanged lines** folds long stretches that are identical and keeps
-  three lines of context around each change.
+  **Side by side** shows the two versions in columns; **Inline** merges them
+  into one column, which reads better on a phone. **Hide unchanged lines**
+  folds identical stretches and keeps three lines of context around each
+  change.
 
   ## How the comparison works
 
-  The tool uses Eugene Myers' O(ND) difference algorithm (1986), the same
-  method behind GNU diff and Git's default diff. It finds the shortest edit
-  script: the fewest insertions and deletions that turn one text into the
-  other, which is the same as finding their longest common subsequence. It
-  runs in linear memory by searching from both ends for the middle of the
-  edit path, and lines that appear on only one side are set aside first,
-  a speed-up GNU diff also uses. The work happens in a background thread, so
-  the page stays responsive with texts of many thousands of lines.
-
-  In word and character mode the texts are first compared line by line, then
-  each changed block is compared again word by word or character by character.
-  Words, runs of spaces and punctuation marks are separate tokens. Characters
-  are grapheme clusters, so an emoji or an accented letter counts as one.
-
-  ## Reading the numbers
+  The tool uses Eugene Myers' O(ND) difference algorithm (1986), the method
+  behind GNU diff and Git's default diff. It finds the fewest insertions and
+  deletions that turn one text into the other. Lines found on only one side
+  are set aside first, as GNU diff does, and the work runs in a background
+  thread, so texts of many thousands of lines stay responsive. In word and
+  character mode, changed blocks are compared again word by word or character
+  by character; an emoji or an accented letter counts as one character.
 
   Within each block of changes, removed lines are paired with added lines in
-  order. Each pair counts as one **changed** line and the rest as **added** or
-  **removed**. If three lines are replaced by five, you see 3 changed and 2
-  added. Unchanged lines are the lines the two texts have in common.
+  order. Each pair is one **changed** line and the rest are **added** or
+  **removed**, so three lines replaced by five show as 3 changed and 2 added.
 
-  ## Ignoring whitespace and case
+  ## Ignore options
 
-  With **Ignore whitespace**, any run of spaces or tabs counts as a single
-  space and spaces at the start or end of a line don't count, so re-indented
-  or re-spaced lines match. Line breaks still count. In word and character
-  mode, added or removed spaces and tabs are not highlighted at all. **Ignore case** compares text as if it were all
-  lower case. Both options affect only the comparison; the texts are shown as
-  you entered them.
+  - **Ignore whitespace** treats any run of spaces or tabs as one space and
+    ignores spaces at the ends of lines. Line breaks still count.
+  - **Ignore case** compares as if everything were lower case.
+  - **Ignore line endings**, on by default, treats Windows (CRLF), Unix (LF)
+    and old Mac (CR) line breaks as equal. Turn it off to find them: each
+    carriage return is then shown as ␍. Under an opened file you can see its
+    encoding and line-ending style.
 
-  ## Patch files
+  The options change only the comparison, never your text.
 
-  The downloaded `.diff` file is a standard unified diff, the format of
-  `diff -u` and `git diff`, with three lines of context. It is always made
-  from the exact texts, even when an ignore option is on, so
-  `patch original.txt < text-compare.diff` turns the original into the
-  changed text. When the texts differ in a great many places, such as rows
-  that were reordered, the search for the smallest patch stops after a few
-  seconds and the remaining changes are written as whole removed and added
-  blocks. That patch is longer but still applies the same way.
+  ## Comparing JSON
+
+  **Compare as JSON** reads both sides as JSON and lays them out the same way,
+  two spaces per level, so only real changes remain. **Sort keys** puts object
+  keys in alphabetical order, since their order carries no meaning; arrays keep
+  their order. Numbers are compared by value (1.0 equals 1), long integers digit
+  by digit, and escaped characters are decoded first. Comments and trailing
+  commas, allowed in files such as tsconfig.json, are accepted and dropped. If a
+  key appears twice, the last value counts, as in JavaScript. Invalid JSON is
+  reported with its line and column, and the texts are then compared as plain
+  text.
+
+  ## Saving the result
+
+  **Download .diff** saves a unified diff, the format of `diff -u` and
+  `git diff`, with three lines of context. It is made from the exact texts,
+  even with an ignore option on, and keeps each file's line endings, so
+  `patch original.txt < text-compare.diff` turns the original into the changed
+  file. In JSON mode it compares the formatted JSON instead. When texts differ
+  almost everywhere, the search for the smallest patch stops after a few
+  seconds and the rest is written as whole blocks, which still apply.
+  **Download .html** saves the comparison as shown, with its numbers, as one
+  self-contained page that opens in any browser.
 faq:
   - q: Is my text uploaded anywhere?
-    a: No. Both texts are compared in your browser, in a background thread on your own device. Nothing is sent to a server or stored, and opened files are read locally.
+    a: No. Both texts are compared in your browser, in a background thread on your own device. Opened files are read locally, and nothing is sent to a server or stored.
   - q: Why is a line I edited shown as removed and added?
     a: A diff describes changes as removals and additions. When a removed line and an added line sit in the same place they are paired as a changed line, and the words that differ inside it are highlighted more strongly.
   - q: Do Windows and Unix line endings count as differences?
-    a: No. Browsers store line breaks in a text box as a single line feed, and opened files are converted the same way, so CRLF and LF files compare as equal.
+    a: Not by default. With Ignore line endings on, CRLF, LF and CR line breaks compare as equal. Turn it off to see the lines whose endings differ, with each carriage return shown as ␍.
+  - q: Can it compare JSON whose keys are in a different order?
+    a: Yes. Turn on Compare as JSON and keep Sort keys on. Both sides are parsed, their keys sorted and the JSON laid out identically, so only differences in values remain.
   - q: How large can the texts be?
     a: Several thousand lines compare almost instantly on a typical computer. Very large texts that differ almost everywhere take longer, but the page stays usable while the comparison runs.
-  - q: Why do the differences look different from another diff tool?
-    a: When several edits are equally short, tools can pick different ones, for example which of two identical blank lines is kept. Every minimal diff is correct; they just group the changes differently.
 ---
-<style>
+<style id="tc-style">
 .tc {
   --tc-del-bg: color-mix(in srgb, var(--danger) 10%, var(--surface));
   --tc-ins-bg: color-mix(in srgb, var(--accent) 12%, var(--surface));
@@ -90,8 +98,10 @@ faq:
 }
 .tc-inputs { margin-bottom: 4px; }
 .tc-inputs textarea { min-height: 220px; }
+.tc-inputs textarea.is-over { outline: 2px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
 .tc-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
 .tc-head > label { font-size: 14px; font-weight: 600; }
+.tc-info { min-height: 1.3em; overflow-wrap: anywhere; }
 .tc-opts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0 0 12px; }
 .tc-opts fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .tc-opts legend { padding: 0; margin-bottom: 2px; }
@@ -103,9 +113,11 @@ faq:
 .tc-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
 /* Two rings, so focus shows on both the filled (checked) and the plain segments. */
 .tc-seg label:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 4px var(--accent-text); outline: 2px solid transparent; }
+.tc .check:has(input:disabled) { color: var(--muted); cursor: not-allowed; }
 .tc-stats .stat b { font-variant-numeric: tabular-nums; }
 .tc-stat-add b { color: var(--accent); }
 .tc-stat-del b { color: var(--danger); }
+.msg.tc-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
 .tc-out { max-width: 100%; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
 .tc-out:empty { display: none; }
 .tc-hint { margin: 0 0 16px; padding: 14px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 14px; }
@@ -134,6 +146,8 @@ faq:
 .tc ins::before { content: " [added: "; }
 .tc del::after, .tc ins::after { content: "] "; }
 .tc .tc-nl { color: var(--muted); font-weight: 700; }
+/* Invisible characters (carriage return, zero-width space, bidi controls) drawn as labels. */
+.tc .tc-inv { display: inline-block; margin: 0 1px; padding: 0 3px; border: 1px dashed var(--muted); border-radius: 3px; color: var(--muted); font-family: var(--mono); font-size: 10px; font-weight: 700; line-height: 1.4; text-decoration: none; vertical-align: 1px; }
 .tc-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
 .tc-pane { min-width: 0; }
 .tc-pane + .tc-pane { border-left: 1px solid var(--border); }
@@ -158,17 +172,19 @@ faq:
       <div class="tc-head">
         <label for="tc-a">Original text</label>
         <button class="btn secondary small" type="button" data-file="#tc-file-a" aria-label="Open file as original text">Open file…</button>
-        <input type="file" id="tc-file-a" hidden accept="text/*,.txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.sql,.yml,.yaml,.toml,.ini,.log,.srt,.tex">
+        <input type="file" id="tc-file-a" hidden>
       </div>
-      <textarea id="tc-a" class="mono" rows="10" spellcheck="false" placeholder="Paste the original text here…"></textarea>
+      <textarea id="tc-a" class="mono" rows="10" spellcheck="false" placeholder="Paste the original text here, or drop a file…" aria-describedby="tc-info-a"></textarea>
+      <span class="hint tc-info" id="tc-info-a"></span>
     </div>
     <div class="field">
       <div class="tc-head">
         <label for="tc-b">Changed text</label>
         <button class="btn secondary small" type="button" data-file="#tc-file-b" aria-label="Open file as changed text">Open file…</button>
-        <input type="file" id="tc-file-b" hidden accept="text/*,.txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.sql,.yml,.yaml,.toml,.ini,.log,.srt,.tex">
+        <input type="file" id="tc-file-b" hidden>
       </div>
-      <textarea id="tc-b" class="mono" rows="10" spellcheck="false" placeholder="Paste the changed text here…"></textarea>
+      <textarea id="tc-b" class="mono" rows="10" spellcheck="false" placeholder="Paste the changed text here, or drop a file…" aria-describedby="tc-info-b"></textarea>
+      <span class="hint tc-info" id="tc-info-b"></span>
     </div>
   </div>
 
@@ -177,6 +193,7 @@ faq:
     <button class="btn secondary small" type="button" id="tc-clear">Clear</button>
     <button class="btn secondary small" type="button" id="tc-example">Load example</button>
     <button class="btn secondary small" type="button" id="tc-download">Download .diff</button>
+    <button class="btn secondary small" type="button" id="tc-html">Download .html</button>
   </div>
 
   <div class="tc-opts">
@@ -200,12 +217,20 @@ faq:
       <div class="checks">
         <label class="check"><input type="checkbox" id="tc-ws"> Ignore whitespace</label>
         <label class="check"><input type="checkbox" id="tc-case"> Ignore case</label>
+        <label class="check"><input type="checkbox" id="tc-eol" checked> Ignore line endings</label>
         <label class="check"><input type="checkbox" id="tc-hide"> Hide unchanged lines</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend class="label">JSON</legend>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="tc-json"> Compare as JSON</label>
+        <label class="check"><input type="checkbox" id="tc-sort" checked disabled> Sort keys</label>
       </div>
     </fieldset>
   </div>
 
-  <div class="stats tc-stats" aria-live="polite">
+  <div class="stats tc-stats">
     <div class="stat tc-stat-add"><b id="tc-added">0</b><span>Lines added</span></div>
     <div class="stat tc-stat-del"><b id="tc-removed">0</b><span>Lines removed</span></div>
     <div class="stat"><b id="tc-changed">0</b><span>Lines changed</span></div>
@@ -213,10 +238,12 @@ faq:
     <div class="stat tc-stat-add" id="tc-tok-add-box" hidden><b id="tc-tok-added">0</b><span id="tc-tok-added-label">Words added</span></div>
     <div class="stat tc-stat-del" id="tc-tok-del-box" hidden><b id="tc-tok-removed">0</b><span id="tc-tok-removed-label">Words removed</span></div>
   </div>
+  <p class="visually-hidden" id="tc-announce" role="status"></p>
   <p class="msg ok" id="tc-ok" aria-live="polite"></p>
   <p class="msg error" id="tc-error" role="alert"></p>
+  <p class="msg error" id="tc-json-msg" aria-live="polite"></p>
   <p class="tc-status" id="tc-status" aria-live="polite"></p>
-  <p class="tc-hint" id="tc-hint">Paste or type text in both boxes, or press <b>Load example</b>, to see the differences here.</p>
+  <p class="tc-hint" id="tc-hint">Paste or type text in both boxes, open or drop two files, or press <b>Load example</b>, to see the differences here.</p>
   <div class="tc-out" id="tc-out" aria-busy="false"></div>
 </div>
 
@@ -365,9 +392,13 @@ faq:
       return lines;
     }
 
+    // With exact line endings, a CRLF line keeps its CR at the end; it stays part of the key
+    // even when whitespace is ignored, because line endings have their own option.
     function lineKey(s, o) {
+      var cr = '';
+      if (s.charCodeAt(s.length - 1) === 13) { cr = '\r'; s = s.slice(0, -1); }
       if (o.ignoreWS) s = s.replace(/\s+/g, ' ').trim();
-      return o.ignoreCase ? s.toLowerCase() : s;
+      return (o.ignoreCase ? s.toLowerCase() : s) + cr;
     }
 
     var RE_WORD = /[\p{L}\p{M}\p{N}_]+|\n|[^\S\n]+|[\s\S]/gu;
@@ -393,9 +424,9 @@ faq:
       return merged;
     }
 
-    // Spaces and tabs can be ignored; line breaks always count.
+    // Spaces and tabs can be ignored; line breaks (and carriage returns) always count.
     function tokKey(t, o) {
-      if (o.ignoreWS && RE_HWS.test(t)) return ' ';
+      if (o.ignoreWS && RE_HWS.test(t) && t.indexOf('\r') < 0) return ' ';
       return o.ignoreCase ? t.toLowerCase() : t;
     }
 
@@ -407,8 +438,23 @@ faq:
       return { ops: toOps(A.length, B.length, r.pairs), timedOut: r.timedOut };
     }
 
+    // Invisible characters that make lines differ without any visible change are drawn as labels:
+    // carriage return, soft hyphen, zero-width space, word joiner, byte order mark, bidi controls.
+    var INV = { '\r': ['\u240D', 'Carriage return (CR)'], '\u00AD': ['SHY', 'U+00AD soft hyphen'], '\u200B': ['ZWSP', 'U+200B zero width space'],
+      '\u2060': ['WJ', 'U+2060 word joiner'], '\uFEFF': ['BOM', 'U+FEFF byte order mark'], '\u202A': ['LRE', 'U+202A left-to-right embedding'],
+      '\u202B': ['RLE', 'U+202B right-to-left embedding'], '\u202C': ['PDF', 'U+202C pop directional formatting'],
+      '\u202D': ['LRO', 'U+202D left-to-right override'], '\u202E': ['RLO', 'U+202E right-to-left override'],
+      '\u2066': ['LRI', 'U+2066 left-to-right isolate'], '\u2067': ['RLI', 'U+2067 right-to-left isolate'],
+      '\u2068': ['FSI', 'U+2068 first strong isolate'], '\u2069': ['PDI', 'U+2069 pop directional isolate'] };
+    var RE_ESC = /[&<>"\r\u00AD\u200B\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g;
     function esc(s) {
-      return s.replace(/[&<>"]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'; });
+      return s.replace(RE_ESC, function (c) {
+        if (c === '&') return '&amp;';
+        if (c === '<') return '&lt;';
+        if (c === '>') return '&gt;';
+        if (c === '"') return '&quot;';
+        return '<span class="tc-inv" title="' + INV[c][1] + '">' + INV[c][0] + '</span>';
+      });
     }
 
     // Renders a token list, wrapping changed tokens; whitespace-only changes stay plain when ignored.
@@ -416,7 +462,7 @@ faq:
     // can be cut into blocks at any line break.
     function mark(tag, toks, o) {
       var text = toks.join('');
-      if (o.ignoreWS && RE_HWS.test(text)) return esc(text);
+      if (o.ignoreWS && RE_HWS.test(text) && text.indexOf('\r') < 0) return esc(text);
       return text.split('\n').map(function (seg, i, all) {
         var nl = i < all.length - 1 ? '<span class="tc-nl" aria-hidden="true">\u21B5</span>' : '';
         return seg || nl ? '<' + tag + '>' + esc(seg) + nl + '</' + tag + '>' : '';
@@ -499,6 +545,10 @@ faq:
     // content-visibility: auto, so the browser only lays out the blocks on screen.
     // One big table took over a second of main-thread layout for 5,000 changed lines.
     var BLOCK = 200;
+    // Past this many rows the rest is left out: inserting hundreds of thousands of rows would
+    // freeze the page for seconds. The downloads always cover everything.
+    var MAX_ROWS = 12000;
+    var CUT_NOTE = 'The rest of this comparison is not shown because it is longer than 12,000 rows. Download the .diff to see every change.';
     function renderLines(A, B, regs, o, deadline) {
       var split = o.view === 'split';
       var cols = split ? 6 : 4;
@@ -506,7 +556,7 @@ faq:
         ? '<table class="tc-table tc-split"><colgroup><col class="tc-num"><col class="tc-mk"><col><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>'
         : '<table class="tc-table tc-unified"><colgroup><col class="tc-num"><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>';
       var html = [], rows = [];
-      var timedOut = false;
+      var timedOut = false, total = 0, cut = false;
 
       function flushBlock() {
         if (!rows.length) return;
@@ -515,10 +565,12 @@ faq:
       }
       function push(tr) {
         rows.push(tr);
+        total++;
         if (rows.length >= BLOCK) flushBlock();
       }
 
       function row(an, at, bn, bt, cls) {
+        if (total >= MAX_ROWS) { cut = true; return; }
         if (split) {
           var l = at === null ? '<td class="tc-num"></td><td class="tc-mk tc-empty"></td><td class="tc-txt tc-empty"></td>'
             : '<td class="tc-num">' + an + '</td><td class="tc-mk ' + (cls === 'eq' ? '' : 'tc-del') + '">' + (cls === 'eq' ? '' : '-') + '</td><td class="tc-txt ' + (cls === 'eq' ? '' : 'tc-del') + '">' + at + '</td>';
@@ -535,18 +587,20 @@ faq:
       }
 
       regs.forEach(function (r, idx) {
+        if (cut || total >= MAX_ROWS) { cut = true; return; }
+        var room = MAX_ROWS - total;
         if (r.eq) {
           var runs = visibleRuns(r, idx, regs.length, o), shown = 0;
           runs.forEach(function (span) {
             if (span[0] > shown) push(fold(span[0] - shown, cols));
-            for (var i = span[0]; i < span[1]; i++) row(r.a + i + 1, esc(A[r.a + i]), r.b + i + 1, esc(B[r.b + i]), 'eq');
+            for (var i = span[0]; i < span[1] && !cut; i++) row(r.a + i + 1, esc(A[r.a + i]), r.b + i + 1, esc(B[r.b + i]), 'eq');
             shown = span[1];
           });
           if (shown < r.len) push(fold(r.len - shown, cols));
           return;
         }
         var pairs = Math.min(r.k, r.m), p, left = [], right = [];
-        for (p = 0; p < pairs; p++) {
+        for (p = 0; p < pairs && p < room; p++) {
           var at = A[r.a + p], bt = B[r.b + p];
           if (!timedOut && at.length + bt.length < 20000 && Date.now() < deadline) {
             var t = tokenHtml(tokens(at, 'word', o), tokens(bt, 'word', o), o, deadline, null, true);
@@ -558,8 +612,8 @@ faq:
             right.push(esc(bt));
           }
         }
-        for (p = pairs; p < r.k; p++) left.push(esc(A[r.a + p]));
-        for (p = pairs; p < r.m; p++) right.push(esc(B[r.b + p]));
+        for (p = pairs; p < r.k && p < room; p++) left.push(esc(A[r.a + p]));
+        for (p = pairs; p < r.m && p < room; p++) right.push(esc(B[r.b + p]));
         if (split) {
           for (p = 0; p < Math.max(r.k, r.m); p++) {
             row(r.a + p + 1, p < r.k ? left[p] : null, r.b + p + 1, p < r.m ? right[p] : null, 'chg');
@@ -569,27 +623,32 @@ faq:
           for (p = 0; p < r.m; p++) row(0, null, r.b + p + 1, right[p], 'ins');
         }
       });
+      if (cut) rows.push('<tr class="tc-fold tc-cut"><td colspan="' + cols + '">' + CUT_NOTE + '</td></tr>');
       flushBlock();
-      return { html: html.join(''), timedOut: timedOut };
+      return { html: html.join(''), timedOut: timedOut, truncated: cut };
     }
 
     // A pane of running text, split into <pre> blocks of about BLOCK lines at
     // fragment boundaries so off-screen blocks skip layout (content-visibility).
     function pane(lineHeight) {
-      var blocks = [], cur = [], lines = 0;
+      var blocks = [], cur = [], lines = 0, total = 0, cut = false;
       function flush() {
         if (!cur.length) return;
         blocks.push('<pre class="tc-blk" style="contain-intrinsic-size:auto ' + Math.ceil(lines * lineHeight) + 'px">' + cur.join('') + '</pre>');
         cur = [];
         lines = 0;
       }
-      function add(html, n) {
+      // Lines past MAX_ROWS are dropped (force adds the closing note).
+      function add(html, n, force) {
+        if (!force && total >= MAX_ROWS) { cut = true; return; }
         cur.push(html);
         lines += n;
+        total += n;
         if (lines >= BLOCK) flush();
       }
       return {
         add: add,
+        isCut: function () { return cut; },
         // Adds the HTML of a changed region line by line (its line breaks are all outside tags).
         addLines: function (html) {
           var parts = html.split('\n'), last = parts.length - 1;
@@ -625,6 +684,7 @@ faq:
         var at = A.slice(r.a, r.a + r.k).map(function (l) { return l + '\n'; }).join('');
         var bt = B.slice(r.b, r.b + r.m).map(function (l) { return l + '\n'; }).join('');
         var ta = tokens(at, o.mode, o), tb = tokens(bt, o.mode, o);
+        // Past the row limit the words are still counted, just not shown.
         if (!timedOut && ta.length + tb.length < 400000 && Date.now() < deadline) {
           var t = tokenHtml(ta, tb, o, deadline, counts, o.mode === 'word');
           left.addLines(t.left); right.addLines(t.right); inline.addLines(t.inline);
@@ -637,22 +697,173 @@ faq:
           left.addLines(dl); right.addLines(il); inline.addLines(dl + il);
         }
       });
+      var cut = o.view === 'split' ? left.isCut() || right.isCut() : inline.isCut();
+      if (cut) {
+        var note = '<span class="tc-fold-flow tc-cut">' + CUT_NOTE + '</span>';
+        left.add(note, 1, true); right.add(note, 1, true); inline.add(note, 1, true);
+      }
       var prose = o.mode === 'word' ? ' is-prose' : '';
       if (o.view === 'split') {
         return {
           html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Original</h2>' + left.html() + '</section>' +
             '<section class="tc-pane"><h2>Changed</h2>' + right.html() + '</section></div>',
-          timedOut: timedOut
+          timedOut: timedOut,
+          truncated: cut
         };
       }
-      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Changes</h2>' + inline.html() + '</section></div>', timedOut: timedOut };
+      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Changes</h2>' + inline.html() + '</section></div>', timedOut: timedOut, truncated: cut };
+    }
+
+    // ---- JSON: a strict parser (plus comments and trailing commas) that keeps every number's
+    // digits, reports errors by line and column, and notes duplicate keys. ----
+    function parseJson(src, label, info) {
+      var i = 0, n = src.length;
+      function where(p) {
+        var pre = src.slice(0, p), line = 1, k = -1;
+        while ((k = pre.indexOf('\n', k + 1)) >= 0) line++;
+        return 'line ' + line + ', column ' + (p - pre.lastIndexOf('\n'));
+      }
+      function fail(msg) { throw { json: true, message: label + ' is not valid JSON: ' + msg + ' at ' + where(i) + '.' }; }
+      function ws() {
+        for (;;) {
+          var c = src.charCodeAt(i);
+          if (c === 32 || c === 9 || c === 10 || c === 13 || c === 0xFEFF) i++;
+          else if (c === 47 && src.charCodeAt(i + 1) === 47) { i = src.indexOf('\n', i); if (i < 0) i = n; }
+          else if (c === 47 && src.charCodeAt(i + 1) === 42) {
+            var e = src.indexOf('*/', i + 2);
+            if (e < 0) fail('a comment is never closed');
+            i = e + 2;
+          } else return;
+        }
+      }
+      var RE_STR = /"(?:[^"\\\u0000-\u001F]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y;
+      var RE_NUMBER = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+      function str() {
+        RE_STR.lastIndex = i;
+        var m = RE_STR.exec(src);
+        if (!m) {
+          var j = i + 1;
+          while (j < n && src[j] !== '"' && src.charCodeAt(j) >= 32) j += src[j] === '\\' ? 2 : 1;
+          if (j >= n) fail('a string is never closed');
+          i = j;
+          fail(src.charCodeAt(j) < 32 ? 'a control character or line break inside a string' : 'an invalid escape in a string');
+        }
+        i += m[0].length;
+        return JSON.parse(m[0]);
+      }
+      function value(depth) {
+        if (depth > 1000) fail('it is nested more than 1,000 levels deep');
+        ws();
+        var c = src[i];
+        if (c === '{' || c === '[') {
+          var obj = c === '{', node = obj ? { t: 'o', k: [], v: [] } : { t: 'a', v: [] }, seen = obj ? new Map() : null;
+          var close = obj ? '}' : ']';
+          i++;
+          for (;;) {
+            ws();
+            if (src[i] === close) { i++; return node; }
+            if (obj) {
+              if (src[i] !== '"') fail(i >= n ? 'the text ends before the object is closed' : 'expected a key in double quotes');
+              var at = i, key = str();
+              ws();
+              if (src[i] !== ':') fail('expected ":" after the key');
+              i++;
+              var v = value(depth + 1);
+              if (seen.has(key)) {
+                node.v[seen.get(key)] = v;
+                info.dupCount++;
+                if (info.dups.length < 3) info.dups.push('"' + key + '" (' + label.toLowerCase() + ', ' + where(at) + ')');
+              } else {
+                seen.set(key, node.k.length);
+                node.k.push(key);
+                node.v.push(v);
+              }
+            } else {
+              node.v.push(value(depth + 1));
+            }
+            ws();
+            if (src[i] === ',') { i++; continue; }
+            if (src[i] === close) { i++; return node; }
+            fail(i >= n ? 'the text ends before the ' + (obj ? 'object' : 'array') + ' is closed' : 'expected "," or "' + close + '"');
+          }
+        }
+        if (c === '"') return { t: 's', v: str() };
+        RE_NUMBER.lastIndex = i;
+        var num = RE_NUMBER.exec(src);
+        if (num && num[0] !== '-') { i += num[0].length; return { t: 'n', v: num[0] }; }
+        for (var lit of ['true', 'false', 'null']) {
+          if (src.startsWith(lit, i)) { i += lit.length; return { t: 'l', v: lit }; }
+        }
+        fail(i >= n ? 'the text ends where a value was expected' : 'unexpected "' + String.fromCodePoint(src.codePointAt(i)) + '"');
+      }
+      var root = value(0);
+      ws();
+      if (i < n) fail('there is more text after the JSON value');
+      return root;
+    }
+
+    // Numbers compare by value (1.0 = 1, 1e3 = 1000); long integers keep all their digits.
+    function canonNumber(lit) {
+      if (/^-?(?:0|[1-9]\d*)$/.test(lit)) return lit.length <= 15 ? String(Number(lit)) : lit;
+      var v = Number(lit);
+      if (!isFinite(v)) return lit;
+      if (Number.isInteger(v) && Math.abs(v) >= 1e15) return BigInt(v).toString();
+      return String(v);
+    }
+
+    function formatJson(node, sort) {
+      var out = [];
+      (function fmt(v, ind) {
+        if (v.t === 's') { out.push(JSON.stringify(v.v)); return; }
+        if (v.t === 'n') { out.push(canonNumber(v.v)); return; }
+        if (v.t === 'l') { out.push(v.v); return; }
+        var obj = v.t === 'o', len = v.v.length;
+        if (!len) { out.push(obj ? '{}' : '[]'); return; }
+        var inner = ind + '  ', order = [];
+        for (var k = 0; k < len; k++) order.push(k);
+        if (obj && sort) order.sort(function (x, y) { return v.k[x] < v.k[y] ? -1 : v.k[x] > v.k[y] ? 1 : 0; });
+        out.push(obj ? '{\n' : '[\n');
+        order.forEach(function (idx, j) {
+          out.push(inner);
+          if (obj) out.push(JSON.stringify(v.k[idx]), ': ');
+          fmt(v.v[idx], inner);
+          out.push(j < len - 1 ? ',\n' : '\n');
+        });
+        out.push(ind, obj ? '}' : ']');
+      })(node, '');
+      return out.join('') + '\n';
+    }
+
+    // Replaces o.a / o.b (and the patch texts) with formatted JSON when both sides parse.
+    function applyJson(o) {
+      var info = { errors: [], dups: [], dupCount: 0 };
+      var fa = null, fb = null;
+      try { fa = o.a.trim() ? formatJson(parseJson(o.a, 'Original text', info), o.sortKeys) : ''; } catch (e) { info.errors.push(e && e.json ? e.message : String(e)); }
+      try { fb = o.b.trim() ? formatJson(parseJson(o.b, 'Changed text', info), o.sortKeys) : ''; } catch (e) { info.errors.push(e && e.json ? e.message : String(e)); }
+      if (!info.errors.length) {
+        o.a = o.pa = fa;
+        o.b = o.pb = fb;
+      }
+      return info;
+    }
+
+    // The patch for a request: formatted JSON in JSON mode, otherwise the exact texts.
+    function patchFor(o, deadline) {
+      var q = { a: o.a, b: o.b, pa: o.pa, pb: o.pb, sortKeys: o.sortKeys };
+      if (o.json) applyJson(q);
+      return patchText(q.pa, q.pb, deadline, o.names);
+    }
+
+    function fileLabel(names, i, fallback) {
+      var n = names && names[i] ? String(names[i]).replace(/[\t\r\n]+/g, ' ') : '';
+      return n || fallback;
     }
 
     // Unified diff (diff -u) of the exact texts, three lines of context. The search stops at
     // the deadline (Myers diff grows with lines x differences, e.g. reordered rows); past it
     // the remaining changes are written as whole removed/added blocks, which still apply.
     // Returns { text, timedOut }.
-    function patchText(a, b, deadline) {
+    function patchText(a, b, deadline, names) {
       var A = splitLines(a), B = splitLines(b);
       var noEolA = a !== '' && a[a.length - 1] !== '\n', noEolB = b !== '' && b[b.length - 1] !== '\n';
       var id = idMapper();
@@ -671,7 +882,8 @@ faq:
       var changes = [];
       lines.forEach(function (l, i) { if (l.t !== ' ') changes.push(i); });
       if (!changes.length) return { text: '', timedOut: false };
-      var CTX = 3, out = '--- original.txt\n+++ changed.txt\n', h = 0;
+      var CTX = 3, h = 0;
+      var out = '--- ' + fileLabel(names, 0, 'original.txt') + '\n+++ ' + fileLabel(names, 1, 'changed.txt') + '\n';
       while (h < changes.length) {
         var start = Math.max(0, changes[h] - CTX), endIdx = changes[h];
         while (h + 1 < changes.length && changes[h + 1] - endIdx <= CTX * 2 + 1) endIdx = changes[++h];
@@ -701,7 +913,13 @@ faq:
 
     function run(o) {
       var t0 = Date.now();
+      o.pa = o.pa == null ? o.a : o.pa;
+      o.pb = o.pb == null ? o.b : o.pb;
+      var json = o.json ? applyJson(o) : null;
       var A = splitLines(o.a), B = splitLines(o.b);
+      // Very long texts fold their unchanged lines, which keeps the output to the changes.
+      var autoFold = !o.hideSame && A.length + B.length > 40000;
+      if (autoFold) o.hideSame = true;
       var id = idMapper();
       var ia = A.map(function (l) { return id(lineKey(l, o)); });
       var ib = B.map(function (l) { return id(lineKey(l, o)); });
@@ -719,15 +937,19 @@ faq:
       var deadline = Date.now() + 3000;
       var rendered = o.mode === 'line' ? renderLines(A, B, regs, o, deadline) : renderFlow(A, B, regs, o, deadline, counts);
       // The patch shares the comparison's time budget (with a short minimum of its own).
-      var patch = patchText(o.a, o.b, Math.max(t0 + 8000, Date.now() + 500));
+      var patch = patchText(o.pa, o.pb, Math.max(t0 + 8000, Date.now() + 500), o.names);
       return {
         html: rendered.html,
         stats: stats,
         tokens: counts,
         identical: stats.added + stats.removed + stats.changed === 0,
+        sameText: o.a === o.b,
+        json: json ? { ok: !json.errors.length, errors: json.errors, dups: json.dups, dupCount: json.dupCount } : null,
         patch: patch.text,
         patchCoarse: patch.timedOut,
         timedOut: d.timedOut || rendered.timedOut,
+        truncated: !!rendered.truncated,
+        autoFold: autoFold,
         ms: Date.now() - t0
       };
     }
@@ -740,13 +962,17 @@ faq:
         scope.postMessage(r);
       };
     }
-    return { run: run, patch: patchText };
+    return { run: run, patch: patchFor };
   }
 
   var ta = TT.$('#tc-a'), tb = TT.$('#tc-b'), out = TT.$('#tc-out'), hint = TT.$('#tc-hint');
-  var okBox = TT.$('#tc-ok'), errBox = TT.$('#tc-error'), statusBox = TT.$('#tc-status');
+  var okBox = TT.$('#tc-ok'), errBox = TT.$('#tc-error'), statusBox = TT.$('#tc-status'), jsonBox = TT.$('#tc-json-msg');
+  var announceBox = TT.$('#tc-announce');
   var worker = null, workerUrl = null, busy = false, seq = 0, latest = null, statusTimer = 0, local = null, lastReq = null;
-  var typing = false;
+  var typing = false, exportWhenReady = null;
+  // What was opened on each side: its name, exact text (original line endings), the text shown
+  // (line breaks as \n, which is all a text box can hold), encoding and line-ending style.
+  var meta = { a: null, b: null };
 
   var EXAMPLE_A = 'Project kickoff notes\nDate: 3 March\nAttendees: Ana, Ben, Chloe\n\nThe launch is planned for the second week of April.\nBudget: 12,000 EUR\n\nOpen questions:\n- Who owns the landing page?\n- Do we need a French translation?\n- When is the next review?';
   var EXAMPLE_B = 'Project kickoff notes\nDate: 4 March\nAttendees: Ana, Ben, Chloe, Dev\n\nThe launch is planned for the last week of April.\nBudget: 12,000 EUR\n\nOpen questions:\n- Who owns the landing page?\n- Which analytics tool do we use?\n- When is the next review?\n- Who writes the press release?';
@@ -756,15 +982,34 @@ faq:
   }
 
   function radio(name) { return TT.$('input[name="' + name + '"]:checked').value; }
+  function box(side) { return side === 'a' ? ta : tb; }
+
+  // The exact text of a side: the opened file as it was, or the edited text with the file's
+  // own line endings put back.
+  function exact(side) {
+    var m = meta[side], v = box(side).value;
+    if (!m) return v;
+    if (v === m.norm) return m.raw;
+    return m.eol === 'CRLF' ? v.replace(/\n/g, '\r\n') : m.eol === 'CR' ? v.replace(/\n/g, '\r') : v;
+  }
 
   function options() {
+    var ignoreEOL = TT.$('#tc-eol').checked, json = TT.$('#tc-json').checked;
+    var pa = exact('a'), pb = exact('b');
+    var ext = json ? '.json' : '.txt';
     return {
-      a: ta.value,
-      b: tb.value,
+      a: ignoreEOL ? ta.value : pa,
+      b: ignoreEOL ? tb.value : pb,
+      pa: pa,
+      pb: pb,
+      names: [meta.a ? meta.a.name : 'original' + ext, meta.b ? meta.b.name : 'changed' + ext],
       mode: radio('tc-mode'),
       view: radio('tc-view'),
       ignoreWS: TT.$('#tc-ws').checked,
       ignoreCase: TT.$('#tc-case').checked,
+      ignoreEOL: ignoreEOL,
+      json: json,
+      sortKeys: TT.$('#tc-sort').checked,
       hideSame: TT.$('#tc-hide').checked
     };
   }
@@ -796,7 +1041,7 @@ faq:
   function runLocal(o) {
     try {
       if (!local) local = tcEngine(null);
-      var r = local.run(o);
+      var r = local.run(Object.assign({}, o));
       r.id = seq;
       show(r);
     } catch (e) {
@@ -821,34 +1066,68 @@ faq:
     }
   }
 
+  function plural(n, one, many) { return n.toLocaleString() + ' ' + (n === 1 ? one : many); }
+
+  // One short summary for screen readers once the result settles, instead of every number.
+  var announce = TT.debounce(function () {
+    if (!latest || latest.error || !lastReq || (!lastReq.a && !lastReq.b)) { announceBox.textContent = ''; return; }
+    var s = latest.stats;
+    announceBox.textContent = latest.identical ? okBox.textContent || 'No differences.'
+      : plural(s.added, 'line', 'lines') + ' added, ' + s.removed.toLocaleString() + ' removed, ' + s.changed.toLocaleString() + ' changed.';
+  }, 900);
+
+  function identicalMessage(r, o) {
+    if (r.sameText) {
+      if (o.json && o.pa !== o.pb) return 'The JSON is equivalent: only ' + (o.sortKeys ? 'formatting and key order differ.' : 'formatting differs.');
+      if (o.pa === o.pb) return 'The two texts are identical.';
+      if (o.ignoreEOL && o.pa.replace(/\r\n?/g, '\n') === o.pb.replace(/\r\n?/g, '\n')) return 'No differences, ignoring line endings.';
+      return 'The two texts are identical.';
+    }
+    if (o.ignoreWS || o.ignoreCase) return 'No differences, ignoring ' + (o.ignoreWS && o.ignoreCase ? 'whitespace and case' : o.ignoreWS ? 'whitespace' : 'case') + '.';
+    return 'The texts are identical apart from a line break at the very end.';
+  }
+
   function show(r) {
     clearTimeout(statusTimer);
     statusBox.textContent = '';
     if (!typing) out.setAttribute('aria-busy', 'false');
     if (r.error) {
       errBox.textContent = 'The comparison failed: ' + r.error;
+      exportWhenReady = null;
       return;
     }
-    errBox.textContent = '';
+    if (/^The comparison failed/.test(errBox.textContent)) errBox.textContent = '';
     latest = r;
     var o = lastReq;
     setStats(r.stats, r.tokens, o.mode);
+    if (r.json && !r.json.ok) {
+      jsonBox.className = 'msg error';
+      jsonBox.textContent = r.json.errors.join(' ') + ' The texts are compared as plain text instead.';
+    } else if (r.json && r.json.dupCount) {
+      jsonBox.className = 'msg tc-note';
+      jsonBox.textContent = 'Duplicate key' + (r.json.dupCount > 1 ? 's' : '') + ': ' + r.json.dups.join(', ') +
+        (r.json.dupCount > r.json.dups.length ? ' and ' + (r.json.dupCount - r.json.dups.length) + ' more' : '') + '. The last value of each is compared.';
+    } else {
+      jsonBox.className = 'msg error';
+      jsonBox.textContent = '';
+    }
     if (!o.a && !o.b) {
       out.innerHTML = '';
       hint.hidden = false;
       okBox.textContent = '';
+      announce();
       return;
     }
     hint.hidden = true;
     out.innerHTML = r.html;
-    if (r.identical) {
-      if (o.a === o.b) okBox.textContent = 'The two texts are identical.';
-      else if (o.ignoreWS || o.ignoreCase) okBox.textContent = 'No differences, ignoring ' + (o.ignoreWS && o.ignoreCase ? 'whitespace and case' : o.ignoreWS ? 'whitespace' : 'case') + '.';
-      else okBox.textContent = 'The texts are identical apart from a line break at the very end.';
-    } else {
-      okBox.textContent = '';
-    }
-    if (r.timedOut) statusBox.textContent = 'These texts differ in very many places, so some changes are shown as whole blocks.';
+    okBox.textContent = r.identical ? identicalMessage(r, o) : '';
+    statusBox.textContent = [
+      r.autoFold ? 'Unchanged lines are folded because these texts are long.' : '',
+      r.timedOut ? 'These texts differ in very many places, so some changes are shown as whole blocks.' : '',
+      r.truncated ? 'Only the first 12,000 rows are shown; the .diff download has every change.' : ''
+    ].filter(Boolean).join(' ');
+    announce();
+    if (exportWhenReady) { var btn = exportWhenReady; exportWhenReady = null; exportHtml(btn); }
   }
 
   function compare() {
@@ -876,39 +1155,64 @@ faq:
   function onInput() {
     typing = true;
     out.setAttribute('aria-busy', 'true');
+    showInfo('a');
+    showInfo('b');
     compareSoon();
   }
   ta.addEventListener('input', onInput);
   tb.addEventListener('input', onInput);
-  TT.$$('input[name="tc-mode"], input[name="tc-view"], #tc-ws, #tc-case, #tc-hide').forEach(function (el) {
+  TT.$$('input[name="tc-mode"], input[name="tc-view"], #tc-ws, #tc-case, #tc-eol, #tc-hide, #tc-json, #tc-sort').forEach(function (el) {
     el.addEventListener('change', compare);
   });
+  TT.$('#tc-json').addEventListener('change', function () { TT.$('#tc-sort').disabled = !TT.$('#tc-json').checked; });
+  TT.$('#tc-sort').disabled = !TT.$('#tc-json').checked;
 
+  function forget() {
+    meta.a = meta.b = null;
+    showInfo('a');
+    showInfo('b');
+  }
   TT.$('#tc-swap').addEventListener('click', function () {
     var t = ta.value;
     ta.value = tb.value;
     tb.value = t;
+    var m = meta.a;
+    meta.a = meta.b;
+    meta.b = m;
+    showInfo('a');
+    showInfo('b');
     compare();
   });
   TT.$('#tc-clear').addEventListener('click', function () {
     ta.value = '';
     tb.value = '';
+    forget();
+    errBox.textContent = '';
     compare();
     ta.focus();
   });
   TT.$('#tc-example').addEventListener('click', function () {
     ta.value = EXAMPLE_A;
     tb.value = EXAMPLE_B;
+    forget();
     compare();
   });
+
+  function isCurrent(o) {
+    var now = options();
+    return latest && lastReq && latest.id === lastReq.id && !typing &&
+      ['pa', 'pb', 'json', 'sortKeys'].every(function (k) { return lastReq[k] === now[k]; }) &&
+      lastReq.names.join('\n') === now.names.join('\n');
+  }
+
   TT.$('#tc-download').addEventListener('click', function () {
     errBox.textContent = '';
-    var a = ta.value, b = tb.value, patch, coarse;
-    if (!a && !b) {
+    var o = options(), patch, coarse;
+    if (!o.pa && !o.pb) {
       errBox.textContent = 'Enter two texts first.';
       return;
     }
-    if (latest && lastReq && latest.id === lastReq.id && lastReq.a === a && lastReq.b === b) {
+    if (isCurrent(o)) {
       patch = latest.patch;
       coarse = latest.patchCoarse;
     } else {
@@ -916,7 +1220,7 @@ faq:
       // patch now, on this thread, so the time limit is short to keep the page responsive.
       try {
         if (!local) local = tcEngine(null);
-        var p = local.patch(a, b, Date.now() + 1000);
+        var p = local.patch(o, Date.now() + 1000);
         patch = p.text;
         coarse = p.timedOut;
       } catch (e) {
@@ -925,44 +1229,147 @@ faq:
       }
     }
     if (!patch) {
-      okBox.textContent = 'The texts are exactly the same, so there is no patch to download.';
+      okBox.textContent = o.json ? 'The formatted JSON is the same on both sides, so there is no patch to download.' : 'The texts are exactly the same, so there is no patch to download.';
       return;
     }
     TT.download('text-compare.diff', patch, 'text/x-diff;charset=utf-8');
     if (coarse) okBox.textContent = 'These texts differ in very many places, so the patch lists some changes as whole removed and added blocks. It still applies correctly.';
   });
 
-  function loadFile(input, target) {
-    input.addEventListener('change', function () {
-      var f = input.files && input.files[0];
-      if (!f) return;
-      errBox.textContent = '';
-      if (f.size > 20 * 1024 * 1024) {
-        errBox.textContent = f.name + ' is larger than 20 MB. Open a smaller text file.';
-        input.value = '';
+  // ---------- HTML report: the comparison as shown, as one self-contained page ----------
+  var TOKENS = ':root{--bg:#f7f7f5;--surface:#fff;--surface-2:#f1f2f0;--text:#16181d;--muted:#5b6270;--border:#dfe2e6;--accent:#1f6f4a;--accent-text:#fff;--danger:#b42318;' +
+    '--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}' +
+    '@media (prefers-color-scheme:dark){:root{--bg:#0f1113;--surface:#171a1d;--surface-2:#1d2125;--text:#eceef1;--muted:#9aa3ae;--border:#2c3137;--accent:#4cc38a;--accent-text:#0b1a12;--danger:#ff8a80}}' +
+    '*,*::before,*::after{box-sizing:border-box}body{margin:0;padding:24px 16px;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}' +
+    'main{max-width:1200px;margin:0 auto}h1{margin:0 0 6px;font-size:1.5rem}.tc-meta{margin:0 0 12px;color:var(--muted);font-size:14px}' +
+    '.tc-sum{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 16px;padding:0;list-style:none;font-size:14px}.tc-sum b{font-variant-numeric:tabular-nums}' +
+    '.tc-sum .add b{color:var(--accent)}.tc-sum .del b{color:var(--danger)}';
+  function escHtml(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function exportHtml(btn) {
+    var o = lastReq, r = latest;
+    if (!o.a && !o.b) {
+      errBox.textContent = 'Enter two texts first.';
+      return;
+    }
+    var mode = { line: 'line', word: 'word', char: 'character' }[o.mode];
+    var ignored = [o.ignoreWS && 'whitespace', o.ignoreCase && 'case', o.ignoreEOL && 'line endings'].filter(Boolean);
+    var s = r.stats;
+    var unit = o.mode === 'word' ? ['word', 'words'] : ['character', 'characters'];
+    var items = [['add', s.added, 'line added', 'lines added'], ['del', s.removed, 'line removed', 'lines removed'],
+      ['', s.changed, 'line changed', 'lines changed'], ['', s.same, 'unchanged line', 'unchanged lines']];
+    if (o.mode !== 'line') {
+      items.push(['add', r.tokens.ins, unit[0] + ' added', unit[1] + ' added']);
+      items.push(['del', r.tokens.del, unit[0] + ' removed', unit[1] + ' removed']);
+    }
+    var title = 'Comparison of ' + o.names[0] + ' and ' + o.names[1];
+    var html = '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+      '<title>' + escHtml(title) + '</title>\n<style>\n' + TOKENS + '\n' + TT.$('#tc-style').textContent.trim() + '\n</style>\n</head>\n<body>\n<main class="tc">\n' +
+      '<h1>' + escHtml(title) + '</h1>\n<p class="tc-meta">Compared by ' + mode + (o.json ? ' as JSON' + (o.sortKeys ? ' with sorted keys' : '') : '') +
+      (ignored.length ? ', ignoring ' + ignored.join(', ') : '') + (o.hideSame ? ', unchanged lines folded' : '') + '. Saved ' + escHtml(new Date().toLocaleString()) + '.</p>\n' +
+      '<ul class="tc-sum">' + items.map(function (it) { return '<li class="' + it[0] + '"><b>' + it[1].toLocaleString() + '</b> ' + (it[1] === 1 ? it[2] : it[3]) + '</li>'; }).join('') + '</ul>\n' +
+      (okBox.textContent ? '<p class="tc-meta">' + escHtml(okBox.textContent) + '</p>\n' : '') +
+      '<div class="tc-out">' + out.innerHTML + '</div>\n</main>\n</body>\n</html>\n';
+    TT.download('text-compare.html', html, 'text/html;charset=utf-8');
+    if (btn) TT.flash(btn, 'Saved');
+  }
+  TT.$('#tc-html').addEventListener('click', function (e) {
+    errBox.textContent = '';
+    var btn = e.currentTarget;
+    if (!ta.value && !tb.value) {
+      errBox.textContent = 'Enter two texts first.';
+      return;
+    }
+    // Still comparing: save as soon as the result is on screen.
+    if (!isCurrent(options()) || out.getAttribute('aria-busy') === 'true') {
+      exportWhenReady = btn;
+      if (typing) compare();
+      return;
+    }
+    exportHtml(btn);
+  });
+
+  // ---------- Opening and dropping files ----------
+  function lineEndings(t) {
+    var crlf = 0, cr = 0, lf = 0;
+    for (var i = t.indexOf('\r'), j; i >= 0; i = t.indexOf('\r', i + 1)) { if (t.charCodeAt(i + 1) === 10) crlf++; else cr++; }
+    for (j = t.indexOf('\n'); j >= 0; j = t.indexOf('\n', j + 1)) lf++;
+    lf -= crlf;
+    var kinds = (crlf ? 1 : 0) + (cr ? 1 : 0) + (lf ? 1 : 0);
+    return kinds === 0 ? 'none' : kinds > 1 ? 'Mixed' : crlf ? 'CRLF' : cr ? 'CR' : 'LF';
+  }
+  var EOL_NAMES = { CRLF: 'Windows line endings (CRLF)', LF: 'Unix line endings (LF)', CR: 'old Mac line endings (CR)', Mixed: 'mixed line endings', none: 'a single line' };
+  function showInfo(side) {
+    var m = meta[side], el = TT.$('#tc-info-' + side);
+    if (!m) { el.textContent = ''; return; }
+    el.textContent = m.name + ' \u00B7 ' + m.enc + ' \u00B7 ' + EOL_NAMES[m.eol] + (box(side).value === m.norm ? '' : ' \u00B7 edited');
+  }
+
+  function decode(bytes) {
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), enc: 'UTF-16 LE' };
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), enc: 'UTF-16 BE' };
+    var bom = bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+    try {
+      return { text: new TextDecoder('utf-8', { fatal: true }).decode(bom ? bytes.subarray(3) : bytes), enc: bom ? 'UTF-8 with BOM' : 'UTF-8' };
+    } catch (e) {
+      // Not valid UTF-8: most likely a Windows "ANSI" file.
+      return { text: new TextDecoder('windows-1252').decode(bytes), enc: 'Windows-1252 (not valid UTF-8)' };
+    }
+  }
+
+  function loadFile(f, side) {
+    if (!f) return;
+    errBox.textContent = '';
+    if (f.size > 20 * 1024 * 1024) {
+      errBox.textContent = f.name + ' is larger than 20 MB. Open a smaller text file.';
+      return;
+    }
+    f.arrayBuffer().then(function (buf) {
+      var d = decode(new Uint8Array(buf));
+      if (/\u0000/.test(d.text.slice(0, 8000))) {
+        errBox.textContent = f.name + ' looks like a binary file, not text.';
         return;
       }
-      f.arrayBuffer().then(function (buf) {
-        // Blob.text() is UTF-8 only; honour a UTF-16 byte order mark (Windows "Unicode" text files).
-        var bytes = new Uint8Array(buf);
-        var enc = bytes[0] === 0xFF && bytes[1] === 0xFE ? 'utf-16le' : bytes[0] === 0xFE && bytes[1] === 0xFF ? 'utf-16be' : 'utf-8';
-        var text = new TextDecoder(enc).decode(bytes);
-        if (/\u0000/.test(text.slice(0, 8000))) {
-          errBox.textContent = f.name + ' looks like a binary file, not text.';
-          return;
-        }
-        target.value = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
-        compare();
-      }, function () {
-        errBox.textContent = 'Could not read ' + f.name + '.';
-      }).finally(function () { input.value = ''; });
+      var norm = d.text.replace(/\r\n?/g, '\n');
+      meta[side] = { name: f.name, raw: d.text, norm: norm, eol: lineEndings(d.text), enc: d.enc };
+      box(side).value = norm;
+      showInfo(side);
+      compare();
+    }, function () {
+      errBox.textContent = 'Could not read ' + f.name + '.';
     });
   }
   TT.$$('[data-file]').forEach(function (btn) {
     btn.addEventListener('click', function () { TT.$(btn.getAttribute('data-file')).click(); });
   });
-  loadFile(TT.$('#tc-file-a'), ta);
-  loadFile(TT.$('#tc-file-b'), tb);
+  ['a', 'b'].forEach(function (side) {
+    var input = TT.$('#tc-file-' + side), area = box(side);
+    input.addEventListener('change', function () {
+      loadFile(input.files && input.files[0], side);
+      input.value = '';
+    });
+    area.addEventListener('dragover', function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      area.classList.add('is-over');
+    });
+    area.addEventListener('dragleave', function () { area.classList.remove('is-over'); });
+    area.addEventListener('drop', function (e) {
+      area.classList.remove('is-over');
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      var files = e.dataTransfer.files;
+      // Two files dropped on one box: the first is the original, the second the changed text.
+      if (files.length >= 2) { loadFile(files[0], 'a'); loadFile(files[1], 'b'); }
+      else loadFile(files[0], side);
+    });
+  });
+  function hasFiles(e) {
+    return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
+  }
+  // A file dropped beside the boxes would otherwise replace the page.
+  document.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener('drop', function (e) { if (hasFiles(e)) e.preventDefault(); });
 
   compare();
 })();

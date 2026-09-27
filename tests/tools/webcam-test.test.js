@@ -127,11 +127,11 @@ module.exports = async ({ page, open, assert }) => {
   await page.waitForFunction(() => document.querySelector('#wct-probe').getAttribute('aria-disabled') === 'false', null, { timeout: 30000 });
   const probeRows = await page.locator('#wct-probe-table tr').evaluateAll(trs => trs.map(tr => [...tr.children].slice(0, 2).map(c => c.textContent)));
   assert.deepEqual(probeRows, [
-    ['640 × 480 (VGA)', 'Supported (native camera mode)'],
-    ['1280 × 720 (720p)', 'Supported (native camera mode)'],
-    ['1920 × 1080 (1080p)', 'Supported (native camera mode)'],
-    ['2560 × 1440 (1440p)', 'Only scaled down by the browser from a larger mode'],
-    ['3840 × 2160 (4K)', 'Supported (native camera mode)'],
+    ['640 × 480 (VGA)', 'Yes, a native camera mode'],
+    ['1280 × 720 (720p)', 'Yes, a native camera mode'],
+    ['1920 × 1080 (1080p)', 'Yes, a native camera mode'],
+    ['2560 × 1440 (1440p)', 'Only by scaling a larger mode down'],
+    ['3840 × 2160 (4K)', 'Yes, a native camera mode'],
   ]);
   assert.equal(await text('#wct-status'), 'Your camera supports 640 × 480, 1280 × 720, 1920 × 1080, 3840 × 2160.');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'wct-probe', 'focus stays on the button');
@@ -141,7 +141,8 @@ module.exports = async ({ page, open, assert }) => {
 
   // Record a 5-second clip (video only), then check the WebM file.
   assert.match(await text('#wct-rec'), /^Record 5 s clip$/);
-  await page.click('#wct-rec');
+  await page.dblclick('#wct-rec'); // a double click must not stop it at once
+  await page.waitForTimeout(600);
   assert.equal(await text('#wct-rec'), 'Stop recording');
   assert.equal(await page.getAttribute('#wct-probe', 'aria-disabled'), 'true');
   await waitText('#wct-rec-time', /^[1-4]\.\d s of 5 s$/);

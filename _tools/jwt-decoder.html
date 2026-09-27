@@ -1,20 +1,19 @@
 ---
-title: JWT Decoder & Verifier (JSON Web Tokens)
-description: Decode a JWT's header and payload, see exp, nbf and iat as dates, and verify HS256, RS256, PS256, ES256 or EdDSA signatures privately in your browser.
+title: JWT Decoder, Verifier & Token Generator
+description: Decode JWTs, check exp and iat, verify HS256, RS256, ES256 or EdDSA signatures with a secret, PEM key or JWKS, and sign test tokens, all in your browser.
 category: Developer
-keywords: [jwt decoder, decode jwt, jwt verifier, verify jwt signature, json web token decoder, jwt parser, jwt debugger, jwt expiration checker]
+keywords: [jwt decoder, decode jwt, jwt verifier, verify jwt signature, jwt generator, jwt encoder, json web token decoder, jwks]
 howto: |
   ## How to use the JWT decoder
 
   Paste a token into the box. It may start with `Bearer ` or be split over
-  several lines; both are cleaned up. You can also paste a whole JSON response
-  or callback URL, and the first token found in it is decoded. The header and
-  payload appear as formatted JSON, and the claims table shows `exp`, `nbf` and
-  `iat` as dates in UTC and in your time zone, with a badge saying whether the
-  token is valid right now.
+  several lines, or sit inside a JSON response, callback URL or cookie; the
+  first token found is decoded. The header and payload appear as formatted
+  JSON, and `exp`, `nbf` and `iat` are shown as dates in UTC and your time
+  zone, with a badge saying whether the token is valid right now.
 
   To check the signature, enter the key under **Verify the signature**. The
-  field changes with the algorithm named in the token's header:
+  field follows the algorithm in the token's header:
 
   | Algorithm | Signed with | Verify with |
   |---|---|---|
@@ -25,56 +24,58 @@ howto: |
   | EdDSA | Ed25519 private key | Ed25519 public key |
 
   A public key can be PEM (`BEGIN PUBLIC KEY`, `BEGIN RSA PUBLIC KEY` or a
-  `BEGIN CERTIFICATE` certificate), a single JWK, or a whole JWKS as served at
-  an identity provider's `jwks_uri`. From a JWKS, the key whose `kid` matches
-  the token's header is used.
+  certificate), a single JWK, or a whole JWKS as served at a provider's
+  `jwks_uri`. From a JWKS the key whose `kid` matches the token is used; the
+  **Key from the set** list lets you try any other key by hand.
+
+  ## Create a test token
+
+  Under **Create and sign a test token**, pick an algorithm, edit the header
+  and payload JSON, and the signed token appears at once. HMAC tokens use a
+  secret (a random 64-byte one is filled in). For RS, PS, ES and EdDSA, paste
+  a private key as PKCS#8 PEM, an `RSA PRIVATE KEY` or `EC PRIVATE KEY` block,
+  or a JWK, or press **Generate a test key pair**; the matching public key is
+  shown as PEM and JWK. **Decode and verify it above** loads the token and its
+  key into the decoder. Use this for tests and demos only, with throwaway keys,
+  never your production secrets.
 
   ## What is inside a JWT
 
-  A JWT (RFC 7519) in compact form is three Base64url strings joined by dots: a
-  header, a payload of claims, and a signature. Base64url is an encoding, not
-  encryption. Anyone holding the token can read the payload, so it must never
-  contain secrets. The signature covers the exact characters of
-  `header.payload`, which is why changing a single character of either part
-  makes verification fail.
+  A JWT (RFC 7519) is three Base64url strings joined by dots: header,
+  payload and signature. Base64url is an encoding, not encryption, so anyone
+  holding the token can read the payload. The signature covers the exact
+  characters of `header.payload`, which is why changing one character makes
+  verification fail. The time claims count seconds since 1970-01-01 UTC; a
+  13-digit value is in milliseconds, a common bug the page warns about.
 
-  The registered claims have short names: `iss` (issuer), `sub` (subject),
-  `aud` (audience), `exp` (expiry), `nbf` (not before), `iat` (issued at) and
-  `jti` (token ID). The three time claims are NumericDate values, counted in
-  seconds since 1970-01-01 UTC. A 13-digit value is in milliseconds, a common
-  bug, and the page warns when it sees one.
+  ## How verification and signing work
 
-  ## How verification works here
-
-  Signatures are checked with the browser's Web Crypto API
-  (`crypto.subtle.verify`) as RFC 7518 defines the algorithms: HMAC for HS,
-  RSASSA-PKCS1-v1_5 for RS, RSASSA-PSS with a salt as long as the hash for PS,
-  and ECDSA with the raw R‖S signature (64, 96 or 132 bytes) for ES. EdDSA
-  follows RFC 8037. The token and key stay in this tab.
+  Both use the browser's Web Crypto API as RFC 7518 defines the algorithms:
+  HMAC for HS, RSASSA-PKCS1-v1_5 for RS, RSA-PSS with a salt as long as the
+  hash for PS, ECDSA with the raw R‖S signature (64, 96 or 132 bytes) for ES,
+  and Ed25519 for EdDSA (RFC 8037), where the browser supports it.
 
   ## Security notes
 
-  - **`alg: none`** marks an unsigned token. Anyone can write one, so a server
-    must never accept it. Some JWT libraries once did, which let attackers
-    forge any claims they liked.
-  - **Algorithm confusion.** A server that trusts the `alg` in the header can
-    be tricked into using its RSA public key as an HMAC secret. Configure the
-    expected algorithm on the server instead of reading it from the token.
-  - **Short HMAC secrets** can be guessed offline from a single token. RFC 7518
-    requires a key at least as long as the hash: 32 bytes for HS256.
+  - **`alg: none`** marks an unsigned token, which a server must never accept.
+  - **Algorithm confusion.** A server that trusts the header's `alg` can be
+    tricked into using its RSA public key as an HMAC secret. Configure the
+    expected algorithm on the server.
+  - **Short HMAC secrets** can be guessed offline from one token. RFC 7518
+    requires at least 32 bytes for HS256.
   - A valid signature proves who issued the token, not that it is meant for
-    you. Servers must also check `exp`, `nbf`, `iss` and `aud`.
+    you: also check `exp`, `nbf`, `iss` and `aud`.
 faq:
   - q: Is my token sent to a server?
-    a: No. Decoding and signature checks run entirely in your browser with JavaScript and the Web Crypto API. The token, secret and keys are never uploaded or stored, so it is safe to inspect real tokens here.
+    a: No. Decoding, verifying and signing run entirely in your browser with JavaScript and the Web Crypto API. Tokens, secrets and keys are never uploaded or stored.
   - q: Can anyone read the contents of my JWT?
     a: Yes. The header and payload are only Base64url-encoded, not encrypted, so anyone who has the token can decode them. Keep secrets out of the payload, or use an encrypted JWE token.
   - q: Why does verification fail even though the secret is right?
     a: Check whether the secret is stored Base64-encoded (tick "Secret is Base64 encoded"), that no spaces or line breaks were copied with it, and that the whole token was pasted. Any change to the header or payload also breaks the signature.
+  - q: Can I use the generator to make tokens for my real app?
+    a: Only for testing. Signing a token needs the real secret or private key, and those should never be pasted into any website. Use a test key, such as one the generator makes, and configure your development server to trust it.
   - q: Where do I get the public key for a provider's tokens?
     a: Identity providers publish their keys as a JWKS. Open the provider's `/.well-known/openid-configuration`, follow the `jwks_uri` link and paste the JSON here; the key matching the token's `kid` is picked automatically.
-  - q: Does a verified signature mean I can trust the token?
-    a: Only partly. It proves the token was signed with that key and not changed since. Your application must also check the expiry, the issuer and the audience before accepting it.
 ---
 <style>
 .jwt-note { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; padding: 10px 12px; background: var(--accent-soft); border-radius: 8px; color: var(--text); font-size: 14px; }
@@ -108,6 +109,19 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
 .jwt-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
 .jwt-keyhint { margin: 0 0 14px; }
 .jwt-secret-row .checks { margin: 8px 0 0; }
+.jb-warn { display: flex; gap: 10px; margin: 0 0 16px; padding: 12px 14px; background: var(--danger-soft); border-left: 4px solid var(--danger); border-radius: 8px; color: var(--text); font-size: 14px; }
+.jb-warn svg { flex: none; width: 20px; height: 20px; margin-top: 1px; fill: none; stroke: var(--danger); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.jb-warn p { margin: 0; }
+.jb-warn strong { color: var(--danger); }
+textarea.jb-json { min-height: 172px; }
+textarea.jb-token { min-height: 100px; background: var(--surface-2); }
+.jb-inrow { display: flex; gap: 10px; align-items: center; }
+.jb-inrow input { flex: 1 1 auto; min-width: 0; }
+.jb-times { margin-bottom: 0; }
+.jb-cols { gap: 0 16px; }
+.jb-keyacts { margin: 8px 0 0; }
+#jb-secret-field .checks { margin: 8px 0 0; }
+@media (max-width: 560px) { .jb-inrow { flex-wrap: wrap; } .jb-inrow input { flex-basis: 100%; } }
 @media (max-width: 560px) {
   table.data.jwt-claims, .jwt-claims tbody, .jwt-claims tr { display: block; }
   table.data.jwt-claims tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
@@ -116,7 +130,7 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
 }
 </style>
 
-<p class="jwt-note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Private by design: your token, secret and keys never leave this browser tab. Decoding and signature checks run locally with the Web Crypto API, and nothing is sent anywhere.</span></p>
+<p class="jwt-note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Private by design: your token, secret and keys never leave this browser tab. Decoding, signature checks and test signing run locally with the Web Crypto API, and nothing is sent anywhere.</span></p>
 
 <div class="field">
   <label for="jwt-token">JSON Web Token</label>
@@ -170,9 +184,96 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
   <label for="jwt-key">Public key <span class="hint">PEM public key or certificate, JWK, or JWKS</span></label>
   <textarea id="jwt-key" class="mono jwt-key" rows="7" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-----BEGIN PUBLIC KEY-----&#10;…&#10;-----END PUBLIC KEY-----"></textarea>
 </div>
+<div class="field" id="jwt-kid-field" hidden>
+  <label for="jwt-kid">Key from the set</label>
+  <select id="jwt-kid"><option value="">Match the token’s kid</option></select>
+</div>
 <p class="msg" id="jwt-verify"></p>
 <p class="msg jwt-info" id="jwt-key-note"></p>
 <p class="visually-hidden" id="jwt-status" role="status"></p>
+
+<hr class="jwt-sep">
+<h2 class="jwt-h2">Create and sign a test token</h2>
+<div class="jb-warn" role="note">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18h.01"/></svg>
+  <p><strong>For testing only.</strong> Use throwaway secrets and keys made for testing, such as the ones the buttons below generate. Never paste a production secret or private key into any website, this one included: anyone who has it can sign tokens your servers will accept. Everything here stays in this browser tab.</p>
+</div>
+<div class="row">
+  <div class="field">
+    <label for="jb-alg">Algorithm</label>
+    <select id="jb-alg">
+      <optgroup label="Shared secret">
+        <option value="HS256" selected>HS256 (HMAC SHA-256)</option>
+        <option value="HS384">HS384 (HMAC SHA-384)</option>
+        <option value="HS512">HS512 (HMAC SHA-512)</option>
+      </optgroup>
+      <optgroup label="Private key">
+        <option value="RS256">RS256 (RSA PKCS#1 v1.5)</option>
+        <option value="RS384">RS384</option>
+        <option value="RS512">RS512</option>
+        <option value="PS256">PS256 (RSA-PSS)</option>
+        <option value="PS384">PS384</option>
+        <option value="PS512">PS512</option>
+        <option value="ES256">ES256 (ECDSA P-256)</option>
+        <option value="ES384">ES384 (ECDSA P-384)</option>
+        <option value="ES512">ES512 (ECDSA P-521)</option>
+        <option value="EdDSA">EdDSA (Ed25519)</option>
+      </optgroup>
+    </select>
+  </div>
+  <div class="actions jb-times">
+    <button class="btn secondary small" type="button" id="jb-now">Set iat now, exp in 1 hour</button>
+  </div>
+</div>
+<div class="cols jb-cols">
+  <div class="field">
+    <label for="jb-header">Header <span class="hint">JSON</span></label>
+    <textarea id="jb-header" class="mono jb-json" rows="5" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="jb-msg">{
+  "alg": "HS256",
+  "typ": "JWT"
+}</textarea>
+  </div>
+  <div class="field">
+    <label for="jb-payload">Payload <span class="hint">JSON claims</span></label>
+    <textarea id="jb-payload" class="mono jb-json" rows="5" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="jb-msg">{
+  "sub": "user-123",
+  "name": "Test User",
+  "admin": false
+}</textarea>
+  </div>
+</div>
+<div class="field" id="jb-secret-field">
+  <label for="jb-secret">Secret <span class="hint">a test secret, never a real one</span></label>
+  <div class="jb-inrow">
+    <input type="text" id="jb-secret" class="mono" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="jb-msg">
+    <button class="btn secondary small" type="button" id="jb-gen-secret">New random secret</button>
+  </div>
+  <div class="checks"><label class="check"><input type="checkbox" id="jb-secret-b64"> Secret is Base64 encoded</label></div>
+</div>
+<div class="field" id="jb-key-field" hidden>
+  <label for="jb-key">Private key <span class="hint">PEM (PKCS#8, RSA or EC) or JWK; use a test key</span></label>
+  <textarea id="jb-key" class="mono jwt-key" rows="6" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----" aria-describedby="jb-msg"></textarea>
+  <div class="actions jb-keyacts"><button class="btn secondary small" type="button" id="jb-gen-key">Generate a test key pair</button></div>
+</div>
+<!-- Not an alert: the message changes while the JSON or key is typed; #jb-status says
+     one short line once typing pauses. -->
+<p class="msg error" id="jb-msg"></p>
+<p class="msg jwt-info" id="jb-note"></p>
+<div class="field">
+  <label for="jb-token">Signed token</label>
+  <textarea id="jb-token" class="mono jwt-token jb-token" rows="4" readonly spellcheck="false"></textarea>
+</div>
+<div class="actions">
+  <button class="btn secondary small" type="button" data-copy-target="#jb-token">Copy token</button>
+  <button class="btn small" type="button" id="jb-load">Decode and verify it above</button>
+</div>
+<div id="jb-pub-wrap" hidden>
+  <div class="jwt-sec-head"><span class="label">Public key <span class="hint">share this one to verify the token</span></span>
+    <span><button class="btn secondary small" type="button" data-copy-target="#jb-pub">Copy PEM</button> <button class="btn secondary small" type="button" data-copy-target="#jb-pub-jwk">Copy JWK</button></span></div>
+  <pre class="output jwt-json" id="jb-pub" tabindex="0" aria-label="Public key in PEM form"></pre>
+  <pre class="visually-hidden" id="jb-pub-jwk"></pre>
+</div>
+<p class="visually-hidden" id="jb-status" role="status"></p>
 
 <script>
 (function () {
@@ -575,10 +676,14 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
     }
   }
 
+  // Ed25519 arrived in Web Crypto later than the others; older browsers reject its name.
+  const unsupported = (e, spec) => spec.kty === 'OKP' && e && (e.name === 'NotSupportedError' || /unrecognized|not supported/i.test(e.message || ''));
+  const NO_ED25519 = 'This browser\'s Web Crypto does not support Ed25519 yet, so EdDSA signatures can\'t be checked here. Update the browser, or try another one.';
   async function importSpki(spki, spec, alg) {
     const info = spkiInfo(spki);
     checkKeyType(info, spec, alg);
     try { return await subtle.importKey('spki', spki, spec.imp, false, ['verify']); } catch (e) {
+      if (unsupported(e, spec)) throw new UserError(NO_ED25519);
       if (info.pssOnly) throw new UserError('This key uses the RSASSA-PSS key identifier, which this browser can\'t import. Export it as a plain RSA public key (rsaEncryption); the signature check is the same.');
       throw new UserError('The browser could not load this ' + describeNeed(spec).replace(/^an? /, '') + ' (' + (e && e.message ? e.message : e) + ').');
     }
@@ -607,8 +712,31 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
       throw new UserError('The JWK is missing its public key members (' + (jwk.kty === 'RSA' ? '"n" and "e"' : jwk.kty === 'EC' ? '"crv", "x" and "y"' : '"crv" and "x"') + ').');
     }
     try { return await subtle.importKey('jwk', pub, spec.imp, false, ['verify']); } catch (e) {
+      if (unsupported(e, spec)) throw new UserError(NO_ED25519);
       throw new UserError('The browser could not load this JWK (' + (e && e.message ? e.message : e) + ').');
     }
+  }
+
+  // The "Key from the set" list, rebuilt when the pasted JWKS changes. Returns the key
+  // the user picked, or null for automatic matching by kid.
+  const kidSel = $('#jwt-kid');
+  let kidListFor = '';
+  function kidPicker(keys) {
+    $('#jwt-kid-field').hidden = false;
+    const sig = JSON.stringify(keys.map(k => [k.kid, k.kty, k.alg, k.crv]));
+    if (sig !== kidListFor) {
+      kidListFor = sig;
+      const keep = kidSel.value;
+      kidSel.length = 1;
+      keys.forEach((k, i) => {
+        const o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = (k.kid ? 'kid ' + k.kid : 'Key ' + (i + 1) + ' (no kid)') + ' · ' + [k.kty, k.crv, k.alg, k.use].filter(Boolean).join(' ');
+        kidSel.appendChild(o);
+      });
+      kidSel.value = keep && +keep < keys.length ? keep : '';
+    }
+    return kidSel.value === '' ? null : keys[+kidSel.value];
   }
 
   const PRIVATE_KEY_MSG = 'This is a private key. Verifying needs only the public key, and a private key should never be pasted into a website. Paste the matching public key instead.';
@@ -619,15 +747,19 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
       try { obj = JSON.parse(text); } catch (e) { throw new UserError('The key looks like JSON, but it is not valid JSON: ' + e.message + '.'); }
       if (obj && Array.isArray(obj.keys)) {
         const keys = obj.keys.filter(k => k && typeof k === 'object');
+        const picked = kidPicker(keys);
         let jwk;
-        if (typeof header.kid === 'string') {
+        if (picked) {
+          jwk = picked;
+          notes.push('Using the key you picked' + (jwk.kid ? ', kid "' + jwk.kid + '"' : '') + (typeof header.kid === 'string' && jwk.kid !== header.kid ? ', although the token names kid "' + header.kid + '"' : '') + '.');
+        } else if (typeof header.kid === 'string') {
           jwk = keys.find(k => k.kid === header.kid);
-          if (!jwk) throw new UserError('No key in this JWKS has the token\'s kid "' + header.kid + '". The provider may have rotated its keys, or the token comes from another issuer.');
+          if (!jwk) throw new UserError('No key in this JWKS has the token\'s kid "' + header.kid + '". The provider may have rotated its keys, or the token comes from another issuer. Pick a key from the set to try one anyway.');
         } else {
           jwk = keys.find(k => k.kty === spec.kty && (!k.alg || k.alg === alg) && (!spec.crv || k.crv === spec.crv));
           if (!jwk) throw new UserError('The token has no kid, and no key in this JWKS fits ' + alg + '.');
         }
-        notes.push('Using the key' + (jwk.kid ? ' with kid "' + jwk.kid + '"' : '') + ' from this JWKS (' + keys.length + (keys.length === 1 ? ' key' : ' keys') + ').');
+        if (!picked) notes.push('Using the key' + (jwk.kid ? ' with kid "' + jwk.kid + '"' : '') + ' from this JWKS (' + keys.length + (keys.length === 1 ? ' key' : ' keys') + ').');
         return importJwk(jwk, spec, alg, notes);
       }
       return importJwk(obj, spec, alg, notes);
@@ -698,6 +830,7 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
     const alg = t && !t.jwe && typeof t.header.obj.alg === 'string' ? t.header.obj.alg : '';
     const spec = alg && Object.prototype.hasOwnProperty.call(ALGS, alg) ? ALGS[alg] : null;
     configureKeyFields(alg, spec);
+    $('#jwt-kid-field').hidden = true;
     if (!t || t.jwe) return done('', '');
     if (/^none$/i.test(alg)) return done('bad', 'Unsigned token (alg "' + alg + '"). There is nothing to verify, and it must not be trusted.', ['Unsigned', 'bad']);
     if (!spec) return done('', '', ['Signature not checked', '']);
@@ -790,6 +923,7 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
   secretEl.addEventListener('input', keyEdited);
   b64El.addEventListener('change', keyEdited);
   keyEl.addEventListener('input', keyEdited);
+  kidSel.addEventListener('change', keyEdited);
   $('#jwt-example').addEventListener('click', exampleClicked);
   $('#jwt-clear').addEventListener('click', () => {
     tokenEl.value = '';
@@ -800,6 +934,277 @@ pre.jwt-json:focus-visible { outline: 2px solid var(--accent); outline-offset: 2
     update();
     tokenEl.focus();
   });
+
+
+  // ---------- Builder: create and sign a test token ----------
+  const jbAlg = $('#jb-alg'), jbHeader = $('#jb-header'), jbPayload = $('#jb-payload'), jbSecret = $('#jb-secret');
+  const jbB64 = $('#jb-secret-b64'), jbKey = $('#jb-key'), jbMsg = $('#jb-msg'), jbToken = $('#jb-token');
+  let jbJob = 0, jbResult = null;
+  const b64u = u8 => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+  const utf8Bytes = t => new TextEncoder().encode(t);
+  const b64std = u8 => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
+  const pemOf = (der, label) => '-----BEGIN ' + label + '-----\n' + b64std(new Uint8Array(der)).replace(/(.{64})(?=.)/g, '$1\n') + '\n-----END ' + label + '-----';
+
+  // Removes whitespace outside strings, so numbers (even huge ones) keep their exact digits.
+  function minifyJson(text) {
+    let out = '', inStr = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inStr) { out += c; if (c === '\\') { out += text[++i] || ''; } else if (c === '"') inStr = false; }
+      else if (c === '"') { inStr = true; out += c; }
+      else if (!/\s/.test(c)) out += c;
+    }
+    return out;
+  }
+  function parseJsonObject(text, what) {
+    let obj;
+    try { obj = JSON.parse(text); } catch (e) { throw new UserError('The ' + what + ' is not valid JSON: ' + e.message.replace(/^JSON\.parse: /, '') + '.'); }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new UserError('The ' + what + ' must be a JSON object, in { }.');
+    return obj;
+  }
+
+  // PKCS#1 RSA and SEC1 EC private keys are wrapped into PKCS#8, which Web Crypto imports.
+  function wrapPkcs8(algIdBytes, inner) {
+    const body = [0x02, 0x01, 0x00].concat(algIdBytes, [0x04], derLen(inner.length), Array.from(inner));
+    return Uint8Array.from([0x30].concat(derLen(body.length), body));
+  }
+  function sec1ToPkcs8(der) {
+    const seq = derNode(der, 0);
+    let p = seq.start, curve = null;
+    for (let i = 0; i < 4 && p < seq.end; i++) {
+      const n = derNode(der, p);
+      if (n.tag === 0xa0) curve = Array.from(der.subarray(n.start, n.end));
+      p = n.end;
+    }
+    if (!curve) throw new UserError('This EC private key does not name its curve. Export it as PKCS#8 (BEGIN PRIVATE KEY).');
+    const algId = [0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01].concat(curve);
+    return wrapPkcs8([0x30].concat(derLen(algId.length), algId), der);
+  }
+  function pkcs1PrivToPkcs8(der) {
+    return wrapPkcs8([0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00], der);
+  }
+  // Key type and curve from a PKCS#8 PrivateKeyInfo.
+  function pkcs8Info(der) {
+    const outer = derNode(der, 0), ver = derNode(der, outer.start), algId = derNode(der, ver.end), oid = derNode(der, algId.start);
+    if (outer.tag !== 0x30 || ver.tag !== 0x02 || algId.tag !== 0x30 || oid.tag !== 0x06) throw new UserError('This is not a valid PKCS#8 private key.');
+    const info = Object.assign({}, OIDS[hexOf(der.subarray(oid.start, oid.end))] || { kty: '?', name: 'unknown type' });
+    if (info.kty === 'EC' && oid.end < algId.end) {
+      const prm = derNode(der, oid.end);
+      info.crv = CURVES[hexOf(der.subarray(prm.start, prm.end))] || 'unknown curve';
+      info.name = 'EC ' + info.crv;
+    }
+    return info;
+  }
+
+  async function importPrivateKey(text, spec, alg) {
+    const usage = ['sign'];
+    const need = () => describeNeed(spec).replace('public', 'private');
+    let key;
+    if (text[0] === '{') {
+      let jwk;
+      try { jwk = JSON.parse(text); } catch (e) { throw new UserError('The key looks like JSON, but it is not valid JSON: ' + e.message + '.'); }
+      if (!jwk || typeof jwk !== 'object' || Array.isArray(jwk)) throw new UserError('The JWK must be a JSON object.');
+      if (Array.isArray(jwk.keys)) throw new UserError('This is a key set (JWKS). Paste the single private JWK to sign with.');
+      if (!jwk.d) throw new UserError('This JWK has no "d" member, so it is a public key. Signing needs the private key.');
+      if (jwk.kty !== spec.kty || (spec.crv && jwk.crv !== spec.crv)) throw new UserError('This is ' + (jwk.kty === 'EC' || jwk.kty === 'OKP' ? 'an ' + jwk.crv : 'an ' + jwk.kty) + ' key, but ' + alg + ' needs ' + need() + '.');
+      const clean = Object.assign({}, jwk);
+      delete clean.alg; delete clean.key_ops; delete clean.use; delete clean.ext;
+      try { key = await subtle.importKey('jwk', clean, spec.imp, true, usage); } catch (e) {
+        if (unsupported(e, spec)) throw new UserError(NO_ED25519.replace('checked', 'made'));
+        throw new UserError('The browser could not load this private JWK (' + (e && e.message ? e.message : e) + ').');
+      }
+      return key;
+    }
+    const pem = text.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----/);
+    if (!pem) {
+      if (/^-----BEGIN/.test(text)) throw new UserError('The PEM block is incomplete: its BEGIN and END lines must match.');
+      throw new UserError('Paste the private key as PEM (-----BEGIN PRIVATE KEY-----) or as a JWK with a "d" member.');
+    }
+    const type = pem[1];
+    if (/PUBLIC KEY|CERTIFICATE/.test(type)) throw new UserError('This is a public key or certificate. Signing needs the private key; the public key only verifies.');
+    if (type === 'ENCRYPTED PRIVATE KEY') throw new UserError('This private key is encrypted with a passphrase, which this page does not handle. Use an unencrypted test key.');
+    if (type === 'OPENSSH PRIVATE KEY') throw new UserError('OpenSSH private keys are not supported. Convert with ssh-keygen -p -m PKCS8 -f KEYFILE, or generate a test key pair here.');
+    let der = b64Bytes(pem[2].replace(/^[\w-]+:.*$/gm, ''), 'PEM key', 'Base64');
+    if (type === 'RSA PRIVATE KEY') der = pkcs1PrivToPkcs8(der);
+    else if (type === 'EC PRIVATE KEY') der = sec1ToPkcs8(der);
+    else if (type !== 'PRIVATE KEY') throw new UserError('"' + type + '" PEM blocks are not supported. Use PRIVATE KEY (PKCS#8), RSA PRIVATE KEY or EC PRIVATE KEY.');
+    const info = pkcs8Info(der);
+    if (info.kty !== spec.kty || (spec.crv && info.crv !== spec.crv)) {
+      throw new UserError('This is ' + (info.kty === '?' ? 'a key of an unknown type' : 'an ' + info.name + ' key') + ', but ' + alg + ' needs ' + need() + '.');
+    }
+    try { key = await subtle.importKey('pkcs8', der, spec.imp, true, usage); } catch (e) {
+      if (unsupported(e, spec)) throw new UserError(NO_ED25519.replace('checked', 'made'));
+      throw new UserError('The browser could not load this private key (' + (e && e.message ? e.message : e) + ').');
+    }
+    return key;
+  }
+
+  // The public half of a private CryptoKey, as a JWK and as a PEM.
+  async function publicOf(privKey, spec, alg, kid) {
+    const j = await subtle.exportKey('jwk', privKey);
+    const pub = spec.kty === 'RSA' ? { kty: 'RSA', n: j.n, e: j.e } : spec.kty === 'EC' ? { kty: 'EC', crv: j.crv, x: j.x, y: j.y } : { kty: 'OKP', crv: j.crv, x: j.x };
+    if (kid) pub.kid = kid;
+    pub.alg = alg; pub.use = 'sig';
+    const imported = await subtle.importKey('jwk', { kty: pub.kty, n: pub.n, e: pub.e, crv: pub.crv, x: pub.x, y: pub.y }, spec.imp, true, ['verify']);
+    return { jwk: pub, pem: pemOf(await subtle.exportKey('spki', imported), 'PUBLIC KEY') };
+  }
+
+  function builderKind() { return ALGS[jbAlg.value].kty === 'oct' ? 'secret' : 'key'; }
+  function syncHeaderAlg() {
+    try {
+      const h = parseJsonObject(jbHeader.value, 'header');
+      if (h.alg === jbAlg.value) return;
+      h.alg = jbAlg.value;
+      jbHeader.value = JSON.stringify(h, null, 2);
+    } catch (e) { /* leave a broken header for the user to fix; build() reports it */ }
+  }
+
+  function showBuilderFields() {
+    const kind = builderKind();
+    $('#jb-secret-field').hidden = kind !== 'secret';
+    $('#jb-key-field').hidden = kind !== 'key';
+  }
+  async function build() {
+    const job = ++jbJob, alg = jbAlg.value, spec = ALGS[alg], kind = builderKind();
+    showBuilderFields();
+    const notes = [];
+    const fail = (msg, el) => {
+      if (job !== jbJob) return;
+      jbMsg.textContent = msg;
+      [jbHeader, jbPayload, jbSecret, jbKey].forEach(x => x.setAttribute('aria-invalid', x === el ? 'true' : 'false'));
+      jbToken.value = '';
+      $('#jb-note').textContent = '';
+      $('#jb-pub-wrap').hidden = true;
+      $('#jb-load').disabled = true;
+      jbResult = null;
+    };
+    let header, headerText, payloadText;
+    try {
+      header = parseJsonObject(jbHeader.value, 'header');
+      if (header.alg !== alg) throw new UserError('The header’s "alg" is ' + JSON.stringify(header.alg) + ', but the token is signed with ' + alg + '. Pick the algorithm in the list, and the header follows.');
+      headerText = minifyJson(jbHeader.value);
+    } catch (e) { if (!(e instanceof UserError)) throw e; return fail(e.message, jbHeader); }
+    try {
+      const pl = parseJsonObject(jbPayload.value, 'payload');
+      payloadText = minifyJson(jbPayload.value);
+      ['exp', 'nbf', 'iat'].forEach(c => { if (c in pl && typeof pl[c] !== 'number') notes.push('"' + c + '" should be a number of seconds since 1970, not ' + typeName(pl[c]) + '.'); else if (typeof pl[c] === 'number' && pl[c] > 1e11) notes.push('"' + c + '" looks like milliseconds; JWT times are in seconds.'); });
+    } catch (e) { if (!(e instanceof UserError)) throw e; return fail(e.message, jbPayload); }
+    if (!subtle) return fail('Signing needs the Web Crypto API, which browsers only offer on secure (https) pages.', null);
+    const input = b64u(utf8Bytes(headerText)) + '.' + b64u(utf8Bytes(payloadText));
+    let sig, pub = null, secretText = '', secretB64 = false;
+    try {
+      if (kind === 'secret') {
+        secretText = jbSecret.value; secretB64 = jbB64.checked;
+        if (!secretText) throw new UserError('Enter a test secret, or press New random secret.');
+        const bytes = secretB64 ? b64Bytes(secretText.trim(), 'secret', 'Base64') : utf8Bytes(secretText);
+        if (!bytes.length) throw new UserError('The secret decodes to zero bytes.');
+        if (bytes.length < spec.minBytes) notes.push('This secret is ' + bytes.length + (bytes.length === 1 ? ' byte' : ' bytes') + '; RFC 7518 requires at least ' + spec.minBytes + ' for ' + alg + '.');
+        const k = await subtle.importKey('raw', bytes, { name: 'HMAC', hash: spec.hash }, false, ['sign']);
+        sig = await subtle.sign('HMAC', k, utf8Bytes(input));
+      } else {
+        const text = jbKey.value.trim();
+        if (!text) throw new UserError('Paste a test private key, or press Generate a test key pair.');
+        const k = await importPrivateKey(text, spec, alg);
+        const bits = k.algorithm && k.algorithm.modulusLength;
+        if (spec.kty === 'RSA' && bits && bits < 2048) notes.push('This RSA key is only ' + bits + ' bits; RFC 7518 requires 2048 bits or more.');
+        sig = await subtle.sign(spec.ver, k, utf8Bytes(input));
+        pub = await publicOf(k, spec, alg, typeof header.kid === 'string' ? header.kid : '');
+      }
+    } catch (e) {
+      if (job !== jbJob) return;
+      return fail(e instanceof UserError ? e.message : 'The token could not be signed: ' + (e && e.message ? e.message : e), kind === 'secret' ? jbSecret : jbKey);
+    }
+    if (job !== jbJob) return;
+    const token = input + '.' + b64u(new Uint8Array(sig));
+    fail('', null);
+    jbToken.value = token;
+    jbResult = { token: token, kind: kind, secret: secretText, secretB64: secretB64, pub: pub };
+    $('#jb-load').disabled = false;
+    $('#jb-note').textContent = notes.join(' ');
+    $('#jb-pub-wrap').hidden = !pub;
+    if (pub) { $('#jb-pub').textContent = pub.pem; $('#jb-pub-jwk').textContent = JSON.stringify(pub.jwk, null, 2); }
+  }
+
+  // Test keys made in the browser: RSA 2048, EC on the algorithm's curve, or Ed25519.
+  async function generateKeyPair(btn) {
+    const alg = jbAlg.value, spec = ALGS[alg];
+    if (!subtle) return;
+    const params = spec.kty === 'RSA'
+      ? Object.assign({}, spec.imp, { modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) })
+      : spec.imp;
+    btn.disabled = true;
+    const before = jbKey.value;
+    try {
+      const pair = await subtle.generateKey(params, true, ['sign', 'verify']);
+      const pem = pemOf(await subtle.exportKey('pkcs8', pair.privateKey), 'PRIVATE KEY');
+      // Never overwrite a key pasted while the pair was being made, or one made for
+      // another algorithm chosen in the meantime.
+      if (jbKey.value !== before || jbAlg.value !== alg) { btn.disabled = false; return; }
+      jbKey.value = pem;
+      await build();
+      TT.announce('Generated a new ' + (spec.kty === 'RSA' ? 'RSA 2048-bit' : spec.kty === 'EC' ? 'EC ' + spec.crv : 'Ed25519') + ' test key pair and signed the token.');
+    } catch (e) {
+      jbMsg.textContent = unsupported(e, spec) ? NO_ED25519.replace('checked', 'made') : 'The key pair could not be generated: ' + (e && e.message ? e.message : e);
+    }
+    btn.disabled = false;
+    btn.focus();
+  }
+  function randomSecret() {
+    const b = new Uint8Array(64);
+    crypto.getRandomValues(b);
+    jbSecret.value = b64u(b);
+    jbB64.checked = false;
+  }
+
+  const jbStatus = $('#jb-status');
+  let jbTimer = null;
+  function jbSay() {
+    clearTimeout(jbTimer);
+    jbTimer = setTimeout(() => {
+      jbStatus.textContent = jbMsg.textContent || (jbResult ? 'Signed ' + jbAlg.value + ' token ready, ' + jbResult.token.length + ' characters.' : '');
+    }, 800);
+  }
+  const rebuild = () => { build().then(jbSay); };
+  jbAlg.addEventListener('change', () => {
+    syncHeaderAlg();
+    showBuilderFields();
+    // A key for another algorithm family would only produce an error: start fresh.
+    const k = jbKey.value;
+    if (k && builderKind() === 'key') {
+      const spec = ALGS[jbAlg.value];
+      const fits = /^\s*\{/.test(k) ? true : (() => { try { const m = k.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END/); if (!m || m[1] !== 'PRIVATE KEY') return true; const i = pkcs8Info(b64Bytes(m[2], 'key', 'Base64')); return i.kty === spec.kty && (!spec.crv || i.crv === spec.crv); } catch (e) { return true; } })();
+      if (!fits) jbKey.value = '';
+    }
+    if (builderKind() === 'key' && !jbKey.value) generateKeyPair($('#jb-gen-key')); else rebuild();
+  });
+  [jbHeader, jbPayload, jbSecret, jbKey].forEach(el => el.addEventListener('input', TT.debounce(rebuild, 150)));
+  jbB64.addEventListener('change', rebuild);
+  $('#jb-gen-secret').addEventListener('click', () => { randomSecret(); rebuild(); });
+  $('#jb-gen-key').addEventListener('click', e => generateKeyPair(e.currentTarget));
+  $('#jb-now').addEventListener('click', () => {
+    try {
+      const pl = parseJsonObject(jbPayload.value, 'payload');
+      const now = Math.floor(Date.now() / 1000);
+      pl.iat = now; pl.exp = now + 3600;
+      jbPayload.value = JSON.stringify(pl, null, 2);
+      rebuild();
+    } catch (e) { if (!(e instanceof UserError)) throw e; jbMsg.textContent = e.message; }
+  });
+  $('#jb-load').addEventListener('click', () => {
+    if (!jbResult) return;
+    tokenEl.value = jbResult.token;
+    exampleActive = false;
+    if (jbResult.kind === 'secret') { secretEl.value = jbResult.secret; b64El.checked = jbResult.secretB64; keyEl.value = ''; }
+    else { keyEl.value = JSON.stringify(jbResult.pub.jwk, null, 2); secretEl.value = ''; }
+    kidSel.value = '';
+    update();
+    sayLater(decodeSummary);
+  });
+
+  randomSecret();
+  const nowSec = Math.floor(Date.now() / 1000);
+  jbPayload.value = JSON.stringify({ sub: 'user-123', name: 'Test User', admin: false, iat: nowSec, exp: nowSec + 3600 }, null, 2);
+  build();
 
   loadExample();
 })();

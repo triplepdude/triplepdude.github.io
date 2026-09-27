@@ -175,9 +175,11 @@ module.exports = async ({ page, open, assert }) => {
   await page.uncheck('#cm-rec');
   await page.fill('#cm-file', '');
 
-  // Live regions: typing a file name must not re-read the explanation or the
-  // commands on every key; one short status follows once typing pauses.
-  assert.equal(await page.locator('.cm-cmds[aria-live]').count(), 0);
+  // Live regions: nothing that is redrawn per keystroke is live. One short status
+  // follows once typing pauses: the command for a name change, the mode summary for a
+  // mode change, the error for bad input (never an alert).
+  assert.equal(await page.locator('.cm-cmds[aria-live], #cm-explain[aria-live], [role=alert]').count(), 0);
+  assert.equal(await page.locator('#cm-explain').evaluate(el => !!el.closest('[aria-live]')), false);
   await page.evaluate(() => {
     window.__live = [];
     document.querySelectorAll('[aria-live], [role=alert], [role=status]').forEach(r => new MutationObserver(() =>
@@ -189,13 +191,23 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#cm-cmd-num'), 'chmod 750 deploy.sh', 'commands still update at once');
   await page.waitForTimeout(1200);
   assert.deepEqual(await page.evaluate(() => window.__live), [['cm-status', 'chmod 750 deploy.sh.']]);
-  // A mode change still updates the explanation; so does the Directory box.
   await page.evaluate(() => { window.__live = []; });
   await page.check('#cm-dir');
   await page.waitForTimeout(1200);
-  const live = await page.evaluate(() => window.__live);
-  assert.ok(live.some(l => /Others have no access/.test(l[1]) || /Owner can list the contents/.test(l[1])), JSON.stringify(live));
-  assert.match((await page.evaluate(() => window.__live)).filter(l => l[0] === 'cm-status').pop()[1], /^chmod 750 deploy\.sh\. GNU chmod keeps/);
+  assert.deepEqual(await page.evaluate(() => window.__live), [['cm-status', '750, rwxr-x---. Owner can list the contents, add or remove files and enter it. Group can list the contents and enter it. Others have no access.']]);
+  // Typing a new octal mode digit by digit gives one summary, not one per key.
+  await page.evaluate(() => { window.__live = []; });
+  await page.fill('#cm-octal', '');
+  await page.type('#cm-octal', '1777', { delay: 40 });
+  await page.waitForTimeout(1200);
+  assert.deepEqual(await page.evaluate(() => window.__live), [['cm-status', '1777, rwxrwxrwt. Owner can list the contents, add or remove files and enter it. Group can list the contents, add or remove files and enter it. Others can list the contents, add or remove files and enter it.']]);
+  // An error while typing is shown at once but read out politely, once.
+  await page.evaluate(() => { window.__live = []; });
+  await page.type('#cm-octal', '8', { delay: 40 });
+  assert.match(await text('#cm-err'), /8 is not an octal digit/);
+  await page.waitForTimeout(1200);
+  assert.deepEqual(await page.evaluate(() => window.__live), [['cm-status', '8 is not an octal digit. Each digit must be 0 to 7.']]);
+  assert.equal(await page.getAttribute('#cm-octal', 'aria-invalid'), 'true');
   await page.fill('#cm-octal', '755');
   assert.match(await text('#cm-explain'), /Others can list the contents and enter it\./);
   await page.uncheck('#cm-dir');
@@ -225,6 +237,196 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#cm-octal', '2775');
   await page.click('button[aria-label="Copy symbolic chmod command"]');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'chmod u=rwx,g=rwxs,o=rx file');
+
+  // ---------- umask ----------
+  const um = async () => ({ u: await val('#cm-umask'), f: await val('#cm-ufile'), d: await val('#cm-udir'), cmd: await text('#cm-umask-cmd'), sym: await text('#cm-umask-sym') });
+  assert.deepEqual(await um(), { u: '022', f: '644', d: '755', cmd: 'umask 022', sym: 'u=rwx,g=rx,o=rx' });
+  // Known answers: files 666 & ~umask, directories 777 & ~umask, and the umask -S
+  // form, all confirmed against real bash below when it is available.
+  const UM = [
+    ['027', '027', '640', '750', 'u=rwx,g=rx,o='], ['077', '077', '600', '700', 'u=rwx,g=,o='],
+    ['002', '002', '664', '775', 'u=rwx,g=rwx,o=rx'], ['000', '000', '666', '777', 'u=rwx,g=rwx,o=rwx'],
+    ['777', '777', '000', '000', 'u=,g=,o='], ['0022', '022', '644', '755', 'u=rwx,g=rx,o=rx'],
+    ['7', '007', '660', '770', 'u=rwx,g=rwx,o='], ['133', '133', '644', '644', 'u=rw,g=r,o=r'],
+    ['u=rwx,g=rx,o=', '027', '640', '750', 'u=rwx,g=rx,o='], ['u=rwx,go=', '077', '600', '700', 'u=rwx,g=,o='],
+    ['a=rx', '222', '444', '555', 'u=rx,g=rx,o=rx'], ['1022', '022', '644', '755', 'u=rwx,g=rx,o=rx'],
+  ];
+  for (const [input, u, f, d, sym] of UM) {
+    await page.fill('#cm-umask', input);
+    assert.equal(await text('#cm-umask-err'), '', input);
+    const r = await um();
+    assert.deepEqual([r.f, r.d, r.cmd, r.sym], [f, d, 'umask ' + u, sym], input);
+    assert.match(await text('#cm-umask-f'), new RegExp('^' + f + ' '), input);
+  }
+  assert.match(await text('#cm-umask-note'), /first digit is ignored/);
+  // Unnamed classes keep their setting, as in bash (umask 027; umask g=rwx -> 0007).
+  await page.fill('#cm-umask', '027');
+  await page.fill('#cm-umask', 'g=rwx');
+  assert.equal(await text('#cm-umask-cmd'), 'umask 007');
+  for (const [bad, re] of [['g-w', /changes the umask the shell already has/], ['abc', /not a umask clause/], ['089', /8 is not an octal digit/], ['', /Enter a umask/], ['12345', /Too many digits/]]) {
+    await page.fill('#cm-umask', bad);
+    assert.match(await text('#cm-umask-err'), re, bad);
+    assert.equal(await page.getAttribute('#cm-umask', 'aria-invalid'), 'true', bad);
+    assert.equal(await text('#cm-umask-cmd'), 'umask 007', 'last good umask kept for ' + bad);
+  }
+  // Reverse: the mode new files or directories should get.
+  const FILES = [['640', '027', '750', /026 gives files 640 too/], ['600', '077', '700', /066 gives files 600 too/], ['664', '002', '775', null], ['644', '022', '755', null], ['400', '277', '500', /266 gives files 400/]];
+  for (const [f, u, d, note] of FILES) {
+    await page.fill('#cm-ufile', f);
+    assert.equal(await text('#cm-umask-err'), '', f);
+    assert.deepEqual([await val('#cm-umask'), await val('#cm-udir')], [u, d], 'file ' + f);
+    if (note) assert.match(await text('#cm-umask-note'), note, f); else assert.equal(await text('#cm-umask-note'), '', f);
+  }
+  await page.fill('#cm-ufile', '755');
+  assert.match(await text('#cm-umask-err'), /never get execute from the umask/);
+  await page.fill('#cm-ufile', '64');
+  assert.equal(await text('#cm-umask-err'), '', 'waits for the third digit');
+  await page.locator('#cm-ufile').blur();
+  assert.match(await text('#cm-umask-err'), /Enter 3 digits/);
+  for (const [d, u, f] of [['750', '027', '640'], ['700', '077', '600'], ['711', '066', '600'], ['2775', null, null]]) {
+    await page.fill('#cm-udir', d);
+    if (!u) { assert.match(await text('#cm-umask-err'), /not setuid, setgid or sticky/); continue; }
+    assert.deepEqual([await val('#cm-umask'), await val('#cm-ufile')], [u, f], 'dir ' + d);
+  }
+  await page.click('button[data-umask="077"]');
+  assert.deepEqual(await um(), { u: '077', f: '600', d: '700', cmd: 'umask 077', sym: 'u=rwx,g=,o=' });
+  assert.equal(await text('#cm-umask-err'), '');
+  await page.click('button[data-umask="027"]');
+  await page.click('#cm-use-d');
+  assert.equal(await val('#cm-octal'), '750');
+  assert.equal(await page.isChecked('#cm-dir'), true);
+  await page.click('#cm-use-f');
+  assert.equal(await val('#cm-octal'), '640');
+  assert.equal(await page.isChecked('#cm-dir'), false);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'cm-use-f', 'focus stays on the button');
+
+  // Confirm the umask answers with real bash: umask -S, and the modes touch and mkdir create.
+  let bash = false;
+  try { bash = process.platform === 'linux' && /bash/.test(execFileSync('bash', ['--version']).toString()); } catch (e) { bash = false; }
+  if (bash) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'umask-test-'));
+    try {
+      for (const [input, u, f, d, sym] of UM.concat(FILES.map(([ff, uu, dd]) => [uu, uu, ff, dd, null]))) {
+        const out = execFileSync('bash', ['-c', `umask ${u} && umask -S && rm -rf f d && touch f && mkdir d && stat -c %a f d`], { cwd: dir }).toString().trim().split('\n');
+        if (sym) assert.equal(out[0], sym, `bash umask -S for ${u}`);
+        assert.deepEqual(out.slice(1).map(x => x.padStart(3, '0')), [f, d], `bash modes for umask ${u}`);
+      }
+      // bash leaves unnamed classes alone and ignores a special-bits digit.
+      assert.equal(execFileSync('bash', ['-c', 'umask 027; umask g=rwx; umask; umask 1022; umask']).toString().trim(), '0007\n0022');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // ---------- ls -l output ----------
+  const lsRows = () => page.$$eval('#cm-ls-body tr', trs => trs.map(tr => ({
+    name: tr.cells[0].firstChild ? tr.cells[0].firstChild.textContent : '', target: (tr.cells[0].querySelector('small') || {}).textContent || '',
+    type: tr.cells[1].textContent, perm: tr.cells[2].textContent, oct: tr.cells[3].textContent, owner: tr.cells[4].textContent,
+    notes: tr.cells[5].textContent, load: !!tr.cells[6].querySelector('button')
+  })));
+  // The sample on load.
+  let ls = await lsRows();
+  assert.deepEqual(ls.map(r => [r.name, r.oct, r.owner, r.type]), [
+    ['shared', '2775', 'alice:devs', 'Directory, ACL'], ['/usr/bin/passwd', '4755', 'root:root', 'File'],
+    ['bin', '777', 'root:root', 'Symbolic link'], ['id ed25519', '600', 'alice:alice', 'File']]);
+  assert.equal(ls[2].target, '→ usr/bin');
+  assert.equal(ls[2].load, false, 'no Load button for a symbolic link');
+  assert.match(ls[0].notes, /ACL.*getfacl.*setgid/);
+  assert.match(ls[1].notes, /SELinux/);
+  // Hand-written lines for markers and formats this machine may not produce.
+  await page.fill('#cm-lsin', [
+    'total 12',
+    'drwxr-xr-x@ 12 alice  staff   384 Mar  3 09:15 Photos Library.photoslibrary',
+    '-rw-r--r-- 1 anna anna 1234  3. Mär 09:15 bericht.txt',
+    'crw-rw-rw- 1 root root 1, 3 Sep 19 01:27 /dev/null',
+    '-rw-r--r-- 1 root root 4.0K Jan  1  2024 a -> b.txt',
+    'brw-rw---- 1 root disk 8, 0 2026-09-19 01:27 /dev/sda',
+    'prw-r--r-- 1 root root 0 2026-09-27 20:36:09.294068952 +0000 pipe',
+    '-rw-r--r-- 1 root root 0 Sep 27 20:36 \'it\'\\\'\'s here.txt\'',
+    './sub:',
+    'srwxrwxrwx 1 root root 0 Sep 27 20:36 sock',
+  ].join('\n'));
+  ls = await lsRows();
+  assert.deepEqual(ls.map(r => [r.name, r.type, r.oct, r.owner]), [
+    ['Photos Library.photoslibrary', 'Directory', '755', 'alice:staff'],
+    ['bericht.txt', 'File', '644', 'anna:anna'],
+    ['/dev/null', 'Character device', '666', 'root:root'],
+    ['a -> b.txt', 'File', '644', 'root:root'],
+    ['/dev/sda', 'Block device', '660', 'root:disk'],
+    ['pipe', 'Named pipe (FIFO)', '644', 'root:root'],
+    ["it's here.txt", 'File', '644', 'root:root'],
+    ['sock', 'Socket', '777', 'root:root'],
+  ]);
+  assert.match(ls[0].notes, /extended attributes \(macOS/);
+  assert.match(ls[2].notes, /Device number 1, 3 \(major, minor\)/);
+  assert.equal(await text('#cm-ls-err'), '');
+  // Load puts the mode, the type and the name into the calculator; focus stays put.
+  await page.fill('#cm-lsin', 'drwxrwsr-x+ 4 alice devs 4096 Mar  3 09:15 shared files');
+  await page.click('#cm-ls-body button');
+  assert.deepEqual([await val('#cm-octal'), await val('#cm-file'), await page.isChecked('#cm-dir')], ['2775', 'shared files', true]);
+  assert.equal(await text('#cm-cmd-num'), "chmod 2775 'shared files'");
+  assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Load');
+  await page.fill('#cm-file', '');
+  // Errors: nothing recognisable, or some lines skipped.
+  await page.fill('#cm-lsin', 'hello\nworld');
+  assert.match(await text('#cm-ls-err'), /No ls -l lines found/);
+  assert.equal(await page.isVisible('#cm-ls-wrap'), false);
+  await page.fill('#cm-lsin', 'hello\n-rw-r----- 1 a b 0 Jan  1 12:00 x');
+  assert.match(await text('#cm-ls-err'), /1 line was skipped.*"hello"/);
+  assert.equal((await lsRows()).length, 1);
+  // A whole ls -l line pasted into the Symbolic box works too.
+  await page.fill('#cm-symbolic', '-rwxr-x--- 1 a b 0 Jan 1 12:00 x');
+  assert.equal(await val('#cm-octal'), '750');
+  // A long paste stays fast (only the first 500 entries are listed).
+  const lsMs = await page.evaluate(() => {
+    const el = document.querySelector('#cm-lsin');
+    el.value = Array.from({ length: 5000 }, (_, i) => '-rw-r--r-- 1 user group ' + i + ' Jan  1 12:00 file ' + i).join('\n');
+    const t = performance.now();
+    el.dispatchEvent(new Event('input'));
+    return performance.now() - t;
+  });
+  assert.ok(lsMs < 300, `5,000 lines took ${lsMs} ms`);
+  assert.equal((await lsRows()).length, 500);
+  await page.click('#cm-ls-clear');
+  assert.equal(await val('#cm-lsin'), '');
+  assert.equal(await text('#cm-ls-err'), '');
+
+  // Real ls output: parse what GNU ls prints here and compare with stat.
+  let gnuLs = false;
+  try { gnuLs = process.platform === 'linux' && /GNU coreutils/.test(execFileSync('ls', ['--version']).toString()); } catch (e) { gnuLs = false; }
+  if (gnuLs) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-test-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'plain.txt'), 'x');
+      fs.writeFileSync(path.join(dir, 'my file.txt'), '');
+      fs.writeFileSync(path.join(dir, "it's.sh"), '');
+      fs.mkdirSync(path.join(dir, 'sub dir'));
+      fs.symlinkSync('plain.txt', path.join(dir, 'link'));
+      fs.chmodSync(path.join(dir, 'plain.txt'), 0o4751);
+      fs.chmodSync(path.join(dir, 'sub dir'), 0o1777);
+      fs.chmodSync(path.join(dir, "it's.sh"), 0o2710);
+      execFileSync('mkfifo', [path.join(dir, 'fifo')]);
+      const stat = Object.fromEntries(execFileSync('bash', ['-c', "stat -c '%n|%a|%U:%G|%F' *"], { cwd: dir }).toString().trim().split('\n')
+        .map(l => l.split('|')).map(([n, a, o, t]) => [n, { oct: a, owner: o, type: t }]));
+      for (const args of [['-l'], ['-l', '--time-style=long-iso'], ['-l', '--time-style=full-iso'], ['-lis'], ['-lh'], ['-l', '--quoting-style=shell-escape'], ['-l', '--time-style=iso']]) {
+        const out = execFileSync('ls', args, { cwd: dir, env: { LC_ALL: 'C', PATH: process.env.PATH } }).toString();
+        await page.fill('#cm-lsin', out);
+        assert.equal(await text('#cm-ls-err'), '', args.join(' '));
+        ls = await lsRows();
+        assert.equal(ls.length, Object.keys(stat).length, args.join(' '));
+        for (const r of ls) {
+          const st = stat[r.name];
+          assert.ok(st, `${args.join(' ')}: unknown name ${JSON.stringify(r.name)}`);
+          assert.equal(r.oct.padStart(3, '0'), st.oct.padStart(3, '0'), `${args.join(' ')}: ${r.name}`);
+          assert.equal(r.owner, st.owner, `${args.join(' ')}: owner of ${r.name}`);
+          assert.equal(r.type.replace(', ACL', '').toLowerCase().replace('named pipe (fifo)', 'fifo'), st.type.replace('regular empty file', 'file').replace('regular file', 'file').replace('symbolic link', 'symbolic link'), `${args.join(' ')}: type of ${r.name}`);
+        }
+        assert.equal(ls.find(r => r.name === 'link').target, '→ plain.txt');
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
 
   // Independent check with GNU chmod: both commands must produce the mode
   // and the ls string the page shows.

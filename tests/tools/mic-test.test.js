@@ -215,10 +215,13 @@ module.exports = async ({ page, open, assert }) => {
   // the header, the length, and the sine's amplitude (0.5 of full scale:
   // peak 16384, RMS 0.5/sqrt(2) = 0.354) and frequency (1000 Hz by zero crossings).
   const rate = Number((await text('#mict-settings')).match(/Analysis sample rate([\d,]+) Hz/)[1].replace(/,/g, ''));
-  await page.click('#mict-rec');
+  // Regression: a double click started and at once stopped the recording.
+  await page.dblclick('#mict-rec');
+  await page.waitForTimeout(600);
+  assert.equal(await text('#mict-rec'), 'Stop recording');
   await waitText('#mict-rec-status', /Recorded a [45]\.\d s clip/, 10000);
   await page.waitForSelector('#mict-dl-wav', { state: 'visible' });
-  assert.match(await text('#mict-dl-wav'), /^Download WAV \(uncompressed, [\d,]+ KB\)$/);
+  assert.match(await text('#mict-dl-wav'), /^Download WAV \([\d,]+ KB\)$/);
   const [wdl] = await Promise.all([page.waitForEvent('download'), page.click('#mict-dl-wav')]);
   assert.match(wdl.suggestedFilename(), /^mic-test-\d{8}-\d{6}\.wav$/);
   const wav = fs.readFileSync(await wdl.path());

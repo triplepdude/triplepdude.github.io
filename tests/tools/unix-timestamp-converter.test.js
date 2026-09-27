@@ -252,6 +252,16 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.match(await text('#ut-ts-msg'), /looks like hexadecimal/);
   await conv('1e9');
   assert.equal(await r('iso'), '2001-09-09T01:46:40Z');
+  // Regression: the hex check backtracked quadratically (0.5 s for 20,000 letters).
+  const hexMs = await page.evaluate(() => {
+    const el = document.querySelector('#ut-ts');
+    el.value = 'a'.repeat(20000) + 'x';
+    const t = performance.now();
+    el.dispatchEvent(new Event('input'));
+    return performance.now() - t;
+  });
+  assert.ok(hexMs < 100, `hex check took ${hexMs} ms`);
+  assert.match(await text('#ut-ts-msg'), /not a number/);
   // Regression: a Unicode minus (as pasted from documents) and a decimal comma
   // were rejected or misread (1700000000,5 became 17000000005).
   await conv('\u22121700000000');

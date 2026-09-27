@@ -107,7 +107,8 @@ faq:
 .wct-snap { display: block; width: auto; max-width: 100%; max-height: 360px; margin: 0 0 10px; border: 1px solid var(--border); border-radius: 8px; }
 #wct-snap-wrap[hidden], #wct-fullscreen[hidden], #wct-clip-wrap[hidden], #wct-probe-wrap[hidden], #wct-caps-wrap[hidden] { display: none; }
 .wct-clip { display: block; width: 100%; max-width: 560px; max-height: 360px; margin: 0 0 10px; background: #000; border-radius: 8px; }
-.wct-rec-row { align-items: center; }
+.wct-rec-row > .field { flex: 0 1 220px; }
+.wct-rec-row .check { min-height: 44px; }
 .wct-progress { height: 6px; margin: 0 0 10px; overflow: hidden; background: var(--surface-2); border-radius: 3px; }
 .wct-progress div { width: 0; height: 100%; background: var(--danger); }
 table.data td.wct-ok { color: var(--accent); font-weight: 600; }
@@ -655,8 +656,8 @@ table.data td.wct-no { color: var(--muted); }
       if (gen !== st.gen) return; // the camera was stopped or restarted
       if (kind) got = track.getSettings();
       res.className = kind === 'scaled' || !kind ? 'wct-no' : 'wct-ok';
-      res.textContent = kind === 'native' ? 'Supported (native camera mode)' : kind === 'yes' ? 'Supported'
-        : kind === 'scaled' ? 'Only scaled down by the browser from a larger mode' : 'Not supported';
+      res.textContent = kind === 'native' ? 'Yes, a native camera mode' : kind === 'yes' ? 'Yes'
+        : kind === 'scaled' ? 'Only by scaling a larger mode down' : 'Not supported';
       fr.textContent = got && got.frameRate ? fmtRate(got.frameRate) : '–';
       results.push([w + ' × ' + h, kind]);
     }
@@ -683,7 +684,8 @@ table.data td.wct-no { color: var(--muted); }
     return list.find(m => MediaRecorder.isTypeSupported(m)) || '';
   }
   async function record() {
-    if (st.recorder && st.recorder.state === 'recording') { st.recorder.stop(); return; }
+    // A double click should not start and then instantly stop a recording.
+    if (st.recorder && st.recorder.state === 'recording') { if (performance.now() - st.recStart > 400) st.recorder.stop(); return; }
     if (!st.stream || st.recStarting || st.probing) return;
     if (typeof MediaRecorder === 'undefined') { recStatus.textContent = 'This browser cannot record video (MediaRecorder is not supported).'; return; }
     const gen = st.gen;

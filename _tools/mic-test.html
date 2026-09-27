@@ -650,7 +650,7 @@ faq:
     st.pcmRec = null;
     if (!rec.frames) return;
     st.wavBlob = encodeWav(rec.chunks, rec.channels, rec.rate, rec.max);
-    wavBtn.textContent = 'Download WAV (uncompressed, ' + Math.max(1, Math.round(st.wavBlob.size / 1024)).toLocaleString() + ' KB)';
+    wavBtn.textContent = 'Download WAV (' + Math.max(1, Math.round(st.wavBlob.size / 1024)).toLocaleString() + ' KB)';
     wavBtn.hidden = false;
   }
   // 16-bit PCM WAV (RIFF): 44-byte header, then interleaved little-endian samples.
@@ -692,7 +692,8 @@ faq:
   }
 
   async function record() {
-    if (st.recorder && st.recorder.state === 'recording') { stopRecording(); return; }
+    // A double click should not start and then instantly stop a recording.
+    if (st.recorder && st.recorder.state === 'recording') { if (performance.now() - st.recStart > 400) stopRecording(); return; }
     if (!st.stream || st.recStarting) return;
     if (typeof MediaRecorder === 'undefined') {
       recStatus.textContent = 'This browser cannot record audio (MediaRecorder is not supported). The live meter still works.';
