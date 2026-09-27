@@ -1,0 +1,907 @@
+---
+title: "Gamepad Tester: Test Your Controller Online"
+description: Test your game controller online with live buttons, analog triggers, stick drift and circularity, a deadzone view, vibration and update rate checks.
+category: Device Tests
+keywords: [gamepad tester, controller tester, controller test online, stick drift test, xbox controller tester, ps5 controller tester, joystick tester]
+howto: |
+  ## How to test a controller
+
+  1. Connect the controller with a USB cable or pair it over Bluetooth.
+  2. Press any button on it. Browsers hide controllers from web pages until
+     a button is pressed while the page is open, so nothing appears before that.
+  3. Press every button and move both sticks and triggers. Each input lights
+     up on the drawing and in the button list, and a tick marks every button
+     that has worked at least once.
+  4. Use **Measure drift**, **Vibration** and **Measure update rate** below.
+
+  With several controllers connected, press a button on the one you want to
+  see or pick it from the list.
+
+  ## Button numbers and the standard mapping
+
+  When the browser recognises a controller it reports the mapping `standard`
+  and arranges the inputs in the W3C Gamepad API's standard layout, so
+  button 0 is always the bottom face button, whatever is printed on it:
+
+  | Index | Xbox | PlayStation | Nintendo |
+  |---|---|---|---|
+  | 0 to 3 | A, B, X, Y | Cross, Circle, Square, Triangle | B, A, Y, X |
+  | 4, 5 | LB, RB | L1, R1 | L, R |
+  | 6, 7 | LT, RT | L2, R2 | ZL, ZR |
+  | 8, 9 | View, Menu | Share or Create, Options | Minus, Plus |
+  | 10, 11 | Stick clicks | L3, R3 | Stick clicks |
+  | 12 to 15 | D-pad up, down, left, right | same | same |
+  | 16 | Xbox button | PS button | Home |
+
+  Axes 0 and 1 are the left stick and 2 and 3 the right stick, each from −1
+  to 1 with up as −1. Triggers are analog buttons from 0 to 1. A controller
+  without a standard mapping is shown by raw button and axis numbers, which
+  can differ between browsers and operating systems.
+
+  ## Stick drift, deadzones and circularity
+
+  Let go of both sticks and press **Measure drift**, which averages two
+  seconds of readings. A resting stick rarely reads exactly 0, and games
+  ignore small offsets with a deadzone. For scale, Microsoft's XInput
+  documentation suggests default deadzones of 7849 and 8689 out of 32767,
+  about 0.24 and 0.27, for the left and right sticks. A resting offset that
+  approaches those values, or grows over weeks, is drift. It usually comes
+  from worn sensors or dirt inside the stick.
+
+  The shaded circle on each stick shows the deadzone set with the slider. To
+  test circularity, rotate a stick slowly around its outer edge a few times.
+  The page records the furthest point reached in each 5° direction and
+  reports the average gap to a perfect circle. A few percent is typical.
+  Bulges at the diagonals mean the controller reports a square range, and a
+  flat or dented side means the stick cannot reach its edge in that direction.
+
+  ## Vibration and update rate
+
+  **Vibration** uses the Gamepad API's `vibrationActuator`. The strong motor
+  is the low-frequency one in the left grip, the weak motor the
+  high-frequency one on the right. Rumble works with many Xbox and
+  PlayStation controllers in Chrome and Edge; support in other browsers and
+  with other controllers varies. The **Trigger rumble** button appears only
+  when the browser reports trigger motors.
+
+  **Measure update rate** counts how often new data from the controller
+  reaches the page while you move a stick. Browsers poll controllers at a
+  rate of their own, so the result is the lower of the controller's rate and
+  the browser's, not necessarily the USB polling rate of the controller.
+
+  ## If the controller does not appear
+
+  - Press a face button, not only a stick or trigger, while this tab is in front.
+  - Try another cable; some USB cables only charge and carry no data.
+  - Close game launchers and remapping tools that may take over the controller.
+  - On Windows, Chrome names every XInput controller "Xbox 360 Controller
+    (XInput STANDARD GAMEPAD)", whatever its brand.
+faq:
+  - q: Is anything from my controller sent over the internet?
+    a: No. The page reads the controller with the browser's Gamepad API and everything is shown and measured locally. Nothing is uploaded or stored.
+  - q: Why does my controller not show up?
+    a: Browsers only reveal a controller after you press one of its buttons while the page is open. If it still does not appear, check that it is connected (Bluetooth pairing, a data cable rather than a charge-only one) and that no other app has taken exclusive control of it.
+  - q: How do I know if my stick has drift?
+    a: Let go of the stick and press Measure drift. An offset below about 0.05 is normal. Between 0.05 and 0.15 most games hide it with their deadzone, and a steady offset above 0.15 is drift that can move your character or camera on its own.
+  - q: Can I test a controller on my phone or tablet?
+    a: Yes. Pair the controller in the Bluetooth settings, open this page in Chrome on Android or Safari on iPhone and iPad, and press a button. Vibration support on phones varies.
+---
+<style>
+.gpt-empty { display: flex; gap: 14px; align-items: flex-start; margin: 0 0 16px; padding: 14px 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+.gpt-empty > svg { flex: none; width: 40px; height: 40px; fill: var(--muted); }
+.gpt-empty p { margin: 0 0 4px; }
+.gpt-empty .hint { margin: 0; font-size: 14px; }
+.gpt-empty[hidden] { display: none; }
+#gpt-pickers > .field { flex: 1 1 220px; max-width: 360px; }
+.gpt-id { margin: 0 0 12px; color: var(--muted); font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.gpt-info .stat b { font-size: 1.1rem; }
+.gpt-vis { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; margin: 0 0 8px; }
+@media (max-width: 780px) { .gpt-vis { grid-template-columns: minmax(0, 1fr); } }
+.gpt-vis:has(> .gpt-side[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.gpt-svg { display: block; width: 100%; max-width: 560px; height: auto; margin: 0 auto; }
+.gpt-svg .body { fill: var(--surface-2); stroke: var(--field-border); stroke-width: 2; }
+.gpt-svg .b { fill: var(--surface); stroke: var(--field-border); stroke-width: 1.5; }
+.gpt-svg .b.is-tested { stroke: var(--accent); stroke-width: 2.5; }
+.gpt-svg .b.is-on { fill: var(--accent); stroke: var(--accent); }
+.gpt-svg .well { fill: var(--bg); stroke: var(--field-border); stroke-width: 1.5; }
+.gpt-svg .lvl { fill: var(--accent); opacity: 0.6; pointer-events: none; }
+.gpt-svg text { fill: var(--text); font: 600 14px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.gpt-svg text.face { font-size: 17px; }
+.gpt-svg text.sm { font-size: 12px; }
+.gpt-svg text.is-on { fill: var(--accent-text); }
+.gpt-svg.is-dim .b, .gpt-svg.is-dim .well { opacity: 0.55; }
+.gpt-side > .field { margin-bottom: 12px; }
+.gpt-sticks { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin: 0 0 12px; }
+.gpt-stick { margin: 0; min-width: 0; }
+.gpt-stick figcaption { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.gpt-stick canvas { display: block; width: 100%; max-width: 220px; height: auto; aspect-ratio: 1; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.gpt-read { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.gpt-read b { color: var(--text); font-weight: 600; }
+.gpt-read span { white-space: nowrap; }
+.gpt-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 28px 0 12px; font-size: 1.1rem; }
+.gpt-h small { color: var(--muted); font-size: 14px; font-weight: 400; }
+.gpt-buttons { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.gpt-buttons li { position: relative; min-width: 0; padding: 7px 10px 10px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.gpt-buttons li.is-tested { border-color: var(--accent); }
+.gpt-buttons li.is-on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.gpt-bn { display: block; overflow: hidden; font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.gpt-buttons li.is-tested .gpt-bn::after { content: " \2713"; color: var(--accent); }
+.gpt-buttons li.is-on .gpt-bn::after { color: var(--accent-text); }
+.gpt-bv { display: flex; justify-content: space-between; gap: 6px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.gpt-buttons li.is-on .gpt-bv { color: var(--accent-text); }
+.gpt-lvl { position: absolute; left: 0; bottom: 0; height: 4px; width: 0; background: var(--accent); }
+.gpt-buttons li.is-on .gpt-lvl { background: var(--accent-text); }
+.gpt-axes { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.gpt-axes li { display: grid; grid-template-columns: minmax(96px, 150px) minmax(0, 1fr) 76px; gap: 10px; align-items: center; font-size: 14px; }
+.gpt-axes .gpt-an { font-weight: 600; }
+.gpt-axes .gpt-av { font-family: var(--mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.gpt-axbar { position: relative; height: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.gpt-axbar::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 1px solid var(--field-border); }
+.gpt-axbar i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: var(--accent); }
+.gpt-tools .field { flex: 1 1 150px; }
+.gpt-tools output { color: var(--muted); font-family: var(--mono); font-weight: 400; }
+.gpt-result { margin: 0 0 16px; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; font-size: 15px; }
+.gpt-result:empty { position: absolute; width: 0; height: 0; margin: 0; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); }
+.msg.gpt-note { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
+.gpt-result p { margin: 0 0 6px; }
+.gpt-result p:last-child { margin: 0; }
+.gpt-sep { margin: 28px 0 0; border: 0; border-top: 1px solid var(--border); }
+@media (max-width: 480px) {
+  .gpt-axes li { grid-template-columns: minmax(0, 1fr) 72px; }
+  .gpt-axes .gpt-axbar { grid-column: 1 / -1; grid-row: 2; }
+}
+</style>
+
+<div class="gpt-empty" id="gpt-empty">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h10a5 5 0 0 1 4.9 6l-1 5.1a2.6 2.6 0 0 1-4.5 1.2L14.6 16H9.4l-1.8 2.3a2.6 2.6 0 0 1-4.5-1.2l-1-5.1A5 5 0 0 1 7 6zm0 3v1.5H5.5v1.5H7v1.5h1.5V12H10v-1.5H8.5V9H7zm9.5.2a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm-2 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg>
+  <div>
+    <p><strong id="gpt-empty-title">No controller detected yet</strong></p>
+    <p class="hint" id="gpt-empty-text">Connect a controller by USB or Bluetooth, then press any button on it. For privacy, browsers only show a controller to a page after one of its buttons is pressed while the page is open.</p>
+  </div>
+</div>
+<p class="msg error" id="gpt-error" role="alert"></p>
+<p class="visually-hidden" id="gpt-status" role="status"></p>
+
+<div class="row" id="gpt-pickers">
+  <div class="field" id="gpt-pad-field" hidden>
+    <label for="gpt-pad">Controller</label>
+    <select id="gpt-pad"></select>
+  </div>
+  <div class="field">
+    <label for="gpt-labels">Button labels</label>
+    <select id="gpt-labels">
+      <option value="auto" selected>Automatic</option>
+      <option value="xbox">Xbox</option>
+      <option value="ps">PlayStation</option>
+      <option value="nintendo">Nintendo</option>
+      <option value="index">Button numbers</option>
+    </select>
+  </div>
+</div>
+
+<div id="gpt-live" hidden>
+  <p class="gpt-id" id="gpt-id"></p>
+  <p class="msg gpt-note" id="gpt-map-note" aria-live="polite"></p>
+  <div class="stats gpt-info">
+    <div class="stat"><b id="gpt-index">–</b><span>Index</span></div>
+    <div class="stat"><b id="gpt-mapping">–</b><span>Mapping</span></div>
+    <div class="stat"><b id="gpt-counts">–</b><span>Buttons / axes</span></div>
+    <div class="stat"><b id="gpt-vendor">–</b><span>Vendor</span></div>
+    <div class="stat"><b id="gpt-tested">–</b><span>Buttons tested</span></div>
+  </div>
+</div>
+
+<div class="gpt-vis">
+  <svg class="gpt-svg is-dim" id="gpt-svg" viewBox="0 0 600 400" role="img" aria-label="Controller drawing. Buttons light up when pressed."></svg>
+  <div class="gpt-side" id="gpt-side" hidden>
+    <div class="gpt-sticks" id="gpt-sticks"></div>
+    <div class="field">
+      <label for="gpt-dz">Deadzone <output id="gpt-dz-val" for="gpt-dz">0.10</output></label>
+      <input type="range" id="gpt-dz" min="0" max="0.4" step="0.01" value="0.1">
+    </div>
+    <button class="btn secondary small" type="button" id="gpt-circ-reset">Reset circularity</button>
+  </div>
+</div>
+
+<div id="gpt-details" hidden>
+  <h2 class="gpt-h">Buttons <small id="gpt-tested-2"></small></h2>
+  <ul class="gpt-buttons" id="gpt-buttons"></ul>
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="gpt-reset">Reset tested buttons</button>
+  </div>
+
+  <h2 class="gpt-h">Axes</h2>
+  <ul class="gpt-axes" id="gpt-axes"></ul>
+
+  <hr class="gpt-sep">
+  <h2 class="gpt-h">Stick drift</h2>
+  <p class="hint">Let go of both sticks, then press Measure drift. It averages two seconds of readings.</p>
+  <div class="actions">
+    <button class="btn secondary" type="button" id="gpt-drift">Measure drift</button>
+  </div>
+  <div class="gpt-result" id="gpt-drift-out" aria-live="polite"></div>
+
+  <hr class="gpt-sep">
+  <h2 class="gpt-h">Vibration</h2>
+  <div class="row gpt-tools">
+    <div class="field">
+      <label for="gpt-strong">Strong motor <output id="gpt-strong-val" for="gpt-strong">1.00</output></label>
+      <input type="range" id="gpt-strong" min="0" max="1" step="0.05" value="1">
+    </div>
+    <div class="field">
+      <label for="gpt-weak">Weak motor <output id="gpt-weak-val" for="gpt-weak">1.00</output></label>
+      <input type="range" id="gpt-weak" min="0" max="1" step="0.05" value="1">
+    </div>
+    <div class="field">
+      <label for="gpt-dur">Duration</label>
+      <select id="gpt-dur">
+        <option value="250">0.25 seconds</option>
+        <option value="500">0.5 seconds</option>
+        <option value="1000" selected>1 second</option>
+        <option value="2000">2 seconds</option>
+        <option value="5000">5 seconds</option>
+      </select>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" id="gpt-rumble">Rumble</button>
+    <button class="btn secondary" type="button" id="gpt-trigger" hidden>Trigger rumble</button>
+    <button class="btn secondary" type="button" id="gpt-stop">Stop</button>
+  </div>
+  <p class="msg" id="gpt-vib-msg" aria-live="polite"></p>
+
+  <hr class="gpt-sep">
+  <h2 class="gpt-h">Update rate</h2>
+  <p class="hint">Press Measure update rate, then keep moving a stick in circles for three seconds.</p>
+  <div class="actions">
+    <button class="btn secondary" type="button" id="gpt-rate">Measure update rate</button>
+  </div>
+  <div class="gpt-result" id="gpt-rate-out" aria-live="polite"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var NS = 'http://www.w3.org/2000/svg';
+  var BINS = 72; // 5 degree directions for the circularity test
+  var MINUS = '−';
+
+  var DPAD = ['D-pad up', 'D-pad down', 'D-pad left', 'D-pad right'];
+  var LABELS = {
+    xbox: ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'View', 'Menu', 'LS', 'RS'].concat(DPAD, ['Xbox']),
+    ps: ['Cross', 'Circle', 'Square', 'Triangle', 'L1', 'R1', 'L2', 'R2', 'Share', 'Options', 'L3', 'R3'].concat(DPAD, ['PS', 'Touchpad']),
+    nintendo: ['B', 'A', 'Y', 'X', 'L', 'R', 'ZL', 'ZR', 'Minus', 'Plus', 'LS', 'RS'].concat(DPAD, ['Home'])
+  };
+  var SHORT = {
+    xbox: ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'View', 'Menu', 'LS', 'RS', '', '', '', '', 'Xbox', ''],
+    ps: ['✕', '○', '□', '△', 'L1', 'R1', 'L2', 'R2', 'Share', 'Options', 'L3', 'R3', '', '', '', '', 'PS', 'Touchpad'],
+    nintendo: ['B', 'A', 'Y', 'X', 'L', 'R', 'ZL', 'ZR', MINUS, '+', 'LS', 'RS', '', '', '', '', 'Home', '']
+  };
+  var VENDORS = { '045e': 'Microsoft', '054c': 'Sony', '057e': 'Nintendo', '046d': 'Logitech', '2dc8': '8BitDo', '0f0d': 'Hori', '28de': 'Valve', '1532': 'Razer' };
+
+  var supported = typeof navigator.getGamepads === 'function';
+  var labelSel = $('#gpt-labels'), padSel = $('#gpt-pad'), dzIn = $('#gpt-dz');
+  var states = {};   // gamepad.index -> per-controller state
+  var sel = null;    // selected gamepad.index
+  var raf = 0, built = '', colors = null, lastCount = -1;
+
+  function fixed(v, d) { var s = (Math.abs(v) < Math.pow(10, -d) / 2 ? 0 : v).toFixed(d); return s.charAt(0) === '-' ? MINUS + s.slice(1) : s; }
+  function pad4(h) { h = String(h).toLowerCase(); while (h.length < 4) h = '0' + h; return h; }
+  function say(t) { var s = $('#gpt-status'); s.textContent = ''; setTimeout(function () { s.textContent = t; }, 30); }
+  var sayPress = TT.debounce(function (name) { say(name + ' pressed'); }, 250);
+
+  function readPads() {
+    var list, out = [];
+    try { list = navigator.getGamepads(); } catch (e) { return out; }
+    if (!list) return out;
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
+      if (p && p.connected !== false && p.buttons && p.axes) out.push(p);
+    }
+    return out;
+  }
+  function padAt(index) {
+    var pads = readPads();
+    for (var i = 0; i < pads.length; i++) if (pads[i].index === index) return pads[i];
+    return null;
+  }
+
+  function info(id) {
+    var s = String(id || '');
+    var m = /Vendor:\s*([0-9a-f]{1,4})\s+Product:\s*([0-9a-f]{1,4})/i.exec(s) || /^([0-9a-f]{1,4})-([0-9a-f]{1,4})-/i.exec(s);
+    var name = s.replace(/^[0-9a-f]{1,4}-[0-9a-f]{1,4}-/i, '').replace(/\s*\([^()]*(STANDARD GAMEPAD|Vendor:)[^()]*\)\s*$/i, '').trim();
+    return { vendor: m ? pad4(m[1]) : '', product: m ? pad4(m[2]) : '', name: name || s || 'Unnamed controller' };
+  }
+  function autoSet(p) {
+    if (p.mapping !== 'standard') return 'index';
+    var i = info(p.id), id = String(p.id);
+    if (i.vendor === '045e' || /xbox|xinput/i.test(id)) return 'xbox';
+    if (i.vendor === '054c' || /dualsense|dualshock|playstation/i.test(id) || /^wireless controller/i.test(i.name)) return 'ps';
+    if (i.vendor === '057e' || /nintendo|pro controller|joy-con/i.test(id)) return 'nintendo';
+    return 'xbox';
+  }
+  function labelSet(p) {
+    var v = labelSel.value;
+    if (!p) return v === 'auto' ? 'xbox' : v;
+    if (p.mapping !== 'standard') return 'index';
+    return v === 'auto' ? autoSet(p) : v;
+  }
+  function btnName(set, i, p) {
+    if (set === 'ps' && i === 8 && p && /^(0ce6|0df2)$/.test(info(p.id).product)) return 'Create';
+    var l = LABELS[set];
+    return l && l[i] ? l[i] : 'Button ' + i;
+  }
+  function shortName(set, i, p) {
+    if (set === 'ps' && i === 8 && p && /^(0ce6|0df2)$/.test(info(p.id).product)) return 'Create';
+    var l = SHORT[set];
+    return l ? (l[i] || '') : String(i);
+  }
+  function sticksOf(p) {
+    var std = p.mapping === 'standard', n = p.axes.length, out = [];
+    if (n >= 2) out.push({ name: std ? 'Left stick' : 'Axes 0 and 1', x: 0, y: 1, key: 0 });
+    if (n >= 4) out.push({ name: std ? 'Right stick' : 'Axes 2 and 3', x: 2, y: 3, key: 1 });
+    return out;
+  }
+  function axisName(p, i) {
+    if (p.mapping === 'standard' && i < 4) return ['Left stick X', 'Left stick Y', 'Right stick X', 'Right stick Y'][i];
+    return 'Axis ' + i;
+  }
+
+  function stateFor(p) {
+    var s = states[p.index];
+    if (!s || s.id !== p.id) {
+      s = states[p.index] = { id: p.id, tested: new Set(), prev: [], circ: [new Float32Array(BINS), new Float32Array(BINS)], trail: [[], []], last: {} };
+    }
+    return s;
+  }
+
+  // ---- Drawing of a standard controller ----
+  var svg = $('#gpt-svg');
+  function mk(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    (parent || svg).appendChild(e);
+    return e;
+  }
+  var shapes = {};
+  mk('path', { 'class': 'body', d: 'M160 72C220 62 380 62 440 72C492 80 518 98 532 128L574 290C587 342 560 382 518 378C490 375 470 356 452 330L430 304C405 294 195 294 170 304L148 330C130 356 110 375 82 378C40 382 13 342 26 290L68 128C82 98 108 80 160 72Z' });
+  function btnShape(i, kind, a, b, c, d, cls) {
+    var g = mk('g', {});
+    var s = kind === 'circle'
+      ? mk('circle', { 'class': 'b', cx: a, cy: b, r: c }, g)
+      : mk('rect', { 'class': 'b', x: a, y: b, width: c, height: d, rx: kind === 'pill' ? d / 2 : 7 }, g);
+    var lvl = null;
+    if (kind === 'trigger') lvl = mk('rect', { 'class': 'lvl', x: a, y: b + d, width: c, height: 0, rx: 4 }, g);
+    var cx = kind === 'circle' ? a : a + c / 2, cy = kind === 'circle' ? b : b + d / 2;
+    var t = mk('text', { x: cx, y: cy, 'class': cls || '' }, g);
+    shapes[i] = { g: g, s: s, t: t, lvl: lvl, box: [a, b, c, d] };
+  }
+  btnShape(6, 'trigger', 110, 8, 100, 34);
+  btnShape(7, 'trigger', 390, 8, 100, 34);
+  btnShape(4, 'pill', 100, 46, 120, 24);
+  btnShape(5, 'pill', 380, 46, 120, 24);
+  btnShape(17, 'rect', 244, 84, 112, 40, 'sm');
+  btnShape(8, 'pill', 230, 134, 56, 24, 'sm');
+  btnShape(9, 'pill', 314, 134, 56, 24, 'sm');
+  btnShape(16, 'circle', 300, 190, 19, 0, 'sm');
+  btnShape(0, 'circle', 437, 188, 19, 0, 'face');
+  btnShape(1, 'circle', 475, 150, 19, 0, 'face');
+  btnShape(2, 'circle', 399, 150, 19, 0, 'face');
+  btnShape(3, 'circle', 437, 112, 19, 0, 'face');
+  mk('rect', { 'class': 'well', x: 205, y: 217, width: 30, height: 30 });
+  btnShape(12, 'rect', 205, 187, 30, 30);
+  btnShape(13, 'rect', 205, 247, 30, 30);
+  btnShape(14, 'rect', 175, 217, 30, 30);
+  btnShape(15, 'rect', 235, 217, 30, 30);
+  ['▲', '▼', '◀', '▶'].forEach(function (a, k) { shapes[12 + k].t.textContent = a; });
+  var knobs = [[175, 150, 10], [372, 238, 11]].map(function (k) {
+    mk('circle', { 'class': 'well', cx: k[0], cy: k[1], r: 44 });
+    var g = mk('g', {});
+    var s = mk('circle', { 'class': 'b', cx: k[0], cy: k[1], r: 26 }, g);
+    var t = mk('text', { x: k[0], y: k[1] }, g);
+    shapes[k[2]] = { g: g, s: s, t: t, knob: true };
+    return { cx: k[0], cy: k[1], g: g };
+  });
+
+  function drawLabels(set, p) {
+    Object.keys(shapes).forEach(function (k) {
+      var i = Number(k);
+      if (i >= 12 && i <= 15) return;
+      shapes[i].t.textContent = set === 'index' ? String(i) : shortName(set, i, p);
+    });
+    shapes[17].g.style.display = p && p.buttons.length > 17 ? '' : 'none';
+  }
+  function setOn(i, on, tested, value) {
+    var sh = shapes[i];
+    if (!sh) return;
+    sh.s.classList.toggle('is-on', on);
+    sh.t.classList.toggle('is-on', on);
+    sh.s.classList.toggle('is-tested', tested && !on);
+    if (sh.lvl) {
+      var h = Math.max(0, Math.min(1, value)) * sh.box[3];
+      sh.lvl.setAttribute('y', sh.box[1] + sh.box[3] - h);
+      sh.lvl.setAttribute('height', h);
+    }
+  }
+  function resetDrawing() {
+    Object.keys(shapes).forEach(function (k) { setOn(Number(k), false, false, 0); });
+    knobs.forEach(function (k) { k.g.setAttribute('transform', ''); });
+  }
+
+  // ---- Stick canvases ----
+  function readColors() {
+    var cs = getComputedStyle(document.documentElement);
+    var v = function (n, f) { return (cs.getPropertyValue(n) || '').trim() || f; };
+    colors = { accent: v('--accent', '#1f6f4a'), soft: v('--accent-soft', '#e4f1ea'), border: v('--border', '#dfe2e6'),
+      field: v('--field-border', '#80878f'), muted: v('--muted', '#5b6270'), text: v('--text', '#16181d'), danger: v('--danger', '#b42318') };
+  }
+  function drawStick(canvas, x, y, circ, trail, dz) {
+    var size = canvas.clientWidth || 180, dpr = window.devicePixelRatio || 1;
+    var px = Math.round(size * dpr);
+    if (canvas.width !== px) { canvas.width = px; canvas.height = px; }
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    if (!colors) readColors();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+    var c = size / 2, R = size / 2 - 7;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = colors.border;
+    ctx.strokeRect(c - R, c - R, 2 * R, 2 * R);
+    ctx.beginPath(); ctx.moveTo(c - R, c); ctx.lineTo(c + R, c); ctx.moveTo(c, c - R); ctx.lineTo(c, c + R); ctx.stroke();
+    if (dz > 0) {
+      ctx.fillStyle = colors.soft;
+      ctx.beginPath(); ctx.arc(c, c, dz * R, 0, Math.PI * 2); ctx.fill();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = colors.muted;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.strokeStyle = colors.field;
+    ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.stroke();
+    // Furthest point reached in each direction.
+    var first = true;
+    ctx.strokeStyle = colors.accent;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (var b = 0; b <= BINS; b++) {
+      var r = circ[b % BINS];
+      if (!r) { first = true; continue; }
+      var a = (b % BINS + 0.5) / BINS * Math.PI * 2;
+      var qx = c + Math.cos(a) * r * R, qy = c - Math.sin(a) * r * R;
+      if (first) { ctx.moveTo(qx, qy); first = false; } else ctx.lineTo(qx, qy);
+    }
+    ctx.stroke();
+    ctx.fillStyle = colors.muted;
+    trail.forEach(function (t, k) {
+      ctx.globalAlpha = 0.15 + 0.5 * k / trail.length;
+      ctx.beginPath(); ctx.arc(c + t[0] * R, c + t[1] * R, 2, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    var inDz = Math.hypot(x, y) < dz;
+    ctx.fillStyle = inDz ? colors.muted : colors.accent;
+    ctx.beginPath(); ctx.arc(c + x * R, c + y * R, 6, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function circStats(circ) {
+    var n = 0, err = 0;
+    for (var b = 0; b < BINS; b++) if (circ[b]) { n++; err += Math.abs(circ[b] - 1); }
+    return { coverage: n / BINS, error: n ? err / n : 0 };
+  }
+
+  // ---- Building the panel for one controller ----
+  var stickUI = [];
+  function build(p, set) {
+    var st = stateFor(p), i = info(p.id);
+    $('#gpt-id').textContent = String(p.id);
+    $('#gpt-index').textContent = String(p.index);
+    $('#gpt-mapping').textContent = p.mapping === 'standard' ? 'standard' : p.mapping ? p.mapping : 'none';
+    $('#gpt-counts').textContent = p.buttons.length + ' / ' + p.axes.length;
+    $('#gpt-vendor').textContent = i.vendor ? (VENDORS[i.vendor] || 'Unknown') + ' (' + i.vendor + ':' + i.product + ')' : 'Not reported';
+    var note = '';
+    if (p.mapping !== 'standard') {
+      note = 'Your browser does not know this controller\'s layout (no standard mapping), so buttons and axes are listed by number and the drawing is not used. Sticks are usually axes 0 and 1 and axes 2 and 3.';
+    } else if (/XInput/i.test(p.id)) {
+      note = 'Windows reports every XInput controller under this generic name, whatever its brand.';
+    }
+    var noteEl = $('#gpt-map-note');
+    noteEl.textContent = note;
+
+    var ul = $('#gpt-buttons');
+    ul.textContent = '';
+    p.buttons.forEach(function (b, k) {
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="gpt-bn"></span><span class="gpt-bv"><span class="gpt-bx">0.00</span><span class="gpt-bi"></span></span><span class="visually-hidden"></span><i class="gpt-lvl" aria-hidden="true"></i>';
+      li.firstChild.textContent = set === 'index' ? 'Button ' + k : btnName(set, k, p);
+      if (set !== 'index') li.querySelector('.gpt-bi').textContent = '#' + k;
+      li.title = 'Button ' + k;
+      li._val = li.querySelector('.gpt-bx');
+      li._state = li.children[2];
+      li._lvl = li.children[3];
+      ul.appendChild(li);
+    });
+    var ax = $('#gpt-axes');
+    ax.textContent = '';
+    p.axes.forEach(function (v, k) {
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="gpt-an"></span><span class="gpt-axbar" aria-hidden="true"><i></i></span><span class="gpt-av">0.0000</span>';
+      li.firstChild.textContent = axisName(p, k);
+      ax.appendChild(li);
+    });
+
+    var box = $('#gpt-sticks');
+    box.textContent = '';
+    stickUI = sticksOf(p).map(function (s) {
+      var fig = document.createElement('figure');
+      fig.className = 'gpt-stick';
+      fig.innerHTML = '<figcaption></figcaption><canvas aria-hidden="true"></canvas><p class="gpt-read"></p>';
+      fig.firstChild.textContent = s.name;
+      box.appendChild(fig);
+      return { def: s, canvas: fig.querySelector('canvas'), read: fig.querySelector('.gpt-read'), sig: '' };
+    });
+    $('#gpt-side').hidden = !stickUI.length;
+
+    svg.style.display = p.mapping === 'standard' ? '' : 'none';
+    svg.classList.remove('is-dim');
+    drawLabels(set, p);
+    resetDrawing();
+    st.last = {};
+    updateVibration(p);
+    updateTested(p, st);
+  }
+
+  function updateTested(p, st) {
+    var n = 0;
+    st.tested.forEach(function (k) { if (k < p.buttons.length) n++; });
+    var t = n + ' of ' + p.buttons.length;
+    $('#gpt-tested').textContent = t;
+    $('#gpt-tested-2').textContent = t + ' tested';
+  }
+
+  // ---- Per-frame update ----
+  function update(p) {
+    var st = stateFor(p), last = st.last, set = labelSet(p);
+    var lis = $('#gpt-buttons').children;
+    var testedChanged = false;
+    for (var k = 0; k < p.buttons.length; k++) {
+      var b = p.buttons[k] || {}, v = typeof b.value === 'number' ? b.value : (b.pressed ? 1 : 0), on = !!b.pressed;
+      var was = !!st.prev[k];
+      if (on && !was) {
+        if (!st.tested.has(k)) { st.tested.add(k); testedChanged = true; }
+        sayPress(set === 'index' ? 'Button ' + k : btnName(set, k, p));
+      }
+      st.prev[k] = on;
+      var sig = (on ? 1 : 0) + ':' + v.toFixed(2) + ':' + (st.tested.has(k) ? 1 : 0);
+      if (last['b' + k] === sig) continue;
+      last['b' + k] = sig;
+      var li = lis[k];
+      if (li) {
+        li.classList.toggle('is-on', on);
+        li.classList.toggle('is-tested', st.tested.has(k));
+        li._val.textContent = v.toFixed(2);
+        li._state.textContent = on ? ', pressed' : st.tested.has(k) ? ', tested' : '';
+        li._lvl.style.width = (Math.max(0, Math.min(1, v)) * 100) + '%';
+      }
+      if (p.mapping === 'standard') setOn(k, on, st.tested.has(k), v);
+    }
+    if (testedChanged) updateTested(p, st);
+
+    var axLis = $('#gpt-axes').children;
+    for (var a = 0; a < p.axes.length; a++) {
+      var av = Number(p.axes[a]) || 0, key = 'a' + a, txt = fixed(av, 4);
+      if (last[key] === txt) continue;
+      last[key] = txt;
+      var row = axLis[a];
+      if (!row) continue;
+      row.children[2].textContent = txt;
+      var bar = row.children[1].firstChild, w = Math.min(1, Math.abs(av)) * 50;
+      bar.style.width = w + '%';
+      bar.style.left = (av < 0 ? 50 - w : 50) + '%';
+    }
+
+    var dz = Number(dzIn.value) || 0;
+    stickUI.forEach(function (ui) {
+      var d = ui.def, x = Number(p.axes[d.x]) || 0, y = Number(p.axes[d.y]) || 0;
+      var circ = st.circ[d.key], trail = st.trail[d.key];
+      var r = Math.hypot(x, y);
+      var sig = x.toFixed(4) + ',' + y.toFixed(4) + ',' + dz;
+      if (sig === ui.sig) return;
+      ui.sig = sig;
+      if (r >= 0.5) {
+        var ang = Math.atan2(-y, x);
+        if (ang < 0) ang += Math.PI * 2;
+        var bin = Math.min(BINS - 1, Math.floor(ang / (Math.PI * 2) * BINS));
+        if (r > circ[bin]) circ[bin] = r;
+      }
+      trail.push([x, y]);
+      if (trail.length > 24) trail.shift();
+      drawStick(ui.canvas, x, y, circ, trail, dz);
+      var deg = Math.round(Math.atan2(-y, x) * 180 / Math.PI);
+      if (deg < 0) deg += 360;
+      var cs = circStats(circ);
+      var circText = cs.coverage === 0 ? 'rotate the stick around its edge'
+        : cs.coverage < 0.25 ? 'keep rotating (' + Math.round(cs.coverage * 100) + '% of directions)'
+        : fixed(cs.error * 100, 1) + '% average error' + (cs.coverage < 1 ? ' (' + Math.round(cs.coverage * 100) + '% of directions so far)' : '');
+      ui.read.innerHTML = '<span>X <b></b></span> · <span>Y <b></b></span><br><span>Distance <b></b></span> · <span>angle <b></b></span><br><b></b><br>Circularity: <b></b>';
+      var bs = ui.read.getElementsByTagName('b');
+      bs[0].textContent = fixed(x, 4);
+      bs[1].textContent = fixed(y, 4);
+      bs[2].textContent = r.toFixed(3);
+      bs[3].textContent = r < 0.05 ? '–' : deg + '°';
+      bs[4].textContent = r < dz ? 'Inside deadzone' : 'Outside deadzone';
+      bs[5].textContent = circText;
+    });
+    if (p.mapping === 'standard') {
+      knobs.forEach(function (k, n) {
+        var ax2 = Number(p.axes[n * 2]) || 0, ay2 = Number(p.axes[n * 2 + 1]) || 0;
+        var t = 'translate(' + (Math.max(-1, Math.min(1, ax2)) * 18).toFixed(2) + ' ' + (Math.max(-1, Math.min(1, ay2)) * 18).toFixed(2) + ')';
+        if (k.g.getAttribute('transform') !== t) k.g.setAttribute('transform', t);
+      });
+    }
+  }
+
+  // ---- Controller list and loop ----
+  function syncList(pads) {
+    var sig = pads.map(function (p) { return p.index + '\u0001' + p.id; }).join('\u0002');
+    if (sig !== syncList.sig) {
+      syncList.sig = sig;
+      padSel.textContent = '';
+      pads.forEach(function (p) {
+        var o = document.createElement('option');
+        o.value = String(p.index);
+        o.textContent = p.index + ': ' + info(p.id).name;
+        padSel.appendChild(o);
+      });
+      $('#gpt-pad-field').hidden = pads.length < 2;
+    }
+    if (pads.length && !pads.some(function (p) { return p.index === sel; })) sel = pads[0].index;
+    if (!pads.length) sel = null;
+    if (sel !== null && padSel.value !== String(sel)) padSel.value = String(sel);
+    if (pads.length !== lastCount) {
+      lastCount = pads.length;
+      var none = !pads.length;
+      $('#gpt-empty').hidden = !none;
+      $('#gpt-live').hidden = none;
+      $('#gpt-details').hidden = none;
+      if (none) {
+        built = '';
+        $('#gpt-side').hidden = true;
+        svg.style.display = '';
+        svg.classList.add('is-dim');
+        drawLabels(labelSet(null), null);
+        resetDrawing();
+      }
+    }
+  }
+
+  function frame() {
+    raf = 0;
+    var pads = readPads();
+    // A fresh press on another controller brings that one into view. Its
+    // press state is left for update(), so that press counts as tested.
+    var switched = false;
+    pads.forEach(function (p) {
+      if (p.index === sel) return;
+      var st = stateFor(p), fresh = false;
+      p.buttons.forEach(function (b, k) { if (b && b.pressed && !st.prev[k]) fresh = true; });
+      if (fresh && sel !== null && !switched) {
+        switched = true;
+        sel = p.index;
+        say('Showing controller ' + p.index + ': ' + info(p.id).name);
+        return;
+      }
+      p.buttons.forEach(function (b, k) { st.prev[k] = !!(b && b.pressed); });
+    });
+    syncList(pads);
+    var cur = null;
+    pads.forEach(function (p) { if (p.index === sel) cur = p; });
+    if (cur) {
+      var set = labelSet(cur);
+      var sig = [cur.index, cur.id, cur.mapping, cur.buttons.length, cur.axes.length, set].join('|');
+      if (sig !== built) { built = sig; build(cur, set); }
+      update(cur);
+    }
+    if (pads.length && !document.hidden) raf = requestAnimationFrame(frame);
+  }
+  function kick() { if (!raf) raf = requestAnimationFrame(frame); }
+
+  // ---- Drift ----
+  var driftRun = 0;
+  function measureDrift() {
+    var p = padAt(sel), out = $('#gpt-drift-out');
+    if (!p) return;
+    var sticks = sticksOf(p), run = ++driftRun, index = p.index, samples = [], t0 = performance.now();
+    if (!sticks.length) { out.textContent = 'This controller has no stick axes to measure.'; return; }
+    out.textContent = 'Measuring… keep your hands off the sticks.';
+    (function step() {
+      if (run !== driftRun) return;
+      var q = padAt(index);
+      if (!q) { out.textContent = 'The controller was disconnected during the measurement.'; return; }
+      samples.push(q.axes.slice());
+      if (performance.now() - t0 < 2000) { setTimeout(step, 10); return; }
+      out.textContent = '';
+      sticks.forEach(function (s) {
+        var sx = 0, sy = 0, maxR = 0;
+        samples.forEach(function (a) {
+          var x = Number(a[s.x]) || 0, y = Number(a[s.y]) || 0;
+          sx += x; sy += y;
+          maxR = Math.max(maxR, Math.hypot(x, y));
+        });
+        var mx = sx / samples.length, my = sy / samples.length, off = Math.hypot(mx, my);
+        var verdict = maxR < 0.05 ? 'No drift.' : maxR < 0.15 ? 'Slight offset; most games hide this with their deadzone.' : 'Drift: large enough to move a character or camera in many games.';
+        var para = document.createElement('p');
+        var strong = document.createElement('strong');
+        strong.textContent = s.name + ': ';
+        para.appendChild(strong);
+        para.appendChild(document.createTextNode('resting offset ' + off.toFixed(3) + ' (X ' + fixed(mx, 3) + ', Y ' + fixed(my, 3) + '), largest ' + maxR.toFixed(3) + '. ' + verdict));
+        out.appendChild(para);
+      });
+    })();
+  }
+
+  // ---- Vibration ----
+  function actuator(p) { return p && p.vibrationActuator && typeof p.vibrationActuator.playEffect === 'function' ? p.vibrationActuator : null; }
+  function haptic(p) { return p && p.hapticActuators && p.hapticActuators[0] && typeof p.hapticActuators[0].pulse === 'function' ? p.hapticActuators[0] : null; }
+  function effects(act) { return act && Array.isArray(act.effects) ? act.effects : act && act.type ? [act.type] : act ? ['dual-rumble'] : []; }
+  function vibMsg(text, ok) { var m = $('#gpt-vib-msg'); m.className = 'msg ' + (ok ? 'ok' : 'error'); m.textContent = text; }
+  function updateVibration(p) {
+    var act = actuator(p), can = !!act || !!haptic(p);
+    $('#gpt-rumble').disabled = !can;
+    $('#gpt-stop').disabled = !can;
+    $('#gpt-trigger').hidden = effects(act).indexOf('trigger-rumble') < 0;
+    if (can) vibMsg('', true);
+    else vibMsg('Vibration is not available for this controller in this browser. Chrome and Edge support rumble on many Xbox and PlayStation controllers.', false);
+  }
+  function rumble(kind) {
+    var p = padAt(sel), act = actuator(p);
+    var dur = Number($('#gpt-dur').value) || 1000, strong = Number($('#gpt-strong').value) || 0, weak = Number($('#gpt-weak').value) || 0;
+    var secs = (dur / 1000) + (dur === 1000 ? ' second' : ' seconds');
+    function fail(e) { vibMsg('The controller did not accept the vibration request' + (e && e.name ? ' (' + e.name + ')' : '') + '. It may not support rumble in this browser.', false); }
+    try {
+      if (act) {
+        var params = { startDelay: 0, duration: dur, strongMagnitude: strong, weakMagnitude: weak };
+        if (kind === 'trigger') { params.strongMagnitude = 0; params.weakMagnitude = 0; params.leftTrigger = strong; params.rightTrigger = strong; }
+        vibMsg((kind === 'trigger' ? 'Trigger rumble' : 'Rumble') + ' for ' + secs + '…', true);
+        Promise.resolve(act.playEffect(kind === 'trigger' ? 'trigger-rumble' : 'dual-rumble', params)).then(function (r) {
+          if (r === 'complete') vibMsg('Vibration finished. If you felt nothing, the controller or its connection may not support rumble.', true);
+        }, fail);
+      } else if (haptic(p)) {
+        vibMsg('Rumble for ' + secs + '…', true);
+        Promise.resolve(haptic(p).pulse(Math.max(strong, weak), dur)).then(null, fail);
+      }
+    } catch (e) { fail(e); }
+  }
+  function stopRumble() {
+    var p = padAt(sel), act = actuator(p);
+    try {
+      if (act && typeof act.reset === 'function') Promise.resolve(act.reset()).then(null, function () {});
+      else if (haptic(p)) haptic(p).pulse(0, 1);
+      vibMsg('Vibration stopped.', true);
+    } catch (e) { vibMsg('The controller could not be stopped from this page.', false); }
+  }
+
+  // ---- Update rate ----
+  var rateRun = 0;
+  function measureRate() {
+    var p = padAt(sel), out = $('#gpt-rate-out');
+    if (!p) return;
+    var run = ++rateRun, index = p.index, t0 = performance.now(), lastPoll = 0;
+    var lastTs = null, lastSig = null, lastAt = 0, deltas = [], updates = 0;
+    out.textContent = 'Measuring… keep moving a stick in circles.';
+    var ch = new MessageChannel();
+    function sample() {
+      if (run !== rateRun) { ch.port1.onmessage = null; return; }
+      var now = performance.now();
+      // A message loop is not throttled like setTimeout; sample about every half millisecond.
+      if (now - lastPoll >= 0.5) {
+        lastPoll = now;
+        var q = padAt(index);
+        if (q) {
+          var ts = q.timestamp, sig = q.axes.join(',') + '|' + q.buttons.map(function (b) { return b ? b.value : 0; }).join(',');
+          if (ts !== lastTs || sig !== lastSig) {
+            if (lastSig !== null) {
+              var byTs = typeof ts === 'number' && typeof lastTs === 'number' && ts > lastTs && ts - lastTs < 1000;
+              deltas.push(byTs ? ts - lastTs : now - lastAt);
+            }
+            updates++;
+            lastTs = ts; lastSig = sig; lastAt = now;
+          }
+        }
+      }
+      if (now - t0 < 3000) ch.port2.postMessage(0);
+      else { ch.port1.onmessage = null; done(); }
+    }
+    function done() {
+      if (deltas.length < 20) {
+        out.textContent = 'Not enough input reached the page (' + updates + ' updates). Keep moving a stick during the whole measurement and try again.';
+        return;
+      }
+      var s = deltas.slice().sort(function (a, b) { return a - b; });
+      var med = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+      var keep = deltas.filter(function (d) { return d > med * 0.5 && d < med * 1.5; });
+      var mean = keep.reduce(function (a, b) { return a + b; }, 0) / keep.length;
+      var hz = 1000 / mean;
+      out.textContent = 'About ' + Math.round(hz) + ' Hz: new input every ' + mean.toFixed(2) + ' ms on average (' + updates + ' updates in 3 seconds). This is capped by how often the browser polls the controller.';
+      say('Update rate about ' + Math.round(hz) + ' hertz.');
+    }
+    ch.port1.onmessage = sample;
+    ch.port2.postMessage(0);
+  }
+
+  // ---- Wiring ----
+  if (!supported) {
+    $('#gpt-error').textContent = window.isSecureContext === false
+      ? 'Controllers are only available to secure (https) pages. Open this page over https.'
+      : 'This browser does not support the Gamepad API. Use a current version of Chrome, Edge, Firefox or Safari.';
+    $('#gpt-empty').hidden = true;
+  }
+  window.addEventListener('gamepadconnected', function (e) {
+    var g = e && e.gamepad;
+    if (g && typeof g.index === 'number') {
+      if (sel === null) sel = g.index;
+      say('Controller connected: ' + info(g.id).name);
+    }
+    kick();
+  });
+  window.addEventListener('gamepaddisconnected', function (e) {
+    var g = e && e.gamepad;
+    if (g && typeof g.index === 'number') {
+      delete states[g.index];
+      if (sel === g.index) { sel = null; built = ''; }
+      say('Controller disconnected: ' + info(g.id).name);
+    }
+    // Catch up now, even when no controller remains to keep the loop running.
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    frame();
+  });
+  padSel.addEventListener('change', function () { sel = Number(padSel.value); built = ''; kick(); });
+  labelSel.addEventListener('change', function () {
+    built = '';
+    if (sel === null) drawLabels(labelSet(null), null);
+    kick();
+  });
+  dzIn.addEventListener('input', function () {
+    $('#gpt-dz-val').textContent = Number(dzIn.value).toFixed(2);
+    stickUI.forEach(function (u) { u.sig = ''; });
+    kick();
+  });
+  ['strong', 'weak'].forEach(function (n) {
+    $('#gpt-' + n).addEventListener('input', function () { $('#gpt-' + n + '-val').textContent = Number(this.value).toFixed(2); });
+  });
+  $('#gpt-circ-reset').addEventListener('click', function () {
+    var st = sel !== null && states[sel];
+    if (!st) return;
+    st.circ = [new Float32Array(BINS), new Float32Array(BINS)];
+    st.trail = [[], []];
+    stickUI.forEach(function (u) { u.sig = ''; });
+    kick();
+  });
+  $('#gpt-reset').addEventListener('click', function () {
+    var st = sel !== null && states[sel], p = padAt(sel);
+    if (!st || !p) return;
+    st.tested.clear();
+    st.last = {};
+    updateTested(p, st);
+    kick();
+  });
+  $('#gpt-drift').addEventListener('click', measureDrift);
+  $('#gpt-rumble').addEventListener('click', function () { rumble('dual'); });
+  $('#gpt-trigger').addEventListener('click', function () { rumble('trigger'); });
+  $('#gpt-stop').addEventListener('click', stopRumble);
+  $('#gpt-rate').addEventListener('click', measureRate);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) kick(); });
+  window.addEventListener('resize', TT.debounce(function () { stickUI.forEach(function (u) { u.sig = ''; }); kick(); }, 100));
+  if (window.matchMedia) {
+    var scheme = window.matchMedia('(prefers-color-scheme: dark)');
+    var recolor = function () { colors = null; stickUI.forEach(function (u) { u.sig = ''; }); kick(); };
+    if (scheme.addEventListener) scheme.addEventListener('change', recolor);
+  }
+  // Some browsers expose controllers that were already in use without an event.
+  if (supported) setInterval(function () { if (!raf && readPads().length) kick(); }, 1000);
+
+  drawLabels(labelSet(null), null);
+  if (supported) frame();
+})();
+</script>

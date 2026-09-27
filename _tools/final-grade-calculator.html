@@ -1,0 +1,403 @@
+---
+title: "Final Grade Calculator: What Do I Need?"
+description: Find the score you need on your final exam to reach a target grade, from your current grade and the final's weight or points, with a table for each letter.
+category: Calculators
+keywords: [final grade calculator, what do i need on my final, final exam calculator, final exam grade calculator, grade needed on final, what do i need to pass]
+howto: |
+  ## How to use it
+
+  Enter your current grade in the class, the course grade you want, and how
+  much the final exam counts. The weight is usually in your syllabus as a
+  percentage, for example "Final exam: 25%". The calculator shows the score
+  you need, what you would end up with if you aced or skipped the final, and
+  a table with the score needed for every letter grade. Use **What if** to
+  see where a particular exam score would leave you.
+
+  If your class counts points instead of percentages, switch to **Points**
+  and enter the points you have earned so far, the points possible so far,
+  and how many points the final is worth.
+
+  ## The formula
+
+  Your course grade is your current grade weighted by everything except the
+  final, plus your final exam score weighted by the final:
+
+  `course = current × (1 − w) + final × w`
+
+  Solving for the final gives the score you need:
+
+  `final = (target − current × (1 − w)) ÷ w`
+
+  With a current grade of 88%, a target of 90% and a final worth 25%
+  (w = 0.25), you need (90 − 88 × 0.75) ÷ 0.25 = (90 − 66) ÷ 0.25 = **96%**.
+
+  In points mode, the course total is the points so far plus the final's
+  points. The points you need are target × total − points earned. With 412
+  of 500 points and a 200-point final, a B (80%) needs 0.80 × 700 − 412 =
+  148 points, or 74% of the final.
+
+  ## Reading the result
+
+  | Result | What it means |
+  |---|---|
+  | A score from 0% to 100% | The minimum you need on the final |
+  | More than 100% | Not reachable without extra credit or a curve |
+  | Guaranteed | You reach the target even with 0% on the final |
+
+  The needed score is rounded **up** to the next hundredth, so it is always
+  enough: 89.333…⁠% is shown as 89.34%, because 89.33% would leave you a
+  fraction short. Your teacher may round the course grade, in which case a
+  slightly lower score could still work.
+
+  ## Things to check
+
+  - The formula assumes the final is the only work left. If homework or
+    other exams are still to be graded, work out your current grade with
+    the [grade calculator](/grade-calculator/) and treat everything left as
+    part of a combined "final".
+  - Use your current grade exactly as your gradebook shows it. A rounded
+    figure can shift the answer by a point or more when the final's weight
+    is small.
+  - Some classes replace the lowest test score with the final, or require a
+    minimum score on the final to pass whatever your average is. The
+    calculator can't know those rules, so read your syllabus.
+faq:
+  - q: What do I need on my final to get an A?
+    a: With the usual 90% cut-off, you need (90 − current × (1 − w)) ÷ w, where w is the final's weight as a decimal. For example, 88% now and a final worth 25% needs 96%. The table shows every letter grade at once.
+  - q: What if the calculator says I need more than 100%?
+    a: That target is out of reach without extra credit or a curve. The calculator shows the best course grade you can still get with a perfect final, and the letter table shows which grades are still possible.
+  - q: What does "guaranteed" mean?
+    a: Your grade stays at or above the target even if you score 0% on the final. That assumes skipping the final is allowed; some classes fail anyone who misses it.
+  - q: Are my grades uploaded or saved?
+    a: No. Everything is calculated in your browser, nothing is sent to a server, and nothing is kept after you close the page.
+---
+<style>
+.fg-mode { margin: 0 0 16px; padding: 0; border: 0; min-width: 0; }
+.fg-mode legend { padding: 0; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
+.fg-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--field-border); border-radius: 8px; overflow: hidden; }
+.fg-seg label { position: relative; display: inline-flex; align-items: center; min-height: 40px; padding: 0 16px; font-size: 15px; cursor: pointer; }
+.fg-seg label + label { border-left: 1px solid var(--field-border); }
+.fg-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.fg-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.fg-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -4px; }
+.fg-inputs > .field { flex: 1 1 150px; }
+.fg-if-row > .field { flex: 0 1 280px; }
+.fg-out { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--border); }
+.fg-out .result-big { margin-bottom: 10px; font-variant-numeric: tabular-nums; }
+.fg-out .result-big.fg-bad { color: var(--danger); }
+.msg.fg-verdict { background: var(--surface-2); border: 1px solid var(--border); border-left: 4px solid var(--accent); color: var(--text); font-size: 15px; }
+.msg.fg-verdict.fg-bad { border-left-color: var(--danger); }
+.fg-h { margin: 24px 0 10px; font-size: 1.1rem; }
+.fg-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+table.data.fg-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data.fg-table td.fg-no { color: var(--danger); }
+table.data.fg-table td.fg-yes { color: var(--accent); font-weight: 600; }
+table.data.fg-table tr.fg-target > * { background: var(--accent-soft); }
+.output.fg-if-out { font-family: inherit; font-size: 15px; }
+</style>
+
+<fieldset class="fg-mode">
+  <legend>Your grade is based on</legend>
+  <div class="fg-seg">
+    <label><input type="radio" name="fg-mode" value="percent" checked> Percent and weight</label>
+    <label><input type="radio" name="fg-mode" value="points"> Points</label>
+  </div>
+</fieldset>
+
+<div class="row fg-inputs">
+  <div class="field fg-pct">
+    <label for="fg-current">Current grade (%)</label>
+    <input type="text" id="fg-current" inputmode="decimal" autocomplete="off" value="88">
+  </div>
+  <div class="field fg-pct">
+    <label for="fg-weight">Final exam weight (%)</label>
+    <input type="text" id="fg-weight" inputmode="decimal" autocomplete="off" value="25">
+  </div>
+  <div class="field fg-pts" hidden>
+    <label for="fg-earned">Points earned so far</label>
+    <input type="text" id="fg-earned" inputmode="decimal" autocomplete="off" value="412">
+  </div>
+  <div class="field fg-pts" hidden>
+    <label for="fg-possible">Points possible so far</label>
+    <input type="text" id="fg-possible" inputmode="decimal" autocomplete="off" value="500">
+  </div>
+  <div class="field fg-pts" hidden>
+    <label for="fg-final-pts">Final exam worth (points)</label>
+    <input type="text" id="fg-final-pts" inputmode="decimal" autocomplete="off" value="200">
+  </div>
+  <div class="field">
+    <label for="fg-target">Course grade you want (%)</label>
+    <input type="text" id="fg-target" inputmode="decimal" autocomplete="off" value="90">
+  </div>
+</div>
+<p class="msg error" id="fg-msg"></p>
+
+<div class="fg-out">
+  <p class="label" id="fg-need-label">Score you need on the final</p>
+  <p class="result-big" id="fg-need">–</p>
+  <p class="msg fg-verdict" id="fg-verdict"></p>
+  <div class="stats">
+    <div class="stat"><b id="fg-best">–</b><span>Course grade with 100% on the final</span></div>
+    <div class="stat"><b id="fg-worst">–</b><span>Course grade with 0% on the final</span></div>
+    <div class="stat" id="fg-pts-stat" hidden><b id="fg-need-pts">–</b><span id="fg-need-pts-l">Points needed on the final</span></div>
+  </div>
+</div>
+
+<hr class="fg-sep">
+<h2 class="fg-h">Score needed for each letter grade</h2>
+<div class="checks">
+  <label class="check"><input type="checkbox" id="fg-pm"> Show + and − grades</label>
+</div>
+<div class="table-wrap">
+  <table class="data fg-table" id="fg-table">
+    <thead><tr><th scope="col">Letter</th><th scope="col" class="num">Course grade</th><th scope="col" class="num">Needed on the final</th><th scope="col" class="num fg-ptcol" hidden>Points</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+<p class="hint">Letter cut-offs follow the common US scale. Enter your own cut-off above if your class uses a different one.</p>
+
+<hr class="fg-sep">
+<h2 class="fg-h">What if I score…</h2>
+<div class="row fg-inputs fg-if-row">
+  <div class="field">
+    <label for="fg-if" id="fg-if-label">Final exam score (%)</label>
+    <input type="text" id="fg-if" inputmode="decimal" autocomplete="off" placeholder="e.g. 85">
+  </div>
+</div>
+<p class="output fg-if-out" id="fg-if-out"></p>
+<div class="actions">
+  <button class="btn small" type="button" id="fg-copy">Copy result</button>
+</div>
+<p class="visually-hidden" id="fg-status" role="status"></p>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var SCALES = {
+    basic: [['A', 90], ['B', 80], ['C', 70], ['D', 60]],
+    plus: [['A+', 97], ['A', 93], ['A−', 90], ['B+', 87], ['B', 83], ['B−', 80], ['C+', 77], ['C', 73], ['C−', 70], ['D+', 67], ['D', 63], ['D−', 60]]
+  };
+  var decComma = (1.5).toLocaleString().indexOf(',') !== -1;
+  var last = null;
+
+  // ----- Exact fractions (BigInt): no 97.00000000000001 turning into 97.01 -----
+  function gcd(a, b) { a = a < 0n ? -a : a; b = b < 0n ? -b : b; while (b) { var t = a % b; a = b; b = t; } return a; }
+  function Q(n, d) { if (d === undefined) d = 1n; if (d < 0n) { n = -n; d = -d; } var g = gcd(n, d) || 1n; return { n: n / g, d: d / g }; }
+  function add(a, b) { return Q(a.n * b.d + b.n * a.d, a.d * b.d); }
+  function sub(a, b) { return Q(a.n * b.d - b.n * a.d, a.d * b.d); }
+  function mul(a, b) { return Q(a.n * b.n, a.d * b.d); }
+  function div(a, b) { return Q(a.n * b.d, a.d * b.n); }
+  function cmp(a, b) { var x = a.n * b.d - b.n * a.d; return x > 0n ? 1 : x < 0n ? -1 : 0; }
+  function int(n) { return Q(BigInt(n)); }
+  var ZERO = int(0), HUNDRED = int(100);
+  function fmtUnits(v, k) { // v = value in 10^-k units (BigInt)
+    var s = 10n ** BigInt(k), neg = v < 0n, a = neg ? -v : v;
+    return (neg ? '-' : '') + (a / s) + (k ? '.' + String(a % s).padStart(k, '0') : '');
+  }
+  function fixed(a, k) { // round half up
+    var s = 10n ** BigInt(k), neg = a.n < 0n, n = neg ? -a.n : a.n;
+    var v = (2n * n * s + a.d) / (2n * a.d);
+    return fmtUnits(neg ? -v : v, k);
+  }
+  function ceilFixed(a, k) { // smallest value with k decimals that is >= a
+    var s = 10n ** BigInt(k), num = a.n * s, q = num / a.d;
+    if (num % a.d !== 0n && num > 0n) q += 1n;
+    return fmtUnits(q, k);
+  }
+  function short(a) { return fixed(a, 2).replace(/\.?0+$/, ''); }
+  function parse(raw) {
+    var s = String(raw || '').trim().replace(/\s*%$/, '');
+    if (!s) return null;
+    if (decComma) s = s.replace(/^(\d+),(\d+)$/, '$1.$2');
+    var m = /^(\d{1,9})(?:\.(\d{1,6}))?$/.exec(s) || /^()\.(\d{1,6})$/.exec(s);
+    if (!m) return NaN;
+    var f = m[2] || '';
+    return Q(BigInt((m[1] || '0') + f), 10n ** BigInt(f.length));
+  }
+  function mode() { return $('input[name="fg-mode"]:checked').value; }
+
+  // Everything the page shows, from the inputs. Returns { error } or a model.
+  function model() {
+    var pts = mode() === 'points', t = parse($('#fg-target').value), bad = [], err = '';
+    function need(id, v, test, text) {
+      var el = $(id);
+      if (v === null || Number.isNaN(v) || !test(v)) { bad.push(el); if (!err) err = v === null ? '' : text; return false; }
+      return true;
+    }
+    var m = { pts: pts, target: t };
+    if (pts) {
+      var E = parse($('#fg-earned').value), P = parse($('#fg-possible').value), F = parse($('#fg-final-pts').value);
+      need('#fg-earned', E, function () { return true; }, 'Enter the points you have earned so far, such as 412.');
+      need('#fg-possible', P, function () { return true; }, 'Enter the points possible so far, such as 500.');
+      need('#fg-final-pts', F, function (v) { return cmp(v, ZERO) > 0; }, 'The final exam must be worth more than 0 points.');
+      if (!bad.length) {
+        m.E = E; m.P = P; m.F = F; m.total = add(P, F);
+        // Course grade (%) for a final score s (points).
+        m.grade = function (s) { return mul(div(add(E, s), m.total), HUNDRED); };
+        // Points needed for a course grade g (%), and that as a % of the final.
+        m.needPts = function (g) { return sub(mul(div(g, HUNDRED), m.total), E); };
+        m.needPct = function (g) { return mul(div(m.needPts(g), F), HUNDRED); };
+        m.best = m.grade(F); m.worst = m.grade(ZERO);
+      }
+    } else {
+      var c = parse($('#fg-current').value), W = parse($('#fg-weight').value);
+      need('#fg-current', c, function (v) { return cmp(v, int(1000)) <= 0; }, 'Enter your current grade as a percentage, such as 88.');
+      need('#fg-weight', W, function (v) { return cmp(v, ZERO) > 0 && cmp(v, HUNDRED) <= 0; }, 'The final exam weight must be more than 0% and at most 100%.');
+      if (!bad.length) {
+        var w = div(W, HUNDRED), rest = sub(int(1), w);
+        m.c = c; m.W = W;
+        m.grade = function (s) { return add(mul(c, rest), mul(s, w)); };
+        m.needPct = function (g) { return div(sub(g, mul(c, rest)), w); };
+        m.best = m.grade(HUNDRED); m.worst = m.grade(ZERO);
+      }
+    }
+    need('#fg-target', t, function (v) { return cmp(v, int(1000)) <= 0; }, 'Enter the course grade you want as a percentage, such as 90.');
+    m.bad = bad; m.error = err;
+    m.ok = !bad.length;
+    return m;
+  }
+
+  function verdict(m, g) {
+    var pct = m.needPct(g);
+    if (cmp(pct, ZERO) <= 0) return { state: 'safe', pct: pct };
+    if (cmp(pct, HUNDRED) > 0) return { state: 'out', pct: pct };
+    return { state: 'need', pct: pct };
+  }
+  // Rounded up to 2 decimals, without trailing zeros (148, 45.8).
+  function up2(a) { return ceilFixed(a, 2).replace(/\.?0+$/, ''); }
+  function pointsText(m, g) {
+    var p = m.needPts(g), whole = ceilFixed(p, 0), t = up2(p) + ' of ' + short(m.F) + ' points';
+    if (whole !== up2(p)) t += ' (' + whole + ' in whole points)';
+    return t;
+  }
+
+  function render(showErrors) {
+    var m = model(), pts = m.pts;
+    $$('#fg-current, #fg-weight, #fg-earned, #fg-possible, #fg-final-pts, #fg-target').forEach(function (el) {
+      var inv = m.bad.indexOf(el) !== -1 && (showErrors || el.getAttribute('aria-invalid') === 'true');
+      if (inv) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+    });
+    var msg = $('#fg-msg');
+    if (!m.error) msg.textContent = '';
+    else if (showErrors || msg.textContent) msg.textContent = m.error;
+    var v = $('#fg-verdict');
+    $('#fg-pts-stat').hidden = !pts;
+    $$('.fg-ptcol').forEach(function (el) { el.hidden = !pts; });
+    if (!m.ok) {
+      $('#fg-need').textContent = '–';
+      $('#fg-need').classList.remove('fg-bad');
+      v.textContent = m.bad.length && !m.error ? 'Fill in every box to see the score you need.' : '';
+      v.classList.remove('fg-bad');
+      $('#fg-best').textContent = $('#fg-worst').textContent = $('#fg-need-pts').textContent = '–';
+      $('#fg-table tbody').textContent = '';
+      $('#fg-if-out').textContent = 'Fill in the boxes above first.';
+      last = null;
+      return;
+    }
+    var t = m.target, r = verdict(m, t), tt = short(t) + '%';
+    var best = fixed(m.best, 2) + '%', worst = fixed(m.worst, 2) + '%';
+    $('#fg-best').textContent = best;
+    $('#fg-worst').textContent = worst;
+    var text;
+    if (r.state === 'safe') {
+      $('#fg-need').textContent = 'Guaranteed';
+      text = 'You already have ' + tt + ' locked in: even 0% on the final leaves you with ' + worst + '.';
+    } else if (r.state === 'out') {
+      $('#fg-need').textContent = 'Not reachable';
+      text = 'Not reachable without extra credit: you would need ' + ceilFixed(r.pct, 2) + '% on the final. With 100% the best you can finish with is ' + best + '.';
+    } else {
+      $('#fg-need').textContent = ceilFixed(r.pct, 2) + '%';
+      text = 'You need at least ' + ceilFixed(r.pct, 2) + '% on the final' + (pts ? ', which is ' + pointsText(m, t) + ',' : '') + ' to finish with ' + tt + '.';
+    }
+    v.textContent = text;
+    v.classList.toggle('fg-bad', r.state === 'out');
+    $('#fg-need').classList.toggle('fg-bad', r.state === 'out');
+    if (pts) {
+      var p = m.needPts(t);
+      $('#fg-need-pts').textContent = cmp(p, ZERO) <= 0 ? '0' : up2(p);
+      $('#fg-need-pts-l').textContent = 'Points needed of ' + short(m.F) + ' on the final';
+    }
+
+    // Letter table, plus the typed target if it is not one of the cut-offs.
+    var list = SCALES[$('#fg-pm').checked ? 'plus' : 'basic'].map(function (x) { return { label: x[0], g: int(x[1]) }; });
+    if (!list.some(function (x) { return cmp(x.g, t) === 0; })) {
+      list.push({ label: 'Your target', g: t, mine: true });
+      list.sort(function (a, b) { return cmp(b.g, a.g); });
+    }
+    var tbody = $('#fg-table tbody');
+    tbody.textContent = '';
+    list.forEach(function (x) {
+      var rv = verdict(m, x.g), tr = document.createElement('tr');
+      if (x.mine || cmp(x.g, t) === 0) tr.className = 'fg-target';
+      var th = document.createElement('th');
+      th.scope = 'row';
+      th.textContent = x.label;
+      var tdG = document.createElement('td'), tdN = document.createElement('td'), tdP = document.createElement('td');
+      tdG.className = 'num'; tdN.className = 'num'; tdP.className = 'num fg-ptcol';
+      tdG.textContent = short(x.g) + '%';
+      if (rv.state === 'safe') { tdN.textContent = 'Guaranteed'; tdN.className += ' fg-yes'; tdP.textContent = '0'; }
+      else if (rv.state === 'out') { tdN.textContent = 'Not possible (' + ceilFixed(rv.pct, 2) + '%)'; tdN.className += ' fg-no'; tdP.textContent = '–'; }
+      else { tdN.textContent = ceilFixed(rv.pct, 2) + '%'; tdP.textContent = pts ? up2(m.needPts(x.g)) : ''; }
+      tdP.hidden = !pts;
+      tr.appendChild(th); tr.appendChild(tdG); tr.appendChild(tdN); tr.appendChild(tdP);
+      tbody.appendChild(tr);
+    });
+
+    // What if.
+    var s = parse($('#fg-if').value), out = $('#fg-if-out'), ifIn = $('#fg-if');
+    if (s === null) { out.textContent = 'Enter a score to see the course grade it would give you.'; ifIn.removeAttribute('aria-invalid'); }
+    else if (Number.isNaN(s)) {
+      out.textContent = pts ? 'Enter the points you might score, such as 150.' : 'Enter the score you might get, such as 85.';
+      if (showErrors) ifIn.setAttribute('aria-invalid', 'true');
+    } else {
+      ifIn.removeAttribute('aria-invalid');
+      var g = m.grade(s), letter = letterOf(g);
+      out.textContent = (pts ? short(s) + ' of ' + short(m.F) + ' points' : short(s) + '%') + ' on the final gives a course grade of ' + fixed(g, 2) + '%' + (letter ? ' (' + letter + ')' : '') + '.' +
+        (pts && cmp(s, m.F) > 0 ? ' That is more than the final is worth.' : !pts && cmp(s, HUNDRED) > 0 ? ' That includes extra credit.' : '');
+    }
+    last = { m: m, r: r, text: text };
+  }
+  function letterOf(g) {
+    var list = SCALES[$('#fg-pm').checked ? 'plus' : 'basic'];
+    for (var i = 0; i < list.length; i++) if (cmp(g, int(list[i][1])) >= 0) return list[i][0];
+    return 'F';
+  }
+
+  var status = $('#fg-status');
+  var announce = TT.debounce(function () {
+    status.textContent = last ? $('#fg-need').textContent === 'Guaranteed' ? 'Guaranteed. ' + last.text : last.text : 'Fill in every box to see the score you need.';
+  }, 1200);
+  var showErrorsLater = TT.debounce(function () { render(true); }, 900);
+  $$('.fg-inputs input').forEach(function (el) {
+    el.addEventListener('input', function () { render(false); showErrorsLater(); announce(); });
+    el.addEventListener('change', function () { render(true); });
+  });
+  $$('input[name="fg-mode"]').forEach(function (el) {
+    el.addEventListener('change', function () {
+      var pts = mode() === 'points';
+      $$('.fg-pct').forEach(function (el) { el.hidden = pts; });
+      $$('.fg-pts').forEach(function (el) { el.hidden = !pts; });
+      $('#fg-if-label').textContent = pts ? 'Final exam score (points)' : 'Final exam score (%)';
+      $('#fg-if').placeholder = pts ? 'e.g. 150' : 'e.g. 85';
+      render(false); announce();
+    });
+  });
+  $('#fg-pm').addEventListener('change', function () { render(false); });
+  $('#fg-copy').addEventListener('click', function () {
+    render(true);
+    if (!last) { TT.flash($('#fg-copy'), 'Nothing to copy yet'); return; }
+    var m = last.m, lines = [];
+    lines.push(m.pts
+      ? 'Points so far: ' + short(m.E) + ' of ' + short(m.P) + '; final worth ' + short(m.F) + ' points; target ' + short(m.target) + '%'
+      : 'Current grade ' + short(m.c) + '%; final worth ' + short(m.W) + '%; target ' + short(m.target) + '%');
+    lines.push(last.text);
+    $$('#fg-table tbody tr').forEach(function (tr) {
+      var c = tr.children;
+      lines.push(c[0].textContent + ' (' + c[1].textContent + '): ' + c[2].textContent);
+    });
+    TT.copy(lines.join('\n'), $('#fg-copy'));
+  });
+  render(false);
+})();
+</script>

@@ -1,0 +1,473 @@
+---
+title: "HEIC to JPG Converter: iPhone Photos to JPG"
+description: Convert iPhone HEIC photos to JPG, PNG or WebP in your browser. Batch convert, set the quality, keep or remove EXIF data and download a ZIP. No upload.
+category: Image & PDF
+keywords: [heic to jpg, heic to jpeg, heic to png, convert heic, heic converter, iphone photo to jpg, heif to jpg]
+howto: |
+  ## How to convert HEIC to JPG
+
+  Choose or drop your HEIC or HEIF photos, as many as you like. Each one is
+  converted to JPG straight away and listed with its new size. Download the
+  files one by one, or all of them in a ZIP. Choose PNG for lossless copies or
+  WebP for smaller files. Changing a setting converts the list again.
+
+  ## What HEIC is
+
+  HEIC is the High Efficiency Image File Format (HEIF, ISO/IEC 23008-12)
+  holding pictures compressed with HEVC, the H.265 video codec. iPhones and
+  iPads have saved photos this way since iOS 11, because a HEIC photo is
+  roughly half the size of a JPG of similar quality. Many websites, older
+  Windows PCs and editing apps still cannot open it, which is why converting
+  to JPG is so common.
+
+  ## How the conversion works
+
+  The photo is decoded by libheif, an open-source HEIF library, compiled to
+  WebAssembly and run in a background worker so the page stays responsive.
+  The decoder, about 1.5 MB, is downloaded only when you add your first HEIC
+  file, and your browser caches it. Your photos are never sent anywhere.
+
+  - **Tiles.** A 12-megapixel iPhone photo is stored as a grid of 512 × 512
+    pixel tiles, which are joined back into one picture.
+  - **Rotation.** The rotation and mirroring saved with the photo are applied,
+    so portrait shots come out upright.
+  - **Colour.** iPhone photos use the Display P3 colour space, which is wider
+    than sRGB. The converter maps them to sRGB, the space that web browsers
+    and most apps assume, so the JPG looks the same everywhere. Only the most
+    saturated colours, beyond sRGB, lose a little intensity.
+  - **Quality.** 90% keeps a JPG visually identical to the original for
+    almost any photo. The JPG is usually larger than the HEIC, because HEVC
+    compresses better than JPG does.
+
+  ## Photo metadata (EXIF)
+
+  | Setting | What the new file keeps |
+  |---|---|
+  | Remove all (default) | Nothing: no camera, date or location |
+  | Keep, without location | Camera, lens, exposure and date; GPS is removed |
+  | Keep all | Everything, including where the photo was taken |
+
+  When metadata is kept, the orientation tag is reset to *normal*, because the
+  pixels are already upright; otherwise some apps would rotate the photo a
+  second time. The small preview thumbnail inside EXIF is dropped. EXIF can be
+  kept in JPG, PNG and WebP files.
+
+  ## Files with several images
+
+  A HEIF file can hold more than one picture, such as an image collection or
+  some cameras' burst sequences. The converter takes the file's primary image,
+  the one a photo viewer shows, and tells you how many the file contains. An
+  iPhone saves each burst frame as a separate photo, so you can add them all
+  at once. A Live Photo's HEIC holds only the still picture; its short video is
+  a separate MOV file.
+
+  ## Tips
+
+  - To have an iPhone shoot JPG from now on, open Settings, then Camera, then
+    Formats, and choose **Most Compatible**.
+  - Sharing a photo by email or AirDrop from an iPhone often converts it to
+    JPG automatically, so check the file name ending before converting.
+  - Very large panoramas can exceed what a phone browser can hold in memory;
+    a desktop browser handles them better.
+faq:
+  - q: Are my photos uploaded to a server?
+    a: No. The HEIC decoder runs inside your browser, and the JPG is created on your device. Nothing is uploaded or stored, so it is safe for private photos.
+  - q: Does the JPG keep the date and location of my photo?
+    a: Only if you ask. By default all metadata is removed. Choose "Keep, without location" to keep the camera details and date, or "Keep all" to also keep the GPS position.
+  - q: Why do the colours look slightly different?
+    a: iPhone photos use the wide Display P3 colour space. The JPG is converted to sRGB so it shows the same colours in every app, and colours that sRGB cannot show, such as very intense reds, become a little less saturated.
+  - q: Why is the JPG bigger than the HEIC file?
+    a: HEVC compression, used inside HEIC, is about twice as efficient as JPG. At the same visual quality a JPG needs more bytes. Lower the quality, or choose WebP, for a smaller file.
+  - q: Can I convert several HEIC files at once?
+    a: Yes. Add as many as you like; they are converted one after another and can be downloaded together as a ZIP file.
+---
+<style>
+.h2j-drop {
+  position: relative; margin: 0 0 16px; padding: 22px 16px; text-align: center;
+  background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.h2j-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.h2j-drop p { margin: 10px 0 0; }
+.h2j-drop .hint { margin-top: 4px; }
+.h2j-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
+.h2j-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
+.h2j-opts .field { margin: 0; }
+.h2j-qlabel { display: flex; justify-content: space-between; gap: 8px; }
+.h2j-qlabel output { font-variant-numeric: tabular-nums; }
+.h2j-resize { display: flex; gap: 8px; }
+.h2j-resize select { flex: 1 1 auto; min-width: 0; }
+.h2j-resize input { flex: 0 0 96px; width: 96px; }
+.h2j-note { margin: 0 0 14px; }
+.h2j-note:empty { display: none; }
+.h2j-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; }
+.h2j-summary { flex: 1 1 200px; margin: 0; color: var(--muted); font-size: 14px; }
+.h2j-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.h2j-list:empty { display: none; }
+.h2j-item {
+  display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+.h2j-thumb {
+  display: grid; place-items: center; width: 64px; height: 64px; overflow: hidden; border-radius: 6px;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--bg) 0 50%) 0 0 / 12px 12px;
+  border: 1px solid var(--border);
+}
+.h2j-thumb img { display: block; max-width: 100%; max-height: 100%; }
+.h2j-text { min-width: 0; }
+.h2j-name { margin: 0; overflow: hidden; font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.h2j-meta { margin: 2px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.h2j-item progress { display: block; width: 100%; max-width: 260px; height: 6px; margin-top: 6px; accent-color: var(--accent); }
+.h2j-err { margin: 4px 0 0; color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
+.h2j-info { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.h2j-err:empty, .h2j-info:empty { display: none; }
+.h2j-btns { display: flex; gap: 6px; }
+.h2j-x { width: 36px; padding: 0; font-size: 18px; line-height: 1; }
+@media (max-width: 520px) {
+  .h2j-item { grid-template-columns: 52px minmax(0, 1fr); }
+  .h2j-thumb { width: 52px; height: 52px; }
+  .h2j-btns { grid-column: 1 / -1; justify-content: flex-end; }
+}
+</style>
+
+<div class="h2j-drop" id="h2j-drop">
+  <input type="file" id="h2j-file" class="h2j-file" multiple tabindex="-1" accept=".heic,.heif,.hif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" aria-label="Add HEIC photos">
+  <button class="btn" type="button" id="h2j-choose">Choose HEIC photos</button>
+  <p>or drop them here</p>
+  <p class="hint">HEIC and HEIF files from an iPhone, iPad or camera, as many as you like. Nothing is uploaded.</p>
+</div>
+
+<div class="h2j-opts">
+  <div class="field">
+    <label for="h2j-format">Convert to</label>
+    <select id="h2j-format">
+      <option value="jpeg" selected>JPG</option>
+      <option value="png">PNG (lossless)</option>
+      <option value="webp">WebP (smaller)</option>
+    </select>
+  </div>
+  <div class="field" id="h2j-quality-field">
+    <label class="h2j-qlabel" for="h2j-quality"><span>Quality</span><output id="h2j-quality-out" for="h2j-quality">90%</output></label>
+    <input type="range" id="h2j-quality" min="10" max="100" step="1" value="90">
+  </div>
+  <div class="field">
+    <label for="h2j-meta">Photo metadata (EXIF)</label>
+    <select id="h2j-meta">
+      <option value="strip" selected>Remove all</option>
+      <option value="nogps">Keep, without location</option>
+      <option value="keep">Keep all, with location</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="h2j-resize">Size</label>
+    <div class="h2j-resize">
+      <select id="h2j-resize">
+        <option value="none" selected>Keep original size</option>
+        <option value="max">Longest side (px)</option>
+        <option value="percent">Scale (%)</option>
+      </select>
+      <input type="number" id="h2j-resize-val" min="1" max="20000" step="1" value="2048" inputmode="numeric" aria-label="Size value" hidden>
+    </div>
+  </div>
+</div>
+<p class="hint h2j-note" id="h2j-note"></p>
+<p class="msg error" id="h2j-error" aria-live="polite"></p>
+
+<div class="h2j-bar">
+  <p class="h2j-summary" id="h2j-summary">No photos added yet.</p>
+  <button class="btn" type="button" id="h2j-zip" disabled>Download all (ZIP)</button>
+  <button class="btn secondary" type="button" id="h2j-clear" disabled>Clear</button>
+</div>
+<p class="visually-hidden" id="h2j-status" role="status"></p>
+<ul class="h2j-list" id="h2j-list" aria-label="Converted photos"></ul>
+
+<script src="{{ '/assets/js/image-decode.js' | relative_url }}"></script>
+<script src="{{ '/assets/js/zip.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var fileInput = $('#h2j-file'), drop = $('#h2j-drop'), list = $('#h2j-list');
+  var fmtSel = $('#h2j-format'), quality = $('#h2j-quality'), qualityOut = $('#h2j-quality-out'), meta = $('#h2j-meta');
+  var resizeSel = $('#h2j-resize'), resizeVal = $('#h2j-resize-val');
+  var note = $('#h2j-note'), errBox = $('#h2j-error'), summary = $('#h2j-summary'), status = $('#h2j-status');
+  var zipBtn = $('#h2j-zip'), clearBtn = $('#h2j-clear');
+
+  var LABEL = { jpeg: 'JPG', png: 'PNG', webp: 'WebP' };
+  var EXT = { jpeg: 'jpg', png: 'png', webp: 'webp' };
+  var MAX_PIXELS = 100e6, CACHE_PIXELS = 50e6, CONCURRENCY = 2;
+  var items = [], nextId = 1, gen = 0, running = 0, decoderLoaded = false;
+  var cache = new Map();
+
+  function fmtBytes(n) {
+    if (n < 1000) return n + ' B';
+    if (n < 1e6) return (n / 1000).toFixed(n < 1e4 ? 1 : 0) + ' KB';
+    return (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + ' MB';
+  }
+  function baseName(name) {
+    var n = String(name || 'photo').replace(/^.*[\\/]/, '');
+    var i = n.lastIndexOf('.');
+    return (i > 0 ? n.slice(0, i) : n) || 'photo';
+  }
+  function settings() {
+    var v = parseFloat(resizeVal.value);
+    return { fmt: fmtSel.value, quality: +quality.value / 100, meta: meta.value, resize: resizeSel.value, resizeVal: v > 0 && isFinite(v) ? v : 0 };
+  }
+  function targetSize(w, h, s) {
+    if (s.resize === 'none' || !s.resizeVal) return { w: w, h: h };
+    var k = s.resize === 'max' ? Math.min(1, s.resizeVal / Math.max(w, h)) : Math.min(1, s.resizeVal / 100);
+    return { w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) };
+  }
+  function syncControls() {
+    var f = fmtSel.value;
+    $('#h2j-quality-field').hidden = f === 'png';
+    resizeVal.hidden = resizeSel.value === 'none';
+    resizeVal.setAttribute('aria-label', resizeSel.value === 'percent' ? 'Scale in percent' : 'Longest side in pixels');
+    resizeVal.max = resizeSel.value === 'percent' ? 100 : 20000;
+    qualityOut.textContent = quality.value + '%';
+    var n = [];
+    if (meta.value === 'strip') n.push('Metadata such as the date, camera and GPS location is removed.');
+    else if (meta.value === 'nogps') n.push('The date and camera details are kept; the GPS location is removed.');
+    else n.push('All metadata is kept, including the GPS location where the photo was taken.');
+    if (f === 'png') n.push('PNG is lossless, so files are several times larger than JPG.');
+    if (resizeSel.value !== 'none') n.push('Photos are only ever made smaller, never enlarged.');
+    note.textContent = n.join(' ');
+  }
+
+  function row(it) {
+    var li = document.createElement('li');
+    li.className = 'h2j-item';
+    li.innerHTML = '<div class="h2j-thumb" aria-hidden="true"></div>' +
+      '<div class="h2j-text"><p class="h2j-name"></p><p class="h2j-meta"></p><progress max="100" value="0"></progress><p class="h2j-err"></p><p class="h2j-info hint"></p></div>' +
+      '<div class="h2j-btns"><button class="btn small" type="button" data-act="dl" disabled>Download</button><button class="btn secondary small h2j-x" type="button" data-act="rm">&times;</button></div>';
+    li.querySelector('[data-act="rm"]').setAttribute('aria-label', 'Remove ' + it.name);
+    li.querySelector('[data-act="dl"]').addEventListener('click', function () { if (it.blob) TT.download(it.outName, it.blob); });
+    li.querySelector('[data-act="rm"]').addEventListener('click', function () { remove(it); });
+    it.el = li;
+    return li;
+  }
+  function paint(it) {
+    var q = function (s) { return it.el.querySelector(s); };
+    var bar = q('progress'), dl = q('[data-act="dl"]');
+    q('.h2j-name').textContent = it.state === 'done' ? it.outName : it.name;
+    q('.h2j-name').title = it.name;
+    bar.hidden = !(it.state === 'queued' || it.state === 'working');
+    bar.value = it.progress || 0;
+    bar.setAttribute('aria-label', 'Converting ' + it.name);
+    q('.h2j-err').textContent = it.state === 'error' ? it.error : '';
+    q('.h2j-info').textContent = it.state === 'done' ? it.notes.join(' ') : '';
+    var m = '';
+    if (it.state === 'queued') m = 'Waiting…';
+    else if (it.state === 'working') m = it.stage || 'Working…';
+    else if (it.state === 'done') m = it.w + ' × ' + it.h + ' px · ' + fmtBytes(it.file.size) + ' → ' + LABEL[it.fmt] + ' ' + fmtBytes(it.blob.size);
+    else if (it.state === 'error') m = fmtBytes(it.file.size);
+    q('.h2j-meta').textContent = m;
+    dl.disabled = it.state !== 'done';
+    dl.hidden = it.state === 'error';
+    dl.setAttribute('aria-label', it.state === 'done' ? 'Download ' + it.outName : 'Download ' + it.name + ' (not ready)');
+    var th = q('.h2j-thumb');
+    if (it.state === 'done' && it.thumbUrl) {
+      var img = th.querySelector('img') || th.appendChild(document.createElement('img'));
+      img.alt = '';
+      if (img.getAttribute('src') !== it.thumbUrl) img.src = it.thumbUrl;
+    } else if (it.state === 'error') th.textContent = '';
+  }
+  function counts() {
+    var done = 0, bad = 0;
+    items.forEach(function (i) { if (i.state === 'done') done++; else if (i.state === 'error') bad++; });
+    return { done: done, bad: bad, busy: items.length - done - bad };
+  }
+  function refreshBar() {
+    var c = counts();
+    zipBtn.disabled = !c.done || c.busy > 0;
+    clearBtn.disabled = !items.length;
+    summary.textContent = !items.length ? 'No photos added yet.' :
+      c.done + ' of ' + items.length + ' converted' + (c.bad ? ', ' + c.bad + ' failed' : '') + (c.busy ? ', working…' : '.');
+  }
+  var announce = TT.debounce(function () {
+    var c = counts();
+    if (!items.length || c.busy) return;
+    status.textContent = 'Converted ' + c.done + (c.done === 1 ? ' photo' : ' photos') + ' to ' + LABEL[settings().fmt] + '.' + (c.bad ? ' ' + c.bad + ' could not be converted.' : '');
+  }, 400);
+
+  function revoke(it) { if (it.thumbUrl) URL.revokeObjectURL(it.thumbUrl); it.thumbUrl = null; }
+  function uncache(id) { TTImage.release(cache.get(id)); cache.delete(id); }
+  // Keep recent decodes so a settings change re-encodes without decoding again,
+  // up to a total pixel budget. Never drop one that is being converted.
+  function remember(id, d) {
+    cache.delete(id);
+    cache.set(id, d);
+    var total = 0, busy = {};
+    cache.forEach(function (v) { total += v.width * v.height; });
+    items.forEach(function (x) { if (x.state === 'working') busy[x.id] = 1; });
+    Array.from(cache.keys()).forEach(function (k) {
+      if (total <= CACHE_PIXELS || k === id || busy[k]) return;
+      total -= cache.get(k).width * cache.get(k).height;
+      uncache(k);
+    });
+  }
+  function remove(it) {
+    var i = items.indexOf(it);
+    if (i < 0) return;
+    items.splice(i, 1);
+    revoke(it);
+    uncache(it.id);
+    it.el.remove();
+    refreshBar();
+    var next = items[i] || items[i - 1];
+    (next ? next.el.querySelector('[data-act="rm"]') : $('#h2j-choose')).focus();
+    status.textContent = it.name + ' removed.';
+  }
+  function add(files) {
+    var n = 0;
+    Array.prototype.forEach.call(files || [], function (f) {
+      if (!f) return;
+      var it = { id: nextId++, file: f, name: f.name || 'photo.heic', state: 'queued', progress: 0 };
+      items.push(it);
+      list.appendChild(row(it));
+      paint(it);
+      n++;
+    });
+    if (!n) return;
+    errBox.textContent = '';
+    refreshBar();
+    pump();
+  }
+  function pump() {
+    while (running < CONCURRENCY) {
+      var it = null;
+      for (var i = 0; i < items.length; i++) if (items[i].state === 'queued') { it = items[i]; break; }
+      if (!it) break;
+      running++;
+      it.state = 'working';
+      it.stage = 'Reading…';
+      it.progress = 10;
+      paint(it);
+      convert(it, gen).then(function () { running--; refreshBar(); announce(); pump(); });
+    }
+    refreshBar();
+  }
+  function stage(it, g, text, pct) {
+    if (g !== gen) return;
+    it.stage = text;
+    it.progress = pct;
+    paint(it);
+  }
+
+  async function convert(it, g) {
+    var s = settings(), d = null;
+    try {
+      if (it.decodeError) throw it.decodeError;
+      d = cache.get(it.id);
+      if (d) remember(it.id, d);
+      else {
+        var type = await TTImage.sniff(it.file);
+        stage(it, g, type === 'heic' && !decoderLoaded ? 'Loading the HEIC decoder (about 1.5 MB, once)…' : 'Decoding…', 30);
+        try {
+          d = await TTImage.decode(it.file, { exif: true, canvas: false, maxPixels: MAX_PIXELS });
+        } catch (e) {
+          it.decodeError = e;
+          throw e;
+        }
+        if (d.format === 'heic') decoderLoaded = true;
+        if (items.indexOf(it) < 0) { TTImage.release(d); return; }
+        remember(it.id, d);
+      }
+      if (g !== gen || items.indexOf(it) < 0) return;
+      stage(it, g, 'Saving as ' + LABEL[s.fmt] + '…', 75);
+      var t = targetSize(d.width, d.height, s);
+      var blob = await TTImage.encode(d, s.fmt, { width: t.w, height: t.h, quality: s.quality, exif: s.meta !== 'strip' ? d.exif : null, stripGps: s.meta === 'nogps' });
+      var k = Math.min(1, 128 / Math.max(t.w, t.h));
+      var thumb = await TTImage.encode(d, 'png', { width: t.w * k, height: t.h * k, background: s.fmt === 'jpeg' ? '#ffffff' : null });
+      if (g !== gen || items.indexOf(it) < 0) return;
+      revoke(it);
+      it.blob = blob;
+      it.thumbUrl = URL.createObjectURL(thumb);
+      it.fmt = s.fmt;
+      it.outName = baseName(it.name) + '.' + EXT[s.fmt];
+      it.w = t.w;
+      it.h = t.h;
+      it.notes = notesFor(d, s);
+      it.state = 'done';
+      it.retried = false;
+      it.progress = 100;
+      paint(it);
+    } catch (e) {
+      if (g !== gen || items.indexOf(it) < 0) return;
+      // The worker holding the decoded image stopped (out of memory, say): decode once more.
+      if (e && e.code === 'GONE' && !it.retried) {
+        it.retried = true;
+        uncache(it.id);
+        return convert(it, g);
+      }
+      it.state = 'error';
+      it.error = e && e.friendly ? e.message : 'This photo could not be converted.';
+      if (e && e.code === 'UNSUPPORTED') it.error = 'This is not a HEIC photo or another image this tool can read. ' + e.message.replace(/^This is not a supported image\. /, '');
+      paint(it);
+    }
+  }
+  function notesFor(d, s) {
+    var n = [];
+    if (d.format !== 'heic') n.push('This file is ' + TTImage.formats[d.format].label + ', not HEIC; it was converted anyway.');
+    if (d.format === 'heic' && d.images > 1) n.push('This file holds ' + d.images + ' images; the primary image was converted.');
+    if (d.colorProfile === 'converted') n.push('Colours converted from Display P3 (or another wide-gamut profile) to sRGB.');
+    if (s.fmt === 'jpeg' && d.hasAlpha) n.push('Transparent areas were filled with white.');
+    if (d.animated) n.push('Only the first frame was converted.');
+    if (s.meta !== 'strip') n.push(d.exif ? (s.meta === 'nogps' ? 'EXIF kept without location.' : 'EXIF kept, including any location.') : 'The photo had no EXIF data to keep.');
+    return n;
+  }
+
+  var rerun = TT.debounce(function () {
+    gen++;
+    items.forEach(function (it) { if (it.state !== 'queued') { it.state = 'queued'; it.progress = 0; paint(it); } });
+    pump();
+  }, 250);
+  function onSettings() { syncControls(); if (items.length) rerun(); }
+  fmtSel.addEventListener('change', onSettings);
+  meta.addEventListener('change', onSettings);
+  quality.addEventListener('input', function () { qualityOut.textContent = quality.value + '%'; });
+  quality.addEventListener('change', onSettings);
+  resizeSel.addEventListener('change', function () { resizeVal.value = resizeSel.value === 'percent' ? 50 : 2048; onSettings(); });
+  resizeVal.addEventListener('input', TT.debounce(onSettings, 500));
+
+  $('#h2j-choose').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () { add(fileInput.files); fileInput.value = ''; });
+  var isFileDrag = function (e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; };
+  document.addEventListener('dragover', function (e) { if (!isFileDrag(e)) return; e.preventDefault(); drop.classList.add('is-over'); });
+  document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) drop.classList.remove('is-over'); });
+  document.addEventListener('drop', function (e) {
+    drop.classList.remove('is-over');
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    add(e.dataTransfer.files);
+  });
+
+  zipBtn.addEventListener('click', async function () {
+    var done = items.filter(function (i) { return i.state === 'done'; });
+    if (!done.length) return;
+    zipBtn.disabled = true;
+    zipBtn.textContent = 'Creating ZIP…';
+    try {
+      var zip = await TTZip.create(done.map(function (i) { return { name: i.outName, data: i.blob, date: i.file.lastModified ? new Date(i.file.lastModified) : null }; }));
+      TT.download('heic-to-' + EXT[settings().fmt] + '.zip', zip);
+      status.textContent = 'ZIP with ' + done.length + (done.length === 1 ? ' photo' : ' photos') + ' downloaded.';
+    } catch (e) {
+      errBox.textContent = e && e.message ? e.message : 'The ZIP file could not be created.';
+    }
+    zipBtn.textContent = 'Download all (ZIP)';
+    refreshBar();
+    zipBtn.focus();
+  });
+  clearBtn.addEventListener('click', function () {
+    gen++;
+    items.forEach(function (it) { revoke(it); uncache(it.id); });
+    items = [];
+    list.textContent = '';
+    errBox.textContent = '';
+    refreshBar();
+    status.textContent = 'All photos removed.';
+    $('#h2j-choose').focus();
+  });
+  syncControls();
+})();
+</script>

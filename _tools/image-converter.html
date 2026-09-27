@@ -1,0 +1,573 @@
+---
+title: "Image Converter: JPG, PNG, WebP, AVIF, ICO"
+description: Convert images to JPG, PNG, WebP, AVIF, BMP or ICO in your browser. Batch convert with quality, resize and background options, then download a ZIP.
+category: Image & PDF
+keywords: [image converter, png to jpg, jpg to png, webp to png, webp to jpg, avif to jpg, png to ico, bmp to png]
+howto: |
+  ## How to convert images
+
+  Choose or drop one or more images, pick the format to save as, and each
+  file is converted straight away. Download files one by one, or all of them
+  in a ZIP. Change a setting and the whole list is converted again with it.
+
+  Inputs can be PNG, JPG, WebP, AVIF, GIF, BMP, ICO, TIFF, HEIC and SVG,
+  mixed in one batch. The format is recognised from the file's contents, not
+  its name, so a WebP saved as *photo.jpg* is still read correctly.
+
+  ## Which format to save as
+
+  | Format | Transparency | Compression | Best for |
+  |---|---|---|---|
+  | JPG | No | Lossy | Photos, email, upload forms |
+  | PNG | Yes | Lossless | Screenshots, logos, text, sharp graphics |
+  | WebP | Yes | Lossy | Websites: usually smaller than JPG at similar quality |
+  | AVIF | Yes | Lossy | Websites: smaller still, where your browser can save it |
+  | BMP | No | None | Older software that wants plain bitmaps |
+  | ICO | Yes | PNG inside | Favicons and Windows icons |
+
+  ## What changes when you convert
+
+  - **Transparency.** JPG and BMP cannot store it, so transparent areas are
+    filled with the background colour you pick (white by default).
+  - **Quality.** JPG, WebP and AVIF discard detail the eye barely notices.
+    85 to 92% suits photos; lower settings give smaller files with visible
+    blocks or smearing. PNG and BMP ignore the setting.
+  - **Lossless is not a repair.** Turning a JPG into a PNG keeps every pixel
+    exactly, compression artefacts included, and the file usually grows.
+  - **Orientation.** A phone photo tagged as rotated is saved upright, so it
+    looks the same everywhere.
+  - **Metadata.** EXIF data (camera, date, GPS location) is removed by
+    default. You can keep it for JPG, PNG and WebP, with or without the
+    location. The rotation tag is then reset, because the pixels are already
+    upright, and the embedded thumbnail is dropped.
+  - **Colour.** Photos with a wide-gamut profile such as Display P3 are
+    converted to sRGB, the colour space that web pages and most apps assume.
+  - **Animation and pages.** Only the first frame of an animated GIF, PNG or
+    WebP is kept, the first page of a multi-page TIFF, and the primary image
+    of a HEIC file. The file list tells you when that happens.
+
+  ## Making an ICO file
+
+  An ICO file holds the same picture at several sizes, and Windows or the
+  browser picks the one that fits. Each size is stored as a PNG, which every
+  version of Windows since Vista and all current browsers read. For a website
+  favicon, 16, 32 and 48 pixels are enough; Windows application icons also
+  use a 256 pixel size. A picture that is not square is centred on a
+  transparent square, and sizes larger than the original are enlarged, which
+  looks soft, so start from an image at least 256 pixels wide for a crisp
+  large icon.
+
+  ## AVIF output
+
+  Every current browser can open AVIF files, but a web page can only save
+  AVIF when the browser includes an AVIF encoder for its canvas, and most do
+  not. The converter tests this when the page loads: if the AVIF choice is
+  greyed out, your browser cannot write AVIF here, while AVIF files you add
+  still convert to the other formats.
+faq:
+  - q: Are my images uploaded to a server?
+    a: No. Every image is decoded and re-encoded by your own browser. Nothing is sent anywhere or stored, and the page keeps working offline once it has loaded.
+  - q: Why is my PNG larger than the JPG I started with?
+    a: PNG is lossless, so it stores every pixel exactly, including the noise and artefacts of the JPG. That takes more space than JPG's lossy compression. For photos, stay with JPG or use WebP.
+  - q: Can I convert an animated GIF and keep the animation?
+    a: No. This tool saves still images, so only the first frame is converted. The file list says when an input was animated.
+  - q: How do I make a favicon.ico from a PNG?
+    a: Choose ICO as the output format, tick the 16, 32 and 48 pixel sizes (add 256 for Windows), add your PNG and download the .ico file. Transparency is kept.
+  - q: Why can't I choose AVIF?
+    a: Your browser can display AVIF images but cannot encode them from a web page. Pick WebP for a similar result, or convert AVIF files you have into JPG or PNG, which works in every browser.
+---
+<style>
+.imc-drop {
+  position: relative; margin: 0 0 16px; padding: 22px 16px; text-align: center;
+  background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.imc-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.imc-drop p { margin: 10px 0 0; }
+.imc-drop .hint { margin-top: 4px; }
+.imc-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
+.imc-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
+.imc-opts .field { margin: 0; }
+.imc-qlabel { display: flex; justify-content: space-between; gap: 8px; }
+.imc-qlabel output { font-variant-numeric: tabular-nums; }
+.imc-resize { display: flex; gap: 8px; }
+.imc-resize select { flex: 1 1 auto; min-width: 0; }
+.imc-resize input { flex: 0 0 96px; width: 96px; }
+.imc-bg { display: flex; align-items: center; gap: 10px; }
+.imc-sizes { margin: 0 0 12px; padding: 0; border: 0; min-width: 0; }
+.imc-sizes legend { padding: 0; margin-bottom: 4px; }
+.imc-sizes .checks { margin-bottom: 0; }
+.imc-note { margin: 0 0 14px; }
+.imc-note:empty { display: none; }
+.imc-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; }
+.imc-summary { flex: 1 1 200px; margin: 0; color: var(--muted); font-size: 14px; }
+.imc-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.imc-list:empty { display: none; }
+.imc-item {
+  display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+.imc-thumb {
+  display: grid; place-items: center; width: 64px; height: 64px; overflow: hidden; border-radius: 6px;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--bg) 0 50%) 0 0 / 12px 12px;
+  border: 1px solid var(--border);
+}
+.imc-thumb img { display: block; max-width: 100%; max-height: 100%; }
+.imc-text { min-width: 0; }
+.imc-name { margin: 0; overflow: hidden; font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.imc-meta { margin: 2px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.imc-item progress { display: block; width: 100%; max-width: 260px; height: 6px; margin-top: 6px; accent-color: var(--accent); }
+.imc-err { margin: 4px 0 0; color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
+.imc-info { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.imc-err:empty, .imc-info:empty { display: none; }
+.imc-btns { display: flex; gap: 6px; }
+.imc-x { width: 36px; padding: 0; font-size: 18px; line-height: 1; }
+@media (max-width: 520px) {
+  .imc-item { grid-template-columns: 52px minmax(0, 1fr); }
+  .imc-thumb { width: 52px; height: 52px; }
+  .imc-btns { grid-column: 1 / -1; justify-content: flex-end; }
+}
+</style>
+
+<div class="imc-drop" id="imc-drop">
+  <input type="file" id="imc-file" class="imc-file" multiple tabindex="-1" aria-label="Add images">
+  <button class="btn" type="button" id="imc-choose">Choose images</button>
+  <p>or drop them here, or paste with Ctrl+V</p>
+  <p class="hint">PNG, JPG, WebP, AVIF, GIF, BMP, ICO, TIFF, HEIC or SVG, as many as you like. Nothing is uploaded.</p>
+</div>
+
+<div class="imc-opts">
+  <div class="field">
+    <label for="imc-format">Convert to</label>
+    <select id="imc-format">
+      <option value="jpeg" selected>JPG</option>
+      <option value="png">PNG</option>
+      <option value="webp">WebP</option>
+      <option value="avif">AVIF</option>
+      <option value="bmp">BMP</option>
+      <option value="ico">ICO (icon)</option>
+    </select>
+  </div>
+  <div class="field" id="imc-quality-field">
+    <label class="imc-qlabel" for="imc-quality"><span>Quality</span><output id="imc-quality-out" for="imc-quality">90%</output></label>
+    <input type="range" id="imc-quality" min="10" max="100" step="1" value="90">
+  </div>
+  <div class="field" id="imc-resize-field">
+    <label for="imc-resize">Size</label>
+    <div class="imc-resize">
+      <select id="imc-resize">
+        <option value="none" selected>Keep original size</option>
+        <option value="max">Longest side (px)</option>
+        <option value="width">Width (px)</option>
+        <option value="height">Height (px)</option>
+        <option value="percent">Scale (%)</option>
+      </select>
+      <input type="number" id="imc-resize-val" min="1" max="20000" step="1" value="1920" inputmode="numeric" aria-label="Size value" hidden>
+    </div>
+  </div>
+  <div class="field" id="imc-bg-field">
+    <label for="imc-bg">Fill transparent areas with</label>
+    <div class="imc-bg"><input type="color" id="imc-bg" value="#ffffff"><span class="hint" id="imc-bg-hint">JPG and BMP cannot store transparency.</span></div>
+  </div>
+  <div class="field" id="imc-meta-field">
+    <label for="imc-meta">Photo metadata (EXIF)</label>
+    <select id="imc-meta">
+      <option value="strip" selected>Remove all</option>
+      <option value="nogps">Keep, without location</option>
+      <option value="keep">Keep all, with location</option>
+    </select>
+  </div>
+</div>
+
+<fieldset class="imc-sizes" id="imc-sizes" hidden>
+  <legend class="label">Icon sizes (pixels)</legend>
+  <div class="checks">
+    <label class="check"><input type="checkbox" value="16" checked> 16</label>
+    <label class="check"><input type="checkbox" value="24"> 24</label>
+    <label class="check"><input type="checkbox" value="32" checked> 32</label>
+    <label class="check"><input type="checkbox" value="48" checked> 48</label>
+    <label class="check"><input type="checkbox" value="64"> 64</label>
+    <label class="check"><input type="checkbox" value="128"> 128</label>
+    <label class="check"><input type="checkbox" value="256" checked> 256</label>
+  </div>
+</fieldset>
+<p class="hint imc-note" id="imc-note"></p>
+<p class="msg error" id="imc-error" aria-live="polite"></p>
+
+<div class="imc-bar">
+  <p class="imc-summary" id="imc-summary">No images added yet.</p>
+  <button class="btn" type="button" id="imc-zip" disabled>Download all (ZIP)</button>
+  <button class="btn secondary" type="button" id="imc-clear" disabled>Clear</button>
+</div>
+<p class="visually-hidden" id="imc-status" role="status"></p>
+<ul class="imc-list" id="imc-list" aria-label="Converted images"></ul>
+
+<script src="{{ '/assets/js/image-decode.js' | relative_url }}"></script>
+<script src="{{ '/assets/js/zip.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var fileInput = $('#imc-file'), drop = $('#imc-drop'), list = $('#imc-list');
+  var fmtSel = $('#imc-format'), quality = $('#imc-quality'), qualityOut = $('#imc-quality-out');
+  var resizeSel = $('#imc-resize'), resizeVal = $('#imc-resize-val'), bg = $('#imc-bg'), meta = $('#imc-meta');
+  var sizesBox = $('#imc-sizes'), note = $('#imc-note'), errBox = $('#imc-error');
+  var summary = $('#imc-summary'), status = $('#imc-status'), zipBtn = $('#imc-zip'), clearBtn = $('#imc-clear');
+
+  var LABEL = { jpeg: 'JPG', png: 'PNG', webp: 'WebP', avif: 'AVIF', bmp: 'BMP', ico: 'ICO' };
+  var EXT = { jpeg: 'jpg', png: 'png', webp: 'webp', avif: 'avif', bmp: 'bmp', ico: 'ico' };
+  var MAX_SIDE = 20000, MAX_PIXELS = 100e6, CACHE_PIXELS = 60e6, CONCURRENCY = 2;
+  var items = [], nextId = 1, gen = 0, running = 0, avifOk = false;
+  var cache = new Map(); // item id -> decoded result, most recently used last
+
+  fileInput.accept = TTImage.accept;
+
+  function fmtBytes(n) {
+    if (n < 1000) return n + ' B';
+    if (n < 1e6) return (n / 1000).toFixed(n < 1e4 ? 1 : 0) + ' KB';
+    return (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + ' MB';
+  }
+  function baseName(name) {
+    var n = String(name || 'image').replace(/^.*[\\/]/, '');
+    var i = n.lastIndexOf('.');
+    return (i > 0 ? n.slice(0, i) : n) || 'image';
+  }
+
+  // ---------- Settings ----------
+  function settings() {
+    var fmt = fmtSel.value;
+    if (fmt === 'avif' && !avifOk) fmt = 'jpeg';
+    var v = parseFloat(resizeVal.value);
+    return {
+      fmt: fmt,
+      quality: +quality.value / 100,
+      resize: resizeSel.value,
+      resizeVal: v > 0 && isFinite(v) ? v : 0,
+      bg: bg.value,
+      meta: meta.value,
+      icoSizes: TT.$$('input', sizesBox).filter(function (c) { return c.checked; }).map(function (c) { return +c.value; })
+    };
+  }
+  function targetSize(w, h, s) {
+    var k = 1, v = s.resizeVal;
+    if (s.fmt === 'ico' || !v || s.resize === 'none') return { w: w, h: h };
+    if (s.resize === 'max') k = Math.min(1, v / Math.max(w, h));
+    else if (s.resize === 'width') k = v / w;
+    else if (s.resize === 'height') k = v / h;
+    else if (s.resize === 'percent') k = v / 100;
+    var tw = Math.max(1, Math.round(w * k)), th = Math.max(1, Math.round(h * k));
+    return { w: tw, h: th };
+  }
+  function syncControls() {
+    var s = settings(), f = fmtSel.value;
+    $('#imc-quality-field').hidden = !(f === 'jpeg' || f === 'webp' || f === 'avif');
+    $('#imc-bg-field').hidden = !(f === 'jpeg' || f === 'bmp');
+    $('#imc-meta-field').hidden = !(f === 'jpeg' || f === 'png' || f === 'webp');
+    $('#imc-resize-field').hidden = f === 'ico';
+    sizesBox.hidden = f !== 'ico';
+    resizeVal.hidden = resizeSel.value === 'none';
+    resizeVal.setAttribute('aria-label', { max: 'Longest side in pixels', width: 'Width in pixels', height: 'Height in pixels', percent: 'Scale in percent' }[resizeSel.value] || 'Size value');
+    qualityOut.textContent = quality.value + '%';
+    var n = [];
+    if (f === 'avif' && !avifOk) n.push('This browser cannot save AVIF images, so AVIF output is unavailable here. It can still convert AVIF files you add.');
+    if (f === 'ico') n.push(s.icoSizes.length ? 'One icon file with ' + s.icoSizes.length + (s.icoSizes.length === 1 ? ' size' : ' sizes') + ': ' + s.icoSizes.join(', ') + ' px. Pictures that are not square are centred on a transparent square.' : 'Tick at least one icon size.');
+    if (f === 'png') n.push('PNG is lossless: every pixel is kept exactly, and photos make large files.');
+    if (f === 'bmp') n.push('BMP files are uncompressed, so they are large: about 3 bytes per pixel.');
+    if (resizeSel.value === 'max' && f !== 'ico') n.push('Images smaller than this are not enlarged.');
+    note.textContent = n.join(' ');
+  }
+
+  // ---------- Items ----------
+  function row(it) {
+    var li = document.createElement('li');
+    li.className = 'imc-item';
+    li.innerHTML = '<div class="imc-thumb" aria-hidden="true"></div>' +
+      '<div class="imc-text"><p class="imc-name"></p><p class="imc-meta"></p><progress max="100" value="0"></progress><p class="imc-err"></p><p class="imc-info hint"></p></div>' +
+      '<div class="imc-btns"><button class="btn small" type="button" data-act="dl" disabled>Download</button><button class="btn secondary small imc-x" type="button" data-act="rm">&times;</button></div>';
+    li.querySelector('[data-act="rm"]').setAttribute('aria-label', 'Remove ' + it.name);
+    it.el = li;
+    it.el.querySelector('[data-act="dl"]').addEventListener('click', function () { if (it.blob) TT.download(it.outName, it.blob); });
+    it.el.querySelector('[data-act="rm"]').addEventListener('click', function () { remove(it); });
+    return li;
+  }
+  function paint(it) {
+    var q = function (s) { return it.el.querySelector(s); };
+    var bar = q('progress'), dl = q('[data-act="dl"]');
+    q('.imc-name').textContent = it.state === 'done' ? it.outName : it.name;
+    q('.imc-name').title = it.name;
+    bar.hidden = !(it.state === 'queued' || it.state === 'working');
+    bar.value = it.progress || 0;
+    bar.setAttribute('aria-label', 'Converting ' + it.name);
+    q('.imc-err').textContent = it.state === 'error' ? it.error : '';
+    q('.imc-info').textContent = it.state === 'done' ? it.notes.join(' ') : '';
+    var m = '';
+    if (it.state === 'queued') m = 'Waiting…';
+    else if (it.state === 'working') m = it.stage || 'Working…';
+    else if (it.state === 'done') {
+      var saved = it.file.size ? Math.round((1 - it.blob.size / it.file.size) * 100) : 0;
+      m = it.inLabel + ' ' + it.inW + '×' + it.inH + ', ' + fmtBytes(it.file.size) + ' → ' + LABEL[it.fmt] + ' ' + it.outW + '×' + it.outH + ', ' + fmtBytes(it.blob.size) +
+        (it.fmt === 'ico' ? '' : saved > 0 ? ' (' + saved + '% smaller)' : saved < 0 ? ' (' + (-saved) + '% larger)' : '');
+    } else if (it.state === 'error') m = fmtBytes(it.file.size);
+    q('.imc-meta').textContent = m;
+    dl.disabled = it.state !== 'done';
+    dl.hidden = it.state === 'error';
+    dl.setAttribute('aria-label', it.state === 'done' ? 'Download ' + it.outName : 'Download ' + it.name + ' (not ready)');
+    var th = q('.imc-thumb');
+    if (it.state === 'done' && it.thumbUrl) {
+      var img = th.querySelector('img') || th.appendChild(document.createElement('img'));
+      img.alt = '';
+      if (img.getAttribute('src') !== it.thumbUrl) img.src = it.thumbUrl;
+    } else if (it.state === 'error') th.textContent = '';
+  }
+  function refreshBar() {
+    var done = items.filter(function (i) { return i.state === 'done'; }).length;
+    var bad = items.filter(function (i) { return i.state === 'error'; }).length;
+    var busy = items.length - done - bad;
+    zipBtn.disabled = !done || busy > 0;
+    clearBtn.disabled = !items.length;
+    if (!items.length) summary.textContent = 'No images added yet.';
+    else summary.textContent = done + ' of ' + items.length + ' converted' + (bad ? ', ' + bad + ' failed' : '') + (busy ? ', working…' : '.');
+  }
+  var announce = TT.debounce(function () {
+    var done = items.filter(function (i) { return i.state === 'done'; }).length;
+    var bad = items.filter(function (i) { return i.state === 'error'; }).length;
+    if (!items.length || done + bad < items.length) return;
+    status.textContent = 'Converted ' + done + (done === 1 ? ' image' : ' images') + ' to ' + LABEL[settings().fmt] + '.' + (bad ? ' ' + bad + ' could not be converted.' : '');
+  }, 400);
+
+  function revoke(it) {
+    if (it.thumbUrl) URL.revokeObjectURL(it.thumbUrl);
+    it.thumbUrl = null;
+  }
+  function uncache(id) {
+    TTImage.release(cache.get(id));
+    cache.delete(id);
+  }
+  // Keep recent decodes so a settings change re-encodes without decoding again,
+  // up to a total pixel budget. Never drop one that is being converted.
+  function remember(id, d) {
+    cache.delete(id);
+    cache.set(id, d);
+    var total = 0, busy = {};
+    cache.forEach(function (v) { total += v.width * v.height; });
+    items.forEach(function (x) { if (x.state === 'working') busy[x.id] = 1; });
+    Array.from(cache.keys()).forEach(function (k) {
+      if (total <= CACHE_PIXELS || k === id || busy[k]) return;
+      total -= cache.get(k).width * cache.get(k).height;
+      uncache(k);
+    });
+  }
+  function remove(it) {
+    var i = items.indexOf(it);
+    if (i < 0) return;
+    items.splice(i, 1);
+    revoke(it);
+    uncache(it.id);
+    it.el.remove();
+    refreshBar();
+    var next = items[i] || items[i - 1];
+    (next ? next.el.querySelector('[data-act="rm"]') : $('#imc-choose')).focus();
+    status.textContent = it.name + ' removed.';
+  }
+
+  function add(files) {
+    var added = 0;
+    Array.prototype.forEach.call(files || [], function (f) {
+      if (!f) return;
+      var it = { id: nextId++, file: f, name: f.name || 'pasted-image.png', state: 'queued', progress: 0 };
+      items.push(it);
+      list.appendChild(row(it));
+      paint(it);
+      added++;
+    });
+    if (!added) return;
+    errBox.textContent = '';
+    refreshBar();
+    pump();
+  }
+
+  function pump() {
+    while (running < CONCURRENCY) {
+      var it = null;
+      for (var i = 0; i < items.length; i++) if (items[i].state === 'queued') { it = items[i]; break; }
+      if (!it) break;
+      running++;
+      it.state = 'working';
+      it.stage = 'Reading…';
+      it.progress = 10;
+      paint(it);
+      convert(it, gen).then(function () { running--; refreshBar(); announce(); pump(); });
+    }
+    refreshBar();
+  }
+
+  function stage(it, g, text, pct) {
+    if (g !== gen) return;
+    it.stage = text;
+    it.progress = pct;
+    paint(it);
+  }
+
+  async function convert(it, g) {
+    var s = settings(), d = null;
+    try {
+      if (it.decodeError) throw it.decodeError;
+      d = cache.get(it.id);
+      if (d) remember(it.id, d);
+      else {
+        var type = await TTImage.sniff(it.file);
+        stage(it, g, type === 'heic' ? 'Decoding HEIC (the decoder loads once)…' : type === 'tiff' ? 'Decoding TIFF…' : 'Decoding…', 30);
+        try {
+          d = await TTImage.decode(it.file, { exif: true, canvas: false, maxPixels: MAX_PIXELS });
+        } catch (e) {
+          it.decodeError = e;
+          throw e;
+        }
+        if (items.indexOf(it) < 0) { TTImage.release(d); return; }
+        remember(it.id, d);
+      }
+      if (g !== gen || items.indexOf(it) < 0) return;
+      stage(it, g, 'Converting to ' + LABEL[s.fmt] + '…', 70);
+      var t = targetSize(d.width, d.height, s);
+      if (t.w > MAX_SIDE || t.h > MAX_SIDE || t.w * t.h > MAX_PIXELS) {
+        throw Object.assign(new Error('The resized image would be ' + t.w + ' × ' + t.h + ' pixels, larger than this tool allows (' + MAX_SIDE + ' px per side, 100 megapixels).'), { friendly: true });
+      }
+      var blob = await TTImage.encode(d, s.fmt, {
+        width: t.w, height: t.h, quality: s.quality, background: s.fmt === 'jpeg' || s.fmt === 'bmp' ? s.bg : null, icoSizes: s.icoSizes,
+        exif: s.meta !== 'strip' ? d.exif : null, stripGps: s.meta === 'nogps'
+      });
+      // A small preview, so a long list does not keep every full-size image decoded.
+      var k = Math.min(1, 128 / Math.max(t.w, t.h));
+      var thumb = await TTImage.encode(d, 'png', { width: t.w * k, height: t.h * k, background: s.fmt === 'jpeg' || s.fmt === 'bmp' ? s.bg : null });
+      if (g !== gen || items.indexOf(it) < 0) return;
+      revoke(it);
+      it.blob = blob;
+      it.thumbUrl = URL.createObjectURL(thumb);
+      it.fmt = s.fmt;
+      it.outName = baseName(it.name) + '.' + EXT[s.fmt];
+      it.inLabel = TTImage.formats[d.format].label;
+      it.inW = d.width;
+      it.inH = d.height;
+      it.outW = s.fmt === 'ico' ? Math.max.apply(null, s.icoSizes) : t.w;
+      it.outH = s.fmt === 'ico' ? it.outW : t.h;
+      it.notes = notesFor(d, s, t);
+      it.state = 'done';
+      it.retried = false;
+      it.progress = 100;
+      paint(it);
+    } catch (e) {
+      if (g !== gen || items.indexOf(it) < 0) return;
+      // The worker holding the decoded image stopped (out of memory, say): decode once more.
+      if (e && e.code === 'GONE' && !it.retried) {
+        it.retried = true;
+        uncache(it.id);
+        return convert(it, g);
+      }
+      it.state = 'error';
+      it.error = e && e.friendly ? e.message : 'This file could not be converted.';
+      paint(it);
+    }
+  }
+
+  function notesFor(d, s, t) {
+    var n = [];
+    if (d.animated) n.push('Animated image: only the first frame was converted.');
+    if (d.format === 'heic' && d.images > 1) n.push('This HEIC file holds ' + d.images + ' images; the primary one was converted.');
+    if (d.format === 'tiff' && d.images > 1) n.push('This TIFF has ' + d.images + ' pages; the first was converted.');
+    if (d.colorProfile === 'converted') n.push('Colours were converted to sRGB from the file’s wide-gamut profile.');
+    if (d.warnings && d.warnings.indexOf('truncated') >= 0) n.push('The file seems to be cut off, so part of the picture may be blank.');
+    if ((s.fmt === 'jpeg' || s.fmt === 'bmp') && d.hasAlpha) n.push('Transparent areas were filled with ' + ({ '#ffffff': 'white', '#000000': 'black' }[s.bg] || s.bg) + '.');
+    if (d.orientation > 1) n.push('Rotated upright using the photo’s orientation tag.');
+    if (s.fmt === 'ico') {
+      var big = Math.max.apply(null, s.icoSizes);
+      if (d.width !== d.height) n.push('Centred on a transparent square.');
+      if (big > Math.max(d.width, d.height)) n.push('The ' + big + ' px icon is enlarged from a ' + d.width + '×' + d.height + ' original and may look soft.');
+    }
+    if (s.fmt !== 'ico' && (t.w > d.width || t.h > d.height)) n.push('Enlarged beyond the original size, so it may look soft.');
+    if (s.meta !== 'strip' && (s.fmt === 'jpeg' || s.fmt === 'png' || s.fmt === 'webp')) n.push(d.exif ? (s.meta === 'nogps' ? 'EXIF kept without location.' : 'EXIF kept, including any location.') : 'The original had no EXIF data to keep.');
+    return n;
+  }
+
+  // Settings changed: convert everything again (decoded images are cached).
+  var rerun = TT.debounce(function () {
+    gen++;
+    items.forEach(function (it) { if (it.state !== 'queued') { it.state = 'queued'; it.progress = 0; paint(it); } });
+    pump();
+  }, 250);
+  function onSettings() { syncControls(); if (items.length) rerun(); }
+  fmtSel.addEventListener('change', onSettings);
+  quality.addEventListener('input', function () { qualityOut.textContent = quality.value + '%'; });
+  quality.addEventListener('change', onSettings);
+  resizeSel.addEventListener('change', function () {
+    var defaults = { max: 1920, width: 1200, height: 800, percent: 50 };
+    if (defaults[resizeSel.value]) resizeVal.value = defaults[resizeSel.value];
+    onSettings();
+  });
+  resizeVal.addEventListener('input', TT.debounce(onSettings, 500));
+  bg.addEventListener('change', onSettings);
+  meta.addEventListener('change', onSettings);
+  sizesBox.addEventListener('change', onSettings);
+
+  // ---------- Input ----------
+  $('#imc-choose').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () { add(fileInput.files); fileInput.value = ''; });
+  // Files dropped anywhere on the page are added (instead of the browser opening them).
+  var isFileDrag = function (e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; };
+  document.addEventListener('dragover', function (e) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    drop.classList.add('is-over');
+  });
+  document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) drop.classList.remove('is-over'); });
+  document.addEventListener('drop', function (e) {
+    drop.classList.remove('is-over');
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    add(e.dataTransfer.files);
+  });
+  document.addEventListener('paste', function (e) {
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && t.type !== 'file') return;
+    var files = [];
+    Array.prototype.forEach.call((e.clipboardData && e.clipboardData.items) || [], function (x) {
+      if (x.kind === 'file') { var f = x.getAsFile(); if (f) files.push(f); }
+    });
+    if (files.length) { e.preventDefault(); add(files); }
+  });
+
+  zipBtn.addEventListener('click', async function () {
+    var done = items.filter(function (i) { return i.state === 'done'; });
+    if (!done.length) return;
+    zipBtn.disabled = true;
+    zipBtn.textContent = 'Creating ZIP…';
+    try {
+      var zip = await TTZip.create(done.map(function (i) { return { name: i.outName, data: i.blob, date: i.file.lastModified ? new Date(i.file.lastModified) : null }; }));
+      TT.download('converted-images-' + EXT[settings().fmt] + '.zip', zip);
+      status.textContent = 'ZIP with ' + done.length + (done.length === 1 ? ' image' : ' images') + ' downloaded.';
+    } catch (e) {
+      errBox.textContent = e && e.message ? e.message : 'The ZIP file could not be created.';
+    }
+    zipBtn.textContent = 'Download all (ZIP)';
+    refreshBar();
+    zipBtn.focus();
+  });
+  clearBtn.addEventListener('click', function () {
+    gen++;
+    items.forEach(function (it) { revoke(it); uncache(it.id); });
+    items = [];
+    list.textContent = '';
+    errBox.textContent = '';
+    refreshBar();
+    status.textContent = 'All images removed.';
+    $('#imc-choose').focus();
+  });
+
+  TTImage.canEncode('avif').then(function (ok) {
+    avifOk = ok;
+    var o = fmtSel.querySelector('option[value="avif"]');
+    if (!ok) { o.disabled = true; o.textContent = 'AVIF (this browser cannot save it)'; }
+    syncControls();
+  });
+  syncControls();
+})();
+</script>

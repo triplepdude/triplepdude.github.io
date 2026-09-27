@@ -1,0 +1,898 @@
+---
+title: Time Card Calculator with Overtime
+description: Weekly or bi-weekly time card calculator. Enter in and out times and breaks to get daily and weekly hours, overtime over 40 hours, pay, CSV and print.
+category: Calculators
+keywords: [time card calculator, timesheet calculator, weekly time card calculator, overtime calculator, bi-weekly timesheet calculator, california overtime calculator, time card calculator with lunch]
+howto: |
+  ## How to fill in the time card
+
+  Pick a weekly or bi-weekly pay period, the day your workweek starts, and
+  optionally the date of the first day so each row shows its date. Then type
+  the in and out times for each day: `8`, `8:30a`, `5:15 pm` and `17:15` all
+  work. Put unpaid breaks in minutes, or set **In/out pairs per day** to 2 or
+  3 if you clock out for lunch or work a split shift. A shift that ends after
+  midnight counts on the day it started. **Copy first day to empty weekdays**
+  fills Monday to Friday when your hours are the same every day.
+
+  ## How overtime is calculated
+
+  Under the US Fair Labor Standards Act (FLSA), non-exempt employees must be
+  paid at least one and a half times their regular rate for hours worked over
+  40 in a workweek (29 U.S.C. § 207(a)(1)). The workweek is any fixed,
+  recurring period of seven consecutive 24-hour days, and it can start on any
+  day (29 CFR 778.105). Each week stands alone: on a bi-weekly time card, 45
+  hours in week one and 35 in week two still means 5 overtime hours, because
+  the FLSA does not allow two weeks to be averaged (29 CFR 778.104). Federal
+  law has no daily overtime and no double time.
+
+  Only hours actually worked count toward the 40. Paid holidays, vacation and
+  sick hours are paid, but the FLSA does not count them as hours worked, so
+  leave them off the grid unless your employer's policy says otherwise. The
+  pay shown is gross pay from one hourly rate. Your legal regular rate can be
+  higher if you earn bonuses, commissions or shift premiums.
+
+  ## State rules: daily overtime and double time
+
+  Some states go further. California's rules (Labor Code § 510) are the best
+  known, and the **California** option applies them:
+
+  | Hours worked | Pay rate |
+  |---|---|
+  | Over 8 in a workday | 1.5× |
+  | Over 12 in a workday | 2× |
+  | Over 40 in a workweek | 1.5× |
+  | 7th consecutive day in the workweek, first 8 hours | 1.5× |
+  | 7th consecutive day in the workweek, over 8 | 2× |
+
+  Hours already paid as daily overtime are not counted again toward the
+  weekly 40. The calculator adds up only regular hours, in day order, and any
+  regular hours past 40 become overtime. Alaska, Nevada and Colorado also have
+  daily overtime rules, each with its own conditions, and union contracts
+  often set their own. Use **Custom** to set the thresholds and multipliers
+  that apply to you.
+
+  These results are an estimate, not legal or payroll advice. Exemptions,
+  industry rules and alternative workweek agreements can change the answer,
+  so check with your state labor department if you think you have been
+  underpaid.
+
+  ## Printing and saving
+
+  **Print time card** prints only the grid, the totals, the pay summary and
+  signature lines; choose "Save as PDF" in the print dialog to keep a copy.
+  **Download CSV** gives a spreadsheet with each day's times, decimal hours
+  and the regular, overtime and double-time split. Nothing is stored, so
+  download or print before you close the page.
+faq:
+  - q: How is overtime calculated on a bi-weekly time card?
+    a: Week by week. The FLSA looks at each workweek on its own, so hours over 40 in either week are overtime even if the two-week total is 80 or less. This calculator totals each week separately and then adds them up.
+  - q: Does California require daily overtime?
+    a: Yes. Non-exempt employees in California get 1.5 times their regular rate for hours over 8 in a workday and over 40 in a workweek, and double time over 12 hours in a workday, with extra rules for the seventh consecutive day of work. Choose the California option to apply them.
+  - q: Do paid holidays or sick hours count toward overtime?
+    a: Not under federal law. Only hours actually worked count toward the 40-hour threshold, although some employers and union contracts include paid leave. Enter only the time you worked.
+  - q: Why is my break not subtracted?
+    a: Only the minutes in the break column, or the gap between two in/out pairs, are taken off. Short paid rest breaks should not be entered at all.
+  - q: Is my time card saved or uploaded?
+    a: No. Everything is calculated in your browser, nothing is sent to a server, and the entries are gone when you close the page. Download the CSV or print the card to keep it.
+---
+<style>
+.tc-settings > .field { flex: 1 1 150px; }
+.tc-settings > .field > input, .tc-settings > .field > select { height: 48px; }
+.tc-box { min-width: 0; margin: 0 0 18px; padding: 14px 16px 2px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.tc-box legend { padding: 0 6px; font-size: 14px; font-weight: 600; }
+.tc-box .row { margin-bottom: 12px; }
+.tc-box .row > .field { flex: 1 1 130px; }
+.tc-box input, .tc-box select { background: var(--surface); }
+.tc-rules { display: flex; flex-wrap: wrap; gap: 4px 28px; margin: 0 0 10px; }
+.tc-rule { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 44px; font-size: 15px; }
+.tc-rule label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.tc-unit { white-space: nowrap; }
+.tc-rule input[type="text"] { width: 4.6em; min-height: 36px; padding: 5px 8px; text-align: right; }
+.tc-note { margin: 0 0 12px; }
+.tc-week { margin: 0 0 8px; }
+.tc-h { margin: 18px 0 8px; font-size: 1.05rem; }
+.tc-grid { --tc-cols: 8.5rem repeat(2, minmax(0, 1fr)) minmax(0, 0.8fr) minmax(0, 1.2fr); }
+.tc-head, .tc-day { display: grid; grid-template-columns: var(--tc-cols); gap: 6px 10px; align-items: center; }
+.tc-head { padding: 0 0 6px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; font-weight: 600; }
+.tc-day { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.tc-dl { min-width: 0; font-weight: 600; line-height: 1.3; }
+.tc-ddate { display: block; color: var(--muted); font-size: 13px; font-weight: 400; }
+.tc-f { min-width: 0; }
+.tc-f input { padding-left: 8px; padding-right: 6px; font-variant-numeric: tabular-nums; }
+.tc-lab { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.tc-res { min-width: 0; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.tc-res b { font-size: 1.05rem; }
+.tc-res .tc-dec { margin-left: 6px; color: var(--muted); font-size: 14px; }
+.tc-res .tc-split { display: block; color: var(--accent); font-size: 12px; font-weight: 600; }
+.tc-day .tc-err { grid-column: 2 / -1; margin: 0; }
+.tc-day input[aria-invalid="true"] { border-color: var(--danger); }
+.tc-weektotal { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.tc-weektotal b { font-weight: 700; }
+.tc-summary { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.tc-total-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0 0 12px; }
+.tc-total-line .result-big { margin: 0; font-variant-numeric: tabular-nums; }
+.tc-total-line span { color: var(--muted); font-size: 1.05rem; }
+table.data.tc-pay td, table.data.tc-pay th { white-space: nowrap; }
+table.data.tc-pay .num { text-align: right; font-variant-numeric: tabular-nums; }
+table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); font-weight: 700; border-bottom: 0; }
+.tc-print-only { display: none; }
+/* Stacked day cards when the grid is too narrow for its columns (set from
+   script by width and pairs per day; never when printing). */
+@media screen {
+  .tc-stack .tc-head { display: none; }
+  .tc-stack .tc-day { grid-template-columns: repeat(var(--tc-stack-cols, 2), minmax(0, 1fr)); gap: 8px 12px; padding: 12px 0; }
+  .tc-stack .tc-dl { order: -2; grid-column: 1 / -2; }
+  .tc-stack .tc-ddate { display: inline; margin-left: 4px; }
+  .tc-stack .tc-res { order: -1; grid-column: -2 / -1; text-align: right; }
+  .tc-stack .tc-day .tc-err { grid-column: 1 / -1; }
+  .tc-stack .tc-lab { position: static; display: block; width: auto; height: auto; margin-bottom: 4px; overflow: visible; clip-path: none; white-space: normal; font-size: 13px; font-weight: 600; }
+}
+@media screen and (max-width: 700px) {
+  table.data.tc-pay .tc-hmcol { display: none; }
+  table.data.tc-pay th, table.data.tc-pay td { padding: 8px 5px; font-size: 13px; }
+  table.data.tc-pay tbody th { white-space: normal; }
+}
+@media print {
+  :root { --bg: #fff; --surface: #fff; --surface-2: #fff; --text: #000; --muted: #333; --border: #999; --accent: #000; }
+  body { background: #fff; color: #000; }
+  .site-header, .site-footer, .crumbs, .tool-page > h1, .tool-page > .lede, .prose, .faq, .related, .ad-slot, .tc-noprint, .msg { display: none !important; }
+  .tool-page { padding: 0; }
+  .tool-card { padding: 0; border: 0; box-shadow: none; }
+  .tc-print-only { display: block; }
+  .tc-print-head h2 { margin: 0 0 4px; font-size: 18pt; }
+  .tc-print-head p { margin: 0 0 4px; font-size: 11pt; }
+  .tc-day, .tc-weektotal, .tc-summary { break-inside: avoid; }
+  .tc-day { padding: 3px 0; }
+  .tc-day input { min-height: 0; padding: 0; border: 0; background: none; color: #000; }
+  .tc-day input::placeholder { color: transparent; }
+  .tc-weektotal { padding: 4px 0; border-top: 1px solid #999; border-radius: 0; }
+  .stats { display: none; }
+  .tc-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 16mm; margin-top: 14mm; }
+  .tc-sign p { margin: 0; padding-top: 2mm; border-top: 1px solid #000; font-size: 10pt; }
+}
+</style>
+
+<div class="tc-print-only tc-print-head" aria-hidden="true">
+  <h2>Time card</h2>
+  <p id="tc-print-name"></p>
+  <p id="tc-print-period"></p>
+  <p id="tc-print-rules"></p>
+</div>
+
+<div class="tc-noprint">
+  <div class="row tc-settings">
+    <div class="field">
+      <label for="tc-period">Pay period</label>
+      <select id="tc-period">
+        <option value="1" selected>Weekly</option>
+        <option value="2">Bi-weekly</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="tc-startday">Week starts on</label>
+      <select id="tc-startday">
+        <option value="0" selected>Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="tc-date">First day's date</label>
+      <input type="date" id="tc-date" min="1900-01-01" max="2999-12-31">
+    </div>
+    <div class="field">
+      <label for="tc-pairs">In/out pairs per day</label>
+      <select id="tc-pairs">
+        <option value="1" selected>1 pair</option>
+        <option value="2">2 pairs (lunch)</option>
+        <option value="3">3 pairs</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="tc-format">Time format</label>
+      <select id="tc-format">
+        <option value="12">12-hour</option>
+        <option value="24">24-hour</option>
+      </select>
+    </div>
+  </div>
+
+  <fieldset class="tc-box">
+    <legend>Pay and overtime</legend>
+    <div class="row">
+      <div class="field">
+        <label for="tc-rate">Hourly rate (optional)</label>
+        <input type="text" id="tc-rate" inputmode="decimal" autocomplete="off" value="20.00" placeholder="e.g. 18.50">
+      </div>
+      <div class="field">
+        <label for="tc-preset">Overtime rules</label>
+        <select id="tc-preset">
+          <option value="federal" selected>Federal (FLSA)</option>
+          <option value="california">California</option>
+          <option value="none">No overtime</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="tc-otm">Overtime multiplier</label>
+        <input type="text" id="tc-otm" inputmode="decimal" autocomplete="off" value="1.5">
+      </div>
+      <div class="field">
+        <label for="tc-dtm">Double-time multiplier</label>
+        <input type="text" id="tc-dtm" inputmode="decimal" autocomplete="off" value="2">
+      </div>
+    </div>
+    <div class="tc-rules">
+      <div class="tc-rule">
+        <label><input type="checkbox" id="tc-weekly-on" checked> Weekly overtime after</label>
+        <span class="tc-unit"><input type="text" id="tc-weekly" inputmode="decimal" value="40" aria-label="Weekly overtime threshold in hours"> hours</span>
+      </div>
+      <div class="tc-rule">
+        <label><input type="checkbox" id="tc-daily-on"> Daily overtime after</label>
+        <span class="tc-unit"><input type="text" id="tc-daily" inputmode="decimal" value="8" aria-label="Daily overtime threshold in hours"> hours</span>
+      </div>
+      <div class="tc-rule">
+        <label><input type="checkbox" id="tc-dt-on"> Double time after</label>
+        <span class="tc-unit"><input type="text" id="tc-dt" inputmode="decimal" value="12" aria-label="Double time threshold in hours per day"> hours a day</span>
+      </div>
+      <div class="tc-rule">
+        <label><input type="checkbox" id="tc-seventh-on"> 7th consecutive day rule (California)</label>
+      </div>
+    </div>
+    <p class="hint tc-note" id="tc-rule-note"></p>
+    <p class="msg error" id="tc-settings-msg"></p>
+  </fieldset>
+
+  <div class="field">
+    <label for="tc-name">Employee name (optional, shown when printing)</label>
+    <input type="text" id="tc-name" autocomplete="off" maxlength="80">
+  </div>
+  <p class="hint">Type times like 8, 8:30a, 5:15 pm or 17:15. An out time earlier than the in time counts as the next day.</p>
+</div>
+
+<div class="tc-grid" id="tc-grid"></div>
+
+<div class="actions tc-noprint">
+  <button class="btn secondary small" type="button" id="tc-fill">Copy first day to empty weekdays</button>
+  <button class="btn secondary small" type="button" id="tc-clear">Clear times</button>
+</div>
+
+<div class="tc-summary">
+  <p class="label" id="tc-total-label">Total for the week</p>
+  <div class="tc-total-line">
+    <p class="result-big" id="tc-total">0:00</p>
+    <span id="tc-total-dec">0.00 hours</span>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="tc-reg">0:00</b><span>Regular hours</span></div>
+    <div class="stat"><b id="tc-ot">0:00</b><span id="tc-ot-label">Overtime (1.5×)</span></div>
+    <div class="stat"><b id="tc-dtt">0:00</b><span id="tc-dt-label">Double time (2×)</span></div>
+    <div class="stat"><b id="tc-pay">–</b><span>Gross pay</span></div>
+  </div>
+  <div class="table-wrap">
+    <table class="data tc-pay" id="tc-paytable">
+      <thead><tr><th scope="col">Pay type</th><th scope="col" class="num tc-hmcol">Hours</th><th scope="col" class="num">Decimal</th><th scope="col" class="num">Rate</th><th scope="col" class="num">Amount</th></tr></thead>
+      <tbody></tbody>
+      <tfoot><tr><th scope="row">Total</th><td class="num tc-hmcol" id="tc-f-hm"></td><td class="num" id="tc-f-dec"></td><td></td><td class="num" id="tc-f-pay"></td></tr></tfoot>
+    </table>
+  </div>
+  <div class="tc-print-only tc-sign" aria-hidden="true">
+    <p>Employee signature and date</p>
+    <p>Supervisor signature and date</p>
+  </div>
+</div>
+
+<div class="actions tc-noprint">
+  <button class="btn" type="button" id="tc-print">Print time card</button>
+  <button class="btn secondary" type="button" id="tc-csv">Download CSV</button>
+  <button class="btn secondary" type="button" id="tc-copy">Copy summary</button>
+</div>
+<p class="visually-hidden" id="tc-status" role="status"></p>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var PRESETS = {
+    federal: { weeklyOn: true, weekly: '40', dailyOn: false, dtOn: false, seventh: false },
+    california: { weeklyOn: true, weekly: '40', dailyOn: true, daily: '8', dtOn: true, dt: '12', seventh: true },
+    none: { weeklyOn: false, dailyOn: false, dtOn: false, seventh: false }
+  };
+  var grid = $('#tc-grid'), fmtSel = $('#tc-format'), pairsSel = $('#tc-pairs'), periodSel = $('#tc-period');
+  var startSel = $('#tc-startday'), dateIn = $('#tc-date'), rateIn = $('#tc-rate'), presetSel = $('#tc-preset');
+  var last = null;
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+  // ----- Times -----
+  // Minutes after midnight (0 to 1440), null when empty, NaN when unreadable.
+  function parseTime(raw) {
+    var s = String(raw == null ? '' : raw).trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!s) return null;
+    if (/^(12 ?)?noon$/.test(s)) return 720;
+    if (/^(12 ?)?midnight$/.test(s)) return 0;
+    var suf = '';
+    var sm = /\s*([ap])\.?\s*(m\.?)?$/.exec(s);
+    if (sm) { suf = sm[1]; s = s.slice(0, sm.index); }
+    var h, m;
+    var a = /^(\d{1,2})(?:\s*[:.h]\s*(\d{2}))?$/.exec(s);
+    var b = /^(\d{3,4})$/.exec(s);
+    if (a) { h = +a[1]; m = a[2] ? +a[2] : 0; }
+    else if (b) { h = Math.floor(+b[1] / 100); m = +b[1] % 100; }
+    else return NaN;
+    if (m > 59) return NaN;
+    if (suf) {
+      if (h > 12 || (h === 0 && suf === 'p')) return NaN;
+      return (h % 12 + (suf === 'p' ? 12 : 0)) * 60 + m;
+    }
+    if (h === 24 && m === 0) return 1440;
+    if (h > 23) return NaN;
+    return h * 60 + m;
+  }
+  function fmtTime(min, h12) {
+    if (min === 1440) return '24:00';
+    var h = Math.floor(min / 60), m = min % 60;
+    if (!h12) return pad2(h) + ':' + pad2(m);
+    return ((h % 12) || 12) + ':' + pad2(m) + (h < 12 ? ' AM' : ' PM');
+  }
+  function fmtHM(t) { return Math.floor(t / 60) + ':' + pad2(t % 60); }
+  function fmtDec(t) { var c = Math.round(t * 5 / 3); return Math.floor(c / 100) + '.' + pad2(c % 100); }
+  function fmtWords(t) {
+    var h = Math.floor(t / 60), m = t % 60;
+    if (!m) return plural(h, 'hour', 'hours');
+    if (!h) return plural(m, 'minute', 'minutes');
+    return plural(h, 'hour', 'hours') + ' ' + plural(m, 'minute', 'minutes');
+  }
+  function is12() { return fmtSel.value === '12'; }
+
+  // ----- Money: exact integer maths in 1/10000 units -----
+  function parseDecimal(raw, maxInt) {
+    var s = String(raw || '').trim().replace(/^[$€£¥₹]\s*/, '').replace(/[×x]$/i, '').trim();
+    if (!s) return null;
+    if (/^\d+,\d{1,4}$/.test(s)) s = s.replace(',', '.');
+    s = s.replace(/,(?=\d{3}(\D|$))/g, '');
+    var m = /^(\d{1,7})(?:\.(\d{0,4}))?$/.exec(s) || /^()\.(\d{1,4})$/.exec(s);
+    if (!m) return NaN;
+    var v = BigInt(m[1] || '0') * 10000n + BigInt(((m[2] || '') + '0000').slice(0, 4));
+    return maxInt && v > BigInt(maxInt) * 10000n ? NaN : v;
+  }
+  function roundDiv(num, den) { return (2n * num + den) / (2n * den); }
+  // Cents for minutes at rate4 (1/10000 units) times mult4 (1/10000 units), half up.
+  function payCents(minutes, rate4, mult4) { return roundDiv(BigInt(minutes) * rate4 * mult4, 60n * 10000n * 100n); }
+  var money = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  var rateFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  var multFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
+  function fmtMoney(c) { return money.format(Number(c) / 100); }
+  function fmtRate4(r4) { return rateFmt.format(Number(r4) / 10000); }
+  function fmtMult(m4) { return multFmt.format(Number(m4) / 10000) + '×'; }
+  // For the CSV: plain digits, no thousands separators.
+  function plainMoney(c) { var n = c < 0n ? -c : c; return (c < 0n ? '-' : '') + (n / 100n) + '.' + String(n % 100n).padStart(2, '0'); }
+
+  // ----- Dates (plain day numbers, so time zones cannot interfere) -----
+  function dayNumOf(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+    if (!m) return null;
+    var t = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    var d = new Date(t);
+    if (d.getUTCFullYear() !== +m[1] || d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) return null;
+    return Math.round(t / 864e5);
+  }
+  function dateOf(z) { return new Date(z * 864e5); }
+  function weekdayOf(z) { return (dateOf(z).getUTCDay() + 6) % 7; } // Monday = 0
+  function isoOf(z) { var d = dateOf(z); return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); }
+  function shortDate(z) { var d = dateOf(z); return MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate(); }
+  function longDate(z) { var d = dateOf(z); return DAYS[weekdayOf(z)].slice(0, 3) + ', ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate() + ', ' + d.getUTCFullYear(); }
+  function todayNum() { var n = new Date(); return Math.round(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) / 864e5); }
+
+  // ----- Grid -----
+  var FIELDS = ['in1', 'out1', 'in2', 'out2', 'in3', 'out3', 'brk'];
+  var LABELS = { in1: 'In', out1: 'Out', in2: 'In 2', out2: 'Out 2', in3: 'In 3', out3: 'Out 3', brk: 'Break (min)' };
+  var dayRows = []; // [week][weekday]
+  function buildGrid() {
+    var html = '';
+    for (var w = 0; w < 2; w++) {
+      html += '<section class="tc-week" id="tc-week' + w + '" aria-labelledby="tc-wh' + w + '">' +
+        '<h2 class="tc-h" id="tc-wh' + w + '"></h2>' +
+        '<div class="tc-head" aria-hidden="true"><span>Day</span>' +
+        FIELDS.map(function (k) { return '<span class="tc-c-' + k + '">' + LABELS[k] + '</span>'; }).join('') +
+        '<span>Hours</span></div><div class="tc-days"></div>' +
+        '<p class="tc-weektotal" id="tc-wt' + w + '"></p></section>';
+    }
+    grid.innerHTML = html;
+    for (w = 0; w < 2; w++) {
+      dayRows[w] = [];
+      var box = $('#tc-week' + w + ' .tc-days');
+      for (var d = 0; d < 7; d++) {
+        var id = 'tc-' + w + '-' + d;
+        var row = document.createElement('div');
+        row.className = 'tc-day';
+        row.setAttribute('role', 'group');
+        row.setAttribute('aria-labelledby', id + '-l');
+        row.dataset.week = w;
+        row.dataset.wd = d;
+        var inner = '<div class="tc-dl" id="' + id + '-l"><span class="tc-dname">' + DAYS[d] + '</span><span class="tc-ddate"></span></div>';
+        FIELDS.forEach(function (k) {
+          var num = k === 'brk';
+          inner += '<div class="tc-f tc-c-' + k + '"><label class="tc-lab" for="' + id + '-' + k + '">' + LABELS[k] + '</label>' +
+            '<input id="' + id + '-' + k + '" data-k="' + k + '" aria-describedby="' + id + '-err" ' +
+            (num ? 'type="number" min="0" max="1440" step="1" inputmode="numeric" placeholder="0"' : 'type="text" autocomplete="off" spellcheck="false"') + '></div>';
+        });
+        inner += '<div class="tc-res"><b class="tc-hm">–</b><span class="tc-dec"></span><span class="tc-split"></span></div>' +
+          '<p class="msg error tc-err" id="' + id + '-err"></p>';
+        row.innerHTML = inner;
+        box.appendChild(row);
+        dayRows[w][d] = row;
+      }
+    }
+  }
+  function field(row, k) { return row.querySelector('[data-k="' + k + '"]'); }
+  // Below these grid widths a row of time boxes would clip "12:30 PM", so
+  // each day becomes a stacked card instead.
+  var STACK_BELOW = { 1: 600, 2: 780, 3: 920 };
+  function fit() {
+    var w = grid.clientWidth;
+    if (!w) return;
+    grid.classList.toggle('tc-stack', w < STACK_BELOW[+pairsSel.value]);
+    // Stacked cards keep each in/out pair on one line: 2 or 4 columns.
+    grid.style.setProperty('--tc-stack-cols', w >= 560 ? '4' : '2');
+  }
+  // Deferred a frame: changing the layout inside the callback would re-trigger it.
+  if (window.ResizeObserver) new ResizeObserver(function () { requestAnimationFrame(fit); }).observe(grid);
+  else window.addEventListener('resize', fit);
+
+  // Rows in workweek order, starting at the chosen weekday.
+  function ordered(w) {
+    var s = +startSel.value, out = [];
+    for (var i = 0; i < 7; i++) out.push(dayRows[w][(s + i) % 7]);
+    return out;
+  }
+  function layout() {
+    var pairs = +pairsSel.value, weeks = +periodSel.value;
+    var cols = (pairs > 1 ? '7rem' : '8.5rem') + ' repeat(' + (pairs * 2) + ', minmax(0, 1fr)) minmax(0, 0.8fr) minmax(0, 1.25fr)';
+    grid.style.setProperty('--tc-cols', cols);
+    fit();
+    $$('.tc-c-in2, .tc-c-out2', grid).forEach(function (el) { el.hidden = pairs < 2; });
+    $$('.tc-c-in3, .tc-c-out3', grid).forEach(function (el) { el.hidden = pairs < 3; });
+    $('#tc-week1').hidden = weeks < 2;
+    var start = dayNumOf(dateIn.value);
+    for (var w = 0; w < 2; w++) {
+      var box = $('#tc-week' + w + ' .tc-days');
+      ordered(w).forEach(function (row, i) {
+        box.appendChild(row);
+        var z = start === null ? null : start + w * 7 + i;
+        row.dataset.z = z === null ? '' : z;
+        row.querySelector('.tc-ddate').textContent = z === null ? '' : shortDate(z);
+        var name = DAYS[+row.dataset.wd] + (z !== null ? ' ' + shortDate(z) : weeks > 1 ? ', week ' + (w + 1) : '');
+        FIELDS.forEach(function (k) { field(row, k).setAttribute('aria-label', LABELS[k] + ', ' + name); });
+      });
+      var title = weeks > 1 ? 'Week ' + (w + 1) : 'Week';
+      if (start !== null) title += ': ' + longDate(start + w * 7) + ' to ' + longDate(start + w * 7 + 6);
+      $('#tc-wh' + w).textContent = title;
+    }
+  }
+
+  // ----- Rules -----
+  function readRules() {
+    var errs = [];
+    function hours(id, onId, max, name) {
+      if (!$(onId).checked) return null;
+      var v = parseDecimal($(id).value);
+      if (v === null || Number.isNaN(v) || v <= 0n || v > BigInt(max) * 10000n) {
+        errs.push('Enter the ' + name + ' threshold as hours between 0 and ' + max + '.');
+        $(id).setAttribute('aria-invalid', 'true');
+        return NaN;
+      }
+      $(id).removeAttribute('aria-invalid');
+      return Math.round(Number(v) * 60 / 10000);
+    }
+    var r = {
+      weekly: hours('#tc-weekly', '#tc-weekly-on', 168, 'weekly overtime'),
+      daily: hours('#tc-daily', '#tc-daily-on', 24, 'daily overtime'),
+      dt: hours('#tc-dt', '#tc-dt-on', 24, 'double time'),
+      seventh: $('#tc-seventh-on').checked
+    };
+    if (r.daily > 0 && r.dt > 0 && r.dt <= r.daily) errs.push('The double-time threshold must be higher than the daily overtime threshold.');
+    function mult(id, name) {
+      var v = parseDecimal($(id).value);
+      if (v === null || Number.isNaN(v) || v < 10000n || v > 100000n) {
+        errs.push('Enter the ' + name + ' multiplier as a number from 1 to 10, such as 1.5.');
+        $(id).setAttribute('aria-invalid', 'true');
+        return 15000n;
+      }
+      $(id).removeAttribute('aria-invalid');
+      return v;
+    }
+    r.otm = mult('#tc-otm', 'overtime');
+    r.dtm = mult('#tc-dtm', 'double-time');
+    ['#tc-weekly', '#tc-daily', '#tc-dt'].forEach(function (id) { $(id).disabled = !$(id + '-on').checked; });
+    r.errors = errs;
+    return r;
+  }
+  function ruleText(r) {
+    var parts = [];
+    if (r.daily) parts.push('over ' + fmtHrs(r.daily) + ' a day');
+    if (r.weekly) parts.push('over ' + fmtHrs(r.weekly) + ' a week');
+    var t = parts.length ? 'Overtime (' + fmtMult(r.otm) + ') ' + parts.join(' and ') : 'No overtime';
+    if (r.dt) t += '; double time (' + fmtMult(r.dtm) + ') over ' + fmtHrs(r.dt) + ' a day';
+    if (r.seventh) t += '; 7th consecutive day: ' + fmtMult(r.otm) + ' for the first 8 hours, ' + fmtMult(r.dtm) + ' after';
+    return t + '.';
+  }
+  function fmtHrs(min) { return (min % 60 ? fmtDec(min).replace(/0$/, '') : String(min / 60)) + ' hours'; }
+  function syncPreset() {
+    var cur = { weeklyOn: $('#tc-weekly-on').checked, dailyOn: $('#tc-daily-on').checked, dtOn: $('#tc-dt-on').checked, seventh: $('#tc-seventh-on').checked };
+    var match = 'custom';
+    Object.keys(PRESETS).forEach(function (k) {
+      var p = PRESETS[k];
+      if (p.weeklyOn === cur.weeklyOn && p.dailyOn === cur.dailyOn && p.dtOn === cur.dtOn && p.seventh === cur.seventh &&
+          (!p.weeklyOn || +$('#tc-weekly').value === +p.weekly) && (!p.dailyOn || +$('#tc-daily').value === +p.daily) && (!p.dtOn || +$('#tc-dt').value === +p.dt)) match = k;
+    });
+    presetSel.value = match;
+  }
+  function applyPreset(name) {
+    var p = PRESETS[name];
+    if (!p) return;
+    $('#tc-weekly-on').checked = p.weeklyOn; if (p.weekly) $('#tc-weekly').value = p.weekly;
+    $('#tc-daily-on').checked = p.dailyOn; if (p.daily) $('#tc-daily').value = p.daily;
+    $('#tc-dt-on').checked = p.dtOn; if (p.dt) $('#tc-dt').value = p.dt;
+    $('#tc-seventh-on').checked = p.seventh;
+  }
+  var NOTES = {
+    federal: 'Federal rule (FLSA): at least 1.5 times the regular rate for hours over 40 in a workweek. Most states use this rule; a few add daily overtime.',
+    california: 'California rule (Labor Code 510): 1.5× over 8 hours a day and 40 a week, 2× over 12 hours a day, and extra rules on the 7th consecutive workday. Exemptions and alternative workweeks can change this.',
+    none: 'Hours only: every hour is paid at the regular rate.',
+    custom: 'Custom rules. Daily overtime and double time are state or contract rules, not federal law.'
+  };
+
+  // ----- Calculation -----
+  function readDay(row, pairs) {
+    var out = { row: row, invalid: [], err: '', worked: 0, blank: true, pairs: [] };
+    var total = 0, first = null, prevEnd = null;
+    for (var p = 1; p <= pairs; p++) {
+      var iIn = field(row, 'in' + p), oIn = field(row, 'out' + p);
+      var s = parseTime(iIn.value), e = parseTime(oIn.value);
+      if (s === null && e === null) continue;
+      out.blank = false;
+      var n = p > 1 ? ' ' + p : '';
+      if (Number.isNaN(s)) { out.invalid.push(iIn); out.err = out.err || '“' + iIn.value.trim() + '” isn’t a time. Try 8:30, 8:30 am or 17:30.'; continue; }
+      if (Number.isNaN(e)) { out.invalid.push(oIn); out.err = out.err || '“' + oIn.value.trim() + '” isn’t a time. Try 5:00, 5 pm or 17:00.'; continue; }
+      if (s === null || e === null) {
+        out.incomplete = true;
+        out.invalid.push(s === null ? iIn : oIn);
+        out.err = out.err || (s === null ? 'Enter the in' + n + ' time.' : 'Enter the out' + n + ' time.');
+        continue;
+      }
+      if (s === 1440) s = 0;
+      var dur = e === 1440 ? 1440 - s : ((e - s) % 1440 + 1440) % 1440;
+      var abs = prevEnd === null ? s : prevEnd + ((s - prevEnd) % 1440 + 1440) % 1440;
+      if (first === null) first = abs;
+      prevEnd = abs + dur;
+      total += dur;
+      out.pairs.push({ s: s, e: e });
+      if (e < s && e !== 1440) out.overnight = true;
+    }
+    var bIn = field(row, 'brk'), bRaw = bIn.value.trim(), brk = 0;
+    if ((bIn.validity && bIn.validity.badInput) || (bRaw && !/^\d+$/.test(bRaw))) {
+      out.invalid.push(bIn); out.err = out.err || 'Enter the break as whole minutes, such as 30.'; out.blank = false;
+    } else if (bRaw) { brk = +bRaw; out.blank = false; }
+    if (out.err) return out;
+    if (!out.pairs.length) {
+      if (brk) { out.err = 'Enter the in and out times for this break.'; out.incomplete = true; out.invalid.push(field(row, 'in1')); }
+      return out;
+    }
+    if (prevEnd - first > 1440) {
+      out.err = 'These times cover more than 24 hours. Check that each pair is in order.';
+      out.invalid.push(field(row, 'in2'));
+      return out;
+    }
+    if (brk > total) {
+      out.invalid.push(bIn);
+      out.err = 'The ' + brk + '-minute break is longer than the ' + fmtHM(total) + ' clocked in.';
+      return out;
+    }
+    out.ok = true;
+    out.brk = brk;
+    out.worked = total - brk;
+    return out;
+  }
+
+  // Splits each day of one workweek into regular, overtime and double-time minutes.
+  // Daily rules first; then regular minutes past the weekly threshold, in day
+  // order, become overtime (daily overtime is never counted twice).
+  function allocate(mins, r) {
+    var cum = 0, res = [];
+    var all7 = r.seventh && mins.every(function (m) { return m > 0; });
+    mins.forEach(function (w, i) {
+      var reg, ot, dt;
+      if (all7 && i === 6) { reg = 0; ot = Math.min(w, 480); dt = w - ot; }
+      else {
+        reg = w;
+        if (r.daily) reg = Math.min(reg, r.daily);
+        if (r.dt) reg = Math.min(reg, r.dt);
+        dt = r.dt ? Math.max(0, w - r.dt) : 0;
+        ot = w - reg - dt;
+      }
+      if (r.weekly && cum + reg > r.weekly) {
+        var move = Math.min(reg, cum + reg - r.weekly);
+        reg -= move; ot += move;
+      }
+      cum += reg;
+      res.push({ reg: reg, ot: ot, dt: dt });
+    });
+    return res;
+  }
+
+  function render(showErrors, activeRow) {
+    if (activeRow === undefined) activeRow = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.tc-day') : null;
+    var pairs = +pairsSel.value, weeks = +periodSel.value, h12 = is12();
+    var rules = readRules();
+    var smsg = $('#tc-settings-msg');
+    var rulesOk = !rules.errors.length;
+    smsg.textContent = rules.errors.join(' ');
+    $('#tc-rule-note').textContent = NOTES[presetSel.value];
+    $('#tc-ot-label').textContent = 'Overtime (' + fmtMult(rules.otm) + ')';
+    $('#tc-dt-label').textContent = 'Double time (' + fmtMult(rules.dtm) + ')';
+
+    var sum = { worked: 0, reg: 0, ot: 0, dt: 0 }, errors = 0, weeksOut = [];
+    for (var w = 0; w < weeks; w++) {
+      var rows = ordered(w), data = rows.map(function (r) { return readDay(r, pairs); });
+      var alloc = rulesOk ? allocate(data.map(function (d) { return d.ok ? d.worked : 0; }), rules) : null;
+      var wk = { worked: 0, reg: 0, ot: 0, dt: 0, days: [] };
+      data.forEach(function (d, i) {
+        var row = rows[i], err = row.querySelector('.tc-err');
+        var show = showErrors && !(d.incomplete && row === activeRow);
+        FIELDS.forEach(function (k) {
+          var el = field(row, k), inv = d.invalid.indexOf(el) !== -1 && (show || el.getAttribute('aria-invalid') === 'true');
+          if (inv) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+        });
+        var hm = row.querySelector('.tc-hm'), dec = row.querySelector('.tc-dec'), split = row.querySelector('.tc-split');
+        if (!d.ok) {
+          hm.textContent = '–'; dec.textContent = ''; split.textContent = '';
+          if (!d.blank) errors++;
+          if (show || err.textContent) err.textContent = d.err;
+          wk.days.push({ row: row, d: d, a: null });
+          return;
+        }
+        err.textContent = '';
+        var a = alloc ? alloc[i] : { reg: d.worked, ot: 0, dt: 0 };
+        hm.textContent = fmtHM(d.worked);
+        dec.textContent = fmtDec(d.worked);
+        var bits = [];
+        if (a.ot) bits.push('OT ' + fmtHM(a.ot));
+        if (a.dt) bits.push('DT ' + fmtHM(a.dt));
+        if (d.overnight) bits.push('ends next day');
+        split.textContent = bits.join(' · ');
+        wk.worked += d.worked; wk.reg += a.reg; wk.ot += a.ot; wk.dt += a.dt;
+        wk.days.push({ row: row, d: d, a: a });
+      });
+      var t = $('#tc-wt' + w);
+      t.textContent = '';
+      [['Week' + (weeks > 1 ? ' ' + (w + 1) : '') + ' total', wk.worked], ['Regular', wk.reg], ['Overtime', wk.ot], ['Double time', wk.dt]].forEach(function (p, j) {
+        if (j === 3 && !wk.dt && !rules.dt && !rules.seventh) return;
+        var span = document.createElement('span'), b = document.createElement('b');
+        span.textContent = p[0] + ': ';
+        b.textContent = fmtHM(p[1]) + ' (' + fmtDec(p[1]) + ')';
+        span.appendChild(b);
+        t.appendChild(span);
+      });
+      sum.worked += wk.worked; sum.reg += wk.reg; sum.ot += wk.ot; sum.dt += wk.dt;
+      weeksOut.push(wk);
+    }
+
+    var rate = parseDecimal(rateIn.value), rateBad = Number.isNaN(rate);
+    var rmsg = rateBad ? 'Enter the hourly rate as a number, such as 18.50.' : '';
+    if (rateBad && showErrors) { rateIn.setAttribute('aria-invalid', 'true'); smsg.textContent = (smsg.textContent + ' ' + rmsg).trim(); }
+    if (!rateBad) rateIn.removeAttribute('aria-invalid');
+
+    $('#tc-total-label').textContent = weeks > 1 ? 'Total for the two weeks' : 'Total for the week';
+    $('#tc-total').textContent = fmtHM(sum.worked);
+    $('#tc-total-dec').textContent = fmtDec(sum.worked) + ' hours';
+    $('#tc-reg').textContent = fmtHM(sum.reg);
+    $('#tc-ot').textContent = fmtHM(sum.ot);
+    $('#tc-dtt').textContent = fmtHM(sum.dt);
+
+    var lines = [
+      { name: 'Regular', min: sum.reg, mult: 10000n },
+      { name: 'Overtime (' + fmtMult(rules.otm) + ')', min: sum.ot, mult: rules.otm },
+      { name: 'Double time (' + fmtMult(rules.dtm) + ')', min: sum.dt, mult: rules.dtm }
+    ];
+    var hasRate = rate !== null && !rateBad, totalPay = 0n;
+    var tbody = $('#tc-paytable tbody');
+    tbody.textContent = '';
+    lines.forEach(function (l, j) {
+      l.pay = hasRate ? payCents(l.min, rate, l.mult) : null;
+      if (hasRate) totalPay += l.pay;
+      if (j === 2 && !l.min && !rules.dt && !rules.seventh) return;
+      if (j === 1 && !l.min && !rules.weekly && !rules.daily && !rules.seventh) return;
+      var tr = document.createElement('tr');
+      var cells = [l.name, fmtHM(l.min), fmtDec(l.min), hasRate ? fmtRate4(rate * l.mult / 10000n) + (rate * l.mult % 10000n ? '…' : '') : '–', hasRate ? fmtMoney(l.pay) : '–'];
+      cells.forEach(function (c, k) {
+        var el = document.createElement(k ? 'td' : 'th');
+        if (!k) el.scope = 'row'; else el.className = k === 1 ? 'num tc-hmcol' : 'num';
+        el.textContent = c;
+        tr.appendChild(el);
+      });
+      tbody.appendChild(tr);
+    });
+    $('#tc-f-hm').textContent = fmtHM(sum.worked);
+    $('#tc-f-dec').textContent = fmtDec(sum.worked);
+    $('#tc-f-pay').textContent = hasRate ? fmtMoney(totalPay) : '–';
+    $('#tc-pay').textContent = hasRate ? fmtMoney(totalPay) : '–';
+
+    // Print header.
+    var start = dayNumOf(dateIn.value), name = $('#tc-name').value.trim();
+    $('#tc-print-name').textContent = name ? 'Employee: ' + name : 'Employee: ______________________________';
+    $('#tc-print-period').textContent = start !== null ? 'Period: ' + longDate(start) + ' to ' + longDate(start + weeks * 7 - 1) : 'Week starts on ' + DAYS[+startSel.value];
+    $('#tc-print-rules').textContent = ruleText(rules) + (hasRate ? ' Rate: ' + fmtRate4(rate) + ' an hour.' : '');
+
+    last = { sum: sum, weeks: weeksOut, rules: rules, rate: hasRate ? rate : null, lines: lines, totalPay: hasRate ? totalPay : null, errors: errors, pairs: pairs, h12: h12, start: start, name: name, rulesOk: rulesOk };
+  }
+
+  // ----- Status, events -----
+  var status = $('#tc-status');
+  var announce = TT.debounce(function () {
+    if (!last) return;
+    var t = 'Total ' + fmtWords(last.sum.worked) + ': ' + fmtDec(last.sum.reg) + ' regular, ' + fmtDec(last.sum.ot) + ' overtime';
+    if (last.sum.dt) t += ', ' + fmtDec(last.sum.dt) + ' double time';
+    t += ' hours';
+    if (last.totalPay !== null) t += '. Pay ' + fmtMoney(last.totalPay);
+    if (last.errors) t += '. ' + plural(last.errors, 'day needs', 'days need') + ' attention';
+    status.textContent = t + '.';
+  }, 1200);
+  var showErrorsLater = TT.debounce(function () { afterPointer(function () { render(true); }); }, 900);
+  function tidy(input) {
+    var v = parseTime(input.value);
+    if (typeof v === 'number' && !Number.isNaN(v)) input.value = fmtTime(v, is12());
+  }
+
+  grid.addEventListener('input', function () { render(false); showErrorsLater(); announce(); });
+  grid.addEventListener('change', function (e) {
+    if (e.target.type === 'text') tidy(e.target);
+    render(false); announce();
+  });
+  grid.addEventListener('focusout', function (e) {
+    var to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest('.tc-day') : null;
+    afterPointer(function () { render(true, to); });
+  });
+  // A message that appears while a mouse button or finger is down moves the
+  // page under the pointer, and the click on the button below is lost. Wait
+  // until it is released (the click has been dispatched by then).
+  var pointerIsDown = false, pendingFn = null;
+  document.addEventListener('pointerdown', function () { pointerIsDown = true; }, true);
+  ['pointerup', 'pointercancel'].forEach(function (type) {
+    document.addEventListener(type, function () {
+      pointerIsDown = false;
+      if (pendingFn) { var fn = pendingFn; pendingFn = null; setTimeout(fn, 0); }
+    }, true);
+  });
+  function afterPointer(fn) { if (pointerIsDown) pendingFn = fn; else fn(); }
+
+  $$('#tc-weekly-on, #tc-daily-on, #tc-dt-on, #tc-seventh-on, #tc-weekly, #tc-daily, #tc-dt').forEach(function (el) {
+    el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', function () { syncPreset(); render(false); announce(); });
+  });
+  presetSel.addEventListener('change', function () { applyPreset(presetSel.value); render(false); announce(); });
+  [rateIn, $('#tc-otm'), $('#tc-dtm')].forEach(function (el) {
+    el.addEventListener('input', function () { render(false); showErrorsLater(); announce(); });
+    el.addEventListener('change', function () { render(true); });
+  });
+  $('#tc-name').addEventListener('input', function () { render(false); });
+  pairsSel.addEventListener('change', function () { layout(); render(false); announce(); });
+  periodSel.addEventListener('change', function () { layout(); render(false); announce(); });
+  fmtSel.addEventListener('change', function () { $$('input[type="text"]', grid).forEach(tidy); render(false); });
+  startSel.addEventListener('change', function () {
+    var z = dayNumOf(dateIn.value);
+    // Keep the date on the chosen weekday: the latest one on or before it.
+    if (z !== null) dateIn.value = isoOf(z - ((weekdayOf(z) - +startSel.value + 7) % 7));
+    layout(); render(false); announce();
+  });
+  function onDate() {
+    var z = dayNumOf(dateIn.value);
+    if (z !== null) startSel.value = String(weekdayOf(z));
+    layout(); render(false);
+  }
+  dateIn.addEventListener('change', onDate);
+  dateIn.addEventListener('input', onDate);
+
+  $('#tc-fill').addEventListener('click', function () {
+    var weeks = +periodSel.value, pairs = +pairsSel.value, src = null;
+    for (var w = 0; w < weeks && !src; w++) ordered(w).forEach(function (row) { if (!src && readDay(row, pairs).ok) src = row; });
+    if (!src) { TT.flash($('#tc-fill'), 'Fill in one day first'); return; }
+    var n = 0;
+    for (w = 0; w < weeks; w++) {
+      for (var d = 0; d < 5; d++) {
+        var row = dayRows[w][d];
+        if (row === src || !readDay(row, pairs).blank) continue;
+        FIELDS.forEach(function (k) { field(row, k).value = field(src, k).value; });
+        n++;
+      }
+    }
+    render(false);
+    TT.flash($('#tc-fill'), n ? plural(n, 'day filled', 'days filled') : 'No empty weekdays');
+    announce();
+  });
+  $('#tc-clear').addEventListener('click', function () {
+    $$('.tc-day input', grid).forEach(function (el) { el.value = ''; el.removeAttribute('aria-invalid'); });
+    $$('.tc-err', grid).forEach(function (el) { el.textContent = ''; });
+    render(false);
+    announce();
+  });
+
+  function csvCell(v) {
+    var s = String(v == null ? '' : v);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // keep spreadsheets from running it as a formula
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  $('#tc-csv').addEventListener('click', function () {
+    render(true);
+    var L = last, rows = [], pairs = L.pairs;
+    rows.push(['Time card', L.name]);
+    rows.push(['Rules', ruleText(L.rules)]);
+    rows.push([]);
+    var head = ['Week', 'Date', 'Day'];
+    for (var p = 1; p <= pairs; p++) head.push(pairs > 1 ? 'In ' + p : 'In', pairs > 1 ? 'Out ' + p : 'Out');
+    head.push('Break (min)', 'Hours (h:mm)', 'Hours (decimal)', 'Regular', 'Overtime', 'Double time');
+    rows.push(head);
+    L.weeks.forEach(function (wk, w) {
+      wk.days.forEach(function (x) {
+        var r = [w + 1, x.row.dataset.z ? isoOf(+x.row.dataset.z) : '', DAYS[+x.row.dataset.wd]];
+        for (var p = 1; p <= pairs; p++) {
+          var a = parseTime(field(x.row, 'in' + p).value), b = parseTime(field(x.row, 'out' + p).value);
+          r.push(x.d.ok && typeof a === 'number' ? fmtTime(a, L.h12) : '', x.d.ok && typeof b === 'number' ? fmtTime(b, L.h12) : '');
+        }
+        if (x.d.ok) r.push(x.d.brk, fmtHM(x.d.worked), fmtDec(x.d.worked), fmtDec(x.a.reg), fmtDec(x.a.ot), fmtDec(x.a.dt));
+        else r.push('', '', '', '', '', '');
+        rows.push(r);
+      });
+      var t = ['Week ' + (w + 1) + ' total', '', ''];
+      for (var q = 0; q < pairs * 2 + 1; q++) t.push('');
+      t.push(fmtHM(wk.worked), fmtDec(wk.worked), fmtDec(wk.reg), fmtDec(wk.ot), fmtDec(wk.dt));
+      rows.push(t);
+    });
+    rows.push([]);
+    rows.push(['Pay type', 'Hours (decimal)', 'Rate', 'Amount']);
+    L.lines.forEach(function (l) {
+      rows.push([l.name, fmtDec(l.min), L.rate !== null ? (Number(L.rate * l.mult) / 1e8).toFixed(4).replace(/0{1,2}$/, '') : '', L.rate !== null ? plainMoney(l.pay) : '']);
+    });
+    rows.push(['Total', fmtDec(L.sum.worked), '', L.totalPay !== null ? plainMoney(L.totalPay) : '']);
+    var csv = rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+    var fname = 'time-card' + (L.start !== null ? '-' + isoOf(L.start) : '') + '.csv';
+    TT.download(fname, '﻿' + csv, 'text/csv;charset=utf-8');
+    TT.flash($('#tc-csv'), 'Downloaded');
+  });
+  $('#tc-print').addEventListener('click', function () { render(true); window.print(); });
+  $('#tc-copy').addEventListener('click', function () {
+    render(true);
+    var L = last, out = [];
+    L.weeks.forEach(function (wk, w) {
+      wk.days.forEach(function (x) {
+        if (!x.d.ok) return;
+        var label = DAYS[+x.row.dataset.wd] + (x.row.dataset.z ? ' ' + shortDate(+x.row.dataset.z) : '');
+        var bits = [];
+        if (x.a.ot) bits.push('OT ' + fmtHM(x.a.ot));
+        if (x.a.dt) bits.push('DT ' + fmtHM(x.a.dt));
+        out.push((L.weeks.length > 1 ? 'W' + (w + 1) + ' ' : '') + label + ': ' + fmtHM(x.d.worked) + (bits.length ? ' (' + bits.join(', ') + ')' : ''));
+      });
+    });
+    out.push('Total: ' + fmtHM(L.sum.worked) + ' (' + fmtDec(L.sum.worked) + ' h)');
+    out.push('Regular ' + fmtDec(L.sum.reg) + ' h, overtime ' + fmtDec(L.sum.ot) + ' h' + (L.sum.dt ? ', double time ' + fmtDec(L.sum.dt) + ' h' : ''));
+    if (L.totalPay !== null) out.push('Gross pay: ' + fmtMoney(L.totalPay));
+    TT.copy(out.join('\n'), $('#tc-copy'));
+  });
+
+  // ----- Start -----
+  try {
+    var hc = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
+    fmtSel.value = hc === 'h23' || hc === 'h24' ? '24' : '12';
+  } catch (e) { fmtSel.value = '12'; }
+  buildGrid();
+  var t0 = todayNum();
+  dateIn.value = isoOf(t0 - weekdayOf(t0)); // this week's Monday
+  for (var d0 = 0; d0 < 5; d0++) {
+    field(dayRows[0][d0], 'in1').value = fmtTime(480, is12());
+    field(dayRows[0][d0], 'out1').value = fmtTime(1020, is12());
+    field(dayRows[0][d0], 'brk').value = '30';
+  }
+  layout();
+  render(false);
+})();
+</script>

@@ -1,0 +1,619 @@
+---
+title: Grade Calculator (Weighted Average)
+description: Weighted grade calculator. Enter scores with weights or points to get your current average and letter grade, even when the weights don't add up to 100.
+category: Calculators
+keywords: [grade calculator, weighted grade calculator, class grade calculator, weighted average calculator, current grade calculator, points grade calculator, letter grade calculator]
+howto: |
+  ## How to use the grade calculator
+
+  Add one row for each category or assignment in your syllabus, such as
+  homework, quizzes and exams. Give it a score and the weight the syllabus
+  lists. A score can be written several ways:
+
+  | You type | It counts as |
+  |---|---|
+  | `92` or `92%` | 92% |
+  | `45/50` | 90% |
+  | `17/20, 18/20, 16/20` | points added up: 51/60 = 85% |
+  | `88; 92; 95` | percentages averaged: 91.67% |
+
+  Leave the score empty for work that has not been graded yet, and its
+  weight is left out until it has a score. If your teacher counts points
+  instead of weights, switch to **Points** and enter points earned and
+  points possible for each item.
+
+  ## How a weighted average works
+
+  Multiply each score by its weight, add the results, and divide by the
+  total of the weights you used. With homework at 92% (weight 20), quizzes
+  at 85% (15) and a midterm at 78% (25), the sum is 92 × 20 + 85 × 15 +
+  78 × 25 = 5,065. The weights add up to 60, so the current grade is
+  5,065 ÷ 60 = **84.42%**. The table under the result shows each row's
+  share of the grade and how many percentage points it contributes.
+
+  ## When the weights don't add up to 100
+
+  Until the final exam is graded, the weights you can fill in add up to
+  less than 100. The calculator then reports your grade on the work
+  graded so far: each weight is divided by the graded total, so the 20,
+  15 and 25 above become 33.33%, 25% and 41.67% of the current grade. This
+  is the usual meaning of a "current grade". It also shows the points
+  already banked: 50.65 of the 60 graded points count toward the final
+  course grade whatever happens next.
+
+  If the weights add up to more than 100, the calculator normalises them
+  the same way and tells you. That usually means a typo, or an
+  extra-credit category that your teacher may handle differently.
+
+  ## Points or weights?
+
+  In a points system every point counts the same, so a 200-point project
+  matters twice as much as a 100-point test. In a weighted system a
+  category's share is fixed by the syllabus, however many points it
+  contains, so ten small quizzes can count as much as one big exam. Using
+  the wrong method can move a grade by several percent, so check which one
+  your class uses.
+
+  ## Letter grades
+
+  The default scale is the common US one: A from 90, B from 80, C from 70,
+  D from 60 and F below 60. Turn on **+ and − grades** for A+ at 97, A at
+  93, A− at 90 and so on down to D− at 60. Schools and teachers differ, so
+  edit the minimums to match your syllabus. Some teachers round 89.5 up to
+  90 before choosing the letter; tick the rounding option only if yours
+  does.
+faq:
+  - q: How do I calculate my grade if the weights don't add up to 100%?
+    a: Divide the sum of score × weight by the total of the weights you have scores for. With 60% of the course graded, a weighted sum of 5,065 gives 5,065 ÷ 60 = 84.42%. The calculator does this automatically and says when it has done so.
+  - q: How do I average several assignments in one category?
+    a: Type them all in the score box. Fractions such as 17/20, 18/20 are added up as points, and plain percentages such as 88; 92 are averaged. The row shows the category score it used.
+  - q: Is an 89.5% an A?
+    a: Only if your teacher rounds. On a strict 90% cut-off, 89.5% is a B. Tick the rounding option if your syllabus says grades are rounded to the nearest whole percent.
+  - q: Are my grades uploaded or saved?
+    a: No. The calculation runs in your browser, nothing is sent to a server, and nothing is kept when you close the page.
+---
+<style>
+.gc-mode { margin: 0 0 16px; padding: 0; border: 0; min-width: 0; }
+.gc-mode legend { padding: 0; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
+.gc-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--field-border); border-radius: 8px; overflow: hidden; }
+.gc-seg label { position: relative; display: inline-flex; align-items: center; min-height: 40px; padding: 0 16px; font-size: 15px; cursor: pointer; }
+.gc-seg label + label { border-left: 1px solid var(--field-border); }
+.gc-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.gc-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.gc-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -4px; }
+.gc-head, .gc-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.5fr) minmax(0, 0.7fr) minmax(0, 1fr) 2.75rem; gap: 6px 10px; align-items: center; }
+.gc-grid.gc-points .gc-head, .gc-grid.gc-points .gc-row { grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1fr) 2.75rem; }
+.gc-head { padding: 0 0 6px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; font-weight: 600; }
+.gc-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.gc-f { min-width: 0; }
+.gc-lab { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.gc-res { min-width: 0; font-size: 14px; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.gc-res b { font-size: 1.05rem; }
+.gc-res span { display: block; color: var(--muted); font-size: 12px; }
+.gc-del { width: 2.75rem; padding: 0; font-size: 1.2rem; line-height: 1; }
+.gc-row .gc-err { grid-column: 1 / -1; margin: 0; }
+.gc-actions { margin-top: 12px; }
+.gc-row input[aria-invalid="true"] { border-color: var(--danger); }
+.gc-out { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.gc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 12px; }
+.gc-top .result-big { margin: 0; font-variant-numeric: tabular-nums; }
+.gc-letter { display: inline-flex; align-items: center; justify-content: center; min-width: 3rem; min-height: 3rem; padding: 0 10px; border-radius: 10px; background: var(--accent); color: var(--accent-text); font-size: 1.6rem; font-weight: 800; }
+.gc-letter:empty { display: none; }
+.msg.gc-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+table.data.gc-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.data.gc-table tfoot th, table.data.gc-table tfoot td { color: var(--text); font-weight: 700; border-bottom: 0; }
+.gc-short { display: none; }
+.gc-scale { margin: 20px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
+.gc-scale summary { padding: 6px 0; font-weight: 600; cursor: pointer; }
+.gc-scale summary span { color: var(--muted); font-weight: 400; }
+.gc-scale-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px 12px; margin: 10px 0 16px; }
+.gc-min { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); align-items: center; gap: 6px; }
+.gc-min label { font-weight: 700; }
+.gc-min input { min-height: 38px; padding: 6px 8px; font-variant-numeric: tabular-nums; }
+.gc-min.gc-min-f { display: block; grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
+@media (max-width: 640px) {
+  .gc-head { display: none; }
+  .gc-row, .gc-grid.gc-points .gc-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 2.75rem; gap: 8px 12px; padding: 12px 0; }
+  .gc-f-name { grid-column: 1 / 3; grid-row: 1; }
+  .gc-del { grid-column: 3; grid-row: 1; align-self: end; }
+  .gc-f-score { grid-column: 1 / -1; }
+  .gc-f-weight, .gc-f-earned { grid-column: 1; }
+  .gc-f-possible { grid-column: 2 / -1; }
+  .gc-res { grid-column: 2 / -1; align-self: end; padding-bottom: 6px; }
+  .gc-grid.gc-points .gc-res { grid-column: 1 / -1; padding-bottom: 0; }
+  table.data.gc-table .gc-col-score { display: none; }
+  table.data.gc-table th, table.data.gc-table td { padding: 8px 5px; font-size: 13px; }
+  .gc-long { display: none; }
+  .gc-short { display: inline; }
+  .gc-lab { position: static; display: block; width: auto; height: auto; margin-bottom: 4px; overflow: visible; clip-path: none; white-space: normal; font-size: 13px; font-weight: 600; }
+}
+</style>
+
+<fieldset class="gc-mode">
+  <legend>Grade by</legend>
+  <div class="gc-seg">
+    <label><input type="radio" name="gc-mode" value="weights" checked> Weights (%)</label>
+    <label><input type="radio" name="gc-mode" value="points"> Points</label>
+  </div>
+</fieldset>
+<p class="hint" id="gc-hint"></p>
+
+<div class="gc-grid" id="gc-grid">
+  <div class="gc-head" aria-hidden="true">
+    <span>Assignment or category</span>
+    <span class="gc-w">Score</span><span class="gc-w">Weight (%)</span>
+    <span class="gc-p" hidden>Points earned</span><span class="gc-p" hidden>Points possible</span>
+    <span>Counts as</span><span></span>
+  </div>
+  <div id="gc-rows"></div>
+</div>
+<div class="actions gc-actions">
+  <button class="btn secondary small" type="button" id="gc-add">+ Add row</button>
+  <button class="btn secondary small" type="button" id="gc-clear">Clear all</button>
+</div>
+
+<div class="gc-out">
+  <p class="label">Current grade</p>
+  <div class="gc-top">
+    <p class="result-big" id="gc-avg">–</p>
+    <span class="gc-letter" id="gc-letter"></span>
+  </div>
+  <p class="msg gc-note" id="gc-note"></p>
+  <p class="msg error" id="gc-msg"></p>
+  <div class="stats">
+    <div class="stat"><b id="gc-s-avg">–</b><span id="gc-s-avg-l">Weighted average</span></div>
+    <div class="stat"><b id="gc-s-letter">–</b><span>Letter grade</span></div>
+    <div class="stat"><b id="gc-s-graded">–</b><span id="gc-s-graded-l">Weight graded</span></div>
+    <div class="stat"><b id="gc-s-banked">–</b><span id="gc-s-banked-l">Points banked toward 100</span></div>
+  </div>
+  <div class="table-wrap">
+    <table class="data gc-table" id="gc-table">
+      <thead><tr><th scope="col">Row</th><th scope="col" class="num gc-col-score">Score</th><th scope="col" class="num" id="gc-th-w">Weight</th><th scope="col" class="num" id="gc-th-share">Share of grade</th><th scope="col" class="num" id="gc-th-c">Adds</th></tr></thead>
+      <tbody></tbody>
+      <tfoot><tr><th scope="row">Total</th><td class="gc-col-score"></td><td class="num" id="gc-t-w"></td><td class="num" id="gc-t-share"></td><td class="num" id="gc-t-c"></td></tr></tfoot>
+    </table>
+  </div>
+  <div class="actions">
+    <button class="btn small" type="button" id="gc-copy">Copy summary</button>
+  </div>
+  <p class="hint">Want to know the score you need on the final exam? Use the <a href="/final-grade-calculator/">final grade calculator</a>.</p>
+</div>
+
+<details class="gc-scale" id="gc-scale">
+  <summary>Letter grade scale <span id="gc-scale-sum"></span></summary>
+  <div class="checks">
+    <label class="check"><input type="checkbox" id="gc-pm"> Use + and − grades</label>
+    <label class="check"><input type="checkbox" id="gc-round"> Round to a whole percent before choosing the letter</label>
+  </div>
+  <p class="hint">Minimum percentage for each letter. Anything below the last one is an F.</p>
+  <div class="gc-scale-grid" id="gc-scale-grid"></div>
+  <p class="msg error" id="gc-scale-msg"></p>
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="gc-scale-reset">Reset scale</button>
+  </div>
+</details>
+<p class="visually-hidden" id="gc-status" role="status"></p>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var rowsEl = $('#gc-rows'), gridEl = $('#gc-grid');
+  var MAX_ROWS = 80, uid = 0, last = null;
+  var SCALES = {
+    basic: [['A', '90'], ['B', '80'], ['C', '70'], ['D', '60']],
+    plus: [['A+', '97'], ['A', '93'], ['A−', '90'], ['B+', '87'], ['B', '83'], ['B−', '80'], ['C+', '77'], ['C', '73'], ['C−', '70'], ['D+', '67'], ['D', '63'], ['D−', '60']]
+  };
+  var scaleVals = { basic: SCALES.basic.map(function (x) { return x[1]; }), plus: SCALES.plus.map(function (x) { return x[1]; }) };
+  // Decimal comma (92,5) only where the visitor's locale writes decimals that way;
+  // elsewhere "90,85" is a list of two scores.
+  var decComma = (1.5).toLocaleString().indexOf(',') !== -1;
+
+  // ----- Exact fractions (BigInt), so 89.999999 never costs anyone an A -----
+  function gcd(a, b) { a = a < 0n ? -a : a; b = b < 0n ? -b : b; while (b) { var t = a % b; a = b; b = t; } return a; }
+  function Q(n, d) { if (d === undefined) d = 1n; if (d < 0n) { n = -n; d = -d; } var g = gcd(n, d) || 1n; return { n: n / g, d: d / g }; }
+  function add(a, b) { return Q(a.n * b.d + b.n * a.d, a.d * b.d); }
+  function mul(a, b) { return Q(a.n * b.n, a.d * b.d); }
+  function div(a, b) { return Q(a.n * b.d, a.d * b.n); }
+  function cmp(a, b) { var x = a.n * b.d - b.n * a.d; return x > 0n ? 1 : x < 0n ? -1 : 0; }
+  var ZERO = Q(0n), HUNDRED = Q(100n);
+  function isZero(a) { return a.n === 0n; }
+  // Round half up to k decimals, as a string.
+  function fixed(a, k) {
+    var s = 10n ** BigInt(k), neg = a.n < 0n, n = neg ? -a.n : a.n;
+    var v = (2n * n * s + a.d) / (2n * a.d);
+    var str = String(v / s) + (k ? '.' + String(v % s).padStart(k, '0') : '');
+    return (neg && v ? '-' : '') + str;
+  }
+  function roundInt(a) { return Q((2n * a.n + a.d) / (2n * a.d)); }
+  // Up to two decimals without trailing zeros (for weights and scale values).
+  function short(a) { return fixed(a, 2).replace(/\.?0+$/, ''); }
+  function dec(str) {
+    var s = String(str).trim();
+    if (decComma) s = s.replace(/^(\d+),(\d+)$/, '$1.$2');
+    var m = /^(\d{1,9})(?:\.(\d{1,6}))?$/.exec(s) || /^()\.(\d{1,6})$/.exec(s);
+    if (!m) return null;
+    var f = m[2] || '';
+    return Q(BigInt((m[1] || '0') + f), 10n ** BigInt(f.length));
+  }
+
+  // A score box: 92, 92%, 45/50, or a list of either kind.
+  function parseScore(raw) {
+    var s = String(raw || '').trim().replace(/\s*\/\s*/g, '/').replace(/\s+%/g, '%');
+    if (!s) return null;
+    var parts = [];
+    s.split(/[;+]|\s+/).forEach(function (tok) {
+      if (!tok) return;
+      if (decComma && /^\d+,\d+%?$/.test(tok)) { parts.push(tok); return; }
+      tok.split(',').forEach(function (t) { if (t) parts.push(t); });
+    });
+    if (!parts.length) return null;
+    var fr = [], pc = [];
+    for (var i = 0; i < parts.length; i++) {
+      var t = parts[i], m;
+      if ((m = /^([^/]+)\/([^/]+)$/.exec(t))) {
+        var a = dec(m[1]), b = dec(m[2]);
+        if (!a || !b) return { error: '“' + t + '” isn’t a score. Use points like 45/50 or a percentage like 92.' };
+        if (isZero(b)) return { error: 'The points possible in “' + t + '” can’t be 0.' };
+        fr.push([a, b]);
+      } else {
+        var p = dec(t.replace(/%$/, ''));
+        if (!p) return { error: '“' + t + '” isn’t a score. Use a percentage like 92 or points like 45/50.' };
+        pc.push(p);
+      }
+    }
+    if (fr.length && pc.length) return { error: 'Use either points (18/20) or percentages (90) in one box, not both.' };
+    if (fr.length) {
+      var ea = ZERO, eb = ZERO;
+      fr.forEach(function (x) { ea = add(ea, x[0]); eb = add(eb, x[1]); });
+      return { pct: mul(div(ea, eb), HUNDRED), detail: fr.length > 1 ? short(ea) + '/' + short(eb) + ' points' : '', n: fr.length };
+    }
+    var sum = ZERO;
+    pc.forEach(function (x) { sum = add(sum, x); });
+    return { pct: div(sum, Q(BigInt(pc.length))), detail: pc.length > 1 ? 'average of ' + pc.length : '', n: pc.length };
+  }
+  function parseNum(raw) {
+    var s = String(raw || '').trim().replace(/%$/, '').trim();
+    if (!s) return null;
+    return dec(s) || NaN;
+  }
+
+  // ----- Rows -----
+  function mode() { return $('input[name="gc-mode"]:checked').value; }
+  function makeRow(v) {
+    var id = ++uid, row = document.createElement('div');
+    row.className = 'gc-row';
+    row.setAttribute('role', 'group');
+    function f(cls, key, label, attrs) {
+      return '<div class="gc-f ' + cls + '"><label class="gc-lab" for="gc-' + key + id + '">' + label + '</label>' +
+        '<input type="text" id="gc-' + key + id + '" data-k="' + key + '" autocomplete="off" aria-describedby="gc-err' + id + '" ' + attrs + '></div>';
+    }
+    row.innerHTML = f('gc-f-name', 'name', 'Name', 'placeholder="e.g. Homework"') +
+      f('gc-f-score gc-w', 'score', 'Score', 'spellcheck="false" placeholder="92 or 45/50"') +
+      f('gc-f-weight gc-w', 'weight', 'Weight (%)', 'inputmode="decimal" placeholder="20"') +
+      f('gc-f-earned gc-p', 'earned', 'Points earned', 'inputmode="decimal" placeholder="45"') +
+      f('gc-f-possible gc-p', 'possible', 'Points possible', 'inputmode="decimal" placeholder="50"') +
+      '<div class="gc-res"><b class="gc-r-main">–</b><span class="gc-r-sub"></span></div>' +
+      '<button class="btn secondary small gc-del" type="button">&times;</button>' +
+      '<p class="msg error gc-err" id="gc-err' + id + '"></p>';
+    ['name', 'score', 'weight', 'earned', 'possible'].forEach(function (k) { inp(row, k).value = v && v[k] || ''; });
+    return row;
+  }
+  function inp(row, k) { return row.querySelector('[data-k="' + k + '"]'); }
+  function rows() { return $$('.gc-row', rowsEl); }
+  function applyMode() {
+    var pts = mode() === 'points';
+    gridEl.classList.toggle('gc-points', pts);
+    $$('.gc-w', gridEl).forEach(function (el) { el.hidden = pts; });
+    $$('.gc-p', gridEl).forEach(function (el) { el.hidden = !pts; });
+    $('#gc-hint').textContent = pts
+      ? 'Enter points earned and points possible. Leave points earned empty for work that is not graded yet.'
+      : 'Scores can be 92, 92%, 45/50 or a list like 17/20, 18/20. Leave the score empty for work not graded yet.';
+  }
+  function relabel() {
+    var list = rows();
+    list.forEach(function (r, i) {
+      var n = i + 1, nm = inp(r, 'name').value.trim();
+      var who = nm ? nm : 'row ' + n;
+      r.setAttribute('aria-label', nm ? nm + ' (row ' + n + ')' : 'Row ' + n);
+      inp(r, 'name').setAttribute('aria-label', 'Name, row ' + n);
+      inp(r, 'score').setAttribute('aria-label', 'Score, ' + who);
+      inp(r, 'weight').setAttribute('aria-label', 'Weight (%), ' + who);
+      inp(r, 'earned').setAttribute('aria-label', 'Points earned, ' + who);
+      inp(r, 'possible').setAttribute('aria-label', 'Points possible, ' + who);
+      r.querySelector('.gc-del').setAttribute('aria-label', list.length === 1 ? 'Clear ' + who : 'Remove ' + who);
+    });
+    $('#gc-add').disabled = list.length >= MAX_ROWS;
+  }
+
+  // ----- Scale -----
+  function scaleKey() { return $('#gc-pm').checked ? 'plus' : 'basic'; }
+  function buildScale() {
+    var key = scaleKey(), box = $('#gc-scale-grid');
+    box.textContent = '';
+    SCALES[key].forEach(function (x, i) {
+      var d = document.createElement('div');
+      d.className = 'gc-min';
+      var id = 'gc-min-' + i;
+      d.innerHTML = '<label for="' + id + '"></label><input type="text" inputmode="decimal" id="' + id + '" data-i="' + i + '">';
+      d.querySelector('label').textContent = x[0];
+      d.querySelector('input').value = scaleVals[key][i];
+      d.querySelector('input').setAttribute('aria-label', 'Minimum percentage for ' + x[0].replace('−', ' minus').replace('+', ' plus'));
+      box.appendChild(d);
+    });
+    var f = document.createElement('div');
+    f.className = 'gc-min gc-min-f';
+    f.textContent = 'F: below the lowest';
+    box.appendChild(f);
+  }
+  function readScale() {
+    var key = scaleKey(), out = [], err = '', prev = null;
+    SCALES[key].forEach(function (x, i) {
+      var el = $('#gc-min-' + i), v = el ? dec(el.value.replace(/%$/, '')) : null;
+      var bad = !v || cmp(v, Q(1000n)) > 0 || (prev && cmp(v, prev) >= 0);
+      if (bad) { if (!err) err = !v ? 'Enter a number for ' + x[0] + '.' : 'Each minimum must be lower than the one before it (check ' + x[0] + ').'; el && el.setAttribute('aria-invalid', 'true'); }
+      else if (el) el.removeAttribute('aria-invalid');
+      if (v) prev = v;
+      out.push({ letter: x[0], min: v });
+    });
+    return { list: out, error: err };
+  }
+  function letterFor(avg, scale) {
+    if (scale.error) return '';
+    var v = $('#gc-round').checked ? roundInt(avg) : avg;
+    for (var i = 0; i < scale.list.length; i++) if (cmp(v, scale.list[i].min) >= 0) return scale.list[i].letter;
+    return 'F';
+  }
+
+  // ----- Calculation -----
+  function readRow(r, pts) {
+    var d = { invalid: [], err: '' };
+    if (pts) {
+      var e = parseNum(inp(r, 'earned').value), p = parseNum(inp(r, 'possible').value);
+      if (e === null && p === null) { d.blank = true; return d; }
+      if (Number.isNaN(e)) { d.invalid.push(inp(r, 'earned')); d.err = 'Enter points earned as a number, such as 45.'; }
+      if (Number.isNaN(p)) { d.invalid.push(inp(r, 'possible')); d.err = d.err || 'Enter points possible as a number, such as 50.'; }
+      if (d.err) return d;
+      if (e === null) { d.pending = true; d.possible = p; return d; }
+      if (p === null) { d.invalid.push(inp(r, 'possible')); d.err = 'Enter the points possible (0 for extra credit).'; d.incomplete = true; return d; }
+      if (isZero(p) && isZero(e)) { d.invalid.push(inp(r, 'possible')); d.err = 'Points possible can’t be 0 unless this row is extra credit.'; return d; }
+      d.ok = true; d.earned = e; d.possible = p;
+      d.pct = isZero(p) ? null : mul(div(e, p), HUNDRED);
+      return d;
+    }
+    var sc = parseScore(inp(r, 'score').value), w = parseNum(inp(r, 'weight').value);
+    if (sc === null && w === null) { d.blank = true; return d; }
+    if (sc && sc.error) { d.invalid.push(inp(r, 'score')); d.err = sc.error; }
+    if (Number.isNaN(w)) { d.invalid.push(inp(r, 'weight')); d.err = d.err || 'Enter the weight as a percentage, such as 20.'; }
+    if (d.err) return d;
+    if (sc === null) { d.pending = true; d.weight = w; return d; }
+    if (w === null) { d.invalid.push(inp(r, 'weight')); d.err = 'Enter this row’s weight from your syllabus.'; d.incomplete = true; return d; }
+    d.ok = true; d.pct = sc.pct; d.detail = sc.detail; d.weight = w;
+    return d;
+  }
+
+  function render(showErrors, activeRow) {
+    if (activeRow === undefined) activeRow = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.gc-row') : null;
+    var pts = mode() === 'points', scale = readScale();
+    $('#gc-scale-msg').textContent = scale.error;
+    $('#gc-scale-sum').textContent = scale.error ? '' : '(' + scale.list.filter(function (x, i) { return scaleKey() === 'basic' || i % 3 === 2 || i === 0; }).map(function (x) { return x.letter + ' ' + short(x.min); }).join(', ') + ')';
+    var used = [], pendingW = ZERO, pendingP = ZERO, pendingN = 0, errors = 0;
+    var sumW = ZERO, sumWG = ZERO, sumE = ZERO, sumP = ZERO;
+    rows().forEach(function (r, i) {
+      var d = readRow(r, pts), err = r.querySelector('.gc-err');
+      var show = showErrors && !(d.incomplete && r === activeRow);
+      ['score', 'weight', 'earned', 'possible'].forEach(function (k) {
+        var el = inp(r, k), inv = d.invalid.indexOf(el) !== -1 && (show || el.getAttribute('aria-invalid') === 'true');
+        if (inv) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+      });
+      var main = r.querySelector('.gc-r-main'), sub = r.querySelector('.gc-r-sub');
+      if (!d.ok) {
+        main.textContent = '–';
+        sub.textContent = d.pending ? 'not graded yet' : '';
+        if (d.pending) { pendingN++; if (pts) pendingP = add(pendingP, d.possible); else pendingW = add(pendingW, d.weight); }
+        if (d.err) errors++;
+        if (!d.err) err.textContent = '';
+        else if (show || err.textContent) err.textContent = d.err;
+        return;
+      }
+      err.textContent = '';
+      var name = inp(r, 'name').value.trim() || 'Row ' + (i + 1);
+      if (pts) {
+        sumE = add(sumE, d.earned); sumP = add(sumP, d.possible);
+        main.textContent = d.pct ? fixed(d.pct, 2) + '%' : '+' + short(d.earned);
+        sub.textContent = d.pct ? short(d.earned) + ' of ' + short(d.possible) : 'extra credit points';
+      } else {
+        sumW = add(sumW, d.weight); sumWG = add(sumWG, mul(d.weight, d.pct));
+        main.textContent = fixed(d.pct, 2) + '%';
+        sub.textContent = d.detail || '';
+      }
+      used.push({ name: name, d: d });
+    });
+
+    var msg = '', note = '', avg = null;
+    if (pts) {
+      if (used.length && isZero(sumP)) msg = 'Add points possible for at least one graded row.';
+      else if (used.length) avg = mul(div(sumE, sumP), HUNDRED);
+    } else if (used.length) {
+      if (isZero(sumW)) msg = 'The weights of the graded rows add up to 0, so there is nothing to average.';
+      else avg = div(sumWG, sumW);
+    }
+    $('#gc-msg').textContent = msg;
+
+    // Weight notes.
+    var totalW = add(sumW, pendingW);
+    if (!pts && avg) {
+      if (cmp(sumW, HUNDRED) === 0 && isZero(pendingW)) note = '';
+      else if (cmp(totalW, HUNDRED) > 0) {
+        note = 'Your weights add up to ' + short(totalW) + '%, more than 100%. The average is normalised: each graded weight is divided by ' + short(sumW) + '. Check your syllabus for a typo or an extra-credit category.';
+      } else {
+        note = pendingN
+          ? 'Graded work is ' + short(sumW) + '% of the course; ' + (pendingN === 1 ? '1 row' : pendingN + ' rows') + ' worth ' + short(pendingW) + '% ' + (pendingN === 1 ? 'is' : 'are') + ' not graded yet.'
+          : 'Your weights add up to ' + short(sumW) + '%, not 100%.';
+        note += ' The graded weights were normalised (divided by ' + short(sumW) + '), so this is your grade on the work graded so far.';
+      }
+    } else if (pts && avg && pendingN) {
+      note = (pendingN === 1 ? '1 row' : pendingN + ' rows') + ' worth ' + short(pendingP) + ' points ' + (pendingN === 1 ? 'is' : 'are') + ' not graded yet, so ' + (pendingN === 1 ? 'it is' : 'they are') + ' left out.';
+    }
+    $('#gc-note').textContent = note;
+
+    var letter = avg ? letterFor(avg, scale) : '';
+    $('#gc-avg').textContent = avg ? fixed(avg, 2) + '%' : '–';
+    $('#gc-letter').textContent = letter;
+    $('#gc-s-avg').textContent = avg ? fixed(avg, 2) + '%' : '–';
+    $('#gc-s-avg-l').textContent = pts ? 'Points average' : 'Weighted average';
+    $('#gc-s-letter').textContent = avg ? (letter || '–') + ($('#gc-round').checked && avg ? ' (' + fixed(roundInt(avg), 0) + '%)' : '') : '–';
+    if (pts) {
+      $('#gc-s-graded').textContent = avg ? short(sumE) + ' / ' + short(sumP) : '–';
+      $('#gc-s-graded-l').textContent = 'Points earned / possible';
+      $('#gc-s-banked').textContent = avg ? short(add(sumP, pendingP)) : '–';
+      $('#gc-s-banked-l').textContent = 'Points possible incl. ungraded';
+    } else {
+      $('#gc-s-graded').textContent = avg ? short(sumW) + '%' : '–';
+      $('#gc-s-graded-l').textContent = 'Weight graded';
+      $('#gc-s-banked').textContent = avg ? fixed(div(sumWG, HUNDRED), 2) : '–';
+      $('#gc-s-banked-l').textContent = 'Points banked toward 100';
+    }
+
+    // Breakdown table.
+    var tbody = $('#gc-table tbody');
+    tbody.textContent = '';
+    $('#gc-th-w').textContent = pts ? 'Points' : 'Weight';
+    $('#gc-th-share').innerHTML = '<span class="gc-long">' + (pts ? 'Share of points' : 'Share of grade') + '</span><span class="gc-short">Share</span>';
+    $('#gc-th-c').textContent = 'Adds';
+    var totShare = ZERO;
+    used.forEach(function (u) {
+      if (!avg) return;
+      var d = u.d, share, contrib, cells;
+      if (pts) {
+        share = mul(div(d.possible, sumP), HUNDRED);
+        contrib = mul(div(d.earned, sumP), HUNDRED);
+        cells = [u.name, d.pct ? fixed(d.pct, 2) + '%' : 'extra', short(d.earned) + '/' + short(d.possible), fixed(share, 2) + '%', fixed(contrib, 2)];
+      } else {
+        share = mul(div(d.weight, sumW), HUNDRED);
+        contrib = div(mul(d.weight, d.pct), sumW);
+        cells = [u.name, fixed(d.pct, 2) + '%', short(d.weight) + '%', fixed(share, 2) + '%', fixed(contrib, 2)];
+      }
+      totShare = add(totShare, share);
+      var tr = document.createElement('tr');
+      cells.forEach(function (c, k) {
+        var el = document.createElement(k ? 'td' : 'th');
+        if (!k) el.scope = 'row'; else el.className = k === 1 ? 'num gc-col-score' : 'num';
+        el.textContent = c;
+        tr.appendChild(el);
+      });
+      tbody.appendChild(tr);
+    });
+    $('#gc-t-w').textContent = avg ? (pts ? short(sumE) + '/' + short(sumP) : short(sumW) + '%') : '';
+    $('#gc-t-share').textContent = avg ? fixed(totShare, 0) + '%' : '';
+    $('#gc-t-c').textContent = avg ? fixed(avg, 2) : '';
+    $('#gc-table').hidden = !avg;
+
+    last = { avg: avg, letter: letter, used: used, pts: pts, note: note, errors: errors, sumW: sumW, sumE: sumE, sumP: sumP };
+  }
+
+  var status = $('#gc-status');
+  var announce = TT.debounce(function () {
+    if (!last) return;
+    var t = last.avg ? 'Current grade ' + fixed(last.avg, 2) + ' percent' + (last.letter ? ', ' + last.letter.replace('−', ' minus').replace('+', ' plus') : '') : 'No graded rows yet';
+    if (last.errors) t += '. ' + (last.errors === 1 ? '1 row needs' : last.errors + ' rows need') + ' attention';
+    status.textContent = t + '.';
+  }, 1200);
+  var pointerIsDown = false, pendingFn = null;
+  document.addEventListener('pointerdown', function () { pointerIsDown = true; }, true);
+  ['pointerup', 'pointercancel'].forEach(function (type) {
+    document.addEventListener(type, function () {
+      pointerIsDown = false;
+      if (pendingFn) { var fn = pendingFn; pendingFn = null; setTimeout(fn, 0); }
+    }, true);
+  });
+  // A message that appears mid-click would move the button being clicked.
+  function afterPointer(fn) { if (pointerIsDown) pendingFn = fn; else fn(); }
+  var showErrorsLater = TT.debounce(function () { afterPointer(function () { render(true); }); }, 900);
+
+  rowsEl.addEventListener('input', function (e) {
+    if (e.target.matches('[data-k="name"]')) relabel();
+    render(false); showErrorsLater(); announce();
+  });
+  rowsEl.addEventListener('focusout', function (e) {
+    var to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest('.gc-row') : null;
+    afterPointer(function () { render(true, to); });
+  });
+  rowsEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('.gc-del');
+    if (!btn) return;
+    var row = btn.closest('.gc-row'), list = rows(), i = list.indexOf(row);
+    if (list.length === 1) {
+      $$('input', row).forEach(function (el) { el.value = ''; el.removeAttribute('aria-invalid'); });
+      row.querySelector('.gc-err').textContent = '';
+      relabel(); render(false);
+      inp(row, 'name').focus();
+    } else {
+      row.remove();
+      relabel(); render(false);
+      var after = rows();
+      after[Math.min(i, after.length - 1)].querySelector('.gc-del').focus();
+    }
+    announce();
+  });
+  rowsEl.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    var list = rows();
+    if (e.target.closest('.gc-row') !== list[list.length - 1] || !e.target.matches(mode() === 'points' ? '[data-k="possible"]' : '[data-k="weight"]')) return;
+    e.preventDefault();
+    addRow();
+  });
+  function addRow() {
+    if (rows().length >= MAX_ROWS) return;
+    var row = makeRow();
+    rowsEl.appendChild(row);
+    applyMode(); relabel(); render(false);
+    inp(row, 'name').focus();
+  }
+  $('#gc-add').addEventListener('click', addRow);
+  $('#gc-clear').addEventListener('click', function () {
+    rowsEl.textContent = '';
+    for (var i = 0; i < 3; i++) rowsEl.appendChild(makeRow());
+    applyMode(); relabel(); render(false); announce();
+    $('#gc-clear').focus();
+  });
+  $$('input[name="gc-mode"]').forEach(function (r) {
+    r.addEventListener('change', function () { applyMode(); render(false); announce(); });
+  });
+  $('#gc-pm').addEventListener('change', function () { buildScale(); render(false); announce(); });
+  $('#gc-round').addEventListener('change', function () { render(false); announce(); });
+  $('#gc-scale-grid').addEventListener('input', function (e) {
+    var i = +e.target.getAttribute('data-i');
+    scaleVals[scaleKey()][i] = e.target.value;
+    render(false); announce();
+  });
+  $('#gc-scale-reset').addEventListener('click', function () {
+    var key = scaleKey();
+    scaleVals[key] = SCALES[key].map(function (x) { return x[1]; });
+    buildScale(); render(false); announce();
+  });
+  $('#gc-copy').addEventListener('click', function () {
+    render(true);
+    var L = last, out = [];
+    L.used.forEach(function (u) {
+      var d = u.d;
+      out.push(u.name + ': ' + (L.pts ? short(d.earned) + '/' + short(d.possible) + (d.pct ? ' (' + fixed(d.pct, 2) + '%)' : ' (extra credit)') : fixed(d.pct, 2) + '%, weight ' + short(d.weight) + '%'));
+    });
+    out.push(L.avg ? 'Current grade: ' + fixed(L.avg, 2) + '%' + (L.letter ? ' (' + L.letter + ')' : '') : 'Current grade: not enough data');
+    if (L.note) out.push(L.note);
+    TT.copy(out.join('\n'), $('#gc-copy'));
+  });
+
+  // Sample class: the final exam is not graded yet.
+  [
+    { name: 'Homework', score: '92', weight: '20', earned: '184', possible: '200' },
+    { name: 'Quizzes', score: '17/20, 18/20, 16/20', weight: '15', earned: '51', possible: '60' },
+    { name: 'Midterm exam', score: '78', weight: '25', earned: '78', possible: '100' },
+    { name: 'Final exam', score: '', weight: '40', earned: '', possible: '100' }
+  ].forEach(function (v) { rowsEl.appendChild(makeRow(v)); });
+  buildScale();
+  applyMode();
+  relabel();
+  render(false);
+})();
+</script>
