@@ -543,12 +543,14 @@ faq:
   function parseUTM(input) {
     var s = String(input).trim();
     if (!s) throw new Error('Enter a UTM coordinate, for example 18T 585631 4511327.');
-    s = s.replace(/\b(?:utm|zone|wgs\s*-?\s*84|nad\s*-?\s*83)\b\s*:?/gi, ' ').replace(/[;,]/g, ' ').replace(/\s+/g, ' ').trim();
+    s = s.replace(/\b(?:utm|zone|wgs\s*-?\s*84|nad\s*-?\s*83)\b\s*:?/gi, ' ')
+      .replace(/(\d),(?=\d{3}(?!\d))/g, '$1')   // thousands separators: 4,511,322
+      .replace(/[;,]/g, ' ').replace(/\s+/g, ' ').trim();
     var m = /^(\d{1,2}) ?([a-z]+)? (.+)$/i.exec(s);
     if (!m) throw new Error('A UTM coordinate starts with the zone number and its band or hemisphere, like 18T 585631 4511327.');
     var zone = +m[1];
     if (zone < 1 || zone > 60) throw new Error('The UTM zone must be a whole number from 1 to 60.');
-    var nm = /^([+-]?\d+(?:\.\d+)?) ?(m?[EN])? ([+-]?\d+(?:\.\d+)?) ?(m?[EN])?$/i.exec(m[3]);
+    var nm = /^([+-]?\d+(?:\.\d+)?) ?(m?[EN]|m)? ([+-]?\d+(?:\.\d+)?) ?(m?[EN]|m)?$/i.exec(m[3]);
     if (!nm) throw new Error('After the zone, give the easting and then the northing in metres, like 585631 4511327.');
     var la = (nm[2] || '').toUpperCase().replace('M', ''), lb = (nm[4] || '').toUpperCase().replace('M', '');
     if (la && la === lb) throw new Error('Both numbers are labelled ' + (la === 'E' ? 'easting (E)' : 'northing (N)') + '. Give one easting and one northing.');
@@ -907,7 +909,11 @@ faq:
     return c;
   }
   function inputFor(cells, c) {
-    function cell(k) { return k >= 0 && k < cells.length ? String(cells[k]).trim() : ''; }
+    // A lone number with a decimal comma (European spreadsheets) gets a decimal point.
+    function cell(k) {
+      var v = k >= 0 && k < cells.length ? String(cells[k]).trim() : '';
+      return /^[+-]?\d+,\d+$/.test(v) ? v.replace(',', '.') : v;
+    }
     if (c.kind === 'll') {
       if (!cell(c.lat) && !cell(c.lon)) return '';
       return cell(c.lat) + ', ' + cell(c.lon);

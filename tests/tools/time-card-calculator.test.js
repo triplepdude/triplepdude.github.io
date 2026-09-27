@@ -156,7 +156,8 @@ module.exports = async ({ page, open, assert }) => {
   await f(0, WED, 'in1').fill('9 AM'); await f(0, WED, 'out1').fill('12 PM');
   await f(0, WED, 'in2').fill('11 AM'); await f(0, WED, 'out2').fill('1 PM');
   await f(0, WED, 'out2').press('Tab');
-  assert.match(await day(0, WED).locator('.tc-err').textContent(), /more than 24 hours/);
+  assert.equal(await day(0, WED).locator('.tc-err').textContent(), 'Pair 2 (11:00 AM–1:00 PM) would end more than 24 hours after the first in time. Pairs must be in order and must not overlap.');
+  assert.equal(await f(0, WED, 'in2').getAttribute('aria-invalid'), 'true');
   assert.equal(await text('#tc-total'), '16:30');
   await f(0, WED, 'in2').fill('');
   await f(0, WED, 'out2').fill('');
@@ -242,4 +243,80 @@ module.exports = async ({ page, open, assert }) => {
   await f(0, THU, 'out1').pressSequentially('17:00', { delay: 30 });
   await page.waitForFunction(() => document.querySelector('#tc-status').textContent === 'Total 25 hours 30 minutes: 25.50 regular, 0.00 overtime hours. Pay 510.00.', null, { timeout: 4000 });
   assert.equal(await page.evaluate(() => window.__tcChanges), 1);
+
+  // Regressions found in review. Pay from Python (Decimal, ROUND_HALF_UP).
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await open();
+  await page.evaluate(() => { window.print = () => {}; });
+  await page.selectOption('#tc-format', '12');
+  // Thousands separators in the rate: 40 h x 1,000 + 2.5 h x 1,500 = 43,750.00 (it was read as 1.000).
+  await page.fill('#tc-rate', '1,000');
+  assert.equal(await text('#tc-pay'), '43,750.00');
+  // A decimal comma and a "/hr" suffix: 740.00 + 150 min x 27.75 = 69.375 -> 69.38.
+  await page.fill('#tc-rate', '$18,50/hr');
+  assert.equal(await text('#tc-pay'), '809.38');
+  assert.equal(await text('#tc-settings-msg'), '');
+  // The threshold message matches the rule (0 is not allowed).
+  await page.fill('#tc-weekly', '0');
+  assert.equal(await text('#tc-settings-msg'), 'Enter the weekly overtime threshold in hours, more than 0 and at most 168.');
+  await page.fill('#tc-weekly', '40');
+  assert.equal(await text('#tc-settings-msg'), '');
+
+  // Exact half-cent rounding: 25 minutes at 18.54 is exactly 7.725, so 7.73
+  // (in floating point it is 7.72499…, which toFixed(2) shows as 7.72).
+  await page.selectOption('#tc-preset', 'none');
+  await page.click('#tc-clear');
+  await page.fill('#tc-rate', '18.54');
+  await f(0, MON, 'in1').fill('9:00 AM'); await f(0, MON, 'out1').fill('9:25 AM');
+  assert.equal(await text('#tc-pay'), '7.73');
+  await page.selectOption('#tc-preset', 'federal');
+
+  await page.selectOption('#tc-pairs', '3');
+  await page.click('#tc-clear');
+  // An overlapping third pair is named, and its own in time is flagged (not In 2).
+  await f(0, MON, 'in1').fill('8:00 AM'); await f(0, MON, 'out1').fill('5:00 PM');
+  await f(0, MON, 'in2').fill('6:00 PM'); await f(0, MON, 'out2').fill('8:00 PM');
+  await f(0, MON, 'in3').fill('7:30 PM'); await f(0, MON, 'out3').fill('9:00 PM');
+  await f(0, MON, 'out3').press('Tab');
+  assert.equal(await day(0, MON).locator('.tc-err').textContent(), 'Pair 3 (7:30 PM–9:00 PM) would end more than 24 hours after the first in time. Pairs must be in order and must not overlap.');
+  assert.equal(await f(0, MON, 'in3').getAttribute('aria-invalid'), 'true');
+  assert.equal(await f(0, MON, 'in2').getAttribute('aria-invalid'), null);
+  await f(0, MON, 'in3').fill(''); await f(0, MON, 'out3').fill('');
+  assert.equal(await day(0, MON).locator('.tc-hm').textContent(), '11:00');
+  // Pairs typed in reverse order are read as running into the next morning, and say so.
+  await f(0, TUE, 'in1').fill('1 PM'); await f(0, TUE, 'out1').fill('5 PM');
+  await f(0, TUE, 'in2').fill('8 AM'); await f(0, TUE, 'out2').fill('12 PM');
+  assert.equal(await day(0, TUE).locator('.tc-hm').textContent(), '8:00');
+  assert.equal(await day(0, TUE).locator('.tc-split').textContent(), 'ends next day');
+  // Same in and out counts 0 with a hint; 12 AM to 24:00 is a full day.
+  await f(0, WED, 'in1').fill('9 AM'); await f(0, WED, 'out1').fill('9 AM');
+  assert.equal(await day(0, WED).locator('.tc-hm').textContent(), '0:00');
+  assert.equal(await day(0, WED).locator('.tc-split').textContent(), 'same in and out; use 24:00 for a full day');
+  // A break on such a day points at the times, not the break.
+  await f(0, WED, 'brk').fill('30');
+  await f(0, WED, 'brk').press('Tab');
+  assert.equal(await day(0, WED).locator('.tc-err').textContent(), 'The in and out times are the same, so no time is clocked. For a 24-hour shift, enter 24:00 as the out time.');
+  assert.equal(await f(0, WED, 'out1').getAttribute('aria-invalid'), 'true');
+  await f(0, WED, 'brk').fill('');
+  await f(0, WED, 'in1').fill('12 AM'); await f(0, WED, 'out1').fill('24:00');
+  assert.equal(await day(0, WED).locator('.tc-hm').textContent(), '24:00');
+  assert.equal(await day(0, WED).locator('.tc-split').textContent(), 'OT 3:00');
+  assert.equal(await text('#tc-total'), '43:00');
+  // More ways of writing a time.
+  await f(0, THU, 'in1').fill('９h'); await f(0, THU, 'in1').press('Tab');
+  assert.equal(await f(0, THU, 'in1').inputValue(), '9:00 AM');
+  await f(0, THU, 'out1').fill('17:30:00'); await f(0, THU, 'out1').press('Tab');
+  assert.equal(await f(0, THU, 'out1').inputValue(), '5:30 PM');
+
+  // At phone width the overtime rules select is wide enough for "Federal (FLSA)".
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(100);
+  const fits = await page.evaluate(() => {
+    const sel = document.querySelector('#tc-preset'), cs = getComputedStyle(sel);
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.font = cs.fontSize + ' ' + cs.fontFamily;
+    const widest = Math.max(...[...sel.options].map(o => ctx.measureText(o.text).width));
+    return { need: widest + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 20, have: sel.clientWidth };
+  });
+  assert.ok(fits.have >= fits.need, JSON.stringify(fits));
 };

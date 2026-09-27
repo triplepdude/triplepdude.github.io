@@ -504,8 +504,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   }
   // Generated test key pairs: switching to ES256 with an unusable key makes a fresh pair.
   await page.fill('#jb-key', '');
+  await page.focus('#jb-alg');
   await page.selectOption('#jb-alg', 'ES256');
   await page.waitForFunction(() => /BEGIN PRIVATE KEY/.test(document.querySelector('#jb-key').value) && document.querySelector('#jb-token').value.startsWith('eyJhbGciOiJFUzI1NiIs'), null, { timeout: 10000 });
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'jb-alg', 'focus stays on the list when a key pair is made for it');
   const genPub = crypto.createPublicKey(await text('#jb-pub'));
   assert.equal(genPub.asymmetricKeyDetails.namedCurve, 'prime256v1');
   assert.equal(await verifyWithNode('ES256', genPub), true, 'generated ES256 pair');
@@ -576,6 +578,17 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#jwt-token', '');
   await page.type('#jwt-token', 'abc', { delay: 40 });
   assert.deepEqual(await heard(), ['jwt-status:This is not a JWT: it has no dots. A JWT has three Base64url parts joined by dots: header.payload.signature.']);
+  // The builder: one short status once typing pauses, errors included, never an alert.
+  assert.equal(await page.locator('#jb-msg[role], #jb-token[aria-live]').count(), 0);
+  await page.evaluate(() => { window.__live = []; });
+  await page.selectOption('#jb-alg', 'HS256');
+  await page.fill('#jb-payload', '');
+  await page.type('#jb-payload', '{"sub":"z"}', { delay: 30 });
+  const jbHeard = (await heard()).filter(l => l.startsWith('jb-status:'));
+  assert.equal(jbHeard.length, 1, JSON.stringify(jbHeard));
+  assert.match(jbHeard[0], /^jb-status:Signed HS256 token ready, \d+ characters\.$/);
+  await page.type('#jb-payload', ',', { delay: 30 });
+  assert.deepEqual((await heard()).filter(l => l.startsWith('jb-status:')), ['jb-status:The payload is not valid JSON: ' + (await text('#jb-msg')).replace(/^The payload is not valid JSON: /, '')]);
   await page.click('#jwt-example');
   await verified('example after the live-region checks');
 };

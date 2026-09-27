@@ -156,6 +156,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     ['[2001:db8::1]:443', /includes a port number/],
     ['::1.2.3.4.5', /four numbers/],
     ['1.2.3.4::1', /IPv4 part can only come last/],
+    // Regression: brackets or a zone with no address threw "Cannot read properties of undefined".
+    ['[]', /Enter the address itself/],
+    ['%eth0', /Enter the address itself/],
+    [' % ', /Enter the address itself/],
     ['1.2..4/24', /empty part/],
     ['1.2.3.x/24', /"x" .*not a number/],
     ['1.2.3.4/', /after the slash/],

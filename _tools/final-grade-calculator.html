@@ -79,7 +79,10 @@ faq:
 .fg-seg label + label { border-left: 1px solid var(--field-border); }
 .fg-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .fg-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
-.fg-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -4px; }
+/* The focused radio is the checked one, whose fill is the accent colour, so
+   the ring goes around the whole control. */
+.fg-seg:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fg-seg label:has(input:focus-visible) { text-decoration: underline; text-underline-offset: 4px; }
 .fg-inputs > .field { flex: 1 1 150px; }
 .fg-if-row > .field { flex: 0 1 280px; }
 .fg-out { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--border); }
@@ -93,6 +96,7 @@ table.data.fg-table .num { text-align: right; font-variant-numeric: tabular-nums
 table.data.fg-table td.fg-no { color: var(--danger); }
 table.data.fg-table td.fg-yes { color: var(--accent); font-weight: 600; }
 table.data.fg-table tr.fg-target > * { background: var(--accent-soft); }
+table.data.fg-table .fg-tag { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
 .output.fg-if-out { font-family: inherit; font-size: 15px; }
 </style>
 
@@ -205,11 +209,16 @@ table.data.fg-table tr.fg-target > * { background: var(--accent-soft); }
     if (num % a.d !== 0n && num > 0n) q += 1n;
     return fmtUnits(q, k);
   }
-  function short(a) { return fixed(a, 2).replace(/\.?0+$/, ''); }
+  // A typed value exactly as entered (inputs have at most 6 decimals), without trailing zeros.
+  function short(a) { return fixed(a, 6).replace(/\.?0+$/, ''); }
+  // "88,5" is 88.5 (no box here takes a list). "1,000" and "1,000.5" group
+  // thousands, except in locales that write decimals with a comma.
   function parse(raw) {
-    var s = String(raw || '').trim().replace(/\s*%$/, '');
+    var s = String(raw || '').normalize('NFKC').trim().replace(/\s*%$/, '');
     if (!s) return null;
-    if (decComma) s = s.replace(/^(\d+),(\d+)$/, '$1.$2');
+    if (/^\d{1,3}(\.\d{3})+,\d+$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^\d*,\d+$/.test(s) && (decComma || !/^\d{1,3},\d{3}$/.test(s))) s = s.replace(',', '.');
+    else if (/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s)) s = s.replace(/,/g, '').replace(/\.$/, '');
     var m = /^(\d{1,9})(?:\.(\d{1,6}))?$/.exec(s) || /^()\.(\d{1,6})$/.exec(s);
     if (!m) return NaN;
     var f = m[2] || '';
@@ -316,7 +325,9 @@ table.data.fg-table tr.fg-target > * { background: var(--accent-soft); }
     if (pts) {
       var p = m.needPts(t);
       $('#fg-need-pts').textContent = cmp(p, ZERO) <= 0 ? '0' : up2(p);
-      $('#fg-need-pts-l').textContent = 'Points needed of ' + short(m.F) + ' on the final';
+      $('#fg-need-pts-l').textContent = r.state === 'out'
+        ? 'Points needed, but the final is worth only ' + short(m.F)
+        : 'Points needed of ' + short(m.F) + ' on the final';
     }
 
     // Letter table, plus the typed target if it is not one of the cut-offs.
@@ -333,6 +344,13 @@ table.data.fg-table tr.fg-target > * { background: var(--accent-soft); }
       var th = document.createElement('th');
       th.scope = 'row';
       th.textContent = x.label;
+      // The highlight is not only a colour: a cut-off that is the target says so.
+      if (!x.mine && cmp(x.g, t) === 0) {
+        var tag = document.createElement('span');
+        tag.className = 'fg-tag';
+        tag.textContent = ' (your target)';
+        th.appendChild(tag);
+      }
       var tdG = document.createElement('td'), tdN = document.createElement('td'), tdP = document.createElement('td');
       tdG.className = 'num'; tdN.className = 'num'; tdP.className = 'num fg-ptcol';
       tdG.textContent = short(x.g) + '%';

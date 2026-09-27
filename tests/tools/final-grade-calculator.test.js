@@ -17,12 +17,13 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#fg-best'), '91.00%');
   assert.equal(await text('#fg-worst'), '66.00%');
   assert.deepEqual(await table(), [
-    ['A', '90%', '96.00%'],
+    ['A (your target)', '90%', '96.00%'],
     ['B', '80%', '56.00%'],
     ['C', '70%', '16.00%'],
     ['D', '60%', 'Guaranteed'],
   ]);
-  assert.equal(await page.locator('#fg-table tr.fg-target th').textContent(), 'A');
+  // The target row is marked in text, not only by its background colour.
+  assert.equal(await page.locator('#fg-table tr.fg-target th').textContent(), 'A (your target)');
 
   // + and - grades: A+ 124 (not possible), A 108 (not possible), A- 96 ... D- -24.
   await page.check('#fg-pm');
@@ -30,7 +31,7 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(plus.length, 12);
   assert.deepEqual(plus[0], ['A+', '97%', 'Not possible (124.00%)']);
   assert.deepEqual(plus[1], ['A', '93%', 'Not possible (108.00%)']);
-  assert.deepEqual(plus[2], ['A−', '90%', '96.00%']);
+  assert.deepEqual(plus[2], ['A− (your target)', '90%', '96.00%']);
   assert.deepEqual(plus[3], ['B+', '87%', '84.00%']);
   assert.deepEqual(plus[9], ['D+', '67%', '4.00%']);
   assert.deepEqual(plus[10], ['D', '63%', 'Guaranteed']);
@@ -102,6 +103,31 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#fg-current', '88%');
   assert.equal(await text('#fg-need'), 'Guaranteed');
 
+  // Regressions found in review (Python fractions.Fraction):
+  // a decimal comma is read as a decimal point here, since no box takes a list:
+  // (90 - 88.5 x 0.75) / 0.25 = 94.5.
+  await set('88,5', '25', '90');
+  assert.equal(await text('#fg-need'), '94.50%');
+  assert.equal(await text('#fg-msg'), '');
+  // A typed target is echoed exactly, not rounded to 90: (89.995 - 66) / 0.25 = 95.98.
+  await set('88', '25', '89.995');
+  assert.equal(await text('#fg-need'), '95.98%');
+  assert.equal(await text('#fg-verdict'), 'You need at least 95.98% on the final to finish with 89.995%.');
+  await set('88', '25', '90');
+
+  // The mode switch shows keyboard focus: the checked segment is filled with the
+  // accent colour, so the ring goes around the whole control.
+  await page.focus('input[name="fg-mode"][value="percent"]');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
+  const ring = await page.evaluate(() => {
+    const seg = document.querySelector('.fg-seg'), s = getComputedStyle(seg);
+    return { style: s.outlineStyle, width: s.outlineWidth, offset: s.outlineOffset, color: s.outlineColor, fill: getComputedStyle(document.querySelector('.fg-seg label')).backgroundColor, bg: getComputedStyle(document.querySelector('.tool-card')).backgroundColor };
+  });
+  assert.equal(ring.style, 'solid');
+  assert.equal(ring.offset, '2px');
+  assert.notEqual(ring.color, ring.bg);
+
   // Points: 412 of 500 so far, 200-point final, B (80%) needs 0.8 x 700 - 412 = 148 points = 74%.
   await page.check('input[name="fg-mode"][value="points"]');
   assert.equal(await page.locator('#fg-current').isVisible(), false);
@@ -114,12 +140,26 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#fg-best'), '87.43%');
   assert.equal(await text('#fg-worst'), '58.86%');
   assert.deepEqual((await table())[0], ['A', '90%', 'Not possible (109.00%)', '–']);
-  assert.deepEqual((await table())[1], ['B', '80%', '74.00%', '148']);
+  assert.deepEqual((await table())[1], ['B (your target)', '80%', '74.00%', '148']);
   // 150-point final, target 90%: 585 - 412 = 173 points > 150, so not reachable.
   await page.fill('#fg-final-pts', '150');
   await page.fill('#fg-target', '90');
   assert.equal(await text('#fg-need'), 'Not reachable');
   assert.match(await text('#fg-verdict'), /you would need 115\.34% on the final\. With 100% the best you can finish with is 86\.46%/);
+  // 173 points needed: the label says the final is not worth that many.
+  assert.equal(await text('#fg-need-pts'), '173');
+  assert.equal(await text('#fg-need-pts-l'), 'Points needed, but the final is worth only 150');
+  // Thousands separators in points: 0.8 x (1,200 + 300) - 1,000 = 200 of 300 = 66.67%.
+  await page.fill('#fg-earned', '1,000');
+  await page.fill('#fg-possible', '1,200');
+  await page.fill('#fg-final-pts', '300');
+  await page.fill('#fg-target', '80');
+  assert.equal(await text('#fg-need'), '66.67%');
+  assert.equal(await text('#fg-need-pts'), '200');
+  await page.fill('#fg-earned', '412');
+  await page.fill('#fg-possible', '500');
+  await page.fill('#fg-final-pts', '150');
+  await page.fill('#fg-target', '90');
   // 87 of 100, 60-point final, target 83%: 0.83 x 160 - 87 = 45.8 points = 76.33…% -> 76.34%.
   await page.fill('#fg-earned', '87');
   await page.fill('#fg-possible', '100');
@@ -154,4 +194,13 @@ module.exports = async ({ page, open, assert }) => {
   // 0.85 x 160 - 87 = 49 points = 81.666…% -> 81.67%.
   await page.waitForFunction(() => document.querySelector('#fg-status').textContent === 'You need at least 81.67% on the final, which is 49 of 60 points, to finish with 85%.', null, { timeout: 4000 });
   assert.equal(await page.evaluate(() => window.__fgChanges), 1);
+
+  // At phone width the letter table (points column, +/- grades, a marked
+  // target row) fits without a horizontal scroll bar.
+  await page.fill('#fg-target', '93');
+  await page.check('#fg-pm');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.locator('#fg-table tr.fg-target th').textContent(), 'A (your target)');
+  const wrap = await page.$eval('#fg-table', t => { const w = t.parentElement; return { scroll: w.scrollWidth, client: w.clientWidth }; });
+  assert.ok(wrap.scroll <= wrap.client + 1, JSON.stringify(wrap));
 };

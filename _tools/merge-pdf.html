@@ -1,0 +1,1271 @@
+---
+title: Merge PDF Files and Organize Pages
+description: Combine PDF files into one in your browser. Reorder, rotate and delete pages, extract or split pages, and unlock protected PDFs. Nothing is uploaded.
+category: Image & PDF
+keywords: [merge pdf, combine pdf, join pdf files, merge pdf online free, reorder pdf pages, rotate pdf pages, split pdf, extract pdf pages]
+howto: |
+  ## How to merge PDF files
+
+  Press **Choose PDF files** or drop PDFs on the page. You can add more at
+  any time. Every page appears as a thumbnail, numbered in the order it will
+  have in the new file.
+
+  - **Reorder files:** use the arrows in the file list, or **Sort by name**.
+    Moving a file keeps all of its pages together.
+  - **Reorder pages:** drag a thumbnail with the mouse, or use the arrow
+    buttons under it, which also work with a keyboard and on touch screens.
+  - **Rotate or remove pages:** use the buttons on each page, or tick several
+    pages and use **Rotate** and **Remove** above the grid. **Undo** reverses
+    the last change.
+  - **Save:** **Merge into one PDF** saves every page in the order shown.
+    **Save selected pages** saves only the ticked pages as a new PDF.
+
+  ## Splitting a PDF
+
+  To split instead of merging, choose how under **Split**: one PDF per page,
+  a PDF for every few pages, or one PDF per original file with the pages you
+  kept. The PDFs are saved together in a ZIP file. To pull out a few pages,
+  tick them and press **Save selected pages**.
+
+  ## What is kept
+
+  Pages are copied as they are, not redrawn, so text stays selectable and
+  searchable, pictures keep their quality and links inside a page keep
+  working. Each page keeps its size, so A4, Letter and landscape pages can
+  sit in one document. Rotating sets the page's rotation value (the /Rotate
+  entry of ISO 32000), which every PDF reader honours, so nothing is
+  re-rendered and the file does not grow.
+
+  Some things belong to the whole document rather than to a page, and are
+  not carried over: bookmarks (the outline), fillable form fields, which
+  keep their current look but stop being editable, digital signatures, which
+  are no longer valid once the file changes, and attachments.
+
+  ## Password-protected PDFs
+
+  Many PDFs are encrypted. A file that opens without a password but blocks
+  editing or printing has only an owner password, and is unlocked and merged
+  directly. A file that asks for a password to open shows a password box;
+  enter the password you would use to open it. The merged PDF is saved
+  without encryption, so protect it again if it needs protecting. RC4 and
+  AES encryption of the PDF standard (40 to 256 bits) are supported;
+  certificate-based encryption is not.
+
+  ## Large files
+
+  Thumbnails are drawn only when they scroll into view, and the new PDF is
+  assembled in a background worker, so the page stays responsive with
+  hundreds of pages. Everything is held in your device's memory, so very
+  large jobs, over about 1 GB in total, are best done on a computer.
+faq:
+  - q: Are my PDFs uploaded to a server?
+    a: No. The files are read, previewed and merged by JavaScript in this page, on your own device. Nothing is sent over the network, so you can merge confidential documents safely.
+  - q: Is there a limit on the number of files or pages?
+    a: There is no fixed limit. Everything happens in your device's memory, so hundreds of files or thousands of pages work on a computer, while a phone may run out of memory sooner.
+  - q: Why did the merged PDF lose its bookmarks or form fields?
+    a: Bookmarks and form fields belong to the document, not to its pages, and this tool copies pages. The page content, links and look are kept, but the outline is not, and form fields become plain content. Fill in forms before you merge them.
+  - q: Can I merge a password-protected PDF?
+    a: Yes. PDFs that only restrict editing or printing are unlocked automatically. For a PDF that needs a password to open, type that password in the box next to the file. The merged file is not password-protected.
+  - q: Does merging reduce quality?
+    a: No. Pages are copied without being re-rendered or recompressed, so text, vector graphics and images stay exactly as they were.
+---
+<style>
+.mpdf-drop { position: relative; margin: 0 0 16px; padding: 24px 16px; text-align: center; background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px; transition: border-color 0.15s ease, background-color 0.15s ease; }
+.mpdf.is-empty .mpdf-drop { padding: 64px 16px; }
+.mpdf-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.mpdf-drop p { margin: 10px 0 0; }
+.mpdf-drop .hint { margin-top: 4px; }
+.mpdf-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 24px 0 10px; font-size: 1.1rem; }
+.mpdf-h small { color: var(--muted); font-size: 14px; font-weight: 400; }
+.mpdf-files { margin: 0 0 12px; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 10px; }
+.mpdf-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.mpdf-file:first-child { border-top: 0; }
+.mpdf-chip { flex: none; width: 14px; height: 14px; border-radius: 4px; }
+.mpdf-file-main { flex: 1 1 200px; min-width: 0; }
+.mpdf-file-name { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.mpdf-file-meta { color: var(--muted); font-size: 13px; }
+.mpdf-file-meta.is-error { color: var(--danger); }
+.mpdf-file-btns { display: flex; gap: 6px; }
+.mpdf-file-btns .btn { min-width: 36px; padding: 0 8px; }
+.mpdf-unlock { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; flex: 1 1 100%; }
+.mpdf-unlock .field { flex: 1 1 200px; max-width: 320px; margin: 0; }
+.mpdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.mpdf-toolbar .mpdf-selinfo { margin-right: auto; color: var(--muted); font-size: 14px; }
+.mpdf-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin: 0 0 16px; padding: 0; list-style: none; }
+.mpdf-page { position: relative; min-width: 0; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; -webkit-user-select: none; user-select: none; }
+.mpdf-page.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.mpdf-page.is-dragging { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); z-index: 1; opacity: 0.85; }
+.mpdf.is-sorting, .mpdf.is-sorting * { cursor: grabbing !important; }
+.mpdf-thumb { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; overflow: hidden; background: var(--surface-2); border-radius: 6px; cursor: grab; }
+.mpdf-thumb img { display: block; max-width: 88%; max-height: 88%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.3); transition: transform 0.2s ease; pointer-events: none; }
+.mpdf-thumb img:not([src]) { width: 62%; height: 84%; }
+.mpdf-thumb .mpdf-wait { position: absolute; color: var(--muted); font-size: 12px; }
+.mpdf-num { position: absolute; bottom: 6px; left: 6px; min-width: 24px; height: 24px; padding: 0 7px; background: var(--accent); color: var(--accent-text); border-radius: 12px; font-size: 13px; font-weight: 700; line-height: 24px; text-align: center; }
+.mpdf-sel { position: absolute; top: 4px; left: 4px; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.mpdf-sel input { margin: 0; cursor: pointer; }
+.mpdf-del { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 50%; cursor: pointer; }
+.mpdf-del:hover { color: var(--danger); border-color: var(--danger); }
+.mpdf-del:focus-visible, .mpdf-tools .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mpdf-cap { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.mpdf-cap span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mpdf-cap .mpdf-chip { width: 10px; height: 10px; border-radius: 3px; }
+.mpdf-tools { display: flex; gap: 4px; margin-top: 6px; }
+.mpdf-tools .btn { flex: 1 1 0; min-width: 0; padding: 0; }
+.mpdf-save { padding: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+.mpdf-save .field { max-width: 420px; }
+.mpdf-save .actions { margin-bottom: 12px; }
+.mpdf-split { align-items: flex-end; margin: 0; }
+.mpdf-split > .field { flex: 0 1 260px; }
+.mpdf-split > .field.mpdf-every { flex: 0 1 120px; }
+.mpdf-progress { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; }
+.mpdf-progress progress { flex: 1 1 auto; height: 8px; accent-color: var(--accent); }
+@media (max-width: 480px) {
+  .mpdf-pages { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .mpdf-page { padding: 6px; }
+  .mpdf-tools .btn { min-height: 34px; }
+}
+</style>
+
+<div class="mpdf is-empty" id="mpdf">
+  <div class="mpdf-drop" id="mpdf-drop">
+    <input type="file" id="mpdf-file" class="visually-hidden" accept="application/pdf,.pdf" multiple tabindex="-1" aria-label="Add PDF files">
+    <button class="btn" type="button" id="mpdf-choose">Choose PDF files</button>
+    <p>or drop them anywhere on this page</p>
+    <p class="hint">Add as many as you like. Nothing is uploaded.</p>
+  </div>
+  <p class="msg error" id="mpdf-error" role="alert"></p>
+  <p class="msg ok" id="mpdf-status" aria-live="polite"></p>
+  <div class="mpdf-progress" id="mpdf-progress" hidden><progress id="mpdf-bar" max="100" value="0" aria-label="Progress"></progress><span id="mpdf-pct" class="hint">0%</span></div>
+
+  <div id="mpdf-work" hidden>
+    <h2 class="mpdf-h">Files <small id="mpdf-files-info"></small></h2>
+    <ol class="mpdf-files" id="mpdf-files" aria-label="Files in merge order"></ol>
+    <div class="actions">
+      <button class="btn secondary small" type="button" id="mpdf-sort">Sort by name</button>
+      <button class="btn secondary small" type="button" id="mpdf-add">Add more PDFs</button>
+      <button class="btn secondary small" type="button" id="mpdf-clear">Remove all</button>
+    </div>
+
+    <h2 class="mpdf-h">Pages <small id="mpdf-pages-info"></small></h2>
+    <div class="mpdf-toolbar">
+      <span class="mpdf-selinfo" id="mpdf-selinfo" aria-live="polite">No pages selected</span>
+      <button class="btn secondary small" type="button" id="mpdf-selall">Select all</button>
+      <button class="btn secondary small" type="button" id="mpdf-selnone">Select none</button>
+      <button class="btn secondary small" type="button" id="mpdf-rotl" aria-label="Rotate selected pages left">↺ Rotate</button>
+      <button class="btn secondary small" type="button" id="mpdf-rotr" aria-label="Rotate selected pages right">↻ Rotate</button>
+      <button class="btn secondary small" type="button" id="mpdf-remove">Remove</button>
+      <button class="btn secondary small" type="button" id="mpdf-reverse">Reverse order</button>
+      <button class="btn secondary small" type="button" id="mpdf-undo">Undo</button>
+    </div>
+    <ol class="mpdf-pages" id="mpdf-pages" aria-label="Pages in order"></ol>
+
+    <div class="mpdf-save">
+      <div class="field">
+        <label for="mpdf-name">File name</label>
+        <input type="text" id="mpdf-name" value="merged.pdf" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="actions">
+        <button class="btn" type="button" id="mpdf-merge">Merge into one PDF</button>
+        <button class="btn secondary" type="button" id="mpdf-extract">Save selected pages</button>
+      </div>
+      <div class="row mpdf-split">
+        <div class="field">
+          <label for="mpdf-split-mode">Split</label>
+          <select id="mpdf-split-mode">
+            <option value="each">One PDF per page</option>
+            <option value="every">A PDF every few pages</option>
+            <option value="files">One PDF per original file</option>
+          </select>
+        </div>
+        <div class="field mpdf-every">
+          <label for="mpdf-every">Pages each</label>
+          <input type="number" id="mpdf-every" min="1" max="9999" step="1" value="2" inputmode="numeric">
+        </div>
+        <button class="btn secondary" type="button" id="mpdf-split">Split to ZIP</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ '/assets/js/zip.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+  var PDFJS_URL = new URL({{ '/assets/vendor/pdfjs/pdf.min.js' | relative_url | jsonify }}, location.href).href;
+  var PDFJS_WORKER = new URL({{ '/assets/vendor/pdfjs/pdf.worker.min.js' | relative_url | jsonify }}, location.href).href;
+  var PDFJS_WASM = new URL({{ '/assets/vendor/pdfjs/wasm/' | relative_url | jsonify }}, location.href).href;
+  var PDFLIB_URL = new URL({{ '/assets/vendor/pdf-lib/pdf-lib.min.js' | relative_url | jsonify }}, location.href).href;
+  {% raw %}
+  var $ = TT.$;
+  var root = $('#mpdf'), fileInput = $('#mpdf-file'), dropZone = $('#mpdf-drop');
+  var errBox = $('#mpdf-error'), statusBox = $('#mpdf-status'), work = $('#mpdf-work');
+  var fileList = $('#mpdf-files'), pageList = $('#mpdf-pages'), nameInput = $('#mpdf-name');
+  var progressBox = $('#mpdf-progress'), bar = $('#mpdf-bar'), pct = $('#mpdf-pct');
+  var COLORS = ['#2f80ed', '#e2711d', '#27ae60', '#c0392b', '#8e44ad', '#16a085', '#d4a017', '#e84393', '#5d6d7e', '#6c5ce7'];
+  var MAX_FILE = 1024 * 1024 * 1024;
+
+  var files = [];     // { id, name, size, bytes, color, state: loading|ready|locked|error, pdf, pages, password, message, encrypted }
+  var pages = [];     // { id, fileId, index, rot, selected, el }
+  var history = [];
+  var nextId = 1, busy = false, drag = null, nameEdited = false;
+
+  var ICON = {
+    left: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+    right: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+    up: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>',
+    down: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+    rotl: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>',
+    rotr: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>',
+    close: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+  };
+
+  // ---------- helpers ----------
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
+    return (n / 1048576).toFixed(n < 10485760 ? 2 : 1) + ' MB';
+  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  function setError(t) { errBox.textContent = t || ''; }
+  function say(t) { statusBox.textContent = t || ''; }
+  function fileById(id) { for (var i = 0; i < files.length; i++) if (files[i].id === id) return files[i]; return null; }
+  function pageIndex(id) { for (var i = 0; i < pages.length; i++) if (pages[i].id === id) return i; return -1; }
+  function baseName(n) { return String(n || '').replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'document'; }
+  function outName() {
+    var n = nameInput.value.trim().replace(/[\\/:*?"<>|]+/g, '-');
+    if (!n) n = 'merged.pdf';
+    if (!/\.pdf$/i.test(n)) n += '.pdf';
+    return n;
+  }
+  function pageLabel(p) {
+    var f = fileById(p.fileId);
+    return (f ? f.name : 'file') + ', page ' + (p.index + 1);
+  }
+
+  // ---------- pdf.js (thumbnails), loaded on first use ----------
+  var pdfjs = null, pdfjsWorker = null, pdfjsLoading = null;
+  function loadPdfjs() {
+    if (pdfjsLoading) return pdfjsLoading;
+    pdfjsLoading = import(PDFJS_URL).then(function (lib) {
+      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      pdfjs = lib;
+      pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
+      return lib;
+    }, function (e) {
+      pdfjsLoading = null;
+      throw new Error('The PDF reader could not load. Check your connection and try again.');
+    });
+    return pdfjsLoading;
+  }
+  function openPdf(f, password) {
+    return loadPdfjs().then(function (lib) {
+      var task = lib.getDocument({ data: new Uint8Array(f.bytes.slice(0)), password: password || undefined, worker: pdfjsWorker, verbosity: 0, wasmUrl: PDFJS_WASM, isOffscreenCanvasSupported: true });
+      return task.promise;
+    });
+  }
+
+  // ---------- pdf-lib in a worker (merging), with the decryption it needs ----------
+  // Standard security handler (ISO 32000-1 7.6.3, ISO 32000-2 7.6.4) for pdf-lib: opens an encrypted PDF
+  // with its user or owner password (or none, for "restricted" files) and returns an unencrypted PDFDocument.
+  function pdfUnlocker(PDFLib) {
+    'use strict';
+    var subtle = (self.crypto || crypto).subtle;
+    var PAD = new Uint8Array([0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
+      0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A]);
+
+    function concat() {
+      var n = 0, i, a = arguments;
+      for (i = 0; i < a.length; i++) n += a[i].length;
+      var out = new Uint8Array(n), o = 0;
+      for (i = 0; i < a.length; i++) { out.set(a[i], o); o += a[i].length; }
+      return out;
+    }
+    function equal(a, b, n) {
+      if (a.length < n || b.length < n) return false;
+      for (var i = 0; i < n; i++) if (a[i] !== b[i]) return false;
+      return true;
+    }
+
+    // ---- MD5 (RFC 1321) ----
+    var K = new Int32Array(64), S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+    for (var ki = 0; ki < 64; ki++) K[ki] = Math.floor(Math.abs(Math.sin(ki + 1)) * 4294967296) | 0;
+    function md5(data) {
+      var n = data.length, padded = new Uint8Array(((n + 8) >> 6 << 6) + 64);
+      padded.set(data);
+      padded[n] = 0x80;
+      var bits = n * 8, dv = new DataView(padded.buffer);
+      dv.setUint32(padded.length - 8, bits >>> 0, true);
+      dv.setUint32(padded.length - 4, Math.floor(bits / 4294967296), true);
+      var a0 = 0x67452301, b0 = 0xEFCDAB89 | 0, c0 = 0x98BADCFE | 0, d0 = 0x10325476, M = new Int32Array(16);
+      for (var off = 0; off < padded.length; off += 64) {
+        for (var j = 0; j < 16; j++) M[j] = dv.getInt32(off + j * 4, true);
+        var A = a0, B = b0, C = c0, D = d0;
+        for (var i = 0; i < 64; i++) {
+          var F, g, r = i >> 4;
+          if (r === 0) { F = (B & C) | (~B & D); g = i; }
+          else if (r === 1) { F = (D & B) | (~D & C); g = (5 * i + 1) & 15; }
+          else if (r === 2) { F = B ^ C ^ D; g = (3 * i + 5) & 15; }
+          else { F = C ^ (B | ~D); g = (7 * i) & 15; }
+          var t = D; D = C; C = B;
+          var x = (A + F + K[i] + M[g]) | 0, s = S[(r << 2) | (i & 3)];
+          B = (B + ((x << s) | (x >>> (32 - s)))) | 0;
+          A = t;
+        }
+        a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+      }
+      var out = new Uint8Array(16), ov = new DataView(out.buffer);
+      ov.setInt32(0, a0, true); ov.setInt32(4, b0, true); ov.setInt32(8, c0, true); ov.setInt32(12, d0, true);
+      return out;
+    }
+
+    // ---- RC4 ----
+    function rc4(key, data) {
+      var s = new Uint8Array(256), i, j = 0, t;
+      for (i = 0; i < 256; i++) s[i] = i;
+      for (i = 0; i < 256; i++) { j = (j + s[i] + key[i % key.length]) & 255; t = s[i]; s[i] = s[j]; s[j] = t; }
+      var out = new Uint8Array(data.length);
+      i = 0; j = 0;
+      for (var k = 0; k < data.length; k++) {
+        i = (i + 1) & 255; j = (j + s[i]) & 255;
+        t = s[i]; s[i] = s[j]; s[j] = t;
+        out[k] = data[k] ^ s[(s[i] + s[j]) & 255];
+      }
+      return out;
+    }
+
+    // ---- AES-CBC and SHA-2 through Web Crypto ----
+    function aesKey(raw, usage) { return subtle.importKey('raw', raw, { name: 'AES-CBC' }, false, [usage]); }
+    async function aesEncryptNoPad(key, iv, data) {
+      var k = await aesKey(key, 'encrypt');
+      var out = new Uint8Array(await subtle.encrypt({ name: 'AES-CBC', iv: iv }, k, data));
+      return out.subarray(0, data.length);   // drop the padding block Web Crypto always adds
+    }
+    // Decrypts data whose length is a multiple of 16 without expecting padding: a crafted last block
+    // decrypts to a full block of padding, which Web Crypto then removes.
+    async function aesDecryptNoPad(key, iv, data) {
+      if (!data.length || data.length % 16) throw new Error('bad AES data');
+      var last = data.subarray(data.length - 16);
+      var pad = new Uint8Array(16).fill(16);
+      var ek = await aesKey(key, 'encrypt'), dk = await aesKey(key, 'decrypt');
+      var extra = new Uint8Array(await subtle.encrypt({ name: 'AES-CBC', iv: last }, ek, pad)).subarray(0, 16);
+      return new Uint8Array(await subtle.decrypt({ name: 'AES-CBC', iv: iv }, dk, concat(data, extra)));
+    }
+    async function aesDecrypt(key, data) {
+      if (data.length < 16) return new Uint8Array(0);
+      var iv = data.subarray(0, 16), body = data.subarray(16);
+      if (!body.length) return new Uint8Array(0);
+      if (body.length % 16) body = body.subarray(0, body.length - (body.length % 16));
+      try {
+        var dk = await aesKey(key, 'decrypt');
+        return new Uint8Array(await subtle.decrypt({ name: 'AES-CBC', iv: iv }, dk, body));
+      } catch (e) {
+        // Bad padding: keep the bytes as they decrypt.
+        return aesDecryptNoPad(key, iv, body);
+      }
+    }
+    async function sha(name, data) { return new Uint8Array(await subtle.digest(name, data)); }
+
+    // ---- Reading the encryption dictionary ----
+    function num(v) { return v && typeof v.asNumber === 'function' ? v.asNumber() : (v && typeof v.value === 'function' ? Number(v.value()) : NaN); }
+    function bytesOf(v) {
+      if (!v) return new Uint8Array(0);
+      if (v instanceof PDFLib.PDFString || v instanceof PDFLib.PDFHexString) return v.asBytes();
+      return new Uint8Array(0);
+    }
+    function nameOf(v) { return v instanceof PDFLib.PDFName ? v.decodeText ? v.decodeText() : v.asString().slice(1) : ''; }
+
+    function latin1(s) {
+      var out = new Uint8Array(s.length);
+      for (var i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xFF;
+      return out;
+    }
+    function padPassword(pw) {
+      var p = latin1(pw || '').subarray(0, 32);
+      return concat(p, PAD.subarray(0, 32 - p.length));
+    }
+
+    // Algorithm 2: the file key from a (padded) user password, R2-R4.
+    function legacyKey(e, pw32) {
+      var P = new Uint8Array(4);
+      new DataView(P.buffer).setInt32(0, e.P, true);
+      var input = concat(pw32, e.O.subarray(0, 32), P, e.id0);
+      if (e.R >= 4 && !e.encryptMetadata) input = concat(input, new Uint8Array([255, 255, 255, 255]));
+      var h = md5(input), n = e.length;
+      if (e.R >= 3) for (var i = 0; i < 50; i++) h = md5(h.subarray(0, n));
+      return h.subarray(0, n);
+    }
+    // Algorithms 4 and 5: is this the user password?
+    function checkUser(e, key) {
+      if (e.R === 2) return equal(rc4(key, PAD), e.U, 32);
+      var x = rc4(key, md5(concat(PAD, e.id0)));
+      for (var i = 1; i <= 19; i++) {
+        var k2 = new Uint8Array(key.length);
+        for (var j = 0; j < key.length; j++) k2[j] = key[j] ^ i;
+        x = rc4(k2, x);
+      }
+      return equal(x, e.U, 16);
+    }
+    // Algorithm 7: the user password recovered from the owner password.
+    function userFromOwner(e, ownerPw) {
+      var h = md5(padPassword(ownerPw)), n = e.length;
+      if (e.R >= 3) for (var i = 0; i < 50; i++) h = md5(h.subarray(0, n));
+      var key = h.subarray(0, n), x = e.O.subarray(0, 32);
+      if (e.R === 2) return rc4(key, x);
+      for (var r = 19; r >= 0; r--) {
+        var k2 = new Uint8Array(n);
+        for (var j = 0; j < n; j++) k2[j] = key[j] ^ r;
+        x = rc4(k2, x);
+      }
+      return x;
+    }
+    // Algorithm 2.B (R6) and the plain SHA-256 of R5.
+    async function hash6(pw, salt, udata, R) {
+      var k = await sha('SHA-256', concat(pw, salt, udata));
+      if (R === 5) return k;
+      for (var round = 0; ; round++) {
+        var seq = concat(pw, k, udata), k1 = new Uint8Array(seq.length * 64);
+        for (var i = 0; i < 64; i++) k1.set(seq, i * seq.length);
+        var e = await aesEncryptNoPad(k.subarray(0, 16), k.subarray(16, 32), k1);
+        var sum = 0;
+        for (var b = 0; b < 16; b++) sum += e[b];
+        k = await sha(['SHA-256', 'SHA-384', 'SHA-512'][sum % 3], e);
+        if (round >= 63 && e[e.length - 1] <= round - 31) break;
+      }
+      return k.subarray(0, 32);
+    }
+    async function aes256Key(e, password) {
+      var pw = new TextEncoder().encode((password || '').normalize('NFKC')).subarray(0, 127);
+      var U = e.U, O = e.O;
+      var h = await hash6(pw, U.subarray(32, 40), new Uint8Array(0), e.R);
+      if (equal(h, U, 32)) return aesDecryptNoPad(await hash6(pw, U.subarray(40, 48), new Uint8Array(0), e.R), new Uint8Array(16), e.UE.subarray(0, 32));
+      h = await hash6(pw, O.subarray(32, 40), U.subarray(0, 48), e.R);
+      if (equal(h, O, 32)) return aesDecryptNoPad(await hash6(pw, O.subarray(40, 48), U.subarray(0, 48), e.R), new Uint8Array(16), e.OE.subarray(0, 32));
+      return null;
+    }
+
+    function readEncrypt(context) {
+      var t = context.trailerInfo, enc = t.Encrypt && context.lookup(t.Encrypt);
+      if (!(enc instanceof PDFLib.PDFDict)) return null;
+      var get = function (k) { return enc.get(PDFLib.PDFName.of(k)); };
+      var filter = nameOf(get('Filter'));
+      if (filter && filter !== 'Standard') { var err = new Error('UNSUPPORTED_SECURITY'); err.code = 'UNSUPPORTED'; err.detail = filter; throw err; }
+      var e = {
+        V: num(get('V')) || 0, R: num(get('R')) || 2, P: num(get('P')) | 0,
+        O: bytesOf(get('O')), U: bytesOf(get('U')), OE: bytesOf(get('OE')), UE: bytesOf(get('UE')),
+        length: (num(get('Length')) || 40) / 8, encryptMetadata: true, stm: 'V2', str: 'V2', ref: t.Encrypt
+      };
+      var em = get('EncryptMetadata');
+      if (em && em.toString() === 'false') e.encryptMetadata = false;
+      var ids = t.ID && context.lookup(t.ID);
+      e.id0 = ids instanceof PDFLib.PDFArray && ids.size() ? bytesOf(ids.get(0)) : new Uint8Array(0);
+      if (e.V === 4 || e.V === 5) {
+        var cf = get('CF'), stmF = nameOf(get('StmF')) || 'Identity', strF = nameOf(get('StrF')) || 'Identity';
+        cf = cf && context.lookup(cf);
+        var method = function (name) {
+          if (name === 'Identity') return 'None';
+          var f = cf instanceof PDFLib.PDFDict ? cf.lookup(PDFLib.PDFName.of(name)) : null;
+          var m = f instanceof PDFLib.PDFDict ? nameOf(f.get(PDFLib.PDFName.of('CFM'))) : 'None';
+          if (f instanceof PDFLib.PDFDict && e.V === 4) {
+            var len = num(f.get(PDFLib.PDFName.of('Length')));
+            if (len) e.length = len > 40 ? len / 8 : len;  // some writers give bytes, some bits
+          }
+          return m;
+        };
+        e.stm = method(stmF);
+        e.str = method(strF);
+      }
+      if (e.V < 4) e.length = e.V === 1 ? 5 : Math.min(16, Math.max(5, e.length));
+      if (e.V === 4) e.length = 16;
+      return e;
+    }
+
+    async function fileKey(e, password) {
+      if (e.R >= 5) return aes256Key(e, password);
+      var tries = [padPassword(password)];
+      for (var i = 0; i < tries.length; i++) {
+        var key = legacyKey(e, tries[i]);
+        if (checkUser(e, key)) return key;
+      }
+      var fromOwner = userFromOwner(e, password);
+      var k2 = legacyKey(e, fromOwner);
+      return checkUser(e, k2) ? k2 : null;
+    }
+
+    function objectKey(e, key, ref, aes) {
+      if (e.R >= 5) return key;
+      var n = ref.objectNumber, g = ref.generationNumber;
+      var extra = new Uint8Array([n & 255, (n >> 8) & 255, (n >> 16) & 255, g & 255, (g >> 8) & 255]);
+      var h = md5(aes ? concat(key, extra, new Uint8Array([0x73, 0x41, 0x6C, 0x54])) : concat(key, extra));
+      return h.subarray(0, Math.min(key.length + 5, 16));
+    }
+    async function decryptData(e, key, ref, data, method) {
+      if (method === 'None') return data;
+      if (method === 'AESV2' || method === 'AESV3') return aesDecrypt(objectKey(e, key, ref, true), data);
+      return rc4(objectKey(e, key, ref, false), data);
+    }
+
+    // Parses a document with pdf-lib's parser, calling onObjStm(rawStream, ref, parser) for each object stream.
+    var hookState = null;
+    var patched = false;
+    function patch() {
+      if (patched) return;
+      patched = true;
+      var P = PDFLib.PDFParser.prototype, origHeader = P.parseIndirectObjectHeader;
+      P.parseIndirectObjectHeader = function () {
+        var ref = origHeader.apply(this, arguments);
+        if (hookState) { hookState.ref = ref; hookState.parser = this; }
+        return ref;
+      };
+      var OS = PDFLib.PDFObjectStreamParser, origFor = OS.forStream;
+      OS.forStream = function (raw, wait) {
+        if (!hookState) return origFor.apply(this, arguments);
+        var st = hookState, ref = st.ref, parser = st.parser;
+        return {
+          parseIntoContext: async function () {
+            if (st.mode === 'skip') { parser.context.assign(ref, raw); return; }
+            raw.contents = await decryptData(st.e, st.key, ref, raw.contents, st.e.stm);
+            var real = origFor.call(OS, raw, wait), ctx = parser.context, origAssign = ctx.assign;
+            ctx.assign = function (r, o) { st.inner.add(r.tag); return origAssign.apply(this, arguments); };
+            try { await real.parseIntoContext(); } finally { ctx.assign = origAssign; }
+          }
+        };
+      };
+    }
+    async function parse(bytes, state) {
+      patch();
+      hookState = state;
+      try {
+        return await PDFLib.PDFParser.forBytesWithOptions(bytes, 400, false, false).parseDocument();
+      } finally { hookState = null; }
+    }
+
+    async function decryptValue(v, e, key, ref) {
+      if (v instanceof PDFLib.PDFString || v instanceof PDFLib.PDFHexString) {
+        var d = await decryptData(e, key, ref, v.asBytes(), e.str), hex = '';
+        for (var i = 0; i < d.length; i++) hex += (d[i] < 16 ? '0' : '') + d[i].toString(16);
+        return PDFLib.PDFHexString.of(hex);
+      }
+      if (v instanceof PDFLib.PDFDict) {
+        var entries = v.entries();
+        for (var k = 0; k < entries.length; k++) {
+          var nv = await decryptValue(entries[k][1], e, key, ref);
+          if (nv !== entries[k][1]) v.set(entries[k][0], nv);
+        }
+        return v;
+      }
+      if (v instanceof PDFLib.PDFArray) {
+        for (var a = 0; a < v.size(); a++) {
+          var el = v.get(a), nel = await decryptValue(el, e, key, ref);
+          if (nel !== el) v.set(a, nel);
+        }
+        return v;
+      }
+      return v;
+    }
+
+    // Returns { doc, encrypted } or throws an Error with .code 'PASSWORD' (wrong or missing) or 'UNSUPPORTED'.
+    async function open(bytes, password) {
+      var probe = await parse(bytes, { mode: 'skip' });
+      var e = readEncrypt(probe);
+      if (!e) return { doc: await PDFLib.PDFDocument.load(bytes, { updateMetadata: false }), encrypted: false };
+      if (!(e.R >= 2 && e.R <= 6)) { var u = new Error('UNSUPPORTED'); u.code = 'UNSUPPORTED'; u.detail = 'R' + e.R; throw u; }
+      var key = await fileKey(e, password || '');
+      if (!key) { var pe = new Error('PASSWORD'); pe.code = 'PASSWORD'; throw pe; }
+      var state = { mode: 'decrypt', e: e, key: key, inner: new Set() };
+      var context = await parse(bytes, state);
+      var encRef = context.trailerInfo.Encrypt;
+      var objects = context.enumerateIndirectObjects();
+      for (var i = 0; i < objects.length; i++) {
+        var ref = objects[i][0], obj = objects[i][1];
+        if (state.inner.has(ref.tag) || (encRef instanceof PDFLib.PDFRef && ref === encRef)) continue;
+        if (obj instanceof PDFLib.PDFRawStream) {
+          var type = obj.dict.get(PDFLib.PDFName.of('Type'));
+          var tname = nameOf(type);
+          if (tname === 'XRef') continue;
+          await decryptValue(obj.dict, e, key, ref);
+          if (!(tname === 'Metadata' && !e.encryptMetadata)) obj.contents = await decryptData(e, key, ref, obj.contents, e.stm);
+        } else {
+          await decryptValue(obj, e, key, ref);
+        }
+      }
+      context.trailerInfo.Encrypt = undefined;
+      return { doc: new PDFLib.PDFDocument(context, true, false), encrypted: true };
+    }
+    return { open: open, md5: md5, rc4: rc4 };
+  }
+
+  function workerMain(scope) {
+    var unlocker = null;
+    scope.onmessage = async function (e) {
+      var msg = e.data;
+      if (msg.type === 'init') {
+        try {
+          scope.importScripts(msg.lib);
+          unlocker = pdfUnlocker(scope.PDFLib);
+          scope.postMessage({ type: 'ready' });
+        } catch (err) { scope.postMessage({ type: 'fatal', message: String(err && err.message || err) }); }
+        return;
+      }
+      if (msg.type !== 'build') return;
+      var PDFLib = scope.PDFLib, id = msg.id;
+      try {
+        var docs = {}, total = 0, done = 0;
+        msg.jobs.forEach(function (j) { total += j.pages.length; });
+        for (var fi = 0; fi < msg.files.length; fi++) {
+          var f = msg.files[fi];
+          try {
+            docs[f.id] = (await unlocker.open(new Uint8Array(f.bytes), f.password || '')).doc;
+          } catch (err) {
+            scope.postMessage({ type: 'error', id: id, fileId: f.id, code: err && err.code || 'READ', message: String(err && err.message || err) });
+            return;
+          }
+          scope.postMessage({ type: 'progress', id: id, value: 0.3 * (fi + 1) / msg.files.length });
+        }
+        var outputs = [], transfer = [];
+        for (var ji = 0; ji < msg.jobs.length; ji++) {
+          var job = msg.jobs[ji], out = await PDFLib.PDFDocument.create(), byFile = {}, copied = {};
+          job.pages.forEach(function (p) { (byFile[p.f] = byFile[p.f] || []).push(p.i); });
+          for (var fid in byFile) {
+            var list = byFile[fid], got = await out.copyPages(docs[fid], list), map = {};
+            list.forEach(function (idx, k) { map[idx] = got[k]; });
+            copied[fid] = map;
+          }
+          for (var pi = 0; pi < job.pages.length; pi++) {
+            var p = job.pages[pi], page = copied[p.f][p.i];
+            var angle = (((page.getRotation().angle || 0) + p.rot) % 360 + 360) % 360;
+            page.setRotation(PDFLib.degrees(angle));
+            out.addPage(page);
+            done++;
+          }
+          out.setProducer('TripleP Tools (pdf-lib)');
+          out.setCreator('TripleP Tools Merge PDF');
+          var bytes = await out.save({ useObjectStreams: true, objectsPerTick: 200 });
+          outputs.push({ name: job.name, bytes: bytes.buffer, pages: job.pages.length });
+          transfer.push(bytes.buffer);
+          scope.postMessage({ type: 'progress', id: id, value: 0.3 + 0.7 * done / Math.max(1, total) });
+        }
+        scope.postMessage({ type: 'done', id: id, outputs: outputs }, transfer);
+      } catch (err) {
+        scope.postMessage({ type: 'error', id: id, code: 'BUILD', message: String(err && err.message || err) });
+      }
+    };
+  }
+
+  var builder = null, builderReady = null, reqId = 0, pending = {};
+  function getBuilder() {
+    if (builderReady) return builderReady;
+    builderReady = new Promise(function (resolve, reject) {
+      var src = pdfUnlocker.toString() + '\n(' + workerMain.toString() + ')(self);';
+      var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      try { builder = new Worker(url); } catch (e) { builderReady = null; reject(new Error('This browser cannot run the PDF builder.')); return; }
+      builder.onmessage = function (e) {
+        var m = e.data;
+        if (m.type === 'ready') { URL.revokeObjectURL(url); resolve(builder); return; }
+        if (m.type === 'fatal') { builderReady = null; builder.terminate(); reject(new Error('The PDF builder could not load. Check your connection and try again.')); return; }
+        var p = pending[m.id];
+        if (!p) return;
+        if (m.type === 'progress') p.progress(m.value);
+        else { delete pending[m.id]; if (m.type === 'done') p.resolve(m); else p.reject(m); }
+      };
+      builder.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        Object.keys(pending).forEach(function (k) { pending[k].reject({ code: 'CRASH', message: 'The PDF builder stopped, probably out of memory.' }); delete pending[k]; });
+        builderReady = null;
+        try { builder.terminate(); } catch (err) { /* already gone */ }
+        reject(new Error('The PDF builder could not start.'));
+      };
+      builder.postMessage({ type: 'init', lib: PDFLIB_URL });
+    });
+    return builderReady;
+  }
+  function build(jobs, onProgress) {
+    var used = {};
+    jobs.forEach(function (j) { j.pages.forEach(function (p) { used[p.f] = true; }); });
+    var list = files.filter(function (f) { return used[f.id]; });
+    return getBuilder().then(function (w) {
+      return new Promise(function (resolve, reject) {
+        var id = ++reqId;
+        pending[id] = { resolve: resolve, reject: reject, progress: onProgress };
+        var payload = list.map(function (f) { return { id: f.id, bytes: f.bytes.slice(0), password: f.password || '' }; });
+        w.postMessage({ type: 'build', id: id, files: payload, jobs: jobs }, payload.map(function (f) { return f.bytes; }));
+      });
+    });
+  }
+
+  // ---------- adding files ----------
+  function isPdf(bytes) {
+    var head = new Uint8Array(bytes, 0, Math.min(1024, bytes.byteLength));
+    for (var i = 0; i + 4 < head.length; i++) {
+      if (head[i] === 0x25 && head[i + 1] === 0x50 && head[i + 2] === 0x44 && head[i + 3] === 0x46 && head[i + 4] === 0x2D) return true;
+    }
+    return false;
+  }
+  function addFiles(list) {
+    var incoming = Array.prototype.slice.call(list || []);
+    if (!incoming.length || busy) return Promise.resolve();
+    setError('');
+    var bad = [];
+    var chain = Promise.resolve();
+    incoming.forEach(function (file) {
+      chain = chain.then(function () {
+        if (file.size > MAX_FILE) { bad.push(file.name + ' is larger than 1 GB.'); return; }
+        return file.arrayBuffer().then(function (buf) {
+          if (!buf.byteLength) { bad.push(file.name + ' is empty.'); return; }
+          if (!isPdf(buf)) { bad.push(file.name + ' is not a PDF file.'); return; }
+          var f = { id: nextId++, name: file.name, size: file.size, bytes: buf, color: COLORS[files.length % COLORS.length], state: 'loading', password: '' };
+          files.push(f);
+          if (files.length === 1 && !nameEdited) nameInput.value = baseName(f.name) + '-merged.pdf';
+          renderFiles();
+          return loadFile(f).then(function () {
+            // A file that cannot be used is reported and left out of the list.
+            if (f.state === 'error') {
+              bad.push(f.name + ' ' + f.message);
+              files = files.filter(function (x) { return x !== f; });
+              if (f.pdf) f.pdf.destroy();
+            }
+          });
+        }, function () { bad.push(file.name + ' could not be read.'); });
+      });
+    });
+    return chain.then(function () {
+      if (bad.length) setError(bad.join(' '));
+      if (files.length && !nameEdited) nameInput.value = files.length === 1 ? baseName(files[0].name) + '-merged.pdf' : 'merged.pdf';
+      renderAll();
+      var ready = files.filter(function (f) { return f.state === 'ready'; });
+      if (ready.length) say(plural(files.length, 'file', 'files') + ', ' + plural(pages.length, 'page', 'pages') + ' in total.');
+    });
+  }
+
+  function loadFile(f, password) {
+    f.state = 'loading';
+    renderFiles();
+    return openPdf(f, password).then(function (doc) {
+      f.pdf = doc;
+      f.pages = doc.numPages;
+      f.state = 'ready';
+      f.password = password || '';
+      f.message = '';
+      return doc.getMetadata().then(function (meta) {
+        f.encrypted = !!(meta && meta.info && meta.info.EncryptFilterName);
+        if (meta && meta.info && meta.info.EncryptFilterName && meta.info.EncryptFilterName !== 'Standard') {
+          f.state = 'error';
+          f.message = 'uses ' + meta.info.EncryptFilterName + ' (certificate) encryption, which this tool cannot remove.';
+          return;
+        }
+        if (!pages.some(function (p) { return p.fileId === f.id; })) {
+          for (var i = 0; i < f.pages; i++) pages.push({ id: nextId++, fileId: f.id, index: i, rot: 0, selected: false });
+        }
+      }, function () { /* metadata is optional */ });
+    }, function (err) {
+      if (err && err.name === 'PasswordException') {
+        f.state = 'locked';
+        f.message = password ? 'wrong password, try again' : 'enter the password that opens it';
+        return;
+      }
+      f.state = 'error';
+      f.message = err && /Invalid PDF|FormatError|Invalid XRef|InvalidPDF/i.test((err.name || '') + ' ' + (err.message || '')) ? 'is damaged or is not a valid PDF.' : 'could not be opened: ' + (err && err.message || err);
+    }).then(function () { renderAll(); });
+  }
+
+  // ---------- thumbnails ----------
+  var thumbQueue = [], thumbBusy = 0;
+  var observer = 'IntersectionObserver' in window ? new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      var id = Number(en.target.dataset.id), i = pageIndex(id);
+      observer.unobserve(en.target);
+      if (i >= 0) queueThumb(pages[i]);
+    });
+  }, { rootMargin: '300px 0px' }) : null;
+  function queueThumb(p) {
+    if (p.thumb || p.thumbQueued) return;
+    p.thumbQueued = true;
+    thumbQueue.push(p);
+    pumpThumbs();
+  }
+  function pumpThumbs() {
+    while (thumbBusy < 2 && thumbQueue.length) {
+      var p = thumbQueue.shift();
+      if (pageIndex(p.id) < 0) continue;
+      thumbBusy++;
+      drawThumb(p).catch(function () { /* leave the placeholder */ }).then(function () { thumbBusy--; pumpThumbs(); });
+    }
+  }
+  function drawThumb(p) {
+    var f = fileById(p.fileId);
+    if (!f || !f.pdf) return Promise.resolve();
+    return f.pdf.getPage(p.index + 1).then(function (page) {
+      var base = page.getViewport({ scale: 1 });
+      p.baseRot = page.rotate || 0;
+      var target = 190 * Math.min(2, window.devicePixelRatio || 1);
+      var vp = page.getViewport({ scale: Math.min(4, target / Math.max(base.width, base.height)) });
+      var canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(vp.width));
+      canvas.height = Math.max(1, Math.round(vp.height));
+      var ctx = canvas.getContext('2d', { alpha: false });
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      return page.render({ canvasContext: ctx, canvas: canvas, viewport: vp }).promise.then(function () {
+        page.cleanup();
+        return new Promise(function (resolve) { canvas.toBlob(resolve, 'image/jpeg', 0.82); });
+      }).then(function (blob) {
+        canvas.width = canvas.height = 0;
+        if (!blob) return;
+        p.thumb = URL.createObjectURL(blob);
+        if (p.el) {
+          var img = TT.$('img', p.el);
+          img.src = p.thumb;
+          var w = TT.$('.mpdf-wait', p.el);
+          if (w) w.remove();
+        }
+      });
+    });
+  }
+
+  // ---------- rendering ----------
+  function renderFiles() {
+    fileList.textContent = '';
+    files.forEach(function (f, i) {
+      var li = document.createElement('li');
+      li.className = 'mpdf-file';
+      li.dataset.id = f.id;
+      var chip = document.createElement('span');
+      chip.className = 'mpdf-chip';
+      chip.style.background = f.color;
+      var main = document.createElement('div');
+      main.className = 'mpdf-file-main';
+      var nm = document.createElement('div');
+      nm.className = 'mpdf-file-name';
+      nm.textContent = f.name;
+      nm.title = f.name;
+      var meta = document.createElement('div');
+      meta.className = 'mpdf-file-meta' + (f.state === 'error' ? ' is-error' : '');
+      var kept = pages.filter(function (p) { return p.fileId === f.id; }).length;
+      meta.textContent = f.state === 'loading' ? 'Reading\u2026' :
+        f.state === 'locked' ? 'Password protected: ' + f.message :
+        f.state === 'error' ? 'This file ' + f.message :
+        plural(f.pages, 'page', 'pages') + (kept !== f.pages ? ' (' + kept + ' kept)' : '') + ' \u00B7 ' + fmtBytes(f.size) + (f.encrypted ? ' \u00B7 unlocked' : '');
+      main.appendChild(nm);
+      main.appendChild(meta);
+      var btns = document.createElement('div');
+      btns.className = 'mpdf-file-btns';
+      btns.innerHTML = '<button type="button" class="btn secondary small mpdf-fup">' + ICON.up + '</button><button type="button" class="btn secondary small mpdf-fdown">' + ICON.down + '</button><button type="button" class="btn secondary small mpdf-fdel">' + ICON.close + '</button>';
+      TT.$('.mpdf-fup', btns).setAttribute('aria-label', 'Move ' + f.name + ' up');
+      TT.$('.mpdf-fdown', btns).setAttribute('aria-label', 'Move ' + f.name + ' down');
+      TT.$('.mpdf-fdel', btns).setAttribute('aria-label', 'Remove ' + f.name);
+      TT.$('.mpdf-fup', btns).disabled = busy || i === 0;
+      TT.$('.mpdf-fdown', btns).disabled = busy || i === files.length - 1;
+      TT.$('.mpdf-fdel', btns).disabled = busy;
+      li.appendChild(chip);
+      li.appendChild(main);
+      li.appendChild(btns);
+      if (f.state === 'locked') {
+        var box = document.createElement('div');
+        box.className = 'mpdf-unlock';
+        var fid = 'mpdf-pw-' + f.id;
+        box.innerHTML = '<div class="field"><label for="' + fid + '"></label><input type="password" id="' + fid + '" autocomplete="off"></div><button type="button" class="btn small mpdf-unlock-btn">Unlock</button>';
+        TT.$('label', box).textContent = 'Password for ' + f.name;
+        li.appendChild(box);
+      }
+      fileList.appendChild(li);
+    });
+    var n = files.length;
+    $('#mpdf-files-info').textContent = n ? plural(n, 'file', 'files') : '';
+    root.classList.toggle('is-empty', n === 0);
+    work.hidden = n === 0;
+  }
+
+  function buildCard(p) {
+    var li = document.createElement('li');
+    li.className = 'mpdf-page';
+    li.dataset.id = p.id;
+    li.innerHTML = '<div class="mpdf-thumb"><img alt="" draggable="false"><span class="mpdf-wait">Loading\u2026</span>' +
+      '<span class="mpdf-num" aria-hidden="true"></span><label class="mpdf-sel"><input type="checkbox" class="mpdf-check"></label>' +
+      '<button type="button" class="mpdf-del">' + ICON.close + '</button></div>' +
+      '<div class="mpdf-cap"><span class="mpdf-chip"></span><span class="mpdf-src"></span></div>' +
+      '<div class="mpdf-tools"><button type="button" class="btn secondary small mpdf-up">' + ICON.left + '</button>' +
+      '<button type="button" class="btn secondary small mpdf-rl">' + ICON.rotl + '</button>' +
+      '<button type="button" class="btn secondary small mpdf-rr">' + ICON.rotr + '</button>' +
+      '<button type="button" class="btn secondary small mpdf-down">' + ICON.right + '</button></div>';
+    if (p.thumb) { TT.$('img', li).src = p.thumb; TT.$('.mpdf-wait', li).remove(); }
+    p.el = li;
+    if (observer) observer.observe(li); else queueThumb(p);
+    return li;
+  }
+
+  function renderPages() {
+    var n = pages.length;
+    pages.forEach(function (p, i) {
+      if (!p.el) buildCard(p);
+      if (pageList.children[i] !== p.el) pageList.insertBefore(p.el, pageList.children[i] || null);
+      var f = fileById(p.fileId), label = pageLabel(p), el = p.el;
+      TT.$('.mpdf-num', el).textContent = i + 1;
+      TT.$('.mpdf-chip', el).style.background = f ? f.color : '#999';
+      var src = TT.$('.mpdf-src', el);
+      src.textContent = (f ? f.name : '') + ' \u00B7 p. ' + (p.index + 1);
+      src.title = src.textContent;
+      TT.$('img', el).style.transform = p.rot ? 'rotate(' + p.rot + 'deg)' : '';
+      var cb = TT.$('.mpdf-check', el);
+      cb.checked = !!p.selected;
+      cb.setAttribute('aria-label', 'Select page ' + (i + 1) + ' (' + label + ')');
+      el.classList.toggle('is-selected', !!p.selected);
+      TT.$('.mpdf-del', el).setAttribute('aria-label', 'Remove page ' + (i + 1) + ' (' + label + ')');
+      TT.$('.mpdf-up', el).setAttribute('aria-label', 'Move page ' + (i + 1) + ' earlier');
+      TT.$('.mpdf-down', el).setAttribute('aria-label', 'Move page ' + (i + 1) + ' later');
+      TT.$('.mpdf-rl', el).setAttribute('aria-label', 'Rotate page ' + (i + 1) + ' left');
+      TT.$('.mpdf-rr', el).setAttribute('aria-label', 'Rotate page ' + (i + 1) + ' right');
+      TT.$('.mpdf-up', el).disabled = busy || i === 0;
+      TT.$('.mpdf-down', el).disabled = busy || i === n - 1;
+      TT.$('.mpdf-rl', el).disabled = busy;
+      TT.$('.mpdf-rr', el).disabled = busy;
+      TT.$('.mpdf-del', el).disabled = busy;
+      cb.disabled = busy;
+      TT.$('.mpdf-up', el).title = 'Move earlier';
+      TT.$('.mpdf-down', el).title = 'Move later';
+      TT.$('.mpdf-rl', el).title = 'Rotate left';
+      TT.$('.mpdf-rr', el).title = 'Rotate right';
+      TT.$('.mpdf-del', el).title = 'Remove page';
+    });
+    while (pageList.children.length > n) {
+      var last = pageList.lastChild;
+      if (observer) observer.unobserve(last);
+      pageList.removeChild(last);
+    }
+    var sel = pages.filter(function (p) { return p.selected; }).length;
+    $('#mpdf-pages-info').textContent = n ? plural(n, 'page', 'pages') : '';
+    $('#mpdf-selinfo').textContent = sel ? plural(sel, 'page', 'pages') + ' selected' : 'No pages selected';
+    ['#mpdf-rotl', '#mpdf-rotr', '#mpdf-remove'].forEach(function (s) { $(s).disabled = busy || !sel; });
+    $('#mpdf-selall').disabled = busy || !n || sel === n;
+    $('#mpdf-selnone').disabled = busy || !sel;
+    $('#mpdf-reverse').disabled = busy || n < 2;
+    $('#mpdf-undo').disabled = busy || !history.length;
+    $('#mpdf-merge').disabled = busy || !n;
+    $('#mpdf-extract').disabled = busy || !sel;
+    $('#mpdf-split').disabled = busy || !n;
+    $('#mpdf-sort').disabled = busy || files.length < 2;
+    $('#mpdf-clear').disabled = busy || !files.length;
+    $('#mpdf-add').disabled = busy;
+    $('#mpdf-choose').disabled = busy;
+    $('.mpdf-every').hidden = $('#mpdf-split-mode').value !== 'every';
+  }
+  function renderAll() { renderFiles(); renderPages(); }
+
+  // ---------- changes (with undo) ----------
+  function snapshot() {
+    history.push({
+      pages: pages.map(function (p) { return { p: p, rot: p.rot, selected: p.selected }; }),
+      files: files.slice()
+    });
+    if (history.length > 60) history.shift();
+  }
+  function undo() {
+    var h = history.pop();
+    if (!h) return;
+    pages.forEach(function (p) { if (p.el && !h.pages.some(function (s) { return s.p === p; })) p.el.remove(); });
+    pages = h.pages.map(function (s) { s.p.rot = s.rot; s.p.selected = s.selected; return s.p; });
+    files = h.files;
+    renderAll();
+    say('Undone.');
+  }
+  function movePage(id, to) {
+    var from = pageIndex(id);
+    if (from < 0 || to < 0 || to >= pages.length || to === from) return;
+    snapshot();
+    pages.splice(to, 0, pages.splice(from, 1)[0]);
+    renderPages();
+    say('Moved ' + pageLabel(pages[to]) + ' to position ' + (to + 1) + '.');
+  }
+  function rotate(list, delta) {
+    if (!list.length) return;
+    snapshot();
+    list.forEach(function (p) { p.rot = ((p.rot + delta) % 360 + 360) % 360; });
+    renderPages();
+    say(list.length === 1 ? 'Rotated page ' + (pageIndex(list[0].id) + 1) + (delta > 0 ? ' right.' : ' left.') : 'Rotated ' + list.length + ' pages' + (delta > 0 ? ' right.' : ' left.'));
+  }
+  function removePages(list) {
+    if (!list.length) return;
+    snapshot();
+    var ids = {};
+    list.forEach(function (p) { ids[p.id] = true; if (p.el) p.el.remove(); });
+    pages = pages.filter(function (p) { return !ids[p.id]; });
+    renderAll();
+    say((list.length === 1 ? 'Removed ' + pageLabel(list[0]) + '.' : 'Removed ' + list.length + ' pages.') + ' Undo brings ' + (list.length === 1 ? 'it' : 'them') + ' back.');
+  }
+  // Keeps each file's pages together, in the order of the file list.
+  function groupByFiles() {
+    var order = {};
+    files.forEach(function (f, i) { order[f.id] = i; });
+    pages = pages.map(function (p, i) { return { p: p, i: i }; })
+      .sort(function (a, b) { return (order[a.p.fileId] - order[b.p.fileId]) || (a.i - b.i); })
+      .map(function (x) { return x.p; });
+  }
+  function moveFile(id, delta) {
+    var i = -1;
+    files.forEach(function (f, k) { if (f.id === id) i = k; });
+    var j = i + delta;
+    if (i < 0 || j < 0 || j >= files.length) return;
+    snapshot();
+    files.splice(j, 0, files.splice(i, 1)[0]);
+    groupByFiles();
+    renderAll();
+    say('Moved ' + files[j].name + ' to position ' + (j + 1) + ' of ' + files.length + '.');
+  }
+  function removeFile(id) {
+    var f = fileById(id);
+    if (!f) return;
+    snapshot();
+    pages = pages.filter(function (p) { if (p.fileId === id && p.el) p.el.remove(); return p.fileId !== id; });
+    files = files.filter(function (x) { return x.id !== id; });
+    renderAll();
+    say('Removed ' + f.name + '. Undo brings it back.');
+  }
+
+  // ---------- saving ----------
+  function setBusy(on, label) {
+    busy = on;
+    progressBox.hidden = !on;
+    bar.value = 0;
+    pct.textContent = on ? (label || '') + ' 0%' : '';
+    renderAll();
+  }
+  function jobFor(list, name) { return { name: name, pages: list.map(function (p) { return { f: p.fileId, i: p.index, rot: p.rot }; }) }; }
+  function explain(err) {
+    var f = err && err.fileId ? fileById(err.fileId) : null;
+    if (err && err.code === 'PASSWORD') return (f ? f.name : 'A file') + ' needs its password. Enter it next to the file and try again.';
+    if (err && err.code === 'UNSUPPORTED') return (f ? f.name : 'A file') + ' uses a kind of encryption this tool cannot remove.';
+    if (f) return f.name + ' could not be read for merging. It may be damaged; opening it in a PDF viewer and printing it to a new PDF usually repairs it.';
+    return 'The PDF could not be made: ' + (err && err.message || err);
+  }
+  function run(jobs, label, done) {
+    if (busy) return;
+    var locked = files.filter(function (f) { return f.state === 'locked' && jobs.some(function (j) { return j.pages.some(function (p) { return p.f === f.id; }); }); });
+    if (locked.length) { setError(locked[0].name + ' needs its password first.'); return; }
+    setError('');
+    say('');
+    setBusy(true, label);
+    var t0 = Date.now();
+    build(jobs, function (v) {
+      bar.value = Math.round(v * 100);
+      pct.textContent = label + ' ' + Math.round(v * 100) + '%';
+    }).then(function (m) {
+      setBusy(false);
+      done(m.outputs, Date.now() - t0);
+    }, function (err) {
+      setBusy(false);
+      setError(explain(err));
+    });
+  }
+  $('#mpdf-merge').addEventListener('click', function (e) {
+    var btn = e.currentTarget;
+    run([jobFor(pages, outName())], 'Merging\u2026', function (outs) {
+      var o = outs[0], blob = new Blob([o.bytes], { type: 'application/pdf' });
+      TT.download(o.name, blob);
+      say('Saved ' + o.name + ': ' + plural(o.pages, 'page', 'pages') + ', ' + fmtBytes(blob.size) + '.');
+      btn.focus();
+    });
+  });
+  $('#mpdf-extract').addEventListener('click', function (e) {
+    var btn = e.currentTarget, sel = pages.filter(function (p) { return p.selected; });
+    if (!sel.length) return;
+    var name = baseName(outName()) + '-selected.pdf';
+    run([jobFor(sel, name)], 'Saving\u2026', function (outs) {
+      var o = outs[0], blob = new Blob([o.bytes], { type: 'application/pdf' });
+      TT.download(o.name, blob);
+      say('Saved ' + o.name + ': ' + plural(o.pages, 'page', 'pages') + ', ' + fmtBytes(blob.size) + '.');
+      btn.focus();
+    });
+  });
+  $('#mpdf-split-mode').addEventListener('change', function () { $('.mpdf-every').hidden = this.value !== 'every'; });
+  $('#mpdf-split').addEventListener('click', function (e) {
+    var btn = e.currentTarget, mode = $('#mpdf-split-mode').value, base = baseName(outName()).replace(/-merged$/, ''), jobs = [];
+    var width = String(pages.length).length;
+    function pad(n) { var s = String(n); while (s.length < width) s = '0' + s; return s; }
+    if (mode === 'each') {
+      pages.forEach(function (p, i) { jobs.push(jobFor([p], base + '-page-' + pad(i + 1) + '.pdf')); });
+    } else if (mode === 'every') {
+      var n = parseInt($('#mpdf-every').value, 10);
+      if (!(n >= 1 && n <= 9999)) { setError('Enter how many pages each PDF should have, from 1 to 9999.'); $('#mpdf-every').focus(); return; }
+      for (var i = 0; i < pages.length; i += n) {
+        var part = pages.slice(i, i + n);
+        jobs.push(jobFor(part, base + '-pages-' + pad(i + 1) + (part.length > 1 ? '-' + pad(i + part.length) : '') + '.pdf'));
+      }
+    } else {
+      files.forEach(function (f) {
+        var part = pages.filter(function (p) { return p.fileId === f.id; });
+        if (part.length) jobs.push(jobFor(part, baseName(f.name) + '.pdf'));
+      });
+    }
+    if (!jobs.length) return;
+    run(jobs, 'Splitting\u2026', function (outs) {
+      var name = base + '-split.zip';
+      window.TTZip.create(outs.map(function (o) { return { name: o.name, data: new Uint8Array(o.bytes) }; }), { compress: 'store' }).then(function (zip) {
+        TT.download(name, zip);
+        say('Saved ' + name + ' with ' + plural(outs.length, 'PDF', 'PDFs') + ', ' + fmtBytes(zip.size) + '.');
+        btn.focus();
+      }, function (err) { setError(err && err.message || 'The ZIP file could not be made.'); });
+    });
+  });
+
+  // ---------- events ----------
+  $('#mpdf-choose').addEventListener('click', function () { fileInput.click(); });
+  $('#mpdf-add').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    var list = fileInput.files;
+    addFiles(list).then(function () { fileInput.value = ''; });
+  });
+  nameInput.addEventListener('input', function () { nameEdited = true; });
+  $('#mpdf-clear').addEventListener('click', function () {
+    snapshot();
+    pages.forEach(function (p) { if (p.el) p.el.remove(); });
+    pages = [];
+    files = [];
+    renderAll();
+    say('Removed all files. Undo brings them back.');
+    $('#mpdf-choose').focus();
+  });
+  $('#mpdf-sort').addEventListener('click', function () {
+    snapshot();
+    files.sort(function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }); });
+    groupByFiles();
+    renderAll();
+    say('Sorted the files by name.');
+  });
+  $('#mpdf-selall').addEventListener('click', function () { pages.forEach(function (p) { p.selected = true; }); renderPages(); });
+  $('#mpdf-selnone').addEventListener('click', function () { pages.forEach(function (p) { p.selected = false; }); renderPages(); });
+  $('#mpdf-rotl').addEventListener('click', function () { rotate(pages.filter(function (p) { return p.selected; }), -90); });
+  $('#mpdf-rotr').addEventListener('click', function () { rotate(pages.filter(function (p) { return p.selected; }), 90); });
+  $('#mpdf-remove').addEventListener('click', function () { removePages(pages.filter(function (p) { return p.selected; })); });
+  $('#mpdf-reverse').addEventListener('click', function () { snapshot(); pages.reverse(); renderPages(); say('Reversed the page order.'); });
+  $('#mpdf-undo').addEventListener('click', undo);
+  root.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && !/^(INPUT|TEXTAREA)$/.test(e.target.nodeName) && history.length && !busy) {
+      e.preventDefault();
+      undo();
+    }
+  });
+
+  fileList.addEventListener('click', function (e) {
+    var btn = e.target.closest('button'), li = e.target.closest('.mpdf-file');
+    if (!btn || !li || busy) return;
+    var id = Number(li.dataset.id);
+    if (btn.classList.contains('mpdf-fup') || btn.classList.contains('mpdf-fdown')) {
+      var up = btn.classList.contains('mpdf-fup');
+      moveFile(id, up ? -1 : 1);
+      var row = TT.$('.mpdf-file[data-id="' + id + '"]', fileList);
+      if (row) { var same = TT.$(up ? '.mpdf-fup' : '.mpdf-fdown', row); (same.disabled ? TT.$(up ? '.mpdf-fdown' : '.mpdf-fup', row) : same).focus(); }
+    } else if (btn.classList.contains('mpdf-fdel')) {
+      var idx = files.indexOf(fileById(id));
+      removeFile(id);
+      var next = fileList.children[Math.min(idx, fileList.children.length - 1)];
+      (next ? TT.$('.mpdf-fdel', next) : $('#mpdf-choose')).focus();
+    } else if (btn.classList.contains('mpdf-unlock-btn')) {
+      unlock(id);
+    }
+  });
+  fileList.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.type === 'password') { e.preventDefault(); unlock(Number(e.target.closest('.mpdf-file').dataset.id)); }
+  });
+  function unlock(id) {
+    var f = fileById(id), input = $('#mpdf-pw-' + id);
+    if (!f || !input) return;
+    var pw = input.value;
+    if (!pw) { input.focus(); return; }
+    loadFile(f, pw).then(function () {
+      if (f.state === 'ready') { say('Unlocked ' + f.name + ': ' + plural(f.pages, 'page', 'pages') + ' added.'); }
+      else { var again = $('#mpdf-pw-' + id); if (again) again.focus(); }
+    });
+  }
+
+  pageList.addEventListener('click', function (e) {
+    var li = e.target.closest('.mpdf-page');
+    if (!li || busy) return;
+    var id = Number(li.dataset.id), i = pageIndex(id), p = pages[i];
+    if (e.target.closest('.mpdf-check')) { p.selected = e.target.checked; renderPages(); return; }
+    var btn = e.target.closest('button');
+    if (!btn) {
+      // A click on the thumbnail toggles the selection.
+      if (e.target.closest('.mpdf-thumb') && !e.target.closest('label')) { p.selected = !p.selected; renderPages(); }
+      return;
+    }
+    if (btn.classList.contains('mpdf-del')) {
+      removePages([p]);
+      var next = pages[Math.min(i, pages.length - 1)];
+      (next ? TT.$('.mpdf-del', next.el) : $('#mpdf-add')).focus();
+    } else if (btn.classList.contains('mpdf-rl') || btn.classList.contains('mpdf-rr')) {
+      rotate([p], btn.classList.contains('mpdf-rr') ? 90 : -90);
+    } else if (btn.classList.contains('mpdf-up') || btn.classList.contains('mpdf-down')) {
+      var up = btn.classList.contains('mpdf-up');
+      movePage(id, i + (up ? -1 : 1));
+      var el = pages[pageIndex(id)].el, same = TT.$(up ? '.mpdf-up' : '.mpdf-down', el);
+      (same.disabled ? TT.$(up ? '.mpdf-down' : '.mpdf-up', el) : same).focus();
+    }
+  });
+
+  // Drag a thumbnail with the mouse or a pen to reorder (touch screens scroll, and use the arrow buttons).
+  pageList.addEventListener('pointerdown', function (e) {
+    if (busy || drag || e.button !== 0 || e.pointerType === 'touch') return;
+    var li = e.target.closest('.mpdf-page');
+    if (!li || !e.target.closest('.mpdf-thumb') || e.target.closest('button, label, input')) return;
+    drag = { id: Number(li.dataset.id), li: li, pid: e.pointerId, x: e.clientX, y: e.clientY, moved: false, from: pageIndex(Number(li.dataset.id)) };
+    try { pageList.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
+    e.preventDefault();
+  });
+  pageList.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.pid) return;
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) < 6) return;
+      drag.moved = true;
+      snapshot();
+      drag.li.classList.add('is-dragging');
+      root.classList.add('is-sorting');
+    }
+    for (var i = 0; i < pages.length; i++) {
+      var el = pages[i].el;
+      if (el === drag.li) continue;
+      var r = el.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        var from = pageIndex(drag.id);
+        pages.splice(i, 0, pages.splice(from, 1)[0]);
+        renderPages();
+        break;
+      }
+    }
+  });
+  function endDrag(e) {
+    if (!drag || e.pointerId !== drag.pid) return;
+    var d = drag;
+    drag = null;
+    d.li.classList.remove('is-dragging');
+    root.classList.remove('is-sorting');
+    if (d.moved) {
+      var i = pageIndex(d.id);
+      if (i === d.from) history.pop();
+      else if (i >= 0) say('Moved ' + pageLabel(pages[i]) + ' to position ' + (i + 1) + '.');
+      renderPages();
+    } else {
+      // A plain click: let the click handler toggle the selection.
+    }
+  }
+  pageList.addEventListener('pointerup', endDrag);
+  pageList.addEventListener('pointercancel', endDrag);
+  pageList.addEventListener('lostpointercapture', endDrag);
+
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1; }
+  document.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropZone.classList.add('is-over');
+  });
+  document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) dropZone.classList.remove('is-over'); });
+  document.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropZone.classList.remove('is-over');
+    addFiles(e.dataTransfer.files);
+  });
+
+  renderAll();
+  {% endraw %}
+})();
+</script>

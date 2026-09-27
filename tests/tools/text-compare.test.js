@@ -171,7 +171,7 @@ module.exports = async ({ page, open, assert }) => {
   // With line endings compared, both lines differ and each carriage return is shown as a label.
   await setOpt('#tc-eol', false);
   assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 2, same: 0 });
-  assert.deepEqual(await texts('.tc-split del .tc-inv'), ['␍', '␍']);
+  assert.deepEqual(await texts('.tc-split del .tc-inv'), ['CR', 'CR']);
   assert.equal(await page.locator('.tc-split ins').count(), 0);
   // GNU diff -u of the two files (CRLF lines keep their CR, as diff writes them).
   let [eolDl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);

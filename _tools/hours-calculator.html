@@ -137,10 +137,10 @@ faq:
   <div class="field">
     <label for="hc-round">Round clock times</label>
     <select id="hc-round">
-      <option value="0" selected>No rounding (exact minutes)</option>
+      <option value="0" selected>No rounding (exact)</option>
       <option value="5">Nearest 5 minutes</option>
-      <option value="6">Nearest 6 minutes (0.1 hour)</option>
-      <option value="15">Nearest 15 minutes (7-minute rule)</option>
+      <option value="6">Nearest 6 min (0.1 hour)</option>
+      <option value="15">Nearest 15 min (7-minute rule)</option>
     </select>
   </div>
   <div class="field">
@@ -190,19 +190,27 @@ faq:
   var uid = 0;
   var last = null;
 
+  // Typed text quoted in a message, cut short so a long paste cannot flood the page.
+  function quote(v) {
+    var s = String(v).trim(), c = Array.from(s.slice(0, 80));
+    return '“' + (c.length > 40 || s.length > 80 ? c.slice(0, 40).join('') + '…' : s) + '”';
+  }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
   // Minutes after midnight (0 to 1440), null for an empty field, NaN if unreadable.
-  // Accepts 9, 9:30, 9.30, 9h30, 930, 0930, 21:30, 9:30pm, 9:30 p.m., 9p, noon, midnight, 24:00.
+  // Accepts 9, 9:30, 9.30, 9h30, 9h, 930, 0930, 21:30, 21:30:00, 9:30pm, 9:30 p.m.,
+  // 9p, noon, 12:00 noon, midnight, 24:00, and full-width digits.
   function parseTime(raw) {
-    var s = String(raw == null ? '' : raw).trim().toLowerCase().replace(/\s+/g, ' ');
+    var s = String(raw == null ? '' : raw).normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ');
     if (!s) return null;
-    if (/^(12 ?)?noon$/.test(s)) return 720;
-    if (/^(12 ?)?midnight$/.test(s)) return 0;
+    if (/^(12(:00)? ?)?noon$/.test(s)) return 720;
+    if (/^(12(:00)? ?)?midnight$/.test(s)) return 0;
     var suf = '';
     var sm = /\s*([ap])\.?\s*(m\.?)?$/.exec(s);
     if (sm) { suf = sm[1]; s = s.slice(0, sm.index); }
+    // Whole minutes only: zero seconds (from a time clock export) are dropped.
+    s = s.replace(/^(\d{1,2}:\d{2}):00$/, '$1').replace(/^(\d{1,2}) ?h$/, '$1');
     var h, m;
     var a = /^(\d{1,2})(?:\s*[:.h]\s*(\d{2}))?$/.exec(s);
     var b = /^(\d{3,4})$/.exec(s);
@@ -225,6 +233,11 @@ faq:
     if (!h12) return pad2(h) + ':' + pad2(m);
     return ((h % 12) || 12) + ':' + pad2(m) + (h < 12 ? ' AM' : ' PM');
   }
+  // A counted (rounded) time: an end at 24:00 reads as 12:00 AM on a 12-hour clock.
+  function fmtCounted(min, h12, isEnd) {
+    if (min === 1440) return isEnd && !h12 ? '24:00' : fmtTime(0, h12);
+    return fmtTime(min, h12);
+  }
   function fmtHM(total) { return Math.floor(total / 60) + ':' + pad2(total % 60); }
   function fmtWords(total) {
     var h = Math.floor(total / 60), m = total % 60;
@@ -240,12 +253,21 @@ faq:
   function roundTo(min, inc) { return inc ? Math.floor((2 * min + inc) / (2 * inc)) * inc : min; }
   function is12() { return fmtSel.value === '12'; }
 
+  // Separators: "1,000" and "1,000.50" group thousands and "18,50" has a decimal
+  // comma. In locales that write decimals with a comma, any single comma is
+  // a decimal comma and "1.000,50" groups with dots.
+  var decComma = (1.5).toLocaleString().indexOf(',') !== -1;
+  function plainNumber(s) {
+    if (/^\d{1,3}(\.\d{3})+,\d+$/.test(s)) return s.replace(/\./g, '').replace(',', '.');
+    if (/^\d*,\d+$/.test(s) && (decComma || !/^\d{1,3},\d{3}$/.test(s))) return s.replace(',', '.');
+    if (/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s)) return s.replace(/,/g, '');
+    return s;
+  }
   // Rate as an integer number of 1/10000 units, or null (empty) / NaN (bad).
   function parseRate(raw) {
-    var s = String(raw || '').trim().replace(/^[$€£¥₹]\s*/, '').replace(/\s*(\/\s*h(ou)?r?|an hour|per hour)$/i, '');
+    var s = String(raw || '').normalize('NFKC').trim().replace(/^[$€£¥₹]\s*/, '').replace(/\s*(\/\s*h(ou)?r?|an hour|per hour)$/i, '').trim();
     if (!s) return null;
-    if (/^\d+,\d{1,4}$/.test(s)) s = s.replace(',', '.');
-    s = s.replace(/,(?=\d{3}(\D|$))/g, '');
+    s = plainNumber(s);
     var m = /^(\d{1,7})(?:\.(\d{0,4}))?$/.exec(s) || /^()\.(\d{1,4})$/.exec(s);
     if (!m) return NaN;
     return BigInt(m[1] || '0') * 10000n + BigInt(((m[2] || '') + '0000').slice(0, 4));
@@ -255,9 +277,11 @@ faq:
     var num = BigInt(minutes) * rate4, den = 6000n;
     return (2n * num + den) / (2n * den);
   }
-  var money = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  var money = new Intl.NumberFormat(undefined, { numberingSystem: 'latn', minimumFractionDigits: 2, maximumFractionDigits: 2 });
   function fmtMoney(cents) { return money.format(Number(cents) / 100); }
-  var rateFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  var intFmt = new Intl.NumberFormat(undefined, { numberingSystem: 'latn' });
+  // Latin digits throughout, since the page itself is in English.
+  var rateFmt = new Intl.NumberFormat(undefined, { numberingSystem: 'latn', minimumFractionDigits: 2, maximumFractionDigits: 4 });
   function fmtRate(rate4) { return rateFmt.format(Number(rate4) / 10000); }
 
   // ----- Rows -----
@@ -307,12 +331,15 @@ faq:
     var bRaw = bIn.value.trim(), bad = bIn.validity && bIn.validity.badInput;
     var out = { sIn: sIn, eIn: eIn, bIn: bIn, s: s, e: e, err: '', invalid: [] };
     if (s === null && e === null && !bRaw && !bad) { out.blank = true; return out; }
-    if (Number.isNaN(s)) { out.invalid.push(sIn); out.err = 'The start time “' + sIn.value.trim() + '” isn’t a time. Try 9:30, 9:30 pm or 21:30.'; }
-    else if (Number.isNaN(e)) { out.invalid.push(eIn); out.err = 'The end time “' + eIn.value.trim() + '” isn’t a time. Try 5:00, 5 pm or 17:00.'; }
+    if (Number.isNaN(s)) { out.invalid.push(sIn); out.err = 'The start time ' + quote(sIn.value) + ' isn’t a time. Try 9:30, 9:30 pm or 21:30.'; }
+    else if (Number.isNaN(e)) { out.invalid.push(eIn); out.err = 'The end time ' + quote(eIn.value) + ' isn’t a time. Try 5:00, 5 pm or 17:00.'; }
     var brk = 0;
     if (bad || (bRaw && !/^\d+$/.test(bRaw))) {
       out.invalid.push(bIn);
       if (!out.err) out.err = 'Enter the break as whole minutes, such as 30.';
+    } else if (bRaw && +bRaw > 1440) {
+      out.invalid.push(bIn);
+      if (!out.err) out.err = 'A break can be at most 1,440 minutes (24 hours).';
     } else if (bRaw) brk = +bRaw;
     if (out.err) return out;
     if (s === null || e === null) {
@@ -324,7 +351,17 @@ faq:
     if (s === 1440) s = 0; // 24:00 as a start is the same instant as 00:00
     var inc = +roundSel.value;
     var rs = roundTo(s, inc), re = roundTo(e, inc);
-    var span = re - rs + (re < rs ? 1440 : 0);
+    // Overnight is decided by the times as entered: rounding never reorders
+    // them, but it can make the two ends meet (0:03 to 0:02 rounds to 24:00, not 0).
+    var span = re - rs + (e < s ? 1440 : 0);
+    if (brk > span && !span) {
+      // A break on a zero-length row: the real problem is the times.
+      out.invalid.push(eIn);
+      out.err = inc && (rs !== s || re !== e)
+        ? 'The start and end round to the same time, so there is no time to take a break from.'
+        : 'The start and end are the same, so no time is counted. For a 24-hour shift, enter 24:00 as the end.';
+      return out;
+    }
     if (brk > span) {
       out.invalid.push(bIn);
       out.err = 'The ' + brk + '-minute break is longer than the ' + fmtHM(span) + ' between start and end.';
@@ -333,7 +370,7 @@ faq:
     out.ok = true;
     out.rs = rs; out.re = re; out.brk = brk; out.span = span; out.worked = span - brk;
     out.overnight = e < s;
-    out.same = rs === re;
+    out.same = span === 0;
     out.rounded = inc && (rs !== s || re !== e);
     return out;
   }
@@ -364,11 +401,11 @@ faq:
       hm.textContent = fmtHM(d.worked);
       dec.textContent = fmtDec(d.worked) + ' h';
       var notes = [];
-      if (d.rounded) notes.push('counted ' + fmtTime(d.rs % 1440, h12) + '–' + fmtTime(d.re, h12));
+      if (d.rounded) notes.push('counted ' + fmtCounted(d.rs, h12) + '–' + fmtCounted(d.re, h12, true));
       if (d.same) notes.push(d.rounded ? 'start and end round to the same time' : 'same start and end; use 24:00 for a full day');
-      else if (d.overnight || (d.re < d.rs)) notes.push('ends the next day');
+      else if (d.overnight) notes.push('ends the next day');
       tag.textContent = notes.join(' · ');
-      lines.push({ n: i + 1, s: d.s, e: d.e, rs: d.rs, re: d.re, brk: d.brk, worked: d.worked, rounded: d.rounded, next: d.overnight || d.re < d.rs });
+      lines.push({ n: i + 1, s: d.s, e: d.e, rs: d.rs, re: d.re, brk: d.brk, worked: d.worked, rounded: d.rounded, next: d.overnight });
     });
 
     var rate = parseRate(rateIn.value), rateBad = Number.isNaN(rate);
@@ -382,7 +419,7 @@ faq:
     $('#hc-total-words').textContent = fmtWords(total);
     $('#hc-total-label').textContent = counted > 1 ? 'Total hours worked (' + counted + ' rows)' : 'Total hours worked';
     $('#hc-dec').textContent = fmtDec(total);
-    $('#hc-mins').textContent = total.toLocaleString();
+    $('#hc-mins').textContent = intFmt.format(total);
     $('#hc-breaks').textContent = fmtHM(breaks);
     var pay = null;
     if (rate !== null && !rateBad) {
@@ -434,7 +471,11 @@ faq:
   // that focus is moving within (it is still being filled in).
   rowsEl.addEventListener('focusout', function (e) {
     var to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest('.hc-row') : null;
-    afterPointer(function () { render(true, to); });
+    // While a button is held down, wait for the click; by then focus has
+    // settled, so the row it is in is read afresh (a stale row would flag
+    // the row just added or clicked into).
+    if (pointerIsDown) afterPointer(function () { render(true); });
+    else render(true, to);
   });
   // A message that appears while a mouse button or finger is down moves the
   // page under the pointer, and the click on the button below is lost. Wait
@@ -509,7 +550,7 @@ faq:
     var h12 = is12(), out = [];
     last.lines.forEach(function (l) {
       var t = l.n + '. ' + fmtTime(l.s, h12) + ' – ' + fmtTime(l.e, h12) + (l.next ? ' (next day)' : '');
-      if (l.rounded) t += ', rounded to ' + fmtTime(l.rs % 1440, h12) + ' – ' + fmtTime(l.re, h12);
+      if (l.rounded) t += ', rounded to ' + fmtCounted(l.rs, h12) + ' – ' + fmtCounted(l.re, h12, true);
       if (l.brk) t += ', break ' + l.brk + ' min';
       out.push(t + ': ' + fmtHM(l.worked) + ' (' + fmtDec(l.worked) + ' h)');
     });

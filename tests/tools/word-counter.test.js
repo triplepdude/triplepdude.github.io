@@ -186,6 +186,11 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // Markdown: front matter, marks and link addresses removed.
   await openFiles(['post.md']);
   assert.equal(await page.inputValue('#wc-input'), 'Hello world\n\nRead the full guide or see a chart.\n\nBold point\ncode_span here\n\nconst x = 1;\n\nQuoted text.');
+  // Lines full of unmatched Markdown marks are read quickly (the patterns are bounded).
+  const t0 = Date.now();
+  await page.setInputFiles('#wc-file', { name: 'marks.md', mimeType: 'text/markdown', buffer: Buffer.from('*a '.repeat(40000) + '\n' + '['.repeat(100000) + '\n' + '`a'.repeat(50000)) });
+  await page.waitForFunction(() => /^Opened marks\.md/.test(document.querySelector('#wc-file-ok').textContent));
+  assert.ok(Date.now() - t0 < 3000, `Markdown file took ${Date.now() - t0} ms`);
   // Windows-1252 and UTF-16 text files.
   await openFiles(['legacy.txt']);
   assert.equal(await page.inputValue('#wc-input'), 'Café naïve résumé \u2013 5 €');

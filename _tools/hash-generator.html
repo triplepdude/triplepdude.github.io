@@ -1,17 +1,22 @@
 ---
 title: "Hash Generator: SHA-256, SHA-3, BLAKE3, MD5"
-description: Hash text or files with MD5, SHA-1, SHA-2, SHA-3, Keccak-256, BLAKE2, BLAKE3, RIPEMD-160 or CRC-32, make HMACs, and check a file against its checksum.
+description: Hash text or files with MD5, SHA-1, SHA-2, SHA-3, Keccak-256, BLAKE2, BLAKE3, RIPEMD-160 or CRC-32, make HMACs, and check files against checksums.
 category: Security & Network
 keywords: [hash generator, sha256 hash generator, md5 hash generator, sha3 hash generator, blake3 hash, keccak256 online, hmac generator, file checksum calculator]
 howto: |
   ## How to use the hash generator
 
-  Type or paste text, or switch to **File** and choose or drop a file. Tick
+  Type or paste text, or switch to **File** and choose or drop files. Tick
   the algorithms you want; each result shows in hexadecimal and in Base64.
   Text is hashed as UTF-8, so it matches `sha256sum` run on a UTF-8 file with
   the same content. Set **Input is** to *Hex bytes* or *Base64* to hash raw
   bytes instead. Files are read in 4 MB pieces in a background worker, so
   even large files keep the page responsive, and nothing is uploaded.
+
+  With several files you get a table and a checksum list in the `sha256sum`
+  format (`hash  name`) to copy or download; `sha256sum -c` accepts it. Paste
+  an existing `SHA256SUMS` or `MD5SUMS` list into the compare box to check
+  every file at once.
 
   To check a download, paste the published checksum into **Compare with
   expected hash**. The page names the algorithm that matches, and ticks it if
@@ -67,10 +72,9 @@ howto: |
 
   - **Trailing newline.** `echo "abc" | sha256sum` hashes `abc` plus a line
     feed. Use `printf '%s' "abc"` to get the value shown here.
-  - **Line endings and encoding.** A text box turns line breaks into LF, and
-    UTF-16 or Latin-1 text is different bytes. Hash the file itself instead.
-  - **Invisible characters.** A copied string can carry a space or a
-    zero-width character; the byte count under the text box helps spot them.
+  - **Line endings, encoding, invisible characters.** A text box turns line
+    breaks into LF, UTF-16 text is different bytes, and a copied string can
+    carry a zero-width character. Hash the file itself instead.
 faq:
   - q: Is my text or file uploaded anywhere?
     a: No. The hashes are calculated in your browser, partly with the Web Crypto API and partly with JavaScript on this page. Your text, keys and files never leave your device, and nothing is stored.
@@ -145,6 +149,17 @@ faq:
 .hg-line .btn.small { flex: none; min-height: 30px; padding: 0 10px; font-size: 13px; }
 .hg-list[data-busy="1"] code { opacity: 0.45; }
 #hg-text { min-height: 140px; }
+textarea.hg-expected { min-height: 44px; height: auto; resize: vertical; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.hg-multi-bar { align-items: flex-end; }
+.hg-multi-bar > .field { flex: 0 1 240px; }
+.hg-multi-bar .actions { margin: 0; }
+.hg-multi-table td { vertical-align: top; }
+.hg-multi-table td.hg-fname { overflow-wrap: anywhere; min-width: 8rem; }
+.hg-multi-table td.hg-hash { font-family: var(--mono); font-size: 13px; word-break: break-all; min-width: 12rem; }
+.hg-multi-table .hg-num { text-align: right; white-space: nowrap; }
+.hg-multi-table td.hg-ok { color: var(--accent); font-weight: 600; white-space: nowrap; }
+.hg-multi-table td.hg-bad { color: var(--danger); font-weight: 600; white-space: nowrap; }
+.hg-multi-table td.hg-dim { color: var(--muted); }
 @media (max-width: 560px) {
   .hg-item { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .hg-alg { grid-row: auto; flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: flex-start; gap: 2px 8px; }
@@ -152,6 +167,11 @@ faq:
   .hg-xof { margin-top: 0; }
   .hg-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; }
   .hg-line .hg-k { grid-column: 1 / -1; width: auto; }
+  .hg-multi-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  table.data.hg-multi-table, .hg-multi-table tbody { display: block; }
+  table.data.hg-multi-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  table.data.hg-multi-table td { display: block; padding: 0; border: 0; min-width: 0; }
+  .hg-multi-table td.hg-hash { grid-column: 1 / -1; }
 }
 </style>
 
@@ -180,10 +200,10 @@ faq:
 
 <div id="hg-file-pane" hidden>
   <div class="hg-pick">
-    <input type="file" id="hg-file" class="hg-input">
+    <input type="file" id="hg-file" class="hg-input" multiple>
     <label class="hg-drop" for="hg-file" id="hg-drop">
-      <strong id="hg-drop-title"><span>Choose a file</span> or drop it here</strong>
-      <span class="hint" id="hg-drop-hint">Any file type. It is read on your device and never uploaded.</span>
+      <strong id="hg-drop-title"><span>Choose files</span> or drop them here</strong>
+      <span class="hint" id="hg-drop-hint">Any file type, one or many. They are read on your device and never uploaded.</span>
     </label>
   </div>
   <div class="hg-progress" id="hg-progress-wrap" hidden>
@@ -254,14 +274,34 @@ faq:
      a short summary is announced in #hg-status once typing pauses. -->
 <div class="hg-list" id="hg-results"></div>
 
+<!-- Several files: one row per file, and a checksum list in the sha256sum format. -->
+<div id="hg-multi" hidden>
+  <div class="row hg-multi-bar">
+    <div class="field">
+      <label for="hg-multi-alg">Show and list</label>
+      <select id="hg-multi-alg"></select>
+    </div>
+    <div class="actions">
+      <button class="btn secondary small" type="button" id="hg-multi-copy">Copy checksum list</button>
+      <button class="btn small" type="button" id="hg-multi-dl">Download</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data hg-multi-table">
+      <thead><tr><th scope="col">File</th><th scope="col" class="hg-num">Size</th><th scope="col" id="hg-multi-h">Hash</th><th scope="col" id="hg-multi-check-h" hidden>Check</th></tr></thead>
+      <tbody id="hg-multi-body"></tbody>
+    </table>
+  </div>
+</div>
+
 <div class="actions">
   <button class="btn secondary small" type="button" id="hg-copy-all">Copy all (hex)</button>
   <button class="btn secondary small" type="button" id="hg-clear">Clear</button>
 </div>
 
 <div class="field">
-  <label for="hg-expected">Compare with expected hash <span class="hint">hex or Base64, e.g. from a download page</span></label>
-  <input type="text" id="hg-expected" class="mono" autocomplete="off" spellcheck="false" placeholder="Paste a checksum to check it" aria-describedby="hg-compare">
+  <label for="hg-expected">Compare with expected hash <span class="hint">hex or Base64, or a whole SHA256SUMS-style list for several files</span></label>
+  <textarea id="hg-expected" class="mono hg-expected" rows="1" autocomplete="off" spellcheck="false" placeholder="Paste a checksum to check it" aria-describedby="hg-compare"></textarea>
 </div>
 <p class="msg" id="hg-compare"></p>
 <p class="visually-hidden" id="hg-status" role="status"></p>
@@ -1060,7 +1100,8 @@ faq:
   const keyEl = $('#hg-key'), keyEncEl = $('#hg-key-enc');
   const fileEl = $('#hg-file'), drop = $('#hg-drop'), msgEl = $('#hg-msg'), listEl = $('#hg-results');
   const blank = () => ({ res: null, summary: '', error: '', busy: false, job: 0 });
-  const state = { src: 'text', text: blank(), file: Object.assign(blank(), { summary: 'Choose a file to see its hashes' }), fileObj: null, key: null, keyError: '' };
+  const state = { src: 'text', text: blank(), file: Object.assign(blank(), { summary: 'Choose a file to see its hashes' }), files: [], key: null, keyError: '' };
+  const MAX_FILES = 500;
 
   const selected = () => TT.$$('.hg-algs input[data-alg]').filter(c => c.checked).map(c => c.getAttribute('data-alg'));
   const xofBits = id => {
@@ -1115,6 +1156,11 @@ faq:
     msgEl.textContent = cur.error || state.keyError;
     $('#hg-summary').textContent = cur.summary;
     listEl.dataset.busy = cur.busy ? '1' : '';
+    const multi = state.src === 'file' && !!cur.multi;
+    listEl.hidden = multi;
+    $('#hg-multi').hidden = !multi;
+    $('#hg-copy-all').hidden = multi;
+    if (multi) { renderMulti(); compare(); return; }
     const sel = new Set(selected());
     $('#hg-alg-count').textContent = sel.size + ' of ' + ALGS.length;
     ALGS.forEach(a => {
@@ -1211,7 +1257,10 @@ faq:
   }
 
   async function hashFile() {
-    const file = state.fileObj, cur = state.file;
+    const cur = state.file;
+    if (state.files.length > 1) return hashMulti();
+    cur.multi = null;
+    const file = state.files[0];
     if (!file) return;
     const job = ++cur.job;
     cur.error = ''; cur.res = null; cur.busy = true;
@@ -1246,12 +1295,182 @@ faq:
     sayLater(statusText);
   }
 
-  function pickFile(file) {
-    state.fileObj = file;
+  // Several files are hashed one after another; each row fills in as its file is done.
+  async function hashMulti() {
+    const cur = state.file, files = state.files, job = ++cur.job;
+    const total = files.reduce((a, f) => a + f.size, 0);
+    cur.error = ''; cur.res = null; cur.busy = true;
+    cur.multi = files.map(f => ({ file: f, res: null, error: '' }));
+    cur.summary = 'Hashing ' + files.length + ' files…';
+    if (state.src === 'file') render();
+    if (state.keyError) { stopWorker('file'); cur.busy = false; cur.summary = 'Fix the key to see the HMACs'; if (state.src === 'file') render(); return; }
+    const algs = selected(), key = state.key, xof = xofBytes();
+    let done = 0;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i], entry = cur.multi[i];
+      try {
+        const r = await runJob('file', f, algs, key, xof, (d, t, st) => {
+          if (job !== cur.job || total < PROGRESS_FROM) return;
+          $('#hg-progress-wrap').hidden = false;
+          $('#hg-progress').value = total ? (done + d) / total : 1;
+          $('#hg-progress-text').textContent = 'File ' + (i + 1) + ' of ' + files.length + (st ? ': computing ' + st + '…' : ': ' + Math.floor((done + d) / total * 100) + '%');
+        }, () => job === cur.job);
+        if (job !== cur.job) return;
+        entry.res = { out: r.out, errors: r.errors, algs: new Set(algs), xof: xof, keyed: !!key };
+      } catch (e) {
+        if (job !== cur.job) return;
+        entry.error = e && e.name === 'NotReadableError' ? 'Could not be read' : e && e.memory ? 'Too large to hold in memory for SHA-1 and SHA-2' : 'Could not be hashed';
+      }
+      done += f.size;
+      cur.summary = i < files.length - 1
+        ? 'Hashing ' + files.length + ' files… ' + (i + 1) + ' done'
+        : (key ? 'HMACs of ' : 'Hashes of ') + files.length + ' files (' + fmtBytes(total).replace(/ \(.*\)$/, '') + ')';
+      if (state.src === 'file') render();
+    }
+    $('#hg-progress-wrap').hidden = true;
+    cur.busy = false;
+    cur.res = null;
+    if (state.src === 'file') render();
+    sayLater(statusText);
+  }
+
+  function pickFiles(list) {
+    let files = Array.from(list || []);
+    if (!files.length) return;
+    const extra = files.length - MAX_FILES;
+    files = files.slice(0, MAX_FILES);
+    state.files = files;
     setSource('file');
-    $('#hg-drop-title').textContent = file.name || 'Unnamed file';
-    $('#hg-drop-hint').textContent = fmtBytes(file.size) + '. Choose or drop another file to replace it.';
+    if (files.length === 1) {
+      $('#hg-drop-title').textContent = files[0].name || 'Unnamed file';
+      $('#hg-drop-hint').textContent = fmtBytes(files[0].size) + '. Choose or drop other files to replace it.';
+    } else {
+      $('#hg-drop-title').textContent = files.length + ' files';
+      $('#hg-drop-hint').textContent = fmtBytes(files.reduce((a, f) => a + f.size, 0)).replace(/ \(.*\)$/, '') + ' in all' + (extra > 0 ? '; only the first ' + MAX_FILES + ' are hashed' : '') + '. Choose or drop other files to replace them.';
+    }
     hashFile();
+  }
+
+  // ---------- Several files ----------
+  const multiAlg = $('#hg-multi-alg');
+  function multiName(a, keyed) { return keyed && a.keyedName ? a.keyedName : a.name; }
+  function renderMulti() {
+    const cur = state.file, sel = ALGS.filter(a => selected().indexOf(a.id) >= 0), keyed = !!state.key;
+    const keep = multiAlg.value;
+    multiAlg.textContent = '';
+    sel.forEach(a => { const o = document.createElement('option'); o.value = a.id; o.textContent = multiName(a, keyed); multiAlg.appendChild(o); });
+    if (sel.some(a => a.id === keep)) multiAlg.value = keep;
+    else if (sel.some(a => a.id === 'sha256')) multiAlg.value = 'sha256';
+    const id = multiAlg.value, a = BY_ID[id];
+    $('#hg-multi-h').textContent = a ? multiName(a, keyed) : 'Hash';
+    const body = $('#hg-multi-body'), checks = cur.checks || [];
+    body.textContent = '';
+    $('#hg-multi-check-h').hidden = !cur.checks;
+    cur.multi.forEach((m, i) => {
+      const tr = document.createElement('tr');
+      const td = (text, cls) => { const c = document.createElement('td'); c.textContent = text; if (cls) c.className = cls; tr.appendChild(c); return c; };
+      td(m.file.name || 'Unnamed file', 'hg-fname');
+      td(fmtBytes(m.file.size).replace(/ \(.*\)$/, ''), 'hg-num');
+      const d = m.res && id ? outFor(id, m.res) : null;
+      const err = m.error || (m.res && m.res.errors[id]);
+      td(err ? err : d ? hexOf(d) : cur.busy ? '…' : '–', err ? 'hg-dim' : 'hg-hash');
+      if (cur.checks) { const c = checks[i] || ['', '']; td(c[0], c[1]); }
+      body.appendChild(tr);
+    });
+    const ready = cur.multi.some(m => m.res && id && outFor(id, m.res) && !m.res.errors[id]);
+    $('#hg-multi-dl').textContent = 'Download ' + listFileName();
+    $('#hg-multi-copy').disabled = !ready;
+    $('#hg-multi-dl').disabled = !ready;
+  }
+  // The sha256sum / md5sum / b3sum format: "hash  name". A name with a backslash or a
+  // line break is escaped, and the line starts with a backslash, as GNU coreutils does.
+  function checksumList() {
+    const id = multiAlg.value, lines = [];
+    state.file.multi.forEach(m => {
+      const d = m.res && outFor(id, m.res);
+      if (!d || m.res.errors[id]) return;
+      const name = m.file.name || 'file';
+      const esc = /[\\\n\r]/.test(name);
+      lines.push((esc ? '\\' : '') + toHex(d) + '  ' + (esc ? name.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r') : name));
+    });
+    return lines.join('\n') + (lines.length ? '\n' : '');
+  }
+  function listFileName() {
+    const a = BY_ID[multiAlg.value];
+    return (a ? a.name.replace(/^SHA-/, 'SHA').replace(/[^A-Za-z0-9-]/g, '') : 'HASH') + 'SUMS';
+  }
+  multiAlg.addEventListener('change', () => { renderMulti(); compare(); });
+  $('#hg-multi-copy').addEventListener('click', e => TT.copy(checksumList(), e.currentTarget));
+  $('#hg-multi-dl').addEventListener('click', () => TT.download(listFileName(), checksumList(), 'text/plain;charset=utf-8'));
+
+  // A pasted checksum list: GNU ("hash  name", "hash *name", "\\hash  name") or BSD
+  // ("SHA256 (name) = hash") lines. Returns [{ name, value }].
+  function parseChecksumList(text) {
+    const out = [];
+    text.split(/\r?\n/).forEach(line => {
+      if (!line.trim() || line.charAt(0) === '#') return;
+      let m = /^(\\?)([0-9a-fA-F]{8,}|[A-Za-z0-9+/_-]{6,}={0,2}) [ *](.+)$/.exec(line);
+      if (m) {
+        let name = m[3];
+        if (m[1]) name = name.replace(/\\(\\|n|r)/g, (x, c) => (c === 'n' ? '\n' : c === 'r' ? '\r' : '\\'));
+        out.push({ name: name, value: m[2] });
+        return;
+      }
+      const close = line.lastIndexOf(')');
+      m = close > 0 && /^[\w-]+\s*\(/.test(line) ? line.slice(close + 1).match(/^\s*=\s*(\S+)$/) : null;
+      if (m) out.push({ name: line.slice(line.indexOf('(') + 1, close), value: m[1] });
+    });
+    return out;
+  }
+  const baseName = n => n.replace(/^.*[\\/]/, '');
+  function valueMatches(res, value) {
+    const cands = [];
+    if (/^[0-9a-f]+$/i.test(value) && value.length % 2 === 0) cands.push(parseHexInput(value, 'x'));
+    const b = /^[A-Za-z0-9+/_-]+={0,2}$/.test(value) ? b64ToBytes(value) : null;
+    if (b && b.length) cands.push(b);
+    for (const want of cands) for (const a of ALGS) {
+      const d = res.out[a.id];
+      if (d && !res.errors[a.id] && (a.bits ? eqBytes(d, want) : (want.length >= 16 && want.length <= d.length && eqBytes(d.subarray(0, want.length), want)))) return a;
+    }
+    return null;
+  }
+  function compareMulti(out) {
+    const cur = state.file, text = expEl.value;
+    cur.checks = null;
+    if (!text.trim()) { renderMulti(); return; }
+    const entries = parseChecksumList(text);
+    if (!entries.length) {
+      // One bare hash: which file has it?
+      const v = extractExpected(text);
+      const hits = cur.multi.map(m => (m.res ? [m, valueMatches(m.res, v)] : null)).filter(x => x && x[1]);
+      renderMulti();
+      out.className = hits.length ? 'msg ok' : 'msg error';
+      out.textContent = hits.length ? 'Match: this is the ' + multiName(hits[0][1], hits[0][0].res.keyed) + ' hash of ' + hits.map(h => h[0].file.name).join(', ') + '.' : 'No match: none of the files has this hash among the ticked algorithms.';
+      if (!hits.length) expEl.setAttribute('aria-invalid', 'true');
+      return;
+    }
+    let ok = 0, bad = 0, missing = 0;
+    const used = new Set();
+    cur.checks = cur.multi.map(m => {
+      const name = m.file.name || '';
+      const e = entries.find(x => x.name === name) || entries.find(x => baseName(x.name) === name);
+      if (!e) { missing++; return ['Not in the list', 'hg-dim']; }
+      used.add(e);
+      if (!m.res) return [m.error ? 'Could not be read' : '…', 'hg-dim'];
+      const a = valueMatches(m.res, e.value);
+      if (a) { ok++; return ['OK (' + multiName(a, m.res.keyed) + ')', 'hg-ok']; }
+      bad++;
+      return ['Different', 'hg-bad'];
+    });
+    renderMulti();
+    const extraEntries = entries.length - used.size;
+    out.className = bad || !ok ? 'msg error' : 'msg ok';
+    if (bad || !ok) expEl.setAttribute('aria-invalid', 'true');
+    out.textContent = (bad ? bad + (bad === 1 ? ' file does not match' : ' files do not match') + ' its checksum. ' : ok ? 'All ' + (ok === 1 ? 'checked file matches' : ok + ' checked files match') + '. ' : 'No file matched. ') +
+      (ok && bad ? ok + ' ' + (ok === 1 ? 'matches' : 'match') + '. ' : '') +
+      (missing ? missing + (missing === 1 ? ' file is' : ' files are') + ' not in the list. ' : '') +
+      (extraEntries > 0 ? extraEntries + (extraEntries === 1 ? ' line in the list names a file you did not choose.' : ' lines in the list name files you did not choose.') : '');
+    out.textContent = out.textContent.trim();
   }
 
   // Recomputes whatever the current settings need: short text has every algorithm
@@ -1261,8 +1480,8 @@ faq:
     const sel = selected(), xb = xofBytes();
     const textOk = r && r.all && ['shake128', 'shake256', 'blake3'].every(id => r.xof[id] >= xb[id]);
     if (force || !textOk || (!r.all && sel.some(id => !r.algs.has(id)))) hashText(); else if (state.src === 'text') render();
-    const f = state.file.res;
-    if (state.fileObj && (force || !f || sel.some(id => !f.algs.has(id)) || ['shake128', 'shake256', 'blake3'].some(id => sel.includes(id) && f.xof[id] !== xb[id]))) hashFile();
+    const f = state.file.multi ? (state.file.multi[0] || {}).res : state.file.res;
+    if (state.files.length && (force || !f || sel.some(id => !f.algs.has(id)) || ['shake128', 'shake256', 'blake3'].some(id => sel.includes(id) && f.xof[id] !== xb[id]))) hashFile();
     else if (state.src === 'file') render();
   }
 
@@ -1335,7 +1554,14 @@ faq:
     out.className = 'msg';
     out.textContent = '';
     expEl.setAttribute('aria-invalid', 'false');
-    const v = extractExpected(expEl.value);
+    if (state.src === 'file' && state.file.multi) return compareMulti(out);
+    let v = extractExpected(expEl.value);
+    // A whole checksum list and one file: use the line for this file.
+    if (state.src === 'file' && state.files[0] && /\n\s*\S/.test(expEl.value.trim())) {
+      const entries = parseChecksumList(expEl.value), name = state.files[0].name;
+      const e = entries.find(x => x.name === name) || entries.find(x => baseName(x.name) === name);
+      if (e) v = e.value;
+    }
     if (!v) return;
     const cur = state[state.src], r = cur.res, what = state.src === 'file' ? 'file' : 'input';
     if (!r) {
@@ -1402,8 +1628,11 @@ faq:
     fileEl.value = '';
     $('#hg-progress-wrap').hidden = true;
     state.file.busy = false;
-    $('#hg-drop-title').innerHTML = '<span>Choose a file</span> or drop it here';
-    $('#hg-drop-hint').textContent = 'Any file type. It is read on your device and never uploaded.';
+    state.file.multi = null;
+    state.file.checks = null;
+    state.files = [];
+    $('#hg-drop-title').innerHTML = '<span>Choose files</span> or drop them here';
+    $('#hg-drop-hint').textContent = 'Any file type, one or many. They are read on your device and never uploaded.';
   }
   function setSource(src) {
     state.src = src;
@@ -1424,12 +1653,15 @@ faq:
   TT.$$('.hg-xof input').forEach(inp => inp.addEventListener('input', TT.debounce(() => refresh(false), 250)));
   $('#hg-pick-common').addEventListener('click', () => { TT.$$('.hg-algs input[data-alg]').forEach(c => { c.checked = COMMON.indexOf(c.getAttribute('data-alg')) >= 0; }); refresh(false); });
   $('#hg-pick-all').addEventListener('click', () => { TT.$$('.hg-algs input[data-alg]').forEach(c => { c.checked = true; }); refresh(false); });
-  expEl.addEventListener('input', () => { compare(); sayLater(compareShort); });
-  fileEl.addEventListener('change', () => { if (fileEl.files && fileEl.files[0]) pickFile(fileEl.files[0]); });
+  expEl.addEventListener('input', () => {
+    expEl.rows = Math.min(8, Math.max(1, expEl.value.split('\n').length));
+    compare();
+    sayLater(compareShort);
+  });
+  fileEl.addEventListener('change', () => { if (fileEl.files && fileEl.files.length) pickFiles(fileEl.files); });
   $('#hg-cancel').addEventListener('click', () => {
     state.file.job++;
     stopWorker('file');
-    state.fileObj = null;
     resetFilePicker();
     state.file.res = null;
     state.file.summary = 'Hashing cancelled. Choose a file to start again.';
@@ -1450,8 +1682,7 @@ faq:
     if (!hasFiles(e)) return;
     e.preventDefault();
     drop.classList.remove('is-over');
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) pickFile(f);
+    if (e.dataTransfer.files && e.dataTransfer.files.length) pickFiles(e.dataTransfer.files);
   });
 
   $('#hg-copy-all').addEventListener('click', e => {
@@ -1470,7 +1701,6 @@ faq:
     } else {
       state.file.job++;
       stopWorker('file');
-      state.fileObj = null;
       resetFilePicker();
       state.file.res = null;
       state.file.error = '';

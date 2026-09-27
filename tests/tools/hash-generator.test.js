@@ -217,7 +217,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForTimeout(1500);
   assert.match(await text('#hg-summary'), /cancelled/);
   assert.equal(await text('#hg-md5-hex'), '–');
-  assert.match(await text('#hg-drop-title'), /Choose a file/);
+  assert.match(await text('#hg-drop-title'), /Choose files/);
   assert.equal(await page.isVisible('#hg-progress-wrap'), false);
   assert.equal(await page.getAttribute('#hg-results', 'data-busy'), '');
 
@@ -474,6 +474,73 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForFunction(v => document.querySelector('#hg-sha256-hex').textContent === v, crypto.createHmac('sha256', 'secret').update(Buffer.alloc(1000000, 'a')).digest('hex'), { timeout: 30000 });
   await page.fill('#hg-key', '');
   await page.click('#hg-pick-common');
+  await page.check('input[name="hg-src"][value="text"]');
+
+  // ---------- Several files: a table and a checksum list ----------
+  const FILES = [['a.txt', Buffer.from('abc')], ['my photo.jpg', crypto.randomBytes(70000)], ['empty.bin', Buffer.alloc(0)]];
+  const digest = (alg, b) => crypto.createHash(alg).update(b).digest('hex');
+  await page.check('input[name="hg-src"][value="file"]');
+  await page.setInputFiles('#hg-file', FILES.map(([name, buffer]) => ({ name, mimeType: 'application/octet-stream', buffer })));
+  await page.waitForFunction(() => /^Hashes of 3 files \([^)]*\)$/.test(document.querySelector('#hg-summary').textContent), null, { timeout: 30000 });
+  assert.equal(await page.isVisible('#hg-results'), false);
+  assert.equal(await page.inputValue('#hg-multi-alg'), 'sha256');
+  const multiRows = () => page.$$eval('#hg-multi-body tr', trs => trs.map(tr => Array.from(tr.cells).map(c => c.textContent)));
+  assert.deepEqual((await multiRows()).map(r => [r[0], r[2]]), FILES.map(([n, b]) => [n, digest('sha256', b)]));
+  assert.equal(await text('#hg-drop-title'), '3 files');
+  await page.selectOption('#hg-multi-alg', 'md5');
+  assert.deepEqual((await multiRows()).map(r => r[2]), FILES.map(([, b]) => digest('md5', b)));
+  const [dlSums] = await Promise.all([page.waitForEvent('download'), page.click('#hg-multi-dl')]);
+  assert.match(dlSums.suggestedFilename(), /^MD5SUMS(\.txt)?$/); // Chrome adds .txt to a text/plain download
+  const sums = fs.readFileSync(await dlSums.path(), 'utf8');
+  assert.equal(sums, FILES.map(([n, b]) => digest('md5', b) + '  ' + n).join('\n') + '\n');
+  // GNU md5sum -c accepts the list for the same files.
+  let md5sum = false;
+  try { md5sum = /GNU coreutils/.test(require('child_process').execFileSync('md5sum', ['--version']).toString()); } catch (e) { md5sum = false; }
+  if (md5sum) {
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sums-'));
+    for (const [n, b] of FILES) fs.writeFileSync(path.join(dir, n), b);
+    fs.writeFileSync(path.join(dir, 'MD5SUMS'), sums);
+    const res = require('child_process').execFileSync('md5sum', ['-c', 'MD5SUMS'], { cwd: dir }).toString();
+    assert.equal(res.trim().split('\n').filter(l => / OK$/.test(l)).length, 3, res);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  await page.click('#hg-multi-copy');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), sums);
+  // Check a pasted SHA256SUMS: one line wrong, one file missing, one extra line, paths ignored.
+  const list = [digest('sha256', FILES[0][1]) + '  ./downloads/a.txt', '0'.repeat(64) + ' *my photo.jpg', digest('sha256', Buffer.from('zzz')) + '  other.iso'].join('\n');
+  await page.fill('#hg-expected', list);
+  let checks = (await multiRows()).map(r => r[3]);
+  assert.deepEqual(checks, ['OK (SHA-256)', 'Different', 'Not in the list']);
+  assert.equal(await text('#hg-compare'), '1 file does not match its checksum. 1 matches. 1 file is not in the list. 1 line in the list names a file you did not choose.');
+  assert.match(await page.getAttribute('#hg-compare', 'class'), /\berror\b/);
+  // BSD-style lines, all matching.
+  await page.fill('#hg-expected', FILES.map(([n, b]) => `SHA3-256 (${n}) = ${digest('sha3-256', b)}`).join('\n'));
+  assert.deepEqual((await multiRows()).map(r => r[3]), ['OK (SHA3-256)', 'OK (SHA3-256)', 'OK (SHA3-256)']);
+  assert.equal(await text('#hg-compare'), 'All 3 checked files match.');
+  // One bare hash: which file is it?
+  await page.fill('#hg-expected', digest('sha512', FILES[1][1]));
+  assert.equal(await text('#hg-compare'), 'Match: this is the SHA-512 hash of my photo.jpg.');
+  await page.fill('#hg-expected', '');
+  assert.equal(await page.isVisible('#hg-multi-check-h'), false);
+  // Several files dropped at once.
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['one'], 'one.txt'));
+    dt.items.add(new File(['two'], 'two.txt'));
+    document.querySelector('.tool-card').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of 2 files'));
+  assert.deepEqual((await multiRows()).map(r => r[2]), [digest('md5', Buffer.from('one')), digest('md5', Buffer.from('two'))]);
+  // Back to one file; a pasted list is matched by its name.
+  await page.setInputFiles('#hg-file', { name: 'two.txt', mimeType: 'text/plain', buffer: Buffer.from('two') });
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of two.txt'));
+  assert.equal(await page.isVisible('#hg-results'), true);
+  assert.equal(await page.isVisible('#hg-multi'), false);
+  await page.fill('#hg-expected', digest('sha256', Buffer.from('one')) + '  one.txt\n' + digest('sha256', Buffer.from('two')) + '  two.txt');
+  assert.match(await text('#hg-compare'), /^Match: this is the SHA-256 hash of the file\./);
+  await page.fill('#hg-expected', '');
+  await page.click('#hg-clear');
+  assert.match(await text('#hg-drop-title'), /Choose files/);
   await page.check('input[name="hg-src"][value="text"]');
 
   // Short text is hashed with every algorithm on each keystroke, so it has to stay fast.

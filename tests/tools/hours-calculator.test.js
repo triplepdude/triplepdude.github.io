@@ -1,7 +1,7 @@
 // Expected values were computed independently with Python (datetime for the
 // spans, decimal.Decimal with ROUND_HALF_UP for decimal hours, rounding and
 // pay), not copied from the page.
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, url }) => {
   await open();
   const text = sel => page.locator(sel).textContent();
   const row = n => page.locator('#hc-rows .hc-row').nth(n - 1);
@@ -188,6 +188,93 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.evaluate(() => window.__hcChanges), 1);
   assert.equal(await page.locator('#hc-status').getAttribute('role'), 'status');
 
+  // Regressions found in review. Expected values from Python (Decimal, ROUND_HALF_UP).
+  await page.click('#hc-clear');
+  await page.selectOption('#hc-format', '12');
+  await cell(1, '.hc-start').fill('9:00 AM');
+  await cell(1, '.hc-end').fill('5:15 PM');
+  await cell(1, '.hc-break').fill('30');
+  // Thousands separators in the rate: 465 minutes at 1,000 = 7,750.00 (it was read as 1.000).
+  for (const [rate, pay, label] of [['1,000', '7,750.00', '1,000.00'], ['¥1,500', '11,625.00', '1,500.00'],
+    ['18,50', '143.38', '18.50'], ['1,000.50', '7,753.88', '1,000.50'], ['$20/hr', '155.00', '20.00']]) {
+    await page.fill('#hc-rate', rate);
+    assert.equal(await text('#hc-pay'), pay, `rate ${rate}`);
+    assert.equal(await text('#hc-pay-label'), `Gross pay at ${label} an hour`, `rate ${rate}`);
+  }
+  await page.fill('#hc-rate', '');
+  // An overnight row whose rounded ends meet is a full 24 hours, not 0:
+  // 0:03 to 0:02 and 11:59 PM to 11:58 PM both count 12:00 AM to 12:00 AM.
+  await page.selectOption('#hc-round', '15');
+  await cell(1, '.hc-break').fill('');
+  for (const [s, e] of [['12:03 AM', '12:02 AM'], ['11:59 PM', '11:58 PM']]) {
+    await cell(1, '.hc-start').fill(s);
+    await cell(1, '.hc-end').fill(e);
+    assert.equal(await text('#hc-total'), '24:00', `${s} to ${e}`);
+    assert.equal(await cell(1, '.hc-tag').textContent(), 'counted 12:00 AM–12:00 AM · ends the next day', `${s} to ${e}`);
+  }
+  // An end that rounds up to midnight reads 12:00 AM on a 12-hour clock, 24:00 on a 24-hour one.
+  await cell(1, '.hc-start').fill('10:00 PM');
+  await cell(1, '.hc-end').fill('11:55 PM');
+  assert.equal(await text('#hc-total'), '2:00');
+  assert.equal(await cell(1, '.hc-tag').textContent(), 'counted 10:00 PM–12:00 AM');
+  await page.selectOption('#hc-format', '24');
+  assert.equal(await cell(1, '.hc-tag').textContent(), 'counted 22:00–24:00');
+  // Two times that round together without crossing midnight still count 0.
+  await cell(1, '.hc-start').fill('08:01');
+  await cell(1, '.hc-end').fill('08:05');
+  assert.equal(await text('#hc-total'), '0:00');
+  assert.match(await cell(1, '.hc-tag').textContent(), /round to the same time/);
+  // A break on a row with no time points at the times, not the break.
+  await cell(1, '.hc-break').fill('10');
+  await cell(1, '.hc-break').press('Tab');
+  assert.equal(await cell(1, '.hc-err').textContent(), 'The start and end round to the same time, so there is no time to take a break from.');
+  assert.equal(await cell(1, '.hc-end').getAttribute('aria-invalid'), 'true');
+  await page.selectOption('#hc-round', '0');
+  await cell(1, '.hc-end').fill('08:01');
+  await cell(1, '.hc-break').press('Tab');
+  assert.equal(await cell(1, '.hc-err').textContent(), 'The start and end are the same, so no time is counted. For a 24-hour shift, enter 24:00 as the end.');
+  await cell(1, '.hc-break').fill('');
+  assert.equal(await cell(1, '.hc-err').textContent(), '');
+  await page.selectOption('#hc-format', '12');
+  // More ways of writing a time; seconds are only accepted when they are zero.
+  await cell(1, '.hc-end').fill('5:00 PM');
+  for (const [typed, expected] of [['12:00 noon', '12:00 PM'], ['9h', '9:00 AM'], ['09:30:00', '9:30 AM'], ['１０:００', '10:00 AM']]) {
+    await tidy(typed, expected);
+    assert.equal(await cell(1, '.hc-err').textContent(), '', typed);
+  }
+  await cell(1, '.hc-start').fill('9:30:15');
+  await cell(1, '.hc-start').press('Tab');
+  assert.match(await cell(1, '.hc-err').textContent(), /“9:30:15” isn’t a time/);
+  // A long paste is quoted only in part, so the message stays short.
+  await cell(1, '.hc-start').fill('x'.repeat(5000));
+  await cell(1, '.hc-start').press('Tab');
+  assert.equal(await cell(1, '.hc-err').textContent(), `The start time “${'x'.repeat(40)}…” isn’t a time. Try 9:30, 9:30 pm or 21:30.`);
+  await cell(1, '.hc-start').fill('9:00 AM');
+  // A huge break gets a plain message, not "1e+23-minute break".
+  await cell(1, '.hc-break').fill('99999999999999999999999');
+  await cell(1, '.hc-break').press('Tab');
+  assert.equal(await cell(1, '.hc-err').textContent(), 'A break can be at most 1,440 minutes (24 hours).');
+  assert.equal(await text('#hc-total'), '0:00');
+
+  // A click on "+ Add row" while focus is in a row, then typing in the new row
+  // before the deferred check runs: the new row is where focus is, so its
+  // missing end time is not flagged yet (it was, from a stale "row being left").
+  await cell(1, '.hc-break').focus();
+  await page.evaluate(() => {
+    const add = document.querySelector('#hc-add');
+    add.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    add.focus();
+    add.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    add.click();
+    const start = document.activeElement;
+    start.value = '8';
+    start.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Start, row 2');
+  assert.equal(await cell(2, '.hc-err').textContent(), '');
+  await cell(2, '.hc-del').click();
+
   // Clear all leaves one empty row.
   await page.click('#hc-clear');
   assert.equal(await page.locator('#hc-rows .hc-row').count(), 1);
@@ -195,4 +282,19 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#hc-total'), '0:00');
   assert.equal(await text('#hc-dec'), '0.00');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'hc-clear');
+
+  // In a locale with its own digits (Arabic, Egypt) the English page still
+  // shows Latin digits, with that locale's separators: 7:45 at 1,500 = 11,625.00.
+  const ctx = await page.context().browser().newContext({ locale: 'ar-EG' });
+  try {
+    const p2 = await ctx.newPage();
+    await p2.route('**/*', r => (r.request().url().startsWith(new URL(url).origin) ? r.continue() : r.abort()));
+    await p2.goto(url);
+    await p2.fill('#hc-rate', '1,500');
+    const shown = [await p2.textContent('#hc-pay'), await p2.textContent('#hc-mins'), await p2.textContent('#hc-pay-label')];
+    for (const s of shown) assert.ok(!/[\u0660-\u0669\u06F0-\u06F9]/.test(s), s);
+    assert.equal(shown[0].replace(/[^0-9]/g, ''), '1162500');
+  } finally {
+    await ctx.close();
+  }
 };

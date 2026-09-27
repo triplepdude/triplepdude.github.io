@@ -573,6 +573,7 @@ faq:
   }
 
   // Markdown: the text a reader sees, without formatting marks, link addresses or front matter.
+  // Patterns are bounded to one line and a few hundred characters, so no line can make them slow.
   function markdownText(s) {
     s = s.replace(/^\uFEFF?---[ \t]*\n[\s\S]*?\n(?:---|\.\.\.)[ \t]*(?:\n|$)/, '');
     s = s.replace(/<!--[\s\S]*?-->/g, '');
@@ -592,16 +593,16 @@ faq:
         .replace(/^\s*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/, '');
       if (/^\s*\|.*\|\s*$/.test(line)) line = line.replace(/^\s*\||\|\s*$/g, '').replace(/\s*\|\s*/g, '\t');
       return line
-        .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-        .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
-        .replace(/<(https?:\/\/[^>\s]+)>/g, '$1')
-        .replace(/<\/?[A-Za-z][^>]*>/g, '')
-        .replace(/`+([^`]+)`+/g, '$1')
-        .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2')
-        .replace(/(?<![\p{L}\p{N}*\\])\*(?=[^\s*])(.+?)(?<=[^\s*\\])\*(?![\p{L}\p{N}*])/gu, '$1')
-        .replace(/(?<![\p{L}\p{N}_\\])_(?=[^\s_])(.+?)(?<=[^\s_\\])_(?![\p{L}\p{N}_])/gu, '$1')
-        .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '$1')
+        .replace(/!\[([^\]\n]{0,300})\]\([^()\n]{0,2000}\)/g, '$1')
+        .replace(/\[([^\]\n]{1,300})\]\([^()\n]{0,2000}\)/g, '$1')
+        .replace(/\[([^\]\n]{1,300})\]\[[^\]\n]{0,300}\]/g, '$1')
+        .replace(/<(https?:\/\/[^>\s]{1,2000})>/g, '$1')
+        .replace(/<\/?[A-Za-z][^<>\n]{0,500}>/g, '')
+        .replace(/(`+)([^`\n]{1,500}?)\1/g, '$2')
+        .replace(/(\*\*|__)(?=\S)([^\n]{1,500}?)(?<=\S)\1/g, '$2')
+        .replace(/(?<![\p{L}\p{N}*\\])\*(?=[^\s*])([^\n]{1,500}?)(?<=[^\s*\\])\*(?![\p{L}\p{N}*])/gu, '$1')
+        .replace(/(?<![\p{L}\p{N}_\\])_(?=[^\s_])([^\n]{1,500}?)(?<=[^\s_\\])_(?![\p{L}\p{N}_])/gu, '$1')
+        .replace(/~~(?=\S)([^\n]{1,500}?)(?<=\S)~~/g, '$1')
         .replace(/\\([\\`*_{}[\]()#+\-.!|~>])/g, '$1');
     }).join('\n');
     return s.replace(/\n{3,}/g, '\n\n').trim();

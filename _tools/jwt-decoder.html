@@ -1126,7 +1126,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
   }
 
   // Test keys made in the browser: RSA 2048, EC on the algorithm's curve, or Ed25519.
-  async function generateKeyPair(btn) {
+  async function generateKeyPair(btn, clicked) {
     const alg = jbAlg.value, spec = ALGS[alg];
     if (!subtle) return;
     const params = spec.kty === 'RSA'
@@ -1147,7 +1147,8 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
       jbMsg.textContent = unsupported(e, spec) ? NO_ED25519.replace('checked', 'made') : 'The key pair could not be generated: ' + (e && e.message ? e.message : e);
     }
     btn.disabled = false;
-    btn.focus();
+    // Disabling the button dropped its focus; give it back only if it was pressed.
+    if (clicked) btn.focus();
   }
   function randomSecret() {
     const b = new Uint8Array(64);
@@ -1180,7 +1181,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
   [jbHeader, jbPayload, jbSecret, jbKey].forEach(el => el.addEventListener('input', TT.debounce(rebuild, 150)));
   jbB64.addEventListener('change', rebuild);
   $('#jb-gen-secret').addEventListener('click', () => { randomSecret(); rebuild(); });
-  $('#jb-gen-key').addEventListener('click', e => generateKeyPair(e.currentTarget));
+  $('#jb-gen-key').addEventListener('click', e => generateKeyPair(e.currentTarget, true));
   $('#jb-now').addEventListener('click', () => {
     try {
       const pl = parseJsonObject(jbPayload.value, 'payload');

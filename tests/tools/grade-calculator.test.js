@@ -135,6 +135,58 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.locator('#gc-rows .gc-row').count(), 3);
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Remove row 3');
 
+  // Regressions found in review.
+  // Weights are shown exactly as typed (a tiny weight was shown as "0", "divided by 0").
+  await setRows([['Quiz', '90', '0.00001']]);
+  assert.equal(await text('#gc-avg'), '90.00%');
+  assert.equal(await text('#gc-note'), 'Your weights add up to 0.00001%, not 100%. The graded weights were normalised (divided by 0.00001), so this is your grade on the work graded so far.');
+  // A box holding only separators is an error, not a silent "not graded yet".
+  await k(1, 'score').fill(',');
+  await k(1, 'score').press('Tab');
+  assert.equal(await row(1).locator('.gc-err').textContent(), '“,” isn’t a score. Use a percentage like 92 or points like 45/50.');
+  assert.equal(await row(1).locator('.gc-r-sub').textContent(), '');
+  assert.equal(await text('#gc-avg'), '–');
+  // Full-width digits are read as digits.
+  await k(1, 'score').fill('９２');
+  assert.equal(await text('#gc-avg'), '92.00%');
+  // A letter minimum above 100 gets its own message (it said "lower than the one before it").
+  await page.fill('#gc-min-0', '101');
+  assert.equal(await text('#gc-scale-msg'), 'Enter a minimum from 0 to 100 for A.');
+  await page.fill('#gc-min-0', '90');
+  assert.equal(await text('#gc-scale-msg'), '');
+  // A click on "+ Add row" while focus is in a row, then typing in the new row
+  // before the deferred check runs: the new row is where focus is, so it is not
+  // flagged yet (it was, from a stale "row being left").
+  await k(1, 'score').focus();
+  await page.evaluate(() => {
+    const add = document.querySelector('#gc-add');
+    add.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    add.focus();
+    add.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    add.click();
+    const row = [...document.querySelectorAll('#gc-rows .gc-row')].pop();
+    const score = row.querySelector('[data-k="score"]');
+    score.focus();
+    score.value = '80';
+    score.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.waitForTimeout(100);
+  assert.equal(await row(4).locator('.gc-err').textContent(), '');
+  await row(4).locator('.gc-del').click();
+
+  // The mode switch shows keyboard focus: the checked segment is filled with the
+  // accent colour, so the ring goes around the whole control.
+  await page.focus('input[name="gc-mode"][value="weights"]');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
+  const ring = await page.evaluate(() => {
+    const s = getComputedStyle(document.querySelector('.gc-seg'));
+    return { style: s.outlineStyle, offset: s.outlineOffset, color: s.outlineColor, bg: getComputedStyle(document.querySelector('.tool-card')).backgroundColor };
+  });
+  assert.equal(ring.style, 'solid');
+  assert.equal(ring.offset, '2px');
+  assert.notEqual(ring.color, ring.bg);
+
   // Points mode: the sample points are 184/200 + 51/60 + 78/100 = 313/360 = 86.94%.
   await page.reload();
   await page.check('input[name="gc-mode"][value="points"]');

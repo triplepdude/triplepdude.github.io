@@ -80,7 +80,10 @@ faq:
 .gc-seg label + label { border-left: 1px solid var(--field-border); }
 .gc-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .gc-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); font-weight: 600; }
-.gc-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -4px; }
+/* The focused radio is the checked one, whose fill is the accent colour, so
+   the ring goes around the whole control. */
+.gc-seg:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gc-seg label:has(input:focus-visible) { text-decoration: underline; text-underline-offset: 4px; }
 .gc-head, .gc-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.5fr) minmax(0, 0.7fr) minmax(0, 1fr) 2.75rem; gap: 6px 10px; align-items: center; }
 .gc-grid.gc-points .gc-head, .gc-grid.gc-points .gc-row { grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1fr) 2.75rem; }
 .gc-head { padding: 0 0 6px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; font-weight: 600; }
@@ -226,10 +229,11 @@ table.data.gc-table tfoot th, table.data.gc-table tfoot td { color: var(--text);
     return (neg && v ? '-' : '') + str;
   }
   function roundInt(a) { return Q((2n * a.n + a.d) / (2n * a.d)); }
-  // Up to two decimals without trailing zeros (for weights and scale values).
-  function short(a) { return fixed(a, 2).replace(/\.?0+$/, ''); }
+  // Typed values (weights, points, scale minimums) and their sums, exactly as
+  // entered: inputs have at most 6 decimals, and trailing zeros are dropped.
+  function short(a) { return fixed(a, 6).replace(/\.?0+$/, ''); }
   function dec(str) {
-    var s = String(str).trim();
+    var s = String(str).normalize('NFKC').trim();
     if (decComma) s = s.replace(/^(\d+),(\d+)$/, '$1.$2');
     var m = /^(\d{1,9})(?:\.(\d{1,6}))?$/.exec(s) || /^()\.(\d{1,6})$/.exec(s);
     if (!m) return null;
@@ -237,9 +241,14 @@ table.data.gc-table tfoot th, table.data.gc-table tfoot td { color: var(--text);
     return Q(BigInt((m[1] || '0') + f), 10n ** BigInt(f.length));
   }
 
+  // Typed text quoted in a message, cut short so a long paste cannot flood the page.
+  function quote(v) {
+    var s = String(v).trim(), c = Array.from(s.slice(0, 80));
+    return '“' + (c.length > 40 || s.length > 80 ? c.slice(0, 40).join('') + '…' : s) + '”';
+  }
   // A score box: 92, 92%, 45/50, or a list of either kind.
   function parseScore(raw) {
-    var s = String(raw || '').trim().replace(/\s*\/\s*/g, '/').replace(/\s+%/g, '%');
+    var s = String(raw || '').normalize('NFKC').trim().replace(/\s*\/\s*/g, '/').replace(/\s+%/g, '%');
     if (!s) return null;
     var parts = [];
     s.split(/[;+]|\s+/).forEach(function (tok) {
@@ -247,18 +256,18 @@ table.data.gc-table tfoot th, table.data.gc-table tfoot td { color: var(--text);
       if (decComma && /^\d+,\d+%?$/.test(tok)) { parts.push(tok); return; }
       tok.split(',').forEach(function (t) { if (t) parts.push(t); });
     });
-    if (!parts.length) return null;
+    if (!parts.length) return { error: quote(s) + ' isn’t a score. Use a percentage like 92 or points like 45/50.' };
     var fr = [], pc = [];
     for (var i = 0; i < parts.length; i++) {
       var t = parts[i], m;
       if ((m = /^([^/]+)\/([^/]+)$/.exec(t))) {
         var a = dec(m[1]), b = dec(m[2]);
-        if (!a || !b) return { error: '“' + t + '” isn’t a score. Use points like 45/50 or a percentage like 92.' };
-        if (isZero(b)) return { error: 'The points possible in “' + t + '” can’t be 0.' };
+        if (!a || !b) return { error: quote(t) + ' isn’t a score. Use points like 45/50 or a percentage like 92.' };
+        if (isZero(b)) return { error: 'The points possible in ' + quote(t) + ' can’t be 0.' };
         fr.push([a, b]);
       } else {
         var p = dec(t.replace(/%$/, ''));
-        if (!p) return { error: '“' + t + '” isn’t a score. Use a percentage like 92 or points like 45/50.' };
+        if (!p) return { error: quote(t) + ' isn’t a score. Use a percentage like 92 or points like 45/50.' };
         pc.push(p);
       }
     }
@@ -349,9 +358,12 @@ table.data.gc-table tfoot th, table.data.gc-table tfoot td { color: var(--text);
   function readScale() {
     var key = scaleKey(), out = [], err = '', prev = null;
     SCALES[key].forEach(function (x, i) {
-      var el = $('#gc-min-' + i), v = el ? dec(el.value.replace(/%$/, '')) : null;
-      var bad = !v || cmp(v, Q(1000n)) > 0 || (prev && cmp(v, prev) >= 0);
-      if (bad) { if (!err) err = !v ? 'Enter a number for ' + x[0] + '.' : 'Each minimum must be lower than the one before it (check ' + x[0] + ').'; el && el.setAttribute('aria-invalid', 'true'); }
+      var el = $('#gc-min-' + i), v = el ? dec(el.value.trim().replace(/\s*%$/, '')) : null;
+      var high = v && cmp(v, HUNDRED) > 0, bad = !v || high || (prev && cmp(v, prev) >= 0);
+      if (bad) {
+        if (!err) err = !v || high ? 'Enter a minimum from 0 to 100 for ' + x[0] + '.' : 'Each minimum must be lower than the one before it (check ' + x[0] + ').';
+        if (el) el.setAttribute('aria-invalid', 'true');
+      }
       else if (el) el.removeAttribute('aria-invalid');
       if (v) prev = v;
       out.push({ letter: x[0], min: v });
@@ -537,7 +549,11 @@ table.data.gc-table tfoot th, table.data.gc-table tfoot td { color: var(--text);
   });
   rowsEl.addEventListener('focusout', function (e) {
     var to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest('.gc-row') : null;
-    afterPointer(function () { render(true, to); });
+    // While a button is held down, wait for the click; by then focus has
+    // settled, so the row it is in is read afresh (a stale row would flag
+    // the row just added or clicked into).
+    if (pointerIsDown) afterPointer(function () { render(true); });
+    else render(true, to);
   });
   rowsEl.addEventListener('click', function (e) {
     var btn = e.target.closest('.gc-del');

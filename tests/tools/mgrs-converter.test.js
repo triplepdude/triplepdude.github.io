@@ -287,6 +287,9 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await val('#mg-big'), '18T WL 85628 11322');
   await utm('18T 4511322N 585628E');
   assert.equal(await val('#mg-big'), '18T WL 85628 11322');
+  // Metre units and thousands separators.
+  await utm('18T 585,628m 4,511,322m');
+  assert.equal(await val('#mg-big'), '18T WL 85628 11322');
   // N: northern hemisphere either way.
   await utm('18N 585628 4511322');
   assert.equal(await val('#mg-big'), '18T WL 85628 11322');
@@ -363,6 +366,9 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(copiedLines[0], 'id,zone,hemisphere,easting,northing,latitude,longitude,mgrs,utm_zone,utm_band,utm_hemisphere,utm_easting,utm_northing,note,error');
   assert.ok(copiedLines[1].startsWith('"\'=HYPERLINK(""x"")",56,S,'), copiedLines[1]);
   assert.ok(copiedLines[2].startsWith('Smith; J,18,N,585628,4511322,40.748396,-73.985705,18TWL8562811322'), copiedLines[2]);
+  // Decimal commas in a semicolon-separated file (European spreadsheets).
+  await batch('name;lat;lon\nESB;40,748440;-73,985664');
+  assert.equal((await batchRows())[0][3], '18TWL8563111326');
   // A header with no rows under it says so instead of "0 of 0".
   await page.fill('#mg-batch', 'name,lat,lon\n');
   await page.waitForFunction(() => /no coordinates below the header/.test(document.querySelector('#mg-batch-sum').textContent));

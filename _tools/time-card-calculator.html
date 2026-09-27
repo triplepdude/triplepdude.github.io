@@ -82,6 +82,7 @@ faq:
 .tc-box legend { padding: 0 6px; font-size: 14px; font-weight: 600; }
 .tc-box .row { margin-bottom: 12px; }
 .tc-box .row > .field { flex: 1 1 130px; }
+.tc-box .row > .field.tc-f-preset { flex-basis: 170px; }
 .tc-box input, .tc-box select { background: var(--surface); }
 .tc-rules { display: flex; flex-wrap: wrap; gap: 4px 28px; margin: 0 0 10px; }
 .tc-rule { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 44px; font-size: 15px; }
@@ -202,7 +203,7 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
         <label for="tc-rate">Hourly rate (optional)</label>
         <input type="text" id="tc-rate" inputmode="decimal" autocomplete="off" value="20.00" placeholder="e.g. 18.50">
       </div>
-      <div class="field">
+      <div class="field tc-f-preset">
         <label for="tc-preset">Overtime rules</label>
         <select id="tc-preset">
           <option value="federal" selected>Federal (FLSA)</option>
@@ -302,19 +303,26 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
   var startSel = $('#tc-startday'), dateIn = $('#tc-date'), rateIn = $('#tc-rate'), presetSel = $('#tc-preset');
   var last = null;
 
+  // Typed text quoted in a message, cut short so a long paste cannot flood the page.
+  function quote(v) {
+    var s = String(v).trim(), c = Array.from(s.slice(0, 80));
+    return '“' + (c.length > 40 || s.length > 80 ? c.slice(0, 40).join('') + '…' : s) + '”';
+  }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
   // ----- Times -----
   // Minutes after midnight (0 to 1440), null when empty, NaN when unreadable.
   function parseTime(raw) {
-    var s = String(raw == null ? '' : raw).trim().toLowerCase().replace(/\s+/g, ' ');
+    var s = String(raw == null ? '' : raw).normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ');
     if (!s) return null;
-    if (/^(12 ?)?noon$/.test(s)) return 720;
-    if (/^(12 ?)?midnight$/.test(s)) return 0;
+    if (/^(12(:00)? ?)?noon$/.test(s)) return 720;
+    if (/^(12(:00)? ?)?midnight$/.test(s)) return 0;
     var suf = '';
     var sm = /\s*([ap])\.?\s*(m\.?)?$/.exec(s);
     if (sm) { suf = sm[1]; s = s.slice(0, sm.index); }
+    // Whole minutes only: zero seconds (from a time clock export) are dropped.
+    s = s.replace(/^(\d{1,2}:\d{2}):00$/, '$1').replace(/^(\d{1,2}) ?h$/, '$1');
     var h, m;
     var a = /^(\d{1,2})(?:\s*[:.h]\s*(\d{2}))?$/.exec(s);
     var b = /^(\d{3,4})$/.exec(s);
@@ -347,11 +355,20 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
   function is12() { return fmtSel.value === '12'; }
 
   // ----- Money: exact integer maths in 1/10000 units -----
+  // Separators: "1,000" and "1,000.50" group thousands and "18,50" has a decimal
+  // comma. In locales that write decimals with a comma, any single comma is
+  // a decimal comma and "1.000,50" groups with dots.
+  var decComma = (1.5).toLocaleString().indexOf(',') !== -1;
+  function plainNumber(s) {
+    if (/^\d{1,3}(\.\d{3})+,\d+$/.test(s)) return s.replace(/\./g, '').replace(',', '.');
+    if (/^\d*,\d+$/.test(s) && (decComma || !/^\d{1,3},\d{3}$/.test(s))) return s.replace(',', '.');
+    if (/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s)) return s.replace(/,/g, '');
+    return s;
+  }
   function parseDecimal(raw, maxInt) {
-    var s = String(raw || '').trim().replace(/^[$€£¥₹]\s*/, '').replace(/[×x]$/i, '').trim();
+    var s = String(raw || '').normalize('NFKC').trim().replace(/^[$€£¥₹]\s*/, '').replace(/\s*(\/\s*h(ou)?r?|an hour|per hour)$/i, '').replace(/[×x]$/i, '').trim();
     if (!s) return null;
-    if (/^\d+,\d{1,4}$/.test(s)) s = s.replace(',', '.');
-    s = s.replace(/,(?=\d{3}(\D|$))/g, '');
+    s = plainNumber(s);
     var m = /^(\d{1,7})(?:\.(\d{0,4}))?$/.exec(s) || /^()\.(\d{1,4})$/.exec(s);
     if (!m) return NaN;
     var v = BigInt(m[1] || '0') * 10000n + BigInt(((m[2] || '') + '0000').slice(0, 4));
@@ -360,9 +377,9 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
   function roundDiv(num, den) { return (2n * num + den) / (2n * den); }
   // Cents for minutes at rate4 (1/10000 units) times mult4 (1/10000 units), half up.
   function payCents(minutes, rate4, mult4) { return roundDiv(BigInt(minutes) * rate4 * mult4, 60n * 10000n * 100n); }
-  var money = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  var rateFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-  var multFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
+  var money = new Intl.NumberFormat(undefined, { numberingSystem: 'latn', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  var rateFmt = new Intl.NumberFormat(undefined, { numberingSystem: 'latn', minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  var multFmt = new Intl.NumberFormat(undefined, { numberingSystem: 'latn', maximumFractionDigits: 4 });
   function fmtMoney(c) { return money.format(Number(c) / 100); }
   function fmtRate4(r4) { return rateFmt.format(Number(r4) / 10000); }
   function fmtMult(m4) { return multFmt.format(Number(m4) / 10000) + '×'; }
@@ -479,7 +496,7 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
       if (!$(onId).checked) return null;
       var v = parseDecimal($(id).value);
       if (v === null || Number.isNaN(v) || v <= 0n || v > BigInt(max) * 10000n) {
-        errs.push('Enter the ' + name + ' threshold as hours between 0 and ' + max + '.');
+        errs.push('Enter the ' + name + ' threshold in hours, more than 0 and at most ' + max + '.');
         $(id).setAttribute('aria-invalid', 'true');
         return NaN;
       }
@@ -547,15 +564,15 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
   // ----- Calculation -----
   function readDay(row, pairs) {
     var out = { row: row, invalid: [], err: '', worked: 0, blank: true, pairs: [] };
-    var total = 0, first = null, prevEnd = null;
+    var total = 0, first = null, prevEnd = null, over = null;
     for (var p = 1; p <= pairs; p++) {
       var iIn = field(row, 'in' + p), oIn = field(row, 'out' + p);
       var s = parseTime(iIn.value), e = parseTime(oIn.value);
       if (s === null && e === null) continue;
       out.blank = false;
       var n = p > 1 ? ' ' + p : '';
-      if (Number.isNaN(s)) { out.invalid.push(iIn); out.err = out.err || '“' + iIn.value.trim() + '” isn’t a time. Try 8:30, 8:30 am or 17:30.'; continue; }
-      if (Number.isNaN(e)) { out.invalid.push(oIn); out.err = out.err || '“' + oIn.value.trim() + '” isn’t a time. Try 5:00, 5 pm or 17:00.'; continue; }
+      if (Number.isNaN(s)) { out.invalid.push(iIn); out.err = out.err || quote(iIn.value) + ' isn’t a time. Try 8:30, 8:30 am or 17:30.'; continue; }
+      if (Number.isNaN(e)) { out.invalid.push(oIn); out.err = out.err || quote(oIn.value) + ' isn’t a time. Try 5:00, 5 pm or 17:00.'; continue; }
       if (s === null || e === null) {
         out.incomplete = true;
         out.invalid.push(s === null ? iIn : oIn);
@@ -564,13 +581,17 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
       }
       if (s === 1440) s = 0;
       var dur = e === 1440 ? 1440 - s : ((e - s) % 1440 + 1440) % 1440;
+      // Each pair starts at the first moment on or after the previous out time.
       var abs = prevEnd === null ? s : prevEnd + ((s - prevEnd) % 1440 + 1440) % 1440;
       if (first === null) first = abs;
+      if (!over && abs + dur - first > 1440) over = { p: p, s: s, e: e, el: iIn };
       prevEnd = abs + dur;
       total += dur;
       out.pairs.push({ s: s, e: e });
-      if (e < s && e !== 1440) out.overnight = true;
+      if (dur === 0 && !out.same) out.same = oIn;
     }
+    // The day's punches run past midnight (a shift counts on the day it starts).
+    if (prevEnd !== null && prevEnd > 1440) out.overnight = true;
     var bIn = field(row, 'brk'), bRaw = bIn.value.trim(), brk = 0;
     if ((bIn.validity && bIn.validity.badInput) || (bRaw && !/^\d+$/.test(bRaw))) {
       out.invalid.push(bIn); out.err = out.err || 'Enter the break as whole minutes, such as 30.'; out.blank = false;
@@ -580,9 +601,16 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
       if (brk) { out.err = 'Enter the in and out times for this break.'; out.incomplete = true; out.invalid.push(field(row, 'in1')); }
       return out;
     }
-    if (prevEnd - first > 1440) {
-      out.err = 'These times cover more than 24 hours. Check that each pair is in order.';
-      out.invalid.push(field(row, 'in2'));
+    if (over) {
+      var h12 = is12();
+      out.err = 'Pair ' + over.p + ' (' + fmtTime(over.s, h12) + '–' + fmtTime(over.e, h12) + ') would end more than 24 hours after the first in time. Pairs must be in order and must not overlap.';
+      out.invalid.push(over.el);
+      return out;
+    }
+    if (brk > total && !total) {
+      // A break on a day with no time clocked: the real problem is the times.
+      out.invalid.push(out.same);
+      out.err = 'The in and out times are the same, so no time is clocked. For a 24-hour shift, enter 24:00 as the out time.';
       return out;
     }
     if (brk > total) {
@@ -661,6 +689,7 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
         if (a.ot) bits.push('OT ' + fmtHM(a.ot));
         if (a.dt) bits.push('DT ' + fmtHM(a.dt));
         if (d.overnight) bits.push('ends next day');
+        if (d.same) bits.push('same in and out; use 24:00 for a full day');
         split.textContent = bits.join(' · ');
         wk.worked += d.worked; wk.reg += a.reg; wk.ot += a.ot; wk.dt += a.dt;
         wk.days.push({ row: row, d: d, a: a });
@@ -752,7 +781,11 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
   });
   grid.addEventListener('focusout', function (e) {
     var to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest('.tc-day') : null;
-    afterPointer(function () { render(true, to); });
+    // While a button is held down, wait for the click; by then focus has
+    // settled, so the row it is in is read afresh (a stale row would flag
+    // the row just added or clicked into).
+    if (pointerIsDown) afterPointer(function () { render(true); });
+    else render(true, to);
   });
   // A message that appears while a mouse button or finger is down moves the
   // page under the pointer, and the click on the button below is lost. Wait
