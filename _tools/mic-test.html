@@ -12,7 +12,8 @@ howto: |
      voice, and a green message confirms that sound is reaching the browser.
   3. Press **Record** to capture a 5-second clip (or 10 or 30 seconds). It
      plays back automatically when it finishes, so you hear what the browser
-     captures with the current filter settings.
+     captures with the current filter settings. Download it compressed, as
+     the browser recorded it, or as an uncompressed WAV file.
   4. Press **Stop** when you are done. The page stops every audio track, so
      the browser's recording indicator switches off.
 
@@ -29,9 +30,7 @@ howto: |
   at 48 kHz), and **Level (RMS)** is the root-mean-square level over the same
   window. For a steady sine wave the RMS reading sits 3 dB below the peak;
   speech is spikier, so the gap is wider. **Peak hold** keeps the loudest peak
-  since you pressed Start, which is the number to check before recording. The
-  analysis runs at the microphone's own sample rate where the browser allows
-  it, because resampling can overshoot and read slightly above 0 dBFS.
+  since you pressed Start, the number to check before recording.
 
   | Peak while you talk | What it means |
   |---|---|
@@ -45,6 +44,15 @@ howto: |
   The fill colour follows the same bands: amber while the peak is below
   −25 dBFS, green from −25 to −6 dBFS, and red above.
 
+  ## Compressed or WAV download
+
+  The playback and the compressed download come from the browser's
+  recorder, usually WebM with the lossy Opus codec (M4A with AAC in browsers
+  that cannot record WebM). The WAV file is 16-bit PCM of the exact samples
+  the meter measured, at the rate in the settings table: use it to judge
+  hiss or hum, or to edit the clip. It takes about 94 KB per second at
+  48 kHz mono.
+
   ## Echo cancellation, noise suppression and auto gain
 
   By default, browsers run microphone audio through the same kind of
@@ -54,8 +62,9 @@ howto: |
   off where the browser supports it, and the settings table shows what was
   actually applied. Automatic gain gradually raises quiet input and lowers loud
   input, so turn it off when you want to judge the real volume set in your
-  operating system. Turning all three off gives the rawest signal the browser
-  allows; music apps often do this because the filters are tuned for speech.
+  operating system. **Turn all three off** reopens the microphone once with
+  the rawest signal the browser allows; music apps do the same because the
+  filters are tuned for speech.
 
   ## When the microphone will not start
 
@@ -70,13 +79,13 @@ howto: |
     localhost.
 faq:
   - q: Is my voice recorded or uploaded anywhere?
-    a: No. The audio is analysed by your browser's Web Audio engine on your own device. A test clip stays in the page's memory until you record a new one, reload or close the tab, Download saves a copy to your device; nothing is sent over the network.
+    a: No. The audio is analysed by your browser's Web Audio engine on your own device. A test clip stays in the page's memory until you record a new one, reload or close the tab, and the download buttons save a copy to your device. Nothing is sent over the network.
   - q: The meter moves here, but people cannot hear me in Zoom or Teams. Why?
     a: Call apps pick their own input device. Open the app's audio settings and choose the same microphone that works here, and check that it is not muted inside the app or by a headset mute button.
   - q: What is a good microphone level?
     a: For speech, aim for peaks between about −25 and −6 dBFS at your normal speaking distance. Peaks near 0 dBFS or the clipping warning mean the input is too loud and will distort.
   - q: Why does my recording sound different from the live meter?
-    a: The clip is compressed, with the Opus codec in current browsers (AAC in older Safari versions), and includes whatever echo cancellation and noise suppression are switched on. Turn the filters off and record again to hear the raw input.
+    a: The playback is compressed, with the Opus codec in most browsers (AAC in some Safari versions), and includes whatever echo cancellation and noise suppression are switched on. Turn the filters off and record again to hear the raw input, and download the WAV file for an uncompressed copy.
   - q: Why is the microphone list empty or showing generic names?
     a: Browsers only reveal device names after you allow microphone access for the page. Press Start once and the list fills in; if it stays empty, the system does not see any input device.
 ---
@@ -104,7 +113,8 @@ faq:
 .mict-progress { height: 6px; margin: 0 0 10px; overflow: hidden; background: var(--surface-2); border-radius: 3px; }
 .mict-progress div { width: 0; height: 100%; background: var(--danger); }
 .mict-audio { display: block; width: 100%; max-width: 480px; margin: 0 0 12px; }
-#mict-audio[hidden], #mict-dl[hidden] { display: none; }
+#mict-audio[hidden], #mict-dl[hidden], #mict-dl-wav[hidden] { display: none; }
+.mict-checks { align-items: center; }
 .mict-row-btns { display: flex; gap: 10px; }
 .mict-stat-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
 .mict-stat-head .label { margin: 0; }
@@ -122,10 +132,11 @@ faq:
 </div>
 <p class="hint" id="mict-device-hint">Press Start and allow microphone access when your browser asks. Device names appear after that.</p>
 
-<div class="checks">
+<div class="checks mict-checks">
   <label class="check"><input type="checkbox" id="mict-ec" checked> Echo cancellation</label>
   <label class="check"><input type="checkbox" id="mict-ns" checked> Noise suppression</label>
   <label class="check"><input type="checkbox" id="mict-agc" checked> Auto gain control</label>
+  <button class="btn secondary small" type="button" id="mict-raw">Turn all three off</button>
   <label class="check"><input type="checkbox" id="mict-monitor"> Hear yourself (use headphones)</label>
 </div>
 
@@ -177,6 +188,7 @@ faq:
 <audio class="mict-audio" id="mict-audio" controls hidden></audio>
 <div class="actions">
   <button class="btn secondary small" type="button" id="mict-dl" hidden>Download recording</button>
+  <button class="btn secondary small" type="button" id="mict-dl-wav" hidden>Download WAV (uncompressed)</button>
 </div>
 
 <div id="mict-settings-wrap" hidden>
@@ -203,8 +215,10 @@ faq:
     stream: null, ctx: null, src: null, an: null, monitor: null, buf: null, raf: 0, starting: false, pending: false, gen: 0,
     peakHold: -Infinity, clipCount: 0, clipping: false, meterDb: MIN_DB, markDb: -Infinity, markT: 0, lastT: 0,
     heard: false, startT: 0, warned: false, textT: 0, histMax: -Infinity, histT: 0, history: [],
-    recorder: null, recTimer: 0, recStart: 0, recLen: 5, recBlob: null, recUrl: null, recExt: 'webm', focusPending: false
+    recorder: null, recTimer: 0, recStart: 0, recLen: 5, recBlob: null, recUrl: null, recExt: 'webm', focusPending: false,
+    pcm: null, pcmReady: null, pcmRec: null, wavBlob: null
   };
+  const wavBtn = $('#mict-dl-wav');
   let colors = {};
 
   // ---------- Messages ----------
@@ -368,13 +382,14 @@ faq:
 
   function releaseStream() {
     st.gen++;
+    finishPcm(true);
     if (st.recorder && st.recorder.state !== 'inactive') { try { st.recorder.stop(); } catch (e) { /* already stopped */ } }
     clearTimeout(st.recTimer);
     if (st.stream) st.stream.getTracks().forEach(t => { t.onended = null; t.onmute = null; t.onunmute = null; t.stop(); });
     st.stream = null;
     cancelAnimationFrame(st.raf);
     if (st.ctx) { st.ctx.close().catch(() => {}); }
-    st.ctx = null; st.src = null; st.an = null; st.monitor = null;
+    st.ctx = null; st.src = null; st.an = null; st.monitor = null; st.pcm = null; st.pcmReady = null;
   }
 
   function stop(message) {
@@ -447,6 +462,7 @@ faq:
     track.onmute = () => setError('The system has muted this microphone. Check a mute switch or your sound settings.');
     track.onunmute = () => setError('');
     applyMonitor();
+    st.pcmReady = setupPcm();
     showSettings(track);
     updateButtons();
     const s = track.getSettings ? track.getSettings() : {};
@@ -563,13 +579,132 @@ faq:
     return ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'].find(m => MediaRecorder.isTypeSupported(m)) || '';
   }
 
-  function record() {
-    if (st.recorder && st.recorder.state === 'recording') { st.recorder.stop(); return; }
-    if (!st.stream) return;
+  // ---------- Uncompressed capture (WAV) ----------
+  // An AudioWorklet copies the samples the meter analyses, so the WAV file is
+  // exactly what the browser captured, without the recorder's lossy codec. It
+  // posts about every 4,096 frames (85 ms at 48 kHz) and flushes on "stop".
+  const PCM_CODE = 'class TTPcm extends AudioWorkletProcessor{constructor(){super();this.on=false;this.buf=[];this.n=0;' +
+    'this.port.onmessage=e=>{if(e.data==="start"){this.on=true;}else if(e.data==="stop"){this.on=false;this.flush();this.port.postMessage("done");}};}' +
+    'flush(){if(this.n){this.port.postMessage(this.buf);}this.buf=[];this.n=0;}' +
+    'process(inputs){const i=inputs[0];if(this.on&&i&&i.length){this.buf.push(i.map(c=>c.slice(0)));this.n+=i[0].length;if(this.n>=4096)this.flush();}return true;}}' +
+    'registerProcessor("tt-pcm",TTPcm);';
+
+  // Resolves to { send(msg), onmsg } or null when the browser cannot capture raw samples.
+  function setupPcm() {
+    const ctx = st.ctx, src = st.src, gen = st.gen;
+    if (!ctx || !src) return Promise.resolve(null);
+    const keep = pcm => (gen === st.gen ? pcm : null);
+    // Nodes only run when something pulls them, so feed a silent gain into the output.
+    const sink = () => { const g = ctx.createGain(); g.gain.value = 0; g.connect(ctx.destination); return g; };
+    function scriptPcm() { // fallback for browsers without AudioWorklet
+      if (typeof ctx.createScriptProcessor !== 'function') return null;
+      const node = ctx.createScriptProcessor(4096, 2, 2);
+      let on = false;
+      const pcm = { onmsg: null, send: m => { if (m === 'start') on = true; else { on = false; if (pcm.onmsg) pcm.onmsg('done'); } } };
+      node.onaudioprocess = e => {
+        if (!on || !pcm.onmsg) return;
+        const b = e.inputBuffer, arr = [];
+        for (let c = 0; c < b.numberOfChannels; c++) arr.push(b.getChannelData(c).slice(0));
+        pcm.onmsg([arr]);
+      };
+      src.connect(node); node.connect(sink());
+      return pcm;
+    }
+    if (!ctx.audioWorklet || typeof AudioWorkletNode !== 'function') {
+      try { return Promise.resolve(keep(scriptPcm())); } catch (e) { return Promise.resolve(null); }
+    }
+    const url = URL.createObjectURL(new Blob([PCM_CODE], { type: 'text/javascript' }));
+    return ctx.audioWorklet.addModule(url).then(() => {
+      if (gen !== st.gen) return null;
+      const node = new AudioWorkletNode(ctx, 'tt-pcm');
+      const pcm = { onmsg: null, send: m => node.port.postMessage(m) };
+      node.port.onmessage = e => { if (pcm.onmsg) pcm.onmsg(e.data); };
+      src.connect(node); node.connect(sink());
+      return pcm;
+    }).catch(() => { try { return keep(scriptPcm()); } catch (e) { return null; } })
+      .finally(() => URL.revokeObjectURL(url));
+  }
+
+  function startPcm(pcm) {
+    const rate = st.ctx.sampleRate;
+    const rec = { pcm, chunks: [], frames: 0, channels: 1, rate, max: Math.round(rate * st.recLen), stopping: false, done: false };
+    pcm.onmsg = data => {
+      if (data === 'done') { finishPcm(false); return; }
+      if (rec.done || !Array.isArray(data)) return;
+      data.forEach(a => { if (a && a.length && a[0].length) { rec.chunks.push(a); rec.frames += a[0].length; rec.channels = Math.min(2, Math.max(rec.channels, a.length)); } });
+    };
+    st.pcmRec = rec;
+    pcm.send('start');
+  }
+  function stopPcm() {
+    const rec = st.pcmRec;
+    if (!rec || rec.stopping) return;
+    rec.stopping = true;
+    rec.pcm.send('stop');
+  }
+  // now: the audio context is closing, so use the samples that have arrived.
+  function finishPcm(now) {
+    const rec = st.pcmRec;
+    if (!rec || rec.done || (!now && !rec.stopping)) return;
+    rec.done = true;
+    st.pcmRec = null;
+    if (!rec.frames) return;
+    st.wavBlob = encodeWav(rec.chunks, rec.channels, rec.rate, rec.max);
+    wavBtn.textContent = 'Download WAV (uncompressed, ' + Math.max(1, Math.round(st.wavBlob.size / 1024)).toLocaleString() + ' KB)';
+    wavBtn.hidden = false;
+  }
+  // 16-bit PCM WAV (RIFF): 44-byte header, then interleaved little-endian samples.
+  function encodeWav(chunks, channels, rate, maxFrames) {
+    let frames = 0;
+    chunks.forEach(a => { frames += a[0].length; });
+    frames = Math.min(frames, maxFrames);
+    const bytes = frames * channels * 2, buf = new ArrayBuffer(44 + bytes), v = new DataView(buf);
+    const str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + bytes, true); str(8, 'WAVE');
+    str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, channels, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * channels * 2, true); v.setUint16(32, channels * 2, true); v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, bytes, true);
+    let off = 44, left = frames;
+    for (const a of chunks) {
+      const n = Math.min(a[0].length, left);
+      for (let i = 0; i < n; i++) {
+        for (let c = 0; c < channels; c++) {
+          const x = Math.max(-1, Math.min(1, (a[c] || a[0])[i])) || 0;
+          v.setInt16(off, x < 0 ? Math.round(x * 32768) : Math.round(x * 32767), true);
+          off += 2;
+        }
+      }
+      left -= n;
+      if (!left) break;
+    }
+    return new Blob([buf], { type: 'audio/wav' });
+  }
+
+  // ---------- Recording ----------
+  function pickMime() {
+    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') return '';
+    return ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+  }
+
+  function stopRecording() {
+    if (st.recorder && st.recorder.state === 'recording') st.recorder.stop();
+    stopPcm();
+  }
+
+  async function record() {
+    if (st.recorder && st.recorder.state === 'recording') { stopRecording(); return; }
+    if (!st.stream || st.recStarting) return;
     if (typeof MediaRecorder === 'undefined') {
       recStatus.textContent = 'This browser cannot record audio (MediaRecorder is not supported). The live meter still works.';
       return;
     }
+    // The raw-sample tap is usually ready long before anyone presses Record.
+    st.recStarting = true;
+    const gen = st.gen;
+    let pcm = null;
+    try { pcm = st.pcmReady ? await st.pcmReady : null; } catch (e) { pcm = null; }
+    st.recStarting = false;
+    if (gen !== st.gen || !st.stream) return;
     const mime = pickMime();
     let rec;
     try { rec = new MediaRecorder(st.stream, mime ? { mimeType: mime } : undefined); } catch (e) {
@@ -582,6 +717,7 @@ faq:
     rec.onerror = e => { recStatus.textContent = 'Recording error: ' + ((e && e.error && e.error.message) || 'unknown') + '.'; };
     rec.onstop = () => {
       clearTimeout(st.recTimer);
+      stopPcm();
       const secs = Math.min((performance.now() - st.recStart) / 1000, st.recLen);
       if (st.recorder === rec) st.recorder = null;
       recBar.style.width = '0%';
@@ -596,9 +732,12 @@ faq:
       recStatus.textContent = 'Recording failed to start: ' + (e && e.message ? e.message : e) + '.';
       return;
     }
+    st.wavBlob = null;
+    wavBtn.hidden = true;
+    if (pcm) startPcm(pcm);
     st.recorder = rec;
     st.recStart = performance.now();
-    st.recTimer = setTimeout(() => { if (rec.state === 'recording') rec.stop(); }, st.recLen * 1000);
+    st.recTimer = setTimeout(() => { if (rec.state === 'recording') stopRecording(); }, st.recLen * 1000);
     recStatus.textContent = 'Recording a ' + st.recLen + '-second clip…';
     recTime.textContent = '0.0 s of ' + st.recLen + ' s';
     recTime.hidden = false;
@@ -612,6 +751,7 @@ faq:
     st.recExt = /mp4|aac/.test(type) ? 'm4a' : /ogg/.test(type) ? 'ogg' : 'webm';
     audio.hidden = false;
     audio.src = st.recUrl;
+    dlBtn.textContent = 'Download ' + (st.recExt === 'm4a' ? 'M4A' : st.recExt === 'ogg' ? 'Ogg' : 'WebM') + ' (compressed)';
     dlBtn.hidden = false;
     const codec = /opus/.test(type) ? 'Opus' : /mp4|aac/.test(type) ? 'AAC' : type;
     recStatus.textContent = 'Recorded a ' + secs.toFixed(1) + ' s clip (' + Math.max(1, Math.round(blob.size / 1024)) + ' KB, ' + codec + '). Playing it back now.';
@@ -636,6 +776,12 @@ faq:
     const stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
     TT.download('mic-test-' + stamp + '.' + st.recExt, st.recBlob);
   });
+  wavBtn.addEventListener('click', () => {
+    if (!st.wavBlob) return;
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    const stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    TT.download('mic-test-' + stamp + '.wav', st.wavBlob);
+  });
 
   // ---------- Wiring ----------
   startBtn.addEventListener('click', start);
@@ -647,6 +793,12 @@ faq:
   const restart = () => { if (st.starting) st.pending = true; else if (st.stream) start(); };
   sel.addEventListener('change', restart);
   [ec, ns, agc].forEach(c => c.addEventListener('change', restart));
+  // One restart for all three, instead of one per checkbox.
+  $('#mict-raw').addEventListener('click', () => {
+    if (!ec.checked && !ns.checked && !agc.checked) return;
+    ec.checked = ns.checked = agc.checked = false;
+    restart();
+  });
   mon.addEventListener('change', applyMonitor);
   // Release the mic when leaving, and leave the page in a clean state if it is restored from the back/forward cache.
   window.addEventListener('pagehide', () => { if (st.stream || st.starting) stop(''); });

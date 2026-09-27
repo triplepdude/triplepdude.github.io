@@ -1,0 +1,981 @@
+---
+title: Free Invoice Generator (PDF, No Sign-Up)
+description: Create a professional invoice in your browser with items, discounts, taxes and any currency. Download a PDF, save an editable copy, no sign-up needed.
+category: Generators
+keywords: [invoice generator, free invoice generator, invoice template, create invoice pdf, invoice maker, online invoice, simple invoice, invoice with vat]
+howto: |
+  ## How to make an invoice
+
+  1. Fill in your business details, add a logo if you like, and enter who
+     you are billing.
+  2. Check the invoice number and dates. **Payment terms** set the due date:
+     *Net 30* means 30 days after the issue date.
+  3. Add a line for each product or service with its quantity and rate. Use a
+     negative quantity for a refund or credit.
+  4. Add a discount, shipping, one or more taxes, and any amount already paid.
+  5. Press **Download PDF** and choose *Save as PDF* in the print dialog. Press
+     **Save invoice file** as well, to keep a copy you can open and edit later.
+
+  The preview updates as you type and is exactly what goes into the PDF.
+
+  ## How the totals are calculated
+
+  Money is counted in whole minor units (cents, pence, fils), never in
+  floating-point numbers, so the rounding errors that make some tools show
+  1.005 × 1 as 1.00 cannot happen here.
+
+  - **Each line** is quantity × rate, rounded to the currency's smallest unit.
+    A half rounds away from zero, so 49.995 becomes 50.00.
+  - **Subtotal** is the sum of the lines.
+  - **Discount** is a percentage of the subtotal, rounded once, or a fixed
+    amount.
+  - **Each tax** is its rate times the subtotal after the discount, plus
+    shipping when *Charge tax on shipping* is ticked. It is rounded once on
+    that total rather than line by line.
+  - **Total** is subtotal − discount + shipping + taxes, and **balance due** is
+    the total minus the amount paid.
+
+  The number of decimals follows the currency, as defined in ISO 4217:
+
+  | Currency | Decimals | Example |
+  |---|---|---|
+  | US dollar, euro, pound | 2 | 1,234.56 |
+  | Japanese yen, Korean won | 0 | 1,235 |
+  | Kuwaiti dinar, Bahraini dinar, Omani rial | 3 | 1,234.567 |
+
+  A rate may have more decimals than the currency, such as 0.0125 per unit;
+  the line amount is still rounded to the currency.
+
+  ## Why the PDF comes from the print dialog
+
+  The PDF is made by your browser's own print engine. It uses the fonts on
+  your device, so names and descriptions in any script, including Chinese,
+  Arabic, Hindi and Cyrillic, are shaped correctly, the text stays selectable
+  and searchable, and the file stays small. A JavaScript PDF library such as
+  pdf-lib needs a font file embedded for every script and does no text
+  shaping, so Arabic letters would not join and Hindi would come out
+  garbled. In the dialog, pick *Save as PDF* in Chrome, Edge or on Android,
+  *Save to PDF* in Firefox, or open the *PDF* menu and choose *Save as PDF*
+  in Safari on a Mac.
+
+  ## Saving and reusing invoices
+
+  Nothing is kept in your browser, so save the invoice file (a small .json
+  file) with your records. Opening it restores every field, including the
+  logo. **Next invoice** keeps your business details, logo, currency, taxes,
+  notes and terms, clears the client and items, and increases the number, so
+  INV-0009 becomes INV-0010.
+
+  ## What to put on an invoice
+
+  Most tax authorities expect a unique, sequential invoice number, the issue
+  date, your name and address, the customer's name and address, a
+  description, quantity and price for each item, and the tax rate and tax
+  amount. In the EU and the UK, a VAT invoice must also show your VAT
+  registration number, so put it in the Tax ID field. Rules differ between
+  countries, so check what yours requires.
+faq:
+  - q: Is my invoice data uploaded or stored?
+    a: No. The invoice is built by JavaScript in your browser, and the PDF is made by your browser's print function. Nothing is sent to a server or stored on this site. To keep a copy, save the invoice file to your own device.
+  - q: How do I save the invoice as a PDF?
+    a: Press Download PDF, then choose Save as PDF as the printer in the dialog that opens. If your browser adds a date or web address at the top or bottom of the page, turn off Headers and footers under More settings.
+  - q: Which currencies can I use?
+    a: Any ISO 4217 currency your browser knows, which covers every current national currency. Amounts get the right number of decimals (none for the yen, three for the Kuwaiti dinar), and the number format setting chooses separators and symbol placement, such as 1.234,56 € in German.
+  - q: Can I edit an invoice later?
+    a: Yes. Save the invoice file (.json) after you finish, and open it here later with Open invoice file, or drop it onto the page. Every field comes back, and you can change it and download a new PDF.
+  - q: Can I write the invoice in another language?
+    a: You can type names, addresses, items and notes in any language, and change the document title to something like Tax Invoice, Quote or Rechnung. The field labels printed on the invoice, such as Bill to and Subtotal, stay in English.
+---
+<style>
+.iv-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 0 32px; }
+.iv-form { min-width: 0; }
+.iv-sec { min-width: 0; margin: 0 0 22px; padding: 0 0 6px; border-bottom: 1px solid var(--border); container-type: inline-size; }
+.iv-h { margin: 0 0 12px; font-size: 1.05rem; }
+.iv-side { min-width: 0; }
+.iv-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 8px; }
+.iv-bar .iv-h { margin: 0 auto 0 0; font-size: 1.2rem; }
+.iv-bar .actions { margin: 0; }
+.iv-sec .row { align-items: flex-start; margin-bottom: 12px; }
+.iv-sec .field { margin-bottom: 12px; }
+.iv-sec .row > .field { margin-bottom: 0; }
+.iv-sec textarea { min-height: 76px; }
+.iv input[type="tel"] { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+.iv [aria-invalid="true"] { border-color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
+.iv-logo-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.iv-logo-thumb { display: grid; place-items: center; width: 64px; height: 44px; padding: 3px; background: #fff; border: 1px solid var(--border); border-radius: 6px; }
+.iv-logo-thumb img { max-width: 100%; max-height: 100%; }
+.iv-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
+.iv-items-head, .iv-item { display: grid; grid-template-columns: minmax(0, 1fr) 90px 130px 130px 36px; gap: 8px; align-items: center; }
+.iv-items-head { margin-bottom: 4px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.iv-items-head span:nth-child(n+2) { text-align: right; }
+.iv-item { margin-bottom: 6px; }
+.iv-cell { display: grid; min-width: 0; }
+.iv-cell-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.iv-item input { min-height: 40px; padding: 8px 9px; }
+.iv-item .iv-qty, .iv-item .iv-rate { text-align: right; }
+.iv-amt { overflow: hidden; font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.iv-x { width: 36px; padding: 0; font-size: 18px; line-height: 1; }
+.iv-tax { display: grid; grid-template-columns: minmax(0, 1fr) 96px auto 36px; gap: 6px; align-items: center; margin-bottom: 6px; }
+.iv-taxhead { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.iv-taxwrap:has(#iv-taxes:empty) .iv-taxhead { display: none; }
+.iv-tax input { min-height: 40px; padding: 8px 9px; }
+.iv-tax .iv-pct { color: var(--muted); }
+.iv-disc { display: flex; gap: 6px; }
+.iv-disc select { flex: 0 0 96px; width: 96px; }
+.iv-disc input { flex: 1 1 auto; min-width: 0; }
+.iv-sum { width: 100%; margin: 10px 0 12px; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.iv-sum th { color: var(--muted); font-weight: 400; text-align: left; padding: 3px 0; }
+.iv-sum td { text-align: right; padding: 3px 0; }
+.iv-sum tr.iv-strong th, .iv-sum tr.iv-strong td { color: var(--text); font-weight: 700; border-top: 1px solid var(--border); padding-top: 6px; }
+.iv-side .hint { margin: 0 0 12px; }
+.iv-preview { container-type: inline-size; max-width: 860px; margin: 0 auto 12px; }
+.iv-warn ul, .iv .msg.error ul { margin: 0; padding-left: 18px; }
+@container (max-width: 470px) {
+  .iv-items-head { display: none; }
+  .iv-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px; grid-template-areas: "desc desc x" "qty rate x" "amt amt x"; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
+  .iv-item .iv-c-desc { grid-area: desc; }
+  .iv-item .iv-c-qty { grid-area: qty; }
+  .iv-item .iv-c-rate { grid-area: rate; }
+  .iv-cell-l { position: static; width: auto; height: auto; overflow: visible; clip: auto; margin-bottom: 2px; color: var(--muted); font-size: 12px; font-weight: 600; }
+  .iv-item .iv-amt { grid-area: amt; }
+  .iv-item .iv-x { grid-area: x; align-self: start; }
+  .iv-item .iv-qty, .iv-item .iv-rate { text-align: left; }
+  .iv-amt::before { content: "Amount: "; color: var(--muted); }
+}
+
+/* ----- The invoice itself: paper colours in both themes, sized relative to its width ----- */
+.iv-sheet { --ink: #16181d; --soft: #5b6270; --rule: #d5d9de; --brand: #1f6f4a;
+  position: relative; aspect-ratio: 1 / 1.4142; padding: 6.5% 6.5% 5%; background: #fff; color: var(--ink);
+  border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 2px 14px rgb(0 0 0 / 0.12);
+  font-size: clamp(9px, 1.9cqi, 14px); line-height: 1.45; overflow-wrap: anywhere; }
+.iv-sheet p { margin: 0; }
+.iv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5em; margin-bottom: 2.2em; }
+.iv-brand { min-width: 0; }
+.iv-brand img { display: block; max-width: 14em; max-height: 5em; margin-bottom: 0.8em; }
+.iv-fromname { font-size: 1.15em; font-weight: 700; }
+.iv-lines { white-space: pre-line; color: var(--soft); }
+.iv-titleblock { flex: 0 0 auto; max-width: 50%; text-align: right; }
+.iv-title { margin: 0 0 0.5em; color: var(--brand); font-size: 2em; font-weight: 700; letter-spacing: 0.06em; line-height: 1.1; text-transform: uppercase; }
+.iv-meta { display: grid; grid-template-columns: auto auto; justify-content: end; gap: 0.15em 1em; margin: 0; }
+.iv-meta dt { color: var(--soft); }
+.iv-meta dd { margin: 0; font-weight: 600; }
+.iv-parties { display: flex; justify-content: space-between; align-items: flex-end; gap: 1.5em; margin-bottom: 1.8em; }
+.iv-label { margin-bottom: 0.25em; color: var(--soft); font-size: 0.8em; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.iv-toname { font-weight: 700; }
+.iv-due { flex: 0 0 auto; padding: 0.7em 1em; background: #eef5f1; border-radius: 0.4em; text-align: right; }
+.iv-due strong { display: block; color: var(--ink); font-size: 1.45em; }
+.iv-sheet table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.iv-tbl th { padding: 0.55em 0.5em; border-bottom: 2px solid var(--ink); font-size: 0.8em; letter-spacing: 0.06em; text-align: left; text-transform: uppercase; }
+.iv-tbl td { padding: 0.6em 0.5em; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.iv-tbl th:first-child, .iv-tbl td:first-child { padding-left: 0; }
+.iv-tbl th:last-child, .iv-tbl td:last-child { padding-right: 0; }
+.iv-tbl .n { width: 1%; text-align: right; white-space: nowrap; }
+.iv-tbl tr { break-inside: avoid; }
+.iv-tot { width: auto !important; min-width: 45%; margin: 1.2em 0 0 auto; break-inside: avoid; }
+.iv-tot th { padding: 0.3em 1.5em 0.3em 0; color: var(--soft); font-weight: 400; text-align: left; }
+.iv-tot td { padding: 0.3em 0; text-align: right; white-space: nowrap; }
+.iv-tot tr.iv-grand th, .iv-tot tr.iv-grand td { padding-top: 0.6em; border-top: 2px solid var(--ink); color: var(--ink); font-size: 1.1em; font-weight: 700; }
+.iv-notes { margin-top: 2.2em; break-inside: avoid; }
+.iv-notes > div + div { margin-top: 1em; }
+.iv-notes .iv-lines { color: var(--ink); }
+.iv-ph { color: #9aa1ab; font-style: italic; }
+/* Right-to-left names and descriptions keep their own direction but line up with the layout. */
+.iv-sheet [dir="auto"] { text-align: left; }
+.iv-titleblock [dir="auto"] { text-align: right; }
+.iv-print-root { display: none; }
+@page { margin: 0; }
+@media print {
+  html.iv-can-print body > :not(.iv-print-root) { display: none !important; }
+  html.iv-can-print .iv-print-root { display: block !important; }
+  html.iv-can-print, html.iv-can-print body { background: #fff !important; }
+  .iv-print-root .iv-sheet { aspect-ratio: auto; width: auto; margin: 0; padding: 14mm 15mm 12mm; border: 0; border-radius: 0; box-shadow: none; font-size: 10pt;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .iv-print-root .iv-ph, .iv-print-root .iv-blank { display: none; }
+  .iv-print-root .iv-tbl thead { display: table-header-group; }
+}
+</style>
+
+<div class="iv" id="iv">
+  <div class="iv-form" id="iv-form">
+    <div class="iv-two">
+      <section class="iv-sec" aria-labelledby="iv-h-from">
+        <h2 class="iv-h" id="iv-h-from">From (your business)</h2>
+        <div class="field"><label for="iv-from-name">Business or your name</label><input type="text" id="iv-from-name" autocomplete="organization" dir="auto"></div>
+        <div class="field"><label for="iv-from-address">Address</label><textarea id="iv-from-address" rows="3" dir="auto" placeholder="Street&#10;City, postcode&#10;Country"></textarea></div>
+        <div class="row">
+          <div class="field"><label for="iv-from-email">Email</label><input type="email" id="iv-from-email" autocomplete="email"></div>
+          <div class="field"><label for="iv-from-phone">Phone</label><input type="tel" id="iv-from-phone" autocomplete="tel"></div>
+        </div>
+        <div class="field"><label for="iv-from-tax">Tax ID or VAT number <span class="hint">(optional)</span></label><input type="text" id="iv-from-tax" autocomplete="off"></div>
+        <div class="iv-logo-row">
+          <input type="file" id="iv-logo-file" class="iv-file" tabindex="-1" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" aria-label="Choose a logo image">
+          <span class="iv-logo-thumb" id="iv-logo-thumb" hidden></span>
+          <button class="btn secondary small" type="button" id="iv-logo-add">Add logo</button>
+          <button class="btn secondary small" type="button" id="iv-logo-remove" hidden>Remove logo</button>
+          <span class="hint">PNG, JPG, WebP, GIF or SVG</span>
+        </div>
+      </section>
+      <section class="iv-sec" aria-labelledby="iv-h-to">
+        <h2 class="iv-h" id="iv-h-to">Bill to</h2>
+        <div class="field"><label for="iv-to-name">Client name</label><input type="text" id="iv-to-name" autocomplete="off" dir="auto"></div>
+        <div class="field"><label for="iv-to-address">Client address</label><textarea id="iv-to-address" rows="3" dir="auto"></textarea></div>
+        <div class="field"><label for="iv-to-email">Client email <span class="hint">(optional)</span></label><input type="email" id="iv-to-email" autocomplete="off"></div>
+      </section>
+    </div>
+    <section class="iv-sec" aria-labelledby="iv-h-details">
+      <h2 class="iv-h" id="iv-h-details">Invoice details</h2>
+      <div class="row">
+        <div class="field"><label for="iv-title">Document title</label><input type="text" id="iv-title" value="Invoice" dir="auto"></div>
+        <div class="field"><label for="iv-number">Invoice number</label><input type="text" id="iv-number" value="INV-0001" autocomplete="off"></div>
+        <div class="field"><label for="iv-date">Issue date</label><input type="date" id="iv-date"></div>
+        <div class="field">
+          <label for="iv-terms">Payment terms</label>
+          <select id="iv-terms">
+            <option value="0">Due on receipt</option>
+            <option value="7">Net 7</option>
+            <option value="14">Net 14</option>
+            <option value="15">Net 15</option>
+            <option value="30" selected>Net 30</option>
+            <option value="45">Net 45</option>
+            <option value="60">Net 60</option>
+            <option value="90">Net 90</option>
+            <option value="custom">Custom due date</option>
+          </select>
+        </div>
+        <div class="field"><label for="iv-due">Due date</label><input type="date" id="iv-due"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="iv-currency">Currency</label><select id="iv-currency"></select></div>
+        <div class="field"><label for="iv-locale">Number and date format</label><select id="iv-locale"></select></div>
+      </div>
+    </section>
+    <section class="iv-sec" aria-labelledby="iv-h-items">
+      <h2 class="iv-h" id="iv-h-items">Items</h2>
+      <div class="iv-items-head" aria-hidden="true"><span>Description</span><span>Qty</span><span>Rate</span><span>Amount</span><span></span></div>
+      <div id="iv-items"></div>
+      <div class="actions"><button class="btn secondary small" type="button" id="iv-add-item">Add item</button></div>
+    </section>
+    <div class="iv-two">
+      <section class="iv-sec" aria-labelledby="iv-h-totals">
+        <h2 class="iv-h" id="iv-h-totals">Discount, shipping and tax</h2>
+        <div class="row">
+          <div class="field">
+            <label for="iv-disc-value">Discount</label>
+            <div class="iv-disc">
+              <select id="iv-disc-type" aria-label="Discount type"><option value="percent" selected>%</option><option value="amount">Amount</option></select>
+              <input type="text" id="iv-disc-value" inputmode="decimal" placeholder="0" autocomplete="off">
+            </div>
+          </div>
+          <div class="field"><label for="iv-shipping">Shipping</label><input type="text" id="iv-shipping" inputmode="decimal" placeholder="0" autocomplete="off"></div>
+        </div>
+        <div class="checks"><label class="check"><input type="checkbox" id="iv-ship-tax"> Charge tax on shipping</label></div>
+        <div class="iv-taxwrap"><p class="iv-taxhead" aria-hidden="true">Taxes</p><div id="iv-taxes"></div></div>
+        <div class="actions"><button class="btn secondary small" type="button" id="iv-add-tax">Add tax</button></div>
+        <div class="field"><label for="iv-paid">Amount already paid <span class="hint">(optional)</span></label><input type="text" id="iv-paid" inputmode="decimal" placeholder="0" autocomplete="off"></div>
+        <table class="iv-sum" id="iv-sum" aria-label="Totals"></table>
+      </section>
+      <section class="iv-sec" aria-labelledby="iv-h-notes">
+        <h2 class="iv-h" id="iv-h-notes">Notes and terms</h2>
+        <div class="field"><label for="iv-notes">Notes <span class="hint">(for example, bank details or a thank-you)</span></label><textarea id="iv-notes" rows="3" dir="auto"></textarea></div>
+        <div class="field"><label for="iv-terms-text">Terms <span class="hint">(for example, late fees)</span></label><textarea id="iv-terms-text" rows="3" dir="auto"></textarea></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="iv-side" id="iv-side" aria-labelledby="iv-h-preview">
+    <div class="iv-bar">
+      <h2 class="iv-h" id="iv-h-preview">Preview</h2>
+      <div class="actions">
+        <button class="btn" type="button" id="iv-pdf">Download PDF</button>
+        <button class="btn secondary" type="button" id="iv-save">Save invoice file</button>
+        <button class="btn secondary" type="button" id="iv-open">Open invoice file</button>
+        <input type="file" id="iv-open-file" class="iv-file" tabindex="-1" accept=".json,application/json" aria-label="Open a saved invoice file">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn secondary small" type="button" id="iv-next">Next invoice</button>
+      <button class="btn secondary small" type="button" id="iv-clear">Clear all</button>
+    </div>
+    <p class="hint">Download PDF opens the print dialog: choose <strong>Save as PDF</strong>. Nothing is stored in your browser, so save the invoice file to edit the invoice later.</p>
+    <div class="msg error" id="iv-error" aria-live="polite"></div>
+    <p class="msg ok" id="iv-ok" aria-live="polite"></p>
+    <p class="visually-hidden" id="iv-status" role="status"></p>
+    <div class="iv-preview"><article class="iv-sheet" id="iv-sheet" aria-label="Invoice preview"></article></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var ZERO = BigInt(0), ONE = BigInt(1), TWO = BigInt(2), TEN = BigInt(10), HUNDRED = BigInt(100);
+  var FORMAT = 'triplep-invoice';
+  var itemsBox = $('#iv-items'), taxesBox = $('#iv-taxes'), sheet = $('#iv-sheet');
+  var errEl = $('#iv-error'), okEl = $('#iv-ok'), statusEl = $('#iv-status');
+  var logo = null; // data URL
+  var model = null; // last computed state and totals
+
+  // ---------- Exact decimal arithmetic with BigInt ----------
+  function pow10(n) { var r = ONE; for (var i = 0; i < n; i++) r *= TEN; return r; }
+  // Divide and round half away from zero (0.5 -> 1, -0.5 -> -1).
+  function roundDiv(num, den) {
+    var q = num / den, r = num % den;
+    if (r < ZERO) r = -r;
+    if (r * TWO >= den) q += num < ZERO ? -ONE : ONE;
+    return q;
+  }
+  // "12.5", "-3", "0,25" -> { v: 125n, s: 1 }. Empty -> null. A problem -> { error }.
+  // One decimal separator (point or comma) and no thousands separators, so "1,234" is
+  // never ambiguous.
+  function parseDec(raw, opt) {
+    var s = String(raw == null ? '' : raw).replace(/[\s\u00a0\u202f]/g, '').replace(/^\u2212/, '-');
+    if (!s) return null;
+    var m = /^([+-]?)(\d*)(?:[.,](\d*))?$/.exec(s);
+    if (!m || (m[2] === '' && !m[3])) return { error: opt.label + ' must be a number, such as ' + opt.example + '. Leave out thousands separators.' };
+    if (m[1] === '-' && !opt.negative) return { error: opt.label + ' cannot be negative.' };
+    var frac = (m[3] || '').replace(/0+$/, ''), intPart = m[2].replace(/^0+(?=\d)/, '') || '0';
+    if (intPart.length > (opt.intDigits || 12)) return { error: opt.label + ' is too large.' };
+    if (frac.length > opt.decimals) return { error: opt.decimals === 0 ? opt.label + ' must be a whole number' + (opt.why ? ' ' + opt.why : '') + '.' : opt.label + ' can have at most ' + opt.decimals + (opt.decimals === 1 ? ' decimal place' : ' decimal places') + (opt.why ? ' ' + opt.why : '') + '.' };
+    var v = BigInt(intPart + frac);
+    return { v: m[1] === '-' ? -v : v, s: frac.length };
+  }
+  function decToString(v, s) {
+    var neg = v < ZERO, a = (neg ? -v : v).toString();
+    if (s > 0) { while (a.length <= s) a = '0' + a; a = a.slice(0, a.length - s) + '.' + a.slice(a.length - s); }
+    return (neg ? '-' : '') + a;
+  }
+  function toMinor(d, digits) { return d.s <= digits ? d.v * pow10(digits - d.s) : roundDiv(d.v, pow10(d.s - digits)); }
+
+  // ---------- Currencies and locales ----------
+  var COMMON = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'CHF', 'JPY', 'CNY', 'INR', 'SGD', 'HKD', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'BRL', 'MXN', 'ZAR', 'AED', 'SAR', 'KWD', 'KRW', 'TRY', 'ILS', 'NGN', 'PHP', 'IDR', 'THB'];
+  var REGION = { US: 'USD', GB: 'GBP', CA: 'CAD', AU: 'AUD', NZ: 'NZD', CH: 'CHF', JP: 'JPY', CN: 'CNY', IN: 'INR', SG: 'SGD', HK: 'HKD', SE: 'SEK', NO: 'NOK', DK: 'DKK', PL: 'PLN', CZ: 'CZK', HU: 'HUF', RO: 'RON', BR: 'BRL', MX: 'MXN', AR: 'ARS', CL: 'CLP', CO: 'COP', ZA: 'ZAR', AE: 'AED', SA: 'SAR', KW: 'KWD', BH: 'BHD', OM: 'OMR', QA: 'QAR', KR: 'KRW', TR: 'TRY', IL: 'ILS', NG: 'NGN', KE: 'KES', EG: 'EGP', PH: 'PHP', ID: 'IDR', TH: 'THB', MY: 'MYR', VN: 'VND', PK: 'PKR', BD: 'BDT', UA: 'UAH', TW: 'TWD' };
+  ['AT', 'BE', 'CY', 'DE', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PT', 'SI', 'SK'].forEach(function (r) { REGION[r] = 'EUR'; });
+  var LOCALES = ['en-US', 'en-GB', 'en-CA', 'en-AU', 'en-IN', 'de-DE', 'de-CH', 'fr-FR', 'fr-CA', 'es-ES', 'es-MX', 'it-IT', 'nl-NL', 'pt-BR', 'pt-PT', 'sv-SE', 'da-DK', 'nb-NO', 'fi-FI', 'pl-PL', 'cs-CZ', 'hu-HU', 'ro-RO', 'tr-TR', 'ru-RU', 'uk-UA', 'el-GR', 'he-IL', 'ar-AE', 'hi-IN', 'th-TH', 'id-ID', 'vi-VN', 'ja-JP', 'ko-KR', 'zh-CN', 'zh-TW'];
+  var browserLocale = 'en-US';
+  try { browserLocale = new Intl.NumberFormat().resolvedOptions().locale || 'en-US'; } catch (e) { /* keep en-US */ }
+  function names(type) { try { return new Intl.DisplayNames(['en'], { type: type }); } catch (e) { return null; } }
+  // Minor-unit digits of a currency (ISO 4217, from the browser's Intl data), or null.
+  var digitCache = {};
+  function digitsFor(code) {
+    if (!(code in digitCache)) {
+      try { digitCache[code] = new Intl.NumberFormat('en', { style: 'currency', currency: code }).resolvedOptions().maximumFractionDigits; } catch (e) { digitCache[code] = null; }
+    }
+    return digitCache[code];
+  }
+  (function fillSelects() {
+    var cur = $('#iv-currency'), curNames = names('currency'), all = [];
+    try { all = Intl.supportedValuesOf('currency').slice(); } catch (e) { all = COMMON.slice(); }
+    function opt(code) {
+      var o = document.createElement('option');
+      var n = curNames ? curNames.of(code) : '';
+      o.value = code;
+      o.textContent = code + (n && n !== code ? ' – ' + n : '');
+      return o;
+    }
+    var g1 = document.createElement('optgroup'), g2 = document.createElement('optgroup');
+    g1.label = 'Common currencies';
+    g2.label = 'All currencies';
+    COMMON.forEach(function (c) { if (digitsFor(c) !== null) g1.appendChild(opt(c)); });
+    all.forEach(function (c) { if (COMMON.indexOf(c) < 0 && digitsFor(c) !== null) g2.appendChild(opt(c)); });
+    cur.appendChild(g1);
+    cur.appendChild(g2);
+    var region = '';
+    try { region = new Intl.Locale(browserLocale).maximize().region || ''; } catch (e) { region = ''; }
+    cur.value = REGION[region] && digitsFor(REGION[region]) !== null ? REGION[region] : 'USD';
+
+    var loc = $('#iv-locale'), langNames = names('language');
+    var sample = function (l) { try { return new Intl.NumberFormat(l, { minimumFractionDigits: 2 }).format(1234.56); } catch (e) { return ''; } };
+    var d = document.createElement('option');
+    d.value = '';
+    d.textContent = 'Your browser (' + (langNames ? langNames.of(browserLocale) : browserLocale) + ', ' + sample(browserLocale) + ')';
+    loc.appendChild(d);
+    LOCALES.forEach(function (l) {
+      var o = document.createElement('option');
+      o.value = l;
+      o.textContent = (langNames ? langNames.of(l) : l) + ' – ' + sample(l);
+      loc.appendChild(o);
+    });
+  })();
+
+  // ---------- Dates ----------
+  function pad(n, w) { var s = String(n); while (s.length < w) s = '0' + s; return s; }
+  function isoToday() { var n = new Date(); return pad(n.getFullYear(), 4) + '-' + pad(n.getMonth() + 1, 2) + '-' + pad(n.getDate(), 2); }
+  function parseISO(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+    if (!m) return null;
+    var t = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    var d = new Date(t);
+    return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 ? t : null;
+  }
+  function isoFromMs(t) { var d = new Date(t); return pad(d.getUTCFullYear(), 4) + '-' + pad(d.getUTCMonth() + 1, 2) + '-' + pad(d.getUTCDate(), 2); }
+  function syncDue() {
+    var terms = $('#iv-terms').value, t = parseISO($('#iv-date').value);
+    if (terms !== 'custom' && t !== null) $('#iv-due').value = isoFromMs(t + (+terms) * 864e5);
+  }
+
+  // ---------- Items and taxes ----------
+  function el(tag, attrs, text) {
+    var e = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function addItem(data, focus) {
+    var row = el('div', { class: 'iv-item' });
+    var desc = el('input', { type: 'text', class: 'iv-desc', autocomplete: 'off', dir: 'auto', placeholder: 'Description' });
+    var qty = el('input', { type: 'text', class: 'iv-qty', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Qty' });
+    var rate = el('input', { type: 'text', class: 'iv-rate', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Rate' });
+    var amt = el('span', { class: 'iv-amt' });
+    var x = el('button', { type: 'button', class: 'btn secondary small iv-x' }, '×');
+    desc.value = data && data.description || '';
+    qty.value = data && data.quantity != null ? data.quantity : '1';
+    rate.value = data && data.rate || '';
+    // Each input sits in a label; its text is shown only in the narrow layout, where the
+    // column headings are hidden.
+    [[desc, 'Description', 'iv-c-desc'], [qty, 'Qty', 'iv-c-qty'], [rate, 'Rate', 'iv-c-rate']].forEach(function (c) {
+      var w = el('label', { class: 'iv-cell ' + c[2] });
+      w.appendChild(el('span', { class: 'iv-cell-l' }, c[1]));
+      w.appendChild(c[0]);
+      row.appendChild(w);
+    });
+    row.appendChild(amt); row.appendChild(x);
+    itemsBox.appendChild(row);
+    labelRows();
+    if (focus) desc.focus();
+    return row;
+  }
+  function addTax(data, focus) {
+    var row = el('div', { class: 'iv-tax' });
+    var name = el('input', { type: 'text', class: 'iv-tax-name', autocomplete: 'off', dir: 'auto', placeholder: 'Tax name, e.g. VAT' });
+    var rate = el('input', { type: 'text', class: 'iv-tax-rate', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Rate' });
+    var x = el('button', { type: 'button', class: 'btn secondary small iv-x' }, '×');
+    name.value = data && data.name != null ? data.name : 'Tax';
+    rate.value = data && data.rate || '';
+    row.appendChild(name); row.appendChild(rate); row.appendChild(el('span', { class: 'iv-pct', 'aria-hidden': 'true' }, '%')); row.appendChild(x);
+    taxesBox.appendChild(row);
+    labelRows();
+    if (focus) rate.focus();
+    return row;
+  }
+  function labelRows() {
+    $$('.iv-item', itemsBox).forEach(function (r, i) {
+      var n = ' ' + (i + 1);
+      $('.iv-desc', r).setAttribute('aria-label', 'Description, item' + n);
+      $('.iv-qty', r).setAttribute('aria-label', 'Quantity, item' + n);
+      $('.iv-rate', r).setAttribute('aria-label', 'Rate, item' + n);
+      $('.iv-amt', r).setAttribute('aria-label', 'Amount, item' + n);
+      $('.iv-x', r).setAttribute('aria-label', 'Remove item' + n);
+    });
+    $$('.iv-tax', taxesBox).forEach(function (r, i) {
+      var n = ' ' + (i + 1);
+      $('.iv-tax-name', r).setAttribute('aria-label', 'Tax name, tax' + n);
+      $('.iv-tax-rate', r).setAttribute('aria-label', 'Tax rate in percent, tax' + n);
+      $('.iv-x', r).setAttribute('aria-label', 'Remove tax' + n);
+    });
+  }
+  function removeRow(row, box, fallback) {
+    var rows = $$(':scope > div', box), i = rows.indexOf(row);
+    row.remove();
+    labelRows();
+    var next = $$(':scope > div', box)[Math.min(i, rows.length - 2)];
+    (next ? $('.iv-x', next) : fallback).focus();
+    update();
+  }
+
+  // ---------- Reading the form ----------
+  function v(id) { return $('#' + id).value; }
+  function readState() {
+    return {
+      format: FORMAT,
+      version: 1,
+      title: v('iv-title'),
+      number: v('iv-number'),
+      issueDate: v('iv-date'),
+      paymentTerms: v('iv-terms'),
+      dueDate: v('iv-due'),
+      currency: v('iv-currency'),
+      locale: v('iv-locale'),
+      from: { name: v('iv-from-name'), address: v('iv-from-address'), email: v('iv-from-email'), phone: v('iv-from-phone'), taxId: v('iv-from-tax') },
+      billTo: { name: v('iv-to-name'), address: v('iv-to-address'), email: v('iv-to-email') },
+      items: $$('.iv-item', itemsBox).map(function (r) { return { description: $('.iv-desc', r).value, quantity: $('.iv-qty', r).value, rate: $('.iv-rate', r).value }; }),
+      discount: { type: v('iv-disc-type'), value: v('iv-disc-value') },
+      shipping: { amount: v('iv-shipping'), taxable: $('#iv-ship-tax').checked },
+      taxes: $$('.iv-tax', taxesBox).map(function (r) { return { name: $('.iv-tax-name', r).value, rate: $('.iv-tax-rate', r).value }; }),
+      amountPaid: v('iv-paid'),
+      notes: v('iv-notes'),
+      terms: v('iv-terms-text'),
+      logo: logo
+    };
+  }
+
+  // ---------- The calculation ----------
+  function compute(st) {
+    var errors = [], bad = [];
+    var cur = st.currency, d = digitsFor(cur);
+    if (d === null) { d = 2; errors.push('"' + cur + '" is not a currency code this browser knows.'); }
+    var why = d === 0 ? '(' + cur + ' has no decimal places)' : '(' + cur + ' has ' + d + ')';
+    function num(raw, opt, node) {
+      var r = parseDec(raw, opt);
+      if (r && r.error) { errors.push(r.error); if (node) bad.push(node); return null; }
+      return r;
+    }
+    var money = function (label) { return { label: label, decimals: d, why: why, example: d ? '12.' + '50'.slice(0, d).padEnd(d, '0') : '1250' }; };
+    var rows = $$('.iv-item', itemsBox);
+    var lines = st.items.map(function (it, i) {
+      var n = 'Item ' + (i + 1);
+      var q = num(it.quantity, { label: n + ': quantity', decimals: 6, intDigits: 9, negative: true, example: '2 or 1.5' }, rows[i] && $('.iv-qty', rows[i]));
+      var p = num(it.rate, { label: n + ': rate', decimals: 6, intDigits: 12, negative: true, example: '49.99' }, rows[i] && $('.iv-rate', rows[i]));
+      // An empty or invalid quantity or rate counts as 0 (invalid ones are flagged).
+      if (!q) q = { v: ZERO, s: 0 };
+      if (!p) p = { v: ZERO, s: 0 };
+      // Quantity x rate in minor units, rounded once for the line.
+      var amount = roundDiv(q.v * p.v * pow10(d), pow10(q.s + p.s));
+      return { description: it.description, qty: q, rate: p, amount: amount };
+    });
+    var subtotal = lines.reduce(function (a, l) { return a + l.amount; }, ZERO);
+
+    var discount = ZERO, discPct = null;
+    var dv = st.discount.type === 'amount'
+      ? num(st.discount.value, money('The discount'), $('#iv-disc-value'))
+      : num(st.discount.value, { label: 'The discount', decimals: 4, intDigits: 3, example: '10' }, $('#iv-disc-value'));
+    if (dv) {
+      if (st.discount.type === 'amount') discount = toMinor(dv, d);
+      else if (dv.v > HUNDRED * pow10(dv.s)) { errors.push('The discount cannot be more than 100%.'); bad.push($('#iv-disc-value')); }
+      else { discPct = dv; discount = roundDiv(subtotal * dv.v, HUNDRED * pow10(dv.s)); }
+    }
+    if (discount > ZERO && subtotal >= ZERO && discount > subtotal) { errors.push('The discount is larger than the subtotal.'); bad.push($('#iv-disc-value')); }
+    var sv = num(st.shipping.amount, money('Shipping'), $('#iv-shipping'));
+    var shipping = sv ? toMinor(sv, d) : ZERO;
+    var base = subtotal - discount + (st.shipping.taxable ? shipping : ZERO);
+    var taxRows = $$('.iv-tax', taxesBox);
+    var taxes = st.taxes.map(function (t, i) {
+      var r = num(t.rate, { label: (t.name.trim() || 'Tax ' + (i + 1)) + ' rate', decimals: 4, intDigits: 3, example: '20 or 8.875' }, taxRows[i] && $('.iv-tax-rate', taxRows[i]));
+      if (r && r.v > HUNDRED * pow10(r.s)) { errors.push((t.name.trim() || 'Tax ' + (i + 1)) + ' rate cannot be more than 100%.'); bad.push($('.iv-tax-rate', taxRows[i])); r = null; }
+      return { name: t.name.trim() || 'Tax', rate: r, amount: r ? roundDiv(base * r.v, HUNDRED * pow10(r.s)) : ZERO };
+    });
+    var taxTotal = taxes.reduce(function (a, t) { return a + t.amount; }, ZERO);
+    var total = subtotal - discount + shipping + taxTotal;
+    var pv = num(st.amountPaid, money('The amount paid'), $('#iv-paid'));
+    var paid = pv ? toMinor(pv, d) : ZERO;
+    if (!st.number.trim()) { errors.push('Enter an invoice number.'); bad.push($('#iv-number')); }
+    if (st.issueDate && parseISO(st.issueDate) === null) { errors.push('Enter a valid issue date.'); bad.push($('#iv-date')); }
+    if (st.dueDate && parseISO(st.dueDate) !== null && parseISO(st.issueDate) !== null && parseISO(st.dueDate) < parseISO(st.issueDate)) { errors.push('The due date is before the issue date.'); bad.push($('#iv-due')); }
+    return {
+      digits: d, lines: lines, subtotal: subtotal, discount: discount, discPct: discPct, shipping: shipping,
+      taxes: taxes, total: total, paid: paid, balance: total - paid, errors: errors, bad: bad
+    };
+  }
+
+  // ---------- Formatting ----------
+  function fmts(st, t) {
+    var loc = st.locale || undefined, cur = st.currency, d = t.digits, f = {};
+    function nf(o) { try { return new Intl.NumberFormat(loc, o); } catch (e) { return new Intl.NumberFormat('en-US', o); } }
+    var money = nf({ style: 'currency', currency: digitsFor(cur) === null ? 'USD' : cur, minimumFractionDigits: d, maximumFractionDigits: d });
+    f.money = function (minor) { return money.format(decToString(minor, d)); };
+    f.rate = function (p) {
+      var o = nf({ style: 'currency', currency: digitsFor(cur) === null ? 'USD' : cur, minimumFractionDigits: d, maximumFractionDigits: Math.max(d, p.s) });
+      return o.format(decToString(p.v, p.s));
+    };
+    var qn = nf({ maximumFractionDigits: 6 });
+    f.qty = function (q) { return qn.format(decToString(q.v, q.s)); };
+    var pc = nf({ style: 'percent', maximumFractionDigits: 6 });
+    f.pct = function (p) { return pc.format(decToString(p.v, p.s + 2)); };
+    var df;
+    try { df = new Intl.DateTimeFormat(loc, { dateStyle: 'medium', timeZone: 'UTC' }); } catch (e) { df = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' }); }
+    f.date = function (iso) { var t = parseISO(iso); return t === null ? '' : df.format(new Date(t)); };
+    return f;
+  }
+
+  // ---------- Rendering ----------
+  function txt(tag, cls, text, ph) {
+    var e = el(tag, cls ? { class: cls } : null);
+    if (text && text.trim()) { e.textContent = text.trim(); e.setAttribute('dir', 'auto'); }
+    else if (ph) { e.textContent = ph; e.classList.add('iv-ph'); }
+    return e;
+  }
+  function renderSheet(st, t, f) {
+    var s = document.createDocumentFragment();
+    var top = el('div', { class: 'iv-top' }), brand = el('div', { class: 'iv-brand' });
+    if (st.logo) brand.appendChild(el('img', { src: st.logo, alt: (st.from.name.trim() || 'Business') + ' logo' }));
+    brand.appendChild(txt('p', 'iv-fromname', st.from.name, 'Your business name'));
+    brand.appendChild(txt('p', 'iv-lines', st.from.address, 'Your address'));
+    [st.from.email, st.from.phone].forEach(function (x) { if (x.trim()) brand.appendChild(txt('p', 'iv-lines', x)); });
+    if (st.from.taxId.trim()) brand.appendChild(txt('p', 'iv-lines', 'Tax ID: ' + st.from.taxId.trim()));
+    var tb = el('div', { class: 'iv-titleblock' });
+    tb.appendChild(txt('p', 'iv-title', st.title.trim() || 'Invoice'));
+    var dl = el('dl', { class: 'iv-meta' });
+    function meta(k, val, id) { if (!val) return; dl.appendChild(el('dt', null, k)); var dd = el('dd', { id: id }, val); dl.appendChild(dd); }
+    meta('Number', st.number.trim(), 'iv-p-number');
+    meta('Issued', f.date(st.issueDate), 'iv-p-issued');
+    meta('Due', f.date(st.dueDate), 'iv-p-due');
+    var termsSel = $('#iv-terms');
+    if (st.paymentTerms !== 'custom' && st.dueDate) meta('Terms', termsSel.options[termsSel.selectedIndex].textContent, 'iv-p-terms');
+    tb.appendChild(dl);
+    top.appendChild(brand); top.appendChild(tb);
+    s.appendChild(top);
+
+    var parties = el('div', { class: 'iv-parties' }), to = el('div');
+    to.appendChild(el('p', { class: 'iv-label' }, 'Bill to'));
+    to.appendChild(txt('p', 'iv-toname', st.billTo.name, 'Client name'));
+    to.appendChild(txt('p', 'iv-lines', st.billTo.address, 'Client address'));
+    if (st.billTo.email.trim()) to.appendChild(txt('p', 'iv-lines', st.billTo.email));
+    var due = el('div', { class: 'iv-due' });
+    due.appendChild(el('p', { class: 'iv-label' }, 'Balance due'));
+    due.appendChild(el('strong', { id: 'iv-p-balance-top' }, f.money(t.balance)));
+    parties.appendChild(to); parties.appendChild(due);
+    s.appendChild(parties);
+
+    var tbl = el('table', { class: 'iv-tbl' }), thead = el('thead'), hr = el('tr');
+    [['Description', ''], ['Qty', 'n'], ['Rate', 'n'], ['Amount', 'n']].forEach(function (h) { hr.appendChild(el('th', { scope: 'col', class: h[1] }, h[0])); });
+    thead.appendChild(hr); tbl.appendChild(thead);
+    var tbody = el('tbody');
+    t.lines.forEach(function (l) {
+      var tr = el('tr', { 'data-minor': l.amount.toString() });
+      // A row left blank is shown as a placeholder here but not printed.
+      if (!l.description.trim() && l.rate.v === ZERO) tr.className = 'iv-blank';
+      tr.appendChild(txt('td', '', l.description, 'Item description'));
+      tr.appendChild(el('td', { class: 'n' }, f.qty(l.qty)));
+      tr.appendChild(el('td', { class: 'n' }, f.rate(l.rate)));
+      tr.appendChild(el('td', { class: 'n' }, f.money(l.amount)));
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    s.appendChild(tbl);
+
+    var tot = el('table', { class: 'iv-tot' }), tb2 = el('tbody');
+    totalRows(st, t, f).forEach(function (r) {
+      var tr = el('tr', { 'data-row': r.key, 'data-minor': r.minor.toString() });
+      if (r.grand) tr.className = 'iv-grand';
+      tr.appendChild(el('th', { scope: 'row' }, r.label));
+      tr.appendChild(el('td', null, f.money(r.minor)));
+      tb2.appendChild(tr);
+    });
+    tot.appendChild(tb2);
+    s.appendChild(tot);
+
+    if (st.notes.trim() || st.terms.trim()) {
+      var notes = el('div', { class: 'iv-notes' });
+      [['Notes', st.notes], ['Terms', st.terms]].forEach(function (n) {
+        if (!n[1].trim()) return;
+        var b = el('div');
+        b.appendChild(el('p', { class: 'iv-label' }, n[0]));
+        b.appendChild(txt('p', 'iv-lines', n[1]));
+        notes.appendChild(b);
+      });
+      s.appendChild(notes);
+    }
+    sheet.textContent = '';
+    sheet.appendChild(s);
+  }
+  function totalRows(st, t, f) {
+    var rows = [{ key: 'subtotal', label: 'Subtotal', minor: t.subtotal }];
+    if (t.discount !== ZERO) rows.push({ key: 'discount', label: 'Discount' + (t.discPct ? ' (' + f.pct(t.discPct) + ')' : ''), minor: -t.discount });
+    if (t.shipping !== ZERO) rows.push({ key: 'shipping', label: 'Shipping', minor: t.shipping });
+    t.taxes.forEach(function (x, i) { rows.push({ key: 'tax-' + i, label: x.name + (x.rate ? ' (' + f.pct(x.rate) + ')' : ''), minor: x.amount }); });
+    rows.push({ key: 'total', label: 'Total', minor: t.total, grand: t.paid === ZERO });
+    if (t.paid !== ZERO) {
+      rows.push({ key: 'paid', label: 'Amount paid', minor: -t.paid });
+      rows.push({ key: 'balance', label: 'Balance due', minor: t.balance, grand: true });
+    }
+    return rows;
+  }
+  function renderSummary(st, t, f) {
+    var table = $('#iv-sum');
+    table.textContent = '';
+    var tb = el('tbody');
+    totalRows(st, t, f).forEach(function (r) {
+      var tr = el('tr', { 'data-row': r.key });
+      if (r.grand) tr.className = 'iv-strong';
+      tr.appendChild(el('th', { scope: 'row' }, r.label));
+      tr.appendChild(el('td', null, f.money(r.minor)));
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+  }
+
+  var listText = '';
+  function setErrors(list) {
+    var text = list.join(' ');
+    if (text === listText) return;
+    listText = text;
+    errEl.textContent = '';
+    if (!list.length) return;
+    if (list.length === 1) { errEl.textContent = list[0]; return; }
+    var ul = el('ul');
+    list.forEach(function (m) { ul.appendChild(el('li', null, m)); });
+    errEl.appendChild(ul);
+  }
+  // Errors are shown once typing pauses, so a half-typed number is not flagged.
+  var showErrorsLater = TT.debounce(function () { if (model) setErrors(model.totals.errors); }, 700);
+  var ready = false; // nothing is announced for the initial render
+  var announceLater = TT.debounce(function () {
+    if (!model) return;
+    var f = model.f, t = model.totals;
+    var text = 'Total ' + f.money(t.total) + (t.paid !== ZERO ? ', balance due ' + f.money(t.balance) : '') + '.';
+    if (statusEl.textContent !== text) statusEl.textContent = text;
+  }, 1000);
+
+  function update(immediate) {
+    var st = readState(), t = compute(st), f = fmts(st, t);
+    model = { state: st, totals: t, f: f };
+    $$('[aria-invalid]', $('#iv')).forEach(function (n) { n.removeAttribute('aria-invalid'); });
+    t.bad.forEach(function (n) { if (n) n.setAttribute('aria-invalid', 'true'); });
+    $$('.iv-item', itemsBox).forEach(function (r, i) { $('.iv-amt', r).textContent = f.money(t.lines[i].amount); });
+    renderSheet(st, t, f);
+    renderSummary(st, t, f);
+    syncPrint();
+    if (immediate === true || !t.errors.length) setErrors(t.errors); else showErrorsLater();
+    if (ready) announceLater();
+  }
+
+  // ---------- Print / PDF ----------
+  var printRoot = el('div', { class: 'iv-print-root', 'aria-hidden': 'true' });
+  document.body.appendChild(printRoot);
+  document.documentElement.classList.add('iv-can-print');
+  function syncPrint() {
+    printRoot.textContent = '';
+    var clone = sheet.cloneNode(true);
+    clone.removeAttribute('id');
+    $$('[id]', clone).forEach(function (n) { n.removeAttribute('id'); });
+    printRoot.appendChild(clone);
+  }
+  var savedTitle = null;
+  function pdfTitle() {
+    var st = model.state;
+    return [st.title.trim() || 'Invoice', st.number.trim(), st.billTo.name.trim()].filter(Boolean).join(' ');
+  }
+  window.addEventListener('beforeprint', function () {
+    update(true);
+    if (savedTitle === null) savedTitle = document.title;
+    document.title = pdfTitle();
+  });
+  window.addEventListener('afterprint', function () {
+    if (savedTitle !== null) { document.title = savedTitle; savedTitle = null; }
+  });
+  $('#iv-pdf').addEventListener('click', function () {
+    update(true);
+    if (model.totals.errors.length) {
+      var first = model.totals.bad[0];
+      if (first) first.focus();
+      return;
+    }
+    okEl.textContent = '';
+    savedTitle = document.title;
+    document.title = pdfTitle();
+    window.print();
+    // Browsers that do not fire afterprint still get their title back.
+    setTimeout(function () { if (savedTitle !== null) { document.title = savedTitle; savedTitle = null; } }, 1000);
+  });
+
+  // ---------- Save and open ----------
+  function slug(s) { return String(s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).toLowerCase(); }
+  $('#iv-save').addEventListener('click', function () {
+    update(true);
+    var st = model.state, t = model.totals, d = t.digits;
+    var out = JSON.parse(JSON.stringify(st));
+    out.totals = {
+      currency: st.currency,
+      minorUnitDigits: d,
+      subtotal: decToString(t.subtotal, d),
+      discount: decToString(t.discount, d),
+      shipping: decToString(t.shipping, d),
+      taxes: t.taxes.map(function (x) { return { name: x.name, amount: decToString(x.amount, d) }; }),
+      total: decToString(t.total, d),
+      amountPaid: decToString(t.paid, d),
+      balanceDue: decToString(t.balance, d)
+    };
+    var name = 'invoice' + (slug(st.number) ? '-' + slug(st.number) : '') + '.json';
+    TT.download(name, JSON.stringify(out, null, 2) + '\n', 'application/json');
+    errEl.textContent = '';
+    listText = '';
+    okEl.textContent = 'Saved ' + name + '. Open it here later to edit this invoice.';
+  });
+  function str(x) { return typeof x === 'string' ? x : x == null ? '' : typeof x === 'number' ? String(x) : ''; }
+  function applyState(o) {
+    var from = o.from || {}, to = o.billTo || {};
+    $('#iv-title').value = str(o.title) || 'Invoice';
+    $('#iv-number').value = str(o.number);
+    $('#iv-date').value = str(o.issueDate);
+    var terms = str(o.paymentTerms);
+    $('#iv-terms').value = $('#iv-terms').querySelector('option[value="' + CSS.escape(terms) + '"]') ? terms : 'custom';
+    $('#iv-due').value = str(o.dueDate);
+    var cur = str(o.currency).toUpperCase();
+    if (cur && digitsFor(cur) !== null) {
+      if (!$('#iv-currency').querySelector('option[value="' + CSS.escape(cur) + '"]')) {
+        var op = el('option', { value: cur }, cur);
+        $('#iv-currency').appendChild(op);
+      }
+      $('#iv-currency').value = cur;
+    }
+    var loc = str(o.locale);
+    $('#iv-locale').value = $('#iv-locale').querySelector('option[value="' + CSS.escape(loc) + '"]') ? loc : '';
+    $('#iv-from-name').value = str(from.name);
+    $('#iv-from-address').value = str(from.address);
+    $('#iv-from-email').value = str(from.email);
+    $('#iv-from-phone').value = str(from.phone);
+    $('#iv-from-tax').value = str(from.taxId);
+    $('#iv-to-name').value = str(to.name);
+    $('#iv-to-address').value = str(to.address);
+    $('#iv-to-email').value = str(to.email);
+    itemsBox.textContent = '';
+    (Array.isArray(o.items) ? o.items : []).forEach(function (it) { if (it && typeof it === 'object') addItem({ description: str(it.description), quantity: str(it.quantity), rate: str(it.rate) }); });
+    if (!itemsBox.children.length) addItem();
+    var disc = o.discount || {};
+    $('#iv-disc-type').value = disc.type === 'amount' ? 'amount' : 'percent';
+    $('#iv-disc-value').value = str(disc.value);
+    var ship = o.shipping || {};
+    $('#iv-shipping').value = str(ship.amount);
+    $('#iv-ship-tax').checked = !!ship.taxable;
+    taxesBox.textContent = '';
+    (Array.isArray(o.taxes) ? o.taxes : []).forEach(function (t) { if (t && typeof t === 'object') addTax({ name: str(t.name), rate: str(t.rate) }); });
+    $('#iv-paid').value = str(o.amountPaid);
+    $('#iv-notes').value = str(o.notes);
+    $('#iv-terms-text').value = str(o.terms);
+    setLogo(typeof o.logo === 'string' && /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/.test(o.logo) ? o.logo : null);
+  }
+  function openFile(file) {
+    okEl.textContent = '';
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) { setErrors(['"' + file.name + '" is too large to be an invoice file.']); return; }
+    file.text().then(function (text) {
+      var o;
+      try { o = JSON.parse(text); } catch (e) { o = null; }
+      if (!o || typeof o !== 'object' || o.format !== FORMAT) {
+        setErrors(['"' + file.name + '" is not an invoice file saved by this tool.']);
+        return;
+      }
+      if (o.version !== 1) {
+        setErrors(['"' + file.name + '" was saved by a newer version of this tool. Reload the page and try again.']);
+        return;
+      }
+      applyState(o);
+      listText = null;
+      update(true);
+      okEl.textContent = 'Opened ' + file.name + '.';
+    }, function () { setErrors(['"' + file.name + '" could not be read.']); });
+  }
+  $('#iv-open').addEventListener('click', function () { $('#iv-open-file').click(); });
+  $('#iv-open-file').addEventListener('change', function (e) { openFile(e.target.files[0]); e.target.value = ''; });
+
+  // ---------- Logo ----------
+  function setLogo(url) {
+    logo = url;
+    var thumb = $('#iv-logo-thumb');
+    thumb.textContent = '';
+    thumb.hidden = !url;
+    if (url) thumb.appendChild(el('img', { src: url, alt: 'Logo' }));
+    $('#iv-logo-remove').hidden = !url;
+    $('#iv-logo-add').textContent = url ? 'Change logo' : 'Add logo';
+  }
+  function readLogo(file) {
+    okEl.textContent = '';
+    if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) { setErrors(['"' + file.name + '" is not a PNG, JPG, WebP, GIF or SVG image.']); return; }
+    if (file.size > 10 * 1024 * 1024) { setErrors(['"' + file.name + '" is larger than 10 MB. Use a smaller logo.']); return; }
+    var reader = new FileReader();
+    reader.onerror = function () { setErrors(['"' + file.name + '" could not be read.']); };
+    reader.onload = function () {
+      var img = new Image();
+      img.onerror = function () { setErrors(['"' + file.name + '" could not be read as an image.']); };
+      img.onload = function () {
+        var url = reader.result, w = img.naturalWidth, h = img.naturalHeight, MAXPX = 800;
+        // Large photos are scaled down so the saved invoice file stays small.
+        if (file.type !== 'image/svg+xml' && w && h && (Math.max(w, h) > MAXPX || file.size > 400 * 1024)) {
+          var k = Math.min(1, MAXPX / Math.max(w, h)), c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(w * k));
+          c.height = Math.max(1, Math.round(h * k));
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          url = c.toDataURL(file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.9);
+        }
+        setLogo(url);
+        listText = null;
+        update(true);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  $('#iv-logo-add').addEventListener('click', function () { $('#iv-logo-file').click(); });
+  $('#iv-logo-file').addEventListener('change', function (e) { if (e.target.files[0]) readLogo(e.target.files[0]); e.target.value = ''; });
+  $('#iv-logo-remove').addEventListener('click', function () { setLogo(null); update(); $('#iv-logo-add').focus(); });
+
+  // An invoice file or an image dropped anywhere on the page.
+  function isFileDrag(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+  document.addEventListener('dragover', function (e) { if (isFileDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  document.addEventListener('drop', function (e) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    var file = e.dataTransfer.files[0];
+    if (!file) return;
+    if (/^image\//.test(file.type)) readLogo(file); else openFile(file);
+  });
+
+  // ---------- Next invoice / clear ----------
+  function nextNumber(s) {
+    var m = /^(.*?)(\d+)(\D*)$/.exec(s);
+    if (!m) return s ? s + '-2' : 'INV-0001';
+    var n = String(BigInt(m[2]) + ONE);
+    while (n.length < m[2].length) n = '0' + n;
+    return m[1] + n + m[3];
+  }
+  $('#iv-next').addEventListener('click', function () {
+    var st = readState();
+    st.number = nextNumber(st.number.trim());
+    st.issueDate = isoToday();
+    st.billTo = { name: '', address: '', email: '' };
+    st.items = [];
+    st.discount = { type: st.discount.type, value: '' };
+    st.shipping = { amount: '', taxable: st.shipping.taxable };
+    st.amountPaid = '';
+    applyState(st);
+    if (st.paymentTerms !== 'custom') syncDue(); else $('#iv-due').value = '';
+    update(true);
+    okEl.textContent = 'Started ' + st.number + '. Your business details, taxes, notes and terms were kept.';
+    $('#iv-to-name').focus();
+  });
+  $('#iv-clear').addEventListener('click', function () {
+    applyState({ title: 'Invoice', number: 'INV-0001', issueDate: isoToday(), paymentTerms: '30', currency: $('#iv-currency').value, locale: $('#iv-locale').value });
+    syncDue();
+    update(true);
+    okEl.textContent = 'Cleared. Save the invoice file first if you want to keep an invoice.';
+    $('#iv-from-name').focus();
+  });
+
+  // ---------- Wiring ----------
+  var form = $('#iv-form');
+  form.addEventListener('input', function (e) {
+    okEl.textContent = '';
+    if (e.target.id === 'iv-date') syncDue();
+    if (e.target.id === 'iv-due') $('#iv-terms').value = 'custom';
+    update();
+  });
+  form.addEventListener('change', function (e) {
+    if (e.target.id === 'iv-terms') { if (e.target.value === 'custom') $('#iv-due').focus(); else syncDue(); }
+    if (e.target.matches('select, input[type="checkbox"]')) update();
+    else if (model && model.totals.errors.length) setErrors(model.totals.errors);
+  });
+  form.addEventListener('click', function (e) {
+    var x = e.target.closest('.iv-x');
+    if (!x) return;
+    var item = x.closest('.iv-item'), tax = x.closest('.iv-tax');
+    if (item) {
+      if (itemsBox.children.length === 1) { $$('input', item).forEach(function (i) { i.value = ''; }); $('.iv-qty', item).value = '1'; $('.iv-desc', item).focus(); update(); return; }
+      removeRow(item, itemsBox, $('#iv-add-item'));
+    } else if (tax) removeRow(tax, taxesBox, $('#iv-add-tax'));
+  });
+  // Enter in an item moves to the next item's description, adding one after the last.
+  itemsBox.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.isComposing || !e.target.matches('input')) return;
+    e.preventDefault();
+    var row = e.target.closest('.iv-item'), next = row.nextElementSibling;
+    if (next) $('.iv-desc', next).focus(); else { addItem(null, true); update(); }
+  });
+  $('#iv-add-item').addEventListener('click', function () { addItem(null, true); update(); });
+  $('#iv-add-tax').addEventListener('click', function () { addTax(null, true); update(); });
+
+  $('#iv-date').value = isoToday();
+  syncDue();
+  addItem();
+  update(true);
+  ready = true;
+})();
+</script>

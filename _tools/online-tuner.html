@@ -1,0 +1,860 @@
+---
+title: Online Guitar Tuner & Chromatic Tuner
+description: Tune guitar, bass, ukulele or violin with your microphone. Chromatic tuner with a cents needle, alternate tunings, A4 calibration and reference tones.
+category: Audio
+keywords: [online tuner, guitar tuner, chromatic tuner, bass tuner, ukulele tuner, violin tuner, tuner with microphone, drop d tuner]
+howto: |
+  ## How to tune your instrument
+
+  Pick your instrument and tuning, press **Start tuner** and allow the
+  microphone. Play one open string at a time and let it ring. The big letter
+  is the string you are tuning, and the needle shows how far off it is:
+
+  - Needle left of centre (**flat**): tighten the string to raise the pitch.
+  - Needle right of centre (**sharp**): loosen it.
+  - Within 5 cents of the target the display turns green and the string
+    gets a check mark.
+
+  The tuner picks the nearest string by itself. To stay on one string, press
+  its button; press **Auto** to go back. **Chromatic** shows the nearest note
+  of any sound, for instruments or tunings not in the list.
+
+  Tune up to the note rather than down to it: approaching from below leaves
+  the string settled against the tuning peg, so it holds pitch longer. Tuning
+  one string shifts the tension on the neck, so go over all the strings a
+  second time, especially with a floating tremolo.
+
+  ## How the pitch is measured
+
+  The page runs the YIN pitch detection algorithm (de Cheveigné and Kawahara,
+  2002) on the most recent 4,096 samples, about 85 ms at 48 kHz. It compares
+  the sound with delayed copies of itself; the delay at which it best matches
+  itself is the period of the note. That window holds at least two periods of
+  notes down to about 25 Hz, below the 30.87 Hz low B of a 5-string bass. The
+  period is then refined on later repetitions, which makes a steady tone
+  accurate to a fraction of a cent. A median filter and gentle smoothing keep
+  the needle steady while a string decays.
+
+  Echo cancellation, noise suppression and automatic gain are switched off.
+  Those filters are designed for speech and can treat a sustained note as
+  noise to remove.
+
+  ## Cents and A4 calibration
+
+  A cent is 1/100 of an equal-tempered semitone, so an octave has 1,200. The
+  offset from a target is 1200 × log2(heard ÷ target), and each note is
+  A4 × 2^(n/12), where n counts semitones from A4. Differences of a few cents
+  are hard to hear between single notes but show up as a slow beating when
+  two strings sound together.
+
+  | A4 | Where it is used |
+  |---|---|
+  | 440 Hz | Standard concert pitch (ISO 16) and nearly all recordings |
+  | 442 to 443 Hz | Many European orchestras |
+  | 432 Hz | An alternative some players prefer |
+
+  Match the calibration to the piano or recording you play with. Reference
+  tones and targets follow it.
+
+  ## Standard tunings
+
+  | Instrument | Strings, low to high |
+  |---|---|
+  | Guitar | E2 82.41, A2 110.00, D3 146.83, G3 196.00, B3 246.94, E4 329.63 Hz |
+  | Bass | E1 41.20, A1 55.00, D2 73.42, G2 98.00 Hz |
+  | Ukulele | G4 392.00, C4 261.63, E4 329.63, A4 440.00 Hz |
+  | Violin | G3 196.00, D4 293.66, A4 440.00, E5 659.26 Hz |
+
+  Frequencies assume A4 = 440 Hz. Ukulele standard tuning is re-entrant: the
+  G string is higher than the C next to it. Octave numbers are scientific
+  pitch notation, where middle C is C4. French and Italian usage often
+  numbers octaves one lower, so the note written La4 here may be called La3.
+
+  **Reference tone** plays the selected note through your speakers. The rich
+  sound adds harmonics, so low bass notes stay audible on phone speakers that
+  cannot reproduce 41 Hz.
+faq:
+  - q: Is my playing recorded or uploaded?
+    a: No. The microphone signal is analysed in your browser's Web Audio engine on your own device. Nothing is recorded, stored or sent anywhere, and Stop releases the microphone.
+  - q: Why does the tuner sometimes show the note an octave higher?
+    a: A plucked string is rich in harmonics, and a 12th-fret harmonic really is an octave up. In an instrument tuning, a note one octave above a string is matched to that string, so tuning with harmonics works. In Chromatic mode you see the octave you play.
+  - q: Should I tune to 440 Hz or 432 Hz?
+    a: Use 440 Hz unless you play along with a piano, orchestra or recording at another pitch. It is the international standard, and almost all music is recorded at or near it.
+  - q: Why does the needle not settle on my bass or low guitar string?
+    a: Low notes need a moment to be measured, and phone or laptop microphones pick up little below 80 Hz. Pluck firmly, hold the device close to the instrument, and keep other strings muted. You can also tune with the 12th-fret harmonic.
+  - q: Can I tune an instrument that is not in the list?
+    a: Yes. Choose Chromatic and play each string; the tuner shows the nearest note and how many cents you are off. Set the reference tone to any note to tune by ear.
+---
+<style>
+.otn-top > .field { flex: 1 1 240px; }
+.otn-go { min-width: 140px; }
+.otn-set > .field { flex: 1 1 200px; }
+.otn-set > .otn-a4f { flex: 0 1 220px; }
+.otn-step { display: flex; gap: 6px; }
+/* Same 44 px as the selects beside it (text inputs grow to 47.6 px with the shared padding). */
+.otn-step input { min-width: 0; height: 44px; text-align: center; }
+.otn-step .btn { flex: 0 0 44px; height: 44px; min-height: 0; padding: 0; font-size: 1.2rem; }
+.otn-strings { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.otn-strings .btn { min-width: 56px; font-variant-numeric: tabular-nums; }
+.otn-strings .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+.otn-strings .btn.otn-cur { border-color: var(--text); }
+.otn-tick { color: var(--accent); font-weight: 700; }
+.otn-display {
+  margin: 0 0 16px; padding: 12px 12px 16px; text-align: center;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+}
+.otn-gauge { display: block; width: 100%; max-width: 440px; height: auto; margin: 0 auto; }
+.otn-gauge .g-tick { stroke: var(--muted); stroke-width: 1.5; }
+.otn-gauge .g-tick.major { stroke: var(--text); stroke-width: 2.5; }
+.otn-gauge .g-zone { fill: var(--accent); opacity: 0.28; }
+.otn-gauge .g-label { fill: var(--muted); font: 12px system-ui, sans-serif; text-anchor: middle; }
+.otn-gauge .g-sym { fill: var(--muted); font: 20px system-ui, sans-serif; text-anchor: middle; }
+.otn-gauge .g-needle { stroke: var(--text); stroke-width: 3; stroke-linecap: round; }
+.otn-gauge .g-hub { fill: var(--text); }
+.otn-gauge.is-good .g-needle { stroke: var(--accent); }
+.otn-gauge.is-good .g-hub { fill: var(--accent); }
+.otn-gauge.is-idle .g-needle, .otn-gauge.is-idle .g-hub { opacity: 0.3; }
+.otn-note { margin: -6px 0 0; font-size: clamp(3rem, 12vw, 4.5rem); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.otn-note sub { font-size: 0.4em; font-weight: 600; vertical-align: baseline; margin-left: 2px; }
+.otn-cents { margin: 6px 0 0; font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.otn-verdict { margin: 4px 0 0; min-height: 1.6em; color: var(--muted); font-weight: 600; }
+.otn-verdict.is-good { color: var(--accent); }
+.otn-heard { margin: 2px 0 0; min-height: 1.5em; color: var(--muted); font-size: 14px; }
+.otn-display.is-idle .otn-note, .otn-display.is-idle .otn-cents { color: var(--muted); }
+.otn-h { margin: 24px 0 10px; font-size: 1.05rem; }
+.otn-ref > .field { flex: 1 1 120px; }
+.otn-ref > .otn-reftimbre { flex: 2 1 220px; }
+.otn-level { height: 6px; margin: 10px auto 0; max-width: 280px; overflow: hidden; background: var(--border); border-radius: 3px; }
+.otn-level div { width: 0; height: 100%; background: var(--accent); }
+</style>
+
+<div class="row otn-top">
+  <div class="field">
+    <label for="otn-inst">Instrument and tuning</label>
+    <select id="otn-inst"></select>
+  </div>
+  <button class="btn otn-go" type="button" id="otn-toggle">Start tuner</button>
+</div>
+<p class="msg error" id="otn-error" role="alert"></p>
+
+<div id="otn-strings-wrap">
+  <p class="label" id="otn-strings-label">Target string</p>
+  <div class="otn-strings" id="otn-strings" role="group" aria-labelledby="otn-strings-label"></div>
+</div>
+
+<div class="otn-display is-idle" id="otn-display">
+  <svg class="otn-gauge is-idle" id="otn-gauge" viewBox="0 0 320 190" role="img" aria-labelledby="otn-gauge-title">
+    <title id="otn-gauge-title">Tuning needle from 50 cents flat to 50 cents sharp</title>
+    <g id="otn-scale"></g>
+    <g id="otn-needle"><line class="g-needle" x1="160" y1="180" x2="160" y2="44"></line></g>
+    <circle class="g-hub" cx="160" cy="180" r="7"></circle>
+  </svg>
+  <p class="otn-note" id="otn-note" aria-hidden="true"><span id="otn-note-name">–</span><sub id="otn-note-oct"></sub></p>
+  <p class="otn-cents" id="otn-cents" aria-hidden="true">&nbsp;</p>
+  <p class="otn-verdict" id="otn-verdict">Press Start tuner, then play a single note.</p>
+  <p class="otn-heard" id="otn-heard"></p>
+  <div class="otn-level" aria-hidden="true"><div id="otn-level-bar"></div></div>
+</div>
+<p class="visually-hidden" id="otn-status" role="status"></p>
+
+<div class="stats">
+  <div class="stat"><b id="otn-freq">–</b><span>Detected frequency</span></div>
+  <div class="stat"><b id="otn-target">–</b><span id="otn-target-label">Target frequency</span></div>
+  <div class="stat"><b id="otn-off">–</b><span>Offset (cents)</span></div>
+  <div class="stat"><b id="otn-level">–</b><span>Input level (dBFS)</span></div>
+</div>
+
+<h2 class="otn-h">Calibration and note names</h2>
+<div class="row otn-set">
+  <div class="field otn-a4f">
+    <label for="otn-a4">A4 calibration (Hz)</label>
+    <div class="otn-step">
+      <button class="btn secondary" type="button" id="otn-a4-down" aria-label="Lower A4 by 1 Hz">−</button>
+      <input type="number" id="otn-a4" min="430" max="450" step="0.1" value="440" inputmode="decimal">
+      <button class="btn secondary" type="button" id="otn-a4-up" aria-label="Raise A4 by 1 Hz">+</button>
+    </div>
+  </div>
+  <div class="field">
+    <label for="otn-names">Note names</label>
+    <select id="otn-names">
+      <option value="sharp" selected>Letters, sharps (C♯)</option>
+      <option value="flat">Letters, flats (D♭)</option>
+      <option value="solfege">Solfège (Do Re Mi)</option>
+    </select>
+  </div>
+</div>
+<p class="msg error" id="otn-a4-msg" aria-live="polite"></p>
+
+<h2 class="otn-h">Reference tone</h2>
+<div class="row otn-ref">
+  <div class="field">
+    <label for="otn-ref-note">Note</label>
+    <select id="otn-ref-note"></select>
+  </div>
+  <div class="field">
+    <label for="otn-ref-oct">Octave</label>
+    <select id="otn-ref-oct"></select>
+  </div>
+  <div class="field otn-reftimbre">
+    <label for="otn-ref-timbre">Sound</label>
+    <select id="otn-ref-timbre">
+      <option value="rich" selected>Rich (with harmonics)</option>
+      <option value="sine">Pure sine</option>
+    </select>
+  </div>
+</div>
+<div class="actions">
+  <button class="btn secondary" type="button" id="otn-play" aria-pressed="false">Play A4 (440.00 Hz)</button>
+</div>
+<p class="hint">Choosing a target string also sets the reference note. The tone keeps playing until you press the button again.</p>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const NAMES = {
+    sharp: ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'],
+    flat: ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'],
+    solfege: ['Do', 'Do♯', 'Re', 'Re♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si']
+  };
+  // Strings as MIDI note numbers (A4 = 69, middle C = C4 = 60), in the order players name them.
+  const TUNINGS = [
+    ['', [['chromatic', 'Chromatic (any note)', []]]],
+    ['Guitar', [
+      ['guitar', 'Standard (E A D G B E)', [40, 45, 50, 55, 59, 64]],
+      ['guitar-drop-d', 'Drop D (D A D G B E)', [38, 45, 50, 55, 59, 64]],
+      ['guitar-eb', 'Half step down (E♭ A♭ D♭ G♭ B♭ E♭)', [39, 44, 49, 54, 58, 63], true],
+      ['guitar-d', 'Full step down (D G C F A D)', [38, 43, 48, 53, 57, 62]],
+      ['guitar-drop-c', 'Drop C (C G C F A D)', [36, 43, 48, 53, 57, 62]],
+      ['guitar-dadgad', 'DADGAD (D A D G A D)', [38, 45, 50, 55, 57, 62]],
+      ['guitar-open-g', 'Open G (D G D G B D)', [38, 43, 50, 55, 59, 62]],
+      ['guitar-open-d', 'Open D (D A D F♯ A D)', [38, 45, 50, 54, 57, 62]],
+      ['guitar-open-e', 'Open E (E B E G♯ B E)', [40, 47, 52, 56, 59, 64]],
+      ['guitar-open-c', 'Open C (C G C G C E)', [36, 43, 48, 55, 60, 64]],
+      ['guitar-7', '7-string (B E A D G B E)', [35, 40, 45, 50, 55, 59, 64]]
+    ]],
+    ['Bass', [
+      ['bass', '4-string (E A D G)', [28, 33, 38, 43]],
+      ['bass-5', '5-string (B E A D G)', [23, 28, 33, 38, 43]],
+      ['bass-6', '6-string (B E A D G C)', [23, 28, 33, 38, 43, 48]],
+      ['bass-drop-d', 'Drop D (D A D G)', [26, 33, 38, 43]]
+    ]],
+    ['Ukulele', [
+      ['ukulele', 'Standard, high G (G C E A)', [67, 60, 64, 69]],
+      ['ukulele-low-g', 'Low G (G C E A)', [55, 60, 64, 69]],
+      ['ukulele-d', 'D tuning (A D F♯ B)', [69, 62, 66, 71]],
+      ['ukulele-baritone', 'Baritone (D G B E)', [50, 55, 59, 64]]
+    ]],
+    ['Orchestral strings', [
+      ['violin', 'Violin (G D A E)', [55, 62, 69, 76]],
+      ['viola', 'Viola (C G D A)', [48, 55, 62, 69]],
+      ['cello', 'Cello (C G D A)', [36, 43, 50, 57]],
+      ['double-bass', 'Double bass (E A D G)', [28, 33, 38, 43]]
+    ]],
+    ['Other', [
+      ['mandolin', 'Mandolin (G D A E)', [55, 62, 69, 76]],
+      ['banjo', 'Banjo, open G (G D G B D)', [67, 50, 55, 59, 62]]
+    ]]
+  ];
+  const BY_ID = {};
+  const IN_TUNE = 5;           // cents
+  const GATE_DB = -58;         // quieter input is treated as silence
+  const HOLD_MS = 1500;        // keep the last reading this long after the note fades
+  const F_MIN = 25, F_MAX = 4200;
+
+  const inst = $('#otn-inst'), a4In = $('#otn-a4'), namesSel = $('#otn-names');
+  const toggle = $('#otn-toggle'), errEl = $('#otn-error'), a4Msg = $('#otn-a4-msg');
+  const stringsWrap = $('#otn-strings-wrap'), stringsEl = $('#otn-strings');
+  const display = $('#otn-display'), gauge = $('#otn-gauge'), needle = $('#otn-needle');
+  const noteName = $('#otn-note-name'), noteOct = $('#otn-note-oct'), centsEl = $('#otn-cents');
+  const verdict = $('#otn-verdict'), heardEl = $('#otn-heard'), statusEl = $('#otn-status');
+  const refNote = $('#otn-ref-note'), refOct = $('#otn-ref-oct'), refTimbre = $('#otn-ref-timbre'), playBtn = $('#otn-play');
+
+  let a4 = 440, lock = null, tuned = {}, tunedSince = {};
+
+  // ---------- Setup ----------
+  TUNINGS.forEach(function (grp) {
+    const parent = grp[0] ? document.createElement('optgroup') : inst;
+    if (grp[0]) { parent.label = grp[0]; inst.appendChild(parent); }
+    grp[1].forEach(function (t) {
+      BY_ID[t[0]] = { id: t[0], name: (grp[0] ? grp[0] + ': ' : '') + t[1], notes: t[2], flats: !!t[3] };
+      const o = document.createElement('option');
+      o.value = t[0];
+      o.textContent = grp[0] === 'Other' || grp[0] === 'Orchestral strings' || !grp[0] ? t[1] : grp[0] + ': ' + t[1];
+      parent.appendChild(o);
+    });
+  });
+  inst.value = 'guitar';
+  for (let o = 0; o <= 8; o++) {
+    const op = document.createElement('option');
+    op.value = String(o);
+    op.textContent = String(o);
+    refOct.appendChild(op);
+  }
+  refOct.value = '4';
+
+  function tuning() { return BY_ID[inst.value] || BY_ID.chromatic; }
+  function names() {
+    const pref = namesSel.value;
+    if (pref === 'sharp' && tuning().flats) return NAMES.flat;
+    return NAMES[pref] || NAMES.sharp;
+  }
+  function noteParts(midi) { return { name: names()[((midi % 12) + 12) % 12], oct: Math.floor(midi / 12) - 1 }; }
+  function noteLabel(midi) { const p = noteParts(midi); return p.name + p.oct; }
+  function freqOf(midi) { return a4 * Math.pow(2, (midi - 69) / 12); }
+  function fmtHz(f) { return f.toFixed(2) + ' Hz'; }
+  function fmtCents(c) {
+    const r = Math.round(c);
+    return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r);
+  }
+
+  function fillRefNotes() {
+    const keep = refNote.value;
+    refNote.textContent = '';
+    names().forEach(function (n, i) {
+      const o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = n;
+      refNote.appendChild(o);
+    });
+    refNote.value = keep || '9';
+  }
+  function refMidi() { return (+refOct.value + 1) * 12 + (+refNote.value); }
+  function setRef(midi) {
+    refNote.value = String(((midi % 12) + 12) % 12);
+    refOct.value = String(Math.floor(midi / 12) - 1);
+    refChanged();
+  }
+
+  function buildStrings() {
+    const t = tuning();
+    stringsEl.textContent = '';
+    stringsWrap.hidden = !t.notes.length;
+    if (!t.notes.length) return;
+    const mk = function (label, value) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn secondary small';
+      b.dataset.midi = value;
+      const s = document.createElement('span');
+      s.textContent = label;
+      b.appendChild(s);
+      if (value !== 'auto') {
+        const tick = document.createElement('span');
+        tick.className = 'otn-tick';
+        tick.setAttribute('aria-hidden', 'true');
+        tick.textContent = ' ✓';
+        b.appendChild(tick);
+      }
+      stringsEl.appendChild(b);
+    };
+    mk('Auto', 'auto');
+    t.notes.forEach(function (m, i) { if (t.notes.indexOf(m) === i) mk(noteLabel(m), String(m)); });
+    refreshStrings();
+  }
+  // Updates pressed state and check marks in place, so keyboard focus stays put.
+  function refreshStrings() {
+    TT.$$('button[data-midi]', stringsEl).forEach(function (b) {
+      const v = b.dataset.midi;
+      b.setAttribute('aria-pressed', String(v === 'auto' ? lock === null : String(lock) === v));
+      if (v !== 'auto') {
+        const on = !!tuned[v];
+        b.children[1].hidden = !on;
+        if (on) b.setAttribute('aria-label', b.children[0].textContent + ', tuned'); else b.removeAttribute('aria-label');
+      }
+    });
+  }
+  stringsEl.addEventListener('click', function (e) {
+    const b = e.target.closest('button[data-midi]');
+    if (!b) return;
+    const v = b.dataset.midi;
+    lock = v === 'auto' || String(lock) === v ? null : +v;
+    if (lock !== null) setRef(lock);
+    refreshStrings();
+    reading.target = null;
+    render(true);
+  });
+
+  inst.addEventListener('change', function () {
+    lock = null; tuned = {}; tunedSince = {};
+    const t = tuning();
+    buildStrings();
+    fillRefNotes();
+    if (t.notes.length) setRef(t.notes[0]); else refChanged();
+    reading.target = null;
+    render(true);
+  });
+  namesSel.addEventListener('change', function () { fillRefNotes(); buildStrings(); refChanged(); render(true); });
+
+  // ---------- A4 calibration ----------
+  const A4_ERR = function () { return 'Enter a calibration from 430 to 450 Hz. Still using A4 = ' + a4 + ' Hz.'; };
+  function setA4(v) {
+    a4Msg.textContent = '';
+    a4 = Math.round(v * 10) / 10;
+    refChanged();
+    render(true);
+  }
+  function a4Valid(s) { return /^\s*\d{3}(\.\d*)?\s*$/.test(s) && Number(s) >= 430 && Number(s) <= 450; }
+  // While typing, a partial value such as "44" is not an error yet; the note appears after a pause.
+  const a4Later = TT.debounce(function () { if (!a4Valid(a4In.value)) a4Msg.textContent = A4_ERR(); }, 900);
+  a4In.addEventListener('input', function () {
+    if (a4Valid(a4In.value)) setA4(Number(a4In.value)); else a4Later();
+  });
+  a4In.addEventListener('change', function () { if (!a4Valid(a4In.value)) a4Msg.textContent = A4_ERR(); });
+  function nudge(dir) {
+    const v = Math.max(430, Math.min(450, dir < 0 ? Math.ceil(a4) - 1 : Math.floor(a4) + 1));
+    a4In.value = String(v);
+    setA4(v);
+  }
+  $('#otn-a4-down').addEventListener('click', function () { nudge(-1); });
+  $('#otn-a4-up').addEventListener('click', function () { nudge(1); });
+
+  // ---------- Gauge ----------
+  (function drawScale() {
+    const g = $('#otn-scale'), ns = 'http://www.w3.org/2000/svg', cx = 160, cy = 180, R = 140;
+    const pt = function (c, r) { const a = c * 1.2 * Math.PI / 180; return [cx + r * Math.sin(a), cy - r * Math.cos(a)]; };
+    const el = function (name, attrs) { const e = document.createElementNS(ns, name); for (const k in attrs) e.setAttribute(k, attrs[k]); g.appendChild(e); return e; };
+    const a = pt(-IN_TUNE, R + 4), b = pt(IN_TUNE, R + 4), c2 = pt(IN_TUNE, R - 28), d = pt(-IN_TUNE, R - 28);
+    el('path', { class: 'g-zone', d: 'M' + a + ' A' + (R + 4) + ' ' + (R + 4) + ' 0 0 1 ' + b + ' L' + c2 + ' A' + (R - 28) + ' ' + (R - 28) + ' 0 0 0 ' + d + 'Z' });
+    for (let c = -50; c <= 50; c += 5) {
+      const major = c % 25 === 0, len = c === 0 ? 24 : major ? 16 : 8;
+      const p1 = pt(c, R), p2 = pt(c, R - len);
+      el('line', { class: 'g-tick' + (major ? ' major' : ''), x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1] });
+      if (major) {
+        // Labels sit outside the arc, so the needle never covers them.
+        const p3 = pt(c, R + 16);
+        el('text', { class: 'g-label', x: p3[0], y: p3[1] + 4 }).textContent = (c > 0 ? '+' : c < 0 ? '−' : '') + Math.abs(c);
+      }
+    }
+    el('text', { class: 'g-sym', x: 44, y: 176 }).textContent = '♭';
+    el('text', { class: 'g-sym', x: 276, y: 176 }).textContent = '♯';
+  })();
+
+  // ---------- Pitch detection (YIN with FFT-based difference function) ----------
+  function fft(re, im, inverse) {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = (inverse ? 2 : -2) * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang), half = len >> 1;
+      for (let i = 0; i < n; i += len) {
+        let cr = 1, ci = 0;
+        for (let k = 0; k < half; k++) {
+          const a = i + k, b = a + half;
+          const xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+          re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+          const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+        }
+      }
+    }
+  }
+
+  let work = null;
+  function detect(x, sr) {
+    const N = x.length, W = N >> 1;
+    if (!work || work.n !== N) {
+      work = { n: N, re: new Float64Array(N), im: new Float64Array(N), pr: new Float64Array(N), pi: new Float64Array(N), sq: new Float64Array(N + 1), d: new Float64Array(W), dp: new Float64Array(W) };
+    }
+    const re = work.re, im = work.im, pr = work.pr, pi = work.pi, sq = work.sq, d = work.d, dp = work.dp;
+    let mean = 0, peak = 0;
+    for (let i = 0; i < N; i++) mean += x[i];
+    mean /= N;
+    sq[0] = 0;
+    for (let i = 0; i < N; i++) {
+      const v = x[i] - mean;
+      im[i] = v; re[i] = i < W ? v : 0;
+      sq[i + 1] = sq[i] + v * v;
+      if (Math.abs(x[i]) > peak) peak = Math.abs(x[i]);
+    }
+    const rms = Math.sqrt(sq[N] / N);
+    const out = { f: 0, rms: rms, peak: peak };
+    if (!(rms > 0) || 20 * Math.log10(rms) < GATE_DB) return out;
+    // One complex FFT carries both the first half-window (real part) and the
+    // whole buffer (imaginary part); their cross-correlation gives the
+    // difference function d(t) = sum (x[j] - x[j+t])^2 for every lag at once.
+    fft(re, im, false);
+    for (let k = 0; k < N; k++) {
+      const k2 = (N - k) & (N - 1);
+      const ar = (re[k] + re[k2]) / 2, ai = (im[k] - im[k2]) / 2;
+      const br = (im[k] + im[k2]) / 2, bi = (re[k2] - re[k]) / 2;
+      pr[k] = ar * br + ai * bi; pi[k] = ar * bi - ai * br;
+    }
+    fft(pr, pi, true);
+    const e0 = sq[W];
+    const tauMin = Math.max(2, Math.floor(sr / F_MAX)), tauMax = Math.min(W - 2, Math.ceil(sr / F_MIN));
+    d[0] = 0; dp[0] = 1;
+    let run = 0;
+    for (let t = 1; t < W; t++) {
+      d[t] = Math.max(0, e0 + (sq[t + W] - sq[t]) - 2 * pr[t] / N);
+      run += d[t];
+      dp[t] = run > 0 ? d[t] * t / run : 1;
+    }
+    let tau = -1;
+    for (let t = tauMin; t <= tauMax; t++) {
+      if (dp[t] < 0.15) { while (t + 1 <= tauMax && dp[t + 1] < dp[t]) t++; tau = t; break; }
+    }
+    if (tau < 0) {
+      // Nothing clearly periodic below the threshold (noisy input): take the
+      // earliest dip nearly as deep as the deepest one, since the later dips
+      // are multiples of the period and would read an octave or more too low.
+      let best = Infinity;
+      for (let t = tauMin; t <= tauMax; t++) if (dp[t] < best) best = dp[t];
+      if (best > 0.35) return out;
+      const lim = best * 1.2 + 0.02;
+      for (let t = tauMin; t <= tauMax; t++) {
+        if (dp[t] <= lim) { while (t + 1 <= tauMax && dp[t + 1] < dp[t]) t++; tau = t; break; }
+      }
+    }
+    // Lowest point of d within +-w of c. The normalised function's dip can sit
+    // a few samples off the raw minimum, and noise adds small bumps, so the
+    // search spans an eighth of a period instead of the neighbouring samples.
+    const valley = function (c, w) {
+      let bt = c;
+      for (let t = Math.max(1, c - w); t <= Math.min(W - 2, c + w); t++) if (d[t] < d[bt]) bt = t;
+      return bt;
+    };
+    const interp = function (t) {
+      if (t < 1 || t >= W - 1) return t;
+      const a = d[t - 1], b = d[t], c = d[t + 1], den = a - 2 * b + c;
+      return den > 0 ? t + Math.max(-1, Math.min(1, 0.5 * (a - c) / den)) : t;
+    };
+    let P = interp(valley(tau, Math.max(1, Math.round(tau / 8))));
+    // Refine on later repetitions (2P, 4P, ...): the interpolation error is divided by m.
+    for (let m = 2; m * P < W - 4; m *= 2) {
+      const c0 = Math.round(m * P), w = Math.max(2, Math.round(P / 8));
+      if (c0 + w > W - 2) break;
+      const bt = valley(c0, w);
+      const scale = e0 + (sq[bt + W] - sq[bt]);
+      if (!(scale > 0) || d[bt] / scale > 0.3) break;
+      P = interp(bt) / m;
+    }
+    out.f = sr / P;
+    out.clarity = 1 - dp[tau];
+    return out;
+  }
+
+  // ---------- Reading state and smoothing ----------
+  const reading = { cents: null, hist: [], jump: 0, lastT: 0, target: null, folded: false, freq: 0, heardMidi: null };
+  let levelDb = -Infinity, lastText = 0, lastAnnounce = 0, announced = '';
+
+  function median(a) { const s = a.slice().sort(function (x, y) { return x - y; }); return s[s.length >> 1]; }
+
+  function pickTarget(midiFloat) {
+    const t = tuning();
+    if (!t.notes.length) return { midi: Math.round(midiFloat), folded: false };
+    const cands = lock !== null ? [lock] : t.notes;
+    let best = null;
+    cands.forEach(function (m) { const diff = Math.abs(midiFloat - m); if (!best || diff < best.diff) best = { midi: m, diff: diff }; });
+    // A note an octave above a string (a 12th-fret harmonic, or the tuner
+    // catching the second harmonic) is matched to that string.
+    if (best.diff > 1) {
+      cands.forEach(function (m) {
+        const diff = Math.abs(midiFloat - 12 - m);
+        if (diff < 0.6 && diff < best.diff) best = { midi: m, diff: diff, folded: true };
+      });
+    }
+    return { midi: best.midi, folded: !!best.folded };
+  }
+
+  function update(res, now) {
+    if (res.f > 0) {
+      const c = 1200 * Math.log2(res.f / a4); // cents from A4
+      const hist = reading.hist;
+      hist.push(c);
+      if (hist.length > 5) hist.shift();
+      const m = median(hist);
+      if (reading.cents === null || now - reading.lastT > HOLD_MS) { reading.cents = m; reading.jump = 0; hist.length = 0; hist.push(c); }
+      else if (Math.abs(m - reading.cents) > 40) {
+        if (++reading.jump >= 3) { reading.cents = m; reading.jump = 0; }
+      } else {
+        reading.jump = 0;
+        // Exponential smoothing with a 0.1 s time constant, independent of the frame rate.
+        const dt = reading.frameT ? Math.min(0.1, Math.max(0.001, (now - reading.frameT) / 1000)) : 0.016;
+        reading.cents += (m - reading.cents) * (1 - Math.exp(-dt / 0.1));
+      }
+      reading.lastT = now;
+      reading.freq = a4 * Math.pow(2, reading.cents / 1200);
+    }
+    reading.frameT = now;
+  }
+
+  function render(force) {
+    const now = performance.now();
+    const t = tuning();
+    const live = reading.cents !== null && now - reading.lastT <= HOLD_MS;
+    const fresh = live && now - reading.lastT < 300;
+    let offset = null;
+    if (live) {
+      const midiF = 69 + reading.cents / 100;
+      const pick = pickTarget(midiF);
+      const tMidi = pick.midi;
+      offset = (midiF - (pick.folded ? 12 : 0) - tMidi) * 100;
+      reading.target = tMidi;
+      reading.folded = pick.folded;
+      reading.heardMidi = Math.round(midiF);
+      // Needle, every frame.
+      const clamped = Math.max(-50, Math.min(50, offset));
+      needle.setAttribute('transform', 'rotate(' + (clamped * 1.2).toFixed(2) + ' 160 180)');
+      const good = Math.abs(offset) <= IN_TUNE;
+      gauge.classList.toggle('is-good', good && fresh);
+      gauge.classList.toggle('is-idle', !fresh);
+      display.classList.toggle('is-idle', !fresh);
+      // A string held in tune for a second gets a check mark.
+      if (t.notes.length) {
+        const key = String(tMidi);
+        if (good && fresh) {
+          if (!tunedSince[key]) tunedSince[key] = now;
+          else if (now - tunedSince[key] > 1000 && !tuned[key]) { tuned[key] = true; refreshStrings(); }
+        } else tunedSince[key] = 0;
+        TT.$$('button[data-midi]', stringsEl).forEach(function (b) { b.classList.toggle('otn-cur', b.dataset.midi === key && fresh); });
+      }
+    } else {
+      needle.setAttribute('transform', 'rotate(0 160 180)');
+      gauge.classList.remove('is-good');
+      gauge.classList.add('is-idle');
+      display.classList.add('is-idle');
+      TT.$$('button[data-midi]', stringsEl).forEach(function (b) { b.classList.remove('otn-cur'); });
+    }
+    // Text, a few times a second so the numbers can be read.
+    if (!force && now - lastText < 120) return;
+    lastText = now;
+    const lvl = levelDb === -Infinity ? '–' : (levelDb < -99 ? '−∞' : fmtCents(levelDb).replace('+', ''));
+    $('#otn-level').textContent = mic.stream ? lvl : '–';
+    $('#otn-level-bar').style.width = mic.stream ? Math.max(0, Math.min(100, (levelDb + 70) / 70 * 100)) + '%' : '0';
+    const targetLabel = $('#otn-target-label');
+    if (!live) {
+      if (lock !== null) {
+        const p = noteParts(lock);
+        noteName.textContent = p.name; noteOct.textContent = String(p.oct);
+        $('#otn-target').textContent = fmtHz(freqOf(lock));
+      } else {
+        noteName.textContent = '–'; noteOct.textContent = '';
+        $('#otn-target').textContent = '–';
+      }
+      targetLabel.textContent = t.notes.length ? 'Target string' : 'Target frequency';
+      centsEl.innerHTML = '&nbsp;';
+      $('#otn-freq').textContent = '–';
+      $('#otn-off').textContent = '–';
+      heardEl.textContent = '';
+      verdict.classList.remove('is-good');
+      verdict.textContent = mic.stream
+        ? (t.notes.length ? 'Listening. Play one open string and let it ring.' : 'Listening. Play a single note.')
+        : mic.starting ? 'Starting the microphone…' : 'Press Start tuner, then play a single note.';
+      return;
+    }
+    const p = noteParts(reading.target);
+    noteName.textContent = p.name; noteOct.textContent = String(p.oct);
+    const cTxt = fmtCents(offset);
+    centsEl.textContent = cTxt + (Math.abs(Math.round(offset)) === 1 ? ' cent' : ' cents');
+    $('#otn-off').textContent = cTxt;
+    $('#otn-freq').textContent = fmtHz(reading.freq);
+    $('#otn-target').textContent = fmtHz(freqOf(reading.target) * (reading.folded ? 2 : 1));
+    targetLabel.textContent = t.notes.length ? 'Target (' + noteLabel(reading.target) + (reading.folded ? ', octave up' : '') + ')' : 'Nearest note (' + noteLabel(reading.target) + ')';
+    const good = Math.abs(offset) <= IN_TUNE;
+    const label = noteLabel(reading.target);
+    let v;
+    if (good) v = t.notes.length ? label + ' is in tune' : 'In tune';
+    else if (offset < 0) v = t.notes.length ? 'Flat: tune up to ' + label : 'Flat: tune up';
+    else v = t.notes.length ? 'Sharp: tune down to ' + label : 'Sharp: tune down';
+    verdict.textContent = v;
+    verdict.classList.toggle('is-good', good && fresh);
+    if (t.notes.length) {
+      heardEl.textContent = reading.folded
+        ? 'Heard ' + noteLabel(reading.heardMidi) + ', one octave above the ' + label + ' string.'
+        : reading.heardMidi !== reading.target ? 'Heard ' + noteLabel(reading.heardMidi) + ', ' + Math.abs(reading.heardMidi - reading.target) + ' semitone' + (Math.abs(reading.heardMidi - reading.target) === 1 ? '' : 's') + (reading.heardMidi < reading.target ? ' below ' : ' above ') + label + '.' : '';
+    } else heardEl.textContent = '';
+    // Screen readers: a short summary when the reading changes, at most every 2 seconds.
+    if (fresh) {
+      const bucket = good ? 'in tune' : Math.abs(Math.round(offset)) + ' cents ' + (offset < 0 ? 'flat' : 'sharp');
+      const say = label + ', ' + bucket;
+      if (say !== announced && now - lastAnnounce > 2000) {
+        announced = say; lastAnnounce = now;
+        statusEl.textContent = say;
+      }
+    }
+  }
+
+  // ---------- Microphone ----------
+  const mic = { stream: null, src: null, an: null, buf: null, raf: 0, starting: false, gen: 0 };
+  let ctx = null;
+
+  function audioCtx() {
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) throw new Error('This browser does not support the Web Audio API.');
+      ctx = new AC();
+    }
+    if (ctx.state === 'suspended') ctx.resume().catch(function () { /* resumed by the next gesture */ });
+    return ctx;
+  }
+
+  function explain(e) {
+    const name = (e && e.name) || '', msg = (e && e.message) || '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      if (/system/i.test(msg)) return 'Your operating system is blocking microphone access for this browser. Allow it in your system privacy settings, then press Start tuner again.';
+      return 'Permission denied: the microphone is blocked for this page. Click the icon at the left of the address bar, allow the microphone, then press Start tuner again.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'No microphone found. Connect one or enable it in your system sound settings, then press Start tuner again.';
+    if (name === 'NotReadableError' || name === 'TrackStartError') return 'The microphone is in use by another app or could not be started. Close other apps or tabs that use it, then press Start tuner again.';
+    if (name === 'SecurityError') return 'The browser blocked microphone access. Open the page over https:// and try again.';
+    return 'Could not start the microphone: ' + (msg || name || 'unknown error') + '.';
+  }
+
+  function stopMic(silent) {
+    mic.gen++;
+    cancelAnimationFrame(mic.raf);
+    if (mic.stream) mic.stream.getTracks().forEach(function (t) { t.stop(); });
+    if (mic.src) { try { mic.src.disconnect(); } catch (e) { /* already disconnected */ } }
+    mic.stream = null; mic.src = null; mic.an = null; mic.starting = false;
+    reading.cents = null; reading.hist = []; levelDb = -Infinity;
+    toggle.textContent = 'Start tuner';
+    render(true);
+    if (!silent) statusEl.textContent = 'Tuner stopped. The microphone is released.';
+    announced = '';
+  }
+
+  async function startMic() {
+    errEl.textContent = '';
+    if (window.isSecureContext === false) { errEl.textContent = 'Microphone access needs a secure connection. Open this page over https://.'; return; }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      errEl.textContent = 'This browser does not support microphone access. Try a current version of Chrome, Edge, Firefox or Safari.';
+      return;
+    }
+    let ac;
+    try { ac = audioCtx(); } catch (e) { errEl.textContent = e.message; return; }
+    const gen = ++mic.gen;
+    mic.starting = true;
+    toggle.textContent = 'Stop tuner';
+    render(true);
+    let stream;
+    try {
+      // Speech filters treat a sustained note as noise, so they are switched off.
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    } catch (e) {
+      if (gen !== mic.gen) return;
+      mic.starting = false;
+      toggle.textContent = 'Start tuner';
+      errEl.textContent = explain(e);
+      render(true);
+      return;
+    }
+    if (gen !== mic.gen) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+    try {
+      if (ac.state === 'suspended') await ac.resume();
+      mic.src = ac.createMediaStreamSource(stream);
+      mic.an = ac.createAnalyser();
+      // About 85 ms of audio: two periods of a 25 Hz note.
+      let size = 2048;
+      while (size < ac.sampleRate * 0.085 && size < 32768) size *= 2;
+      mic.an.fftSize = size;
+      mic.buf = new Float32Array(size);
+      mic.src.connect(mic.an);
+    } catch (e) {
+      stream.getTracks().forEach(function (t) { t.stop(); });
+      mic.starting = false;
+      toggle.textContent = 'Start tuner';
+      errEl.textContent = 'Could not analyse the microphone: ' + (e && e.message ? e.message : e) + '.';
+      return;
+    }
+    mic.stream = stream;
+    mic.starting = false;
+    stream.getAudioTracks().forEach(function (t) {
+      t.addEventListener('ended', function () { if (mic.stream === stream) { stopMic(true); errEl.textContent = 'The microphone was disconnected. Press Start tuner to try again.'; } });
+    });
+    statusEl.textContent = 'Tuner listening.';
+    // On a phone the needle may be below the fold; bring it into view.
+    const r = display.getBoundingClientRect();
+    if (r.bottom > window.innerHeight || r.top < 0) display.scrollIntoView({ block: 'nearest' });
+    const sr = ac.sampleRate;
+    (function frame() {
+      if (gen !== mic.gen || !mic.an) return;
+      mic.an.getFloatTimeDomainData(mic.buf);
+      const now = performance.now();
+      let res;
+      try { res = detect(mic.buf, sr); } catch (e) { res = { f: 0, rms: 0 }; }
+      const db = res.rms > 0 ? 20 * Math.log10(res.rms) : -Infinity;
+      levelDb = db;
+      update(res, now);
+      render(false);
+      mic.raf = requestAnimationFrame(frame);
+    })();
+  }
+
+  toggle.addEventListener('click', function () {
+    if (mic.stream || mic.starting) { stopMic(false); return; }
+    startMic();
+  });
+
+  // ---------- Reference tone ----------
+  const ref = { osc: null, gain: null };
+  let richWave = null;
+  function refFreq() { return freqOf(refMidi()); }
+  function refChanged() {
+    const f = refFreq();
+    playBtn.textContent = (ref.osc ? 'Stop ' : 'Play ') + noteLabel(refMidi()) + ' (' + fmtHz(f) + ')';
+    if (ref.osc && ctx) {
+      ref.osc.frequency.setTargetAtTime(f, ctx.currentTime, 0.01);
+      applyTimbre();
+    }
+  }
+  function applyTimbre() {
+    if (!ref.osc) return;
+    if (refTimbre.value === 'sine') { ref.osc.type = 'sine'; return; }
+    if (!richWave) {
+      // A soft, string-like spectrum: the harmonics keep low notes audible on small speakers.
+      const amps = [0, 1, 0.55, 0.4, 0.3, 0.22, 0.15, 0.1, 0.07];
+      richWave = ctx.createPeriodicWave(new Float32Array(amps.length), new Float32Array(amps));
+    }
+    ref.osc.setPeriodicWave(richWave);
+  }
+  function stopRef() {
+    if (!ref.osc) return;
+    const t = ctx.currentTime, osc = ref.osc, g = ref.gain;
+    g.gain.cancelScheduledValues(t);
+    g.gain.setValueAtTime(g.gain.value, t);
+    g.gain.linearRampToValueAtTime(0, t + 0.06);
+    osc.stop(t + 0.08);
+    osc.onended = function () { osc.disconnect(); g.disconnect(); };
+    ref.osc = null; ref.gain = null;
+    playBtn.setAttribute('aria-pressed', 'false');
+    refChanged();
+  }
+  function playRef() {
+    let ac;
+    try { ac = audioCtx(); } catch (e) { errEl.textContent = e.message; return; }
+    const t = ac.currentTime;
+    ref.osc = ac.createOscillator();
+    ref.gain = ac.createGain();
+    ref.osc.frequency.value = refFreq();
+    applyTimbre();
+    ref.gain.gain.setValueAtTime(0, t);
+    ref.gain.gain.linearRampToValueAtTime(0.2, t + 0.04);
+    ref.osc.connect(ref.gain).connect(ac.destination);
+    ref.osc.start(t);
+    playBtn.setAttribute('aria-pressed', 'true');
+    refChanged();
+  }
+  playBtn.addEventListener('click', function () { if (ref.osc) stopRef(); else playRef(); });
+  refNote.addEventListener('change', refChanged);
+  refOct.addEventListener('change', refChanged);
+  refTimbre.addEventListener('change', function () { applyTimbre(); });
+
+  // Leaving the page releases the microphone and silences the tone (also for back/forward cache).
+  window.addEventListener('pagehide', function () { if (mic.stream || mic.starting) stopMic(true); stopRef(); });
+
+  fillRefNotes();
+  buildStrings();
+  setRef(tuning().notes.length ? tuning().notes[0] : 69);
+  if (window.isSecureContext === false || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    errEl.textContent = window.isSecureContext === false
+      ? 'Microphone access needs a secure connection. Open this page over https://.'
+      : 'This browser does not support microphone access. The reference tone still works.';
+    toggle.disabled = true;
+  }
+  render(true);
+})();
+</script>

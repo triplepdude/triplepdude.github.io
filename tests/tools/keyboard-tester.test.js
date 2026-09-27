@@ -139,7 +139,13 @@ module.exports = async ({ page, open, assert }) => {
   await human();
   await page.keyboard.press('Tab');
   assert.equal(await active(), 'kbt-capture');
-  // The event log scrolls sideways on phones, so its wrapper is keyboard focusable.
+  // Then the rollover test controls, and the event log, which scrolls sideways
+  // on phones, so its wrapper is keyboard focusable.
+  for (const id of ['kbt-roll', 'kbt-roll-reset']) {
+    await human();
+    await page.keyboard.press('Tab');
+    assert.equal(await active(), id);
+  }
   await human();
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Event log');
@@ -284,6 +290,101 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#kbt-held-count'), '0');
   assert.equal(await hasClass('KeyG', 'is-down'), false);
   await page.keyboard.up('KeyG');
+
+  // Layouts. Key counts by hand from standard boards: ISO adds the key next to
+  // left Shift (105 full, 88 TKL, 62 at 60%); a 75% board has 83 keys that send
+  // codes plus Fn; an Apple laptop board 76 (ANSI) or 77 (ISO) plus fn and power.
+  await page.click('#kbt-reset');
+  const count = () => page.locator('#kbt-board .kbt-key').count();
+  const total = async () => (await text('#kbt-tested')).split(' / ')[1];
+  const counts = [['full', 'iso-uk', 105, '105'], ['tkl', 'iso-uk', 88, '88'], ['60', 'iso-de', 62, '62'], ['75', 'ansi', 84, '83'],
+    ['75', 'iso-uk', 85, '84'], ['apple', 'ansi', 78, '76'], ['apple', 'iso-de', 79, '77'], ['full', 'ansi', 104, '104']];
+  for (const [size, std, drawn, counted] of counts) {
+    await page.selectOption('#kbt-layout', size);
+    await page.selectOption('#kbt-std', std);
+    assert.equal(await count(), drawn, `${size} ${std} drawn`);
+    assert.equal(await total(), counted, `${size} ${std} counted`);
+  }
+  // ISO: the extra IntlBackslash key, Backslash moved to the home row (UI
+  // Events: "#~ on a UK keyboard"), and an L-shaped Enter.
+  await page.selectOption('#kbt-std', 'iso-uk');
+  assert.equal(await page.locator('.kbt-key[data-code="IntlBackslash"]').count(), 1);
+  const top = code => page.locator(`.kbt-key[data-code="${code}"]`).evaluate(el => Math.round(el.getBoundingClientRect().top));
+  assert.equal(await top('Backslash'), await top('KeyA'));
+  assert.equal(await top('Enter'), await top('KeyQ'));
+  assert.equal(await hasClass('Enter', 'is-iso-enter'), true);
+  assert.match(await text('.kbt-key[data-code="Digit3"]'), /£/);
+  assert.match(await text('.kbt-key[data-code="Backslash"]'), /#/);
+  await page.evaluate(() => {
+    const t = document.getElementById('kbt-scroll');
+    for (const type of ['keydown', 'keyup']) t.dispatchEvent(new KeyboardEvent(type, { code: 'IntlBackslash', key: '\\', keyCode: 220, bubbles: true }));
+  });
+  assert.equal(await hasClass('IntlBackslash', 'is-tested'), true);
+  assert.equal(await page.locator('#kbt-other-wrap').isVisible(), false);
+  // German legends: QWERTZ swaps the labels of KeyY and KeyZ, not their codes.
+  await page.selectOption('#kbt-std', 'iso-de');
+  assert.equal(await text('.kbt-key[data-code="KeyY"]'), 'Z');
+  assert.equal(await text('.kbt-key[data-code="KeyZ"]'), 'Y');
+  assert.equal(await text('.kbt-key[data-code="Semicolon"]'), 'Ö');
+  // Mac full-size: PrtSc/ScrLk/Pause are F13 to F15 and accept either code.
+  await page.selectOption('#kbt-std', 'ansi');
+  await page.selectOption('#kbt-labels', 'mac');
+  assert.equal(await page.locator('.kbt-key[data-code="PrintScreen"]').count(), 0);
+  await page.evaluate(() => document.getElementById('kbt-scroll').dispatchEvent(
+    new KeyboardEvent('keyup', { code: 'PrintScreen', key: 'PrintScreen', keyCode: 44, bubbles: true })));
+  assert.equal(await hasClass('F13', 'is-tested'), true);
+  await page.selectOption('#kbt-labels', 'pc');
+  // 75%: Fn is drawn but sends nothing, so it is not counted; the right-hand
+  // modifier accepts Alt (Windows boards) or Command (Mac boards).
+  await page.selectOption('#kbt-layout', '75');
+  assert.equal(await page.locator('.kbt-key.is-dead').count(), 1);
+  assert.equal(await page.locator('#kbt-legend-dead').isVisible(), true);
+  await page.focus('#kbt-scroll');
+  await page.keyboard.press('MetaRight');
+  assert.equal(await hasClass('AltRight', 'is-tested'), true);
+  assert.doesNotMatch(await text('#kbt-other'), /MetaRight/);
+  assert.match(await text('#kbt-other'), /IntlBackslash/); // not on an ANSI 75% board
+  await page.selectOption('#kbt-layout', 'full');
+  assert.equal(await page.locator('#kbt-legend-dead').isVisible(), false);
+
+  // Rollover test: each target key lights while held; the best result is kept.
+  await page.click('#kbt-capture');
+  const chips = () => page.locator('#kbt-roll-keys li').evaluateAll(els => els.map(e => e.firstChild.textContent + (e.classList.contains('is-on') ? '*' : '')));
+  assert.deepEqual(await chips(), ['W', 'A', 'S', 'D', 'Shift', 'Space']);
+  assert.match(await text('#kbt-roll-best'), /^Not tried yet/);
+  for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD']) await page.keyboard.down(k);
+  assert.deepEqual(await chips(), ['W*', 'A*', 'S*', 'D*', 'Shift', 'Space']);
+  for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD']) await page.keyboard.up(k);
+  assert.equal(await text('#kbt-roll-best'), 'Best so far: 4 of 6 registered together. Missing: Shift, Space. If you were holding them too, the keyboard is blocking this combination.');
+  // A key outside the combination held at the best moment is reported (ghosting check).
+  for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'KeyQ']) await page.keyboard.down(k);
+  for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'KeyQ']) await page.keyboard.up(k);
+  assert.match(await text('#kbt-roll-best'), /^Best so far: 5 of 6 .*Missing: Space\..*Also reported as held: KeyQ\./);
+  // Regression: Ctrl+S, Ctrl+P and similar shortcuts were not blocked while
+  // capturing, so a rollover test with Ctrl could open the Save dialog.
+  await page.evaluate(() => { window.__prevented = []; document.addEventListener('keydown', e => window.__prevented.push(e.code + ':' + e.defaultPrevented)); });
+  for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'Space']) await page.keyboard.down(k);
+  for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'Space']) await page.keyboard.up(k);
+  assert.equal(await text('#kbt-roll-best'), 'Passed: all 6 keys registered together.');
+  await page.keyboard.press('Control+KeyS');
+  assert.ok((await page.evaluate(() => window.__prevented)).includes('KeyS:true'));
+  await page.selectOption('#kbt-roll', 'KeyA KeyS KeyD KeyF KeyJ KeyK KeyL Semicolon');
+  assert.deepEqual(await chips(), ['A', 'S', 'D', 'F', 'J', 'K', 'L', ';']);
+  assert.match(await text('#kbt-roll-best'), /^Not tried yet. Hold all 8 keys/);
+
+  // Chatter report: each flagged key with its count and shortest gap (the
+  // rollover presses above were machine-fast, so start from a reset).
+  await page.click('#kbt-reset');
+  await page.evaluate(() => {
+    const t = document.getElementById('kbt-scroll');
+    t.focus();
+    const ev = type => t.dispatchEvent(new KeyboardEvent(type, { code: 'KeyE', key: 'e', keyCode: 69, bubbles: true }));
+    ev('keydown'); ev('keyup'); ev('keydown'); ev('keyup'); ev('keydown'); ev('keyup');
+  });
+  assert.equal(await page.locator('#kbt-chatter-wrap').isVisible(), true);
+  assert.match(await text('#kbt-chatter-list'), /^KeyE: 2 times, shortest gap \d+ ms$/);
+  await page.click('#kbt-reset');
+  assert.equal(await page.locator('#kbt-chatter-wrap').isVisible(), false);
 
   // At phone width the keyboard scrolls inside its own box, not the page.
   await page.selectOption('#kbt-layout', 'full');

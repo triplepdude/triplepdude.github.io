@@ -1,0 +1,786 @@
+---
+title: AI Token Counter and GPT Tokenizer
+description: "Free token counter for GPT-5, GPT-4o and GPT-4: exact o200k and cl100k counts, a view of how your text splits into tokens, and Claude and Gemini estimates."
+category: Text
+keywords: [token counter, gpt tokenizer, openai tokenizer, tiktoken online, count tokens, gpt-4o token counter, claude token counter, llm token count]
+howto: |
+  ## How to use the token counter
+
+  Paste or type your prompt, or open or drop a plain-text file (.txt, .md,
+  .csv, .json or source code). The big number is the exact token count for the
+  tokenizer you pick, and the table compares the other models. Under **See the
+  tokens** you can view the text as coloured tokens, as a token list, or as the
+  raw token IDs, which you can copy or download as JSON.
+
+  ## What a token is
+
+  Language models read tokens, not letters or words. OpenAI models use
+  byte-level byte pair encoding (BPE). The text is first cut into chunks by a
+  regular expression: a word together with the space before it, up to three
+  digits, a run of punctuation, or whitespace. Each chunk becomes UTF-8 bytes,
+  and neighbouring bytes are merged, most frequent pair first, until only pieces
+  from the vocabulary are left. A common English word is one token including
+  its leading space, while a rare word, a long number or most non-English text
+  splits into several. An emoji or a Chinese character can take two or three
+  tokens, and a token can even hold only part of a character's bytes; those
+  pieces are shown in a dashed box.
+
+  ## Which tokenizer each model uses
+
+  | Tokenizer | Vocabulary | Models |
+  |---|---|---|
+  | o200k_base | about 200,000 tokens | GPT-5, GPT-4.1, GPT-4o, o1, o3, o4-mini |
+  | cl100k_base | about 100,000 tokens | GPT-4, GPT-4 Turbo, GPT-3.5 Turbo, text-embedding-3 |
+
+  Counts here match OpenAI's tiktoken library token for token. Like its
+  `encode_ordinary`, special markers such as `<|endoftext|>` typed into the
+  text count as ordinary text. The open-weight gpt-oss models use
+  o200k_harmony, which only adds special tokens to o200k_base, so plain text
+  gives the same count.
+
+  ## Claude and Gemini estimates
+
+  Anthropic and Google don't publish tokenizers for their current models that
+  can run in a browser, so this page estimates from the character count using
+  each company's rule of thumb: about 3.5 characters per token for Claude and
+  about 4 for Gemini. Anthropic says the tokenizer introduced with Claude Opus
+  4.7 can use up to 1.35 times as many tokens as earlier Claude models for the
+  same text, so the Claude estimate is a range. The rules describe English
+  prose. Code, numbers and non-Latin scripts need more tokens per character,
+  and the page warns you when most of your text is not in the Latin alphabet.
+
+  For an exact figure, send the text to Anthropic's
+  `POST /v1/messages/count_tokens` endpoint or the Gemini API's `countTokens`
+  method, naming the model you plan to use.
+
+  ## Why an API request uses more tokens
+
+  - Chat requests wrap each message in role markers, which adds a few tokens
+    per message, plus the system prompt and any tool definitions.
+  - Images, audio and files are counted separately.
+  - Output tokens, and reasoning tokens on reasoning models, are billed on top
+    of the input.
+
+  ## Tips for fewer tokens
+
+  - Numbers split into groups of up to three digits, so long IDs, hashes and
+    base64 strings are expensive. Leave them out when the model doesn't need
+    them.
+  - Pretty-printed JSON and wide Markdown tables cost more than the same facts
+    in plain sentences.
+  - Watch **Characters per token**. English prose usually lands around 4 to 5
+    with these tokenizers, and a much lower number points to text that is
+    costly to send.
+faq:
+  - q: Is my text uploaded anywhere?
+    a: No. The tokenizer data (about 1 MB) is downloaded from this site once, and the counting runs in your browser. Your text and files never leave your device.
+  - q: How many words is 1,000 tokens?
+    a: About 750 English words with the OpenAI tokenizers, following OpenAI's rule of thumb that one token is roughly three quarters of a word. Other languages and code fit fewer words into the same number of tokens.
+  - q: Why does the API report more input tokens than this counter?
+    a: The API counts the whole request. Each chat message adds a few tokens of formatting, and the system prompt, tool definitions, images and files count too. This page counts the text you give it.
+  - q: Can this count Claude or Gemini tokens exactly?
+    a: No. Those tokenizers aren't published for use in a browser, so the page shows labelled estimates. Anthropic's count_tokens endpoint and Gemini's countTokens method return exact counts for a given model.
+  - q: Why do emoji and Chinese text use so many tokens?
+    a: The tokenizers work on UTF-8 bytes. A Chinese character is 3 bytes and many emoji are 4 or more, and characters that are rare in the training data are not merged into a single token, so each can cost two or three tokens.
+---
+<style>
+.tc-root { --tc-0: #dbeafe; --tc-1: #d6f5df; --tc-2: #fdefc3; --tc-3: #fbe0ee; --tc-4: #e9e3fd; --tc-edge: #6b7380; }
+@media (prefers-color-scheme: dark) {
+  .tc-root { --tc-0: #1c3552; --tc-1: #193a28; --tc-2: #3f3312; --tc-3: #44203a; --tc-4: #2f2853; --tc-edge: #8a939e; }
+}
+.tc-h { margin: 28px 0 12px; font-size: 1.1rem; }
+.tc-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+.tc-drop.tc-over textarea { outline: 2px dashed var(--accent); outline-offset: 2px; }
+.tc-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 4px 0 2px; }
+.tc-top .result-big { margin: 0; }
+.tc-top .hint { margin: 0; font-size: 14px; }
+.tc-sub { margin: 0 0 16px; }
+.tc-models td:last-child, .tc-models th:last-child { text-align: right; white-space: nowrap; }
+.tc-models td:last-child { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; }
+.tc-models .tc-meth { display: block; color: var(--muted); font-size: 13px; }
+.tc-models .tc-est { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.tc-models .tc-name { color: var(--text); font-weight: 600; }
+.tc-models tbody th { font-weight: 400; color: var(--text); }
+.tc-views { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.tc-views legend { padding: 0; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
+.tc-vis { max-height: 26rem; overflow: auto; margin: 0 0 10px; padding: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; font-family: var(--mono); font-size: 14px; line-height: 2; white-space: pre-wrap; overflow-wrap: anywhere; min-height: 64px; }
+.tc-vis:focus-visible, .tc-list-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tc-t { padding: 2px 0; border-right: 2px solid var(--tc-edge); color: var(--text); }
+.tc-c0 { background: var(--tc-0); } .tc-c1 { background: var(--tc-1); } .tc-c2 { background: var(--tc-2); } .tc-c3 { background: var(--tc-3); } .tc-c4 { background: var(--tc-4); }
+.tc-multi { outline: 1px dashed var(--tc-edge); outline-offset: -1px; }
+.tc-ws { color: var(--muted); }
+.tc-empty { color: var(--muted); font-family: inherit; }
+.tc-list-wrap { max-height: 26rem; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.tc-list-wrap table.data thead th { position: sticky; top: 0; background: var(--surface); box-shadow: inset 0 -1px 0 var(--border); }
+.tc-list-wrap table.data td { font-variant-numeric: tabular-nums; }
+.tc-list-wrap table.data td.tc-tok { font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tc-list-wrap table.data tbody tr:last-child > * { border-bottom: 0; }
+.tc-bytes { color: var(--muted); }
+#tc-ids-text { min-height: 140px; }
+.tc-legend { margin: 0 0 16px; }
+</style>
+
+<div class="tc-root" id="tc-root" data-base="{{ '/assets/data/token-counter/' | relative_url }}">
+  <div class="field tc-drop" id="tc-drop">
+    <label for="tc-input">Your text or prompt</label>
+    <textarea id="tc-input" rows="9" spellcheck="false" placeholder="Paste or type text here, or drop a text file…" aria-describedby="tc-input-hint"></textarea>
+    <span class="hint" id="tc-input-hint">Plain-text files such as .txt, .md, .csv, .json or source code, up to 5 MB.</span>
+  </div>
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="tc-open">Open text file</button>
+    <input type="file" id="tc-file" hidden accept=".txt,.text,.md,.markdown,.csv,.tsv,.json,.jsonl,.ndjson,.xml,.html,.htm,.css,.js,.mjs,.ts,.tsx,.jsx,.py,.ipynb,.java,.kt,.c,.h,.cpp,.hpp,.cs,.go,.rs,.rb,.php,.swift,.sh,.sql,.yml,.yaml,.toml,.ini,.cfg,.log,.srt,.vtt,.tex,.rst,text/*">
+    <button class="btn secondary small" type="button" id="tc-example">Load example</button>
+    <button class="btn secondary small" type="button" id="tc-clear">Clear</button>
+  </div>
+  <p class="msg error" id="tc-msg" role="alert"></p>
+  <p class="msg ok" id="tc-note" role="status"></p>
+
+  <div class="field">
+    <label for="tc-enc">Tokenizer</label>
+    <select id="tc-enc">
+      <option value="o200k_base" selected>o200k_base: GPT-5, GPT-4.1, GPT-4o, o1, o3, o4-mini</option>
+      <option value="cl100k_base">cl100k_base: GPT-4, GPT-4 Turbo, GPT-3.5 Turbo, embeddings</option>
+    </select>
+  </div>
+
+  <div class="tc-top">
+    <p class="result-big"><span id="tc-big">0</span> <span id="tc-big-unit">tokens</span></p>
+    <p class="hint" id="tc-big-note">Exact count with o200k_base</p>
+  </div>
+  <p class="hint tc-sub" id="tc-state"></p>
+
+  <div class="stats">
+    <div class="stat"><b id="tc-chars">0</b><span>Characters</span></div>
+    <div class="stat"><b id="tc-words">0</b><span>Words</span></div>
+    <div class="stat"><b id="tc-ratio">–</b><span>Characters per token</span></div>
+    <div class="stat"><b id="tc-bytes">0</b><span>UTF-8 bytes</span></div>
+  </div>
+  <p class="visually-hidden" id="tc-status" role="status"></p>
+
+  <div class="table-wrap">
+    <table class="data tc-models" id="tc-models">
+      <caption class="visually-hidden">Token count by model family</caption>
+      <thead><tr><th scope="col">Model family</th><th scope="col">Tokens</th></tr></thead>
+      <tbody>
+        <tr id="tc-row-o200k_base">
+          <th scope="row"><span class="tc-name">GPT-5, GPT-4.1, GPT-4o, o-series</span><span class="tc-meth">o200k_base, exact</span></th>
+          <td id="tc-n-o200k_base">–</td>
+        </tr>
+        <tr id="tc-row-cl100k_base">
+          <th scope="row"><span class="tc-name">GPT-4, GPT-4 Turbo, GPT-3.5 Turbo</span><span class="tc-meth">cl100k_base, exact</span></th>
+          <td id="tc-n-cl100k_base">–</td>
+        </tr>
+        <tr>
+          <th scope="row"><span class="tc-name">Claude</span> <span class="tc-est">estimate</span><span class="tc-meth">characters ÷ 3.5, up to 35% more on Claude Opus 4.7 and newer</span></th>
+          <td id="tc-n-claude">0</td>
+        </tr>
+        <tr>
+          <th scope="row"><span class="tc-name">Gemini</span> <span class="tc-est">estimate</span><span class="tc-meth">characters ÷ 4</span></th>
+          <td id="tc-n-gemini">0</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="hint" id="tc-est-note">Claude and Gemini figures are rules of thumb for English text, not tokenizer counts. For exact numbers use Anthropic's count_tokens endpoint or Gemini's countTokens method.</p>
+
+  <hr class="tc-sep">
+  <h2 class="tc-h">See the tokens</h2>
+  <div class="row">
+    <fieldset class="tc-views">
+      <legend>Show</legend>
+      <label class="check"><input type="radio" name="tc-view" value="vis" checked> Coloured text</label>
+      <label class="check"><input type="radio" name="tc-view" value="list"> Token list</label>
+      <label class="check"><input type="radio" name="tc-view" value="ids"> Token IDs</label>
+    </fieldset>
+    <label class="check" id="tc-ws-wrap"><input type="checkbox" id="tc-ws" checked> Show spaces and line breaks</label>
+  </div>
+  <p class="hint tc-legend" id="tc-legend">Each coloured block is one token, and a bar marks where it ends. · is a space, → a tab, ↵ a line break. A dashed box is a character whose bytes are split across several tokens.</p>
+  <div class="tc-vis" id="tc-vis" role="region" aria-label="Text split into tokens" tabindex="0"></div>
+  <div class="tc-list-wrap" id="tc-list" role="region" aria-label="Token list" tabindex="0" hidden>
+    <table class="data">
+      <thead><tr><th scope="col">#</th><th scope="col">Token</th><th scope="col">ID</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div id="tc-ids" hidden>
+    <div class="field">
+      <label for="tc-ids-text">Token IDs</label>
+      <textarea id="tc-ids-text" class="mono" rows="6" readonly></textarea>
+    </div>
+    <div class="actions">
+      <button class="btn secondary small" type="button" id="tc-copy-ids">Copy IDs</button>
+      <button class="btn secondary small" type="button" id="tc-dl-ids">Download JSON</button>
+    </div>
+  </div>
+  <p class="hint" id="tc-vis-note" aria-live="polite"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Web Worker: loads a rank table and runs byte-pair encoding ----------
+  // Stringified into a Blob worker, so it must not use anything from this closure.
+  function tokenizerWorker() {
+    var WS = '\\t-\\r \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
+    // tiktoken's split patterns. JavaScript has no (?i:...) groups or possessive
+    // quantifiers, so the case-insensitive contractions are spelled out
+    // (Unicode case folding also maps s to U+017F), and whitespace is the
+    // Unicode White_Space set that tiktoken's regex engine uses.
+    var C = "(?:'[sS\\u017f]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?";
+    var PATS = {
+      o200k_base: '[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+' + C +
+        '|[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]*' + C +
+        '|\\p{N}{1,3}| ?[^' + WS + '\\p{L}\\p{N}]+[\\r\\n/]*|[' + WS + ']*[\\r\\n]+|[' + WS + ']+(?![^' + WS + '])|[' + WS + ']+',
+      cl100k_base: "'(?:[sS\\u017fdDmMtT]|[lL][lL]|[vV][eE]|[rR][eE])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^" + WS +
+        "\\p{L}\\p{N}]+[\\r\\n]*|[" + WS + "]*[\\r\\n]+|[" + WS + "]+(?![^" + WS + "])|[" + WS + "]+"
+    };
+    var INF = 0x7fffffff, LIST_MAX = 1000;
+    var encoders = {};
+
+    function makeEncoder(data, name) {
+      var ranks = new Map(), keys = [], lens = [];
+      for (var p = 0; p < data.length;) {
+        var n = data[p++];
+        var k = String.fromCharCode.apply(null, data.subarray(p, p + n));
+        ranks.set(k, keys.length);
+        keys.push(k);
+        lens.push(n);
+        p += n;
+      }
+      var pat = new RegExp(PATS[name], 'gu');
+      var cache = new Map();
+
+      function rankOf(bs, a, b) {
+        if (b - a > 128) return INF; // longer than any token
+        var v = ranks.get(bs.slice(a, b));
+        return v === undefined ? INF : v;
+      }
+      // UTF-8 bytes of a string, as a string of char codes 0-255.
+      function utf8(s) {
+        var out = [];
+        for (var i = 0; i < s.length; i++) {
+          var c = s.charCodeAt(i);
+          if (c < 0x80) out.push(c);
+          else if (c < 0x800) out.push(0xc0 | c >> 6, 0x80 | c & 63);
+          else if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length) {
+            var cp = 0x10000 + ((c - 0xd800) << 10) + (s.charCodeAt(++i) - 0xdc00);
+            out.push(0xf0 | cp >> 18, 0x80 | cp >> 12 & 63, 0x80 | cp >> 6 & 63, 0x80 | cp & 63);
+          } else out.push(0xe0 | c >> 12, 0x80 | c >> 6 & 63, 0x80 | c & 63);
+        }
+        var str = '';
+        for (var j = 0; j < out.length; j += 4096) str += String.fromCharCode.apply(null, out.slice(j, j + 4096));
+        return str;
+      }
+      // tiktoken's merge loop (lowest rank first, leftmost on ties).
+      function bpeSmall(bs) {
+        var pos = [], rk = [], n = bs.length, i;
+        for (i = 0; i < n - 1; i++) { pos.push(i); rk.push(rankOf(bs, i, i + 2)); }
+        pos.push(n - 1, n); rk.push(INF, INF);
+        for (;;) {
+          var min = INF, mi = -1;
+          for (i = 0; i < rk.length - 1; i++) if (rk[i] < min) { min = rk[i]; mi = i; }
+          if (mi < 0) break;
+          if (mi > 0) rk[mi - 1] = mi + 2 < pos.length ? rankOf(bs, pos[mi - 1], pos[mi + 2]) : INF;
+          rk[mi] = mi + 3 < pos.length ? rankOf(bs, pos[mi], pos[mi + 3]) : INF;
+          pos.splice(mi + 1, 1); rk.splice(mi + 1, 1);
+        }
+        var ids = [];
+        for (i = 0; i < pos.length - 1; i++) ids.push(ranks.get(bs.slice(pos[i], pos[i + 1])));
+        return ids;
+      }
+      // The same merge order with a heap and a linked list, so a very long
+      // chunk (a 50,000-letter DNA string) takes O(n log n), not O(n^2).
+      function bpeLarge(bs) {
+        var n = bs.length, i;
+        var next = new Int32Array(n + 1), prev = new Int32Array(n + 1), ver = new Int32Array(n + 1), alive = new Uint8Array(n + 1);
+        for (i = 0; i <= n; i++) { next[i] = i + 1; prev[i] = i - 1; alive[i] = 1; }
+        var hk = [], hi = [], hv = [];
+        function less(a, b) { return hk[a] < hk[b] || (hk[a] === hk[b] && hi[a] < hi[b]); }
+        function swap(a, b) {
+          var t = hk[a]; hk[a] = hk[b]; hk[b] = t;
+          t = hi[a]; hi[a] = hi[b]; hi[b] = t;
+          t = hv[a]; hv[a] = hv[b]; hv[b] = t;
+        }
+        function push(k, idx, v) {
+          var j = hk.length;
+          hk.push(k); hi.push(idx); hv.push(v);
+          while (j > 0) { var q = (j - 1) >> 1; if (!less(j, q)) break; swap(j, q); j = q; }
+        }
+        function pop() {
+          swap(0, hk.length - 1);
+          var e = [hk.pop(), hi.pop(), hv.pop()], j = 0, m = hk.length;
+          for (;;) {
+            var l = 2 * j + 1, r = l + 1, s = j;
+            if (l < m && less(l, s)) s = l;
+            if (r < m && less(r, s)) s = r;
+            if (s === j) break;
+            swap(j, s); j = s;
+          }
+          return e;
+        }
+        function pairRank(a) { var b = next[a]; return b < n ? rankOf(bs, a, next[b]) : INF; }
+        for (i = 0; i < n - 1; i++) { var k0 = pairRank(i); if (k0 < INF) push(k0, i, 0); }
+        while (hk.length) {
+          var e = pop(), a = e[1];
+          if (!alive[a] || e[2] !== ver[a]) continue;
+          var b = next[a];
+          alive[b] = 0; next[a] = next[b]; prev[next[b]] = a;
+          ver[a]++;
+          var k1 = pairRank(a); if (k1 < INF) push(k1, a, ver[a]);
+          var pa = prev[a];
+          if (pa >= 0) { ver[pa]++; var k2 = pairRank(pa); if (k2 < INF) push(k2, pa, ver[pa]); }
+        }
+        var ids = [];
+        for (i = 0; i < n; i = next[i]) ids.push(ranks.get(bs.slice(i, next[i])));
+        return ids;
+      }
+      function pieceIds(bs) {
+        var one = ranks.get(bs);
+        if (one !== undefined) return [one];
+        var hit = cache.get(bs);
+        if (hit) return hit;
+        var ids = bs.length > 300 ? bpeLarge(bs) : bpeSmall(bs);
+        if (bs.length <= 64) {
+          if (cache.size > 100000) cache.clear();
+          cache.set(bs, ids);
+        }
+        return ids;
+      }
+      // Token ids, and for each token the UTF-16 offset where it ends in the
+      // text (-1 when it ends inside a multi-byte character).
+      function encode(text) {
+        // Lone surrogates become U+FFFD, as tiktoken does.
+        text = text.replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '�');
+        var ids = [], ends = [], m;
+        pat.lastIndex = 0;
+        while ((m = pat.exec(text)) !== null) {
+          var piece = m[0], at = m.index;
+          if (!piece.length) { pat.lastIndex++; continue; }
+          var bs = utf8(piece), t = pieceIds(bs);
+          if (t.length === 1) { ids.push(t[0]); ends.push(at + piece.length); continue; }
+          var ascii = bs.length === piece.length, b2u = null;
+          if (!ascii) {
+            b2u = new Int32Array(bs.length + 1).fill(-1);
+            for (var i = 0, bo = 0; i < piece.length; i++) {
+              b2u[bo] = i;
+              var c = piece.charCodeAt(i);
+              if (c < 0x80) bo += 1;
+              else if (c < 0x800) bo += 2;
+              else if (c >= 0xd800 && c < 0xdc00 && i + 1 < piece.length) { bo += 4; i++; }
+              else bo += 3;
+            }
+            b2u[bs.length] = piece.length;
+          }
+          for (var j = 0, off = 0; j < t.length; j++) {
+            off += lens[t[j]];
+            ids.push(t[j]);
+            var u = ascii ? off : b2u[off];
+            ends.push(u < 0 ? -1 : at + u);
+          }
+        }
+        return { ids: ids, ends: ends };
+      }
+      return { encode: encode, keys: keys };
+    }
+
+    function load(enc, url) {
+      fetch(url).then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.arrayBuffer();
+      }).then(function (buf) {
+        var u8 = new Uint8Array(buf);
+        if (u8[0] === 0x1f && u8[1] === 0x8b) {
+          if (typeof DecompressionStream === 'undefined') throw new Error('nodecompress');
+          var stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
+          return new Response(stream).arrayBuffer();
+        }
+        return buf; // already decompressed by the server
+      }).then(function (buf) {
+        encoders[enc] = makeEncoder(new Uint8Array(buf), enc);
+        self.postMessage({ type: 'ready', enc: enc });
+      }).catch(function (e) {
+        self.postMessage({ type: 'error', enc: enc, reason: e && e.message === 'nodecompress' ? 'browser' : 'network' });
+      });
+    }
+
+    self.onmessage = function (ev) {
+      var m = ev.data;
+      if (m.type === 'load') { load(m.enc, m.url); return; }
+      if (m.type !== 'encode' || !encoders[m.enc]) return;
+      try {
+        var enc = encoders[m.enc], r = enc.encode(m.text);
+        var ids = Int32Array.from(r.ids), ends = Int32Array.from(r.ends), bytes = [];
+        for (var i = 0; i < Math.min(ids.length, LIST_MAX); i++) bytes.push(enc.keys[ids[i]]);
+        self.postMessage({ type: 'result', enc: m.enc, seq: m.seq, ids: ids, ends: ends, bytes: bytes }, [ids.buffer, ends.buffer]);
+      } catch (e) {
+        self.postMessage({ type: 'failed', enc: m.enc, seq: m.seq });
+      }
+    };
+  }
+
+  // ---------- Page ----------
+  var $ = TT.$;
+  var root = $('#tc-root');
+  var input = $('#tc-input'), encSel = $('#tc-enc'), wsBox = $('#tc-ws');
+  var msg = $('#tc-msg'), note = $('#tc-note');
+  var ENCS = ['o200k_base', 'cl100k_base'];
+  var VIS_MAX = 5000, IDS_SHOW = 50000;
+  var fmt = function (n) { return n.toLocaleString('en-US'); };
+  var state = {};
+  ENCS.forEach(function (e) { state[e] = { status: 'idle', busy: false, seq: 0, sent: null, result: null }; });
+  var worker = null;
+
+  function getWorker() {
+    if (worker) return worker;
+    var src = '(' + tokenizerWorker.toString() + ')();';
+    var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    worker = new Worker(url);
+    worker.onmessage = onMessage;
+    worker.onerror = function (e) {
+      if (e && e.preventDefault) e.preventDefault();
+      worker = null; // a retry starts a fresh worker
+      ENCS.forEach(function (k) { if (state[k].status !== 'error') { state[k].status = 'error'; state[k].busy = false; } });
+      msg.textContent = 'The tokenizer stopped unexpectedly. Reload the page to try again.';
+      renderCounts();
+    };
+    return worker;
+  }
+
+  function load(enc) {
+    var s = state[enc];
+    if (s.status === 'loading' || s.status === 'ready') return;
+    s.status = 'loading';
+    renderCounts();
+    try {
+      getWorker().postMessage({ type: 'load', enc: enc, url: new URL(root.getAttribute('data-base') + enc + '.bin.gz', location.href).href });
+    } catch (e) {
+      s.status = 'error';
+      msg.textContent = 'This browser cannot run the tokenizer (Web Workers are unavailable).';
+      renderCounts();
+    }
+  }
+
+  function request(enc) {
+    var s = state[enc];
+    if (s.status !== 'ready') return;
+    if (s.busy) { s.dirty = true; return; }
+    s.busy = true;
+    s.dirty = false;
+    s.sent = input.value;
+    s.seq++;
+    worker.postMessage({ type: 'encode', enc: enc, seq: s.seq, text: s.sent });
+  }
+
+  function onMessage(ev) {
+    var m = ev.data, s = state[m.enc];
+    if (!s) return;
+    if (m.type === 'ready') {
+      s.status = 'ready';
+      request(m.enc);
+    } else if (m.type === 'error') {
+      s.status = 'error';
+      msg.textContent = m.reason === 'browser'
+        ? 'This browser cannot unpack the tokenizer data. Update to a current version of Chrome, Edge, Firefox or Safari.'
+        : 'The ' + m.enc + ' tokenizer could not be downloaded. Check your connection and try again.';
+    } else if (m.type === 'result' || m.type === 'failed') {
+      s.busy = false;
+      if (m.type === 'result') {
+        s.result = { text: s.sent, ids: m.ids, ends: m.ends, bytes: m.bytes, count: m.ids.length };
+      } else {
+        s.result = null;
+        msg.textContent = 'This text could not be tokenized.';
+      }
+      if (s.dirty || s.sent !== input.value) request(m.enc);
+      if (m.enc === encSel.value) { renderVis(); announce(); }
+    }
+    renderCounts();
+  }
+
+  // ---------- Local counts (characters, words, bytes, estimates) ----------
+  var seg = window.Intl && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  var local = { chars: 0, words: 0 };
+  function countChars(s) {
+    if (seg && s.length <= 200000) { var n = 0; for (var _ of seg.segment(s)) n++; return n; }
+    var c = 0;
+    for (var i = 0; i < s.length; i++) { var x = s.charCodeAt(i); if (x < 0xdc00 || x > 0xdfff) c++; }
+    return c;
+  }
+  function utf8Len(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c < 0x80) n += 1; else if (c < 0x800) n += 2;
+      else if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+      else n += 3;
+    }
+    return n;
+  }
+  function updateLocal() {
+    var text = input.value;
+    var cjk = (text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu) || []).length;
+    var rest = text.replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu, ' ');
+    local.words = cjk + (rest.match(/[\p{L}\p{N}\p{M}]+(?:['’\-][\p{L}\p{N}\p{M}]+|(?<=\p{N})[.,:]\p{N}+)*/gu) || []).length;
+    local.chars = countChars(text);
+    $('#tc-chars').textContent = fmt(local.chars);
+    $('#tc-words').textContent = fmt(local.words);
+    $('#tc-bytes').textContent = fmt(utf8Len(text));
+    // Estimates: provider rules of thumb on the character count.
+    var c = local.chars;
+    var lo = c ? Math.max(1, Math.round(c / 3.5)) : 0, hi = c ? Math.max(1, Math.round(c / 3.5 * 1.35)) : 0;
+    $('#tc-n-claude').textContent = c ? '≈ ' + fmt(lo) + '–' + fmt(hi) : '0';
+    $('#tc-n-gemini').textContent = c ? '≈ ' + fmt(Math.max(1, Math.round(c / 4))) : '0';
+    var letters = (text.match(/\p{L}/gu) || []).length, latin = (text.match(/\p{Script=Latin}/gu) || []).length;
+    var nonLatin = letters >= 20 && (letters - latin) / letters > 0.3;
+    $('#tc-est-note').textContent = nonLatin
+      ? 'Most of this text is not in the Latin alphabet, so real Claude and Gemini counts are likely to be well above these estimates. Use Anthropic\'s count_tokens endpoint or Gemini\'s countTokens method for exact numbers.'
+      : 'Claude and Gemini figures are rules of thumb for English text, not tokenizer counts. For exact numbers use Anthropic\'s count_tokens endpoint or Gemini\'s countTokens method.';
+  }
+
+  function renderCounts() {
+    ENCS.forEach(function (e) {
+      var s = state[e], cell = $('#tc-n-' + e);
+      if (s.status === 'ready' && s.result) {
+        cell.textContent = fmt(s.result.count);
+      } else if (s.status === 'loading' || (s.status === 'ready' && !s.result)) {
+        cell.textContent = 'Loading…';
+      } else {
+        // Not loaded yet, or the download failed: a button loads it.
+        var label = s.status === 'error' ? 'Retry' : 'Count';
+        var old = cell.querySelector('button');
+        if (old && old.textContent === label) return;
+        cell.textContent = '';
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn secondary small';
+        b.textContent = label;
+        b.setAttribute('aria-label', label + ' with ' + e);
+        b.addEventListener('click', function () {
+          msg.textContent = '';
+          load(e);
+          // Keep keyboard focus in the table row once the button is replaced.
+          var th = $('#tc-row-' + e + ' th');
+          th.tabIndex = -1;
+          th.focus();
+        });
+        cell.appendChild(b);
+      }
+    });
+    var sel = encSel.value, s = state[sel];
+    var big = $('#tc-big'), st = $('#tc-state');
+    if (s.status === 'ready' && s.result) {
+      big.textContent = fmt(s.result.count);
+      $('#tc-big-unit').textContent = s.result.count === 1 ? 'token' : 'tokens';
+      $('#tc-ratio').textContent = s.result.count ? (local.chars / s.result.count).toFixed(2) : '–';
+      st.textContent = '';
+    } else {
+      big.textContent = s.status === 'error' ? '–' : '…';
+      $('#tc-big-unit').textContent = 'tokens';
+      $('#tc-ratio').textContent = '–';
+      st.textContent = s.status === 'error' ? 'The tokenizer is not available. Use Retry in the table below to try again.' : 'Loading the ' + sel + ' tokenizer (about ' + (sel === 'o200k_base' ? '1 MB' : '0.5 MB') + ', once)…';
+    }
+    $('#tc-big-note').textContent = 'Exact count with ' + sel;
+  }
+
+  // ---------- Token views ----------
+  var WS_SYM = { ' ': '·', '\t': '→\t', '\n': '↵\n', '\r': '␍' };
+  function appendText(el, str) {
+    if (!wsBox.checked) { el.appendChild(document.createTextNode(str)); return; }
+    var re = /[ \t\r\n]+/g, last = 0, m;
+    while ((m = re.exec(str)) !== null) {
+      if (m.index > last) el.appendChild(document.createTextNode(str.slice(last, m.index)));
+      var w = document.createElement('span');
+      w.className = 'tc-ws';
+      w.textContent = m[0].replace(/[ \t\r\n]/g, function (c) { return WS_SYM[c]; });
+      el.appendChild(w);
+      last = re.lastIndex;
+    }
+    if (last < str.length) el.appendChild(document.createTextNode(str.slice(last)));
+  }
+  function view() { var r = TT.$('input[name="tc-view"]:checked'); return r ? r.value : 'vis'; }
+
+  var strictDecoder = new TextDecoder('utf-8', { fatal: true });
+  function tokenLabel(bytes) {
+    var arr = new Uint8Array(bytes.length);
+    for (var i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    try { return { text: strictDecoder.decode(arr) }; } catch (e) {
+      return { hex: Array.prototype.map.call(arr, function (b) { return b.toString(16).toUpperCase().padStart(2, '0'); }).join(' ') };
+    }
+  }
+
+  function renderVis() {
+    var v = view(), r = state[encSel.value].result;
+    var vis = $('#tc-vis'), list = $('#tc-list'), ids = $('#tc-ids'), vnote = $('#tc-vis-note');
+    vis.hidden = v !== 'vis';
+    list.hidden = v !== 'list';
+    ids.hidden = v !== 'ids';
+    $('#tc-legend').hidden = v !== 'vis';
+    $('#tc-ws-wrap').hidden = v === 'ids';
+    var noteText = '';
+    if (!r || !r.count) {
+      vis.textContent = '';
+      var empty = document.createElement('span');
+      empty.className = 'tc-empty';
+      empty.textContent = r ? 'Type or paste text above to see its tokens.' : 'Waiting for the tokenizer…';
+      vis.appendChild(empty);
+      $('#tc-list tbody').textContent = '';
+      $('#tc-ids-text').value = '';
+      vnote.textContent = '';
+      return;
+    }
+    if (v === 'vis') {
+      var frag = document.createDocumentFragment(), start = 0, i = 0, k = 0, n = Math.min(r.count, VIS_MAX);
+      while (i < n) {
+        var j = i;
+        while (j < r.count - 1 && r.ends[j] < 0) j++;
+        var end = r.ends[j] < 0 ? r.text.length : r.ends[j];
+        var span = document.createElement('span');
+        span.className = 'tc-t tc-c' + (k % 5) + (j > i ? ' tc-multi' : '');
+        span.title = j > i ? (j - i + 1) + ' tokens: ' + Array.prototype.slice.call(r.ids, i, j + 1).join(', ') : 'Token ' + (i + 1) + ', ID ' + r.ids[i];
+        appendText(span, r.text.slice(start, end));
+        frag.appendChild(span);
+        start = end; i = j + 1; k++;
+      }
+      vis.textContent = '';
+      vis.appendChild(frag);
+      if (r.count > VIS_MAX) noteText = 'Showing the first ' + fmt(i) + ' of ' + fmt(r.count) + ' tokens.';
+    } else if (v === 'list') {
+      var tb = document.createDocumentFragment();
+      r.bytes.forEach(function (b, idx) {
+        var tr = document.createElement('tr');
+        var td0 = document.createElement('td'), td1 = document.createElement('td'), td2 = document.createElement('td');
+        td0.textContent = idx + 1;
+        td1.className = 'tc-tok';
+        var lab = tokenLabel(b);
+        if (lab.text !== undefined) appendText(td1, lab.text);
+        else { var sp = document.createElement('span'); sp.className = 'tc-bytes'; sp.textContent = 'bytes ' + lab.hex; td1.appendChild(sp); }
+        td2.textContent = r.ids[idx];
+        tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2);
+        tb.appendChild(tr);
+      });
+      var body = $('#tc-list tbody');
+      body.textContent = '';
+      body.appendChild(tb);
+      if (r.count > r.bytes.length) noteText = 'Listing the first ' + fmt(r.bytes.length) + ' of ' + fmt(r.count) + ' tokens.';
+    } else {
+      var shown = Array.prototype.slice.call(r.ids, 0, IDS_SHOW);
+      $('#tc-ids-text').value = '[' + shown.join(', ') + (r.count > IDS_SHOW ? ', …' : '') + ']';
+      if (r.count > IDS_SHOW) noteText = 'Showing the first ' + fmt(IDS_SHOW) + ' of ' + fmt(r.count) + ' IDs. Copy and Download include all of them.';
+    }
+    vnote.textContent = noteText;
+  }
+
+  function allIdsJson() {
+    var r = state[encSel.value].result;
+    return r ? '[' + Array.prototype.join.call(r.ids, ',') + ']' : '[]';
+  }
+
+  // ---------- Announcements ----------
+  var status = $('#tc-status');
+  var announce = TT.debounce(function () {
+    var s = state[encSel.value];
+    if (!s.result || s.result.text !== input.value) return;
+    var n = s.result.count;
+    status.textContent = fmt(n) + (n === 1 ? ' token' : ' tokens') + ' with ' + encSel.value + ', ' + fmt(local.chars) + (local.chars === 1 ? ' character' : ' characters');
+  }, 1000);
+
+  // ---------- Input, files, buttons ----------
+  var localLater = TT.debounce(updateLocal, 200);
+  function onText() {
+    if (input.value.length > 20000) localLater(); else updateLocal();
+    ENCS.forEach(request);
+    renderCounts();
+    announce();
+  }
+  input.addEventListener('input', function () { msg.textContent = ''; note.textContent = ''; onText(); });
+
+  var MAX_FILE = 5 * 1024 * 1024;
+  function decodeFile(buf) {
+    var u8 = new Uint8Array(buf);
+    if (u8[0] === 0xff && u8[1] === 0xfe) return { text: new TextDecoder('utf-16le').decode(u8.subarray(2)), enc: 'UTF-16' };
+    if (u8[0] === 0xfe && u8[1] === 0xff) return { text: new TextDecoder('utf-16be').decode(u8.subarray(2)), enc: 'UTF-16' };
+    var head = u8.subarray(0, 8192);
+    for (var i = 0; i < head.length; i++) if (head[i] === 0) return null; // binary (PDF, Word, image…)
+    try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(u8), enc: 'UTF-8' }; } catch (e) {
+      return { text: new TextDecoder('windows-1252').decode(u8), enc: 'Windows-1252' };
+    }
+  }
+  function openFiles(files) {
+    msg.textContent = '';
+    note.textContent = '';
+    if (!files || !files.length) return;
+    var f = files[0];
+    if (f.size > MAX_FILE) { msg.textContent = f.name + ' is ' + (f.size / 1048576).toFixed(1) + ' MB. Open a text file of 5 MB or less.'; return; }
+    f.arrayBuffer().then(function (buf) {
+      var d = decodeFile(buf);
+      if (!d) {
+        msg.textContent = f.name + ' is not a plain-text file. For a PDF or Word document, copy its text and paste it here.';
+        return;
+      }
+      input.value = d.text;
+      var extra = files.length > 1 ? ' Only the first of the ' + files.length + ' files was opened.' : '';
+      note.textContent = 'Opened ' + f.name + ' (' + fmt(d.text.length) + ' characters' + (d.enc === 'UTF-8' ? '' : ', read as ' + d.enc) + ').' + extra;
+      onText();
+    }, function () {
+      msg.textContent = f.name + ' could not be read.';
+    });
+  }
+  $('#tc-open').addEventListener('click', function () { $('#tc-file').click(); });
+  $('#tc-file').addEventListener('change', function () { openFiles(this.files); this.value = ''; });
+  // A file dropped anywhere on the page is opened (instead of the browser
+  // navigating away to show it); the text box is highlighted while dragging.
+  var drop = $('#tc-drop');
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') >= 0; }
+  ['dragenter', 'dragover'].forEach(function (t) {
+    document.addEventListener(t, function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      drop.classList.add('tc-over');
+    });
+  });
+  document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) drop.classList.remove('tc-over'); });
+  document.addEventListener('drop', function (e) {
+    drop.classList.remove('tc-over');
+    if (!hasFiles(e) || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    openFiles(e.dataTransfer.files);
+  });
+
+  var EXAMPLE = 'Tokenizers split text into pieces. Common words like "the" are a single token, while rare ones such as "antidisestablishmentarianism" are split up.\n\n' +
+    'Numbers: 2026, 1234567 and 3.14159\n' +
+    'Code: const total = items.reduce((a, b) => a + b, 0);\n' +
+    'Other languages: Größe, 東京は日本の首都です。\n' +
+    'Emoji: 👋🏽 🚀';
+  $('#tc-example').addEventListener('click', function () {
+    input.value = EXAMPLE;
+    msg.textContent = '';
+    note.textContent = '';
+    onText();
+  });
+  $('#tc-clear').addEventListener('click', function () {
+    input.value = '';
+    msg.textContent = '';
+    note.textContent = '';
+    onText();
+    input.focus();
+  });
+  encSel.addEventListener('change', function () {
+    load(encSel.value);
+    request(encSel.value);
+    renderCounts();
+    renderVis();
+    announce();
+  });
+  TT.$$('input[name="tc-view"]').forEach(function (r) { r.addEventListener('change', renderVis); });
+  wsBox.addEventListener('change', renderVis);
+  $('#tc-copy-ids').addEventListener('click', function () { TT.copy(allIdsJson(), this); });
+  $('#tc-dl-ids').addEventListener('click', function () {
+    TT.download('tokens-' + encSel.value + '.json', allIdsJson() + '\n', 'application/json');
+  });
+
+  updateLocal();
+  renderCounts();
+  renderVis();
+  load('o200k_base');
+})();
+</script>

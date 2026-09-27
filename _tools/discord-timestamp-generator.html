@@ -1,6 +1,6 @@
 ---
 title: Discord Timestamp Generator
-description: Make Discord timestamps that show in every reader's own time zone. Pick a date and time, preview each format live and copy the code in one click.
+description: Make Discord timestamps that show in every reader's own time zone. Pick a date or a countdown, preview each format live and copy the code in one click.
 category: Date & Time
 keywords: [discord timestamp generator, discord timestamp, discord time converter, discord timestamp format, discord relative timestamp, discord unix timestamp, discord time zone]
 howto: |
@@ -12,9 +12,12 @@ howto: |
   2. Copy the code for the style you like and paste it into a Discord message.
      Everyone who reads it sees the time converted to their own time zone and
      language.
-  3. To check a timestamp someone else posted, paste it into the decoder. It
+  3. For an event that starts a set time from now, use **Countdown to an
+     event**: enter days, hours and minutes and copy a ready-made countdown.
+  4. To check a timestamp someone else posted, paste it into the decoder. It
      also accepts a whole message, a plain Unix time, or a Discord ID
-     (message, user or server) and tells you when that ID was created.
+     (message, user or server) and tells you when that ID was created. If a
+     code would show up as plain text, it tells you why.
 
   ## What each style letter means
 
@@ -55,10 +58,19 @@ howto: |
   skipped time (such as 2:30 AM on a spring-forward night) it moves forward by
   the length of the gap, and it tells you when either happens.
 
+  ## Countdowns for events
+
+  The `R` style is the one to use for anything upcoming: each reader's app
+  recalculates it, so "in 2 hours" counts down by itself and becomes
+  "2 hours ago" once the moment has passed. On its own it can be vague ("in
+  a day" covers about 22 to 36 hours), so pair it with a clock time for events
+  later today, `<t:1618953630:t> (<t:1618953630:R>)`, or with the full date
+  for later days, `<t:1618953630:F> (<t:1618953630:R>)`. The countdown
+  helper builds both and can round the start to a clean time, such as the
+  nearest quarter hour.
+
   ## Tips
 
-  - For events, pair the full date with a countdown:
-    `<t:1618953630:F> (<t:1618953630:R>)`. The generator builds this for you.
   - Discord expects **seconds**. JavaScript's `Date.now()` returns
     milliseconds, so divide by 1000 first. A 13-digit number pasted into
     `<t:...>` does not show the date you meant.
@@ -74,10 +86,10 @@ faq:
     a: Yes. The code only contains a Unix time, and each reader's Discord app shows it in their own time zone and language. Nobody needs to convert anything.
   - q: Why does my timestamp show the wrong time?
     a: Usually the time was entered in the wrong time zone, or a millisecond value was used where Discord expects seconds. Paste the code into the decoder to see the exact moment it points to.
-  - q: Does the relative style keep updating?
-    a: Yes. A relative timestamp such as "in 2 hours" is recalculated by the reader's app, so it counts down and then switches to "ago" once the moment has passed. The preview here updates live in the same way.
   - q: Can I choose a 12-hour or 24-hour clock?
     a: Not in the code itself. Each reader sees the clock style that goes with their own Discord language, for example 4:20 PM in English (US) or 16:20 in English (UK).
+  - q: Is anything I enter sent to a server?
+    a: No. The codes and previews are made by JavaScript in your browser. Nothing you type or paste, including message text and Discord IDs, is uploaded or stored.
   - q: Why does my timestamp show up as plain text in Discord?
     a: Discord only converts the exact form `<t:1618953630>` or `<t:1618953630:R>`, with no spaces, a whole number of seconds and one of the style letters in the table above. Anything else, such as a decimal point, a space after the colon or an unknown letter, is shown exactly as typed, and so is a code inside backticks or a code block. Copy the code from the generator and paste it outside any formatting.
 ---
@@ -118,6 +130,11 @@ faq:
 .dts-dec-item { padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
 .dts-dec-item > div + div { margin-top: 4px; }
 .dts-dec-item .mono { overflow-wrap: anywhere; }
+.dts-cd > .field { flex: 1 1 90px; }
+.dts-cd > .field.dts-cd-round { flex: 2 1 180px; }
+.dts-try { align-self: center; }
+.dts-cd-when { margin: 0 0 12px; font-size: 15px; }
+.dts-cd-when:empty { display: none; }
 .dts-message { padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 8px 8px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 @media (max-width: 720px) {
   .dts-item { grid-template-columns: minmax(0, 1fr) auto; }
@@ -147,10 +164,13 @@ faq:
   <button class="btn secondary small" type="button" data-add-days="7">+1 week</button>
   <button class="btn secondary small" type="button" data-add="-3600">&minus;1 hour</button>
 </div>
-<p class="msg error" id="dts-msg" role="alert"></p>
-<p class="hint dts-note" id="dts-note" aria-live="polite"></p>
+<p class="msg error" id="dts-msg"></p>
+<p class="hint dts-note" id="dts-note"></p>
+<!-- The fields convert as you type, so the results are not live regions; one
+     short summary is announced here once editing pauses. -->
+<p class="visually-hidden" id="dts-status" role="status"></p>
 
-<div class="stats dts-stats" aria-live="polite">
+<div class="stats dts-stats">
   <div class="stat">
     <div class="dts-stat-row"><b class="mono" id="dts-unix">–</b><button class="btn secondary small" type="button" data-copy-target="#dts-unix" aria-label="Copy Unix timestamp">Copy</button></div>
     <span>Unix timestamp (seconds)</span>
@@ -162,6 +182,50 @@ faq:
 <h2 class="dts-h">Discord codes</h2>
 <p class="hint" id="dts-preview-hint">Previews show what Discord displays in English (US) in your time zone. Every reader sees their own time zone and language.</p>
 <ul class="dts-list" id="dts-list"></ul>
+
+<hr class="dts-sep">
+<h2 class="dts-h">Countdown to an event</h2>
+<p class="hint">Enter how long until the event starts. The <code>R</code> code shows every reader a live countdown, such as &ldquo;in 2 hours&rdquo;, that turns into &ldquo;2 hours ago&rdquo; once the event has started.</p>
+<div class="row dts-cd">
+  <div class="field">
+    <label for="dts-cd-d">Days</label>
+    <input type="number" id="dts-cd-d" min="0" max="3650" step="1" value="0" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label for="dts-cd-h">Hours</label>
+    <input type="number" id="dts-cd-h" min="0" max="999" step="1" value="2" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label for="dts-cd-m">Minutes</label>
+    <input type="number" id="dts-cd-m" min="0" max="9999" step="1" value="0" inputmode="numeric">
+  </div>
+  <div class="field dts-cd-round">
+    <label for="dts-cd-round">Round the start time to</label>
+    <select id="dts-cd-round">
+      <option value="0">Exact second</option>
+      <option value="1">Whole minute</option>
+      <option value="5">5 minutes</option>
+      <option value="15" selected>15 minutes</option>
+      <option value="30">30 minutes</option>
+      <option value="60">Whole hour</option>
+    </select>
+  </div>
+</div>
+<div class="actions">
+  <span class="hint dts-try">Starts in:</span>
+  <button class="btn secondary small" type="button" data-cd="0,0,15">15 min</button>
+  <button class="btn secondary small" type="button" data-cd="0,1,0">1 hour</button>
+  <button class="btn secondary small" type="button" data-cd="0,2,0">2 hours</button>
+  <button class="btn secondary small" type="button" data-cd="1,0,0">1 day</button>
+  <button class="btn secondary small" type="button" data-cd="7,0,0">1 week</button>
+</div>
+<p class="msg error" id="dts-cd-msg"></p>
+<p class="visually-hidden" id="dts-cd-status" role="status"></p>
+<p id="dts-cd-when" class="dts-cd-when"></p>
+<ul class="dts-list" id="dts-cd-list"></ul>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="dts-cd-load">Load into generator</button>
+</div>
 
 <hr class="dts-sep">
 <h2 class="dts-h">Decode a timestamp</h2>
@@ -395,22 +459,23 @@ faq:
   var pinned = null;
   var rows = {};
 
-  STYLES.forEach(function (st) {
+  // One row of the code lists: name (with style letter), live preview, code, Copy.
+  function makeItem(parent, key, label, letterText, sub, wide) {
     var li = document.createElement('li');
-    li.className = 'dts-item' + (st.k === 'combo' ? ' dts-wide' : '');
-    li.setAttribute('data-style', st.k || 'default');
+    li.className = 'dts-item' + (wide ? ' dts-wide' : '');
+    li.setAttribute('data-style', key);
     var name = document.createElement('div');
     name.className = 'dts-name';
-    name.textContent = st.name + ' ';
-    if (st.k && st.k !== 'combo') {
+    name.textContent = label + ' ';
+    if (letterText) {
       var letter = document.createElement('span');
       letter.className = 'dts-letter';
-      letter.textContent = st.k;
+      letter.textContent = letterText;
       name.appendChild(letter);
     }
-    if (st.sub) {
+    if (sub) {
       var small = document.createElement('small');
-      small.textContent = st.sub;
+      small.textContent = sub;
       name.appendChild(small);
     }
     var prev = document.createElement('div');
@@ -421,11 +486,14 @@ faq:
     btn.type = 'button';
     btn.className = 'btn small';
     btn.textContent = 'Copy';
-    btn.setAttribute('aria-label', 'Copy ' + st.name.toLowerCase() + ' code');
+    btn.setAttribute('aria-label', 'Copy ' + label.toLowerCase() + ' code');
     btn.addEventListener('click', function () { TT.copy(cd.textContent, btn); });
     li.appendChild(name); li.appendChild(prev); li.appendChild(cd); li.appendChild(btn);
-    list.appendChild(li);
-    rows[st.k] = { prev: prev, code: cd, btn: btn };
+    parent.appendChild(li);
+    return { prev: prev, code: cd, btn: btn };
+  }
+  STYLES.forEach(function (st) {
+    rows[st.k] = makeItem(list, st.k || 'default', st.name, st.k && st.k !== 'combo' ? st.k : '', st.sub, st.k === 'combo');
   });
 
   function chip(text) {
@@ -439,6 +507,22 @@ faq:
     el.textContent = '';
     el.appendChild(chip(text));
   }
+  // A preview made of several rendered codes with text between them, such as
+  // "<t:1:F> (<t:1:R>)". parts: strings (plain text) and [style] arrays.
+  function setComboPreview(el, parts, sec) {
+    var text = sec + '|' + parts.map(function (p) { return typeof p === 'string' ? p : render(p[0], sec); }).join('');
+    if (el.getAttribute('data-text') === text) return;
+    el.setAttribute('data-text', text);
+    el.textContent = '';
+    parts.forEach(function (p) {
+      if (typeof p === 'string') el.appendChild(document.createTextNode(p));
+      else {
+        var c = chip(render(p[0], sec));
+        if (p[0] === 'R') c.setAttribute('data-rel', String(sec));
+        el.appendChild(c);
+      }
+    });
+  }
   function renderRows() {
     STYLES.forEach(function (st) {
       var r = rows[st.k];
@@ -451,15 +535,7 @@ faq:
       r.btn.disabled = false;
       if (st.k === 'combo') {
         r.code.textContent = code('F', current) + ' (' + code('R', current) + ')';
-        var text = render('F', current) + ' (' + render('R', current) + ')';
-        if (r.prev.getAttribute('data-text') !== text) {
-          r.prev.setAttribute('data-text', text);
-          r.prev.textContent = '';
-          r.prev.appendChild(chip(render('F', current)));
-          r.prev.appendChild(document.createTextNode(' ('));
-          r.prev.appendChild(chip(render('R', current)));
-          r.prev.appendChild(document.createTextNode(')'));
-        }
+        setComboPreview(r.prev, [['F'], ' (', ['R'], ')'], current);
       } else {
         r.code.textContent = code(st.k, current);
         setPreview(r.prev, render(st.k, current));
@@ -488,7 +564,22 @@ faq:
     return r;
   }
 
+  // Screen readers hear one short summary: at once after a button, or once
+  // typing pauses (not every half-typed date or error).
+  function speaker(el) {
+    var timer = null;
+    return function (text, now) {
+      clearTimeout(timer);
+      if (now) { el.textContent = ''; timer = setTimeout(function () { el.textContent = text; }, 50); }
+      else timer = setTimeout(function () { if (el.textContent !== text) el.textContent = text; }, 700);
+    };
+  }
+  var sayGen = speaker($('#dts-status'));
+  var genTrigger = null; // 'type' or 'click' for the next update's announcement
+
   function showError(text) {
+    if (genTrigger) sayGen(text, genTrigger === 'click');
+    genTrigger = null;
     $('#dts-msg').textContent = text;
     $('#dts-note').textContent = '';
     current = null;
@@ -515,6 +606,8 @@ faq:
     $('#dts-utc').textContent = isoUtc(current * 1000);
     $('#dts-local').textContent = fmt('full', current * 1000);
     renderRows();
+    if (genTrigger) sayGen('Unix ' + current + ': ' + render('F', current) + ', ' + render('R', current) + '.' + (r.skipped || r.repeated ? ' ' + parts[0].replace(/^(.*?\.)\s.*$/, '$1') : ''), genTrigger === 'click');
+    genTrigger = null;
   }
 
   function setFromSeconds(sec) {
@@ -540,7 +633,7 @@ faq:
   var DISCORD_EPOCH = 1420070400000n;
   var decoded = null;
 
-  function decodeItem(label, sec, style, extra) {
+  function decodeItem(label, sec, style, extra, literal) {
     var box = document.createElement('div');
     box.className = 'dts-dec-item';
     var l1 = document.createElement('div');
@@ -558,8 +651,8 @@ faq:
     if (style !== null) {
       var l2 = document.createElement('div');
       l2.appendChild(document.createTextNode('Discord shows: '));
-      var ch = chip(render(style, sec));
-      if (style === 'R') ch.setAttribute('data-rel', String(sec));
+      var ch = chip(literal ? label : render(style, sec));
+      if (style === 'R' && !literal) ch.setAttribute('data-rel', String(sec));
       l2.appendChild(ch);
       box.appendChild(l2);
     }
@@ -568,6 +661,33 @@ faq:
     l3.textContent = (extra ? extra + ' · ' : '') + 'Your time: ' + fmt('full', sec * 1000) + ' · ' + isoUtc(sec * 1000) + ' · Unix ' + sec;
     box.appendChild(l3);
     return box;
+  }
+
+  // Inline code (`...`, ``...``) and code blocks (```...```): Discord shows
+  // timestamps inside them exactly as typed.
+  function codeSpans(raw) {
+    var out = [], re = /```[\s\S]*?```|``[\s\S]*?``|`[^`]+`/g, m;
+    while ((m = re.exec(raw)) !== null) out.push([m.index, m.index + m[0].length]);
+    return out;
+  }
+  function tokenNote(t) {
+    if (t.literal) return 'Inside backticks (code formatting), so Discord shows it as plain text';
+    if (Math.abs(t.sec) >= 1e11) {
+      var y = new Date(t.sec * 1000).getUTCFullYear();
+      return 'This looks like milliseconds. Discord reads it as seconds, a date in the year ' + y + '; the seconds value is ' + Math.floor(t.sec / 1000);
+    }
+    return '';
+  }
+  // Why a <t:...> lookalike is not a timestamp Discord will convert.
+  function whyNot(src) {
+    var inner = src.slice(3, -1);
+    if (/\s/.test(inner)) return 'it contains a space. Remove every space inside the angle brackets.';
+    if (/^-?\d+[.,]\d/.test(inner)) return 'the time has a decimal point. Use a whole number of seconds.';
+    var m = /^(-?\d+)(?::(.*))?$/.exec(inner);
+    if (!m) return 'there must be a Unix time in seconds right after "t:", such as <t:1618953630:F>.';
+    if (m[1].replace('-', '').length > 17) return 'the number is too long to be a date.';
+    if (m[2] !== undefined) return '"' + m[2] + '" is not a style letter. Use one of t, T, d, D, f, F, s, S or R (letters are case-sensitive).';
+    return 'it is not in the form <t:1618953630> or <t:1618953630:R>.';
   }
 
   // Screen readers hear one short line per decode, once typing pauses.
@@ -600,9 +720,17 @@ faq:
     if (!text) return '';
     var frag = document.createDocumentFragment(), wrap = document.createElement('div');
     wrap.className = 'dts-dec';
-    var tokens = [], m, summary;
+    var tokens = [], m, summary, spans = codeSpans(raw);
     TOKEN.lastIndex = 0;
-    while ((m = TOKEN.exec(raw)) !== null) tokens.push({ index: m.index, len: m[0].length, sec: +m[1], style: m[2] || '', src: m[0] });
+    while ((m = TOKEN.exec(raw)) !== null) {
+      var at = m.index;
+      tokens.push({ index: at, len: m[0].length, sec: +m[1], style: m[2] || '', src: m[0],
+        literal: spans.some(function (r) { return at >= r[0] && at < r[1]; }) });
+    }
+    if (!tokens.length) {
+      var near = /<t:[^<>\n]{0,60}>/.exec(raw);
+      if (near) { msg.textContent = 'Discord shows ' + near[0] + ' as plain text: ' + whyNot(near[0]); return ''; }
+    }
     if (tokens.length) {
       var bad = tokens.filter(function (t) { return !isFinite(new Date(t.sec * 1000).getTime()); });
       if (bad.length) { msg.textContent = bad[0].src + ' is outside the range of dates a browser can show.'; return ''; }
@@ -613,7 +741,7 @@ faq:
         var pos = 0, cut = Math.min(raw.length, PREVIEW_MAX);
         tokens.forEach(function (t) { if (t.index < cut && t.index + t.len > cut) cut = t.index; });
         tokens.forEach(function (t) {
-          if (t.index + t.len > cut) return;
+          if (t.index + t.len > cut || t.literal) return;
           p.appendChild(document.createTextNode(raw.slice(pos, t.index)));
           var ch = chip(render(t.style, t.sec));
           if (t.style === 'R') ch.setAttribute('data-rel', String(t.sec));
@@ -627,9 +755,10 @@ faq:
         frag.appendChild(lbl);
         frag.appendChild(p);
       }
-      tokens.slice(0, 20).forEach(function (t) { wrap.appendChild(decodeItem(t.src, t.sec, t.style, '')); });
+      tokens.slice(0, 20).forEach(function (t) { wrap.appendChild(decodeItem(t.src, t.sec, t.style, tokenNote(t), t.literal)); });
       decoded = tokens[0].sec;
-      summary = tokens.length + (tokens.length === 1 ? ' timestamp found: ' : ' timestamps found. First: ') + render(tokens[0].style, tokens[0].sec);
+      summary = tokens.length + (tokens.length === 1 ? ' timestamp found: ' : ' timestamps found. First: ') +
+        (tokens[0].literal ? 'inside backticks, so Discord shows it as plain text' : render(tokens[0].style, tokens[0].sec));
     } else if (/^-?\d+$/.test(text)) {
       var digits = text.replace('-', '');
       if (digits.length >= 17 && text[0] !== '-') {
@@ -665,14 +794,83 @@ faq:
     return summary;
   }
 
+
+  // ---------- Countdown ----------
+  // The event starts a chosen time from now, optionally rounded to a clean
+  // clock time in the generator's time zone (nearest step, never in the past).
+  var cdList = $('#dts-cd-list'), cdRows = {}, cdSec = null;
+  var CD_ROWS = [
+    ['R', 'Countdown', 'R', 'updates live'],
+    ['tR', 'Time + countdown', '', 'for events later today'],
+    ['FR', 'Full date + countdown', '', 'for events on another day']
+  ];
+  CD_ROWS.forEach(function (c) { cdRows[c[0]] = makeItem(cdList, 'cd-' + c[0], c[1], c[2], c[3], c[0] !== 'R'); });
+  var sayCd = speaker($('#dts-cd-status'));
+  function cdNum(id, max) {
+    var v = String($(id).value).trim();
+    if (v === '') return 0;
+    if (!/^\d+$/.test(v) || +v > max) return NaN;
+    return +v;
+  }
+  function roundStart(ms, stepMin, tz) {
+    if (!stepMin) return ms;
+    var step = stepMin * 60000, off = offsetMs(ms, tz);
+    var local = Math.round((ms + off) / step) * step;
+    if (local - off <= Date.now()) local = Math.ceil((ms + off) / step) * step;
+    var t = local - off, off2 = offsetMs(t, tz);
+    return off2 === off ? t : local - off2; // the offset changed (DST) between now and then
+  }
+  function renderCountdown() {
+    CD_ROWS.forEach(function (c) {
+      var r = cdRows[c[0]];
+      r.btn.disabled = cdSec === null;
+      if (cdSec === null) { r.code.textContent = '–'; r.prev.textContent = ''; r.prev.removeAttribute('data-text'); return; }
+      if (c[0] === 'R') { r.code.textContent = code('R', cdSec); setComboPreview(r.prev, [['R']], cdSec); }
+      else {
+        var first = c[0] === 'tR' ? 't' : 'F';
+        r.code.textContent = code(first, cdSec) + ' (' + code('R', cdSec) + ')';
+        setComboPreview(r.prev, [[first], ' (', ['R'], ')'], cdSec);
+      }
+    });
+    $('#dts-cd-load').disabled = cdSec === null;
+  }
+  function updateCountdown(trigger) {
+    var d = cdNum('#dts-cd-d', 3650), h = cdNum('#dts-cd-h', 999), m = cdNum('#dts-cd-m', 9999);
+    var msg = $('#dts-cd-msg'), when = $('#dts-cd-when');
+    if (isNaN(d) || isNaN(h) || isNaN(m)) {
+      cdSec = null;
+      msg.textContent = 'Enter whole numbers: up to 3650 days, 999 hours and 9999 minutes.';
+      when.textContent = '';
+      renderCountdown();
+      if (trigger) sayCd('Enter whole numbers of days, hours and minutes.', trigger === 'click');
+      return;
+    }
+    msg.textContent = '';
+    var tz = zoneEl.value || LOCAL_TZ, now = Date.now();
+    var ms;
+    try { ms = roundStart(now + ((d * 24 + h) * 60 + m) * 60000, Number($('#dts-cd-round').value), tz); } catch (e) { ms = now; }
+    cdSec = Math.floor(ms / 1000);
+    renderCountdown();
+    when.textContent = 'Starts ' + fmt('F', cdSec * 1000) + (tz === LOCAL_TZ ? ' your time' : ' (' + tz.replace(/_/g, ' ') + ' time is ' + clean(zoneTime(cdSec * 1000, tz)) + ')') +
+      ', Unix ' + cdSec + '. Counted from ' + fmt('t', now) + ', when you last changed these settings.';
+    if (trigger) sayCd('Starts ' + render('R', cdSec) + ': ' + code('R', cdSec), trigger === 'click');
+  }
+  var zoneTimeCache = {};
+  function zoneTime(ms, tz) {
+    var f = zoneTimeCache[tz] || (zoneTimeCache[tz] = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', hour: 'numeric', minute: '2-digit' }));
+    return f.format(new Date(ms));
+  }
+
   // ---------- Wiring ----------
   zoneMenu(zoneEl);
-  function userEdit() { pinned = null; update(); }
+  function userEdit(e) { pinned = null; genTrigger = e && e.type === 'change' && e.target === zoneEl ? 'click' : 'type'; update(); }
   [dateEl, timeEl].forEach(function (el) { el.addEventListener('input', userEdit); el.addEventListener('change', userEdit); });
   zoneEl.addEventListener('change', userEdit);
-  $('#dts-now').addEventListener('click', function () { setFromSeconds(Math.floor(Date.now() / 1000)); });
+  zoneEl.addEventListener('change', function () { if (cdSec !== null) updateCountdown(); });
+  $('#dts-now').addEventListener('click', function () { genTrigger = 'click'; setFromSeconds(Math.floor(Date.now() / 1000)); });
   TT.$$('[data-add]').forEach(function (b) {
     b.addEventListener('click', function () {
+      genTrigger = 'click';
       var base = current === null ? Math.floor(Date.now() / 1000) : current;
       setFromSeconds(base + Number(b.getAttribute('data-add')));
     });
@@ -680,6 +878,7 @@ faq:
   // Days are added on the calendar, so the clock time stays the same across DST changes.
   TT.$$('[data-add-days]').forEach(function (b) {
     b.addEventListener('click', function () {
+      genTrigger = 'click';
       var dm = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(dateEl.value);
       if (current === null || !dm) { setFromSeconds(Math.floor(Date.now() / 1000) + 86400 * Number(b.getAttribute('data-add-days'))); return; }
       var dt = new Date(0);
@@ -689,9 +888,25 @@ faq:
       update();
     });
   });
+  ['#dts-cd-d', '#dts-cd-h', '#dts-cd-m'].forEach(function (id) { $(id).addEventListener('input', function () { updateCountdown('type'); }); });
+  $('#dts-cd-round').addEventListener('change', function () { updateCountdown('click'); });
+  TT.$$('[data-cd]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var v = b.getAttribute('data-cd').split(',');
+      $('#dts-cd-d').value = v[0]; $('#dts-cd-h').value = v[1]; $('#dts-cd-m').value = v[2];
+      updateCountdown('click');
+    });
+  });
+  $('#dts-cd-load').addEventListener('click', function () {
+    if (cdSec === null) return;
+    genTrigger = 'click';
+    setFromSeconds(cdSec);
+    dateEl.focus();
+  });
   $('#dts-decode').addEventListener('input', TT.debounce(runDecode, 120));
   $('#dts-decode-load').addEventListener('click', function () {
     if (decoded === null) return;
+    genTrigger = 'click';
     setFromSeconds(decoded);
     dateEl.focus();
   });
@@ -700,17 +915,12 @@ faq:
   // Start at the current minute.
   var start = Math.floor(Date.now() / 60000) * 60;
   setFromSeconds(start);
+  updateCountdown();
 
   // Keep relative previews live.
   setInterval(function () {
-    if (current !== null) {
-      setPreview(rows.R.prev, render('R', current));
-      var combo = rows.combo.prev;
-      var rel = render('R', current);
-      var chips = combo.querySelectorAll('.dts-chip');
-      if (chips[1] && chips[1].textContent !== rel) chips[1].textContent = rel;
-    }
-    TT.$$('#dts-decode-out [data-rel]').forEach(function (el) {
+    if (current !== null) setPreview(rows.R.prev, render('R', current));
+    TT.$$('[data-rel]').forEach(function (el) {
       var t = render('R', Number(el.getAttribute('data-rel')));
       if (el.textContent !== t) el.textContent = t;
     });
