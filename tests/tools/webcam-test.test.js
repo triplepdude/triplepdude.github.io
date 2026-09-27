@@ -105,6 +105,73 @@ module.exports = async ({ page, open, assert }) => {
   await waitText('#wct-status', /requested 1280 × 720/);
   await page.waitForFunction(() => document.getElementById('wct-video').videoWidth === 1280);
 
+  // Capabilities table: one row per getCapabilities() entry (device and group
+  // IDs left out), with the range and the current setting.
+  const caps = await page.evaluate(() => {
+    const t = window.__gum.streams[window.__gum.streams.length - 1].getVideoTracks()[0];
+    return Object.keys(t.getCapabilities()).filter(k => k !== 'deviceId' && k !== 'groupId');
+  });
+  assert.equal(await page.locator('#wct-caps tr').count(), caps.length);
+  const capsText = await text('#wct-caps');
+  assert.match(capsText, new RegExp(`Width1 to ${s.caps.width.max}1280`));
+  assert.match(capsText, new RegExp(`Height1 to ${s.caps.height.max}720`));
+  assert.doesNotMatch(capsText, /deviceId|groupId/i);
+
+  // Resolution check. Chromium's fake camera has native modes 640x480,
+  // 1280x720, 1920x1080 and 3840x2160 (kSupportedSizesOrderedByIncreasingWidth
+  // in its fake_video_capture_device_factory.cc); 2560x1440 can only be made by
+  // scaling 4K down. The camera goes back to its mode afterwards.
+  await page.focus('#wct-probe');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.getAttribute('#wct-probe', 'aria-disabled'), 'true');
+  await page.waitForFunction(() => document.querySelector('#wct-probe').getAttribute('aria-disabled') === 'false', null, { timeout: 30000 });
+  const probeRows = await page.locator('#wct-probe-table tr').evaluateAll(trs => trs.map(tr => [...tr.children].slice(0, 2).map(c => c.textContent)));
+  assert.deepEqual(probeRows, [
+    ['640 × 480 (VGA)', 'Supported (native camera mode)'],
+    ['1280 × 720 (720p)', 'Supported (native camera mode)'],
+    ['1920 × 1080 (1080p)', 'Supported (native camera mode)'],
+    ['2560 × 1440 (1440p)', 'Only scaled down by the browser from a larger mode'],
+    ['3840 × 2160 (4K)', 'Supported (native camera mode)'],
+  ]);
+  assert.equal(await text('#wct-status'), 'Your camera supports 640 × 480, 1280 × 720, 1920 × 1080, 3840 × 2160.');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'wct-probe', 'focus stays on the button');
+  await waitText('#wct-resolution', /^1280 × 720$/);
+  assert.equal(await page.evaluate(() => document.getElementById('wct-video').videoWidth), 1280);
+  assert.equal(await page.evaluate(() => window.__gum.streams.length), 3, 'the check reuses the running camera');
+
+  // Record a 5-second clip (video only), then check the WebM file.
+  assert.match(await text('#wct-rec'), /^Record 5 s clip$/);
+  await page.click('#wct-rec');
+  assert.equal(await text('#wct-rec'), 'Stop recording');
+  assert.equal(await page.getAttribute('#wct-probe', 'aria-disabled'), 'true');
+  await waitText('#wct-rec-time', /^[1-4]\.\d s of 5 s$/);
+  await waitText('#wct-rec-status', /^Recorded a [45]\.\d s clip \([\d,]+ KB, WEBM, no sound\)/, 10000);
+  const clipDur = await (await page.waitForFunction(() => {
+    const v = document.getElementById('wct-clip');
+    return Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+  }, null, { timeout: 8000 })).jsonValue();
+  assert.ok(clipDur > 4.3 && clipDur < 5.8, `clip duration ${clipDur}`);
+  const [cdl] = await Promise.all([page.waitForEvent('download'), page.click('#wct-clip-dl')]);
+  assert.match(cdl.suggestedFilename(), /^webcam-clip-\d{8}-\d{6}\.webm$/);
+  const clip = fs.readFileSync(await cdl.path());
+  assert.equal(clip.subarray(0, 4).toString('hex'), '1a45dfa3', 'EBML magic');
+  assert.ok(clip.includes(Buffer.from('webm')), 'webm DocType');
+  assert.ok(clip.includes(Buffer.from('V_VP9')) || clip.includes(Buffer.from('V_VP8')), 'VP8/VP9 video track');
+  assert.ok(!clip.includes(Buffer.from('A_OPUS')), 'no audio track');
+  // With the microphone: an Opus audio track too; Stop recording ends it early,
+  // and the extra microphone stream is released.
+  await page.check('#wct-rec-mic');
+  await page.click('#wct-rec');
+  await waitText('#wct-rec-status', /^Recording a 5-second clip with sound/);
+  await page.waitForTimeout(1500);
+  await page.click('#wct-rec');
+  await waitText('#wct-rec-status', /^Recorded a [0-3]\.\d s clip \([\d,]+ KB, WEBM, with sound\)/, 8000);
+  const [cdl2] = await Promise.all([page.waitForEvent('download'), page.click('#wct-clip-dl')]);
+  assert.ok(fs.readFileSync(await cdl2.path()).includes(Buffer.from('A_OPUS')), 'Opus audio track');
+  assert.equal(await page.evaluate(() => window.__gum.streams.length), 4);
+  assert.equal(await page.evaluate(() => window.__gum.streams[3].getTracks().every(t => t.readyState === 'ended')), true, 'microphone released');
+  await page.uncheck('#wct-rec-mic');
+
   // Mirror toggle flips the preview.
   const transform = () => page.$eval('#wct-video', v => getComputedStyle(v).transform);
   assert.match(await transform(), /^matrix\(-1, 0, 0, 1, 0, 0\)$/);
