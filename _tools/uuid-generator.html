@@ -1,90 +1,84 @@
 ---
-title: UUID Generator (v4 & v7) and Decoder
-description: Generate random v4 or time-ordered v7 UUIDs in bulk, uppercase, without hyphens or in braces, and decode any UUID's version, variant and timestamp.
+title: "UUID Generator: v4, v7, v5, ULID & NanoID"
+description: Generate UUIDs (v4, v7, v1, v6 and name-based v3, v5, v8), ULIDs and NanoIDs in bulk, and decode any UUID or ULID to see its version and timestamp.
 category: Developer
-keywords: [uuid generator, uuid v4 generator, uuid v7 generator, guid generator, bulk uuid generator, uuid decoder, uuid validator, uuid timestamp]
+keywords: [uuid generator, uuid v4 generator, uuid v7 generator, uuid v5 generator, guid generator, ulid generator, nanoid generator, uuid decoder]
 howto: |
   ## How to use it
 
-  Pick a version, choose how many UUIDs you need (up to 1,000) and press
-  **Generate**. Tick the boxes for uppercase, no hyphens or curly braces;
-  changing the format re-formats the same list rather than making new IDs.
-  **Copy** puts the whole list on your clipboard and **Download .txt** saves
-  it with one UUID per line.
+  Pick a type, choose how many you need (up to 1,000) and press
+  **Generate**. For UUIDs, tick uppercase, no hyphens or braces; the same list
+  is re-formatted rather than regenerated. **Copy** takes the whole list and
+  **Download .txt** saves it one per line. Paste any UUID or ULID into
+  **Decode** to see its version, variant, timestamp and the same 128 bits in
+  the other format.
 
-  To look inside an existing UUID, paste it into **Decode a UUID**. It
-  accepts the usual forms: with or without hyphens, in braces, upper or
-  lower case, or as a `urn:uuid:` name. You get the version, the variant,
-  the 128-bit value as an integer, and for time-based versions the moment it
-  was made.
+  ## Which UUID version?
 
-  ## v4 or v7?
-
-  A **v4** UUID is 122 random bits plus the version and variant markers. This
-  page makes them with the browser's `crypto.randomUUID()`, which uses the
-  same cryptographically secure generator as `crypto.getRandomValues()`.
-
-  A **v7** UUID starts with a 48-bit count of milliseconds since
-  1970-01-01 UTC, followed by 74 random bits, so v7 IDs sort by creation
-  time. As database primary keys they keep B-tree indexes append-mostly,
-  which usually means faster inserts and less index bloat than random v4
-  keys. The trade-off is that anyone holding the ID can read when it was
-  created.
-
-  | Bits | v7 field | Contents |
+  | Version | Built from | Sorts by time |
   |---|---|---|
-  | 0–47 | `unix_ts_ms` | milliseconds since the Unix epoch |
-  | 48–51 | `ver` | always `0111` (7) |
-  | 52–63 | `rand_a` | random |
-  | 64–65 | `var` | always `10` |
-  | 66–127 | `rand_b` | random |
+  | 4 | 122 random bits | no |
+  | 7 | Unix milliseconds + 74 random bits | yes |
+  | 1 | 100 ns time since 1582 + clock sequence + node | no |
+  | 6 | v1's fields reordered, time first | yes |
+  | 3, 5 | MD5 or SHA-1 of a namespace and a name | no |
+  | 8 | vendor-defined; here SHA-256 of namespace and name | no |
 
-  In text form the version is the first digit of the third group and the
-  variant shows in the first digit of the fourth group, which is 8, 9, a or
-  b for standard UUIDs: `xxxxxxxx-xxxx-7xxx-9xxx-xxxxxxxxxxxx`.
+  Use **v4** when the ID must not reveal anything, and **v7** for database
+  keys: new rows land at the end of the index. Random bits come from
+  `crypto.getRandomValues`, the browser's secure generator. Within one
+  millisecond, v7 treats its random bits as a counter and adds a random step
+  (RFC 9562, section 6.2), so a batch sorts in the order it was made.
 
-  ## Keeping v7 in order
+  **v1 and v6** here use a random node with the multicast bit set and a random
+  clock sequence (RFC 9562, section 6.10), never your network card's MAC
+  address. IDs made in the same millisecond take the next 100 ns tick.
 
-  Many v7 IDs can share one millisecond. Following RFC 9562 section 6.2
-  (method 2, "monotonic random"), the generator treats the 74 random bits as
-  a counter: the first ID in a millisecond gets fresh random bits, and each
-  later one adds a random amount of up to 2<sup>32</sup>. A batch of 1,000
-  therefore sorts in exactly the order it was made, and each step still adds
-  32 bits of randomness. If the computer's clock steps backwards, the last
-  timestamp is reused so the order still holds.
+  ## Name-based UUIDs (v3, v5, v8)
 
-  ## Versions at a glance
+  The same namespace and name always give the same UUID, which is handy for
+  turning URLs, e-mail addresses or keys from another system into stable IDs.
+  Enter one name per line. Names are hashed as UTF-8 exactly as typed, so
+  case and spaces matter. The standard namespaces are DNS
+  (`6ba7b810-…`), URL (`6ba7b811-…`), OID (`6ba7b812-…`) and X.500
+  (`6ba7b814-…`); any UUID can serve as a custom one. Prefer **v5** (SHA-1)
+  over v3 (MD5). The v8 option follows RFC 9562 Appendix B.2 and uses
+  SHA-256: `www.example.com` in the DNS namespace gives
+  `5c146b14-3c52-8afd-938a-375d0df1fbf6`.
 
-  | Version | Built from | Timestamp |
-  |---|---|---|
-  | 1 | time and node (often a MAC address) | 100 ns steps since 1582-10-15 |
-  | 2 | like v1, with a POSIX user or group ID | coarse, low bits replaced |
-  | 3, 5 | MD5 or SHA-1 hash of a namespace and a name | none |
-  | 4 | random bits | none |
-  | 6 | v1's fields reordered to sort by time | as v1 |
-  | 7 | Unix milliseconds and random bits | milliseconds since 1970 |
-  | 8 | a vendor-defined layout | depends |
+  The **nil UUID** is all zeros, often meaning "no ID". The **max UUID** is all
+  `f`, a sentinel such as "end of the list".
 
-  The **nil UUID** is all zeros and the **max UUID** is all `f`. Both are
-  valid special values: nil usually stands for "no ID", and RFC 9562 suggests
-  max as a sentinel, for example to mark the end of a list.
+  ## ULID
 
-  A **GUID** is Microsoft's name for the same 128-bit identifier. The
-  registry style wraps it in braces and uses capitals, as in
-  `{0F8FAD5B-D9CB-469F-A165-70867728950E}`. When you handle raw bytes,
-  note that Windows and .NET store the first three groups little-endian, so
-  the byte order differs from the text even though the text form is
-  identical.
+  A ULID is 128 bits like a UUID: a 48-bit millisecond timestamp and 80 random
+  bits, written as 26 characters of Crockford's Base32 (no I, L, O or U), such
+  as `01ARZ3NDEKTSV4RRFFQ69G5FAV`. ULIDs sort by time as text. Within one
+  millisecond each ULID is the previous one plus 1 (the monotonic mode of the
+  spec). The decoder converts a ULID to UUID form for databases with a `uuid`
+  column, and back.
+
+  ## NanoID
+
+  NanoID makes short random strings from any alphabet. The default, 21
+  URL-safe characters, carries 126 random bits, about as many as v4. Pick a
+  preset or type your own characters. Characters are chosen by rejection
+  sampling, so each is equally likely even when the alphabet size is not a
+  power of two. The page shows the bits per ID and roughly how many IDs give
+  a 1% chance of any two being equal.
+
+  A **GUID** is Microsoft's name for a UUID. Windows stores the first three
+  groups little-endian in binary, but the text form is the same.
 faq:
   - q: Can two generated UUIDs ever be the same?
-    a: In theory yes, in practice no. A v4 UUID has 122 random bits, so you would need to make about 2.7 quintillion (2.7 × 10<sup>18</sup>) of them for a 50% chance of a single repeat. A v7 UUID has 74 random bits, but only IDs made in the same millisecond can clash, and within one batch from this page each ID is larger than the one before, so none can repeat.
-  - q: Is a GUID the same as a UUID?
-    a: Yes. GUID is Microsoft's term for a UUID. The text format is the same; Windows tools often show it in capitals and curly braces, which the checkboxes above reproduce.
-  - q: Can I find out when a UUID was created?
-    a: Only for versions that store a time, which are 1, 6 and 7 (and 2, roughly). Paste one into the decoder to see the date. Version 4 is pure randomness, and versions 3 and 5 are hashes, so they contain no date.
-  - q: Should I use v4 or v7 for database keys?
-    a: v7 is usually the better choice for primary keys because new rows land at the end of the index. Use v4 when the ID must not reveal when the record was created.
-  - q: Are these UUIDs generated on a server?
+    a: In theory yes, in practice no. A v4 UUID has 122 random bits, so you would need about 2.7 quintillion (2.7 × 10<sup>18</sup>) of them for a 50% chance of a single repeat. v7 IDs can only clash within the same millisecond, and within one batch from this page each is larger than the one before.
+  - q: Why does my v5 UUID differ from another tool's?
+    a: Check the namespace, and that the name matches byte for byte. `www.example.com` and `www.example.com ` (trailing space) or `WWW.example.com` give different UUIDs. Some tools also hash the name in another encoding than UTF-8.
+  - q: Can I find out when a UUID or ULID was created?
+    a: Yes for v1, v6, v7 and ULID, which store a time; paste one into the decoder. v4 and NanoID are pure randomness, and v3, v5 and v8 name-based IDs are hashes, so they contain no date.
+  - q: Should I use UUID v7 or ULID?
+    a: Both put a millisecond timestamp first. Use v7 when your database or language has a UUID type, and ULID when you want a shorter, case-insensitive string. The decoder converts one form into the other.
+  - q: Are these IDs generated on a server?
     a: No. They are created in your browser with the Web Crypto API, and the decoder also runs locally. Nothing is uploaded, logged or stored.
 ---
 <style>
@@ -94,7 +88,9 @@ faq:
 .uu-h { margin: 0 0 14px; font-size: 1.15rem; }
 .uu-sep { margin: 28px 0 20px; border: 0; border-top: 1px solid var(--border); }
 .uu-gen .row > .field { flex: 1 1 180px; }
+.uu-gen .row > .field.uu-narrow { flex: 1 1 110px; }
 textarea.mono.uu-out { min-height: 0; font-size: clamp(12px, 3.3vw, 15px); line-height: 1.6; white-space: pre; overflow-wrap: normal; overflow-x: auto; resize: vertical; background: var(--surface-2); }
+textarea.mono.uu-names { min-height: 84px; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
 input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
 .uu-gen .row select, .uu-gen .row input { height: 44px; padding-top: 0; padding-bottom: 0; }
 .uu-examples { align-items: center; }
@@ -105,6 +101,8 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
 .uu-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-family: system-ui, sans-serif; font-size: 14px; font-weight: 600; }
 .uu-badge.ok { background: var(--accent-soft); color: var(--accent); }
 .uu-badge.warn { background: var(--danger-soft); color: var(--danger); }
+.uu-note { margin: -6px 0 14px; }
+.uu-note:empty { display: none; }
 @media (max-width: 560px) {
   table.data.uu-info, .uu-info tbody, .uu-info tr, table.data.uu-info th, table.data.uu-info td { display: block; width: auto; }
   table.data.uu-info tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
@@ -114,30 +112,96 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
 </style>
 
 <div class="uu-gen">
-  <h2 class="uu-h">Generate UUIDs</h2>
+  <h2 class="uu-h">Generate IDs</h2>
   <div class="row">
     <div class="field">
-      <label for="uu-ver">Version</label>
+      <label for="uu-ver">Type</label>
       <select id="uu-ver">
-        <option value="4" selected>v4, random</option>
-        <option value="7">v7, time-ordered</option>
+        <optgroup label="UUID">
+          <option value="4" selected>UUID v4, random</option>
+          <option value="7">UUID v7, time-ordered</option>
+          <option value="1">UUID v1, time and node</option>
+          <option value="6">UUID v6, time-ordered v1</option>
+          <option value="5">UUID v5, name-based (SHA-1)</option>
+          <option value="3">UUID v3, name-based (MD5)</option>
+          <option value="8">UUID v8, name-based (SHA-256)</option>
+          <option value="nil">Nil UUID (all zeros)</option>
+          <option value="max">Max UUID (all ones)</option>
+        </optgroup>
+        <optgroup label="Other IDs">
+          <option value="ulid">ULID</option>
+          <option value="nanoid">NanoID</option>
+        </optgroup>
       </select>
     </div>
-    <div class="field">
+    <div class="field uu-narrow" data-for="random">
       <label for="uu-count">How many <span class="hint">1 to 1,000</span></label>
-      <input type="number" id="uu-count" min="1" max="1000" step="1" value="1" inputmode="numeric">
+      <input type="number" id="uu-count" min="1" max="1000" step="1" value="1" inputmode="numeric" aria-describedby="uu-gen-err">
     </div>
   </div>
-  <div class="checks">
+
+  <div data-for="name" hidden>
+    <div class="row">
+      <div class="field">
+        <label for="uu-ns">Namespace</label>
+        <select id="uu-ns">
+          <option value="6ba7b810-9dad-11d1-80b4-00c04fd430c8" selected>DNS (domain names)</option>
+          <option value="6ba7b811-9dad-11d1-80b4-00c04fd430c8">URL</option>
+          <option value="6ba7b812-9dad-11d1-80b4-00c04fd430c8">OID (ISO object identifier)</option>
+          <option value="6ba7b814-9dad-11d1-80b4-00c04fd430c8">X.500 distinguished name</option>
+          <option value="custom">Custom namespace UUID</option>
+        </select>
+      </div>
+      <div class="field" id="uu-ns-custom-field" hidden>
+        <label for="uu-ns-custom">Namespace UUID</label>
+        <input type="text" id="uu-ns-custom" class="mono" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="e.g. 017f22e2-79b0-7cc3-98c4-dc0c0c07398f" aria-describedby="uu-gen-err">
+      </div>
+    </div>
+    <div class="field">
+      <label for="uu-names">Names <span class="hint">one per line, hashed as UTF-8 exactly as typed</span></label>
+      <textarea id="uu-names" class="mono uu-names" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="uu-gen-err">www.example.com</textarea>
+    </div>
+  </div>
+
+  <div data-for="nanoid" hidden>
+    <div class="row">
+      <div class="field">
+        <label for="uu-nano-set">Alphabet</label>
+        <select id="uu-nano-set">
+          <option value="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" selected>URL-safe: A–Z a–z 0–9 _ - (64)</option>
+          <option value="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789">Letters and digits (62)</option>
+          <option value="0123456789abcdefghijklmnopqrstuvwxyz">Lowercase and digits (36)</option>
+          <option value="346789ABCDEFGHJKLMNPQRTUVWXYabcdefghijkmnpqrtwxyz">No look-alikes like 0/O, 1/l (49)</option>
+          <option value="0123456789abcdef">Hexadecimal (16)</option>
+          <option value="0123456789">Digits (10)</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="field uu-narrow">
+        <label for="uu-nano-len">Length</label>
+        <input type="number" id="uu-nano-len" min="1" max="256" step="1" value="21" inputmode="numeric" aria-describedby="uu-gen-err">
+      </div>
+    </div>
+    <div class="field">
+      <label for="uu-nano-alpha">Characters to use</label>
+      <input type="text" id="uu-nano-alpha" class="mono" value="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="uu-gen-err uu-nano-info">
+    </div>
+    <p class="hint uu-note" id="uu-nano-info"></p>
+  </div>
+
+  <div class="checks" data-for="uuid">
     <label class="check"><input type="checkbox" id="uu-upper"> Uppercase</label>
     <label class="check"><input type="checkbox" id="uu-nohyph"> No hyphens</label>
     <label class="check"><input type="checkbox" id="uu-braces"> Braces { }</label>
   </div>
-  <p class="msg error" id="uu-gen-err" role="alert"></p>
+  <!-- Not an alert: it appears while a count or name is typed, and is read out through
+       #uu-gen-status once typing pauses. -->
+  <p class="msg error" id="uu-gen-err"></p>
   <div class="field">
-    <label for="uu-out">Result <span class="hint" id="uu-summary" aria-live="polite"></span></label>
+    <label for="uu-out">Result <span class="hint" id="uu-summary"></span></label>
     <textarea id="uu-out" class="mono uu-out" rows="1" readonly spellcheck="false" autocapitalize="off"></textarea>
   </div>
+  <p class="visually-hidden" id="uu-gen-status" role="status"></p>
   <div class="actions">
     <button class="btn" type="button" id="uu-gen">Generate</button>
     <button class="btn secondary" type="button" data-copy-target="#uu-out">Copy</button>
@@ -146,20 +210,22 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
 </div>
 
 <hr class="uu-sep">
-<h2 class="uu-h">Decode a UUID</h2>
+<h2 class="uu-h">Decode a UUID or ULID</h2>
 <div class="field">
-  <label for="uu-in">UUID to inspect</label>
+  <label for="uu-in">UUID or ULID to inspect</label>
   <input type="text" id="uu-in" class="mono uu-in" value="017f22e2-79b0-7cc3-98c4-dc0c0c07398f" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="uu-in-err">
 </div>
 <div class="actions uu-examples">
-  <span class="hint">RFC 9562 examples:</span>
+  <span class="hint">Examples:</span>
   <button class="btn secondary small" type="button" data-uuid="C232AB00-9414-11EC-B3C8-9F6BDECED846" aria-label="Decode the RFC 9562 v1 example">v1</button>
   <button class="btn secondary small" type="button" data-uuid="919108F7-52D1-4320-9BAC-F847DB4148A8" aria-label="Decode the RFC 9562 v4 example">v4</button>
+  <button class="btn secondary small" type="button" data-uuid="2ed6657d-e927-568b-95e1-2665a8aea6a2" aria-label="Decode a v5 example, www.example.com in the DNS namespace">v5</button>
   <button class="btn secondary small" type="button" data-uuid="1EC9414C-232A-6B00-B3C8-9F6BDECED846" aria-label="Decode the RFC 9562 v6 example">v6</button>
   <button class="btn secondary small" type="button" data-uuid="017F22E2-79B0-7CC3-98C4-DC0C0C07398F" aria-label="Decode the RFC 9562 v7 example">v7</button>
   <button class="btn secondary small" type="button" data-uuid="2489E9AD-2EE2-8E00-8EC9-32D5F69181C0" aria-label="Decode the RFC 9562 v8 example">v8</button>
   <button class="btn secondary small" type="button" data-uuid="00000000-0000-0000-0000-000000000000" aria-label="Decode the Nil UUID">Nil</button>
   <button class="btn secondary small" type="button" data-uuid="FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" aria-label="Decode the Max UUID">Max</button>
+  <button class="btn secondary small" type="button" data-uuid="01ARZ3NDEKTSV4RRFFQ69G5FAV" aria-label="Decode the ULID specification example">ULID</button>
 </div>
 <p class="msg error" id="uu-in-err"></p>
 <p class="visually-hidden" id="uu-in-status" role="status"></p>
@@ -175,12 +241,18 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
   var $ = TT.$;
   var out = $('#uu-out'), countIn = $('#uu-count'), verSel = $('#uu-ver');
   var genErr = $('#uu-gen-err'), inp = $('#uu-in'), inErr = $('#uu-in-err');
+  var subtle = window.crypto && crypto.subtle && typeof crypto.subtle.digest === 'function' ? crypto.subtle : null;
 
-  // ---------- Generation ----------
+  // ---------- Helpers ----------
   function hexOf(bytes) {
     var s = '';
     for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
     return s;
+  }
+  function bytesOfHex(h) {
+    var b = new Uint8Array(h.length / 2);
+    for (var i = 0; i < b.length; i++) b[i] = parseInt(h.substr(i * 2, 2), 16);
+    return b;
   }
   function dashed(h) { return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20); }
   function randomBytes(n) { var b = new Uint8Array(n); crypto.getRandomValues(b); return b; }
@@ -189,7 +261,17 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     for (var i = 0; i < b.length; i++) v = (v << 8n) | BigInt(b[i]);
     return v & ((1n << BigInt(bits)) - 1n);
   }
+  function hex32(v) { return v.toString(16).padStart(32, '0'); }
 
+  // Crockford's Base32, as used by ULID: 128 bits -> 26 characters.
+  var B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  function toUlid(v) {
+    var s = '';
+    for (var i = 0; i < 26; i++) { s = B32[Number(v & 31n)] + s; v >>= 5n; }
+    return s;
+  }
+
+  // ---------- Random and time-based generators ----------
   function uuid4() {
     if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
     var b = randomBytes(16);
@@ -201,23 +283,142 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
   // RFC 9562 section 6.2, method 2: the 74 random bits double as a counter
   // within one millisecond, incremented by a random amount (1 to 2^32).
   var R74 = 1n << 74n, M62 = (1n << 62n) - 1n;
-  var last = { ms: -1, r: 0n };
+  var last7 = { ms: -1, r: 0n };
   function uuid7() {
     var now = Date.now();
-    if (now > last.ms) {
-      last.ms = now;
-      last.r = randomBig(73); // top bit clear leaves room to count up
+    if (now > last7.ms) {
+      last7.ms = now;
+      last7.r = randomBig(73); // top bit clear leaves room to count up
     } else {
-      last.r += randomBig(32) + 1n;
-      if (last.r >= R74) { last.ms += 1; last.r = randomBig(73); }
+      last7.r += randomBig(32) + 1n;
+      if (last7.r >= R74) { last7.ms += 1; last7.r = randomBig(73); }
     }
-    var hi = (BigInt(last.ms) << 16n) | (7n << 12n) | (last.r >> 62n);
-    var lo = (2n << 62n) | (last.r & M62);
+    var hi = (BigInt(last7.ms) << 16n) | (7n << 12n) | (last7.r >> 62n);
+    var lo = (2n << 62n) | (last7.r & M62);
     return dashed(hi.toString(16).padStart(16, '0') + lo.toString(16).padStart(16, '0'));
   }
 
-  var list = [];
+  // v1 and v6: 60-bit count of 100 ns since 1582-10-15. The node is random with the
+  // multicast bit set and the clock sequence random (RFC 9562 section 6.10), both
+  // fixed for this page. Several IDs in one millisecond take the next 100 ns ticks,
+  // and a clock that steps back continues from the last value, so IDs never repeat.
+  var GREGORIAN_OFFSET = 0x01B21DD213814000n; // 100 ns intervals from 1582-10-15 to 1970-01-01
+  var gState = null, lastTick = -1n;
+  function gregorianTick() {
+    if (!gState) {
+      var b = randomBytes(8);
+      b[2] |= 1; // multicast bit: not a real MAC address
+      gState = { seq: BigInt(((b[0] << 8) | b[1]) & 0x3fff), node: BigInt('0x' + hexOf(b.subarray(2))) };
+    }
+    var t = BigInt(Date.now()) * 10000n + GREGORIAN_OFFSET;
+    if (t <= lastTick) t = lastTick + 1n;
+    lastTick = t;
+    return t;
+  }
+  function tail(seq, node) { return ((0x8000n | seq) << 48n) | node; }
+  function uuid1() {
+    var t = gregorianTick();
+    var hi = ((t & 0xffffffffn) << 32n) | (((t >> 32n) & 0xffffn) << 16n) | 0x1000n | ((t >> 48n) & 0x0fffn);
+    return dashed(hi.toString(16).padStart(16, '0') + tail(gState.seq, gState.node).toString(16).padStart(16, '0'));
+  }
+  function uuid6() {
+    var t = gregorianTick();
+    var hi = ((t >> 12n) << 16n) | 0x6000n | (t & 0x0fffn);
+    return dashed(hi.toString(16).padStart(16, '0') + tail(gState.seq, gState.node).toString(16).padStart(16, '0'));
+  }
+
+  // ULID, monotonic: in the same millisecond (or if the clock steps back) the
+  // previous 80-bit random part plus 1.
+  var lastU = { ms: -1, r: 0n }, R80 = (1n << 80n) - 1n;
+  function ulid() {
+    var now = Date.now();
+    if (now > lastU.ms) { lastU.ms = now; lastU.r = randomBig(80); }
+    else if (lastU.r === R80) throw new Error('ULID random part overflow in one millisecond.');
+    else lastU.r += 1n;
+    return toUlid((BigInt(lastU.ms) << 80n) | lastU.r);
+  }
+
+  // NanoID with any alphabet: random bytes masked to the next power of two, and
+  // values past the alphabet discarded (rejection sampling, as nanoid's
+  // customAlphabet does), so every character is equally likely.
+  function nanoid(chars, size) {
+    var n = chars.length, mask = (2 << (31 - Math.clz32((n - 1) | 1))) - 1;
+    // Count characters, not string length: an emoji in the alphabet is two UTF-16 units.
+    var id = '', got = 0, step = Math.ceil(1.6 * mask * size / n);
+    for (;;) {
+      var bytes = randomBytes(step);
+      for (var i = 0; i < step; i++) {
+        var k = bytes[i] & mask;
+        if (k < n) { id += chars[k]; if (++got === size) return id; }
+      }
+    }
+  }
+
+  // ---------- Name-based: v3 (MD5), v5 (SHA-1), v8 (SHA-256, RFC 9562 B.2) ----------
+  var MD5K = new Int32Array(64), MD5S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  for (var ki = 0; ki < 64; ki++) MD5K[ki] = Math.floor(Math.abs(Math.sin(ki + 1)) * 4294967296);
+  function md5(msg) {
+    var len = msg.length, total = ((len + 8) >> 6) + 1, m = new Uint8Array(total * 64);
+    m.set(msg);
+    m[len] = 0x80;
+    var bits = len * 8;
+    for (var i = 0; i < 4; i++) m[total * 64 - 8 + i] = (bits >>> (8 * i)) & 255;
+    m[total * 64 - 4] = Math.floor(len / 536870912) & 255;
+    var h0 = 0x67452301, h1 = 0xefcdab89 | 0, h2 = 0x98badcfe | 0, h3 = 0x10325476, w = new Int32Array(16);
+    for (var o = 0; o < m.length; o += 64) {
+      for (var j = 0; j < 16; j++) w[j] = m[o + j * 4] | (m[o + j * 4 + 1] << 8) | (m[o + j * 4 + 2] << 16) | (m[o + j * 4 + 3] << 24);
+      var a = h0, b = h1, c = h2, d = h3;
+      for (var r = 0; r < 64; r++) {
+        var f, g;
+        if (r < 16) { f = (b & c) | (~b & d); g = r; }
+        else if (r < 32) { f = (d & b) | (~d & c); g = (5 * r + 1) & 15; }
+        else if (r < 48) { f = b ^ c ^ d; g = (3 * r + 5) & 15; }
+        else { f = c ^ (b | ~d); g = (7 * r) & 15; }
+        var t = (a + f + MD5K[r] + w[g]) | 0, s = MD5S[(r >> 4) * 4 + (r & 3)];
+        a = d; d = c; c = b;
+        b = (b + ((t << s) | (t >>> (32 - s)))) | 0;
+      }
+      h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0;
+    }
+    var outB = new Uint8Array(16);
+    [h0, h1, h2, h3].forEach(function (h, k) { for (var q = 0; q < 4; q++) outB[k * 4 + q] = (h >>> (8 * q)) & 255; });
+    return outB;
+  }
+  async function nameUuid(ver, nsHex, name) {
+    var nb = new TextEncoder().encode(name), data = new Uint8Array(16 + nb.length);
+    data.set(bytesOfHex(nsHex));
+    data.set(nb, 16);
+    var h;
+    if (ver === 3) h = md5(data);
+    else h = new Uint8Array(await subtle.digest(ver === 5 ? 'SHA-1' : 'SHA-256', data));
+    var b = h.slice(0, 16);
+    b[6] = (b[6] & 0x0f) | (ver << 4);
+    b[8] = (b[8] & 0x3f) | 0x80;
+    return dashed(hexOf(b));
+  }
+
+  // ---------- Generator UI ----------
+  var nsSel = $('#uu-ns'), nsCustom = $('#uu-ns-custom'), namesIn = $('#uu-names');
+  var nanoSet = $('#uu-nano-set'), nanoLen = $('#uu-nano-len'), nanoAlpha = $('#uu-nano-alpha');
+  var list = [], listKind = { ver: '4' }, genJob = 0;
+
+  function kindOf(v) {
+    if (v === '3' || v === '5' || v === '8') return 'name';
+    if (v === 'nil' || v === 'max') return 'const';
+    if (v === 'ulid' || v === 'nanoid') return v;
+    return 'random';
+  }
+  function showFields() {
+    var v = verSel.value, k = kindOf(v);
+    TT.$$('.uu-gen [data-for]').forEach(function (el) {
+      var f = el.getAttribute('data-for');
+      el.hidden = !(f === k || (f === 'random' && (k === 'random' || k === 'ulid' || k === 'nanoid')) || (f === 'uuid' && k !== 'ulid' && k !== 'nanoid'));
+    });
+    $('#uu-ns-custom-field').hidden = nsSel.value !== 'custom';
+  }
+
   function formatted() {
+    if (listKind.kind === 'ulid' || listKind.kind === 'nanoid') return list.slice();
     var upper = $('#uu-upper').checked, nohyph = $('#uu-nohyph').checked, braces = $('#uu-braces').checked;
     return list.map(function (u) {
       var s = nohyph ? u.replace(/-/g, '') : u;
@@ -225,46 +426,138 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
       return braces ? '{' + s + '}' : s;
     });
   }
+  function summaryText() {
+    var n = list.length, k = listKind;
+    if (!n) return '';
+    var many = n.toLocaleString('en-US');
+    if (k.kind === 'const') return k.ver === 'nil' ? 'Nil UUID' : 'Max UUID';
+    if (k.kind === 'ulid') return many + (n === 1 ? ' ULID' : ' ULIDs');
+    if (k.kind === 'nanoid') return many + (n === 1 ? ' NanoID' : ' NanoIDs') + ' of ' + k.len + (k.len === 1 ? ' character' : ' characters');
+    return many + ' UUID' + (n === 1 ? '' : 's') + ', version ' + k.ver + (k.kind === 'name' ? ' (name-based)' : '');
+  }
   function render() {
     out.value = formatted().join('\n');
     out.rows = Math.min(Math.max(list.length, 1), 10);
-    var v = list.length && list[0].charAt(14);
-    $('#uu-summary').textContent = list.length ? list.length.toLocaleString('en-US') + ' UUID' + (list.length === 1 ? '' : 's') + ', version ' + v : '';
+    $('#uu-summary').textContent = summaryText();
     $('#uu-dl').disabled = !list.length;
   }
-  function readCount() {
-    var s = String(countIn.value).trim();
+
+  // Screen readers hear one short line once changes pause (or at once after a click):
+  // the summary of the new list, or the error.
+  var genStatus = $('#uu-gen-status'), genTimer = null;
+  function sayGen(now) {
+    clearTimeout(genTimer);
+    var put = function () { var t = genErr.textContent || summaryText(); if (genStatus.textContent !== t) genStatus.textContent = t; };
+    if (now) put(); else genTimer = setTimeout(put, 800);
+  }
+  function fail(msg, el) {
+    genErr.textContent = msg;
+    [countIn, nsCustom, namesIn, nanoLen, nanoAlpha].forEach(function (x) { x.setAttribute('aria-invalid', x === el ? 'true' : 'false'); });
+  }
+  function readInt(el, lo, hi) {
+    var s = String(el.value).trim();
     if (!/^\d+$/.test(s)) return null;
     var n = parseInt(s, 10);
-    return n >= 1 && n <= 1000 ? n : null;
-  }
-  function generate() {
-    var n = readCount();
-    if (n === null) {
-      genErr.textContent = 'Enter a whole number from 1 to 1,000.';
-      countIn.setAttribute('aria-invalid', 'true');
-      return;
-    }
-    genErr.textContent = '';
-    countIn.setAttribute('aria-invalid', 'false');
-    var make = verSel.value === '7' ? uuid7 : uuid4, fresh = [];
-    try {
-      for (var i = 0; i < n; i++) fresh.push(make());
-    } catch (e) {
-      genErr.textContent = 'This browser could not generate secure random numbers.';
-      return;
-    }
-    list = fresh;
-    render();
+    return n >= lo && n <= hi ? n : null;
   }
 
-  $('#uu-gen').addEventListener('click', generate);
-  verSel.addEventListener('change', generate);
-  countIn.addEventListener('input', generate);
+  function nanoAlphabet() {
+    var chars = Array.from(nanoAlpha.value);
+    if (chars.length < 2) return { error: 'The alphabet needs at least 2 different characters.' };
+    if (chars.length > 256) return { error: 'Use at most 256 characters in the alphabet.' };
+    var seen = new Set();
+    for (var i = 0; i < chars.length; i++) {
+      if (seen.has(chars[i])) return { error: '"' + chars[i] + '" appears more than once in the alphabet, which would make it more likely than the others.' };
+      seen.add(chars[i]);
+    }
+    if (/\s/.test(nanoAlpha.value)) return { chars: chars, warn: true };
+    return { chars: chars };
+  }
+  function nanoInfo() {
+    var a = nanoAlphabet(), len = readInt(nanoLen, 1, 256), el = $('#uu-nano-info');
+    if (a.error || len === null) { el.textContent = ''; return; }
+    var bits = len * Math.log2(a.chars.length);
+    // Birthday bound: n ~ sqrt(2 N ln(1 / (1 - p))) IDs for a collision chance p = 1%.
+    var log10n = 0.5 * (Math.log10(2 * Math.log(1 / 0.99)) + len * Math.log10(a.chars.length));
+    var many;
+    if (log10n < 0.5) many = '2';
+    else if (log10n < 15) many = Math.max(2, Math.round(Math.pow(10, log10n))).toLocaleString('en-US');
+    else {
+      var e = Math.floor(log10n), m = Math.pow(10, log10n - e);
+      many = m.toFixed(1) + ' × 10' + String(e).replace(/\d/g, function (d) { return '⁰¹²³⁴⁵⁶⁷⁸⁹'[d]; });
+    }
+    el.textContent = (Math.round(bits * 10) / 10) + ' random bits per ID (' + a.chars.length + ' characters, length ' + len + '). About ' + many +
+      ' IDs give a 1% chance that two are equal.' + (a.warn ? ' The alphabet contains a space or other whitespace.' : '');
+  }
+
+  async function generate(now) {
+    var job = ++genJob, v = verSel.value, k = kindOf(v), fresh = [];
+    showFields();
+    if (k === 'nanoid') nanoInfo();
+    try {
+      if (k === 'const') {
+        fresh = [v === 'nil' ? '00000000-0000-0000-0000-000000000000' : 'ffffffff-ffff-ffff-ffff-ffffffffffff'];
+      } else if (k === 'name') {
+        var ns = nsSel.value;
+        if (ns === 'custom') {
+          var p = parse(nsCustom.value);
+          if (p.empty) return fail('Enter the namespace UUID, or pick a standard namespace.', nsCustom), sayGen(now);
+          if (p.error || p.ulid) return fail('The custom namespace must be a UUID. ' + (p.error || 'This looks like a ULID; convert it with the decoder below.'), nsCustom), sayGen(now);
+          ns = dashed(p.hex);
+        }
+        if (v !== '3' && !subtle) return fail('Version ' + v + ' needs the Web Crypto API, which browsers only offer on secure (https) pages.', null), sayGen(now);
+        var names = namesIn.value.split(/\r?\n/);
+        if (names.length > 1 && names[names.length - 1] === '') names.pop();
+        if (names.length === 1 && names[0] === '') return fail('Enter a name, such as www.example.com. Each line gives one UUID.', namesIn), sayGen(now);
+        if (names.length > 1000) return fail('Enter at most 1,000 names; this has ' + names.length.toLocaleString('en-US') + ' lines.', namesIn), sayGen(now);
+        var nsHex = ns.replace(/-/g, '');
+        for (var i = 0; i < names.length; i++) {
+          fresh.push(await nameUuid(+v, nsHex, names[i]));
+          if (job !== genJob) return; // a newer edit has started over
+        }
+      } else {
+        var n = readInt(countIn, 1, 1000);
+        if (n === null) return fail('Enter a whole number from 1 to 1,000.', countIn), sayGen(now);
+        var make = { 4: uuid4, 7: uuid7, 1: uuid1, 6: uuid6, ulid: ulid }[v];
+        if (k === 'nanoid') {
+          var a = nanoAlphabet(), len = readInt(nanoLen, 1, 256);
+          if (a.error) return fail(a.error, nanoAlpha), sayGen(now);
+          if (len === null) return fail('Enter a length from 1 to 256 characters.', nanoLen), sayGen(now);
+          make = function () { return nanoid(a.chars, len); };
+          listKind.len = len;
+        }
+        for (var j = 0; j < n; j++) fresh.push(make());
+      }
+    } catch (e) {
+      if (job !== genJob) return;
+      return fail('These IDs could not be generated: ' + (e && e.message ? e.message : e), null), sayGen(now);
+    }
+    fail('', null);
+    list = fresh;
+    listKind = { ver: v, kind: k, len: listKind.len };
+    render();
+    sayGen(now);
+  }
+
+  $('#uu-gen').addEventListener('click', function () { generate(true); });
+  verSel.addEventListener('change', function () { generate(true); });
+  [countIn, namesIn, nsCustom, nanoLen].forEach(function (el) { el.addEventListener('input', function () { generate(false); }); });
+  nsSel.addEventListener('change', function () { generate(true); });
+  nanoSet.addEventListener('change', function () {
+    if (nanoSet.value !== 'custom') nanoAlpha.value = nanoSet.value;
+    else nanoAlpha.focus();
+    generate(nanoSet.value !== 'custom');
+  });
+  nanoAlpha.addEventListener('input', function () {
+    var match = TT.$$('option', nanoSet).filter(function (o) { return o.value === nanoAlpha.value; })[0];
+    nanoSet.value = match ? match.value : 'custom';
+    generate(false);
+  });
   ['#uu-upper', '#uu-nohyph', '#uu-braces'].forEach(function (id) { $(id).addEventListener('change', render); });
   $('#uu-dl').addEventListener('click', function () {
     if (!list.length) return;
-    TT.download('uuids-v' + list[0].charAt(14) + '.txt', formatted().join('\n') + '\n', 'text/plain;charset=utf-8');
+    var k = listKind, name = k.kind === 'ulid' ? 'ulids' : k.kind === 'nanoid' ? 'nanoids' : k.kind === 'const' ? 'uuid-' + k.ver : 'uuids-v' + k.ver;
+    TT.download(name + '.txt', formatted().join('\n') + '\n', 'text/plain;charset=utf-8');
   });
 
   // ---------- Decoding ----------
@@ -272,7 +565,10 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     1: 'Gregorian time-based', 2: 'DCE Security', 3: 'Name-based, MD5 hash', 4: 'Random',
     5: 'Name-based, SHA-1 hash', 6: 'Reordered Gregorian time-based', 7: 'Unix Epoch time-based', 8: 'Custom, vendor-specific'
   };
-  var GREGORIAN_OFFSET = 0x01B21DD213814000n; // 100 ns intervals from 1582-10-15 to 1970-01-01
+  var NAMESPACES = {
+    '6ba7b8109dad11d180b400c04fd430c8': 'DNS', '6ba7b8119dad11d180b400c04fd430c8': 'URL',
+    '6ba7b8129dad11d180b400c04fd430c8': 'OID', '6ba7b8149dad11d180b400c04fd430c8': 'X.500'
+  };
 
   function parse(raw) {
     var s = raw.trim();
@@ -281,8 +577,17 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     if (s.charAt(0) === '{' && s.charAt(s.length - 1) === '}') s = s.slice(1, -1).trim();
     s = s.replace(/^urn:uuid:/i, '');
     if (!s) return { empty: true };
-    var bad = /[^0-9a-fA-F-]/u.exec(s);
-    if (bad) return { error: '"' + bad[0] + '" is not a hexadecimal digit. A UUID uses only 0-9 and a-f, plus hyphens.' };
+    // A ULID: 26 characters of Crockford's Base32.
+    if (s.length === 26 && s.indexOf('-') < 0) {
+      var up = s.toUpperCase(), bad = /[^0-9A-Z]/.exec(up) || /[ILOU]/.exec(up);
+      if (bad) return { error: '"' + bad[0] + '" can\'t appear in a ULID. ULIDs use Crockford\'s Base32: 0-9 and A-Z without I, L, O and U.' };
+      if (up.charAt(0) > '7') return { error: 'A ULID starts with 0 to 7; "' + s.charAt(0) + '" would need more than 128 bits.' };
+      var v = 0n;
+      for (var i = 0; i < 26; i++) v = (v << 5n) | BigInt(B32.indexOf(up.charAt(i)));
+      return { ulid: up, hex: hex32(v) };
+    }
+    var badHex = /[^0-9a-fA-F-]/u.exec(s);
+    if (badHex) return { error: '"' + badHex[0] + '" is not a hexadecimal digit. A UUID uses only 0-9 and a-f, plus hyphens.' };
     var h = s.replace(/-/g, '');
     if (h.length !== 32) return { error: 'A UUID has 32 hex digits, but this has ' + h.length + '.' };
     if (s.indexOf('-') >= 0 && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) {
@@ -312,6 +617,20 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     var mac = h.slice(20).match(/../g).join(':');
     var multicast = parseInt(h.slice(20, 22), 16) & 1;
     return [mac, multicast ? 'Multicast bit set: a random node ID, not a network address.' : 'Usually the MAC address of the machine that made it.'];
+  }
+
+  function ulidRows(r) {
+    var v = BigInt('0x' + r.hex), ms = Number(v >> 80n);
+    return [
+      ['Status', { badge: 'Valid ULID', ok: true }],
+      ['Standard form', r.ulid],
+      ['Timestamp, UTC', new Date(ms).toISOString(), '', 'Millisecond precision, from the first 10 characters.'],
+      ['Your local time', localTime(ms), 'text'],
+      ['Unix time (ms)', String(ms)],
+      ['Random part', (v & R80).toString(16).padStart(20, '0'), '', '80 bits, from the last 16 characters.'],
+      ['As a UUID', dashed(r.hex), '', 'The same 128 bits in UUID form, for a uuid database column. It is not a v7 UUID: no version or variant bits are set.'],
+      ['As an integer', v.toString(10)]
+    ];
   }
 
   function rowsFor(h) {
@@ -356,6 +675,8 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
       rows.push(['Clock sequence', cs + ' (0x' + cs.toString(16) + ')']);
       var n = node(h);
       rows.push(['Node', n[0], '', n[1]]);
+      if (ver === 1) rows.push(['As v6', dashed(((t >> 12n) << 16n | 0x6000n | (t & 0xfffn)).toString(16).padStart(16, '0') + h.slice(16)), '', 'The same time, clock sequence and node, reordered so the IDs sort by time (RFC 9562, section 5.6).']);
+      if (ver === 6) rows.push(['As v1', dashed((((t & 0xffffffffn) << 32n) | (((t >> 32n) & 0xffffn) << 16n) | 0x1000n | ((t >> 48n) & 0xfffn)).toString(16).padStart(16, '0') + h.slice(16)), '', 'The same fields in the older v1 layout.']);
     } else if (v.rfc && ver === 7) {
       var unixMs = parseInt(h.slice(0, 12), 16);
       rows.push(['Timestamp, UTC', new Date(unixMs).toISOString(), '', 'Millisecond precision.']);
@@ -367,8 +688,10 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     } else if (v.rfc && (ver === 3 || ver === 5)) {
       rows.push(['Contents', (ver === 3 ? 'MD5' : 'SHA-1') + ' hash of a namespace UUID and a name. The same inputs always give the same UUID, and the hash cannot be reversed.', 'text']);
     } else if (v.rfc && ver === 8) {
-      rows.push(['Contents', 'Apart from the version and variant bits, the layout is defined by whoever made it.', 'text']);
+      rows.push(['Contents', 'Apart from the version and variant bits, the layout is defined by whoever made it. This page’s v8 option hashes a namespace and a name with SHA-256 (RFC 9562, appendix B.2).', 'text']);
     }
+    if (NAMESPACES[h]) rows.push(['Namespace', 'This is the standard ' + NAMESPACES[h] + ' namespace for v3 and v5 UUIDs (RFC 9562, section 6.6).', 'text']);
+    rows.push(['As a ULID', toUlid(big), '', 'The same 128 bits in ULID text form.']);
     rows.push(['As an integer', big.toString(10)]);
     return rows;
   }
@@ -391,8 +714,8 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     inErr.textContent = r.error || '';
     inp.setAttribute('aria-invalid', r.error ? 'true' : 'false');
     if (r.error || r.empty) { statusText = r.error || ''; return; }
-    var rows = rowsFor(r.hex);
-    statusText = rows.filter(function (row) { return row[0] === 'Status' || row[0] === 'Version'; })
+    var rows = r.ulid ? ulidRows(r) : rowsFor(r.hex);
+    statusText = rows.filter(function (row) { return row[0] === 'Status' || row[0] === 'Version' || (r.ulid && row[0] === 'Timestamp, UTC'); })
       .map(function (row) { return (row[1].badge || row[0] + ' ' + row[1]) + '.'; }).join(' ');
     rows.forEach(function (row) {
       var tr = document.createElement('tr');
@@ -414,7 +737,7 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
         small.textContent = row[3];
         td.appendChild(small);
       }
-      tr.id = 'uu-row-' + row[0].toLowerCase().replace(/[^a-z]+/g, '-').replace(/-$/, '');
+      tr.id = 'uu-row-' + row[0].toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '');
       tr.appendChild(th);
       tr.appendChild(td);
       body.appendChild(tr);
@@ -431,7 +754,7 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     });
   });
 
-  generate();
+  generate(false).then(function () { clearTimeout(genTimer); });
   inspect();
 })();
 </script>

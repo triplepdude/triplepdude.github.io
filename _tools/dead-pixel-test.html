@@ -1,0 +1,479 @@
+---
+title: "Dead Pixel Test: Check Your Screen Online"
+description: Find dead, stuck and hot pixels with full-screen solid colours, then check backlight bleed and uniformity with gradients and a checkerboard.
+category: Device Tests
+keywords: [dead pixel test, stuck pixel test, screen test, monitor test, backlight bleed test, screen color test, dead pixel checker]
+howto: |
+  ## How to test for dead pixels
+
+  1. Wipe the screen with a dry microfibre cloth, so dust isn't mistaken for
+     a faulty pixel.
+  2. Press **Start full-screen test**. Each pattern fills the whole screen.
+  3. Step through the colours with the arrow keys or Space, or click or tap
+     the screen (the left third goes back). Press Esc to finish.
+  4. Scan the whole screen on every colour from your normal viewing
+     distance, then look closely at anything suspicious. On a dense screen a
+     magnifying glass or your phone camera's zoom helps.
+
+  The controls fade after two seconds and the mouse pointer hides, so neither
+  can be mistaken for a fault. Tick **Auto-cycle** to step through the
+  patterns by themselves; they change no faster than once a second, well
+  below the three flashes per second that accessibility guidelines treat as
+  a seizure risk. The screen is kept awake during the test where the browser
+  allows it.
+
+  ## Dead, stuck and hot pixels
+
+  Every pixel is made of red, green and blue sub-pixels, and each kind of
+  fault shows up best on a different background:
+
+  | Fault | What you see | Where to look | Fixable at home? |
+  |---|---|---|---|
+  | Dead pixel | A black dot | White and bright colours | Rarely |
+  | Stuck pixel | A red, green, blue or mixed dot | Black and the other colours | Sometimes |
+  | Hot pixel | A white dot | Black | Rarely |
+  | Dead sub-pixel | A dark dot on one colour only | Red, green and blue | Rarely |
+
+  On an LCD the result of a failed transistor depends on the panel. IPS and
+  VA panels are *normally black*, so the pixel stays dark; TN panels are
+  normally white, so it stays lit. On an OLED each sub-pixel makes its own
+  light, and a dead one is simply dark.
+
+  ## Can a stuck pixel be fixed?
+
+  A stuck sub-pixel is still wired up but frozen in one state. Running a
+  rapidly changing colour pattern over it for 10 to 30 minutes, often called
+  pixel exercising, sometimes frees it; there is no guarantee, and fast
+  flashing is unsuitable for anyone with photosensitive epilepsy. Pressing
+  gently on the spot through a soft cloth is another old trick, but pressure
+  can damage the panel, so treat it as a last resort. Dead and hot pixels
+  usually come from a failed transistor or connection and cannot be repaired
+  at home.
+
+  ## Backlight bleed and uniformity
+
+  Show **Black** in a dark room with brightness at your usual setting. Light
+  leaking in from the edges that stays put when you move your head is
+  backlight bleed. A silvery glow in the corners that changes with your
+  viewing angle is IPS glow, which is normal for IPS panels. **Grey 50%** and
+  **Dark grey 5%** reveal clouding, darker corners and tinted patches, and
+  near-black banding on OLEDs. The **gradients** should look smooth: clear
+  steps are banding, common on 6-bit panels and with some colour settings.
+  On the **checkerboard**, white squares should be equally bright everywhere
+  without glowing into their black neighbours. Phone cameras exaggerate
+  bleed, so judge with your eyes.
+
+  ## Pixel fault policies
+
+  The ISO 13406-2 standard, since replaced by ISO 9241-307 but still quoted
+  by many manufacturers, allowed a Class II panel up to 2 always-lit and 2
+  always-dark pixels plus 5 faulty sub-pixels per million pixels. A 1920 ×
+  1080 screen has about 2.1 million pixels, so a few faults could still pass.
+  Many brands publish stricter zero bright dot policies, and a retailer's
+  return window is often the simplest remedy, so test a new screen straight
+  away.
+faq:
+  - q: Does this test upload or record anything?
+    a: No. The page only draws colours in your browser. Nothing is uploaded, recorded or stored.
+  - q: How do I get out of full screen?
+    a: Press Esc, or click or tap the screen and choose Exit on the bar at the bottom. On a phone you can also use the back gesture.
+  - q: Is it a dead pixel or a speck of dust?
+    a: Dust sits on the surface, so it often looks slightly blurred, casts a faint shadow and moves or disappears when you wipe the screen. A pixel fault is perfectly sharp, stays in place, and is exactly one pixel or sub-pixel in size.
+  - q: Does it work on phones, tablets and TVs?
+    a: Yes. Tap to change colours on a touch screen. iPhones do not let web pages go full screen, so there the test fills the browser window instead. On a smart TV, open the page in its browser, or connect a computer and run it full screen.
+---
+<style>
+.dpt-stage {
+  position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 62vh; margin: 0 0 12px; overflow: hidden;
+  background: #000; border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.dpt-stage:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dpt-pattern, .dpt-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.dpt-canvas[hidden] { display: none; }
+.dpt-stage:fullscreen { width: 100vw; height: 100vh; max-height: none; aspect-ratio: auto; margin: 0; border: 0; border-radius: 0; }
+.dpt-stage:-webkit-full-screen { width: 100vw; height: 100vh; max-height: none; aspect-ratio: auto; margin: 0; border: 0; border-radius: 0; }
+/* Whatever the full-screen flavour, no border or rounded corner may hide the edge pixels. */
+.dpt-stage.is-active { border: 0; border-radius: 0; }
+.dpt-stage.is-pseudo {
+  position: fixed; inset: 0; z-index: 2147483647; width: 100vw; height: 100vh; height: 100dvh;
+  max-height: none; aspect-ratio: auto; margin: 0; border: 0; border-radius: 0;
+}
+.dpt-stage.is-active:focus-visible { outline: none; }
+.dpt-stage.is-active.is-idle, .dpt-stage.is-active.is-idle * { cursor: none; }
+html.dpt-lock, html.dpt-lock body { overflow: hidden; }
+.dpt-cta {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: calc(100% - 24px);
+  padding: 8px 14px; border: 1px solid rgb(255 255 255 / 0.4); border-radius: 999px;
+  background: rgb(17 17 17 / 0.82); color: #fff; font-size: 14px; font-weight: 600; text-align: center; pointer-events: none;
+}
+.dpt-stage.is-active .dpt-cta { display: none; }
+.dpt-cta .dpt-short { display: none; }
+@media (max-width: 560px) { .dpt-cta .dpt-long { display: none; } .dpt-cta .dpt-short { display: inline; } }
+.dpt-bar {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px;
+  max-width: calc(100% - 24px); padding: 6px; border: 1px solid rgb(255 255 255 / 0.3); border-radius: 12px;
+  background: rgb(17 17 17 / 0.85); color: #fff; font-size: 14px; line-height: 1.3;
+  opacity: 0; visibility: hidden; transition: opacity 0.2s ease, visibility 0s linear 0.2s;
+}
+.dpt-stage.is-active.show-bar .dpt-bar { opacity: 1; visibility: visible; transition: opacity 0.2s ease, visibility 0s; }
+.dpt-bar button {
+  min-width: 40px; min-height: 40px; padding: 0 10px; border: 1px solid rgb(255 255 255 / 0.35); border-radius: 8px;
+  background: transparent; color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+}
+.dpt-bar button:hover { background: rgb(255 255 255 / 0.12); }
+.dpt-note {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px); margin: 0;
+  padding: 8px 12px; border: 1px solid rgb(255 255 255 / 0.3); border-radius: 10px; background: rgb(17 17 17 / 0.85); color: #fff;
+  font-size: 14px; line-height: 1.4; text-align: center; opacity: 0; visibility: hidden; transition: opacity 0.2s ease, visibility 0s linear 0.2s;
+}
+.dpt-stage.is-pseudo.show-bar .dpt-note:not(:empty) { opacity: 1; visibility: visible; transition: opacity 0.2s ease, visibility 0s; }
+.dpt-bar-text { padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dpt-bar-text small { color: #c9ccd1; font-size: 12px; }
+.dpt-now { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 4px; }
+.dpt-now strong { font-size: 1.15rem; }
+.dpt-now span { color: var(--muted); font-size: 14px; }
+.dpt-tip { margin: 0 0 16px; min-height: 3em; }
+.dpt-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0 0 16px; }
+.dpt-sw {
+  display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.dpt-sw:hover { border-color: var(--muted); }
+.dpt-sw[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); font-weight: 600; }
+.dpt-sw i { flex: none; width: 20px; height: 20px; border: 1px solid var(--field-border); border-radius: 4px; }
+.dpt-opts { align-items: center; }
+.dpt-opts > .field { flex: 0 1 180px; }
+.dpt-keys { margin: 0 0 4px; }
+.msg.dpt-info { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
+.dpt-keys kbd { padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); font-family: var(--mono); font-size: 12px; }
+</style>
+
+<div class="dpt-stage" id="dpt-stage" tabindex="0" role="group" aria-roledescription="test screen" aria-describedby="dpt-tip">
+  <div class="dpt-pattern" id="dpt-pattern"></div>
+  <canvas class="dpt-canvas" id="dpt-canvas" hidden></canvas>
+  <p class="dpt-cta" aria-hidden="true"><span class="dpt-long">Click or press Enter for full screen</span><span class="dpt-short">Tap for full screen</span></p>
+  <div class="dpt-bar" id="dpt-bar">
+    <button type="button" tabindex="-1" id="dpt-bar-prev" aria-label="Previous pattern">&#8249;</button>
+    <span class="dpt-bar-text" id="dpt-bar-text">Black</span>
+    <button type="button" tabindex="-1" id="dpt-bar-next" aria-label="Next pattern">&#8250;</button>
+    <button type="button" tabindex="-1" id="dpt-bar-exit">Exit</button>
+  </div>
+  <p class="dpt-note" id="dpt-note" aria-hidden="true"></p>
+  <p class="visually-hidden" id="dpt-live" aria-live="polite"></p>
+</div>
+
+<p class="dpt-now"><strong id="dpt-name">Black</strong><span id="dpt-count">1 of 13</span></p>
+<p class="hint dpt-tip" id="dpt-tip"></p>
+
+<div class="actions">
+  <button class="btn" type="button" id="dpt-start">Start full-screen test</button>
+  <button class="btn secondary" type="button" id="dpt-prev" aria-label="Previous pattern">&larr; Previous</button>
+  <button class="btn secondary" type="button" id="dpt-next" aria-label="Next pattern">Next &rarr;</button>
+</div>
+<p class="msg dpt-info" id="dpt-msg" aria-live="polite"></p>
+
+<p class="label" id="dpt-sw-label">Test patterns</p>
+<div class="dpt-swatches" id="dpt-swatches" role="group" aria-labelledby="dpt-sw-label"></div>
+
+<div class="row dpt-opts">
+  <label class="check"><input type="checkbox" id="dpt-auto"> Auto-cycle patterns</label>
+  <div class="field">
+    <label for="dpt-interval">Change every</label>
+    <select id="dpt-interval">
+      <option value="1">1 second</option>
+      <option value="2">2 seconds</option>
+      <option value="3" selected>3 seconds</option>
+      <option value="5">5 seconds</option>
+      <option value="10">10 seconds</option>
+    </select>
+  </div>
+</div>
+<p class="hint dpt-keys">In full screen, click or tap the right two thirds of the screen for the next pattern and the left third to go back. Keys: <kbd>&rarr;</kbd> <kbd>&darr;</kbd> or <kbd>Space</kbd> next, <kbd>&larr;</kbd> <kbd>&uarr;</kbd> previous, <kbd>Home</kbd> / <kbd>End</kbd> first and last, <kbd>A</kbd> auto-cycle, <kbd>F</kbd> full screen, <kbd>Esc</kbd> exit.</p>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var CHECKER_SWATCH = 'repeating-conic-gradient(#000 0 25%, #fff 0 50%) 0 0 / 10px 10px';
+  var PATTERNS = [
+    { name: 'Black', bg: '#000000', tip: 'Look for lit dots: a white dot is a hot pixel, a coloured one a stuck pixel. In a dark room, check the edges for backlight bleed.' },
+    { name: 'White', bg: '#ffffff', tip: 'Look for black dots (dead pixels) and coloured dots, where one dead sub-pixel leaves the other two colours.' },
+    { name: 'Red', bg: '#ff0000', tip: 'A dark dot means a dead red sub-pixel. A yellow, magenta or white dot means another sub-pixel is stuck on.' },
+    { name: 'Green', bg: '#00ff00', tip: 'A dark dot means a dead green sub-pixel. A yellow, cyan or white dot means another sub-pixel is stuck on.' },
+    { name: 'Blue', bg: '#0000ff', tip: 'A dark dot means a dead blue sub-pixel. A magenta, cyan or white dot means another sub-pixel is stuck on.' },
+    { name: 'Cyan', bg: '#00ffff', tip: 'Red is off here, so a reddish or white dot is a stuck red sub-pixel. A pure green or blue dot means the other one is dead.' },
+    { name: 'Magenta', bg: '#ff00ff', tip: 'Green is off here, so a greenish or white dot is a stuck green sub-pixel. A pure red or blue dot means the other one is dead.' },
+    { name: 'Yellow', bg: '#ffff00', tip: 'Blue is off here, so a bluish or white dot is a stuck blue sub-pixel. A pure red or green dot means the other one is dead.' },
+    { name: 'Grey 50%', bg: '#808080', tip: 'Check uniformity: the whole screen should be one even grey, without darker corners, cloudy patches or colour tints.' },
+    { name: 'Dark grey 5%', bg: '#0d0d0d', tip: 'Near black shows clouding and uneven patches in dark scenes, and near-black banding or blotches on OLED screens.' },
+    { name: 'Grey gradient', bg: 'linear-gradient(to right, #000000, #ffffff)', tip: 'Should run smoothly from black to white. Visible stripes are banding; ends that merge into black or white mean crushed shadows or clipped highlights.' },
+    { name: 'Colour gradients', bg: 'linear-gradient(to right, #000, #fff) 0 0 / 100% 25.1% no-repeat, linear-gradient(to right, #000, #f00) 0 33.333% / 100% 25.1% no-repeat, linear-gradient(to right, #000, #0f0) 0 66.667% / 100% 25.1% no-repeat, linear-gradient(to right, #000, #00f) 0 100% / 100% 25.1% no-repeat, #000', tip: 'Each band should be smooth from black to full colour, without steps or shifts in hue.' },
+    { name: 'Checkerboard', checker: true, bg: '#000000', swatch: CHECKER_SWATCH, tip: 'White squares should look equally bright all over the screen, with no glow spilling into the black squares next to them.' }
+  ];
+  var N = PATTERNS.length;
+
+  var stage = $('#dpt-stage'), patternEl = $('#dpt-pattern'), canvas = $('#dpt-canvas');
+  var startBtn = $('#dpt-start'), autoBox = $('#dpt-auto'), intervalSel = $('#dpt-interval');
+  var msg = $('#dpt-msg'), live = $('#dpt-live');
+  var idx = 0, active = false, mode = '', autoTimer = null, barTimer = null, wakeLock = null, pending = false;
+
+  // ---- Swatches ----
+  var swatches = PATTERNS.map(function (p, i) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'dpt-sw';
+    b.setAttribute('aria-pressed', 'false');
+    var chip = document.createElement('i');
+    chip.setAttribute('aria-hidden', 'true');
+    chip.style.background = p.swatch || p.bg;
+    b.appendChild(chip);
+    b.appendChild(document.createTextNode(p.name));
+    b.addEventListener('click', function () { show(i, true); });
+    $('#dpt-swatches').appendChild(b);
+    return b;
+  });
+
+  // ---- Drawing ----
+  // The checkerboard is drawn in device pixels, so square edges stay sharp at any scaling.
+  function drawChecker() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.max(1, Math.round(stage.clientWidth * dpr)), h = Math.max(1, Math.round(stage.clientHeight * dpr));
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    var ctx = canvas.getContext('2d', { alpha: false }); // opaque: cheaper to composite
+    if (!ctx) return;
+    var cell = Math.max(2, Math.round(Math.min(w, h) / 6));
+    var cols = Math.ceil(w / cell) + 1, rows = Math.ceil(h / cell) + 1;
+    var ox = Math.floor((w - cols * cell) / 2), oy = Math.floor((h - rows * cell) / 2);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#ffffff';
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) if ((r + c) % 2 === 0) ctx.fillRect(ox + c * cell, oy + r * cell, cell, cell);
+    }
+  }
+
+  function label() { return PATTERNS[idx].name + ', ' + (idx + 1) + ' of ' + N; }
+
+  function show(i, byUser) {
+    idx = ((i % N) + N) % N;
+    var p = PATTERNS[idx];
+    patternEl.style.background = p.bg;
+    canvas.hidden = !p.checker;
+    if (p.checker) drawChecker();
+    $('#dpt-name').textContent = p.name;
+    $('#dpt-count').textContent = (idx + 1) + ' of ' + N;
+    $('#dpt-tip').textContent = p.tip;
+    swatches.forEach(function (b, j) { b.setAttribute('aria-pressed', j === idx ? 'true' : 'false'); });
+    updateBarText();
+    stage.setAttribute('aria-label', active
+      ? 'Full-screen test: ' + label() + '. Arrow keys change the pattern, Escape exits.'
+      : 'Test pattern preview: ' + label() + '. Press Enter for the full-screen test, arrow keys to change the pattern.');
+    if (byUser) {
+      live.textContent = label();
+      restartAuto();
+      if (active) showBar();
+    }
+  }
+  function next() { show(idx + 1, true); }
+  function prev() { show(idx - 1, true); }
+
+  function updateBarText() {
+    var t = $('#dpt-bar-text');
+    t.textContent = PATTERNS[idx].name + ' ';
+    var s = document.createElement('small');
+    s.textContent = (idx + 1) + '/' + N + (autoBox.checked ? ', auto' : '');
+    t.appendChild(s);
+  }
+
+  // ---- Controls bar and pointer ----
+  function showBar() {
+    stage.classList.add('show-bar');
+    stage.classList.remove('is-idle');
+    clearTimeout(barTimer);
+    barTimer = setTimeout(function () {
+      stage.classList.remove('show-bar');
+      if (active) stage.classList.add('is-idle');
+    }, 2000);
+  }
+
+  // ---- Auto-cycle ----
+  function restartAuto() {
+    clearInterval(autoTimer);
+    autoTimer = null;
+    var secs = Math.max(1, Number(intervalSel.value) || 3);
+    if (autoBox.checked) autoTimer = setInterval(function () { show(idx + 1, false); }, secs * 1000);
+    updateBarText();
+  }
+
+  // ---- Full screen ----
+  function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+
+  function activate(m) {
+    active = true;
+    mode = m;
+    pending = false;
+    stage.classList.add('is-active');
+    if (m === 'pseudo') { stage.classList.add('is-pseudo'); document.documentElement.classList.add('dpt-lock'); }
+    stage.setAttribute('role', 'application');
+    stage.focus({ preventScroll: true });
+    show(idx, false);
+    showBar();
+    lockScreen();
+  }
+
+  // Keep the display awake during a long test. The browser drops the lock
+  // whenever the tab is hidden, so it is taken again on return.
+  function noop() {}
+  function lockScreen() {
+    if (wakeLock || !navigator.wakeLock || !navigator.wakeLock.request) return;
+    navigator.wakeLock.request('screen').then(function (l) {
+      if (!active) { l.release().catch(noop); return; }
+      wakeLock = l;
+      if (l.addEventListener) l.addEventListener('release', function () { if (wakeLock === l) wakeLock = null; });
+    }, noop);
+  }
+
+  function deactivate() {
+    var hadFocus = stage.contains(document.activeElement);
+    active = false;
+    mode = '';
+    pending = false;
+    stage.classList.remove('is-active', 'is-pseudo', 'show-bar', 'is-idle');
+    document.documentElement.classList.remove('dpt-lock');
+    stage.setAttribute('role', 'group');
+    clearTimeout(barTimer);
+    if (wakeLock) { var l = wakeLock; wakeLock = null; l.release().catch(noop); }
+    show(idx, false);
+    if (hadFocus || document.activeElement === document.body) startBtn.focus();
+  }
+
+  function enterPseudo(note) {
+    msg.textContent = note;
+    $('#dpt-note').textContent = note;
+    activate('pseudo');
+  }
+
+  function fallbackNote(blocked) {
+    var touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    return (blocked ? 'Full screen was blocked' : 'Full screen is not available in this browser') +
+      ', so the test fills the browser window instead.' +
+      (touch ? ' Strips under the browser\'s own bars are not covered, so check those edges with another app or a photo viewer.'
+        : ' Press F11 (Ctrl+Cmd+F on a Mac) to hide the browser toolbars as well.');
+  }
+
+  function start() {
+    if (active || pending) return;
+    msg.textContent = '';
+    var req = stage.requestFullscreen ? 'requestFullscreen' : stage.webkitRequestFullscreen ? 'webkitRequestFullscreen' : '';
+    var allowed = document.fullscreenEnabled !== false && document.webkitFullscreenEnabled !== false;
+    if (!req || !allowed) { enterPseudo(fallbackNote(false)); return; }
+    pending = true;
+    function fail() { if (pending && !active) { pending = false; enterPseudo(fallbackNote(true)); } }
+    try {
+      var r = stage[req]({ navigationUI: 'hide' });
+      if (r && typeof r.then === 'function') r.then(null, fail);
+      // A request that neither succeeds nor fails (old WebKit returns nothing
+      // and may stay silent) must not leave the Start button dead.
+      setTimeout(function () { if (fsElement() !== stage) fail(); }, 1500);
+    } catch (e) {
+      fail();
+    }
+  }
+
+  function exit() {
+    if (!active) return;
+    if (fsElement() === stage) {
+      var ex = document.exitFullscreen || document.webkitExitFullscreen;
+      try {
+        var r = ex.call(document);
+        if (r && typeof r.then === 'function') r.then(null, deactivate);
+      } catch (e) { deactivate(); }
+    } else {
+      deactivate();
+    }
+  }
+
+  function onFsChange() {
+    if (fsElement() === stage) {
+      if (!active) activate('fs');
+      else if (mode === 'pseudo') {
+        // A slow request that succeeded after the window-filling fallback began.
+        mode = 'fs';
+        stage.classList.remove('is-pseudo');
+        document.documentElement.classList.remove('dpt-lock');
+        msg.textContent = '';
+        $('#dpt-note').textContent = '';
+      }
+    } else if (active && mode === 'fs') deactivate();
+  }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+  document.addEventListener('fullscreenerror', function () { if (pending && !active) { pending = false; enterPseudo(fallbackNote(true)); } });
+
+  // ---- Keyboard ----
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!active && document.activeElement !== stage) return;
+    var handled = true;
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowDown': case 'PageDown': case ' ': case 'Spacebar': next(); break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp': case 'Backspace': prev(); break;
+      case 'Enter': if (active) next(); else start(); break;
+      case 'Home': show(0, true); break;
+      case 'End': show(N - 1, true); break;
+      case 'Escape': case 'Esc': if (active) exit(); else handled = false; break;
+      // The page behind the test is covered, so focus stays on the test screen.
+      case 'Tab': if (active) { stage.focus({ preventScroll: true }); showBar(); } else handled = false; break;
+      case 'f': case 'F': if (active) exit(); else start(); break;
+      case 'a': case 'A':
+        autoBox.checked = !autoBox.checked;
+        restartAuto();
+        live.textContent = autoBox.checked ? 'Auto-cycle on' : 'Auto-cycle off';
+        if (active) showBar();
+        break;
+      default: handled = false;
+    }
+    if (handled) e.preventDefault();
+  });
+
+  // Focus that reaches the hidden page some other way (a screen reader, a
+  // click-through) is brought back to the test screen.
+  document.addEventListener('focusin', function (e) {
+    if (active && !stage.contains(e.target)) stage.focus({ preventScroll: true });
+  });
+
+  // ---- Pointer ----
+  stage.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('.dpt-bar')) return;
+    if (!active) { start(); return; }
+    var r = stage.getBoundingClientRect();
+    if (e.clientX - r.left < r.width / 3) prev(); else next();
+  });
+  stage.addEventListener('pointermove', function (e) {
+    if (active && e.pointerType === 'mouse' && (e.movementX || e.movementY)) showBar();
+  });
+  function barBtn(id, fn) {
+    $(id).addEventListener('click', function (e) { e.stopPropagation(); fn(); if (active) showBar(); });
+  }
+  barBtn('#dpt-bar-prev', prev);
+  barBtn('#dpt-bar-next', next);
+  barBtn('#dpt-bar-exit', exit);
+
+  // ---- Page controls ----
+  startBtn.addEventListener('click', start);
+  $('#dpt-prev').addEventListener('click', prev);
+  $('#dpt-next').addEventListener('click', next);
+  autoBox.addEventListener('change', restartAuto);
+  intervalSel.addEventListener('change', restartAuto);
+  // Redraw the checkerboard whenever the stage changes size (window resize,
+  // entering or leaving full screen, rotation).
+  var redraw = function () { if (PATTERNS[idx].checker) drawChecker(); };
+  if (window.ResizeObserver) new ResizeObserver(redraw).observe(stage);
+  else window.addEventListener('resize', TT.debounce(redraw, 50));
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && active) lockScreen(); });
+
+  show(0, false);
+})();
+</script>

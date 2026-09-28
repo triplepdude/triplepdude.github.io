@@ -72,6 +72,113 @@ function webpChunks(buf, assert) {
   return chunks;
 }
 
+// ---- ISO BMFF (ISO/IEC 14496-12 and 23008-12): boxes, items and item data ----
+function isoBoxes(buf, s = 0, e = buf.length) {
+  const out = [];
+  for (let o = s; o + 8 <= e;) {
+    let size = buf.readUInt32BE(o), h = 8;
+    if (size === 1) { size = Number(buf.readBigUInt64BE(o + 8)); h = 16; } else if (size === 0) size = e - o;
+    if (size < h || o + size > e) throw new Error(`bad box at ${o}`);
+    out.push({ type: buf.toString('latin1', o + 4, o + 8), s: o, d: o + h, e: o + size });
+    o += size;
+  }
+  return out;
+}
+function heifItems(buf) {
+  const top = isoBoxes(buf), meta = top.find(b => b.type === 'meta');
+  const kids = isoBoxes(buf, meta.d + 4, meta.e), items = {}, loc = {}, refs = [];
+  let idat = null;
+  for (const b of kids) {
+    const v = buf[b.d], p = b.d + 4;
+    if (b.type === 'iinf') {
+      const cw = v === 0 ? 2 : 4, count = cw === 2 ? buf.readUInt16BE(p) : buf.readUInt32BE(p);
+      const infes = isoBoxes(buf, p + cw, b.e);
+      if (infes.length !== count) throw new Error(`iinf count ${count} but ${infes.length} entries`);
+      for (const c of infes) {
+        const iv = buf[c.d], id = iv === 2 ? buf.readUInt16BE(c.d + 4) : buf.readUInt32BE(c.d + 4);
+        items[id] = buf.toString('latin1', c.d + (iv === 2 ? 8 : 10), c.d + (iv === 2 ? 12 : 14));
+      }
+    } else if (b.type === 'iloc') {
+      const os = buf[p] >> 4, ls = buf[p] & 15, bs = buf[p + 1] >> 4, is = v ? buf[p + 1] & 15 : 0;
+      const rd = (o, n) => (n === 0 ? 0 : n === 2 ? buf.readUInt16BE(o) : n === 4 ? buf.readUInt32BE(o) : Number(buf.readBigUInt64BE(o)));
+      let q = p + 2;
+      const count = v < 2 ? buf.readUInt16BE(q) : buf.readUInt32BE(q);
+      q += v < 2 ? 2 : 4;
+      for (let i = 0; i < count; i++) {
+        const id = v < 2 ? buf.readUInt16BE(q) : buf.readUInt32BE(q);
+        q += v < 2 ? 2 : 4;
+        let method = 0;
+        if (v) { method = buf.readUInt16BE(q) & 15; q += 2; }
+        q += 2;
+        const base = rd(q, bs); q += bs;
+        const n = buf.readUInt16BE(q); q += 2;
+        const ext = [];
+        for (let j = 0; j < n; j++) { q += is; const off = rd(q, os); q += os; const len = rd(q, ls); q += ls; ext.push([base + off, len]); }
+        loc[id] = { method, ext };
+      }
+    } else if (b.type === 'iref') {
+      for (const r of isoBoxes(buf, p, b.e)) refs.push({ type: r.type, from: buf.readUInt16BE(r.d) });
+    } else if (b.type === 'idat') idat = b;
+  }
+  const data = id => Buffer.concat(loc[id].ext.map(([o, n]) => (loc[id].method === 1 ? buf.subarray(idat.d + o, idat.d + o + n) : buf.subarray(o, o + n))));
+  return { top, items, loc, refs, data };
+}
+
+// ---- TIFF 6.0: every IFD as { tag: values } ----
+function tiffPages(buf) {
+  const le = buf.toString('latin1', 0, 2) === 'II';
+  const u16 = o => (le ? buf.readUInt16LE(o) : buf.readUInt16BE(o)), u32 = o => (le ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+  assert42(u16(2));
+  const SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1 }, pages = [];
+  for (let off = u32(4); off; off = u32(off + 2 + u16(off) * 12)) {
+    const tags = {};
+    for (let i = 0; i < u16(off); i++) {
+      const e = off + 2 + i * 12, type = u16(e + 2), n = u32(e + 4), size = SIZE[type] * n, vo = size <= 4 ? e + 8 : u32(e + 8);
+      tags[u16(e)] = type === 2 ? buf.toString('latin1', vo, vo + n - 1)
+        : Array.from({ length: type === 5 ? 1 : n }, (_, k) => (type === 3 ? u16(vo + 2 * k) : type === 4 ? u32(vo + 4 * k) : type === 5 ? u32(vo) / u32(vo + 4) : buf[vo + k]));
+    }
+    pages.push(tags);
+  }
+  return { le, pages };
+}
+function assert42(v) { if (v !== 42) throw new Error('not a TIFF'); }
+// The image data of a TIFF page: its strips or tiles, in order.
+function tiffData(buf, page) {
+  const offs = page[273] || page[324], lens = page[279] || page[325];
+  return Buffer.concat(offs.map((o, k) => buf.subarray(o, o + lens[k])));
+}
+
+// ---- GIF89a blocks ----
+function gifBlocks(buf) {
+  let o = 13 + (buf[10] & 0x80 ? 3 * (1 << ((buf[10] & 7) + 1)) : 0);
+  const out = [];
+  const subs = p => { while (buf[p]) p += buf[p] + 1; return p + 1; };
+  while (buf[o] !== 0x3b) {
+    if (buf[o] === 0x21) { const e = subs(o + 2); out.push({ kind: 'ext', label: buf[o + 1], app: buf[o + 1] === 0xff ? buf.toString('latin1', o + 3, o + 14) : '', bytes: buf.subarray(o, e) }); o = e; }
+    else if (buf[o] === 0x2c) { const f = buf[o + 9], e = subs(o + 10 + (f & 0x80 ? 3 * (1 << ((f & 7) + 1)) : 0) + 1); out.push({ kind: 'img', bytes: buf.subarray(o, e) }); o = e; }
+    else throw new Error(`bad GIF block at ${o}`);
+  }
+  return { blocks: out, end: o + 1 };
+}
+
+// ---- ZIP (APPNOTE 6.3): entries from the central directory ----
+function unzip(buf) {
+  let eocd = buf.length - 22;
+  while (buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  const n = buf.readUInt16LE(eocd + 10), out = {};
+  for (let i = 0, p = buf.readUInt32LE(eocd + 16); i < n; i++) {
+    const method = buf.readUInt16LE(p + 10), crc = buf.readUInt32LE(p + 16), csize = buf.readUInt32LE(p + 20);
+    const nlen = buf.readUInt16LE(p + 28), xlen = buf.readUInt16LE(p + 30), clen = buf.readUInt16LE(p + 32), lho = buf.readUInt32LE(p + 42);
+    const name = buf.toString('utf8', p + 46, p + 46 + nlen);
+    const start = lho + 30 + buf.readUInt16LE(lho + 26) + buf.readUInt16LE(lho + 28);
+    const raw = buf.subarray(start, start + csize), data = method === 8 ? zlib.inflateRawSync(raw) : raw;
+    if (zlib.crc32(data) !== crc) throw new Error(`CRC mismatch in ${name}`);
+    out[name] = data;
+    p += 46 + nlen + xlen + clen;
+  }
+  return out;
+}
+
 module.exports = async ({ page, open, assert, fixtures }) => {
   await open();
   const F = n => path.join(fixtures, n);
@@ -95,6 +202,16 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     return { w: bmp.width, h: bmp.height, px: pts.map(([x, y]) => Array.from(g.getImageData(x, y, 1, 1).data)) };
   }, [buf.toString('base64'), points]);
   const setMode = async v => { await page.check(`input[name="rexif-orient"][value="${v}"]`); await idle(); };
+  // HEIC and TIFF decoded by the site's shared decoder (libheif, UTIF), which is independent of
+  // the metadata rewriting under test; AVIF, GIF and the rest by the browser itself.
+  const decodeShared = (buf, points = []) => page.evaluate(async ([b64, pts]) => {
+    const d = await TTImage.decode(new Blob([Uint8Array.from(atob(b64), c => c.charCodeAt(0))]));
+    const g = d.canvas.getContext('2d');
+    const res = { w: d.width, h: d.height, px: pts.map(([x, y]) => Array.from(g.getImageData(x, y, 1, 1).data)) };
+    TTImage.release(d);
+    return res;
+  }, [buf.toString('base64'), points]);
+  const clear = async () => { await page.click('#rexif-clear'); assert.equal(await page.locator('[data-rexif-card]').count(), 0); };
 
   assert.equal(await page.isVisible('#rexif-empty'), true);
   assert.equal(await page.isVisible('#rexif-bulk'), false);
@@ -114,8 +231,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.getAttribute(`${card(0)} .rexif-gps a`, 'href'),
     `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/48.85808/2.29450`);
   let t = await table(0);
-  assert.equal(t['Location (GPS)'][0], `${lat}, ${lon} (48°51′29.1″N 2°17′40.2″E), altitude 35 m`);
+  assert.equal(t['Location (GPS)'][0], `${lat}, ${lon} (48°51′29.1″N 2°17′40.2″E)`);
   assert.equal(t['Location (GPS)'][1], 'Removed');
+  assert.equal(t.Altitude[0], '35 m above sea level');
   assert.equal(t['Date taken'][0], '2023-07-14 18:32:05 (UTC+02:00)');
   assert.equal(t.Camera[0], 'Canon EOS 80D');
   assert.equal(t.Lens[0], 'EF-S 18-135mm f/3.5-5.6 IS USM');
@@ -124,7 +242,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(t.Copyright[0], '(c) Jane Example');
   assert.equal(t.Software[0], 'Adobe Lightroom Classic 12.4');
   assert.equal(t['Last edited'][0], '2023-07-15 09:12:44');
-  assert.equal(t['Camera settings'][0], '1/250 s · f/5.6 · ISO 200 · 35 mm');
+  assert.equal(t.Exposure[0], '1/250 s · f/5.6 · ISO 200');
+  assert.equal(t['Focal length'][0], '35 mm');
   assert.deepEqual(t.Orientation, ['Rotate 90° clockwise (6)', 'Kept']);
   assert.match(t['Embedded thumbnail'][0], /preview image/);
   assert.match(t.XMP[0], /includes GPS location, made with Adobe Lightroom Classic 12\.4/);
@@ -224,15 +343,15 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   d = await download(3);
   assert.ok(d.buf.equals(fs.readFileSync(F('plain.jpg'))), 'nothing to remove: identical bytes');
 
-  // ---------- Download all ----------
-  const got = [];
-  const onDl = dl => got.push(dl.suggestedFilename());
-  page.on('download', onDl);
-  assert.equal(await page.textContent('#rexif-all'), 'Download all (4)');
-  await page.click('#rexif-all');
-  for (let i = 0; i < 60 && got.length < 4; i++) await page.waitForTimeout(100);
-  page.off('download', onDl);
-  assert.deepEqual(got.sort(), ['gps-rotated-clean.jpg', 'meta-clean.png', 'meta-clean.webp', 'plain-clean.jpg']);
+  // ---------- Download all: one ZIP ----------
+  assert.equal(await page.textContent('#rexif-all'), 'Download all as ZIP (4)');
+  const [zdl] = await Promise.all([page.waitForEvent('download'), page.click('#rexif-all')]);
+  assert.equal(zdl.suggestedFilename(), 'photos-without-metadata.zip');
+  const zip = unzip(fs.readFileSync(await zdl.path()));
+  assert.deepEqual(Object.keys(zip).sort(), ['gps-rotated-clean.jpg', 'meta-clean.png', 'meta-clean.webp', 'plain-clean.jpg']);
+  assert.ok(zip['plain-clean.jpg'].equals(fs.readFileSync(F('plain.jpg'))), 'ZIP entry matches the single download');
+  assert.deepEqual(webpChunks(zip['meta-clean.webp'], assert).map(c => c.type), ['VP8X', 'ICCP', 'VP8 ']);
+  assert.match(await page.textContent('#rexif-status'), /Downloaded a ZIP with 4 cleaned files/);
 
   // ---------- Bad input ----------
   const png = fs.readFileSync(F('meta.png'));
@@ -242,8 +361,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     { name: 'cut.png', mimeType: 'image/png', buffer: png.subarray(0, 300) },
   ]);
   await idle();
-  assert.match(await page.textContent(`${card(4)} .rexif-err`), /not a JPEG, PNG or WebP/);
-  assert.match(await page.textContent(`${card(5)} .rexif-err`), /HEIC/);
+  assert.match(await page.textContent(`${card(4)} .rexif-err`), /not a JPEG, PNG, WebP, HEIC, AVIF, TIFF or GIF image/);
+  assert.match(await page.textContent(`${card(5)} .rexif-err`), /This HEIC file has no image data/);
   assert.match(await page.textContent(`${card(6)} .rexif-err`), /damaged or truncated/);
   assert.equal(await page.locator(`${card(4)} [data-rexif-dl]`).count(), 0);
   assert.match(await page.textContent('#rexif-error'), /3 files could not be cleaned/);
@@ -278,7 +397,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   t = await table(0);
   const leLat = (-(33 + 51 / 60 + 54.5 / 3600)).toFixed(6), leLon = (-(151 + 12 / 60 + 36 / 3600)).toFixed(6);
   assert.equal(leLat, '-33.865139');
-  assert.equal(t['Location (GPS)'][0], `${leLat}, ${leLon} (33°51′54.5″S 151°12′36.0″W), altitude -12.5 m`);
+  assert.equal(t['Location (GPS)'][0], `${leLat}, ${leLon} (33°51′54.5″S 151°12′36.0″W)`);
+  assert.equal(t.Altitude[0], '12.5 m below sea level', 'AltitudeRef 1');
   assert.equal(t.Camera[0], 'NIKON CORPORATION');
   assert.deepEqual(t.Orientation, ['Rotate 270° clockwise (8)', 'Kept']);
   d = await download(0);
@@ -363,4 +483,248 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.isVisible('#rexif-empty'), false);
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Download cleaned sample-photo.jpg',
     'the sample hands focus to its Download button');
+
+  // ---------- HEIC: Exif and XMP items removed without re-encoding ----------
+  // gps.heic (pillow-heif): item 1 hvc1, item 2 Exif (GPS 51°30'26.35"N 0°7'39.6"W, alt 21.5 m,
+  // direction 212.75° true, iPhone 15 Pro, 1/120 s f/1.78 ISO 64, 6.765 mm = 24 mm), item 3 mime XMP.
+  await clear();
+  await page.setInputFiles('#rexif-file', [F('gps.heic'), F('rot6.heic'), F('gps.avif')]);
+  await idle();
+  t = await table(0);
+  const hLat = (51 + 30 / 60 + 26.35 / 3600).toFixed(6), hLon = (-(7 / 60 + 39.6 / 3600)).toFixed(6);
+  // 26.35 s is a rounding tie; converted to decimal degrees and back it is 26.34999…, so 26.3.
+  assert.equal(t['Location (GPS)'][0], `${hLat}, ${hLon} (51°30′26.3″N 0°7′39.6″W)`);
+  assert.equal(t.Altitude[0], '21.5 m above sea level');
+  assert.equal(t.Direction[0], 'Facing 213° (true north)');
+  assert.equal(t['Date taken'][0], '2024-03-09 10:15:42 (UTC+01:00)');
+  assert.equal(t.Camera[0], 'Apple iPhone 15 Pro');
+  assert.equal(t.Lens[0], 'Apple iPhone 15 Pro back triple camera 6.765mm f/1.78');
+  assert.equal(t.Exposure[0], '1/120 s · f/1.8 · ISO 64');
+  assert.equal(t['Focal length'][0], '6.8 mm (24 mm in 35 mm film terms)');
+  assert.match(t.XMP[0], /includes GPS location, made with Photos 9\.0/);
+  assert.match(await page.textContent(`${card(0)} .rexif-name .hint`), /^HEIC · 96 × 64 px/);
+  d = await download(0);
+  assert.equal(d.name, 'gps-clean.heic');
+  const hOrig = fs.readFileSync(F('gps.heic'));
+  let hi = heifItems(d.buf);
+  const ho = heifItems(hOrig);
+  assert.deepEqual(ho.items, { 1: 'hvc1', 2: 'Exif', 3: 'mime' }, 'the fixture has Exif and XMP items');
+  assert.deepEqual(hi.items, { 1: 'hvc1' }, 'only the image item is left');
+  assert.deepEqual(Object.keys(hi.loc), ['1']);
+  assert.deepEqual(hi.refs, [], 'no cdsc references to removed items');
+  assert.deepEqual(hi.top.map(b => b.type), ['ftyp', 'meta', 'free', 'mdat']);
+  assert.equal(d.buf.length, hOrig.length, 'same size: the free box replaces the removed entries');
+  assert.ok(hi.data(1).equals(ho.data(1)), 'the HEVC image data is byte-identical');
+  assert.equal(hi.loc[1].ext[0][0], ho.loc[1].ext[0][0], 'and at the same offset');
+  assert.ok(!d.buf.includes(ho.data(2)) && !d.buf.includes(ho.data(3)), 'the Exif and XMP bytes are gone');
+  for (const str of ['iPhone', 'Apple', 'rdf:RDF', 'GPSLatitude', 'Photos 9.0']) assert.equal(d.buf.includes(str), false, `"${str}" is gone`);
+  const hPts = [[10, 10], [80, 10], [10, 55], [80, 55]];
+  const hA = await decodeShared(hOrig, hPts), hB = await decodeShared(d.buf, hPts);
+  assert.deepEqual(hB, hA, 'decodes to the same pixels');
+  assert.ok(near(hB.px[0], [230, 30, 30]) && near(hB.px[3], [240, 220, 40]), `quadrants ${JSON.stringify(hB.px)}`);
+  await page.waitForSelector(`${card(0)}[data-thumb="ready"]`);
+
+  // Orientation lives in the HEIF irot property, which stays, so the photo is still upright.
+  t = await table(1);
+  assert.deepEqual(t.Orientation, ['Rotate 90° clockwise (6)', 'Removed']);
+  assert.match(await page.textContent(`${card(1)} .rexif-note`), /keeps its own rotation setting/);
+  d = await download(1);
+  const r6o = fs.readFileSync(F('rot6.heic'));
+  hi = heifItems(d.buf);
+  assert.deepEqual(hi.items, { 1: 'hvc1' });
+  const r6a = await decodeShared(r6o, [[5, 5], [60, 5]]), r6b = await decodeShared(d.buf, [[5, 5], [60, 5]]);
+  assert.deepEqual([r6b.w, r6b.h], [64, 96], 'still rotated by irot');
+  assert.deepEqual(r6b, r6a);
+  assert.ok(near(r6b.px[1], [230, 30, 30]), `stored top-left red block is now top-right: ${r6b.px[1]}`);
+
+  // ---------- HEIC with a grid of tiles (grid descriptor in idat), a second image with its own Exif ----------
+  await page.setInputFiles('#rexif-file', F('multi.heic'));
+  await idle();
+  t = await table(3);
+  assert.equal(t['Location (GPS)'][0], '-33.850000, 151.200000 (33°51′0.0″S 151°12′0.0″E)');
+  d = await download(3);
+  const mOrig = fs.readFileSync(F('multi.heic')), mo = heifItems(mOrig), mc = heifItems(d.buf);
+  assert.deepEqual(Object.values(mo.items).filter(x => x !== 'hvc1'), ['grid', 'Exif', 'mime', 'Exif']);
+  assert.deepEqual(Object.values(mc.items).filter(x => x !== 'hvc1'), ['grid'], 'both images lose their Exif, the XMP goes');
+  assert.equal(Object.keys(mc.items).length, Object.keys(mo.items).length - 3);
+  assert.deepEqual(mc.refs.map(r => r.type), ['dimg'], 'the grid still lists its tiles');
+  for (const id of Object.keys(mc.items)) assert.ok(mc.data(id).equals(mo.data(id)), `item ${id} data unchanged`);
+  for (const str of ['Apple', 'SecondCam', 'rdf']) assert.equal(d.buf.includes(str), false, `"${str}" is gone`);
+  const mPts = [[20, 20], [300, 200], [590, 390]];
+  assert.deepEqual(await decodeShared(d.buf, mPts), await decodeShared(mOrig, mPts));
+
+  // ---------- AVIF: same container; the browser decodes it ----------
+  t = await table(2);
+  assert.equal(t['Location (GPS)'][0], `${hLat}, ${hLon} (51°30′26.3″N 0°7′39.6″W)`);
+  d = await download(2);
+  assert.equal(d.name, 'gps-clean.avif');
+  const aOrig = fs.readFileSync(F('gps.avif'));
+  hi = heifItems(d.buf);
+  assert.deepEqual(hi.items, { 1: 'av01' });
+  assert.ok(hi.data(1).equals(heifItems(aOrig).data(1)), 'AV1 data byte-identical');
+  assert.equal(d.buf.includes('iPhone'), false);
+  assert.deepEqual(await decode(d.buf, hPts), await decode(aOrig, hPts));
+
+  // ---------- TIFF: rebuilt with only the image tags, every page kept ----------
+  await clear();
+  await page.setInputFiles('#rexif-file', [F('meta.tif'), F('tiled-o8.tif')]);
+  await idle();
+  t = await table(0);
+  assert.equal(t['Location (GPS)'][0], '35.660000, 139.740000 (35°39′36.0″N 139°44′24.0″E)');
+  assert.equal(t['Date taken'][0], '2024-04-02 14:21:09 (UTC+09:00)');
+  assert.equal(t.Camera[0], 'FUJIFILM X-T5');
+  assert.equal(t.Lens[0], 'XF23mmF1.4 R LM WR');
+  assert.equal(t.Exposure[0], '1/250 s · f/5.6 · ISO 400');
+  assert.equal(t['Focal length'][0], '23 mm (35 mm in 35 mm film terms)');
+  assert.equal(t['Serial number'][0], 'camera 5C123456');
+  assert.equal(t['Computer name'][0], 'KENJI-MACBOOK');
+  assert.equal(t.Description[0], 'Cherry blossoms at the park');
+  assert.match(t.IPTC[0], /By-line: Kenji Sato; City: Tokyo/);
+  assert.equal(t['Text: Page 2 software'][0], 'Capture One 23');
+  assert.match(await page.textContent(`${card(0)} .rexif-note`), /2 pages/);
+  d = await download(0);
+  assert.equal(d.name, 'meta-clean.tif');
+  const tOrig = fs.readFileSync(F('meta.tif')), tp = tiffPages(d.buf), to = tiffPages(tOrig);
+  assert.equal(tp.le, true, 'byte order kept');
+  assert.equal(tp.pages.length, 2);
+  assert.deepEqual(Object.keys(tp.pages[0]).map(Number), [256, 257, 258, 259, 262, 273, 277, 278, 279, 282, 283, 284, 296]);
+  assert.deepEqual(Object.keys(tp.pages[1]).map(Number), [254, 256, 257, 258, 259, 262, 273, 277, 278, 279, 297]);
+  assert.ok(tiffData(d.buf, tp.pages[0]).equals(tiffData(tOrig, to.pages[0])), 'strips byte-identical');
+  assert.ok(tiffData(d.buf, tp.pages[1]).equals(tiffData(tOrig, to.pages[1])), 'second page too');
+  for (const str of ['FUJIFILM', 'Kenji', 'KENJI', 'Capture One', 'xmpmeta', 'Tokyo', 'Cherry']) assert.equal(d.buf.includes(str), false, `"${str}" is gone`);
+  const tPts = [[5, 5], [30, 5], [5, 20], [30, 20]];
+  assert.deepEqual(await decodeShared(d.buf, tPts), await decodeShared(tOrig, tPts));
+  await page.waitForSelector(`${card(0)}[data-thumb="ready"]`);
+
+  // Big-endian, tiled, RGBA, orientation 8: the tag is kept (default), tiles relocated.
+  t = await table(1);
+  assert.deepEqual(t.Orientation, ['Rotate 270° clockwise (8)', 'Kept']);
+  assert.equal(t['Owner / author'][0], 'Ana Lopez');
+  d = await download(1);
+  const oOrig = fs.readFileSync(F('tiled-o8.tif')), op = tiffPages(d.buf), oo = tiffPages(oOrig);
+  assert.equal(op.le, false);
+  assert.deepEqual(Object.keys(op.pages[0]).map(Number), [256, 257, 258, 259, 262, 274, 277, 282, 283, 284, 296, 322, 323, 324, 325, 338]);
+  assert.deepEqual(op.pages[0][274], [8]);
+  assert.ok(tiffData(d.buf, op.pages[0]).equals(tiffData(oOrig, oo.pages[0])), 'tiles byte-identical');
+  // Independently (Pillow, ImageOps.exif_transpose): upright 32 x 48, red at (4, 40), transparent at (25, 3).
+  const oPts = [[4, 40], [4, 5], [25, 3]];
+  let ob = await decodeShared(d.buf, oPts);
+  assert.deepEqual([ob.w, ob.h], [32, 48]);
+  assert.ok(near(ob.px[0], [230, 30, 30]) && near(ob.px[1], [40, 90, 210]) && ob.px[2][3] === 0, JSON.stringify(ob.px));
+
+  // Rotate the pixels: a TIFF comes out as an upright PNG.
+  await setMode('bake');
+  t = await table(1);
+  assert.equal(t.Orientation[1], 'Applied to pixels');
+  assert.match(await page.textContent(`${card(1)} .rexif-note`), /re-encoded the photo as PNG/);
+  d = await download(1);
+  assert.equal(d.name, 'tiled-o8-clean.png');
+  assert.deepEqual(pngChunks(d.buf, assert).map(c => c.type).filter(x => x !== 'IDAT'), ['IHDR', 'IEND']);
+  ob = await decode(d.buf, oPts);
+  assert.deepEqual([ob.w, ob.h], [32, 48]);
+  assert.ok(near(ob.px[0], [230, 30, 30]) && ob.px[2][3] === 0, JSON.stringify(ob.px));
+  // A TIFF without the tag stays a lossless TIFF in this mode.
+  assert.equal((await download(0)).name, 'meta-clean.tif');
+  await setMode('strip');
+  d = await download(1);
+  assert.equal(tiffPages(d.buf).pages[0][274], undefined, 'orientation removed too');
+  await setMode('keep');
+
+  // ---------- GIF: comment, XMP, IPTC and trailing data removed, both frames kept ----------
+  await clear();
+  await page.setInputFiles('#rexif-file', F('meta.gif'));
+  await idle();
+  t = await table(0);
+  assert.equal(t.Comment[0], 'Taken at 12 Rue de Rivoli, Paris by Marie');
+  assert.match(t.XMP[0], /includes GPS location, made with Adobe Photoshop 25\.0/);
+  assert.match(t.IPTC[0], /By-line: Marie/);
+  assert.match(t['Data after the image'][0], /^29 bytes/);
+  assert.match(await page.textContent(`${card(0)} .rexif-gps`), /GPS coordinates in its XMP/);
+  d = await download(0);
+  const gOrig = fs.readFileSync(F('meta.gif')), gb = gifBlocks(d.buf), go = gifBlocks(gOrig);
+  assert.equal(gb.end, d.buf.length, 'ends at the trailer');
+  assert.deepEqual(gb.blocks.map(b => b.kind === 'img' ? 'img' : b.label.toString(16) + (b.app ? ':' + b.app : '')),
+    ['ff:NETSCAPE2.0', 'f9', 'img', 'f9', 'img'], 'loop count, timing and frames only');
+  assert.deepEqual(gb.blocks.filter(b => b.kind === 'img').map(b => b.bytes.toString('hex')), go.blocks.filter(b => b.kind === 'img').map(b => b.bytes.toString('hex')));
+  assert.ok(d.buf.subarray(0, 13).equals(gOrig.subarray(0, 13)));
+  for (const str of ['Rivoli', 'Marie', 'XMP', 'Photoshop', 'extra bytes']) assert.equal(d.buf.includes(str), false, `"${str}" is gone`);
+  img = await decode(d.buf, [[3, 3], [20, 3]]);
+  assert.deepEqual([img.w, img.h], [24, 16]);
+  assert.ok(near(img.px[0], [230, 30, 30]) && near(img.px[1], [40, 90, 210]), JSON.stringify(img.px));
+
+  // ---------- Multi-page TIFF: each page keeps its own orientation ----------
+  // pages.tif: two 30x20 pages, Artist on both, Orientation 6 on page 1 and 3 on page 2.
+  await clear();
+  await page.setInputFiles('#rexif-file', F('pages.tif'));
+  await idle();
+  d = await download(0);
+  let pp = tiffPages(d.buf).pages;
+  assert.equal(pp.length, 2);
+  assert.deepEqual([pp[0][274], pp[1][274]], [[6], [3]], 'page 2 keeps 3, not page 1\'s 6');
+  assert.equal(pp[0][315] === undefined && pp[1][315] === undefined, true, 'Artist removed from both pages');
+  const pOrig = tiffPages(fs.readFileSync(F('pages.tif')));
+  assert.ok(tiffData(d.buf, pp[1]).equals(tiffData(fs.readFileSync(F('pages.tif')), pOrig.pages[1])));
+  // "Rotate the pixels" would make a one-page PNG, so a multi-page TIFF keeps its tags instead.
+  await setMode('bake');
+  d = await download(0);
+  assert.equal(d.name, 'pages-clean.tif');
+  pp = tiffPages(d.buf).pages;
+  assert.deepEqual([pp.length, pp[0][274], pp[1][274]], [2, [6], [3]]);
+  assert.match(await page.textContent(card(0)), /one-page PNG, so each page keeps its own orientation tag/);
+  await setMode('strip');
+  pp = tiffPages((await download(0)).buf).pages;
+  assert.deepEqual([pp[0][274], pp[1][274]], [undefined, undefined]);
+  await setMode('keep');
+
+  // ---------- Crafted files that list millions of entries are refused quickly ----------
+  // TIFF: 1,000 overlapping directories of 65,520 tags each in 790 KB (65 million tags).
+  const N = 0xFFF0, bomb = Buffer.alloc(8 + 2 + N * 12 + 4 * 1001 + 16);
+  bomb.write('II*\0', 0, 'latin1');
+  bomb.writeUInt32LE(8, 4);
+  for (let k = 0; k < 1000; k++) {
+    bomb.writeUInt16LE(N, 8 + 4 * k);
+    bomb.writeUInt32LE(k < 999 ? 12 + 4 * k : 0, 8 + 2 + N * 12 + 4 * k);
+  }
+  // HEIC: an iloc box of 12,000 items, each claiming 65,535 zero-byte extents (786 million).
+  const box = (t, p) => { const h = Buffer.alloc(8); h.writeUInt32BE(8 + p.length); h.write(t, 4, 'latin1'); return Buffer.concat([h, p]); };
+  const fbox = (t, v, p) => box(t, Buffer.concat([Buffer.from([v, 0, 0, 0]), p]));
+  const u16 = (...v) => { const b = Buffer.alloc(2 * v.length); v.forEach((x, i) => b.writeUInt16BE(x, 2 * i)); return b; };
+  const ents = Buffer.concat(Array.from({ length: 12000 }, (_, i) => u16(i + 1, 0, 0, 65535)));
+  const heicBomb = Buffer.concat([
+    box('ftyp', Buffer.from('heic\0\0\0\0mif1heic', 'latin1')),
+    fbox('meta', 0, Buffer.concat([
+      fbox('hdlr', 0, Buffer.concat([Buffer.alloc(4), Buffer.from('pict'), Buffer.alloc(13)])),
+      fbox('pitm', 0, u16(1)),
+      fbox('iinf', 0, Buffer.concat([u16(1), fbox('infe', 2, Buffer.concat([u16(1, 0), Buffer.from('hvc1\0', 'latin1')]))])),
+      fbox('iloc', 1, Buffer.concat([Buffer.from([0, 0]), u16(12000), ents]))
+    ])),
+    box('mdat', Buffer.alloc(16))
+  ]);
+  const t1 = Date.now();
+  await clear();
+  await page.setInputFiles('#rexif-file', [
+    { name: 'bomb.tif', mimeType: 'image/tiff', buffer: bomb },
+    { name: 'bomb.heic', mimeType: 'image/heic', buffer: heicBomb }
+  ]);
+  await idle();
+  assert.ok(Date.now() - t1 < 5000, `crafted files refused in ${Date.now() - t1} ms`);
+  assert.match(await page.textContent(`${card(0)} .rexif-err`), /tag directories are far too large/);
+  assert.match(await page.textContent(`${card(1)} .rexif-err`), /HEIC file is damaged: its item list cannot be read/);
+
+  // ---------- A photo dropped anywhere on the page is cleaned, instead of the browser opening it ----------
+  await clear();
+  const dropped = await page.evaluate(async b64 => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], 'dropped.jpg', { type: 'image/jpeg' }));
+    const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(over);
+    const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(ev);
+    return over.defaultPrevented && ev.defaultPrevented;
+  }, fs.readFileSync(F('gps-rotated.jpg')).toString('base64'));
+  assert.equal(dropped, true);
+  await page.waitForSelector(`${card(0)} [data-rexif-dl]`);
+  await idle();
+  assert.equal(await page.textContent(`${card(0)} strong`), 'dropped.jpg');
+  assert.ok((await table(0))['Location (GPS)']);
 };

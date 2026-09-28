@@ -1,0 +1,680 @@
+---
+title: Morse Code Translator with Audio
+description: "Morse code translator: text to Morse and Morse to text, with audio at any WPM, Farnsworth spacing, a flashing light and WAV download. ITU standard."
+category: Text
+keywords: [morse code translator, morse code, text to morse code, morse code to english, morse code audio, morse code alphabet, sos in morse code, morse code wav]
+howto: |
+  ## How to use the Morse code translator
+
+  Type in either box. Text turns into Morse code as you type, and Morse code
+  typed or pasted into the right-hand box turns back into text. Press **Play**
+  to hear it, tick **Flash a light** to see it, and use **Download WAV** to
+  save the sound. Click any character in the chart to hear it on its own.
+  Speed, tone, separators and dot and dash symbols are all adjustable.
+
+  ## Writing Morse code by hand
+
+  Use `.` for a dot and `-` for a dash (`·` `•` `−` `▬` and `_` work too). Put one space
+  between letters and `/` or `|` between words; a gap of two or more spaces also
+  counts as a word break, and line breaks are kept. Letters and words need
+  different separators, so picking one that clashes changes the other. Codes that are not Morse
+  show as `#`. Prosigns, which are sent as one signal without letter gaps, go
+  in angle brackets: `<SOS>`, `<AR>`, `<SK>`.
+
+  ## Timing and words per minute
+
+  | Element | Length |
+  |---|---|
+  | Dot (dit) | 1 unit |
+  | Dash (dah) | 3 units |
+  | Gap inside a character | 1 unit |
+  | Gap between letters | 3 units |
+  | Gap between words | 7 units |
+
+  Speed is measured with the word PARIS, which takes exactly 50 units including
+  the gap after it. At *w* words per minute one unit therefore lasts
+  1200 ÷ *w* milliseconds: 60 ms at 20 WPM, 100 ms at 12 WPM. The timing line
+  under the controls shows every length for your settings.
+
+  ## Farnsworth spacing
+
+  Farnsworth timing sends each character at the full character speed but
+  stretches the gaps between letters and words, so the overall speed is lower.
+  Learners hear every letter as a rhythm instead of counting dots. The page
+  uses the formula from the ARRL's Farnsworth timing standard. With character
+  speed *c* and overall speed *s*, the gaps in each 50-unit word add up to
+  (60*c* − 37.2*s*) ÷ (*s* × *c*) seconds: 3/19 of that for each of the four
+  gaps between letters and 7/19 for the gap between words. At 20 WPM
+  characters and 10 WPM overall, a letter gap is 654 ms and a word gap
+  1,525 ms.
+
+  ## The ITU standard and extras
+
+  The code follows ITU-R M.1677-1: the letters A to Z plus É, the digits, and
+  the signs `. , : ? ' - / ( ) " = + × @`. It also defines service signals, which
+  the translator writes as prosigns: understood `...-.` `<SN>`, error
+  `........` `<HH>`, wait `.-...` `<AS>`, end of work `...-.-` `<SK>`, and
+  starting signal `-.-.-` `<KA>`. The ITU has no code for % or ‰: they are
+  sent as 0/0 and 0/00, joined to a number by a hyphen, so 2% becomes 2-0/0
+  rather than 20/0. A fraction such as ½ is sent as 1/2, also joined by a
+  hyphen (4½ becomes 4-1/2). The minute sign ′ is an apostrophe and the second
+  sign ″ two apostrophes, and the multiplication sign × is the same code as X.
+
+  Signs such as `! & ; $ _` and letters like Ä, Ñ, Ö and Ü are not in the ITU
+  standard but are widely used; they are marked with an asterisk in the chart.
+  Untick **Common non-ITU signs** to leave them out. Æ and Ø share the codes
+  of Ä and Ö, or become AE and O when those signs are off. Other accented
+  letters are sent as their base letter, so ô becomes O, and ß and Œ become
+  SS and OE.
+
+  ## SOS
+
+  The distress signal is sent as one continuous sequence, `...---...`, with no
+  gaps between the letters. Type `<SOS>` to get that form. Typing SOS gives the
+  three separate letters `... --- ...`, which any listener will still recognize.
+faq:
+  - q: Is my text uploaded anywhere?
+    a: No. The translation, the audio and the WAV file are all made in your browser, and nothing is sent to a server or stored.
+  - q: What is SOS in Morse code?
+    a: Three dots, three dashes and three dots, sent without gaps between the letters as ...---... It is a single signal, not an abbreviation.
+  - q: How long is a dot at 20 WPM?
+    a: 60 milliseconds. One unit lasts 1200 divided by the speed in words per minute, a dash is three units, and the gap between words is seven units, or 420 ms at 20 WPM.
+  - q: Why can't I hear anything?
+    a: Check the volume slider and your device volume. On an iPhone or iPad, silent mode can also mute sound from web pages, so turn it off and press Play again.
+  - q: What format is the WAV download?
+    a: A mono 16-bit PCM WAV file at 22,050 samples per second. Each tone fades in and out over 5 ms, which prevents the clicks a hard on-off keyed tone would make.
+---
+<style>
+.mc-boxes { margin-bottom: 4px; gap: 0 16px; }
+.mc-boxes textarea { min-height: 150px; }
+#mc-morse { font-size: 17px; letter-spacing: 0.06em; }
+.mc-h { margin: 24px 0 12px; font-size: 1.1rem; }
+.mc-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+.mc-row > .field { flex: 1 1 150px; }
+.mc-vol { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.mc-vol output { min-width: 3.5ch; font-variant-numeric: tabular-nums; }
+.mc-player { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 0 0 16px; }
+.mc-light { flex: 0 0 auto; width: 56px; height: 56px; border-radius: 50%; border: 2px solid var(--field-border); background: var(--surface-2); }
+.mc-light.mc-on { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.mc-now { min-width: 9rem; margin: 0; font-family: var(--mono); font-size: 1.25rem; line-height: 1.3; }
+.mc-now b { font-family: system-ui, sans-serif; font-size: 1.6rem; margin-right: 10px; }
+.mc-timing { margin: 0 0 16px; }
+.mc-chart-group { margin: 0 0 12px; }
+.mc-chart-group h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); font-weight: 600; }
+.mc-chart { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mc-cell { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; width: 100%; min-height: 40px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+.mc-cell:hover { border-color: var(--accent); }
+.mc-cell .mc-ch { font-weight: 700; }
+.mc-cell .mc-code { font-family: var(--mono); font-size: 14px; letter-spacing: 0.04em; white-space: nowrap; }
+.mc-cell .mc-lab { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+.mc-chart.mc-pro { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.tool-page:has(#mc-morse) .prose code { white-space: nowrap; }
+@media (max-width: 480px) { .mc-chart { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); } }
+</style>
+
+<div class="cols mc-boxes">
+  <div class="field">
+    <label for="mc-text">Text</label>
+    <textarea id="mc-text" rows="6" spellcheck="false" aria-describedby="mc-msg">SOS</textarea>
+  </div>
+  <div class="field">
+    <label for="mc-morse">Morse code</label>
+    <textarea id="mc-morse" rows="6" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="mc-msg"></textarea>
+  </div>
+</div>
+<p class="msg error" id="mc-msg" role="status"></p>
+<div class="actions">
+  <button class="btn secondary small" type="button" data-copy-target="#mc-text">Copy text</button>
+  <button class="btn secondary small" type="button" id="mc-copy-morse">Copy Morse</button>
+  <button class="btn secondary small" type="button" id="mc-clear">Clear</button>
+</div>
+
+<div class="row mc-row">
+  <div class="field">
+    <label for="mc-lsep">Between letters</label>
+    <select id="mc-lsep">
+      <option value="space" selected>Space</option>
+      <option value="slash">Slash (/)</option>
+      <option value="pipe">Pipe (|)</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="mc-wsep">Between words</label>
+    <select id="mc-wsep">
+      <option value="slash" selected>Slash ( / )</option>
+      <option value="pipe">Pipe ( | )</option>
+      <option value="spaces">Three spaces</option>
+      <option value="dslash">Double slash ( // )</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="mc-sym">Dot and dash</label>
+    <select id="mc-sym">
+      <option value="ascii" selected>. and -</option>
+      <option value="bullet">• and ▬</option>
+      <option value="under">· and _</option>
+    </select>
+  </div>
+</div>
+<div class="checks">
+  <label class="check"><input type="checkbox" id="mc-ext" checked> Common non-ITU signs (! &amp; ; $ _ Ä Ñ Ö Ü)</label>
+</div>
+
+<hr class="mc-sep">
+<h2 class="mc-h">Sound and light</h2>
+<div class="row mc-row">
+  <div class="field">
+    <label for="mc-wpm">Character speed (WPM)</label>
+    <input type="number" id="mc-wpm" min="5" max="60" step="1" value="20" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label for="mc-fwpm">Farnsworth speed (WPM)</label>
+    <input type="number" id="mc-fwpm" min="3" max="60" step="1" value="20" inputmode="numeric" aria-describedby="mc-fw-hint">
+  </div>
+  <div class="field">
+    <label for="mc-freq">Tone (Hz)</label>
+    <input type="number" id="mc-freq" min="200" max="1500" step="10" value="600" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label for="mc-vol">Volume</label>
+    <div class="mc-vol"><input type="range" id="mc-vol" min="0" max="100" step="5" value="60"><output id="mc-vol-out" for="mc-vol">60%</output></div>
+  </div>
+</div>
+<p class="hint" id="mc-fw-hint">Set the Farnsworth speed lower than the character speed to add space between letters and words.</p>
+<p class="msg error" id="mc-set-msg" role="status"></p>
+<p class="hint mc-timing" id="mc-timing"></p>
+<div class="checks">
+  <label class="check"><input type="checkbox" id="mc-flash" checked> Flash a light</label>
+</div>
+<p class="hint" id="mc-motion" hidden>Flashing starts off because your device is set to reduce motion.</p>
+<div class="mc-player">
+  <button class="btn" type="button" id="mc-play">Play</button>
+  <button class="btn secondary" type="button" id="mc-wav">Download WAV</button>
+  <div class="mc-light" id="mc-light" aria-hidden="true"></div>
+  <p class="mc-now" id="mc-now" aria-hidden="true"></p>
+</div>
+
+<hr class="mc-sep">
+<h2 class="mc-h">Morse code chart</h2>
+<p class="hint">Click a character to hear it. * marks signs that are not in the ITU standard.</p>
+<div id="mc-charts"></div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+
+  // ---------- Code table (ITU-R M.1677-1, plus marked extensions) ----------
+  var ITU = [
+    ['A', '.-'], ['B', '-...'], ['C', '-.-.'], ['D', '-..'], ['E', '.'], ['F', '..-.'], ['G', '--.'], ['H', '....'], ['I', '..'],
+    ['J', '.---'], ['K', '-.-'], ['L', '.-..'], ['M', '--'], ['N', '-.'], ['O', '---'], ['P', '.--.'], ['Q', '--.-'], ['R', '.-.'],
+    ['S', '...'], ['T', '-'], ['U', '..-'], ['V', '...-'], ['W', '.--'], ['X', '-..-'], ['Y', '-.--'], ['Z', '--..'], ['É', '..-..'],
+    ['1', '.----'], ['2', '..---'], ['3', '...--'], ['4', '....-'], ['5', '.....'], ['6', '-....'], ['7', '--...'], ['8', '---..'], ['9', '----.'], ['0', '-----'],
+    ['.', '.-.-.-'], [',', '--..--'], [':', '---...'], ['?', '..--..'], ["'", '.----.'], ['-', '-....-'], ['/', '-..-.'], ['(', '-.--.'],
+    [')', '-.--.-'], ['"', '.-..-.'], ['=', '-...-'], ['+', '.-.-.'], ['×', '-..-'], ['@', '.--.-.']
+  ];
+  var EXT = [
+    ['!', '-.-.--'], ['&', '.-...'], [';', '-.-.-.'], ['$', '...-..-'], ['_', '..--.-'],
+    ['Ä', '.-.-'], ['À', '.--.-'], ['Å', '.--.-'], ['Ç', '-.-..'], ['È', '.-..-'], ['Ñ', '--.--'], ['Ö', '---.'], ['Ü', '..--'],
+    ['Æ', '.-.-'], ['Ø', '---.']
+  ];
+  // Service signals (ITU) and SOS, decoded to prosign notation.
+  var PROSIGNS = [
+    ['<SOS>', '...---...', 'Distress'], ['<SN>', '...-.', 'Understood'], ['<HH>', '........', 'Error'], ['<AS>', '.-...', 'Wait'],
+    ['<SK>', '...-.-', 'End of work'], ['<KA>', '-.-.-', 'Starting signal'], ['<AR>', '.-.-.', 'End of message (+)'], ['<BT>', '-...-', 'Break (=)']
+  ];
+  // ITU-R M.1677-1 3.5.1: the minute sign is sent as an apostrophe, the second sign as two.
+  var ALIASES = { '’': "'", '‘': "'", '`': "'", '´': "'", '′': "'", '″': "''", '“': '"', '”': '"', '„': '"', '«': '"', '»': '"', '–': '-', '—': '-', '‐': '-', '‑': '-', '−': '-', '÷': ':', '[': '(', ']': ')', '{': '(', '}': ')' };
+  // Letters with no decomposition into a base letter, for when there is no code of their own.
+  var FOLD = { 'ẞ': 'SS', 'Æ': 'AE', 'Œ': 'OE', 'Ø': 'O', 'Đ': 'D', 'Ð': 'D', 'Ł': 'L', 'Þ': 'TH', 'Ħ': 'H', 'Ŧ': 'T', 'Ŋ': 'N' };
+  var ENC = {}, ENC_EXT = {}, DEC = {}, DEC_EXT = {};
+  ITU.forEach(function (p) { ENC[p[0]] = p[1]; if (!DEC[p[1]]) DEC[p[1]] = p[0]; });
+  EXT.forEach(function (p) { ENC_EXT[p[0]] = p[1]; if (!DEC_EXT[p[1]]) DEC_EXT[p[1]] = p[0]; });
+  var DEC_PRO = {};
+  PROSIGNS.forEach(function (p) { DEC_PRO[p[1]] = p[0]; });
+
+  var textBox = $('#mc-text'), morseBox = $('#mc-morse'), msg = $('#mc-msg');
+  var lsepSel = $('#mc-lsep'), wsepSel = $('#mc-wsep'), symSel = $('#mc-sym'), extBox = $('#mc-ext');
+  // Dot and dash characters. The box shows "-" as a non-breaking hyphen
+  // (U+2011, which looks the same) so a long code never wraps in the middle;
+  // copying turns it back into "-". The other sets never break either.
+  var SYMBOLS = { ascii: ['.', '\u2011'], bullet: ['•', '▬'], under: ['·', '_'] };
+
+  var LSEP = { space: ' ', slash: '/', pipe: '|' }, WSEP = { slash: ' / ', pipe: ' | ', spaces: '   ', dslash: ' // ' };
+  function lsep() { return LSEP[lsepSel.value] || ' '; }
+  function wsep() { return WSEP[wsepSel.value] || ' / '; }
+  function sepsValid() { var lt = lsep().trim(); return !lt || lt !== wsep().trim(); }
+
+  // ---------- Text -> Morse ----------
+  function one(c, ext) { return ENC[c] || (ext && ENC_EXT[c]) || null; }
+  // The codes for one typed character: its own code, else what it stands for
+  // (ß -> SS, ô -> O, ﬁ -> FI, ² -> 2, Ĳ -> IJ, Æ -> AE), or null.
+  function codesFor(ch, ext) {
+    var up = ch.toUpperCase(), c = one(up, ext);
+    if (c) return [c];
+    if (ALIASES[ch]) return Array.from(ALIASES[ch]).map(function (a) { return ENC[a]; });
+    var tries = [up, up.normalize('NFKD').replace(/\p{M}+/gu, '')];
+    tries.push(Array.from(tries[1]).map(function (x) { return FOLD[x] || x; }).join(''));
+    for (var i = 0; i < tries.length; i++) {
+      var codes = Array.from(tries[i]).map(function (x) { return one(x, ext); });
+      if (codes.length && codes.every(Boolean)) return codes;
+    }
+    return null;
+  }
+  // ½ -> 1/2 (a vulgar fraction decomposes to digits around U+2044 FRACTION SLASH).
+  function fractionOf(ch) {
+    var d = ch.normalize('NFKD');
+    return /^\d+\u2044\d+$/.test(d) ? d.replace('\u2044', '/') : null;
+  }
+  // Returns lines of words of codes (codes use . and -), plus unsupported characters.
+  function textToCodes(text, ext) {
+    var bad = [], lines = [];
+    text.split(/\r\n|\r|\n/).forEach(function (line) {
+      var words = [], word = [];
+      var i = 0, afterFigure = false; // the previous character in this word was a figure or a fraction
+      while (i < line.length) {
+        var pro = line.charAt(i) === '<' && /^<([A-Za-z0-9]{2,12})>/.exec(line.slice(i, i + 14));
+        if (pro) {
+          var codes = Array.from(pro[1].toUpperCase()).map(function (c) { return ENC[c]; });
+          if (codes.every(Boolean)) { word.push(codes.join('')); i += pro[0].length; afterFigure = false; continue; }
+        }
+        var ch = String.fromCodePoint(line.codePointAt(i));
+        i += ch.length;
+        if (/\s/.test(ch)) { if (word.length) { words.push(word); word = []; } afterFigure = false; continue; }
+        // ITU-R M.1677-1 3.3: % is sent as 0/0 and ‰ as 0/00, joined to a number
+        // before them by a hyphen (2% -> 2-0/0, not 20/0). 4.3: a fraction is
+        // joined to a whole number the same way (4½ -> 4-1/2).
+        var frac = fractionOf(ch);
+        if (ch === '%' || ch === '‰' || frac) {
+          if (afterFigure) word.push(ENC['-']);
+          Array.from(frac || (ch === '%' ? '0/0' : '0/00')).forEach(function (c) { word.push(ENC[c]); });
+          afterFigure = !!frac;
+          continue;
+        }
+        var cs = codesFor(ch, ext);
+        afterFigure = /^\d$/.test(ch);
+        if (cs) { Array.prototype.push.apply(word, cs); continue; }
+        if (bad.indexOf(ch) < 0) bad.push(ch);
+      }
+      if (word.length) words.push(word);
+      lines.push(words);
+    });
+    return { lines: lines, bad: bad };
+  }
+  function formatCodes(lines) {
+    var sym = SYMBOLS[symSel.value] || SYMBOLS.ascii, dot = sym[0], dash = sym[1];
+    return lines.map(function (words) {
+      return words.map(function (w) { return w.join(lsep()); }).join(wsep());
+    }).join('\n').replace(/[.-]/g, function (c) { return c === '.' ? dot : dash; });
+  }
+
+  // ---------- Morse -> text ----------
+  function normalizeSymbols(s) {
+    return s.replace(/[·•∙⋅‧∘]/g, '.').replace(/[\u2010\u2011−–—‒_▬━﹣－]/g, '-');
+  }
+  // Copies of the Morse box get plain hyphens back (see SYMBOLS).
+  function plainMorse(s) { return s.replace(/\u2011/g, '-'); }
+  ['copy', 'cut'].forEach(function (type) {
+    morseBox.addEventListener(type, function (e) {
+      var a = morseBox.selectionStart, b = morseBox.selectionEnd, sel = morseBox.value.slice(a, b);
+      if (!e.clipboardData || sel.indexOf('\u2011') < 0) return;
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', plainMorse(sel));
+      if (type === 'cut') { morseBox.setRangeText('', a, b, 'end'); fromMorse(); }
+    });
+  });
+  $('#mc-copy-morse').addEventListener('click', function () { TT.copy(plainMorse(morseBox.value), this); });
+  // Parses Morse into lines of words of codes; lists codes and other characters it can't read.
+  function parseMorse(src) {
+    var lt = lsep().trim(), wt = wsep().trim();
+    var stray = [], lines = [];
+    normalizeSymbols(src).split(/\r\n|\r|\n/).forEach(function (line) {
+      var words = [], word = [], re = /[.-]+/g, m, last = 0;
+      function gap(g, edge) {
+        var other = g.replace(/[\s\/|]/g, '');
+        if (other) Array.from(other).forEach(function (c) { if (stray.indexOf(c) < 0) stray.push(c); });
+        if (edge) return;
+        var isWord = (wt && wt !== lt && g.indexOf(wt) >= 0) ||
+          (/\//.test(g) && lt !== '/') || (/\|/.test(g) && lt !== '|') ||
+          /^\s{2,}$/.test(g);
+        if (isWord && word.length) { words.push(word); word = []; }
+      }
+      while ((m = re.exec(line)) !== null) {
+        gap(line.slice(last, m.index), last === 0);
+        word.push(m[0]);
+        last = re.lastIndex;
+      }
+      gap(line.slice(last), true);
+      if (word.length) words.push(word);
+      lines.push(words);
+    });
+    return { lines: lines, stray: stray };
+  }
+  function decodeCode(code, ext) {
+    return DEC[code] || (ext && DEC_EXT[code]) || DEC_PRO[code] || null;
+  }
+
+  // ---------- Two-way sync ----------
+  var source = 'text';
+  function showMsg(parts) { msg.textContent = parts.filter(Boolean).join(' '); }
+  function fromText() {
+    source = 'text';
+    if (!sepsValid()) { showMsg(['Choose different separators for letters and words.']); return; }
+    var r = textToCodes(textBox.value, extBox.checked);
+    morseBox.value = formatCodes(r.lines);
+    showMsg([r.bad.length ? 'No Morse code for ' + r.bad.map(function (c) { return '“' + c + '”'; }).join(', ') + ', so ' + (r.bad.length === 1 ? 'it was' : 'they were') + ' left out.' : '']);
+    updateTiming();
+  }
+  function fromMorse() {
+    source = 'morse';
+    if (!sepsValid()) { showMsg(['Choose different separators for letters and words.']); return; }
+    var p = parseMorse(morseBox.value), ext = extBox.checked, unknown = [];
+    textBox.value = p.lines.map(function (words) {
+      return words.map(function (w) {
+        return w.map(function (c) {
+          var ch = decodeCode(c, ext);
+          if (!ch && unknown.indexOf(c) < 0) unknown.push(c);
+          return ch || '#';
+        }).join('');
+      }).join(' ');
+    }).join('\n');
+    showMsg([
+      unknown.length ? (unknown.length === 1 ? 'This is not a Morse character, shown as #: ' : 'These are not Morse characters, shown as #: ') + unknown.join('  ') + '.' : '',
+      p.stray.length ? 'Morse code uses only dots, dashes, spaces, / and |, so ' + p.stray.slice(0, 8).map(function (c) { return '“' + c + '”'; }).join(', ') + ' ' + (p.stray.length === 1 ? 'was' : 'were') + ' ignored.' : ''
+    ]);
+    updateTiming();
+  }
+  // Very long text is translated after a short pause instead of on every keystroke.
+  var fromTextLater = TT.debounce(fromText, 150), fromMorseLater = TT.debounce(fromMorse, 150);
+  textBox.addEventListener('input', function () { if (textBox.value.length > 20000) fromTextLater(); else fromText(); });
+  morseBox.addEventListener('input', function () { if (morseBox.value.length > 80000) fromMorseLater(); else fromMorse(); });
+  // Letters and words need different separators: picking one that clashes
+  // moves the other select to a free choice instead of showing an error.
+  lsepSel.addEventListener('change', function () {
+    if (!sepsValid()) {
+      wsepSel.value = lsepSel.value === 'slash' ? 'dslash' : 'slash';
+      TT.announce('Words are now separated by ' + wsepSel.options[wsepSel.selectedIndex].text);
+    }
+    reformat();
+  });
+  wsepSel.addEventListener('change', function () {
+    if (!sepsValid()) {
+      lsepSel.value = 'space';
+      TT.announce('Letters are now separated by a space');
+    }
+    reformat();
+  });
+  symSel.addEventListener('change', reformat);
+  // Morse typed by hand is read again with or without the non-ITU signs;
+  // re-encoding the text would drop the codes it can no longer write.
+  extBox.addEventListener('change', function () { if (source === 'morse') fromMorse(); else fromText(); });
+  function reformat() {
+    // Reformat the Morse from the text, unless the Morse typed by hand has
+    // unreadable codes that the text can't reproduce.
+    if (source === 'morse' && /#/.test(textBox.value)) fromMorse(); else fromText();
+  }
+  $('#mc-clear').addEventListener('click', function () {
+    stop();
+    textBox.value = '';
+    morseBox.value = '';
+    fromText();
+    textBox.focus();
+  });
+
+  // ---------- Timing ----------
+  var wpmIn = $('#mc-wpm'), fwIn = $('#mc-fwpm'), freqIn = $('#mc-freq'), volIn = $('#mc-vol'), setMsg = $('#mc-set-msg');
+  function readInt(el, lo, hi) {
+    var v = String(el.value).trim();
+    if (!/^\d+(\.\d+)?$/.test(v)) return null;
+    var n = +v;
+    return n >= lo && n <= hi ? n : null;
+  }
+  function settings() {
+    var wpm = readInt(wpmIn, 5, 60), fw = readInt(fwIn, 3, 60), freq = readInt(freqIn, 200, 1500);
+    var err = wpm === null ? 'Character speed must be 5 to 60 WPM.' : fw === null ? 'Farnsworth speed must be 3 to 60 WPM.' : freq === null ? 'Tone must be 200 to 1500 Hz.' : '';
+    if (err) return { error: err };
+    var unit = 1.2 / wpm, s = Math.min(fw, wpm), letterGap = 3 * unit, wordGap = 7 * unit;
+    if (s < wpm) {
+      // ARRL Farnsworth timing: extra delay per word, split 3/19 per letter gap, 7/19 per word gap.
+      var ta = (60 * wpm - 37.2 * s) / (s * wpm);
+      letterGap = 3 * ta / 19;
+      wordGap = 7 * ta / 19;
+    }
+    return { wpm: wpm, fw: s, fwCapped: fw > wpm, unit: unit, letterGap: letterGap, wordGap: wordGap, freq: freq, volume: +volIn.value / 100 };
+  }
+  // Tone intervals (seconds from the first tone) and the characters they belong to.
+  function timeline(lines, st) {
+    var tones = [], chars = [], t = 0, first = true;
+    lines.forEach(function (words) {
+      words.forEach(function (w) {
+        if (!first) t += st.wordGap;
+        w.forEach(function (code, ci) {
+          if (ci) t += st.letterGap;
+          var c0 = t;
+          for (var k = 0; k < code.length; k++) {
+            if (k) t += st.unit;
+            var d = code[k] === '.' ? st.unit : 3 * st.unit;
+            tones.push([t, t + d]);
+            t += d;
+          }
+          chars.push({ t0: c0, t1: t, code: code });
+        });
+        first = false;
+      });
+    });
+    return { tones: tones, chars: chars, length: t };
+  }
+  function ms(x) { return Math.round(x * 1000).toLocaleString('en-US') + ' ms'; }
+  // Rounded before splitting into minutes, so 7,199.8 s reads "120 min 0 s", not "119 min 60 s".
+  function secs(x) {
+    if (x < 59.95) return (Math.round(x * 10) / 10) + ' s';
+    var t = Math.round(x);
+    return Math.floor(t / 60) + ' min ' + (t % 60) + ' s';
+  }
+  function currentLines() { return parseMorse(morseBox.value).lines; }
+  function updateTiming() {
+    var st = settings();
+    setMsg.textContent = st.error || '';
+    $('#mc-play').disabled = !!st.error && !playing;
+    $('#mc-wav').disabled = !!st.error;
+    if (st.error) { $('#mc-timing').textContent = ''; return; }
+    var tl = timeline(currentLines(), st);
+    $('#mc-timing').textContent = 'Dot ' + ms(st.unit) + ' · dash ' + ms(3 * st.unit) + ' · letter gap ' + ms(st.letterGap) +
+      ' · word gap ' + ms(st.wordGap) + ' · length ' + secs(tl.length) + (st.fwCapped ? ' · Farnsworth speed capped at ' + st.wpm + ' WPM' : '');
+  }
+  // While the Farnsworth speed equals the character speed (no extra spacing),
+  // it follows the character speed.
+  var lastWpm = wpmIn.value;
+  wpmIn.addEventListener('input', function () {
+    if (fwIn.value === lastWpm && readInt(wpmIn, 5, 60) !== null) fwIn.value = wpmIn.value;
+    if (readInt(wpmIn, 5, 60) !== null) lastWpm = wpmIn.value;
+    updateTiming();
+  });
+  [fwIn, freqIn].forEach(function (el) { el.addEventListener('input', updateTiming); });
+  // The timing line changes with every letter typed, so it is not a live
+  // region; a speed change is announced once typing in the field pauses.
+  var announceTiming = TT.debounce(function () {
+    var st = settings();
+    if (!st.error) TT.announce('Dot ' + ms(st.unit) + ', letter gap ' + ms(st.letterGap) + ', word gap ' + ms(st.wordGap));
+  }, 800);
+  [wpmIn, fwIn].forEach(function (el) { el.addEventListener('input', announceTiming); });
+  volIn.addEventListener('input', function () {
+    $('#mc-vol-out').textContent = volIn.value + '%';
+    if (master) master.gain.setTargetAtTime(+volIn.value / 100 * 0.8, ctx.currentTime, 0.01);
+  });
+
+  // ---------- Audio ----------
+  var RATE = 22050, LEAD = 0.1, MAX_SECONDS = 20 * 60;
+  function ramp(unit) { return Math.min(0.005, unit / 4); }
+  var ctx = null, master = null, osc = null, env = null, playing = false, startAt = 0, current = null, raf = 0, token = 0;
+  var light = $('#mc-light'), now = $('#mc-now'), playBtn = $('#mc-play');
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) { $('#mc-flash').checked = false; $('#mc-motion').hidden = false; }
+
+  function stop() {
+    token++; // cancels a start that is still waiting for the audio clock
+    if (osc) { try { osc.onended = null; osc.stop(); } catch (e) { /* already stopped */ } osc.disconnect(); osc = null; }
+    if (env) { env.disconnect(); env = null; }
+    playing = false;
+    cancelAnimationFrame(raf);
+    light.classList.remove('mc-on');
+    now.textContent = '';
+    playBtn.textContent = 'Play';
+    updateTiming();
+  }
+  function play(lines, label) {
+    var st = settings();
+    if (st.error) { setMsg.textContent = st.error; return; }
+    var tl = timeline(lines, st);
+    if (!tl.tones.length) { setMsg.textContent = 'There is no Morse code to play yet.'; return; }
+    if (tl.length > MAX_SECONDS) { setMsg.textContent = 'That would play for ' + secs(tl.length) + '. Shorten the text or raise the speed (20 minutes at most).'; return; }
+    stop();
+    try {
+      if (!ctx) {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        master = ctx.createGain();
+        master.connect(ctx.destination);
+      }
+    } catch (e) { setMsg.textContent = 'This browser cannot play sound.'; return; }
+    if (ctx.state === 'suspended') {
+      // Schedule only once the audio clock runs, or the first tones are lost.
+      var mine = token;
+      ctx.resume().then(function () { if (mine === token) start(tl, st, label); }, function () { setMsg.textContent = 'This browser cannot play sound.'; });
+      return;
+    }
+    start(tl, st, label);
+  }
+  function start(tl, st, label) {
+    master.gain.value = st.volume * 0.8;
+    env = ctx.createGain();
+    env.gain.value = 0;
+    env.connect(master);
+    osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = st.freq;
+    osc.connect(env);
+    var r = ramp(st.unit), t0 = ctx.currentTime + 0.08;
+    tl.tones.forEach(function (tn) {
+      var a = t0 + tn[0], b = t0 + tn[1];
+      env.gain.setValueAtTime(0, a);
+      env.gain.linearRampToValueAtTime(1, a + r);
+      env.gain.setValueAtTime(1, b - r);
+      env.gain.linearRampToValueAtTime(0, b);
+    });
+    osc.start(t0);
+    osc.stop(t0 + tl.length + 0.05);
+    var mine = osc;
+    osc.onended = function () { if (osc === mine) { stop(); TT.announce('Finished playing'); } };
+    playing = true;
+    startAt = t0;
+    current = tl;
+    playBtn.textContent = 'Stop';
+    playBtn.disabled = false;
+    TT.announce('Playing ' + (label || 'Morse code') + ', ' + secs(tl.length));
+    var lastChar = -1, flashBox = $('#mc-flash');
+    (function frame() {
+      if (!playing) return;
+      var t = ctx.currentTime - startAt;
+      var on = false, tones = current.tones, lo = 0, hi = tones.length - 1;
+      while (lo <= hi) { var mid = (lo + hi) >> 1; if (tones[mid][1] <= t) lo = mid + 1; else if (tones[mid][0] > t) hi = mid - 1; else { on = true; break; } }
+      light.classList.toggle('mc-on', flashBox.checked && on); // ticking or unticking takes effect at once
+      var ci = -1, chars = current.chars;
+      for (var i = lastChar < 0 ? 0 : lastChar; i < chars.length && chars[i].t0 <= t; i++) ci = i;
+      if (ci !== lastChar && ci >= 0) {
+        lastChar = ci;
+        var c = chars[ci];
+        now.textContent = '';
+        var b = document.createElement('b');
+        b.textContent = decodeCode(c.code, extBox.checked) || '#';
+        now.appendChild(b);
+        now.appendChild(document.createTextNode(formatCodes([[[c.code]]])));
+      }
+      raf = requestAnimationFrame(frame);
+    })();
+  }
+  playBtn.addEventListener('click', function () {
+    if (playing) { stop(); TT.announce('Stopped'); return; }
+    play(currentLines());
+  });
+
+  // ---------- WAV ----------
+  function renderWav(lines) {
+    var st = settings();
+    if (st.error) return { error: st.error };
+    var tl = timeline(lines, st);
+    if (!tl.tones.length) return { error: 'There is no Morse code to save yet.' };
+    if (tl.length > MAX_SECONDS) return { error: 'That would be ' + secs(tl.length) + ' long. Shorten the text or raise the speed (20 minutes at most).' };
+    var total = Math.round((LEAD + tl.length + LEAD) * RATE);
+    var bytes = new ArrayBuffer(44 + total * 2), pcm = new Int16Array(bytes, 44, total), amp = Math.round(32767 * 0.8 * Math.max(0, Math.min(1, st.volume)));
+    // Every dot (and every dash) is the same waveform, so build each once.
+    function tone(dur) {
+      var n = Math.round(dur * RATE), rs = Math.max(1, Math.round(ramp(st.unit) * RATE)), buf = new Int16Array(n);
+      for (var i = 0; i < n; i++) {
+        var e = i < rs ? 0.5 - 0.5 * Math.cos(Math.PI * i / rs) : i >= n - rs ? 0.5 - 0.5 * Math.cos(Math.PI * (n - i) / rs) : 1;
+        buf[i] = Math.round(amp * e * Math.sin(2 * Math.PI * st.freq * i / RATE));
+      }
+      return buf;
+    }
+    var dot = tone(st.unit), dash = tone(3 * st.unit);
+    tl.tones.forEach(function (tn) {
+      var buf = tn[1] - tn[0] > 2 * st.unit ? dash : dot, at = Math.round((LEAD + tn[0]) * RATE);
+      pcm.set(buf.subarray(0, Math.max(0, Math.min(buf.length, total - at))), at);
+    });
+    var v = new DataView(bytes);
+    function str(o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); }
+    str(0, 'RIFF'); v.setUint32(4, 36 + total * 2, true); str(8, 'WAVE');
+    str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, total * 2, true);
+    return { blob: new Blob([bytes], { type: 'audio/wav' }) };
+  }
+  $('#mc-wav').addEventListener('click', function () {
+    var r = renderWav(currentLines());
+    if (r.error) { setMsg.textContent = r.error; return; }
+    setMsg.textContent = '';
+    var name = textBox.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    TT.download('morse-' + (name || 'code') + '.wav', r.blob);
+    TT.flash(this, 'Saved');
+  });
+
+  // ---------- Chart ----------
+  function cell(ch, code, label, nonItu) {
+    var li = document.createElement('li'), b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mc-cell';
+    var spoken = code.replace(/\./g, 'dot ').replace(/-/g, 'dash ').trim();
+    b.setAttribute('aria-label', 'Play ' + (label ? label + ' ' : '') + ch + (nonItu ? ' (not ITU)' : '') + ': ' + spoken);
+    var c = document.createElement('span');
+    c.className = 'mc-ch';
+    c.textContent = ch + (nonItu ? '*' : '');
+    if (label) { var l = document.createElement('span'); l.className = 'mc-lab'; l.textContent = label; c.appendChild(l); }
+    var k = document.createElement('span');
+    k.className = 'mc-code';
+    k.textContent = code;
+    b.appendChild(c);
+    b.appendChild(k);
+    b.addEventListener('click', function () { play([[[code]]], ch); });
+    li.appendChild(b);
+    return li;
+  }
+  function group(title, rows, cls) {
+    var wrap = document.createElement('div'), h = document.createElement('h3'), ul = document.createElement('ul');
+    wrap.className = 'mc-chart-group';
+    h.textContent = title;
+    ul.className = 'mc-chart' + (cls ? ' ' + cls : '');
+    rows.forEach(function (r) { ul.appendChild(r); });
+    wrap.appendChild(h);
+    wrap.appendChild(ul);
+    return wrap;
+  }
+  var charts = $('#mc-charts');
+  charts.appendChild(group('Letters', ITU.slice(0, 27).map(function (p) { return cell(p[0], p[1]); })));
+  charts.appendChild(group('Digits', ITU.slice(27, 37).map(function (p) { return cell(p[0], p[1]); })));
+  charts.appendChild(group('Punctuation', ITU.slice(37).map(function (p) { return cell(p[0], p[1]); })
+    .concat(EXT.slice(0, 5).map(function (p) { return cell(p[0], p[1], '', true); }))));
+  charts.appendChild(group('Prosigns and service signals', PROSIGNS.map(function (p) { return cell(p[0], p[1], p[2]); }), 'mc-pro'));
+  charts.appendChild(group('Other letters', EXT.slice(5).map(function (p) { return cell(p[0], p[1], '', true); })));
+
+  fromText();
+})();
+</script>

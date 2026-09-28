@@ -1,6 +1,6 @@
 ---
 title: "Webcam Test: Check Your Camera Online"
-description: Test your webcam online with a live preview, real resolution, frame rate, aspect ratio and measured FPS. Switch cameras and save PNG snapshots.
+description: Test your webcam online with a live preview, real resolution and measured FPS, a check of supported resolutions, test clips and PNG snapshots.
 category: Device Tests
 keywords: [webcam test, camera test, test my webcam, webcam resolution test, webcam fps test, online camera test, webcam mirror]
 howto: |
@@ -10,8 +10,10 @@ howto: |
      **Start**. Allow camera access when the browser asks.
   2. The preview appears with the delivered resolution and frame rate in the
      corner. The figures below it update every half second.
-  3. Press **Take snapshot** to capture a full-resolution still, then
-     **Download PNG** to save it.
+  3. **Take snapshot** saves a full-resolution PNG. **Record clip** captures
+     5, 10 or 30 seconds, with sound if you tick **Include microphone**, to
+     play back and download (WebM, or MP4 where the browser cannot record
+     WebM).
   4. Press **Stop** to release the camera. The webcam light should go out a
      moment later; if it stays on, another app or tab is still using it.
 
@@ -23,13 +25,12 @@ howto: |
   **Resolution**, **Frame rate** and **Aspect ratio** come from
   `MediaStreamTrack.getSettings()`, which reports the mode the camera is
   actually running in, not the maximum printed on the box. **Measured FPS**
-  counts the frames the page really displays, using
-  `requestVideoFrameCallback` where the browser supports it. If it is well
-  below the reported rate, the camera is dropping frames. The usual cause is
-  low light: auto-exposure lengthens each exposure, and a 1/15 s exposure
-  cannot deliver more than 15 frames per second. **Brightness** is the
-  average luma of the picture from 0 to 100%. A near-zero value with the
-  camera running usually means a closed privacy shutter or a covered lens.
+  counts the frames the page really displays. If it is well below the
+  reported rate, the camera is dropping frames, usually because of low light:
+  auto-exposure lengthens each exposure, and a 1/15 s exposure cannot deliver
+  more than 15 frames per second. **Brightness** is the average luma of the
+  picture from 0 to 100%; near zero usually means a closed privacy shutter or
+  a covered lens.
 
   | Resolution | Common name | Aspect | MP |
   |---|---|---|---|
@@ -40,27 +41,27 @@ howto: |
   | 3840 × 2160 | 4K UHD | 16:9 | 8.29 |
   {: .data .wct-gt}
 
-  ## Why you may not get the resolution you picked
+  ## Which resolutions your camera supports
 
   The resolution and frame rate menus send *ideal* constraints, as defined in
-  the W3C Media Capture and Streams specification. The browser then chooses
-  the closest mode the camera supports instead of failing, and the page shows
-  what you really got. Common reasons for a lower result: the camera tops out
-  lower, a USB 2.0 connection lacks the bandwidth for high resolutions at
-  high frame rates, or another app already has the camera open in a
-  different mode. Chrome can also crop and scale frames to reach a requested
-  size; the **Resize mode** row shows `crop-and-scale` when that happened.
-  The **Maximum resolution** row lists the largest size the camera reports
-  it can deliver, where the browser exposes it.
+  the W3C Media Capture and Streams specification, so the browser picks the
+  closest mode the camera offers instead of failing. **Test resolutions** is
+  stricter: it asks for each size in the table exactly. A size the camera
+  delivers itself counts as supported; one that Chrome can only reach by
+  cropping and scaling a larger mode is reported as scaled, because it holds
+  no more detail than that larger picture shrunk. Lower results than you
+  expect usually mean the camera tops out lower, a USB 2.0 link lacks the
+  bandwidth for high resolutions at high frame rates, or another app has the
+  camera open in a different mode. **Camera capabilities** lists what the
+  browser says the camera can adjust, such as focus or exposure ranges; many
+  webcams report only size and frame rate.
 
-  ## Mirroring and snapshots
+  ## Mirroring, snapshots and clips
 
-  The preview is mirrored by default, so moving your right hand moves the
-  image on the right, as in a bathroom mirror. Most call apps mirror only
-  your self-view and send the unmirrored picture to others. Snapshots follow
-  the preview: with **Mirror** on they are saved mirrored, with it off they
-  match what other people see. Snapshots are saved at the camera's full
-  delivered resolution as lossless PNG files.
+  The preview is mirrored by default, like a bathroom mirror. Most call apps
+  mirror only your self-view and send the unmirrored picture to others.
+  Snapshots follow the **Mirror** setting; recorded clips are never mirrored,
+  so they show what other people see.
 
   ## If the camera will not start
 
@@ -72,8 +73,8 @@ howto: |
     Close video call apps, OBS and other tabs.
   - **Not secure:** cameras only work on https pages and on localhost.
 faq:
-  - q: Is my video recorded or uploaded?
-    a: No. The camera feed goes straight from your device to the video element on this page. Nothing is recorded or sent anywhere, and snapshots stay in your browser until you choose Download PNG.
+  - q: Is my video uploaded anywhere?
+    a: No. The camera feed goes straight from your device to the video element on this page. Test clips and snapshots are made in your browser and stay in the page's memory until you download them or close the tab. Nothing is sent anywhere.
   - q: Why is my webcam picture mirrored?
     a: The preview is flipped horizontally so it behaves like a mirror, which feels natural when you look at yourself. Untick Mirror to see the picture the way other people see it in a call.
   - q: Why is the measured frame rate lower than my camera's rating?
@@ -104,7 +105,15 @@ faq:
 .wct-row-btns { display: flex; gap: 10px; }
 .wct-h { margin: 24px 0 10px; font-size: 1.05rem; }
 .wct-snap { display: block; width: auto; max-width: 100%; max-height: 360px; margin: 0 0 10px; border: 1px solid var(--border); border-radius: 8px; }
-#wct-snap-wrap[hidden], #wct-fullscreen[hidden] { display: none; }
+#wct-snap-wrap[hidden], #wct-fullscreen[hidden], #wct-clip-wrap[hidden], #wct-probe-wrap[hidden], #wct-caps-wrap[hidden] { display: none; }
+.wct-clip { display: block; width: 100%; max-width: 560px; max-height: 360px; margin: 0 0 10px; background: #000; border-radius: 8px; }
+.wct-rec-row > .field { flex: 0 1 220px; }
+.wct-rec-row .check { min-height: 44px; }
+.wct-progress { height: 6px; margin: 0 0 10px; overflow: hidden; background: var(--surface-2); border-radius: 3px; }
+.wct-progress div { width: 0; height: 100%; background: var(--danger); }
+table.data td.wct-ok { color: var(--accent); font-weight: 600; }
+.btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+table.data td.wct-no { color: var(--muted); }
 </style>
 
 <div class="row">
@@ -173,10 +182,59 @@ faq:
   </div>
 </div>
 
+<h2 class="wct-h">Record a test clip</h2>
+<div class="row wct-rec-row">
+  <div class="field">
+    <label for="wct-rec-len">Clip length</label>
+    <select id="wct-rec-len">
+      <option value="5" selected>5 seconds</option>
+      <option value="10">10 seconds</option>
+      <option value="30">30 seconds</option>
+    </select>
+  </div>
+  <label class="check"><input type="checkbox" id="wct-rec-mic"> Include microphone</label>
+  <button class="btn" type="button" id="wct-rec" disabled>Record clip</button>
+</div>
+<div class="wct-progress" aria-hidden="true"><div id="wct-rec-bar"></div></div>
+<p class="hint" id="wct-rec-time" hidden></p>
+<p class="hint" id="wct-rec-status" aria-live="polite">Start the camera to record a short clip. Clips are not mirrored: they show what other people see.</p>
+<div id="wct-clip-wrap" hidden>
+  <video class="wct-clip" id="wct-clip" controls playsinline aria-label="Recorded clip"></video>
+  <div class="actions">
+    <button class="btn secondary" type="button" id="wct-clip-dl">Download clip</button>
+  </div>
+</div>
+
+<h2 class="wct-h">Resolution check</h2>
+<p class="hint">Asks the camera for each common resolution in turn and reports which ones it really supports. The preview flickers while it runs.</p>
+<div class="actions">
+  <button class="btn secondary" type="button" id="wct-probe" disabled>Test resolutions</button>
+</div>
+<p class="msg error" id="wct-probe-msg"></p>
+<div id="wct-probe-wrap" hidden>
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th scope="col">Resolution</th><th scope="col">Result</th><th scope="col">Best frame rate</th></tr></thead>
+      <tbody id="wct-probe-table"></tbody>
+    </table>
+  </div>
+</div>
+
 <div id="wct-details-wrap" hidden>
   <h2 class="wct-h">Camera details</h2>
   <div class="table-wrap">
     <table class="data"><tbody id="wct-details"></tbody></table>
+  </div>
+</div>
+
+<div id="wct-caps-wrap" hidden>
+  <h2 class="wct-h">Camera capabilities</h2>
+  <p class="hint">What the browser reports the camera can do (<code>getCapabilities()</code>), next to the current setting.</p>
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th scope="col">Capability</th><th scope="col">Supported</th><th scope="col">Current</th></tr></thead>
+      <tbody id="wct-caps"></tbody>
+    </table>
   </div>
 </div>
 
@@ -189,7 +247,11 @@ faq:
   const video = $('#wct-video'), stage = $('#wct-stage'), mirror = $('#wct-mirror');
   const errEl = $('#wct-error'), okEl = $('#wct-status');
   const canvas = $('#wct-canvas');
-  const st = { stream: null, starting: false, pending: false, gen: 0, timer: 0, vfc: 0, samples: [], frames: 0, darkSince: 0, darkWarned: false, lastQ: null, snapName: '', focusPending: false };
+  const st = { stream: null, starting: false, pending: false, gen: 0, timer: 0, vfc: 0, samples: [], frames: 0, darkSince: 0, darkWarned: false, lastQ: null, snapName: '', focusPending: false,
+    videoC: true, probing: false, recorder: null, recMic: null, recTimer: 0, recStart: 0, recLen: 5, recStarting: false, clipBlob: null, clipUrl: null, clipExt: 'webm' };
+  const recBtn = $('#wct-rec'), probeBtn = $('#wct-probe'), recStatus = $('#wct-rec-status'), recTime = $('#wct-rec-time');
+  const REC_IDLE = 'Start the camera to record a short clip. Clips are not mirrored: they show what other people see.';
+  const REC_READY = 'Ready. Press Record for a short clip you can play back and download.';
   const RATIOS = [[4, 3], [16, 9], [16, 10], [3, 2], [5, 4], [1, 1], [21, 9], [9, 16], [3, 4]];
 
   function setError(t) { errEl.textContent = t || ''; }
@@ -273,9 +335,17 @@ faq:
     stopBtn.disabled = !running;
     snapBtn.disabled = !running;
     fsBtn.disabled = !running;
+    const recording = !!(st.recorder && st.recorder.state === 'recording');
+    // Busy buttons stay focusable (aria-disabled), so keyboard focus is not lost.
+    recBtn.disabled = !running && !recording;
+    recBtn.setAttribute('aria-disabled', String(!recording && (st.probing || st.recStarting)));
+    recBtn.textContent = recording ? 'Stop recording' : 'Record ' + $('#wct-rec-len').value + ' s clip';
+    probeBtn.disabled = !running;
+    probeBtn.setAttribute('aria-disabled', String(st.probing || recording));
+    probeBtn.textContent = st.probing ? 'Testing\u2026' : 'Test resolutions';
     // Start and Stop disable themselves when pressed: hand focus to whichever is
     // usable, or wait (while the permission prompt is open) until one is.
-    if (([startBtn, stopBtn, snapBtn, fsBtn].includes(f) && f.disabled) || (st.focusPending && lost)) {
+    if (([startBtn, stopBtn, snapBtn, fsBtn, probeBtn, recBtn].includes(f) && f.disabled) || (st.focusPending && lost)) {
       const to = !stopBtn.disabled ? stopBtn : !startBtn.disabled ? startBtn : null;
       st.focusPending = !to;
       if (to && document.activeElement !== to) to.focus();
@@ -289,11 +359,16 @@ faq:
     if (r === 'max') { v.width = { ideal: 4096 }; v.height = { ideal: 2160 }; }
     else if (r) { const p = r.split('x').map(Number); v.width = { ideal: p[0] }; v.height = { ideal: p[1] }; }
     if (fpsSel.value) v.frameRate = { ideal: Number(fpsSel.value) };
-    return { audio: false, video: Object.keys(v).length ? v : true };
+    st.videoC = Object.keys(v).length ? v : true;
+    return { audio: false, video: st.videoC };
   }
 
   function release() {
     st.gen++;
+    st.probing = false;
+    clearTimeout(st.recTimer);
+    if (st.recorder && st.recorder.state !== 'inactive') { try { st.recorder.stop(); } catch (e) { /* already stopped */ } }
+    if (st.recMic) { st.recMic.getTracks().forEach(t => t.stop()); st.recMic = null; }
     clearInterval(st.timer);
     if (st.vfc && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(st.vfc);
     st.vfc = 0;
@@ -311,6 +386,7 @@ faq:
     stage.style.aspectRatio = '';
     $('#wct-measured').textContent = '–';
     $('#wct-bright').textContent = '–';
+    if (!/^Recorded/.test(recStatus.textContent)) recStatus.textContent = REC_IDLE;
     if (document.fullscreenElement === stage && document.exitFullscreen) document.exitFullscreen().catch(() => {});
     setOk(message === undefined ? 'Camera released. The browser is no longer using it.' : message);
     updateButtons();
@@ -355,6 +431,7 @@ faq:
     const p = video.play();
     if (p && p.catch) p.catch(() => {});
     updateButtons();
+    if (!/^Recorded/.test(recStatus.textContent)) recStatus.textContent = REC_READY;
     const s = track.getSettings ? track.getSettings() : {};
     refreshDevices(s.deviceId);
     const waitMeta = video.readyState >= 1 ? Promise.resolve() : new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
@@ -424,7 +501,8 @@ faq:
     $('#wct-mp').textContent = w && h ? (w * h / 1e6).toFixed(2) + ' MP' : '–';
     $('#wct-badge').textContent = w && h ? w + '×' + h + (s.frameRate ? ' · ' + fmtRate(s.frameRate) : '') : '';
     if (video.videoWidth && video.videoHeight) stage.style.aspectRatio = video.videoWidth + ' / ' + video.videoHeight;
-    if (!full) return;
+    if (!full || st.probing) return;
+    showCaps(t, s);
     const caps = t.getCapabilities ? t.getCapabilities() : null;
     const range = r => (r && typeof r.max === 'number' ? r : null);
     const cw = caps && range(caps.width), ch = caps && range(caps.height), cf = caps && range(caps.frameRate);
@@ -506,11 +584,199 @@ faq:
     }, 'image/png');
   }
 
+
+  // ---------- Capabilities ----------
+  const CAP_NAMES = {
+    width: 'Width', height: 'Height', aspectRatio: 'Aspect ratio', frameRate: 'Frame rate', facingMode: 'Facing mode', resizeMode: 'Resize mode',
+    zoom: 'Zoom', pan: 'Pan', tilt: 'Tilt', focusMode: 'Focus mode', focusDistance: 'Focus distance', exposureMode: 'Exposure mode',
+    exposureCompensation: 'Exposure compensation', exposureTime: 'Exposure time', whiteBalanceMode: 'White balance mode',
+    colorTemperature: 'Colour temperature', iso: 'ISO', brightness: 'Brightness', contrast: 'Contrast', saturation: 'Saturation',
+    sharpness: 'Sharpness', torch: 'Torch', backgroundBlur: 'Background blur', faceFraming: 'Face framing', eyeGazeCorrection: 'Eye gaze correction'
+  };
+  const num = v => (typeof v === 'number' ? String(+v.toPrecision(6)) : String(v));
+  function capText(v) {
+    if (Array.isArray(v)) return v.length ? v.map(String).join(', ') : 'None';
+    if (v && typeof v === 'object') {
+      if ('min' in v || 'max' in v) return num(v.min) + ' to ' + num(v.max) + (typeof v.step === 'number' && v.step ? ' (step ' + num(v.step) + ')' : '');
+      return JSON.stringify(v);
+    }
+    return typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v);
+  }
+  function showCaps(t, s) {
+    const caps = t.getCapabilities ? t.getCapabilities() : null;
+    const keys = caps ? Object.keys(caps).filter(k => k !== 'deviceId' && k !== 'groupId') : [];
+    const tb = $('#wct-caps');
+    tb.innerHTML = '';
+    keys.forEach(k => {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th'); th.scope = 'row';
+      th.textContent = CAP_NAMES[k] || k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase());
+      const td = document.createElement('td'); td.textContent = capText(caps[k]);
+      const cur = document.createElement('td'); cur.textContent = k in s ? (typeof s[k] === 'number' ? num(s[k]) : capText(s[k])) : '–';
+      tr.append(th, td, cur); tb.append(tr);
+    });
+    $('#wct-caps-wrap').hidden = !keys.length;
+  }
+
+  // ---------- Resolution check ----------
+  // Each size is requested exactly; resizeMode "none" (where the browser
+  // supports it) only accepts the camera's own modes, so a success there is a
+  // native mode and a success only without it means the browser scaled a
+  // larger frame down.
+  const PROBES = [[640, 480, 'VGA'], [1280, 720, '720p'], [1920, 1080, '1080p'], [2560, 1440, '1440p'], [3840, 2160, '4K']];
+  async function probeResolutions() {
+    const track = st.stream && st.stream.getVideoTracks()[0];
+    const msg = $('#wct-probe-msg');
+    msg.textContent = '';
+    if (!track || st.probing || (st.recorder && st.recorder.state === 'recording')) return;
+    if (typeof track.applyConstraints !== 'function') { msg.textContent = 'This browser cannot change the camera mode of a running stream, so the check is not available.'; return; }
+    const sup = navigator.mediaDevices.getSupportedConstraints ? navigator.mediaDevices.getSupportedConstraints() : {};
+    const gen = st.gen, body = $('#wct-probe-table'), prev = track.getSettings();
+    st.probing = true;
+    updateButtons();
+    body.innerHTML = '';
+    $('#wct-probe-wrap').hidden = false;
+    const results = [];
+    for (const [w, h, name] of PROBES) {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th'); th.scope = 'row'; th.textContent = w + ' × ' + h + ' (' + name + ')';
+      const res = document.createElement('td'), fr = document.createElement('td');
+      res.textContent = 'Testing…'; fr.textContent = '';
+      tr.append(th, res, fr); body.append(tr);
+      let kind = null, got = null;
+      const base = { width: { exact: w }, height: { exact: h }, frameRate: { ideal: 60 } };
+      try {
+        await track.applyConstraints(sup.resizeMode ? Object.assign({ resizeMode: { exact: 'none' } }, base) : base);
+        kind = sup.resizeMode ? 'native' : 'yes';
+      } catch (e) {
+        if (sup.resizeMode && gen === st.gen) {
+          try { await track.applyConstraints(base); kind = 'scaled'; } catch (e2) { kind = null; }
+        }
+      }
+      if (gen !== st.gen) return; // the camera was stopped or restarted
+      if (kind) got = track.getSettings();
+      res.className = kind === 'scaled' || !kind ? 'wct-no' : 'wct-ok';
+      res.textContent = kind === 'native' ? 'Yes, a native camera mode' : kind === 'yes' ? 'Yes'
+        : kind === 'scaled' ? 'Only by scaling a larger mode down' : 'Not supported';
+      fr.textContent = got && got.frameRate ? fmtRate(got.frameRate) : '–';
+      results.push([w + ' × ' + h, kind]);
+    }
+    // Back to the mode the camera was in before the check.
+    let restored = true;
+    try {
+      await track.applyConstraints({ width: { ideal: prev.width }, height: { ideal: prev.height }, frameRate: { ideal: prev.frameRate } });
+    } catch (e) { restored = false; }
+    if (gen !== st.gen) return;
+    if (!restored) { st.probing = false; start(); return; }
+    st.probing = false;
+    updateButtons();
+    showInfo(true);
+    const good = results.filter(r => r[1] === 'native' || r[1] === 'yes').map(r => r[0]);
+    const summary = good.length ? 'Your camera supports ' + good.join(', ') + '.' : 'None of the common resolutions is a native mode of this camera.';
+    setOk(summary);
+  }
+
+  // ---------- Recording ----------
+  function pickVideoMime(withAudio) {
+    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') return '';
+    const list = withAudio ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+      : ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+    return list.find(m => MediaRecorder.isTypeSupported(m)) || '';
+  }
+  async function record() {
+    // A double click should not start and then instantly stop a recording.
+    if (st.recorder && st.recorder.state === 'recording') { if (performance.now() - st.recStart > 400) st.recorder.stop(); return; }
+    if (!st.stream || st.recStarting || st.probing) return;
+    if (typeof MediaRecorder === 'undefined') { recStatus.textContent = 'This browser cannot record video (MediaRecorder is not supported).'; return; }
+    const gen = st.gen;
+    let mic = null, note = '';
+    if ($('#wct-rec-mic').checked) {
+      st.recStarting = true;
+      updateButtons();
+      try { mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); } catch (e) { note = ' The microphone could not be opened, so the clip has no sound.'; }
+      st.recStarting = false;
+      if (gen !== st.gen || !st.stream) { if (mic) mic.getTracks().forEach(t => t.stop()); updateButtons(); return; }
+    }
+    const tracks = st.stream.getVideoTracks().concat(mic ? mic.getAudioTracks() : []);
+    const mime = pickVideoMime(!!mic);
+    let rec;
+    try { rec = new MediaRecorder(new MediaStream(tracks), mime ? { mimeType: mime } : undefined); } catch (e) {
+      if (mic) mic.getTracks().forEach(t => t.stop());
+      recStatus.textContent = 'Recording failed to start: ' + (e && e.message ? e.message : e) + '.';
+      updateButtons();
+      return;
+    }
+    const chunks = [];
+    st.recLen = Number($('#wct-rec-len').value) || 5;
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onerror = e => { recStatus.textContent = 'Recording error: ' + ((e && e.error && e.error.message) || 'unknown') + '.'; };
+    rec.onstop = () => {
+      clearTimeout(st.recTimer);
+      clearInterval(rec._tick);
+      if (mic) mic.getTracks().forEach(t => t.stop());
+      if (st.recMic === mic) st.recMic = null;
+      if (st.recorder === rec) st.recorder = null;
+      $('#wct-rec-bar').style.width = '0%';
+      recTime.hidden = true;
+      updateButtons();
+      const type = (rec.mimeType || mime || 'video/webm').split(';')[0];
+      const blob = new Blob(chunks, { type });
+      if (!blob.size) { recStatus.textContent = 'The recording came back empty. Try again.'; return; }
+      const secs = Math.min((performance.now() - st.recStart) / 1000, st.recLen);
+      if (st.clipUrl) URL.revokeObjectURL(st.clipUrl);
+      st.clipBlob = blob;
+      st.clipUrl = URL.createObjectURL(blob);
+      st.clipExt = /mp4/.test(type) ? 'mp4' : 'webm';
+      const clip = $('#wct-clip');
+      clip.src = st.clipUrl;
+      $('#wct-clip-wrap').hidden = false;
+      recStatus.textContent = 'Recorded a ' + secs.toFixed(1) + ' s clip (' + Math.max(1, Math.round(blob.size / 1024)).toLocaleString() + ' KB, ' +
+        st.clipExt.toUpperCase() + (mic ? ', with sound' : ', no sound') + '). Press play to watch it.' + note;
+    };
+    try { rec.start(1000); } catch (e) {
+      if (mic) mic.getTracks().forEach(t => t.stop());
+      recStatus.textContent = 'Recording failed to start: ' + (e && e.message ? e.message : e) + '.';
+      updateButtons();
+      return;
+    }
+    st.recorder = rec;
+    st.recMic = mic;
+    st.recStart = performance.now();
+    st.recTimer = setTimeout(() => { if (rec.state === 'recording') rec.stop(); }, st.recLen * 1000);
+    // Visible counter only; the live status is announced at the start and end.
+    rec._tick = setInterval(() => {
+      const el = Math.min((performance.now() - st.recStart) / 1000, st.recLen);
+      $('#wct-rec-bar').style.width = (el / st.recLen * 100) + '%';
+      recTime.textContent = el.toFixed(1) + ' s of ' + st.recLen + ' s';
+    }, 100);
+    recTime.textContent = '0.0 s of ' + st.recLen + ' s';
+    recTime.hidden = false;
+    recStatus.textContent = 'Recording a ' + st.recLen + '-second clip' + (mic ? ' with sound' : '') + '…' + note;
+    updateButtons();
+  }
+  // Chrome writes WebM files without a duration; seeking to the end makes it compute one.
+  $('#wct-clip').addEventListener('loadedmetadata', function () {
+    const v = this;
+    if (v.duration === Infinity) {
+      const back = () => { v.removeEventListener('durationchange', back); v.currentTime = 0; };
+      v.addEventListener('durationchange', back);
+      v.currentTime = 1e101;
+    }
+  });
+
   // ---------- Wiring ----------
   startBtn.addEventListener('click', start);
   stopBtn.addEventListener('click', () => stop());
   snapBtn.addEventListener('click', snapshot);
   $('#wct-download').addEventListener('click', downloadSnap);
+  recBtn.addEventListener('click', record);
+  probeBtn.addEventListener('click', probeResolutions);
+  $('#wct-rec-len').addEventListener('change', updateButtons);
+  $('#wct-clip-dl').addEventListener('click', () => {
+    if (!st.clipBlob) return;
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    TT.download('webcam-clip-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '.' + st.clipExt, st.clipBlob);
+  });
   const syncMirror = () => video.classList.toggle('is-mirrored', mirror.checked);
   mirror.addEventListener('change', syncMirror);
   syncMirror(); // browsers may restore the checkbox state on reload

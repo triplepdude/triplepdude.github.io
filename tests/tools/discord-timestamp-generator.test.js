@@ -21,6 +21,53 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await text('#dts-unix'), '1618957200');
   assert.equal(await codeOf('R'), '<t:1618957200:R>');
 
+  // Countdown helper: now (17:20:30 CDT, 1618957230) plus a duration, rounded to
+  // the nearest step of local clock time (values from Python's zoneinfo).
+  const cdCodes = () => page.locator('#dts-cd-list .dts-code').allTextContents();
+  const cdPrev = async () => (await page.locator('#dts-cd-list .dts-preview').allTextContents()).map(t => t.trim());
+  // Default: 2 hours, rounded to 15 minutes -> 19:15 CDT.
+  assert.deepEqual(await cdCodes(), ['<t:1618964100:R>', '<t:1618964100:t> (<t:1618964100:R>)', '<t:1618964100:F> (<t:1618964100:R>)']);
+  assert.deepEqual(await cdPrev(), ['in 2 hours', '7:15 PM (in 2 hours)', 'Tuesday, April 20, 2021 at 7:15 PM (in 2 hours)']);
+  assert.match(await text('#dts-cd-when'), /^Starts Tuesday, April 20, 2021 at 7:15 PM your time, Unix 1618964100\./);
+  await page.click('button[data-cd="0,0,15"]'); // 17:35:30 -> 17:30
+  assert.equal(await page.locator('#dts-cd-list .dts-code').first().textContent(), '<t:1618957800:R>');
+  // 9.5 minutes away when the page's clock reads 17:20:30 exactly: "in 10 minutes", then 9 once it moves on.
+  assert.match((await cdPrev())[0], /^in (9|10) minutes$/);
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('data-cd')), '0,0,15');
+  await page.waitForFunction(() => /^Starts in (9|10) minutes: <t:1618957800:R>$/.test(document.querySelector('#dts-cd-status').textContent));
+  await page.click('button[data-cd="7,0,0"]'); // Apr 27 17:20:30 -> 17:15
+  assert.equal(await page.locator('#dts-cd-list .dts-code').first().textContent(), '<t:1619561700:R>');
+  assert.equal((await cdPrev())[0], 'in 7 days');
+  await page.fill('#dts-cd-d', '0');
+  await page.fill('#dts-cd-h', '3');
+  await page.selectOption('#dts-cd-round', '0'); // exact: now + 3 h
+  assert.equal(await page.locator('#dts-cd-list .dts-code').first().textContent(), '<t:1618968030:R>');
+  await page.fill('#dts-cd-d', '1');
+  await page.fill('#dts-cd-h', '0');
+  await page.selectOption('#dts-cd-round', '60'); // Apr 21 17:20:30 -> 17:00
+  assert.equal(await page.locator('#dts-cd-list .dts-code').first().textContent(), '<t:1619042400:R>');
+  assert.equal((await cdPrev())[0], 'in a day');
+  // Bad durations: a friendly message and nothing to copy.
+  await page.fill('#dts-cd-h', '1.5');
+  assert.match(await text('#dts-cd-msg'), /whole numbers/);
+  assert.equal(await page.locator('#dts-cd-list button').first().isDisabled(), true);
+  assert.equal(await page.isDisabled('#dts-cd-load'), true);
+  // Rounding to the hour follows the generator's zone: in India (UTC+05:30),
+  // 03:50:30 + 2 h rounds to 06:00 IST, which is 00:30 UTC.
+  await page.fill('#dts-cd-d', '0');
+  await page.fill('#dts-cd-h', '2');
+  await page.selectOption('#dts-zone', 'Asia/Kolkata');
+  assert.equal(await page.locator('#dts-cd-list .dts-code').first().textContent(), '<t:1618965000:R>');
+  assert.match(await text('#dts-cd-when'), /Asia\/Kolkata time is Wed 6:00 AM/);
+  await page.selectOption('#dts-zone', 'America/Chicago');
+  // Copy and load into the generator.
+  await page.locator('#dts-cd-list button').nth(2).click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '<t:1618963200:F> (<t:1618963200:R>)');
+  await page.click('#dts-cd-load');
+  assert.equal(await text('#dts-unix'), '1618963200');
+  assert.equal(await page.inputValue('#dts-time'), '19:00:00');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'dts-date');
+
   // The docs example: 2021-04-20 16:20:30 in Chicago = 1618953630.
   await page.fill('#dts-time', '16:20:30');
   assert.equal(await text('#dts-unix'), '1618953630');
@@ -152,6 +199,20 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.fill('#dts-decode', '175928847299117063');
   await page.waitForFunction(() => /Discord ID/.test(document.querySelector('#dts-decode-out').textContent));
   assert.match(await page.locator('#dts-decode-out').textContent(), /2016-04-30 11:18:25\.796 UTC/);
+  // Regression: a 19-digit Unix time in nanoseconds was decoded as a Discord ID
+  // "created" decades in the future. No ID can be from the future, so it is
+  // read as nanoseconds (9e18 ns = 9000000000 s; as an ID it would be dated
+  // 2082-12-30, both checked with Python).
+  await page.fill('#dts-decode', '9000000000000000000');
+  await page.waitForFunction(() => /nanoseconds/.test(document.querySelector('#dts-decode-out').textContent));
+  const nsOut = await page.locator('#dts-decode-out').textContent();
+  assert.match(nsOut, /<t:9000000000:f>/);
+  assert.match(nsOut, /2082-12-30/);
+  assert.doesNotMatch(nsOut, /Discord ID created/);
+  // A 20-digit number below 2^64 would also be a future ID, and is not nanoseconds of any date a browser shows.
+  await page.fill('#dts-decode', '18000000000000000000');
+  await page.waitForFunction(() => /not a Discord ID/.test(document.querySelector('#dts-decode-msg').textContent));
+  assert.match(await page.locator('#dts-decode-msg').textContent(), /2150-12-29, which is in the future/);
 
   // Regression: loading keeps the exact instant, in the repeated DST hour and before 1970.
   await page.selectOption('#dts-zone', 'America/New_York');
@@ -220,10 +281,41 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.fill('#dts-decode', '175928847299117063');
   await status('Discord ID created Saturday, April 30, 2016 at 6:18 AM');
 
-  // The privacy line is in every page's footer; this slot answers a real question.
+  // The FAQ explains plain-text codes and confirms nothing is uploaded.
   const faqs = await page.locator('.faq summary').allTextContents();
-  assert.ok(!faqs.some(q => /uploaded|sent to a server/i.test(q)), faqs.join(' | '));
+  assert.ok(faqs.some(q => /sent to a server/i.test(q)), faqs.join(' | '));
   assert.ok(faqs.some(q => /plain text/.test(q)), faqs.join(' | '));
+
+  // Regression: codes that Discord shows as plain text were only reported as
+  // "No timestamp found", and codes inside backticks were previewed as dates.
+  const why = async (input, re) => {
+    await page.fill('#dts-decode', input);
+    await page.waitForFunction(src => new RegExp(src).test(document.querySelector('#dts-decode-msg').textContent), re.source);
+  };
+  await why('<t:1618953630:x>', /"x" is not a style letter/);
+  await why('<t: 1618953630>', /contains a space/);
+  await why('<t:1618953630.5:R>', /decimal point/);
+  await why('<t:abc>', /Unix time in seconds right after "t:"/);
+  await page.fill('#dts-decode', 'see `<t:1618953630:R>` and <t:1618953630:F>');
+  await page.waitForFunction(() => document.querySelectorAll('.dts-dec-item').length === 2);
+  assert.equal(await text('.dts-message'), 'see `<t:1618953630:R>` and Tuesday, April 20, 2021 at 4:20 PM');
+  assert.match(await page.locator('.dts-dec-item').first().textContent(), /Discord shows: <t:1618953630:R>Inside backticks/);
+  // A millisecond value inside a code is flagged (it would show the year 53272).
+  await page.fill('#dts-decode', '<t:1618953630123:R>');
+  await page.waitForFunction(() => /looks like milliseconds/.test(document.querySelector('#dts-decode-out').textContent));
+  assert.match(await text('#dts-decode-out'), /year 53272; the seconds value is 1618953630/);
+
+  // Regression: the generator's results were live regions and its error an
+  // alert, so each edit re-read the whole panel. Now one summary is announced.
+  for (const sel of ['#dts-msg', '#dts-note', '.dts-stats', '#dts-list', '#dts-cd-list']) {
+    assert.equal(await page.locator(sel).evaluate(el => !!el.closest('[aria-live]:not([aria-live="off"]), [role="alert"], [role="status"]')), false, `${sel} is not live`);
+  }
+  await page.selectOption('#dts-zone', 'UTC');
+  await page.fill('#dts-date', '2021-04-20');
+  await page.fill('#dts-time', '21:20:30');
+  await page.waitForFunction(() => document.querySelector('#dts-status').textContent === 'Unix 1618953630: Tuesday, April 20, 2021 at 4:20 PM, 3 hours ago.');
+  await page.fill('#dts-date', '');
+  await page.waitForFunction(() => document.querySelector('#dts-status').textContent === 'Enter a date.');
 
   // Regression: the time zone menu was filled at load, one Intl.DateTimeFormat
   // per zone (about 420), which blocked the main thread for about 400 ms on a

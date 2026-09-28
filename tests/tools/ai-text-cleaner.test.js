@@ -245,6 +245,89 @@ module.exports = async ({ page, open, assert }) => {
   await setText('Plain ASCII text.');
   assert.match(await page.textContent('#atc-summary'), /Nothing to clean/);
 
+  // ---- Regression: a year range became "2019, present". ----
+  assert.equal(await clean('Manager, 2019\u2014present'), 'Manager, 2019-present');
+  assert.equal(await clean('2019\u2014Today'), '2019-Today');
+  // Regression: a dash opening a sentence after a full stop became ". , Next" ("20., Start").
+  assert.equal(await clean('It ended. \u2014Next came more. Why? \u2014 Because.'), 'It ended. Next came more. Why? Because.');
+  assert.equal(await clean('Apples, pears, etc.\u2014and more'), 'Apples, pears, etc., and more');
+
+  // ---- Markdown: off by default, but counted so you can see it is there. ----
+  const md = '# Title\n\nSome **bold**, *italic*, __strong__ and ~~old~~ text with `code_x` and a [link](https://example.com/a_b_c).\n\n' +
+    '- one\n* two\n  + nested\n\n> quoted line\n\n---\n\n```js\nconst a = 2 * 3;\n```\n\n1. keep numbers\n2 * 3 * 4 stays\nsnake_case_name stays\n![logo](logo.png)';
+  assert.equal(await page.isChecked('#atc-o-md'), false);
+  assert.equal(await page.isDisabled('#atc-md-bullets'), true);
+  assert.equal(await clean(md), md);
+  assert.equal(await count('md'), 15);
+  await page.check('#atc-o-md');
+  assert.equal(await out(), 'Title\n\nSome bold, italic, strong and old text with code_x and a link (https://example.com/a_b_c).\n\n' +
+    '• one\n• two\n  • nested\n\nquoted line\n\nconst a = 2 * 3;\n\n1. keep numbers\n2 * 3 * 4 stays\nsnake_case_name stays\nlogo');
+  const report = () => page.$$eval('#atc-report-body tr', trs => trs.map(t => [t.children[0].textContent, t.children[1].textContent]));
+  assert.deepEqual(await report(), [
+    ['Removed Markdown heading marks (# or an underline)', '1'], ['Removed bold marks (** or __)', '2'], ['Removed italic marks (* or _)', '1'],
+    ['Removed strikethrough marks (~~)', '1'], ['Removed backticks around inline code', '1'], ['Removed code fence lines (```)', '2'],
+    ['Turned Markdown links into text (address)', '1'], ['Turned Markdown images into their alt text', '1'],
+    ['Changed list bullets (-, * or +) to •', '3'], ['Removed quote marks at the start of lines (>)', '1'], ['Removed horizontal rules (---)', '1']]);
+  assert.match(await page.textContent('#atc-summary'), /^Cleaned 15 items/);
+  await page.selectOption('#atc-md-bullets', 'remove');
+  assert.match(await out(), /\n\none\ntwo\n {2}nested\n\n/);
+  await page.selectOption('#atc-md-bullets', 'dot');
+  // Bold italic, a setext heading, a link whose text is its address, escapes and an autolink.
+  assert.equal(await clean('Intro\n===\n***Both*** \\*not italic\\* <https://x.org> [https://x.org](https://x.org)'), 'Intro\n\nBoth *not italic* https://x.org https://x.org');
+  // Regression: a link whose address holds brackets (Wikipedia style) was left as raw Markdown.
+  assert.equal(await clean('[Foo](https://en.wikipedia.org/wiki/Foo_(bar)) and ![A](a_(1).png)'), 'Foo (https://en.wikipedia.org/wiki/Foo_(bar)) and A');
+  // Regression: a horizontal rule between blank lines left two blank lines behind.
+  assert.equal(await clean('One\n\n***\n\nTwo'), 'One\n\nTwo');
+  // Emphasis marks inside web addresses and code are kept.
+  assert.equal(await clean('See https://example.com/_private_/x and `**kwargs`'), 'See https://example.com/_private_/x and **kwargs');
+  // A line full of unmatched marks must not make the search slow (patterns are bounded).
+  for (const v of ['*a '.repeat(40000), '['.repeat(100000), '_a '.repeat(40000), '**a '.repeat(30000)]) {
+    const ms = await page.evaluate(t => {
+      const el = document.querySelector('#atc-input');
+      el.value = t;
+      const t0 = performance.now();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('#atc-o-quotes').click();
+      document.querySelector('#atc-o-quotes').click();
+      return performance.now() - t0;
+    }, v);
+    assert.ok(ms < 1500, `Markdown removal took ${Math.round(ms)} ms`);
+  }
+  await page.uncheck('#atc-o-md');
+
+  // ---- NFC: a letter plus a separate accent becomes one character; so does the angstrom sign. ----
+  assert.equal(await clean('cafe\u0301 Å'), 'café Å');
+  assert.equal(await count('nfc'), 2);
+  assert.deepEqual(await report(), [['Joined letters and separate accent marks (NFC)', '2']]);
+  await page.uncheck('#atc-o-nfc');
+  assert.equal(await clean('cafe\u0301 Å'), 'cafe\u0301 Å');
+  assert.equal(await count('nfc'), 2);
+  assert.equal(await page.isVisible('#atc-report'), false);
+  await page.check('#atc-o-nfc');
+
+  // ---- The report lists every kind of change with its count. ----
+  await setText('He said \u201CHi\u201D\u2014then\u00A0left\u200B. \u201COK\u201D');
+  assert.equal(await out(), 'He said "Hi", then left. "OK"');
+  assert.deepEqual(await report(), [
+    ['Removed zero width space characters (U+200B)', '1'], ['Changed no-break space characters (U+00A0) to normal spaces', '1'],
+    ['Replaced em dashes (\u2014) with a comma', '1'], ['Straightened left double quotation marks (\u201C)', '2'],
+    ['Straightened right double quotation marks (\u201D)', '2']]);
+  assert.match(await page.textContent('#atc-summary'), /^Cleaned 7 items/);
+
+  // ---- Regression: the cleaned text box was a live region, so a screen reader read the whole text
+  // on every key, and the summary was announced on every key too. Now one status after a pause. ----
+  assert.equal(await page.getAttribute('#atc-output', 'aria-live'), null);
+  assert.equal(await page.getAttribute('#atc-summary', 'aria-live'), null);
+  await setText('');
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => {
+    window.__atcChanges = 0;
+    new MutationObserver(() => window.__atcChanges++).observe(document.querySelector('#atc-status'), { childList: true, characterData: true, subtree: true });
+  });
+  await page.locator('#atc-input').pressSequentially('A \u201Cquote\u201D\u2014ok', { delay: 30 });
+  await page.waitForFunction(() => /^Cleaned 3 items/.test(document.querySelector('#atc-status').textContent), null, { timeout: 3000 });
+  assert.equal(await page.evaluate(() => window.__atcChanges), 1);
+
   // ---- Example, copy and download ----
   await page.click('#atc-example');
   const cleaned = await out();

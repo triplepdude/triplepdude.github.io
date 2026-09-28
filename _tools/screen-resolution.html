@@ -1,0 +1,600 @@
+---
+title: "What Is My Screen Resolution?"
+description: See your screen resolution in physical and CSS pixels, plus live viewport size, device pixel ratio, refresh rate, colour depth and HDR support.
+category: Device Tests
+keywords: [what is my screen resolution, screen resolution, my screen size, viewport size, device pixel ratio, refresh rate test, monitor resolution checker]
+howto: |
+  ## How to read the results
+
+  The big number is your screen's resolution in physical pixels, the figure
+  on a monitor's spec sheet. The tiles below it show what the browser works
+  with, and the table lists every value with the JavaScript property it comes
+  from. Everything updates live: resize the window, rotate a phone or drag
+  the window to another monitor and the numbers follow. **Copy summary** puts
+  all of it on your clipboard as plain text for a support ticket or bug report.
+
+  ## CSS pixels and physical pixels
+
+  Web pages are laid out in CSS pixels, a unit the operating system scales so
+  that text stays readable on dense screens. The device pixel ratio (DPR) is
+  the number of physical pixels per CSS pixel along each side, so 125%
+  display scaling gives a DPR of 1.25. This page multiplies `screen.width`
+  and `screen.height` by `devicePixelRatio`. When the ratio is fractional,
+  browsers round the CSS size to whole pixels, so the page snaps the product
+  to the nearest standard panel size within that rounding error.
+
+  | Setup | CSS pixels | DPR | Physical pixels |
+  |---|---|---|---|
+  | 1080p monitor at 100% | 1920 × 1080 | 1 | 1920 × 1080 |
+  | 1080p laptop at 125% | 1536 × 864 | 1.25 | 1920 × 1080 |
+  | 1440p monitor at 150% | 1707 × 960 | 1.5 | 2560 × 1440 |
+  | iPhone 15 | 393 × 852 | 3 | 1179 × 2556 |
+
+  Two cases differ from the spec sheet. A Mac in a scaled mode, such as
+  "looks like 1440 × 900" on a 2560 × 1600 panel, renders at 2880 × 1800 and
+  then shrinks the picture to fit, and 2880 × 1800 is what the page sees.
+  Browser zoom also changes the DPR in Chrome, Edge and Firefox. The page
+  estimates the zoom level and corrects for it in Chromium browsers, but
+  100% zoom (Ctrl+0, or Cmd+0 on a Mac) gives the most reliable reading.
+
+  ## Screen, viewport and window
+
+  - **Screen** is the whole display; **available** leaves out the taskbar or Dock.
+  - **Viewport** is the area that shows the page, including any scrollbar.
+    CSS media queries such as `@media (max-width: 600px)` test this width.
+  - **Window** is the whole browser window with its tabs and toolbars.
+
+  ## How the refresh rate is measured
+
+  Browsers draw at most one frame per screen refresh and run
+  `requestAnimationFrame` callbacks once per frame. For three seconds the page
+  records each frame's timestamp, finds the median gap between frames, drops
+  gaps far longer than that (dropped frames) and averages the rest. 60 Hz
+  works out at 16.7 ms per frame and 144 Hz at 6.9 ms.
+
+  The reading comes out lower than the monitor's rating when something holds
+  frames back. Battery saver modes often cap pages at 30 frames per second,
+  and background tabs are paused. Safari holds pages to 60 on 120 Hz
+  ProMotion screens unless the feature flag "Prefer Page Rendering Updates
+  near 60fps" is turned off. Variable refresh rate displays may idle lower.
+  With several monitors, the result is for the one the window is on. If it still reads
+  60 Hz, check the rate chosen in your system's display settings and that
+  the cable supports it.
+
+  ## Colour depth, HDR and gamut
+
+  Colour depth is `screen.colorDepth`: 24 bits means 8 bits for each of red,
+  green and blue, 30 bits means 10. Many browsers report 24 whatever the
+  panel. HDR and colour gamut come from the CSS media features
+  `dynamic-range` and `color-gamut`. On Windows, HDR usually reads Yes only
+  while HDR is switched on in the display settings.
+
+  ## Common screen resolutions
+
+  | Name | Pixels | Aspect ratio |
+  |---|---|---|
+  | HD (WXGA) | 1366 × 768 | about 16:9 |
+  | Full HD, 1080p | 1920 × 1080 | 16:9 |
+  | WUXGA | 1920 × 1200 | 16:10 |
+  | QHD, 1440p | 2560 × 1440 | 16:9 |
+  | Ultrawide QHD | 3440 × 1440 | 21:9 |
+  | 4K UHD | 3840 × 2160 | 16:9 |
+faq:
+  - q: Is any information about my screen sent anywhere?
+    a: No. Everything is read and measured by JavaScript in your browser. Nothing is uploaded, logged or stored, and the page works offline once loaded.
+  - q: Why doesn't the resolution match my monitor's specifications?
+    a: The usual causes are browser zoom, a scaled display mode on a Mac, or a privacy feature. Firefox's resistFingerprinting and Tor Browser, for example, report the window size instead of the real screen. Reset zoom to 100% and compare again.
+  - q: Can a website find out my screen size in inches?
+    a: No. Browsers do not expose the physical size of a display, and a CSS inch is always 96 CSS pixels whatever the screen. Enter the diagonal from the spec sheet in the pixel density calculator to get PPI and the width and height.
+  - q: My monitor is 144 Hz, so why does the test show 60 Hz?
+    a: Check that 144 Hz is selected in the operating system's display settings (on Windows under Advanced display, on macOS under Displays) and that the cable and port support it, since some HDMI connections top out at 60 Hz. Battery saver modes and some browsers also cap the frame rate.
+---
+<style>
+.scr-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px); gap: 16px 28px; align-items: center; margin-bottom: 18px; }
+@media (max-width: 680px) { .scr-top { grid-template-columns: minmax(0, 1fr); } }
+.scr-top .result-big { margin: 0 0 4px; font-variant-numeric: tabular-nums; }
+.scr-sub { margin: 0; color: var(--muted); }
+.scr-fig { margin: 0; min-width: 0; }
+.scr-screen { position: relative; margin: 0 auto; max-width: 100%; background: var(--surface-2); border: 2px solid var(--field-border); border-radius: 6px; overflow: hidden; }
+.scr-win { position: absolute; background: var(--surface); border: 1px solid var(--muted); border-radius: 3px; overflow: hidden; }
+.scr-vp { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: var(--accent-soft); border-top: 1px solid var(--accent); color: var(--accent); font-size: 12px; font-weight: 600; line-height: 1.2; text-align: center; overflow: hidden; }
+.scr-vp span { padding: 2px 4px; }
+.scr-caption { margin: 6px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
+.stats.scr-stats { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.scr-stats .stat b { font-size: 1.2rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.scr-hz-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 16px; }
+.scr-hz-line p { margin: 0; flex: 1 1 260px; }
+.scr-h { margin: 28px 0 12px; font-size: 1.1rem; }
+.scr-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+.msg.scr-note { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
+table.data.scr-table th { width: 46%; color: var(--text); }
+table.data.scr-table th small { display: block; color: var(--muted); font-family: var(--mono); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
+table.data.scr-table td { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  table.data.scr-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  table.data.scr-table th, table.data.scr-table td { display: block; width: auto; padding: 0 4px; border: 0; }
+  table.data.scr-table td { padding-top: 2px; }
+}
+.scr-ppi-row > .field { flex: 1 1 120px; }
+.scr-ppi-row > .field.scr-unit { flex: 0 1 110px; }
+.stats.scr-ppi { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.scr-ppi .stat b { font-size: 1.15rem; }
+@media (max-width: 480px) { .scr-ppi .stat b { font-size: 1rem; } }
+</style>
+
+<div class="scr-top">
+  <div>
+    <p class="label">Your screen resolution</p>
+    <p class="result-big" id="scr-phys">–</p>
+    <p class="scr-sub" id="scr-sub">Physical pixels</p>
+  </div>
+  <figure class="scr-fig">
+    <div class="scr-screen" id="scr-screen" aria-hidden="true">
+      <div class="scr-win" id="scr-win"><div class="scr-vp" id="scr-vpbox"><span id="scr-vp-tag">Viewport</span></div></div>
+    </div>
+    <figcaption class="scr-caption" id="scr-caption">Your browser window on the screen, to scale</figcaption>
+  </figure>
+</div>
+
+<p class="msg scr-note" id="scr-zoom" aria-live="polite"></p>
+
+<div class="stats scr-stats">
+  <div class="stat"><b id="scr-css">–</b><span>Screen size (CSS pixels)</span></div>
+  <div class="stat"><b id="scr-vp">–</b><span>Viewport (live)</span></div>
+  <div class="stat"><b id="scr-dpr">–</b><span>Device pixel ratio</span></div>
+  <div class="stat"><b id="scr-hz">–</b><span>Refresh rate</span></div>
+  <div class="stat"><b id="scr-aspect">–</b><span>Aspect ratio</span></div>
+  <div class="stat"><b id="scr-depth">–</b><span>Colour depth</span></div>
+  <div class="stat"><b id="scr-hdr">–</b><span>HDR</span></div>
+  <div class="stat"><b id="scr-gamut">–</b><span>Colour gamut</span></div>
+</div>
+
+<div class="scr-hz-line">
+  <p class="hint" id="scr-hz-detail">Measuring the refresh rate…</p>
+  <button class="btn secondary small" type="button" id="scr-hz-again">Measure again</button>
+</div>
+<p class="visually-hidden" id="scr-status" role="status"></p>
+
+<h2 class="scr-h">All details</h2>
+<div class="table-wrap">
+  <table class="data scr-table">
+    <caption class="visually-hidden">Screen and browser display details</caption>
+    <tbody id="scr-rows"></tbody>
+  </table>
+</div>
+<div class="actions">
+  <button class="btn small" type="button" id="scr-copy">Copy summary</button>
+  <button class="btn secondary small" type="button" id="scr-download">Download as text</button>
+</div>
+
+<hr class="scr-sep">
+<h2 class="scr-h">Pixel density (PPI) calculator</h2>
+<p class="hint">Browsers cannot see how big your screen is. Enter the diagonal from its spec sheet to get pixel density and physical size.</p>
+<div class="row scr-ppi-row">
+  <div class="field">
+    <label for="scr-pw">Width (pixels)</label>
+    <input type="number" id="scr-pw" min="1" max="100000" step="1" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label for="scr-ph">Height (pixels)</label>
+    <input type="number" id="scr-ph" min="1" max="100000" step="1" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label for="scr-diag">Diagonal</label>
+    <input type="number" id="scr-diag" min="0.1" step="any" inputmode="decimal" placeholder="e.g. 27">
+  </div>
+  <div class="field scr-unit">
+    <label for="scr-unit">Unit</label>
+    <select id="scr-unit">
+      <option value="in" selected>inches</option>
+      <option value="cm">cm</option>
+    </select>
+  </div>
+</div>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="scr-use">Use my screen's resolution</button>
+</div>
+<p class="msg error" id="scr-ppi-msg"></p>
+<!-- Results update while typing, so they are not a live region; one short
+     summary is announced once typing pauses. -->
+<p class="visually-hidden" id="scr-ppi-status" role="status"></p>
+<div class="stats scr-ppi" id="scr-ppi-out">
+  <div class="stat"><b id="scr-ppi">–</b><span>Pixels per inch</span></div>
+  <div class="stat"><b id="scr-pitch">–</b><span>Pixel pitch</span></div>
+  <div class="stat"><b id="scr-size-in">–</b><span>Width × height (inches)</span></div>
+  <div class="stat"><b id="scr-size-cm">–</b><span>Width × height (cm)</span></div>
+  <div class="stat"><b id="scr-blend">–</b><span>Pixels blend beyond (20/20 vision)</span></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var X = ' × ';
+
+  // Refresh rates sold today; a measured rate within 3% is labelled with one.
+  var COMMON_HZ = [24, 25, 30, 48, 50, 60, 72, 75, 85, 90, 100, 120, 144, 160, 165, 170, 180, 200, 240, 280, 300, 360, 480, 500, 540];
+  var RATIOS = [[1, 1], [5, 4], [4, 3], [3, 2], [16, 10], [5, 3], [16, 9], [17, 9], [2, 1], [19.5, 9], [20, 9], [21, 9], [32, 9]];
+  // Panel widths and heights in use. With a fractional pixel ratio the browser
+  // rounds the CSS size, so several physical sizes fit; the listed one wins.
+  var PANEL = [480, 540, 600, 640, 720, 750, 768, 800, 828, 854, 900, 960, 1008, 1024, 1050, 1080, 1116, 1125, 1152, 1170,
+    1179, 1200, 1206, 1220, 1236, 1242, 1260, 1264, 1280, 1284, 1290, 1320, 1334, 1344, 1360, 1366, 1440, 1536, 1600, 1620,
+    1640, 1664, 1668, 1680, 1728, 1800, 1824, 1920, 2000, 2048, 2160, 2224, 2256, 2316, 2340, 2360, 2376, 2388, 2400, 2408,
+    2412, 2436, 2448, 2460, 2520, 2532, 2556, 2560, 2622, 2640, 2688, 2712, 2732, 2736, 2772, 2778, 2796, 2800, 2856, 2868,
+    2880, 2960, 2992, 3000, 3024, 3072, 3088, 3120, 3168, 3200, 3216, 3240, 3440, 3456, 3840, 4096, 4320, 5120, 6016, 7680];
+  // Browser zoom presets (Chrome, Edge, Firefox and Safari menus).
+  var ZOOMS = [0.25, 0.3, 1 / 3, 0.5, 0.63, 2 / 3, 0.75, 0.8, 0.85, 0.9, 1.1, 1.15, 1.2, 1.25, 1.33, 1.5, 1.7, 1.75, 2, 2.4, 2.5, 3, 4, 5];
+
+  var ua = navigator.userAgent || '';
+  var isChromium = /Chrom(e|ium)\//.test(ua) && !/Firefox\//.test(ua);
+
+  function mq(q) { try { return window.matchMedia(q).matches; } catch (e) { return false; } }
+  function num(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
+  function round(v, d) { var f = Math.pow(10, d); return Math.round(v * f) / f; }
+  function fmt(v, d) { return round(v, d).toLocaleString('en-US', { maximumFractionDigits: d }); }
+  function fixed(v, d) { return v.toFixed(d); }
+  function pair(w, h) { return w && h ? w + X + h : 'Not available'; }
+
+  function physical(css, ratio) {
+    var p = css * ratio;
+    if (!p) return 0;
+    if (Math.abs(ratio - Math.round(ratio)) < 1e-6) return Math.round(p);
+    // With a fractional ratio the browser rounds the CSS size to whole pixels,
+    // even when the product happens to be whole (882 x 3.5 = 3087 for a
+    // 3088-pixel panel), so any panel within one CSS pixel fits. A known size wins.
+    var best = 0, bestD = Infinity;
+    PANEL.forEach(function (n) {
+      var d = Math.abs(n - p);
+      if (Math.abs(n / ratio - css) < 1 && d < bestD) { best = n; bestD = d; }
+    });
+    return best || Math.round(p);
+  }
+
+  function gcd(a, b) { while (b) { var t = b; b = a % b; a = t; } return a; }
+  function aspect(w, h) {
+    if (!w || !h) return null;
+    var L = Math.max(w, h), S = Math.min(w, h), g = gcd(L, S), r = L / S;
+    var dec = r.toFixed(2), exact = (L / g) + ':' + (S / g);
+    // 8:5 is sold as 16:10. Ultrawide monitors (2560 x 1080 is 64:27, 3440 x
+    // 1440 is 43:18, 3840 x 1600 is 12:5) are all sold as 21:9.
+    if (exact === '8:5') return { text: '16:10', dec: dec, exact: true };
+    if (exact === '7:3') return { text: '21:9', dec: dec, exact: true };
+    if (r >= 2.3 && r <= 2.45) return { text: '21:9', dec: dec, exact: false, ratio: L / g <= 99 ? exact : '' };
+    if (L / g <= 32) return { text: exact, dec: dec, exact: true };
+    var best = null, bestErr = 1;
+    RATIOS.forEach(function (q) { var e = Math.abs(r / (q[0] / q[1]) - 1); if (e < bestErr) { bestErr = e; best = q; } });
+    if (best && bestErr < 0.015) return { text: best[0] + ':' + best[1], dec: dec, exact: false };
+    return { text: dec + ':1', dec: dec, exact: true, plain: true };
+  }
+
+  function zoomInfo() {
+    var ow = num(window.outerWidth), iw = num(window.innerWidth), oh = num(window.outerHeight), ih = num(window.innerHeight);
+    if (!ow || !iw || !oh || !ih || mq('(pointer: coarse)')) return 1;
+    var z = ow / iw;
+    if (Math.abs(ow - iw) < 24 || Math.abs(z - 1) < 0.04) return 1;
+    var best = 0;
+    ZOOMS.forEach(function (p) { if (Math.abs(z / p - 1) < 0.02) best = p; });
+    if (!best) return 1;
+    // The toolbars above the page take up the rest of the window's height.
+    var bars = oh - ih * best;
+    return bars >= -2 && bars <= 250 ? best : 1;
+  }
+
+  function gamut() {
+    if (mq('(color-gamut: rec2020)')) return 'Rec. 2020';
+    if (mq('(color-gamut: p3)')) return 'Display P3';
+    if (mq('(color-gamut: srgb)')) return 'sRGB';
+    return 'Not reported';
+  }
+
+  function orientation() {
+    var o = screen.orientation;
+    if (o && o.type) {
+      var t = String(o.type).split('-');
+      return t[0].charAt(0).toUpperCase() + t[0].slice(1) + (t[1] ? ' (' + t[1] + ')' : '') + ', ' + num(o.angle) + '°';
+    }
+    return mq('(orientation: portrait)') ? 'Portrait' : 'Landscape';
+  }
+
+  var hz = { text: 'Measuring…', summary: '' };
+  var cur = null;
+
+  function collect() {
+    var dpr = num(window.devicePixelRatio) || 1;
+    var sw = num(screen.width), sh = num(screen.height);
+    var zoom = zoomInfo();
+    // Chromium leaves screen.width alone when zooming but folds the zoom into
+    // devicePixelRatio, so the ratio has to be divided back out.
+    var scale = isChromium ? dpr / zoom : dpr;
+    var depth = num(screen.colorDepth);
+    var de = document.documentElement;
+    var d = {
+      dpr: dpr, zoom: zoom, scale: scale, sw: sw, sh: sh,
+      pw: physical(sw, scale), ph: physical(sh, scale),
+      aw: num(screen.availWidth), ah: num(screen.availHeight),
+      iw: num(window.innerWidth), ih: num(window.innerHeight),
+      cw: num(de.clientWidth), ch: num(de.clientHeight),
+      ow: num(window.outerWidth), oh: num(window.outerHeight),
+      depth: depth, orient: orientation(), gamut: gamut(),
+      hdr: mq('(dynamic-range: high)'), hdrKnown: mq('(dynamic-range: high)') || mq('(dynamic-range: standard)'),
+      touch: num(navigator.maxTouchPoints),
+      pointer: mq('(pointer: coarse)') ? 'Coarse (touch)' : mq('(pointer: fine)') ? 'Fine (mouse, trackpad or pen)' : 'None',
+      extended: typeof screen.isExtended === 'boolean' ? (screen.isExtended ? 'Yes' : 'No') : 'Not reported by this browser',
+      pinch: window.visualViewport ? num(window.visualViewport.scale) : 0
+    };
+    d.aspect = aspect(d.pw || sw, d.ph || sh);
+    return d;
+  }
+
+  function pct(v) { return Math.round(v * 100) + '%'; }
+  function depthText(bits) {
+    if (!bits) return 'Not reported';
+    return bits + '-bit' + (bits % 3 === 0 && bits >= 24 ? ' (' + bits / 3 + ' bits per channel)' : '');
+  }
+  function aspectText(a) {
+    if (!a) return 'Not available';
+    return a.plain ? a.text : (a.exact ? '' : '≈ ') + a.text + ' (' + (a.ratio ? a.ratio + ', ' : '') + a.dec + ':1)';
+  }
+
+  function rows(d) {
+    var r = [
+      ['Screen resolution (physical pixels)', pair(d.pw, d.ph), 'screen.width × devicePixelRatio'],
+      ['Screen size (CSS pixels)', pair(d.sw, d.sh), 'screen.width, screen.height'],
+      ['Available screen (minus taskbar or Dock)', pair(d.aw, d.ah), 'screen.availWidth, availHeight'],
+      ['Viewport', pair(d.iw, d.ih), 'window.innerWidth, innerHeight'],
+      ['Viewport without scrollbars', pair(d.cw, d.ch), 'documentElement.clientWidth, clientHeight'],
+      ['Browser window', d.ow && d.oh ? pair(d.ow, d.oh) : 'Not reported', 'window.outerWidth, outerHeight'],
+      ['Device pixel ratio', String(round(d.dpr, 4)) + (d.zoom !== 1 && isChromium ? ' (' + pct(d.scale) + ' display scaling × ' + pct(d.zoom) + ' zoom)' : ' (' + pct(d.dpr) + ' scaling)'), 'window.devicePixelRatio'],
+      ['Aspect ratio', aspectText(d.aspect), 'Physical width ÷ height'],
+      ['Colour depth', depthText(d.depth), 'screen.colorDepth'],
+      ['Orientation', d.orient, 'screen.orientation'],
+      ['Refresh rate', hz.summary || hz.text, 'requestAnimationFrame timing'],
+      ['HDR', d.hdrKnown ? (d.hdr ? 'Yes' : 'No') : 'Not reported', '@media (dynamic-range: high)'],
+      ['Colour gamut', d.gamut, '@media (color-gamut)'],
+      ['Touch points', d.touch ? d.touch + ' (touch screen)' : 'None (no touch screen)', 'navigator.maxTouchPoints'],
+      ['Primary pointer', d.pointer, '@media (pointer)'],
+      ['Several screens', d.extended, 'screen.isExtended']
+    ];
+    if (d.zoom !== 1) r.push(['Browser zoom (estimated)', pct(d.zoom), 'outerWidth ÷ innerWidth']);
+    if (d.pinch && Math.abs(d.pinch - 1) > 0.01) r.push(['Pinch zoom', round(d.pinch, 2) + '×', 'visualViewport.scale']);
+    return r;
+  }
+
+  function renderDiagram(d) {
+    var box = $('#scr-screen');
+    var sw = d.sw || d.iw, sh = d.sh || d.ih;
+    if (!sw || !sh) { box.hidden = true; return; }
+    // iPhones and iPads keep screen.width and height in portrait when rotated,
+    // so turn the drawing of the screen to match the page.
+    if (d.touch && mq('(pointer: coarse)') && d.iw && d.ih && (d.iw > d.ih) !== (sw > sh)) { var t = sw; sw = sh; sh = t; }
+    box.hidden = false;
+    var avail = box.parentNode.clientWidth || 280;
+    var maxH = 190, w = Math.min(avail, maxH * sw / sh), h = w * sh / sw;
+    box.style.width = Math.round(w) + 'px';
+    box.style.height = Math.round(h) + 'px';
+    // Window size in screen (CSS) pixels. Inner sizes are zoomed CSS pixels.
+    var zw = isChromium ? d.zoom : 1;
+    var ow = d.ow || d.iw * zw, oh = d.oh || d.ih * zw;
+    ow = Math.min(ow, sw); oh = Math.min(oh, sh);
+    var x = num(window.screenX) - num(screen.availLeft), y = num(window.screenY) - num(screen.availTop);
+    x = Math.max(0, Math.min(sw - ow, x)); y = Math.max(0, Math.min(sh - oh, y));
+    var win = $('#scr-win');
+    win.style.left = (x / sw * 100) + '%';
+    win.style.top = (y / sh * 100) + '%';
+    win.style.width = (ow / sw * 100) + '%';
+    win.style.height = (oh / sh * 100) + '%';
+    var vpH = Math.min(1, d.ih * zw / oh), vpW = Math.min(1, d.iw * zw / ow);
+    var vp = $('#scr-vpbox');
+    vp.style.height = (vpH * 100) + '%';
+    vp.style.width = (vpW * 100) + '%';
+    $('#scr-caption').textContent = d.sw && d.sh ? 'Your browser window on the ' + pair(sw, sh) + ' screen, to scale' : 'Your browser window, to scale';
+    $('#scr-vp-tag').textContent = 'Viewport ' + pair(d.iw, d.ih);
+  }
+
+  function render() {
+    var d = collect();
+    cur = d;
+    $('#scr-phys').textContent = pair(d.pw, d.ph);
+    var sub = 'Physical pixels';
+    if (d.sw && (d.pw !== d.sw || d.ph !== d.sh)) sub += ', shown as ' + pair(d.sw, d.sh) + ' CSS pixels at ' + pct(d.scale) + ' scaling';
+    else if (d.sw) sub += ', the same as CSS pixels (no display scaling)';
+    $('#scr-sub').textContent = sub + '.';
+    $('#scr-css').textContent = pair(d.sw, d.sh);
+    $('#scr-vp').textContent = pair(d.iw, d.ih);
+    $('#scr-dpr').textContent = String(round(d.dpr, 3));
+    $('#scr-hz').textContent = hz.text;
+    $('#scr-aspect').textContent = d.aspect ? (d.aspect.exact ? '' : '≈ ') + d.aspect.text : '–';
+    $('#scr-depth').textContent = d.depth ? d.depth + '-bit' : '–';
+    $('#scr-hdr').textContent = d.hdrKnown ? (d.hdr ? 'Yes' : 'No') : '–';
+    $('#scr-gamut').textContent = d.gamut;
+
+    var note = '';
+    if (d.zoom !== 1) {
+      note = 'Browser zoom looks like ' + pct(d.zoom) + '. The viewport is measured in zoomed CSS pixels' +
+        (isChromium ? ', and the physical resolution has been corrected for the zoom.' : '.') +
+        ' Press Ctrl+0 (Cmd+0 on a Mac) to reset zoom for the most reliable reading.';
+    }
+    $('#scr-zoom').textContent = note;
+
+    var body = $('#scr-rows');
+    body.textContent = '';
+    rows(d).forEach(function (r) {
+      var tr = document.createElement('tr');
+      var th = document.createElement('th');
+      th.scope = 'row';
+      th.textContent = r[0];
+      var src = document.createElement('small');
+      src.textContent = r[2];
+      th.appendChild(src);
+      var td = document.createElement('td');
+      td.textContent = r[1];
+      tr.appendChild(th); tr.appendChild(td);
+      body.appendChild(tr);
+    });
+    renderDiagram(d);
+    fillPpiDefaults(false);
+  }
+
+  function summaryText() {
+    var d = cur || collect();
+    return rows(d).map(function (r) { return r[0] + ': ' + r[1]; }).join('\n') + '\n';
+  }
+
+  // ---- Refresh rate ----
+  var meas = null;
+  function setHz(text, detail, summary) {
+    hz.text = text;
+    hz.summary = summary || '';
+    $('#scr-hz').textContent = text;
+    $('#scr-hz-detail').textContent = detail;
+    if (cur) {
+      var body = $('#scr-rows');
+      TT.$$('tr', body).forEach(function (tr) {
+        if (tr.firstChild.firstChild.nodeValue === 'Refresh rate') tr.lastChild.textContent = summary || text;
+      });
+    }
+  }
+
+  function nearestHz(v) {
+    var best = 0;
+    COMMON_HZ.forEach(function (c) { if (Math.abs(v / c - 1) < 0.03 && (!best || Math.abs(v - c) < Math.abs(v - best))) best = c; });
+    return best;
+  }
+
+  function finish(st) {
+    meas = null;
+    var t = st.t, d = [];
+    for (var i = 6; i < t.length; i++) { var g = t[i] - t[i - 1]; if (g > 0) d.push(g); }
+    if (d.length < 10) {
+      setHz('Unknown', 'Too few frames were drawn to measure the refresh rate. Keep this tab in front and try again.');
+      return;
+    }
+    var s = d.slice().sort(function (a, b) { return a - b; });
+    var med = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+    var keep = d.filter(function (x) { return x > med * 0.5 && x < med * 1.5; });
+    var mean = keep.reduce(function (a, b) { return a + b; }, 0) / keep.length;
+    var rate = 1000 / mean;
+    var near = nearestHz(rate);
+    var dropped = d.length - keep.length;
+    var shown = near ? near + ' Hz' : fmt(rate, 1) + ' Hz';
+    var detail = 'Measured ' + fixed(rate, 2) + ' Hz: ' + fixed(mean, 2) + ' ms per frame over ' + d.length + ' frames' +
+      (dropped ? ', ignoring ' + dropped + ' slow ' + (dropped === 1 ? 'frame' : 'frames') : '') +
+      '. Battery saver, background tabs and some browsers cap the frame rate, so this can read lower than your display\'s rating.';
+    setHz(shown, detail, (near ? 'About ' + near + ' Hz' : fmt(rate, 1) + ' Hz') + ' (measured ' + fixed(rate, 2) + ' Hz)');
+    say('Refresh rate about ' + (near || fmt(rate, 1)) + ' hertz.');
+  }
+
+  function measure() {
+    if (meas) cancelAnimationFrame(meas.raf);
+    if (typeof requestAnimationFrame !== 'function') { setHz('Unknown', 'This browser cannot measure frame timing.'); return; }
+    var st = meas = { t: [], raf: 0 };
+    setHz('Measuring…', 'Measuring the refresh rate for 3 seconds. Keep this tab in front and avoid scrolling.');
+    function frame(ts) {
+      if (meas !== st) return;
+      if (document.hidden) { meas = null; setHz('Paused', 'The tab was hidden, so the measurement stopped. It starts again when you come back.'); return; }
+      st.t.push(ts);
+      var span = ts - st.t[0];
+      if ((span < 3000 || st.t.length < 40) && span < 8000) st.raf = requestAnimationFrame(frame);
+      else finish(st);
+    }
+    st.raf = requestAnimationFrame(frame);
+  }
+
+  // ---- Announcements ----
+  var status = $('#scr-status');
+  var say = function (text) { status.textContent = text; };
+  function vpText(d) { return d ? 'Screen ' + d.pw + ' by ' + d.ph + ', viewport ' + d.iw + ' by ' + d.ih + ' pixels.' : ''; }
+  var lastVp = '';
+  var announceViewport = TT.debounce(function () {
+    var t = vpText(cur);
+    if (t && t !== lastVp) { lastVp = t; say(t); }
+  }, 1000);
+
+  // ---- PPI calculator ----
+  var pwIn = $('#scr-pw'), phIn = $('#scr-ph'), diagIn = $('#scr-diag'), unitSel = $('#scr-unit');
+  var userEditedRes = false;
+  var ppiStatus = $('#scr-ppi-status'), ppiTimer = null;
+  // Announced once input pauses (or at once after a button), never per keystroke.
+  function sayPpi(text, now) {
+    clearTimeout(ppiTimer);
+    if (!text) return;
+    ppiTimer = setTimeout(function () { if (ppiStatus.textContent !== text) ppiStatus.textContent = text; }, now ? 50 : 800);
+  }
+  function fillPpiDefaults(force) {
+    if (!cur || (userEditedRes && !force)) return;
+    if (cur.pw && cur.ph) { pwIn.value = cur.pw; phIn.value = cur.ph; }
+    ppi(force ? 'click' : '');
+  }
+  // trigger: 'type' or 'click' announces a short summary; '' stays quiet.
+  function ppi(trigger) {
+    var msg = $('#scr-ppi-msg');
+    var say = trigger ? function (t) { sayPpi(t, trigger === 'click'); } : function () {};
+    var ids = ['#scr-ppi', '#scr-pitch', '#scr-size-in', '#scr-size-cm', '#scr-blend'];
+    function blank() { ids.forEach(function (id) { $(id).textContent = '–'; }); }
+    var w = Number(pwIn.value), h = Number(phIn.value), dv = String(diagIn.value).trim(), diag = Number(dv);
+    if (!(Number.isInteger(w) && w >= 1 && w <= 100000 && Number.isInteger(h) && h >= 1 && h <= 100000)) {
+      msg.textContent = 'Enter the width and height as whole numbers of pixels, up to 100,000.';
+      blank();
+      say(msg.textContent);
+      return;
+    }
+    if (dv === '') { msg.textContent = ''; blank(); say(''); return; } // '' cancels a pending summary
+    var inches = unitSel.value === 'cm' ? diag / 2.54 : diag;
+    if (!(inches > 0 && inches <= 1000)) {
+      msg.textContent = 'Enter a diagonal greater than 0' + (unitSel.value === 'cm' ? ' and up to 2540 cm.' : ' and up to 1000 inches.');
+      blank();
+      say(msg.textContent);
+      return;
+    }
+    msg.textContent = '';
+    var dpx = Math.sqrt(w * w + h * h), p = dpx / inches;
+    var wi = inches * w / dpx, hi = inches * h / dpx;
+    // 20/20 vision resolves 1 arcminute; beyond this distance one pixel subtends less.
+    var blendIn = 1 / (p * Math.tan(Math.PI / 10800));
+    $('#scr-ppi').textContent = fmt(p, 2) + ' PPI';
+    $('#scr-pitch').textContent = fmt(25.4 / p, 4) + ' mm';
+    $('#scr-size-in').textContent = fixed(wi, 1) + X + fixed(hi, 1) + ' in';
+    $('#scr-size-cm').textContent = fixed(wi * 2.54, 1) + X + fixed(hi * 2.54, 1) + ' cm';
+    $('#scr-blend').textContent = fmt(blendIn * 2.54, 0) + ' cm (' + fmt(blendIn, 1) + ' in)';
+    say(fmt(p, 2) + ' pixels per inch, pixel pitch ' + fmt(25.4 / p, 4) + ' millimetres.');
+  }
+  [pwIn, phIn].forEach(function (el) { el.addEventListener('input', function () { userEditedRes = true; ppi('type'); }); });
+  diagIn.addEventListener('input', function () { ppi('type'); });
+  unitSel.addEventListener('change', function () { ppi('click'); });
+  $('#scr-use').addEventListener('click', function () { userEditedRes = false; fillPpiDefaults(true); });
+
+  // ---- Copy and download ----
+  $('#scr-copy').addEventListener('click', function (e) { TT.copy(summaryText(), e.currentTarget); });
+  $('#scr-download').addEventListener('click', function () {
+    TT.download('screen-resolution.txt', summaryText(), 'text/plain;charset=utf-8');
+  });
+  $('#scr-hz-again').addEventListener('click', measure);
+
+  // ---- Live updates ----
+  var sig = '';
+  function signature() {
+    return [screen.width, screen.height, screen.availWidth, screen.availHeight, window.devicePixelRatio, screen.colorDepth,
+      screen.orientation ? screen.orientation.type : '', mq('(dynamic-range: high)'), gamut()].join('|');
+  }
+  function onResize() {
+    var s = signature(), moved = s !== sig;
+    sig = s;
+    render();
+    announceViewport();
+    // A new pixel ratio or screen size usually means another monitor.
+    if (moved && !meas) measure();
+  }
+  window.addEventListener('resize', TT.debounce(onResize, 60));
+  if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', onResize);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', TT.debounce(render, 100));
+  setInterval(function () { if (signature() !== sig) onResize(); }, 1000);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && hz.text === 'Paused') measure();
+  });
+
+  sig = signature();
+  render();
+  lastVp = vpText(cur);
+  measure();
+})();
+</script>

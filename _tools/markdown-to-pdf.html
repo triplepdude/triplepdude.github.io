@@ -1,0 +1,1205 @@
+---
+title: Markdown to PDF Converter
+description: Convert Markdown to PDF with a live preview. Tables, task lists, code highlighting, footnotes and LaTeX math, with ChatGPT output supported. Private.
+category: Text
+keywords: [markdown to pdf, md to pdf, convert markdown to pdf, markdown to pdf converter, chatgpt markdown to pdf, markdown preview, markdown to html]
+howto: |
+  ## How to convert Markdown to PDF
+
+  Paste your Markdown into the left box, or press **Open file…** to load a
+  `.md` file. The preview updates as you type; when it has room, it lays the
+  text out at the page's real width, so lines wrap where they will in the
+  PDF. Pick a page size, margins, font and text size, then press **Save as
+  PDF…**. Your browser's print window opens with only the document in it;
+  choose **Save as PDF** as the destination.
+
+  | Browser | Where to find Save as PDF |
+  |---|---|
+  | Chrome, Edge, Brave | Destination (or Printer) → Save as PDF |
+  | Firefox | Destination → Save to PDF |
+  | Safari on a Mac | The PDF menu at the bottom left → Save as PDF |
+  | iPhone and iPad | Options or Share → Save to Files |
+  | Android | Select a printer → Save as PDF |
+
+  The PDF is drawn by the browser itself, so its text is real, selectable
+  and searchable, and links stay clickable. If the date, page title and web
+  address appear at the top and bottom of each page, turn off **Headers and
+  footers** in the print window. With **Page numbers** ticked, Chrome and
+  Edge print "3 / 12" at the foot of each page (any margin but None).
+
+  ## Supported Markdown
+
+  The converter follows GitHub Flavored Markdown: headings, bold, italic,
+  ~~strikethrough~~, links and bare web addresses, ordered, bulleted and
+  nested lists, task lists (`- [x] done`), block quotes, tables with column
+  alignment, horizontal rules and images. Fenced code blocks with a language
+  name, such as `python` or `sql`, are colour-highlighted for about 60
+  languages. Footnotes use `[^1]` in the text and a `[^1]: note` line
+  anywhere in the file, and are numbered and collected at the end.
+
+  ## Math from ChatGPT and other assistants
+
+  With **Render LaTeX math** ticked, formulas between single dollar signs
+  are shown inline and formulas between double dollar signs are shown on
+  their own line. The `\( … \)` and `\[ … \]` delimiters that ChatGPT and
+  other assistants produce work too, as do fenced `math` blocks and
+  `\begin{align}` environments. Prices such as "$5 and $10" stay plain
+  text: as in Pandoc, a closing dollar sign may not follow a space or come
+  right before a digit, and `\$` always gives a literal dollar sign.
+  Formulas are typeset with KaTeX, which covers most of LaTeX math mode; an
+  unknown command is shown in red instead of stopping the page.
+
+  ## Page breaks, images and files
+
+  - A line with only `\newpage` or `<!-- pagebreak -->` starts a new page.
+    **New page for each top-level heading** does this before every `#`
+    heading after the first.
+  - Pictures written into the Markdown as `data:` addresses always show.
+    For files next to your `.md` file, such as `images/chart.png`, open or
+    drop the image files too; they are matched by file name.
+  - Images from other websites are not loaded until you tick **Load images
+    from the web**, because fetching them tells that site you opened the
+    document.
+  - YAML front matter at the top of a file is removed, and its `title`
+    becomes the file name.
+
+  ## Safe with any Markdown
+
+  Markdown may contain raw HTML. Before anything is shown, the HTML is
+  cleaned with DOMPurify: scripts, event handlers such as `onerror`,
+  `javascript:` links, frames, forms and style sheets are removed, so a
+  pasted document cannot run code in this page or in the downloaded HTML.
+
+  **Download HTML** saves the same document as a single web page with its
+  styles built in, handy for email or a website. Formulas in it are stored as
+  MathML, which current browsers display without extra files.
+faq:
+  - q: Is my Markdown uploaded to a server?
+    a: No. Rendering, highlighting and the PDF all happen in your browser on your own device. Nothing you type or open is sent anywhere or stored.
+  - q: Is the text in the PDF selectable?
+    a: Yes. The browser prints the document as real text with embedded fonts, not as a picture, so you can select, copy and search it, and links stay clickable in Chrome, Edge and Safari.
+  - q: How do I remove the date and web address from the PDF pages?
+    a: Those are the browser's own print headers. In the print window, open More settings (Chrome and Edge) or the print options (Firefox) and untick Headers and footers.
+  - q: Why does my ChatGPT answer show dollar signs or brackets instead of formulas?
+    a: Make sure Render LaTeX math is ticked. Formulas need one of the delimiters `$…$`, `$$…$$`, `\( … \)` or `\[ … \]`. Text selected and copied from the chat window often loses the backslashes and dollar signs, so copy the answer with the assistant's own copy button, which keeps the Markdown.
+  - q: Can I convert Markdown to PDF on my phone?
+    a: Yes. On Android choose Save as PDF as the printer. On an iPhone or iPad, tap Save as PDF…, then share the print preview to Files.
+---
+<style>
+.mdp-panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+@media (max-width: 820px) { .mdp-panes { grid-template-columns: minmax(0, 1fr); } }
+.mdp-pane { display: flex; flex-direction: column; min-width: 0; }
+.mdp-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; min-height: 36px; margin-bottom: 6px; }
+.mdp-head > label, .mdp-head > .label { font-size: 14px; font-weight: 600; }
+.mdp-head-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.mdp textarea#mdp-input { flex: 1 1 auto; height: 560px; min-height: 260px; font-size: 13.5px; line-height: 1.55; tab-size: 4; }
+.mdp textarea#mdp-input.is-over, .mdp-sheet.is-over { outline: 2px dashed var(--accent); outline-offset: 2px; }
+.mdp-edit .hint { margin-top: 6px; }
+.mdp-sheet {
+  display: block; flex: 1 1 auto; width: 100%; height: 560px; min-height: 260px;
+  background: #fff; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+}
+.mdp-sheet:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mdp-view { position: relative; }
+.mdp-drop { position: absolute; inset: 42px 0 0; display: none; align-items: center; justify-content: center; background: color-mix(in srgb, var(--accent-soft) 85%, transparent); border: 2px dashed var(--accent); border-radius: 8px; color: var(--accent); font-weight: 600; }
+.mdp.is-dragging .mdp-drop { display: flex; }
+.mdp-info { color: var(--muted); font-size: 13px; }
+.mdp-h { margin: 24px 0 12px; font-size: 1.1rem; }
+.mdp-panes + .msg, .mdp-panes + .msg + .msg { margin-top: 12px; }
+.mdp-opts > .field { flex: 1 1 150px; }
+.mdp-name { max-width: 420px; }
+.mdp-print-hint { margin: -6px 0 0; }
+.mdp .checks { gap: 2px 22px; }
+.mdp-print-root { display: none; }
+@media (max-width: 820px) {
+  .mdp textarea#mdp-input { height: 300px; }
+  .mdp-sheet { height: 460px; }
+}
+
+/* Printing with the browser menu (the Save as PDF button prints the preview frame itself):
+   only a copy of the document, on plain paper. */
+@media print {
+  html.mdp-printing, html.mdp-printing body { background: #fff !important; color: #000 !important; }
+  html.mdp-printing body > :not(.mdp-print-root) { display: none !important; }
+  html.mdp-printing .mdp-print-root { display: block !important; }
+  .mdp-print-root .md-doc h1 { letter-spacing: normal; }
+}
+</style>
+
+<div class="mdp" id="mdp">
+  <div class="mdp-panes">
+    <div class="mdp-pane mdp-edit">
+      <div class="mdp-head">
+        <label for="mdp-input">Markdown</label>
+        <div class="mdp-head-btns">
+          <button class="btn secondary small" type="button" id="mdp-open">Open file…</button>
+          <button class="btn secondary small" type="button" id="mdp-sample">Example</button>
+          <button class="btn secondary small" type="button" id="mdp-clear">Clear</button>
+        </div>
+        <input type="file" id="mdp-file" hidden multiple accept=".md,.markdown,.mdown,.mkd,.mkdn,.txt,.text,text/markdown,text/plain,image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/avif">
+      </div>
+      <textarea id="mdp-input" class="mono" spellcheck="false" autocomplete="off" aria-describedby="mdp-input-hint"># Quarterly project update
+
+A short report written in **Markdown**. Edit this text or paste your own: the preview shows what goes into the PDF.
+
+## Highlights
+
+- Shipped the *new onboarding flow* two weeks early
+- Cut page load time by 38%
+  - Photos now use modern image formats
+  - Scripts load only when a page needs them
+
+## Tasks
+
+- [x] Draft the report
+- [x] Add the figures
+- [ ] Send it for review
+
+## Results
+
+| Metric | Q1 | Q2 | Change |
+|:--|--:|--:|--:|
+| Sign-ups | 1,240 | 1,810 | +46% |
+| Churn | 4.1% | 3.2% | −0.9 pt |
+
+## Code
+
+```python
+def growth(before, after):
+    """Percentage change between two values."""
+    return (after - before) / before * 100
+
+print(f"{growth(1240, 1810):.0f}%")  # 46%
+```
+
+## Math
+
+Growth is $g = \frac{x_2 - x_1}{x_1}$, so over four quarters:
+
+$$
+\text{annual} = (1 + g)^{4} - 1
+$$
+
+> **Tip:** answers copied from ChatGPT or Claude work as they are, including `\( … \)` and `\[ … \]` math.[^1]
+
+[^1]: Formulas are drawn with KaTeX and code is coloured with highlight.js.
+</textarea>
+      <span class="hint" id="mdp-input-hint">Paste Markdown, or drop a .md file (and the images it uses) on the box.</span>
+    </div>
+    <div class="mdp-pane mdp-view">
+      <div class="mdp-head">
+        <span class="label" id="mdp-preview-label">Preview</span>
+        <span class="mdp-info" id="mdp-info"></span>
+      </div>
+      <iframe class="mdp-sheet" id="mdp-frame" title="Preview of your document" sandbox="allow-same-origin allow-modals"></iframe>
+      <div class="mdp-drop" aria-hidden="true">Drop Markdown or image files</div>
+    </div>
+  </div>
+  <p class="msg error" id="mdp-error" role="alert"></p>
+  <p class="msg ok" id="mdp-ok" aria-live="polite"></p>
+
+  <h2 class="mdp-h">Page and text</h2>
+  <div class="row mdp-opts">
+    <div class="field">
+      <label for="mdp-size">Page size</label>
+      <select id="mdp-size">
+        <option value="a4">A4</option>
+        <option value="letter">US Letter</option>
+        <option value="legal">US Legal</option>
+        <option value="a5">A5</option>
+        <option value="a3">A3</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="mdp-orient">Orientation</label>
+      <select id="mdp-orient">
+        <option value="portrait">Portrait</option>
+        <option value="landscape">Landscape</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="mdp-margin">Margins</label>
+      <select id="mdp-margin">
+        <option value="0">None</option>
+        <option value="12.7">Narrow, ½ in</option>
+        <option value="20" selected>Normal, 20 mm</option>
+        <option value="25.4">Wide, 1 in</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="mdp-font">Font</label>
+      <select id="mdp-font">
+        <option value="sans">Sans-serif</option>
+        <option value="serif">Serif</option>
+        <option value="mono">Monospace</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="mdp-fontsize">Text size</label>
+      <select id="mdp-fontsize">
+        <option value="10">10 pt</option>
+        <option value="11" selected>11 pt</option>
+        <option value="12">12 pt</option>
+        <option value="14">14 pt</option>
+      </select>
+    </div>
+  </div>
+  <div class="checks">
+    <label class="check"><input type="checkbox" id="mdp-pagenum" checked> Page numbers</label>
+    <label class="check"><input type="checkbox" id="mdp-toc"> Table of contents</label>
+    <label class="check"><input type="checkbox" id="mdp-h1break"> New page for each top-level heading</label>
+    <label class="check"><input type="checkbox" id="mdp-breaks"> Keep single line breaks</label>
+    <label class="check"><input type="checkbox" id="mdp-math" checked> Render LaTeX math</label>
+    <label class="check"><input type="checkbox" id="mdp-remote"> Load images from the web</label>
+  </div>
+  <div class="field mdp-name">
+    <label for="mdp-name">File name</label>
+    <input type="text" id="mdp-name" autocomplete="off" spellcheck="false" placeholder="document">
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" id="mdp-print">Save as PDF…</button>
+    <button class="btn secondary" type="button" id="mdp-html">Download HTML</button>
+    <button class="btn secondary" type="button" id="mdp-copy">Copy HTML</button>
+  </div>
+  <p class="hint mdp-print-hint" id="mdp-print-hint">The print window opens with only your document: choose <strong>Save as PDF</strong> as the destination.</p>
+</div>
+
+<script defer src="{{ '/assets/vendor/marked/marked.umd.js' | relative_url }}"></script>
+<script defer src="{{ '/assets/vendor/dompurify/purify.min.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+  var VENDOR = {{ '/assets/vendor/' | relative_url | jsonify }};
+  {% raw %}
+  var $ = TT.$;
+
+  // ---------- Document style: the same CSS styles the preview, the print and the downloaded HTML ----------
+  var FONTS = {
+    sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"',
+    serif: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, "Times New Roman", Times, serif',
+    mono: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+  };
+  var MONO = FONTS.mono;
+  var DOC_CSS = [
+    '.md-doc{color:#1f2328;background:#fff;line-height:1.55;overflow-wrap:break-word;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-kerning:normal}',
+    '.md-doc>:first-child{margin-top:0!important}.md-doc>:last-child{margin-bottom:0!important}',
+    '.md-doc h1,.md-doc h2,.md-doc h3,.md-doc h4,.md-doc h5,.md-doc h6{margin:1.4em 0 .6em;font-weight:600;line-height:1.25;break-after:avoid;page-break-after:avoid;break-inside:avoid}',
+    '.md-doc h1{font-size:2em;padding-bottom:.25em;border-bottom:1px solid #d1d9e0}',
+    '.md-doc h2{font-size:1.5em;padding-bottom:.25em;border-bottom:1px solid #d1d9e0}',
+    '.md-doc h3{font-size:1.25em}.md-doc h4{font-size:1em}.md-doc h5{font-size:.875em}.md-doc h6{font-size:.85em;color:#59636e}',
+    '.md-doc p,.md-doc ul,.md-doc ol,.md-doc dl,.md-doc blockquote,.md-doc table,.md-doc pre,.md-doc details,.md-doc .katex-display{margin:0 0 1em}',
+    '.md-doc p{orphans:3;widows:3}',
+    '.md-doc a{color:#0969da;text-decoration:underline;text-underline-offset:.15em}',
+    '.md-doc strong{font-weight:600}',
+    '.md-doc ul,.md-doc ol{padding-left:2em}.md-doc li+li{margin-top:.25em}.md-doc li>ul,.md-doc li>ol{margin:.25em 0 0}',
+    '.md-doc li>p{margin:.5em 0}',
+    '.md-doc ul.contains-task-list{list-style:none;padding-left:1.6em}.md-doc li.task-list-item{position:relative}',
+    '.md-doc li.task-list-item>input[type=checkbox],.md-doc li.task-list-item>p>input[type=checkbox]{position:absolute;left:-1.45em;top:.3em;width:.95em;height:.95em;margin:0}',
+    '.md-doc blockquote{margin-left:0;margin-right:0;padding:0 1em;color:#59636e;border-left:.25em solid #d1d9e0}',
+    '.md-doc hr{height:.2em;margin:1.5em 0;padding:0;background:#d1d9e0;border:0}',
+    '.md-doc code,.md-doc kbd,.md-doc samp,.md-doc pre{font-family:' + MONO + '}',
+    '.md-doc code{padding:.15em .35em;font-size:.86em;background:#eff1f3;border-radius:4px}',
+    '.md-doc pre{padding:.9em 1em;font-size:.84em;line-height:1.45;background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere}',
+    '.md-doc pre code{padding:0;font-size:inherit;background:none;border-radius:0}',
+    '.md-doc kbd{padding:.1em .4em;font-size:.8em;border:1px solid #d1d9e0;border-bottom-width:2px;border-radius:4px;background:#f6f8fa}',
+    '.md-doc table{border-collapse:collapse;border-spacing:0;max-width:100%}',
+    '.md-doc th,.md-doc td{padding:.4em .8em;border:1px solid #d1d9e0;overflow-wrap:anywhere;vertical-align:top}',
+    '.md-doc th{font-weight:600;background:#f6f8fa}.md-doc tbody tr:nth-child(2n){background:#fafbfc}',
+    '.md-doc thead{display:table-header-group}.md-doc tr,.md-doc img,.md-doc .katex-display,.md-doc figure{break-inside:avoid;page-break-inside:avoid}',
+    '.md-doc img{max-width:100%;height:auto;box-sizing:content-box}',
+    '.md-doc mark{background:#fff8c5;color:inherit}',
+    '.md-doc sup,.md-doc sub{line-height:0}',
+    '.md-doc .md-pagebreak{break-after:page;page-break-after:always;height:0;margin:0;border:0}',
+    '.md-doc.md-h1-break h1{break-before:page;page-break-before:always}.md-doc.md-h1-break h1:first-child,.md-doc.md-h1-break .md-toc+h1{break-before:auto;page-break-before:auto}',
+    '.md-doc .md-toc{margin:0 0 1.5em;padding:.8em 1.2em;background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px}',
+    '.md-doc .md-toc-title{margin:0 0 .4em;font-weight:600}.md-doc .md-toc ul{margin:0;padding-left:1.2em;list-style:none}.md-doc .md-toc>ul{padding-left:0}.md-doc .md-toc li{margin:.15em 0}',
+    '.md-doc .footnotes{margin-top:2em;padding-top:.8em;font-size:.85em;color:#59636e;border-top:1px solid #d1d9e0}',
+    '.md-doc .footnotes ol{padding-left:1.5em}.md-doc .footnotes p{margin:0}.md-doc .md-fn-back{text-decoration:none}',
+    '.md-doc .md-img-note{display:inline-block;padding:.3em .6em;font-size:.85em;color:#59636e;background:#f6f8fa;border:1px dashed #afb8c1;border-radius:4px}',
+    '.md-doc .md-math-src{font-family:' + MONO + ';font-size:.9em;color:#59636e}',
+    '.md-doc .md-math-display{display:block;margin:0 0 1em;text-align:center}',
+    '.md-doc .katex-display{overflow-x:auto;overflow-y:hidden;padding:.2em 0}',
+    '.md-doc .katex{font-size:1.1em}',
+    /* Syntax colours (after the GitHub light theme) */
+    '.md-doc .hljs-doctag,.md-doc .hljs-keyword,.md-doc .hljs-meta .hljs-keyword,.md-doc .hljs-template-tag,.md-doc .hljs-template-variable,.md-doc .hljs-type,.md-doc .hljs-variable.language_{color:#cf222e}',
+    '.md-doc .hljs-title,.md-doc .hljs-title.class_,.md-doc .hljs-title.function_{color:#8250df}',
+    '.md-doc .hljs-attr,.md-doc .hljs-attribute,.md-doc .hljs-literal,.md-doc .hljs-meta,.md-doc .hljs-number,.md-doc .hljs-operator,.md-doc .hljs-selector-attr,.md-doc .hljs-selector-class,.md-doc .hljs-selector-id,.md-doc .hljs-variable{color:#0550ae}',
+    '.md-doc .hljs-meta .hljs-string,.md-doc .hljs-regexp,.md-doc .hljs-string{color:#0a3069}',
+    '.md-doc .hljs-built_in,.md-doc .hljs-symbol{color:#953800}',
+    '.md-doc .hljs-code,.md-doc .hljs-comment,.md-doc .hljs-formula{color:#6e7781}',
+    '.md-doc .hljs-name,.md-doc .hljs-quote,.md-doc .hljs-selector-pseudo,.md-doc .hljs-selector-tag{color:#116329}',
+    '.md-doc .hljs-section{color:#0550ae;font-weight:700}.md-doc .hljs-bullet{color:#953800}',
+    '.md-doc .hljs-emphasis{font-style:italic}.md-doc .hljs-strong{font-weight:700}',
+    '.md-doc .hljs-addition{color:#116329;background:#dafbe1}.md-doc .hljs-deletion{color:#82071e;background:#ffebe9}'
+  ].join('\n');
+
+  // The preview is its own document in a sandboxed frame: no script can run in it, the site's
+  // styles cannot leak into it, and printing it prints only the document.
+  var FRAME_CSS = 'html{background:#fff;color-scheme:light}body{margin:0;padding:16px}' +
+    '@media print{body{padding:0!important}.md-doc{width:auto!important;zoom:1!important}}';
+  function frameSkeleton() {
+    return '<!DOCTYPE html><html lang="' + (document.documentElement.lang || 'en') + '"><head><meta charset="utf-8">' +
+      '<meta name="color-scheme" content="light"><title>Preview</title><style>' + DOC_CSS + '\n' + FRAME_CSS +
+      '</style><style id="mdp-page"></style></head><body><article class="md-doc" id="mdp-doc"></article></body></html>';
+  }
+  // The same styles in this page, for printing from the browser menu instead of the button.
+  var styleEl = document.createElement('style');
+  styleEl.textContent = DOC_CSS;
+  document.head.appendChild(styleEl);
+  var pageStyle = document.createElement('style');
+  document.head.appendChild(pageStyle);
+
+  // ---------- Elements ----------
+  var input = $('#mdp-input'), frame = $('#mdp-frame'), fdoc = null, doc = null;
+  var root = $('#mdp');
+  var errBox = $('#mdp-error'), okBox = $('#mdp-ok'), info = $('#mdp-info');
+  var nameInput = $('#mdp-name'), fileInput = $('#mdp-file');
+  var opt = {
+    size: $('#mdp-size'), orient: $('#mdp-orient'), margin: $('#mdp-margin'), font: $('#mdp-font'), fontsize: $('#mdp-fontsize'),
+    pagenum: $('#mdp-pagenum'), toc: $('#mdp-toc'), h1break: $('#mdp-h1break'), breaks: $('#mdp-breaks'), math: $('#mdp-math'), remote: $('#mdp-remote')
+  };
+  var SAMPLE = input.defaultValue;
+
+  var PAGE_MM = { a4: [210, 297], letter: [215.9, 279.4], legal: [215.9, 355.6], a5: [148, 210], a3: [297, 420] };
+  var PAGE_CSS = { a4: 'A4', letter: 'letter', legal: 'legal', a5: 'A5', a3: 'A3' };
+  // Territories whose default paper is US Letter (CLDR); everywhere else uses A4.
+  var LETTER_REGIONS = ['BZ', 'CA', 'CL', 'CO', 'CR', 'GT', 'MX', 'NI', 'PA', 'PH', 'PR', 'SV', 'US', 'VE'];
+  try {
+    var region = (navigator.language || '').split('-')[1];
+    if (region && LETTER_REGIONS.indexOf(region.toUpperCase()) !== -1) opt.size.value = 'letter';
+  } catch (e) { /* keep A4 */ }
+
+  // ---------- Small helpers ----------
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function unesc(s) {
+    return String(s).replace(/&(?:amp|lt|gt|quot|#39|#x27);/g, function (m) {
+      return { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'" }[m];
+    });
+  }
+  function fmt(n) { return n.toLocaleString(); }
+  function setMsg(el, text) { el.textContent = text || ''; }
+  function safeName(s) {
+    return String(s || '').replace(/[\u0000-\u001f\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^\.+/, '').slice(0, 120);
+  }
+
+  // Lazily loaded vendored files (same origin only).
+  var loads = {};
+  function loadScript(path) {
+    if (loads[path]) return loads[path];
+    loads[path] = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = VENDOR + path;
+      s.async = true;
+      s.onload = function () { resolve(); };
+      s.onerror = function () { delete loads[path]; s.remove(); reject(new Error('Could not load ' + path + '. Check your connection and try again.')); };
+      document.head.appendChild(s);
+    });
+    return loads[path];
+  }
+  function loadCss(path, d) {
+    d = d || document;
+    var key = (d === document ? 'page:' : 'frame:') + path;
+    if (loads[key]) return loads[key];
+    loads[key] = new Promise(function (resolve, reject) {
+      var l = d.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = new URL(VENDOR + path, location.href).href;
+      l.onload = function () { resolve(); };
+      l.onerror = function () { delete loads[key]; l.remove(); reject(new Error('Could not load ' + path + '.')); };
+      d.head.appendChild(l);
+    });
+    return loads[key];
+  }
+
+  // ---------- Syntax highlighting (highlight.js, loaded on first use) ----------
+  // Extra grammars beyond the 36 bundled with highlight.min.js, by the names people write after ```.
+  var EXTRA = {
+    dockerfile: 'dockerfile', docker: 'dockerfile', powershell: 'powershell', ps: 'powershell', ps1: 'powershell', pwsh: 'powershell',
+    latex: 'latex', tex: 'latex', matlab: 'matlab', scala: 'scala', dart: 'dart', haskell: 'haskell', hs: 'haskell',
+    elixir: 'elixir', ex: 'elixir', exs: 'elixir', julia: 'julia', jl: 'julia', nginx: 'nginx', nginxconf: 'nginx',
+    protobuf: 'protobuf', proto: 'protobuf', clojure: 'clojure', clj: 'clojure', ocaml: 'ocaml', ml: 'ocaml',
+    fsharp: 'fsharp', fs: 'fsharp', 'f#': 'fsharp', vim: 'vim', x86asm: 'x86asm', asm: 'x86asm', nasm: 'x86asm',
+    groovy: 'groovy', fortran: 'fortran', f90: 'fortran', erlang: 'erlang', erl: 'erlang', cmake: 'cmake',
+    apache: 'apache', apacheconf: 'apache', http: 'http', dos: 'dos', bat: 'dos', cmd: 'dos', batch: 'dos',
+    pgsql: 'pgsql', postgres: 'pgsql', postgresql: 'pgsql', properties: 'properties', gradle: 'gradle'
+  };
+  var hl = { ready: false, failed: false, extra: {}, cache: new Map() };
+  function wantHighlighter(lang) {
+    if (hl.failed) return;
+    if (!hl.ready) {
+      loadScript('highlight.js/highlight.min.js').then(function () {
+        hl.ready = !!window.hljs;
+        if (hl.ready) scheduleRender(0);
+      }, function () { hl.failed = true; });
+      return;
+    }
+    var file = EXTRA[lang];
+    if (file && !hl.extra[file]) {
+      hl.extra[file] = 'loading';
+      loadScript('highlight.js/languages/' + file + '.min.js').then(function () {
+        hl.extra[file] = 'done';
+        hl.cache.clear();
+        scheduleRender(0);
+      }, function () { hl.extra[file] = 'failed'; });
+    }
+  }
+  function highlight(code, lang) {
+    if (!lang) return null;
+    if (!hl.ready || !window.hljs.getLanguage(lang)) { wantHighlighter(lang); if (!hl.ready || !window.hljs.getLanguage(lang)) return null; }
+    var key = lang + '\u0000' + code;
+    if (hl.cache.has(key)) return hl.cache.get(key);
+    var out = null;
+    try { out = window.hljs.highlight(code, { language: lang, ignoreIllegals: true }).value; } catch (e) { out = null; }
+    if (hl.cache.size > 400) hl.cache.clear();
+    hl.cache.set(key, out);
+    return out;
+  }
+
+  // ---------- Math (KaTeX, loaded on first use) ----------
+  var km = { ready: false, failed: false, cache: new Map(), error: '' };
+  function wantKatex() {
+    if (km.ready || km.failed || km.loading) return;
+    km.loading = true;
+    Promise.all([loadScript('katex/katex.min.js'), loadCss('katex/katex.min.css', fdoc), loadCss('katex/katex.min.css')]).then(function () {
+      km.ready = !!window.katex;
+      km.loading = false;
+      if (km.ready) scheduleRender(0);
+    }, function (e) {
+      km.failed = true;
+      km.loading = false;
+      km.error = e.message;
+      scheduleRender(0);
+    });
+  }
+  function renderMath(tex, display) {
+    var t = tex.trim();
+    if (!km.ready) {
+      wantKatex();
+      return display ? '<span class="md-math-display md-math-src">' + esc(t) + '</span>' : '<span class="md-math-src">' + esc(t) + '</span>';
+    }
+    // KaTeX's markup is long, so each formula is cleaned once (all new ones of a render together)
+    // and cached; the document holds a placeholder that is swapped in after it has been cleaned.
+    var key = (display ? 'D' : 'I') + t;
+    if (!km.cache.has(key) && !(key in ctx.raw)) {
+      var html;
+      try {
+        html = window.katex.renderToString(t, { displayMode: display, throwOnError: false, output: 'htmlAndMathml', trust: false, strict: 'ignore', maxExpand: 500, macros: {} });
+      } catch (e) { html = '<span class="md-math-src">' + esc(t) + '</span>'; }
+      ctx.raw[key] = html;
+      ctx.rawKeys.push(key);
+    }
+    ctx.kx.push(key);
+    return '<span class="md-kx ' + ctx.nonce + '-' + (ctx.kx.length - 1) + '"></span>';
+  }
+  function cleanNewMath() {
+    var keys = ctx.rawKeys;
+    if (!keys.length) return;
+    if (km.cache.size + keys.length > 3000) km.cache.clear();
+    var sep = '<hr class="md-sep ' + ctx.nonce + '">';
+    var x = keys.map(function (k) { return ctx.raw[k]; }).join(sep);
+    var parts = sanitize(x, 'preview').split(sep);
+    if (parts.length === keys.length) keys.forEach(function (k, i) { km.cache.set(k, parts[i]); });
+    else keys.forEach(function (k) { x = ctx.raw[k]; km.cache.set(k, sanitize(x, 'preview')); });
+    ctx.rawKeys = [];
+  }
+  function spliceMath(html) {
+    if (!ctx.kx.length) return html;
+    cleanNewMath();
+    return html.replace(new RegExp('<span class="md-kx ' + ctx.nonce + '-(\\d+)"></span>', 'g'), function (m, i) { return km.cache.get(ctx.kx[+i]) || ''; });
+  }
+  function nonce() {
+    var a = new Uint8Array(6);
+    crypto.getRandomValues(a);
+    return 'k' + Array.prototype.map.call(a, function (x) { return (x < 16 ? '0' : '') + x.toString(16); }).join('');
+  }
+
+  // ---------- Markdown ----------
+  var ctx = null; // per-render state
+  function newCtx(mode) {
+    return { mode: mode, slugs: Object.create(null), heads: [], fnIds: Object.create(null), fnOrder: [], fnNum: Object.create(null), fnRefCount: Object.create(null), fnHtml: Object.create(null), math: false, title: '', kx: [], raw: Object.create(null), rawKeys: [], nonce: nonce() };
+  }
+
+  // GitHub's heading anchors: lower case, keep letters, digits, spaces, - and _, spaces become -.
+  function slugify(text) {
+    var base = unesc(text.replace(/<[^>]*>/g, '')).trim().toLowerCase()
+      .replace(/[^\p{L}\p{M}\p{N}\s_-]/gu, '').replace(/\s/g, '-') || 'section';
+    var s = base, n = 0;
+    while (ctx.slugs[s]) { n++; s = base + '-' + n; }
+    ctx.slugs[s] = true;
+    return s;
+  }
+
+  var mathOn = function () { return opt.math.checked; };
+  var extensions = [
+    { // \newpage, \pagebreak or <!-- pagebreak --> on a line of its own
+      name: 'pagebreak', level: 'block',
+      start: function (src) { var m = /^ {0,3}(?:\\newpage|\\pagebreak|<!--\s*pagebreak\s*-->)/m.exec(src); return m ? m.index : undefined; },
+      tokenizer: function (src) {
+        var m = /^ {0,3}(?:\\newpage|\\pagebreak|<!--\s*pagebreak\s*-->)[ \t]*(?:\n+|$)/.exec(src);
+        if (m) return { type: 'pagebreak', raw: m[0] };
+      },
+      renderer: function () { return '<div class="md-pagebreak"></div>\n'; }
+    },
+    { // $$ \u2026 $$, \[ \u2026 \], ```math and \begin{align} \u2026 blocks
+      name: 'mathBlock', level: 'block',
+      start: function (src) { if (!mathOn()) return; var m = /^ {0,3}(?:\$\$|\\\[|\\begin\{)/m.exec(src); return m ? m.index : undefined; },
+      tokenizer: function (src) {
+        if (!mathOn()) return;
+        var m = /^ {0,3}\$\$([\s\S]+?)\$\$[ \t]*(?:\n+|$)/.exec(src) ||
+          /^ {0,3}\\\[([\s\S]+?)\\\][ \t]*(?:\n+|$)/.exec(src) ||
+          /^ {0,3}(\\begin\{(equation|align|alignat|gather|multline|flalign|split|eqnarray)\*?\}[\s\S]+?\\end\{\2\*?\})[ \t]*(?:\n+|$)/.exec(src);
+        if (m && /\S/.test(m[1])) return { type: 'mathBlock', raw: m[0], text: m[1] };
+      },
+      renderer: function (t) { ctx.math = true; return '<div class="md-math-block">' + renderMath(t.text, true) + '</div>\n'; }
+    },
+    { // $ \u2026 $, \( \u2026 \), and $$ \u2026 $$ or \[ \u2026 \] inside a paragraph
+      name: 'mathInline', level: 'inline',
+      start: function (src) { if (!mathOn()) return; var m = /\$|\\\(|\\\[/.exec(src); return m ? m.index : undefined; },
+      tokenizer: function (src) {
+        if (!mathOn()) return;
+        var m;
+        if ((m = /^\$\$(?!\$)([\s\S]+?)\$\$/.exec(src))) return { type: 'mathInline', raw: m[0], text: m[1], display: true };
+        if ((m = /^\\\[([\s\S]+?)\\\]/.exec(src))) return { type: 'mathInline', raw: m[0], text: m[1], display: true };
+        if ((m = /^\\\(([\s\S]+?)\\\)/.exec(src))) return { type: 'mathInline', raw: m[0], text: m[1], display: false };
+        // Pandoc's rule: no space after the opening $, none before the closing $, and no digit right after it.
+        if ((m = /^\$(?![\s$])((?:\\[\s\S]|[^\\$])*?[^\s\\$])\$(?![\d$])/.exec(src))) return { type: 'mathInline', raw: m[0], text: m[1], display: false };
+      },
+      renderer: function (t) { ctx.math = true; return renderMath(t.text, t.display); }
+    },
+    { // [^label]: footnote text, with indented continuation lines
+      name: 'fnDef', level: 'block',
+      start: function (src) { var m = /^ {0,3}\[\^[^\]\s]+\]:/m.exec(src); return m ? m.index : undefined; },
+      tokenizer: function (src) {
+        var m = /^ {0,3}\[\^([^\]\s]{1,100})\]:[ \t]*/.exec(src);
+        if (!m) return;
+        var rest = src.slice(m[0].length), lines = rest.split('\n'), body = [lines[0]], used = lines[0].length, i = 1;
+        while (i < lines.length) {
+          var ln = lines[i];
+          if (!/\S/.test(ln)) {
+            var j = i;
+            while (j < lines.length && !/\S/.test(lines[j])) j++;
+            if (j < lines.length && /^(?: {4}|\t)/.test(lines[j])) {
+              for (; i < j; i++) { body.push(''); used += 1 + lines[i].length; }
+              continue;
+            }
+            break;
+          }
+          if (/^ {0,3}\[\^[^\]\s]+\]:/.test(ln)) break;
+          if (!/^(?: {2,}|\t)/.test(ln) && /^ {0,3}(?:#{1,6}(?:\s|$)|[-*+]\s|\d{1,9}[.)]\s|>|`{3}|~{3}|\||<)/.test(ln)) break;
+          body.push(ln.replace(/^(?: {1,4}|\t)/, ''));
+          used += 1 + ln.length;
+          i++;
+        }
+        var raw = src.slice(0, m[0].length + used);
+        var after = /^\n*/.exec(src.slice(raw.length))[0];
+        var id = m[1].toLowerCase();
+        if (!ctx.fnIds[id]) ctx.fnIds[id] = true;
+        return { type: 'fnDef', raw: raw + after, id: id, tokens: this.lexer.blockTokens(body.join('\n').trim(), []) };
+      },
+      renderer: function (t) {
+        if (!(t.id in ctx.fnHtml)) ctx.fnHtml[t.id] = this.parser.parse(t.tokens);
+        return '';
+      }
+    },
+    { // [^label] in the text
+      name: 'fnRef', level: 'inline',
+      start: function (src) { var i = src.indexOf('[^'); return i < 0 ? undefined : i; },
+      tokenizer: function (src) {
+        var m = /^\[\^([^\]\s]{1,100})\]/.exec(src);
+        if (!m) return;
+        var id = m[1].toLowerCase();
+        if (!ctx.fnIds[id]) return;
+        if (!ctx.fnNum[id]) { ctx.fnOrder.push(id); ctx.fnNum[id] = ctx.fnOrder.length; }
+        ctx.fnRefCount[id] = (ctx.fnRefCount[id] || 0) + 1;
+        return { type: 'fnRef', raw: m[0], id: id, n: ctx.fnNum[id], k: ctx.fnRefCount[id] };
+      },
+      renderer: function (t) {
+        var n = t.n, refId = 'fnref-' + n + (t.k > 1 ? '-' + t.k : '');
+        return '<sup class="md-fn-ref"><a href="#fn-' + n + '" id="' + refId + '">' + n + '</a></sup>';
+      }
+    }
+  ];
+
+  var renderer = {
+    heading: function (t) {
+      var inner = this.parser.parseInline(t.tokens);
+      var id = slugify(inner);
+      ctx.heads.push({ depth: t.depth, id: id, html: inner });
+      if (!ctx.title && t.depth === 1) ctx.title = unesc(inner.replace(/<[^>]*>/g, '')).trim();
+      return '<h' + t.depth + ' id="' + id + '">' + inner + '</h' + t.depth + '>\n';
+    },
+    code: function (t) {
+      var info = (t.lang || '').trim(), lang = info.split(/\s+/)[0].toLowerCase().replace(/^\{?\.?|\}$/g, '');
+      if (lang === 'math' && mathOn()) { ctx.math = true; return '<div class="md-math-block">' + renderMath(t.text, true) + '</div>\n'; }
+      var body = highlight(t.text, lang);
+      var cls = lang ? ' class="hljs language-' + esc(lang.replace(/[^\w#+.-]/g, '')) + '"' : '';
+      return '<pre><code' + cls + '>' + (body != null ? body : esc(t.text)) + '\n</code></pre>\n';
+    },
+    list: function (t) {
+      var tag = t.ordered ? 'ol' : 'ul', body = '', task = false;
+      for (var i = 0; i < t.items.length; i++) { body += this.listitem(t.items[i]); if (t.items[i].task) task = true; }
+      var start = t.ordered && t.start !== 1 && t.start !== '' ? ' start="' + (+t.start || 0) + '"' : '';
+      return '<' + tag + start + (task ? ' class="contains-task-list"' : '') + '>\n' + body + '</' + tag + '>\n';
+    },
+    listitem: function (item) {
+      return '<li' + (item.task ? ' class="task-list-item"' : '') + '>' + this.parser.parse(item.tokens) + '</li>\n';
+    }
+  };
+
+  var md = null;
+  function setupMarked() {
+    md = new window.marked.Marked();
+    md.use({
+      gfm: true,
+      extensions: extensions,
+      renderer: renderer,
+      hooks: {
+        preprocess: function (src) {
+          src = src.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+          // YAML front matter: removed; its title names the file.
+          var fm = /^---[ \t]*\n([\s\S]*?)\n(?:---|\.\.\.)[ \t]*(?:\n|$)/.exec(src);
+          if (fm) {
+            var tm = /^title:[ \t]*(.+)$/m.exec(fm[1]);
+            if (tm) ctx.fmTitle = tm[1].trim().replace(/^(['"])(.*)\1$/, '$2');
+            src = src.slice(fm[0].length);
+          }
+          return src;
+        }
+      }
+    });
+  }
+
+  // ---------- Sanitising ----------
+  var images = new Map();   // lower-case file name -> { url, file }
+  var purifyMode = 'preview';
+  var FORBID_TAGS = ['style', 'form', 'video', 'audio', 'source', 'track', 'picture', 'iframe', 'frame', 'frameset', 'object', 'embed',
+    'applet', 'base', 'link', 'meta', 'noscript', 'template', 'portal', 'dialog', 'foreignobject', 'image', 'use', 'animate', 'set', 'feimage', 'mglyph'];
+  var PURIFY = {
+    FORBID_TAGS: FORBID_TAGS,
+    FORBID_ATTR: ['srcset', 'ping', 'action', 'formaction', 'background', 'poster', 'dynsrc', 'lowsrc', 'autofocus', 'contenteditable', 'tabindex', 'accesskey'],
+    ADD_TAGS: ['semantics', 'annotation'],
+    SANITIZE_NAMED_PROPS: true,
+    ALLOW_DATA_ATTR: false
+  };
+  var RE_CSS_FETCH = /url\s*\(|image-set|image\s*\(|@import|expression\s*\(|behavio(?:u)?r\s*:|-moz-binding|\\/i;
+  function isWeb(u) { return /^(?:https?:)?\/\//i.test(u); }
+  function baseName(u) {
+    var p = String(u).split(/[?#]/)[0];
+    try { p = decodeURIComponent(p); } catch (e) { /* keep as written */ }
+    return p.split(/[\\/]/).pop().toLowerCase();
+  }
+
+  function setupPurify() {
+    var P = window.DOMPurify;
+    P.addHook('uponSanitizeAttribute', function (node, data) {
+      var n = data.attrName, v = data.attrValue || '';
+      if (n === 'style' && RE_CSS_FETCH.test(v)) { data.keepAttr = false; return; }
+      // SVG presentation attributes (fill, filter, mask, clip-path, marker-*) may only point inside the document.
+      if (n !== 'style' && /url\s*\(/i.test(v) && !/^\s*url\s*\(\s*['"]?#[^)]*\)\s*$/i.test(v)) { data.keepAttr = false; return; }
+      if (n === 'src' && node.nodeName !== 'IMG') { data.keepAttr = false; return; }
+      // SVG may only point inside the document; no external files.
+      if ((n === 'href' || n === 'xlink:href') && node.namespaceURI === 'http://www.w3.org/2000/svg' && node.localName !== 'a' && v.charAt(0) !== '#') data.keepAttr = false;
+    });
+    P.addHook('afterSanitizeAttributes', function (node) {
+      var tag = node.nodeName;
+      if (tag === 'IMG') {
+        var src = node.getAttribute('src') || '';
+        node.removeAttribute('loading');
+        if (!src || /^data:image\//i.test(src)) return;
+        if (isWeb(src)) {
+          if (purifyMode === 'export' || opt.remote.checked) { node.setAttribute('referrerpolicy', 'no-referrer'); return; }
+          node.removeAttribute('src');
+          node.setAttribute('class', 'md-img-blocked');
+          node.setAttribute('title', src);
+          return;
+        }
+        var local = images.get(baseName(src));
+        if (purifyMode === 'export') {
+          // The saved page keeps a relative path unless the picture was added here, then it is embedded.
+          if (local && local.dataUrl) node.setAttribute('src', local.dataUrl);
+          return;
+        }
+        node.removeAttribute('src');
+        if (local) {
+          node.setAttribute('src', local.url);
+        } else {
+          node.setAttribute('class', 'md-img-missing');
+          node.setAttribute('title', src);
+        }
+      } else if (tag === 'A') {
+        var href = node.getAttribute('href');
+        if (href == null) return;
+        if (href.charAt(0) === '#' && href.length > 1 && href.indexOf('#user-content-') !== 0) {
+          var frag = href.slice(1);
+          try { frag = decodeURIComponent(frag); } catch (e) { /* as written */ }
+          node.setAttribute('href', '#user-content-' + frag.toLowerCase());
+        } else if (purifyMode === 'preview' && /^(?:https?:|mailto:|tel:)/i.test(href)) {
+          node.setAttribute('target', '_blank');
+          node.setAttribute('rel', 'noopener noreferrer');
+        }
+      } else if (tag === 'INPUT') {
+        // Only the checkboxes of task lists are expected; nothing can be typed, sent or loaded.
+        node.setAttribute('type', 'checkbox');
+        node.setAttribute('disabled', '');
+        ['name', 'value', 'src', 'form', 'list', 'pattern'].forEach(function (a) { node.removeAttribute(a); });
+      } else if (tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
+        node.setAttribute('disabled', '');
+        node.removeAttribute('form');
+      }
+    });
+  }
+
+  function sanitize(html, mode) {
+    purifyMode = mode;
+    try { return window.DOMPurify.sanitize(html, PURIFY); } finally { purifyMode = 'preview'; }
+  }
+
+  // ---------- Rendering ----------
+  function buildHtml(src, mode) {
+    ctx = newCtx(mode);
+    var body = md.parse(src, { breaks: opt.breaks.checked });
+    if (ctx.fnOrder.length) {
+      body += '<section class="footnotes" aria-label="Footnotes"><ol>';
+      ctx.fnOrder.forEach(function (id, i) {
+        var n = i + 1, html = ctx.fnHtml[id] || '', back = '';
+        for (var k = 1; k <= (ctx.fnRefCount[id] || 1); k++) {
+          back += ' <a href="#fnref-' + n + (k > 1 ? '-' + k : '') + '" class="md-fn-back" aria-label="Back to reference ' + n + (k > 1 ? '-' + k : '') + '">\u21A9' + (k > 1 ? '<sup>' + k + '</sup>' : '') + '</a>';
+        }
+        html = /<\/p>\s*$/.test(html) ? html.replace(/<\/p>\s*$/, back + '</p>') : html + back;
+        body += '<li id="fn-' + n + '">' + html + '</li>';
+      });
+      body += '</ol></section>';
+    }
+    if (opt.toc.checked) {
+      var heads = ctx.heads.slice();
+      var titleFirst = heads.length && heads[0].depth === 1 && heads.filter(function (h) { return h.depth === 1; }).length === 1;
+      if (titleFirst) heads.shift();
+      heads = heads.filter(function (h) { return h.depth <= 3; });
+      if (heads.length) {
+        var min = Math.min.apply(null, heads.map(function (h) { return h.depth; })), toc = '', depth = min - 1;
+        heads.forEach(function (h) {
+          var d = Math.max(min, h.depth);
+          while (depth < d) { toc += '<ul>'; depth++; }
+          while (depth > d) { toc += '</li></ul>'; depth--; }
+          if (toc.slice(-4) !== '<ul>') toc += '</li>';
+          toc += '<li><a href="#' + h.id + '">' + h.html.replace(/<a\b[^>]*>|<\/a>/g, '') + '</a>';
+        });
+        while (depth >= min) { toc += '</li></ul>'; depth--; }
+        var nav = '<nav class="md-toc" aria-label="Contents"><p class="md-toc-title">Contents</p>' + toc + '</nav>\n';
+        var m = titleFirst ? /^<h1 [^>]*>[\s\S]*?<\/h1>\n?/.exec(body) : null;
+        body = m ? m[0] + nav + body.slice(m[0].length) : nav + body;
+      }
+    }
+    var clean = spliceMath(sanitize(body, mode));
+    return { html: clean, title: ctx.fmTitle || ctx.title, math: ctx.math };
+  }
+
+  function docStyle() {
+    var sizePt = +opt.fontsize.value || 11;
+    return 'font-family:' + FONTS[opt.font.value] + ';font-size:' + sizePt + 'pt';
+  }
+  function applyDocOptions(el) {
+    el.setAttribute('style', docStyle());
+    el.classList.toggle('md-h1-break', opt.h1break.checked);
+  }
+
+  function pageCss() {
+    var mm = +opt.margin.value || 0;
+    var css = '@page{size:' + PAGE_CSS[opt.size.value] + ' ' + opt.orient.value + ';margin:' + mm + 'mm';
+    if (opt.pagenum.checked && mm >= 8) {
+      css += ';@bottom-center{content:counter(page) " / " counter(pages);font-size:9pt;font-family:sans-serif;color:#59636e}';
+    }
+    return css + '}';
+  }
+
+  var autoName = '', nameEdited = false, openedName = '';
+  var last = { src: null };
+  // Replaces only the top-level blocks that changed, so an edit in a long document does not
+  // rebuild and re-lay-out the whole preview.
+  function updateDoc(target, html) {
+    var tpl = target.ownerDocument.createElement('template');
+    tpl.innerHTML = html;   // parsed inert: nothing loads until nodes are inserted
+    var next = Array.prototype.slice.call(tpl.content.childNodes), prev = Array.prototype.slice.call(target.childNodes);
+    var a = 0, n = next.length, p = prev.length;
+    while (a < n && a < p && prev[a].isEqualNode(next[a])) a++;
+    while (n > a && p > a && prev[p - 1].isEqualNode(next[n - 1])) { n--; p--; }
+    var ref = prev[p] || null;
+    for (var i = a; i < p; i++) target.removeChild(prev[i]);
+    var frag = target.ownerDocument.createDocumentFragment();
+    for (var j = a; j < n; j++) frag.appendChild(next[j]);
+    target.insertBefore(frag, ref);
+  }
+  function render() {
+    renderTimer = null;
+    if (!md || !doc) return;
+    var src = input.value, out;
+    try {
+      out = buildHtml(src, 'preview');
+    } catch (e) {
+      setMsg(errBox, e instanceof RangeError ? 'The Markdown is nested too deeply to show (hundreds of > or list levels). Reduce the nesting and try again.' :
+        'The Markdown could not be rendered: ' + String(e && e.message || e).split('\n')[0]);
+      errBox.dataset.from = 'render';
+      return;
+    }
+    if (errBox.dataset.from === 'render') setMsg(errBox, '');
+    // Page settings first: measuring the frame now is cheap, after a big insert it forces a full layout.
+    applyDocOptions(doc);
+    updatePageCss();
+    layoutPreview();
+    updateDoc(doc, out.html);
+    decorate(doc);
+    last = { src: src, title: out.title, math: out.math };
+    autoName = safeName(openedName || out.title || '');
+    if (!nameEdited) nameInput.value = autoName;
+    var words = (doc.textContent.match(/[\p{L}\p{N}][\p{L}\p{N}'\u2019_-]*/gu) || []).length;
+    info.textContent = fmt(words) + (words === 1 ? ' word' : ' words');
+    if (km.failed && out.math) { setMsg(errBox, km.error + ' Formulas are shown as LaTeX source.'); errBox.dataset.from = 'render'; }
+  }
+  function updatePageCss() {
+    var css = pageCss();
+    pageStyle.textContent = css;
+    var el = fdoc && fdoc.getElementById('mdp-page');
+    if (el) el.textContent = css;
+    if (fdoc) fdoc.title = fileBase();
+  }
+
+  // Placeholders for pictures that are not shown, built as text so nothing is fetched.
+  function decorate(rootEl) {
+    TT.$$('img.md-img-blocked, img.md-img-missing', rootEl).forEach(function (img) {
+      var note = rootEl.ownerDocument.createElement('span');
+      note.className = 'md-img-note';
+      var alt = img.getAttribute('alt') || '', src = img.getAttribute('title') || '';
+      if (img.classList.contains('md-img-blocked')) {
+        var host = '';
+        try { host = new URL(src, 'https://x.invalid').hostname; } catch (e) { host = ''; }
+        note.textContent = '[Image' + (alt ? ': ' + alt : '') + (host ? ' from ' + host : '') + ' is not loaded. Tick \u201CLoad images from the web\u201D to show it.]';
+      } else {
+        note.textContent = '[Image' + (alt ? ': ' + alt : '') + ' \u2013 add \u201C' + baseName(src) + '\u201D with Open file\u2026 to show it.]';
+      }
+      img.replaceWith(note);
+    });
+  }
+
+  // The preview lays the text out at the page's real width, scaled to fit, so lines wrap as in the PDF.
+  function layoutPreview() {
+    if (!fdoc || !fdoc.body) return;
+    var size = PAGE_MM[opt.size.value] || PAGE_MM.a4, land = opt.orient.value === 'landscape';
+    var pageW = land ? size[1] : size[0], mm = +opt.margin.value || 0, pxPerMm = 96 / 25.4;
+    var contentPx = (pageW - 2 * mm) * pxPerMm;
+    var avail = fdoc.documentElement.clientWidth || frame.clientWidth;
+    var zoom = avail / (pageW * pxPerMm);
+    var body = fdoc.body;
+    if (zoom >= 0.7 && 'zoom' in doc.style) {
+      zoom = Math.min(zoom, 1.25);
+      body.style.padding = (mm ? mm * pxPerMm * zoom : 4) + 'px';
+      doc.style.width = contentPx + 'px';
+      doc.style.zoom = String(zoom);
+      body.style.overflowX = 'hidden';
+    } else {
+      body.style.padding = '';
+      doc.style.width = '';
+      doc.style.zoom = '';
+      body.style.overflowX = '';
+    }
+  }
+
+  var renderTimer = null;
+  function scheduleRender(ms) {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(render, ms);
+  }
+  function flush() { if (renderTimer) { clearTimeout(renderTimer); render(); } }
+
+  input.addEventListener('input', function () {
+    scheduleRender(input.value.length > 60000 ? 350 : input.value.length > 15000 ? 150 : 40);
+  });
+  ['size', 'orient', 'margin', 'font', 'fontsize', 'pagenum', 'h1break'].forEach(function (k) {
+    opt[k].addEventListener('change', function () {
+      if (!doc) return;
+      applyDocOptions(doc);
+      updatePageCss();
+      layoutPreview();
+    });
+  });
+  ['toc', 'breaks', 'math', 'remote'].forEach(function (k) { opt[k].addEventListener('change', function () { render(); }); });
+  nameInput.addEventListener('input', function () { nameEdited = nameInput.value.trim() !== ''; if (fdoc) fdoc.title = fileBase(); });
+  if (window.ResizeObserver) new ResizeObserver(TT.debounce(layoutPreview, 50)).observe(frame);
+
+  // Links in the preview: jump within the document, open web links in a new tab, never navigate the frame.
+  function onFrameClick(e) {
+    var a = e.target.closest && e.target.closest('a');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    e.preventDefault();
+    if (href.charAt(0) === '#') {
+      var target = null;
+      try { target = fdoc.getElementById(decodeURIComponent(href.slice(1))); } catch (err) { target = null; }
+      if (target) target.scrollIntoView({ block: 'start' });
+    } else if (/^(?:https?:|mailto:|tel:)/i.test(href)) {
+      window.open(a.href, '_blank', 'noopener,noreferrer');
+    }
+  }
+
+  // ---------- Opening files ----------
+  function decodeText(bytes) {
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) { return new TextDecoder('windows-1252').decode(bytes); }
+  }
+  function isImage(f) { return /^image\//.test(f.type) || /\.(?:png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(f.name); }
+  function readDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(r.result); };
+      r.onerror = function () { reject(r.error); };
+      r.readAsDataURL(file);
+    });
+  }
+
+  function loadFiles(list) {
+    var files = Array.prototype.slice.call(list || []);
+    if (!files.length) return;
+    setMsg(errBox, ''); setMsg(okBox, '');
+    var texts = files.filter(function (f) { return !isImage(f); });
+    var pics = files.filter(isImage);
+    var bad = [], addedPics = [];
+    pics.forEach(function (f) {
+      if (f.size > 25 * 1024 * 1024) { bad.push(f.name + ' is larger than 25 MB.'); return; }
+      var key = f.name.toLowerCase(), old = images.get(key);
+      if (old) URL.revokeObjectURL(old.url);
+      images.set(key, { url: URL.createObjectURL(f), file: f });
+      addedPics.push(f.name);
+    });
+    var md = texts[0];
+    if (texts.length > 1) bad.push('Only one Markdown file can be open at a time; ' + md.name + ' was opened.');
+    var done = Promise.resolve(null);
+    if (md) {
+      if (md.size > 10 * 1024 * 1024) {
+        bad.push(md.name + ' is larger than 10 MB, which is too big to preview.');
+      } else {
+        done = md.arrayBuffer().then(function (buf) {
+          var bytes = new Uint8Array(buf);
+          var head = bytes.subarray(0, 4000);
+          if (Array.prototype.indexOf.call(head, 0) !== -1 && !(bytes[0] === 0xFF || bytes[0] === 0xFE)) throw new Error(md.name + ' is not a text file.');
+          return decodeText(bytes);
+        }).then(function (text) {
+          input.value = text;
+          openedName = safeName(md.name.replace(/\.[^.]+$/, ''));
+          nameEdited = false;
+          return md.name;
+        }, function (e) { bad.push(e.message || (md.name + ' could not be read.')); return null; });
+      }
+    }
+    done.then(function (openedMd) {
+      render();
+      var parts = [];
+      if (openedMd) parts.push('Opened ' + openedMd + '.');
+      if (addedPics.length) {
+        parts.push((addedPics.length === 1 ? 'Added the image ' + addedPics[0] : 'Added ' + addedPics.length + ' images') + '; pictures that refer to ' + (addedPics.length === 1 ? 'that file name' : 'those file names') + ' now show.');
+      }
+      setMsg(okBox, parts.join(' '));
+      setMsg(errBox, bad.join(' '));
+      errBox.dataset.from = 'files';
+    });
+  }
+
+  $('#mdp-open').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () { loadFiles(fileInput.files); fileInput.value = ''; });
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+  input.addEventListener('dragover', function (e) { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; input.classList.add('is-over'); });
+  input.addEventListener('dragleave', function () { input.classList.remove('is-over'); });
+  input.addEventListener('drop', function (e) { input.classList.remove('is-over'); if (!hasFiles(e)) return; e.preventDefault(); loadFiles(e.dataTransfer.files); });
+  // Files dropped anywhere else, the preview included, are opened too instead of replacing the page.
+  var dragTimer = null;
+  function onDocDragOver(e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    root.classList.add('is-dragging');
+    clearTimeout(dragTimer);
+    dragTimer = setTimeout(function () { root.classList.remove('is-dragging'); }, 300);
+  }
+  function onDocDrop(e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    root.classList.remove('is-dragging');
+    if (e.target !== input) loadFiles(e.dataTransfer.files);
+  }
+  document.addEventListener('dragover', onDocDragOver);
+  document.addEventListener('drop', onDocDrop);
+
+  $('#mdp-sample').addEventListener('click', function (e) {
+    input.value = SAMPLE; openedName = ''; nameEdited = false;
+    setMsg(okBox, ''); setMsg(errBox, '');
+    render();
+    TT.flash(e.currentTarget, 'Loaded');
+  });
+  $('#mdp-clear').addEventListener('click', function () {
+    input.value = ''; openedName = ''; nameEdited = false;
+    setMsg(okBox, ''); setMsg(errBox, '');
+    render();
+    input.focus();
+  });
+
+  // ---------- Saving ----------
+  function fileBase() { return safeName(nameInput.value) || autoName || 'document'; }
+
+  // Waits for lazily loaded highlighting and math, then for fonts and pictures, so the print is complete.
+  function whenReady() {
+    flush();
+    var waits = [];
+    if (doc.querySelector('pre code[class*="language-"]') && !hl.ready && !hl.failed) {
+      waits.push(loadScript('highlight.js/highlight.min.js').then(function () { hl.ready = !!window.hljs; }, function () { hl.failed = true; }));
+    }
+    if (last.math && !km.ready && !km.failed) {
+      wantKatex();
+      waits.push(Promise.all([loadScript('katex/katex.min.js'), loadCss('katex/katex.min.css', fdoc), loadCss('katex/katex.min.css')])
+        .then(function () { km.ready = !!window.katex; }, function () { km.failed = true; }));
+    }
+    return Promise.all(waits).then(function () {
+      if (waits.length) render();
+      var imgs = TT.$$('img', doc).map(function (img) {
+        return img.complete ? null : new Promise(function (r) { img.addEventListener('load', r, { once: true }); img.addEventListener('error', r, { once: true }); });
+      });
+      var fonts = fdoc.fonts && fdoc.fonts.ready ? fdoc.fonts.ready : null;
+      var timeout = new Promise(function (r) { setTimeout(r, 4000); });
+      return Promise.race([Promise.all(imgs.concat([fonts])), timeout]);
+    });
+  }
+
+  var savedTitle = null, printing = false;
+  function restoreTitle() { if (savedTitle !== null) { document.title = savedTitle; savedTitle = null; } }
+
+  // The button (and Ctrl+P / Cmd+P) prints the preview frame, which holds only the document.
+  function printPreview(btn) {
+    if (!doc || printing) return;
+    if (!input.value.trim()) { setMsg(errBox, 'There is nothing to save yet. Type or paste some Markdown first.'); errBox.dataset.from = 'save'; return; }
+    printing = true;
+    if (btn) btn.disabled = true;
+    whenReady().then(function () {
+      if (btn) btn.disabled = false;
+      printing = false;
+      fdoc.title = fileBase();
+      savedTitle = document.title;
+      document.title = fileBase();   // browsers suggest the title as the PDF's file name
+      // Chrome and Safari return from print() when the dialog closes, Firefox at once: the title is
+      // put back when the print is over (afterprint), or at the next click or key press.
+      var t0 = Date.now(), win = frame.contentWindow;
+      win.addEventListener('afterprint', restoreTitle, { once: true });
+      try { win.print(); } finally {
+        if (Date.now() - t0 > 400) restoreTitle();
+        else {
+          ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, restoreTitle, { once: true, capture: true }); });
+        }
+      }
+      if (btn) btn.focus();
+    }, function () { printing = false; if (btn) btn.disabled = false; });
+  }
+  $('#mdp-print').addEventListener('click', function (e) { printPreview(e.currentTarget); });
+  function onKey(e) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+      e.preventDefault();
+      printPreview(null);
+    }
+  }
+  document.addEventListener('keydown', onKey);
+
+  // Printing from the browser menu prints this page: show a copy of the document only.
+  var printRoot = null;
+  window.addEventListener('beforeprint', function () {
+    if (!doc) return;
+    flush();
+    if (printRoot) printRoot.remove();
+    printRoot = document.createElement('div');
+    printRoot.className = 'mdp-print-root';
+    var art = doc.cloneNode(true);
+    art.removeAttribute('id');
+    art.style.width = '';
+    art.style.zoom = '';
+    printRoot.appendChild(art);
+    document.body.appendChild(printRoot);
+    document.documentElement.classList.add('mdp-printing');
+    if (savedTitle === null) { savedTitle = document.title; document.title = fileBase(); }
+  });
+  window.addEventListener('afterprint', function () {
+    if (printRoot) { printRoot.remove(); printRoot = null; }
+    document.documentElement.classList.remove('mdp-printing');
+    restoreTitle();
+  });
+
+  function exportHtml() {
+    var need = [];
+    images.forEach(function (v) { if (!v.dataUrl) need.push(readDataUrl(v.file).then(function (d) { v.dataUrl = d; }, function () { v.dataUrl = ''; })); });
+    return Promise.all(need).then(whenReady).then(function () {
+      // Cleaned HTML in which web images keep their address and added local ones are embedded.
+      var out = buildHtml(input.value, 'export');
+      return { body: out.html, title: out.title };
+    });
+  }
+  function htmlFile(body, title) {
+    var size = PAGE_CSS[opt.size.value] + ' ' + opt.orient.value;
+    return '<!DOCTYPE html>\n<html lang="' + esc((document.documentElement.lang || 'en')) + '">\n<head>\n<meta charset="utf-8">\n' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>' + esc(title || fileBase()) + '</title>\n' +
+      '<style>\n' + DOC_CSS + '\n' +
+      'html{background:#fff}body{margin:0}.md-doc{box-sizing:border-box;max-width:52em;margin:0 auto;padding:2.5em 1.5em}\n' +
+      '.katex-html{display:none}math[display=block]{margin:.2em 0}\n' +
+      '@page{size:' + size + ';margin:' + (+opt.margin.value || 0) + 'mm}\n' +
+      '@media print{.md-doc{max-width:none;padding:0}}\n' +
+      '</style>\n</head>\n<body>\n<article class="md-doc' + (opt.h1break.checked ? ' md-h1-break' : '') + '" style="' + esc(docStyle()) + '">\n' + body + '\n</article>\n</body>\n</html>\n';
+  }
+  $('#mdp-html').addEventListener('click', function (e) {
+    var btn = e.currentTarget;
+    exportHtml().then(function (r) {
+      TT.download(fileBase() + '.html', htmlFile(r.body, r.title || fileBase()), 'text/html;charset=utf-8');
+      TT.flash(btn, 'Downloaded');
+    }, function (err) { setMsg(errBox, 'The HTML file could not be made: ' + (err && err.message || err)); });
+  });
+  $('#mdp-copy').addEventListener('click', function (e) {
+    var btn = e.currentTarget;
+    exportHtml().then(function (r) { TT.copy(r.body, btn); }, function (err) { setMsg(errBox, 'Could not copy: ' + (err && err.message || err)); });
+  });
+
+  // Browser-specific words for the print window.
+  (function () {
+    var ua = navigator.userAgent || '', hint = $('#mdp-print-hint');
+    var ios = /iP(?:hone|ad|od)/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    var text;
+    if (ios) text = 'In the print window, tap the share button (or Options) and choose Save to Files to keep the PDF.';
+    else if (/Android/.test(ua)) text = 'In the print window, choose Save as PDF as the printer, then tap the PDF button.';
+    else if (/Firefox\//.test(ua)) text = 'In the print window, set Destination to Save to PDF, and untick Print headers and footers for clean pages.';
+    else if (/Safari\//.test(ua) && !/Chrome|Chromium|Edg\//.test(ua)) text = 'In the print window, open the PDF menu at the bottom left and choose Save as PDF.';
+    else text = 'In the print window, set Destination to Save as PDF, and under More settings untick Headers and footers for clean pages.';
+    hint.textContent = text;
+  })();
+
+  // ---------- Start ----------
+  var libsReady = new Promise(function (resolve) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', resolve);
+    else resolve();
+  });
+  var frameReady = new Promise(function (resolve) {
+    frame.addEventListener('load', function () { resolve(); }, { once: true });
+    frame.src = URL.createObjectURL(new Blob([frameSkeleton()], { type: 'text/html' }));
+  });
+  Promise.all([libsReady, frameReady]).then(function () {
+    if (!window.marked || !window.DOMPurify) {
+      setMsg(errBox, 'The Markdown converter could not load. Check your connection and reload the page.');
+      return;
+    }
+    fdoc = frame.contentDocument;
+    doc = fdoc && fdoc.getElementById('mdp-doc');
+    if (!doc) { setMsg(errBox, 'The preview could not start. Reload the page and try again.'); return; }
+    URL.revokeObjectURL(frame.src);
+    fdoc.addEventListener('click', onFrameClick);
+    fdoc.addEventListener('dragover', onDocDragOver);
+    fdoc.addEventListener('drop', onDocDrop);
+    fdoc.addEventListener('keydown', onKey);
+    setupMarked();
+    setupPurify();
+    render();
+  });
+  {% endraw %}
+})();
+</script>

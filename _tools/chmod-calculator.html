@@ -1,88 +1,92 @@
 ---
-title: Chmod Calculator (Octal & Symbolic)
-description: Work out Linux file permissions. Tick read, write and execute or type 755 or rwxr-xr-x to get octal, symbolic and chmod commands, with setuid and sticky bits.
+title: "Chmod Calculator: Octal, Symbolic & umask"
+description: Convert Linux file permissions between 755 and rwxr-xr-x, get chmod commands, work out umask defaults and explain pasted ls -l lines, setuid and ACLs.
 category: Developer
-keywords: [chmod calculator, chmod 755, chmod 644, linux file permissions calculator, octal permissions, rwxr-xr-x, unix permissions converter, setuid sticky bit]
+keywords: [chmod calculator, chmod 755, linux file permissions calculator, octal permissions, rwxr-xr-x, umask calculator, ls -l permissions explained, setuid sticky bit]
 howto: |
   ## How to use the chmod calculator
 
-  Tick the boxes for what the owner, the group and everyone else may do, or
-  type a mode into either box: an octal number such as `755` or `4755`, or the
-  permission string that `ls -l` prints, such as `rwxr-xr-x` or
-  `drwxrwxrwt`. Every view stays in sync, and the ready-to-paste commands
-  update as you go. Enter your own file name to put it in the commands, and
-  tick **Directory** to see what each permission means for a folder.
+  Tick what the owner, the group and everyone else may do, or type a mode
+  into either box: an octal number such as `755` or `4755`, or the string
+  `ls -l` prints, such as `rwxr-xr-x` or `drwxrwxrwt`. The ready-to-paste
+  `chmod` commands follow along. Enter a file name to put it in the commands,
+  and tick **Directory** to see what each permission means for a folder.
 
   ## How the octal number works
 
-  Each permission has a value: read is 4, write is 2 and execute is 1. Add
-  them up for each class of user and write the three sums in the order
-  owner, group, others. `rwx` is 4+2+1 = 7 and `r-x` is 4+1 = 5, so
+  Read is 4, write is 2 and execute is 1. Add them up for each class and
+  write the three sums as owner, group, others: `rwx` is 7 and `r-x` is 5, so
   `rwxr-xr-x` is 755. An optional fourth digit in front holds the special
-  bits: setuid is 4, setgid is 2 and sticky is 1, so `4755` is 755 plus
-  setuid.
+  bits: setuid 4, setgid 2, sticky 1.
 
-  | Digit | Permissions | Digit | Permissions |
-  |---|---|---|---|
-  | 0 | `---` none | 4 | `r--` read |
-  | 1 | `--x` execute | 5 | `r-x` read, execute |
-  | 2 | `-w-` write | 6 | `rw-` read, write |
-  | 3 | `-wx` write, execute | 7 | `rwx` all |
+  On a directory, read lets you list names, write lets you create, rename and
+  delete entries, and execute lets you enter it and open files by name. Write
+  does nothing without execute. Only one class applies to you: the owner gets
+  the owner bits even when others are allowed more.
 
-  ## Files and directories
+  ## Special bits and s, S, t, T
 
-  On a file, read lets you see the contents, write lets you change them and
-  execute lets you run the file as a program. On a directory, read lets you
-  list the names in it, write lets you create, rename and delete entries, and
-  execute lets you enter it and reach files inside by name. Write on a
-  directory does nothing without execute, and read without execute lists the
-  names but does not let you open the files or see their details.
+  **setuid** (4000) runs a program with its owner's rights, which is how
+  `/usr/bin/passwd` (`rwsr-xr-x`) can update the password file. **setgid**
+  (2000) on a directory makes new files inherit its group. **sticky** (1000)
+  on a directory lets only a file's owner delete it, as on `/tmp` (1777).
+  `ls -l` shows these in the execute position: lowercase `s` or `t` when the
+  execute bit is also set, uppercase `S` or `T` when it is not.
 
-  Only one class applies to you: if you own the file, the owner bits decide,
-  even when the group or others bits allow more. So `chmod 077` locks the
-  owner out while everyone else has full access.
+  ## umask: default permissions for new files
 
-  ## Special bits and the s, S, t, T letters
+  Programs usually create files with mode 666 and directories with 777, and
+  the umask removes bits from that. With umask `022` new files get 644 and new
+  directories 755; with `027` they get 640 and 750. Type a umask, or the mode
+  you want new files or directories to get, and the calculator fills in the
+  rest. The umask never adds execute to a file, and a program can always ask
+  for less (SSH keys are created 600). Set it with `umask 027` in
+  `~/.profile`, or `UMask=0027` in a systemd unit.
 
-  - **setuid** (4000) makes a program run with its owner's rights.
-    `/usr/bin/passwd` is `rwsr-xr-x` so it can update the password file.
-    Linux ignores setuid on scripts that start with `#!`.
-  - **setgid** (2000) on a program runs it with the file's group. On a
-    directory, new files inherit the directory's group, which is handy for
-    shared project folders.
-  - **sticky** (1000) on a directory means only a file's owner, the
-    directory's owner or root can delete or rename entries in it. `/tmp` is
-    `rwxrwxrwt` (1777) for this reason.
+  ## Reading ls -l output
 
-  `ls -l` shows these bits in the execute position: a lowercase `s` or `t`
-  means the bit and execute are both set, and an uppercase `S` or `T` means
-  the bit is set without execute. Linux ignores setgid on a program without
-  group execute, but setuid still applies to anyone else allowed to run it.
+  Paste lines from `ls -l` to get each entry's octal mode, type and owner. The
+  first character is the type: `-` file, `d` directory, `l` symbolic link,
+  `c` or `b` device, `p` named pipe, `s` socket. A character after the nine
+  permission letters is a marker:
+
+  | Marker | Meaning |
+  |---|---|
+  | `+` | the entry has an access control list (ACL) |
+  | `.` | an SELinux security context (Linux) |
+  | `@` | extended attributes (macOS) |
+
+  A symbolic link always shows `rwxrwxrwx`; its own bits are unused and
+  `chmod` changes the target instead.
+
+  ## ACLs and setfacl
+
+  An ACL grants rights to extra users or groups:
+  `setfacl -m u:alice:rwx file` gives alice full access, `getfacl file`
+  lists the entries and `setfacl -b file` removes them. With an ACL, the
+  group digit `ls -l` shows is the ACL *mask*, the most any named user or
+  group can get, so `chmod g-w` also takes write away from alice. A default
+  ACL on a directory (`setfacl -d -m g:devs:rwX dir`) is copied to new files
+  inside it and replaces the umask there.
 
   ## Tips
 
-  - Setting 755 or 644 on a whole tree with `chmod -R` gives every file the
-    same mode. To give directories 755 and files 644, run
-    `find DIR -type d -exec chmod 755 {} +` and
-    `find DIR -type f -exec chmod 644 {} +`, or use
-    `chmod -R u=rwX,go=rX DIR`, where the capital `X` adds execute only to
-    directories and to files that someone can already execute.
-  - The symbolic command adds the sticky bit as a separate `+t`, because some
-    chmod versions, including the BSD one on macOS, ignore `t` attached to `o`.
-  - On a directory, GNU chmod keeps an existing setuid or setgid bit when
-    you give a three- or four-digit number, or a symbolic `=` that does not
-    mention it. Use five digits, as in `00755`, or `g-s` to clear it.
+  - To give directories 755 and files 644 in a tree, use
+    `chmod -R u=rwX,go=rX DIR`: capital `X` adds execute only to directories
+    and to files someone can already execute.
+  - GNU chmod keeps a directory's setuid and setgid bits when you give a
+    three- or four-digit number. Use five digits, as in `00755`, to clear them.
 faq:
   - q: What does chmod 755 mean?
     a: The owner can read, write and execute (7), and the group and everyone else can read and execute (5). It is the usual mode for programs, scripts and directories that others need to use but not change.
-  - q: What is the difference between chmod 644 and 755?
-    a: 644 (`rw-r--r--`) has no execute permission, which suits regular files such as web pages, images and config files. 755 adds execute for everyone, which programs need to run and directories need to be entered.
-  - q: Why should I avoid chmod 777?
-    a: 777 lets every user on the system change or replace the file, and for a directory, delete anything in it. Fix the owner or group with `chown` or `chgrp` and use 755, 775 or 770 instead.
+  - q: What umask gives files 644 and directories 755?
+    a: "`022`. It removes write for the group and others: 666 minus 022 is 644 for files, and 777 minus 022 is 755 for directories. For 640 and 750 use `027`, and for private 600 and 700 use `077`."
+  - q: What does the + at the end of the permissions in ls -l mean?
+    a: The file has an access control list. Run `getfacl` on it to see the extra entries. The group permissions shown by ls are then the ACL mask, the upper limit for every named user and group entry.
   - q: What do the capital S and T in ls -l mean?
     a: They mean setuid, setgid or the sticky bit is set but the matching execute bit is not. A lowercase `s` or `t` means both are set.
   - q: Is anything I enter sent to a server?
-    a: No. The calculator runs entirely in your browser. Nothing you type is uploaded or stored.
+    a: No. The calculator runs entirely in your browser. Nothing you type or paste, including ls output with file names, is uploaded or stored.
 ---
 <style>
 .tool-page:has(#cm-octal) .prose table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 15px; }
@@ -107,16 +111,30 @@ table.data.cm-grid tbody th { color: var(--text); }
 .cm-cmd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
 .cm-cmd .label { flex: 0 0 7.5rem; color: var(--muted); font-weight: 600; }
 .cm-cmd code { flex: 1 1 180px; min-width: 0; font-family: var(--mono); font-size: 15px; overflow-wrap: anywhere; }
+.cm-cmd code small { color: var(--muted); font-family: system-ui, sans-serif; font-size: 13px; }
 .cm-explain { margin: 0 0 16px; padding-left: 20px; }
 .cm-explain li { margin-bottom: 4px; }
 .msg.cm-warn { background: var(--danger-soft); color: var(--text); border-left: 3px solid var(--danger); }
 .cm-h { margin: 26px 0 12px; font-size: 1.1rem; }
+.cm-sep { margin: 28px 0 0; border: 0; border-top: 1px solid var(--border); }
+.cm-lead { margin: -4px 0 14px; }
 .row > .checks.cm-opts { margin-bottom: 6px; }
 .cm-dirnote { margin: 0; }
 .cm-dirnote:empty { display: none; }
 .cm-presets td, .cm-presets th { vertical-align: middle; }
 .cm-presets td.mono { white-space: nowrap; }
 .cm-presets td:last-child { width: 1%; text-align: right; }
+.cm-umask .field input { font-size: clamp(1.1rem, 4vw, 1.35rem); letter-spacing: 0.05em; }
+.cm-umask > .field { flex: 1 1 96px; }
+.cm-uex { align-items: center; margin-top: -4px; }
+textarea.cm-lsin { min-height: 120px; white-space: pre; overflow-wrap: normal; overflow-x: auto; font-size: 13px; }
+.cm-lstable td { vertical-align: middle; }
+.cm-lstable td.cm-lsname { min-width: 10.5rem; font-family: var(--mono); overflow-wrap: anywhere; }
+.cm-lstable td.cm-lsname small { display: block; color: var(--muted); font-family: system-ui, sans-serif; font-size: 12px; word-break: normal; }
+.cm-lstable td.cm-lsmode { font-family: var(--mono); white-space: nowrap; }
+.cm-lstable td.cm-lsoct { font-family: var(--mono); font-weight: 700; }
+.cm-lstable td.cm-lsnotes { color: var(--muted); font-size: 13px; min-width: 12rem; }
+.cm-lstable td:last-child { width: 1%; text-align: right; }
 @media (max-width: 560px) {
   table.data.cm-grid th:first-child { width: 23%; padding-left: 6px; }
   table.data.cm-grid thead th { font-size: 12.5px; }
@@ -128,20 +146,34 @@ table.data.cm-grid tbody th { color: var(--text); }
   table.data.cm-presets td { padding: 0; border: 0; }
   table.data.cm-presets td.cm-use { grid-column: 1 / -1; grid-row: 2; color: var(--muted); font-size: 14px; }
   table.data.cm-presets td:last-child { grid-column: 3; grid-row: 1; width: auto; }
+  .cm-lstable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  table.data.cm-lstable, .cm-lstable tbody { display: block; }
+  table.data.cm-lstable tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  table.data.cm-lstable td { display: block; padding: 0; border: 0; }
+  .cm-lstable td.cm-lsname { flex: 1 1 60%; min-width: 0; max-width: calc(100% - 78px); font-weight: 700; }
+  .cm-lstable td:last-child { order: 1; flex: 0 0 auto; min-width: 64px; width: auto; margin-left: auto; text-align: right; }
+  .cm-lstable td.cm-lsmode { order: 2; }
+  .cm-lstable td.cm-lsoct { order: 3; }
+  .cm-lstable td.cm-lstype { order: 4; }
+  .cm-lstable td.cm-lsowner { order: 5; font-family: var(--mono); overflow-wrap: anywhere; }
+  .cm-lstable td.cm-lsnotes { order: 6; flex-basis: 100%; min-width: 0; }
+  .cm-lstable td.cm-lsoct::before, .cm-lstable td.cm-lsowner::before { content: attr(data-label) " "; color: var(--muted); font-family: system-ui, sans-serif; font-size: 12px; font-weight: 400; }
 }
 </style>
 
 <div class="row cm-modes">
   <div class="field">
     <label for="cm-octal">Octal <span class="hint">3 or 4 digits</span></label>
-    <input type="text" id="cm-octal" class="mono" value="755" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="6">
+    <input type="text" id="cm-octal" class="mono" value="755" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="6" aria-describedby="cm-err">
   </div>
   <div class="field">
     <label for="cm-symbolic">Symbolic <span class="hint">as in ls -l</span></label>
-    <input type="text" id="cm-symbolic" class="mono" value="rwxr-xr-x" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="12">
+    <input type="text" id="cm-symbolic" class="mono" value="rwxr-xr-x" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="cm-err">
   </div>
 </div>
-<p class="msg error" id="cm-err" role="alert"></p>
+<!-- Not an alert: the message appears while a mode is being typed, and is read out
+     through #cm-status once typing pauses. -->
+<p class="msg error" id="cm-err"></p>
 
 <div class="table-wrap">
   <table class="data cm-grid">
@@ -207,17 +239,71 @@ table.data.cm-grid tbody th { color: var(--text); }
   <p class="hint cm-dirnote" id="cm-dirnote"></p>
 </div>
 
+<!-- One short, delayed summary for screen readers: the mode, what it means, or the
+     error. The explanation and warnings below are redrawn as you type, so they are
+     not live regions themselves. -->
 <p class="visually-hidden" id="cm-status" role="status"></p>
-<div aria-live="polite">
-  <ul class="cm-explain" id="cm-explain"></ul>
-  <div id="cm-warnings"></div>
-</div>
+<ul class="cm-explain" id="cm-explain"></ul>
+<div id="cm-warnings"></div>
 
 <h2 class="cm-h">Common permissions</h2>
 <div class="table-wrap">
   <table class="data cm-presets">
     <thead><tr><th scope="col">Octal</th><th scope="col">Symbolic</th><th scope="col">Typical use</th><th scope="col"><span class="hint">Apply</span></th></tr></thead>
     <tbody id="cm-presets"></tbody>
+  </table>
+</div>
+
+<hr class="cm-sep">
+<h2 class="cm-h">umask calculator</h2>
+<p class="hint cm-lead">New files start from 666 and new directories from 777, and the umask removes bits. Edit any of the three boxes. The umask can be octal, like 027, or symbolic as <code>umask -S</code> prints it, like u=rwx,g=rx,o=.</p>
+<div class="row cm-umask">
+  <div class="field">
+    <label for="cm-umask">umask</label>
+    <input type="text" id="cm-umask" class="mono" value="022" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="cm-umask-err">
+  </div>
+  <div class="field">
+    <label for="cm-ufile">New files</label>
+    <input type="text" id="cm-ufile" class="mono" value="644" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="4" aria-describedby="cm-umask-err">
+  </div>
+  <div class="field">
+    <label for="cm-udir">New directories</label>
+    <input type="text" id="cm-udir" class="mono" value="755" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="4" aria-describedby="cm-umask-err">
+  </div>
+</div>
+<p class="msg error" id="cm-umask-err"></p>
+<div class="actions cm-uex">
+  <span class="hint">Common:</span>
+  <button class="btn secondary small" type="button" data-umask="022" aria-label="umask 022, the usual default">022</button>
+  <button class="btn secondary small" type="button" data-umask="002" aria-label="umask 002, group can edit">002</button>
+  <button class="btn secondary small" type="button" data-umask="027" aria-label="umask 027, nothing for others">027</button>
+  <button class="btn secondary small" type="button" data-umask="077" aria-label="umask 077, private">077</button>
+</div>
+<div class="cm-cmds">
+  <div class="cm-cmd"><span class="label">Set it</span><code id="cm-umask-cmd"></code><button class="btn secondary small" type="button" data-copy-target="#cm-umask-cmd" aria-label="Copy umask command">Copy</button></div>
+  <div class="cm-cmd"><span class="label">umask -S</span><code id="cm-umask-sym"></code><button class="btn secondary small" type="button" data-copy-target="#cm-umask-sym" aria-label="Copy symbolic umask">Copy</button></div>
+  <div class="cm-cmd"><span class="label">New files</span><code id="cm-umask-f"></code><button class="btn secondary small" type="button" id="cm-use-f" aria-label="Use the new-file mode in the chmod calculator">Use above</button></div>
+  <div class="cm-cmd"><span class="label">New dirs</span><code id="cm-umask-d"></code><button class="btn secondary small" type="button" id="cm-use-d" aria-label="Use the new-directory mode in the chmod calculator">Use above</button></div>
+  <p class="hint cm-dirnote" id="cm-umask-note"></p>
+</div>
+
+<hr class="cm-sep">
+<h2 class="cm-h">Explain ls -l output</h2>
+<div class="field">
+  <label for="cm-lsin">Paste one or more lines from <code>ls -l</code></label>
+  <textarea id="cm-lsin" class="mono cm-lsin" rows="5" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="cm-ls-err">drwxrwsr-x+ 4 alice devs 4096 Mar  3 09:15 shared
+-rwsr-xr-x. 1 root root 68248 Feb  6  2024 /usr/bin/passwd
+lrwxrwxrwx  1 root root     7 Apr 22  2024 bin -> usr/bin
+-rw-------  1 alice alice  411 2025-11-02 18:40 'id ed25519'</textarea>
+</div>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="cm-ls-clear">Clear</button>
+</div>
+<p class="msg error" id="cm-ls-err"></p>
+<div class="table-wrap" id="cm-ls-wrap">
+  <table class="data cm-lstable">
+    <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Permissions</th><th scope="col">Octal</th><th scope="col">Owner:group</th><th scope="col">Notes</th><th scope="col"><span class="visually-hidden">Load</span></th></tr></thead>
+    <tbody id="cm-ls-body"></tbody>
   </table>
 </div>
 
@@ -247,6 +333,7 @@ table.data.cm-grid tbody th { color: var(--text); }
     while (s.length < 3) s = '0' + s;
     return (m >> 9 ? String(m >> 9) : '') + s;
   }
+  function oct3(m) { return ('00' + (m & 511).toString(8)).slice(-3); }
   function symbolic(m) {
     var s = '';
     s += m & 256 ? 'r' : '-';
@@ -283,7 +370,7 @@ table.data.cm-grid tbody th { color: var(--text); }
 
   // ---------- Parsing ----------
   function parseOctal(raw) {
-    var s = raw.trim();
+    var s = raw.trim().replace(/^0o/i, '');
     if (!s) return { error: 'Enter an octal mode such as 644 or 4755.' };
     var bad = /[89]/.exec(s);
     if (bad) return { error: bad[0] + ' is not an octal digit. Each digit must be 0 to 7.' };
@@ -302,12 +389,16 @@ table.data.cm-grid tbody th { color: var(--text); }
   function parseSymbolic(raw) {
     var s = raw.trim(), type = null;
     if (!s) return { error: 'Enter a permission string such as rwxr-xr-x.' };
-    if (s.length === 11 && /[.+@]$/.test(s)) s = s.slice(0, 10);
+    // A whole ls -l line: use its first word, the file type and permissions.
+    var line = /^([-dlcbpsD][rwxsStT-]{9}[.+@]?)\s+\d/.exec(s);
+    if (line) s = line[1];
+    // A trailing ACL, SELinux or xattr marker: drwxr-x---+ or rwxr-x---+ (without the type).
+    if ((s.length === 11 || s.length === 10) && /[.+@]$/.test(s)) s = s.slice(0, -1);
     // A partly typed ls -l string such as "drwxr-x" waits for the rest.
     if (s.length <= 9 && /^[dlcbps][rwxsStT-]*$/.test(s)) return { short: true };
     if (s.length === 10) {
       type = s.charAt(0);
-      if ('-dlcbps'.indexOf(type) < 0) return { error: 'The first of 10 characters is the file type: - for a file or d for a directory, not "' + type + '".' };
+      if ('-dlcbpsD'.indexOf(type) < 0) return { error: 'The first of 10 characters is the file type: - for a file or d for a directory, not "' + type + '".' };
       s = s.slice(1);
     }
     if (s.length !== 9) {
@@ -346,26 +437,26 @@ table.data.cm-grid tbody th { color: var(--text); }
     }
     return out.length ? 'can ' + joinList(out) + (isDir ? '' : ' it') : '';
   }
-  function who(label, bits, isDir, plural) {
-    var does = canDo(bits, isDir);
-    return li('<b>' + label + '</b> ' + esc(does || (plural ? 'have no access' : 'has no access')) + '.');
+  function whoText(label, bits, isDir, plural) {
+    return label + ' ' + (canDo(bits, isDir) || (plural ? 'have no access' : 'has no access')) + '.';
   }
-  function li(html) {
-    var el = document.createElement('li');
-    el.innerHTML = html;
+  function li(label, rest) {
+    var el = document.createElement('li'), b = document.createElement('b');
+    b.textContent = label;
+    el.appendChild(b);
+    el.appendChild(document.createTextNode(rest));
     return el;
   }
-  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   function explain(m) {
     var isDir = dirBox.checked, ul = $('#cm-explain');
     ul.textContent = '';
-    ul.appendChild(who('Owner', m >> 6, isDir, false));
-    ul.appendChild(who('Group', m >> 3, isDir, false));
-    ul.appendChild(who('Others', m, isDir, true));
-    if (m & 2048) ul.appendChild(li('<b>setuid</b>: ' + (isDir ? 'has no effect on directories in Linux.' : 'the program runs with the rights of the file’s owner. Linux ignores it on #! scripts.')));
-    if (m & 1024) ul.appendChild(li('<b>setgid</b>: ' + (isDir ? 'new files and subdirectories inherit this directory’s group.' : 'the program runs with the rights of the file’s group.')));
-    if (m & 512) ul.appendChild(li('<b>sticky</b>: ' + (isDir ? 'only a file’s owner, the directory’s owner or root can delete or rename files in it.' : 'ignored on regular files by Linux; it matters on directories.')));
+    [['Owner', m >> 6, false], ['Group', m >> 3, false], ['Others', m, true]].forEach(function (w) {
+      ul.appendChild(li(w[0], whoText('', w[1], isDir, w[2])));
+    });
+    if (m & 2048) ul.appendChild(li('setuid', ': ' + (isDir ? 'has no effect on directories in Linux.' : 'the program runs with the rights of the file’s owner. Linux ignores it on #! scripts.')));
+    if (m & 1024) ul.appendChild(li('setgid', ': ' + (isDir ? 'new files and subdirectories inherit this directory’s group.' : 'the program runs with the rights of the file’s group.')));
+    if (m & 512) ul.appendChild(li('sticky', ': ' + (isDir ? 'only a file’s owner, the directory’s owner or root can delete or rename files in it.' : 'ignored on regular files by Linux; it matters on directories.')));
 
     var warn = [];
     var u = (m >> 6) & 7, g = (m >> 3) & 7, o = m & 7;
@@ -382,13 +473,15 @@ table.data.cm-grid tbody th { color: var(--text); }
     if ((g & ~u) || (o & ~u)) warn.push('The owner has fewer rights than the group or others. As the owner you get only the owner bits, even where the others bits allow more.');
     var box = $('#cm-warnings');
     box.textContent = '';
-    warn.filter(Boolean).forEach(function (w) {
+    warn.forEach(function (w) {
       var p = document.createElement('p');
       p.className = 'msg cm-warn';
       p.textContent = w;
       box.appendChild(p);
     });
+    lastWarnings = warn;
   }
+  var lastWarnings = [];
 
   // ---------- Rendering ----------
   function render(source, type) {
@@ -411,26 +504,33 @@ table.data.cm-grid tbody th { color: var(--text); }
     $('#cm-dirnote').textContent = dirBox.checked && !(mode & 3072)
       ? 'GNU chmod keeps a directory\u2019s existing setuid or setgid bit with both commands. To clear it too, use chmod ' + rec + '00000'.slice(o5.length) + o5 + ' ' + target + '.'
       : '';
-    // The explanation depends only on the mode and the Directory box, so it
-    // (a live region) is rebuilt only when one of those changes, not while
-    // the file name is typed.
-    var key = mode + (dirBox.checked ? 'd' : '-');
-    if (key !== explained) { explained = key; explain(mode); }
-    // Name, Directory and Recursive changes are summed up in one short status
-    // once the user pauses; mode changes are already read out by the explanation.
-    if (source === 'options') sayCommand();
+    explain(mode);
+    say(source === 'options' ? commandSummary : modeSummary, source === 'preset' || source === 'load');
   }
-  var explained = null, statusEl = $('#cm-status');
-  var sayCommand = TT.debounce(function () {
-    var text = $('#cm-cmd-num').textContent + '. ' + $('#cm-dirnote').textContent;
-    text = text.replace(/\. $/, '.');
-    if (statusEl.textContent !== text) statusEl.textContent = text;
-  }, 800);
+
+  // Screen readers get one short line once changes pause: the mode and what it means
+  // after a mode change, the command after a name or option change, or the error.
+  var statusEl = $('#cm-status'), statusTimer = null;
+  function say(fn, now) {
+    clearTimeout(statusTimer);
+    var put = function () { var t = fn(); if (statusEl.textContent !== t) statusEl.textContent = t; };
+    if (now) put(); else statusTimer = setTimeout(put, 800);
+  }
+  function modeSummary() {
+    var isDir = dirBox.checked;
+    return octal(mode) + ', ' + symbolic(mode) + '. ' + whoText('Owner', mode >> 6, isDir, false) + ' ' +
+      whoText('Group', mode >> 3, isDir, false) + ' ' + whoText('Others', mode, isDir, true) +
+      (lastWarnings.length ? ' ' + lastWarnings.length + (lastWarnings.length === 1 ? ' warning.' : ' warnings.') : '');
+  }
+  function commandSummary() {
+    return ($('#cm-cmd-num').textContent + '. ' + $('#cm-dirnote').textContent).replace(/\. $/, '.');
+  }
 
   function showError(msg, el) {
     err.textContent = msg || '';
     octIn.setAttribute('aria-invalid', el === octIn ? 'true' : 'false');
     symIn.setAttribute('aria-invalid', el === symIn ? 'true' : 'false');
+    if (msg) say(function () { return msg; }, false);
   }
 
   octIn.addEventListener('input', function () {
@@ -465,8 +565,17 @@ table.data.cm-grid tbody th { color: var(--text); }
       render('boxes');
     });
   });
-  [dirBox, recBox].forEach(function (el) { el.addEventListener('change', function () { render('options'); }); });
+  dirBox.addEventListener('change', function () { render('dir'); });
+  recBox.addEventListener('change', function () { render('options'); });
   fileIn.addEventListener('input', function () { render('options'); });
+
+  function load(m, isDir, name) {
+    mode = m;
+    showError('');
+    if (isDir !== null && isDir !== undefined) dirBox.checked = isDir;
+    if (name !== undefined) fileIn.value = name;
+    render('load');
+  }
 
   // Presets table.
   var tbody = $('#cm-presets');
@@ -493,6 +602,289 @@ table.data.cm-grid tbody th { color: var(--text); }
     tbody.appendChild(tr);
   });
 
+  // ---------- umask ----------
+  var umIn = $('#cm-umask'), ufIn = $('#cm-ufile'), udIn = $('#cm-udir'), umErr = $('#cm-umask-err');
+  var umask = 18; // 022
+
+  // umask -S style: "u=rwx,g=rx,o=" lists what is ALLOWED. Only "=" clauses are
+  // absolute; "+" and "-" change whatever umask the shell has now.
+  function parseUmask(raw) {
+    var s = raw.trim();
+    if (!s) return { error: 'Enter a umask such as 022, or the symbolic form u=rwx,g=rx,o=rx.' };
+    var t = s.replace(/^0o/i, '');
+    if (/^\d+$/.test(t)) {
+      var bad = /[89]/.exec(t);
+      if (bad) return { error: bad[0] + ' is not an octal digit. A umask uses the digits 0 to 7, as in 022.' };
+      if (t.length > 4 && !/^0+$/.test(t.slice(0, t.length - 4))) return { error: 'Too many digits. A umask has 3 digits, like 022, or 4 with a leading 0, like 0022.' };
+      var v = parseInt(t, 8);
+      return { value: v & 511, special: (v & 3584) !== 0, octal: true };
+    }
+    var allowed = 0, seen = 0;
+    var clauses = s.split(',');
+    for (var i = 0; i < clauses.length; i++) {
+      var c = clauses[i].trim();
+      var m = /^([ugoa]*)([=+-])([rwx]*)$/.exec(c);
+      if (!m) return { error: '"' + c + '" is not a umask clause. Write it like u=rwx,g=rx,o=rx (the letters are what is allowed).' };
+      if (m[2] !== '=') return { error: '"' + c + '" changes the umask the shell already has, so its result depends on it. Use = clauses, like u=rwx,g=rx,o=, or an octal umask.' };
+      var who = m[1] === '' || m[1].indexOf('a') >= 0 ? 'ugo' : m[1];
+      var bits = (m[3].indexOf('r') >= 0 ? 4 : 0) | (m[3].indexOf('w') >= 0 ? 2 : 0) | (m[3].indexOf('x') >= 0 ? 1 : 0);
+      [['u', 6], ['g', 3], ['o', 0]].forEach(function (p) {
+        if (who.indexOf(p[0]) < 0) return;
+        allowed = (allowed & ~(7 << p[1])) | (bits << p[1]);
+        seen |= 7 << p[1];
+      });
+    }
+    // Classes not named keep their current setting, as in bash.
+    return { value: ((~allowed & seen) | (umask & ~seen)) & 511, partial: seen !== 511 };
+  }
+  function umaskSymbolic(u) {
+    var a = ~u & 511;
+    return 'u=' + classPerm(a, 6) + ',g=' + classPerm(a, 3) + ',o=' + classPerm(a, 0);
+  }
+  // The umask for a wanted file mode: the missing read and write bits, and execute
+  // masked wherever read is (the usual convention: 640 -> 027, 600 -> 077).
+  function umaskForFile(f) {
+    var u = 438 & ~f;
+    for (var sh = 0; sh <= 6; sh += 3) if (u & (4 << sh)) u |= 1 << sh;
+    return u;
+  }
+  function parseMode3(raw, what) {
+    var s = raw.trim().replace(/^0o/i, '');
+    if (!s) return { error: 'Enter the mode new ' + what + ' should get, such as ' + (what === 'files' ? '644.' : '755.') };
+    if (/[89]/.test(s)) return { error: /[89]/.exec(s)[0] + ' is not an octal digit. Each digit must be 0 to 7.' };
+    if (!/^[0-7]+$/.test(s)) return { error: 'Use only the digits 0 to 7, as in ' + (what === 'files' ? '640.' : '750.') };
+    if (s.length < 3) return { short: true };
+    if (s.length === 4 && s[0] !== '0') return { error: 'The umask only affects the permission bits, not setuid, setgid or sticky. Use 3 digits.' };
+    if (s.length > 4) return { error: 'Use 3 digits, like ' + (what === 'files' ? '640.' : '750.') };
+    return { value: parseInt(s, 8) & 511 };
+  }
+
+  var umTimer = null;
+  function umaskError(msg, el) {
+    umErr.textContent = msg || '';
+    [umIn, ufIn, udIn].forEach(function (x) { x.setAttribute('aria-invalid', x === el && msg ? 'true' : 'false'); });
+    if (msg) say(function () { return msg; }, false);
+  }
+  function renderUmask(source, notes) {
+    var f = 438 & ~umask, d = 511 & ~umask;
+    if (source !== 'umask') umIn.value = oct3(umask);
+    if (source !== 'file') ufIn.value = oct3(f);
+    if (source !== 'dir') udIn.value = oct3(d);
+    $('#cm-umask-cmd').textContent = 'umask ' + oct3(umask);
+    $('#cm-umask-sym').textContent = umaskSymbolic(umask);
+    $('#cm-umask-f').textContent = oct3(f) + '  -' + symbolic(f);
+    $('#cm-umask-d').textContent = oct3(d) + '  d' + symbolic(d);
+    notes = notes || [];
+    if (umask & 256) notes.push('The umask removes read from the owner, so you could not read your own new files.');
+    else if (umask & 64) notes.push('The umask removes execute from the owner, so you could not enter your own new directories.');
+    $('#cm-umask-note').textContent = notes.join(' ');
+    say(function () {
+      return 'umask ' + oct3(umask) + ': new files ' + oct3(f) + ', new directories ' + oct3(d) + '.';
+    }, source === 'preset');
+  }
+  umIn.addEventListener('input', function () {
+    var r = parseUmask(umIn.value);
+    if (r.error) return umaskError(r.error, umIn);
+    umaskError('');
+    umask = r.value;
+    var notes = [];
+    if (r.special) notes.push('The first digit is ignored: the umask only covers read, write and execute.');
+    if (r.partial) notes.push('Classes you did not name keep their earlier setting.');
+    renderUmask('umask', notes);
+  });
+  ufIn.addEventListener('input', function () {
+    var r = parseMode3(ufIn.value, 'files');
+    if (r.error) return umaskError(r.error, ufIn);
+    if (r.short) return umaskError('');
+    if (r.value & 73) {
+      return umaskError('New files never get execute from the umask: programs create them with 666 at most, so no umask gives ' + oct3(r.value) + '. Directories can have it.', ufIn);
+    }
+    umaskError('');
+    umask = umaskForFile(r.value);
+    var alt = 438 & ~r.value;
+    var notes = alt !== umask ? ['The execute bits of a umask do not affect files, so ' + oct3(alt) + ' gives files ' + oct3(r.value) + ' too; ' + oct3(umask) + ' also gives directories the matching ' + oct3(511 & ~umask) + '.'] : [];
+    renderUmask('file', notes);
+  });
+  udIn.addEventListener('input', function () {
+    var r = parseMode3(udIn.value, 'directories');
+    if (r.error) return umaskError(r.error, udIn);
+    if (r.short) return umaskError('');
+    umaskError('');
+    umask = 511 & ~r.value;
+    renderUmask('dir');
+  });
+  [umIn, ufIn, udIn].forEach(function (el) {
+    el.addEventListener('change', function () {
+      if (/^\s*[0-7]{1,2}\s*$/.test(el.value) && el !== umIn) umaskError('Enter 3 digits, like ' + (el === ufIn ? '644.' : '755.'), el);
+    });
+  });
+  TT.$$('[data-umask]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      umask = parseInt(b.getAttribute('data-umask'), 8);
+      umaskError('');
+      renderUmask('preset');
+    });
+  });
+  $('#cm-use-f').addEventListener('click', function () { load(438 & ~umask, false); });
+  $('#cm-use-d').addEventListener('click', function () { load(511 & ~umask, true); });
+
+  // ---------- ls -l lines ----------
+  var TYPES = {
+    '-': 'File', d: 'Directory', l: 'Symbolic link', c: 'Character device', b: 'Block device',
+    p: 'Named pipe (FIFO)', s: 'Socket', D: 'Door (Solaris)'
+  };
+  var MARKS = {
+    '+': 'Has an ACL: the group digit is the ACL mask, the most any named user or group gets. Run getfacl to see the entries.',
+    '.': 'Has an SELinux security context (ls -Z shows it).',
+    '@': 'Has extended attributes (macOS; ls -l@ lists them).'
+  };
+  var SIZE = /^\d+(?:[.,]\d+)?[KMGTPEZY]?i?B?$/i;
+  var TIME = /^\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
+  var MONTH = /^\p{L}{2,5}\.?$/u;
+  // Number of tokens a date takes when one starts at tokens[i], else 0. Covers the
+  // default "Mar  3 09:15" / "Feb  6  2024", day-first locales ("3. Mär 09:15"),
+  // and --time-style long-iso, full-iso and iso.
+  function dateLen(t, i) {
+    var a = t[i] && t[i].s, b = t[i + 1] && t[i + 1].s, c = t[i + 2] && t[i + 2].s;
+    if (!a) return 0;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(a)) {
+      if (b && TIME.test(b)) return c && /^[+-]\d{4}$/.test(c) ? 3 : 2;
+      return 1;
+    }
+    if (/^\d{2}-\d{2}$/.test(a) && b && TIME.test(b)) return 2;
+    var yearOrTime = function (x) { return x && (TIME.test(x) || /^\d{4}$/.test(x)); };
+    if (MONTH.test(a) && b && /^\d{1,2}\.?$/.test(b) && yearOrTime(c)) return 3;
+    if (/^\d{1,2}\.?$/.test(a) && b && MONTH.test(b) && yearOrTime(c)) return 3;
+    return 0;
+  }
+  // Undoes the quoting of ls --quoting-style=shell-escape: 'a b', "a", a\ b, 'it'\''s'.
+  function unquote(s) {
+    if (!/^['"$]/.test(s) && s.indexOf('\\') < 0) return s;
+    var out = '', i = 0;
+    while (i < s.length) {
+      var ch = s[i];
+      if (ch === "'") { var j = s.indexOf("'", i + 1); if (j < 0) return s; out += s.slice(i + 1, j); i = j + 1; }
+      else if (ch === '"') { var k = s.indexOf('"', i + 1); if (k < 0) return s; out += s.slice(i + 1, k).replace(/\\(["\\$`])/g, '$1'); i = k + 1; }
+      else if (ch === '\\' && i + 1 < s.length) { out += s[i + 1]; i += 2; }
+      else if (ch === '$' && s[i + 1] === "'") return s; // $'\n' escapes: keep as printed
+      else { out += ch; i++; }
+    }
+    return out;
+  }
+
+  function parseLsLine(line) {
+    var toks = [], re = /\S+/g, m;
+    while ((m = re.exec(line))) toks.push({ s: m[0], at: m.index, end: m.index + m[0].length });
+    var p = 0;
+    // ls -i and -s put an inode number and a block count first.
+    while (p < toks.length - 1 && /^\d+$/.test(toks[p].s) && !/^[-dlcbpsD][rwxsStT-]{9}/.test(toks[p].s)) p++;
+    var perm = toks[p] && /^([-dlcbpsD])([rwxsStT-]{9})([.+@]?)$/.exec(toks[p].s);
+    if (!perm) return null;
+    var r = parseSymbolic(perm[1] + perm[2]);
+    if (r.error || r.short) return { error: r.error || 'Incomplete permissions.' };
+    var entry = { type: perm[1], mark: perm[3], mode: r.mode, perm: toks[p].s, name: '', target: '', owner: '' };
+    // Find the date; the size (or a device's "major, minor") is just before it.
+    for (var i = p + 2; i < toks.length; i++) {
+      var n = dateLen(toks, i);
+      if (!n || !SIZE.test(toks[i - 1].s)) continue;
+      var sizeAt = i - 1;
+      if (sizeAt - 1 > p + 1 && /^\d+,$/.test(toks[sizeAt - 1].s)) { entry.device = toks[sizeAt - 1].s + ' ' + toks[sizeAt].s; sizeAt--; }
+      else entry.size = toks[sizeAt].s;
+      entry.owner = toks.slice(p + 2, sizeAt).map(function (t) { return t.s; }).join(':');
+      var rest = line.slice(toks[i + n - 1].end).replace(/^\s+/, '').replace(/\s+$/, '');
+      if (perm[1] === 'l') {
+        var arrow = rest.indexOf(' -> ');
+        if (arrow >= 0) { entry.target = unquote(rest.slice(arrow + 4)); rest = rest.slice(0, arrow); }
+      }
+      entry.name = unquote(rest);
+      return entry;
+    }
+    // Only the mode (or a line we can't split): still worth showing.
+    entry.partial = toks.length > p + 1;
+    return entry;
+  }
+
+  function notesFor(e) {
+    var out = [];
+    if (e.mark && MARKS[e.mark]) out.push(MARKS[e.mark]);
+    if (e.type === 'l') out.push('A link’s own permissions are not used; chmod changes the target' + (e.target ? ' (' + e.target + ')' : '') + '.');
+    if (e.mode & 2048) out.push(e.type === 'd' ? 'setuid on a directory is ignored by Linux.' : 'setuid: runs with the owner’s rights.');
+    if (e.mode & 1024) out.push(e.type === 'd' ? 'setgid: new files get this directory’s group.' : 'setgid: runs with the file’s group.');
+    if (e.mode & 512) out.push(e.type === 'd' ? 'Sticky: only owners can delete their files.' : 'Sticky bit (no effect on files).');
+    if (e.type !== 'l' && (e.mode & 2) && !(e.type === 'd' && (e.mode & 512))) out.push('Anyone can ' + (e.type === 'd' ? 'add or delete entries.' : 'change it.'));
+    if (e.device) out.push('Device number ' + e.device.replace(/,\s*/, ', ') + ' (major, minor).');
+    if (e.partial) out.push('Could not find the date and name in this line.');
+    return out.join(' ');
+  }
+
+  var lsIn = $('#cm-lsin'), lsErr = $('#cm-ls-err'), lsBody = $('#cm-ls-body');
+  function renderLs(announce) {
+    var lines = lsIn.value.split(/\r?\n/);
+    lsBody.textContent = '';
+    var entries = [], skipped = 0, firstBad = '';
+    for (var k = 0; k < lines.length && entries.length < 500; k++) {
+      var line = lines[k];
+      if (!line.trim() || /^total\s+\S+$/.test(line.trim())) continue;
+      var e = parseLsLine(line);
+      // ls -lR prints a "dir:" heading before each directory's listing.
+      if (!e && /^\S.*:$/.test(line.trim())) continue;
+      if (!e) { skipped++; if (!firstBad) firstBad = line.trim(); continue; }
+      if (e.error) { skipped++; if (!firstBad) firstBad = line.trim(); continue; }
+      entries.push(e);
+    }
+    var msg = '';
+    if (!entries.length && skipped) msg = 'No ls -l lines found. Each line should start with the file type and permissions, like drwxr-xr-x or -rw-r--r--.';
+    else if (skipped) msg = skipped + (skipped === 1 ? ' line was' : ' lines were') + ' skipped because ' + (skipped === 1 ? 'it does' : 'they do') + ' not start with permissions, such as "' + firstBad.slice(0, 40) + (firstBad.length > 40 ? '…' : '') + '".';
+    lsErr.textContent = msg;
+    $('#cm-ls-wrap').hidden = !entries.length;
+    entries.forEach(function (e) {
+      var tr = document.createElement('tr');
+      var name = document.createElement('td');
+      name.className = 'cm-lsname';
+      name.textContent = e.name || '–';
+      if (e.target) { var sm = document.createElement('small'); sm.textContent = '→ ' + e.target; name.appendChild(sm); }
+      var cells = [
+        name,
+        ['cm-lstype', TYPES[e.type] + (e.mark === '+' ? ', ACL' : '')],
+        ['cm-lsmode', e.perm],
+        ['cm-lsoct', octal(e.mode)],
+        ['cm-lsowner', e.owner || '–'],
+        ['cm-lsnotes', notesFor(e)]
+      ];
+      cells.forEach(function (c) {
+        if (c.nodeType) { tr.appendChild(c); return; }
+        var td = document.createElement('td');
+        td.className = c[0];
+        td.textContent = c[1];
+        if (c[0] === 'cm-lsoct') td.setAttribute('data-label', 'octal');
+        if (c[0] === 'cm-lsowner') td.setAttribute('data-label', 'owner');
+        tr.appendChild(td);
+      });
+      var tdb = document.createElement('td');
+      tr.appendChild(tdb);
+      lsBody.appendChild(tr);
+      if (e.type === 'l') return; // a link's rwxrwxrwx is not a mode worth loading
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn secondary small';
+      btn.textContent = 'Load';
+      btn.setAttribute('aria-label', 'Load ' + octal(e.mode) + (e.name ? ' of ' + e.name : '') + ' into the calculator');
+      btn.addEventListener('click', function () {
+        load(e.mode, e.type === 'd' ? true : e.type === '-' ? false : null, e.name && e.type !== 'l' ? e.name : undefined);
+        TT.announce('Loaded ' + octal(e.mode) + ' into the calculator.');
+      });
+      tdb.appendChild(btn);
+    });
+    lsSummary = entries.length ? entries.length + (entries.length === 1 ? ' entry' : ' entries') + ' decoded.' + (msg ? ' ' + msg : '') : msg;
+    if (announce) say(function () { return lsSummary; }, false);
+  }
+  var lsSummary = '';
+  lsIn.addEventListener('input', function () { renderLs(true); });
+  $('#cm-ls-clear').addEventListener('click', function () { lsIn.value = ''; renderLs(false); lsIn.focus(); });
+
   render('init');
+  renderUmask('init');
+  renderLs(false);
+  clearTimeout(statusTimer);
 })();
 </script>

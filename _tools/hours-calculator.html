@@ -1,0 +1,571 @@
+---
+title: "Hours Calculator: Work Hours Between Times"
+description: Calculate hours worked between two times, minus unpaid breaks, with overnight shifts. Get hours and minutes, decimal hours, a total of all rows and pay.
+category: Calculators
+keywords: [hours calculator, work hours calculator, time between two times, hours worked calculator, decimal hours calculator, overnight shift hours, hours and minutes to decimal]
+howto: |
+  ## How to use the hours calculator
+
+  Enter a start and an end time on each row. Type them the way you would say
+  them: `9`, `9:30`, `9:30 pm`, `930p`, `21:30`, `noon` and `midnight` all
+  work, and the field is tidied into your chosen 12-hour or 24-hour format
+  when you move on. Add a row for every shift or time block, such as each day
+  of a week, and the total at the bottom adds them all up.
+
+  Put **unpaid** break time in the break column, in minutes. In the United
+  States, the federal rules generally treat short rest breaks of 5 to 20
+  minutes as paid work time, while a real meal break, usually 30 minutes or
+  more with no duties, can be unpaid (29 CFR 785.18 and 785.19). Leave paid
+  breaks out.
+
+  Add an hourly rate to see gross pay before tax. Pay is worked out from the
+  exact minutes, not from the rounded decimal, so 8:20 at 15.00 an hour
+  pays 125.00, while 8.33 × 15 would give 124.95. For overtime, use the
+  [time card calculator](/time-card-calculator/).
+
+  ## Overnight shifts
+
+  When the end time is earlier than the start time, the calculator assumes
+  the shift ends the next day: 10:00 PM to 6:30 AM is 8 hours 30 minutes. A
+  row with the same start and end counts as zero, so enter `24:00` as the end
+  for a full 24-hour shift. Split anything longer than 24 hours into two rows.
+
+  ## Converting minutes to decimal hours
+
+  Payroll and invoicing systems usually want decimal hours. Divide the
+  minutes by 60 and add them to the whole hours: 7:45 is 7 + 45 ÷ 60 =
+  **7.75** hours, and 8:20 is 8.3333… hours, which rounds to 8.33. Only
+  multiples of 3 minutes convert to an exact two-digit decimal; the others
+  repeat forever, so the calculator shows when it has rounded.
+
+  | Minutes | Decimal | Minutes | Decimal |
+  |---|---|---|---|
+  | 5 | 0.08 | 35 | 0.58 |
+  | 10 | 0.17 | 40 | 0.67 |
+  | 15 | 0.25 | 45 | 0.75 |
+  | 20 | 0.33 | 50 | 0.83 |
+  | 25 | 0.42 | 55 | 0.92 |
+  | 30 | 0.50 | 60 | 1.00 |
+
+  ## Time clock rounding and the 7-minute rule
+
+  Some employers round clock-in and clock-out times. US federal rules allow
+  rounding to the nearest 5 minutes, tenth of an hour or quarter hour, as
+  long as it averages out over time and does not end up underpaying
+  employees (29 CFR 785.48). Choose a rounding option to see what each row
+  counts after rounding; the break is not rounded.
+
+  | Rounding | Rounds down | Rounds up |
+  |---|---|---|
+  | Nearest 5 minutes | 1–2 minutes past | 3–4 minutes past |
+  | Nearest 6 minutes (0.1 hour) | 1–2 minutes past | 3–5 minutes past |
+  | Nearest 15 minutes (7-minute rule) | 1–7 minutes past | 8–14 minutes past |
+
+  With the 7-minute rule, a punch at 8:07 counts as 8:00 and a punch at 8:08
+  counts as 8:15. Rules vary: some states and courts restrict rounding, some
+  employers round only in the worker's favour, and many pay to the exact
+  minute. Check your employer's written policy and local law, and keep
+  **No rounding** selected to see the time you actually worked.
+faq:
+  - q: How do I convert hours and minutes to decimal hours?
+    a: Divide the minutes by 60 and add the result to the hours. 7 hours 45 minutes is 7 + 45 ÷ 60 = 7.75 hours, and 6 hours 10 minutes is 6.1666…, which rounds to 6.17.
+  - q: How do I calculate hours for a night shift that ends after midnight?
+    a: Enter the times as they appear on the clock, such as 10:00 PM to 6:30 AM. An end time earlier than the start is read as the next day, which gives 8 hours 30 minutes before breaks.
+  - q: Should I subtract my lunch break?
+    a: Subtract unpaid breaks only. A meal break of about 30 minutes or more, when you are fully relieved of duty, is usually unpaid; short rest breaks are usually paid, so leave them out.
+  - q: Why is my pay slightly different from decimal hours times my rate?
+    a: The rounded decimal loses a little. 8 hours 20 minutes is 8.3333… hours, so at 15.00 an hour the exact pay is 125.00, while 8.33 × 15 gives 124.95. Payroll systems can use either method.
+  - q: Are my times uploaded or saved?
+    a: No. Everything is calculated in your browser, nothing is sent to a server, and nothing is kept after you close the page.
+---
+<style>
+.hc-settings > .field { flex: 1 1 170px; }
+.hc-settings > .field > input, .hc-settings > .field > select { height: 48px; }
+.hc-grid { margin: 0 0 12px; }
+.hc-head, .hc-row {
+  display: grid;
+  grid-template-columns: 2.2rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.25fr) 2.75rem;
+  gap: 6px 10px;
+  align-items: center;
+}
+.hc-head { padding: 0 0 6px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; font-weight: 600; }
+.hc-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.hc-num { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.hc-num-word { display: none; }
+.hc-f { min-width: 0; }
+.hc-f input { font-variant-numeric: tabular-nums; }
+.hc-lab { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.hc-res { min-width: 0; line-height: 1.35; }
+.hc-res b { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.hc-res .hc-dec { margin-left: 6px; color: var(--muted); font-size: 14px; white-space: nowrap; }
+.hc-res .hc-tag { display: block; color: var(--muted); font-size: 12px; }
+.hc-del { width: 2.75rem; padding: 0; font-size: 1.2rem; line-height: 1; }
+.hc-row .hc-err { grid-column: 2 / -1; margin: 0; }
+.hc-row input[aria-invalid="true"] { border-color: var(--danger); }
+.hc-total-wrap { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.hc-total-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0 0 12px; }
+.hc-total-line .result-big { margin: 0; font-variant-numeric: tabular-nums; }
+.hc-total-line span { color: var(--muted); font-size: 1.05rem; }
+.hc-explain { margin: -4px 0 16px; font-size: 14px; }
+@media (max-width: 640px) {
+  .hc-head { display: none; }
+  .hc-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "num del" "s e" "b res" "err err";
+    gap: 8px 12px;
+  }
+  .hc-num { grid-area: num; color: var(--text); font-weight: 600; }
+  .hc-num-word { display: inline; }
+  .hc-del { grid-area: del; justify-self: end; }
+  .hc-f-s { grid-area: s; }
+  .hc-f-e { grid-area: e; }
+  .hc-f-b { grid-area: b; }
+  .hc-res { grid-area: res; align-self: end; padding-bottom: 8px; }
+  .hc-row .hc-err { grid-area: err; }
+  .hc-lab { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: normal; display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; }
+}
+</style>
+
+<div class="row hc-settings">
+  <div class="field">
+    <label for="hc-format">Time format</label>
+    <select id="hc-format">
+      <option value="12">12-hour (9:00 AM)</option>
+      <option value="24">24-hour (09:00)</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="hc-round">Round clock times</label>
+    <select id="hc-round">
+      <option value="0" selected>No rounding (exact)</option>
+      <option value="5">Nearest 5 minutes</option>
+      <option value="6">Nearest 6 min (0.1 hour)</option>
+      <option value="15">Nearest 15 min (7-minute rule)</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="hc-rate">Hourly rate (optional)</label>
+    <input type="text" id="hc-rate" inputmode="decimal" autocomplete="off" placeholder="e.g. 18.50">
+  </div>
+</div>
+<p class="hint">Type times like 9, 9:30, 9:30 pm, 930p or 21:30. An end time earlier than the start counts as the next day.</p>
+
+<div class="hc-grid">
+  <div class="hc-head" aria-hidden="true">
+    <span>#</span><span>Start</span><span>End</span><span>Unpaid break (min)</span><span>Hours worked</span><span></span>
+  </div>
+  <div id="hc-rows"></div>
+</div>
+<p class="msg error" id="hc-msg"></p>
+<div class="actions">
+  <button class="btn secondary small" type="button" id="hc-add">+ Add row</button>
+  <button class="btn secondary small" type="button" id="hc-clear">Clear all</button>
+</div>
+
+<div class="hc-total-wrap">
+  <p class="label" id="hc-total-label">Total hours worked</p>
+  <div class="hc-total-line">
+    <p class="result-big" id="hc-total">0:00</p>
+    <span id="hc-total-words">0 hours</span>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="hc-dec">0.00</b><span>Decimal hours</span></div>
+    <div class="stat"><b id="hc-mins">0</b><span>Total minutes</span></div>
+    <div class="stat"><b id="hc-breaks">0:00</b><span>Unpaid breaks</span></div>
+    <div class="stat"><b id="hc-pay">–</b><span id="hc-pay-label">Gross pay</span></div>
+  </div>
+  <p class="hint hc-explain" id="hc-explain"></p>
+  <div class="actions">
+    <button class="btn small" type="button" id="hc-copy">Copy results</button>
+  </div>
+</div>
+<p class="visually-hidden" id="hc-status" role="status"></p>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var rowsEl = $('#hc-rows'), fmtSel = $('#hc-format'), roundSel = $('#hc-round'), rateIn = $('#hc-rate');
+  var MAX_ROWS = 60;
+  var uid = 0;
+  var last = null;
+
+  // Typed text quoted in a message, cut short so a long paste cannot flood the page.
+  function quote(v) {
+    var s = String(v).trim(), c = Array.from(s.slice(0, 80));
+    return '“' + (c.length > 40 || s.length > 80 ? c.slice(0, 40).join('') + '…' : s) + '”';
+  }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+  // Minutes after midnight (0 to 1440), null for an empty field, NaN if unreadable.
+  // Accepts 9, 9:30, 9.30, 9h30, 9h, 930, 0930, 21:30, 21:30:00, 9:30pm, 9:30 p.m.,
+  // 9p, noon, 12:00 noon, midnight, 24:00, and full-width digits.
+  function parseTime(raw) {
+    var s = String(raw == null ? '' : raw).normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!s) return null;
+    if (/^(12(:00)? ?)?noon$/.test(s)) return 720;
+    if (/^(12(:00)? ?)?midnight$/.test(s)) return 0;
+    var suf = '';
+    var sm = /\s*([ap])\.?\s*(m\.?)?$/.exec(s);
+    if (sm) { suf = sm[1]; s = s.slice(0, sm.index); }
+    // Whole minutes only: zero seconds (from a time clock export) are dropped.
+    s = s.replace(/^(\d{1,2}:\d{2}):00$/, '$1').replace(/^(\d{1,2}) ?h$/, '$1');
+    var h, m;
+    var a = /^(\d{1,2})(?:\s*[:.h]\s*(\d{2}))?$/.exec(s);
+    var b = /^(\d{3,4})$/.exec(s);
+    if (a) { h = +a[1]; m = a[2] ? +a[2] : 0; }
+    else if (b) { h = Math.floor(+b[1] / 100); m = +b[1] % 100; }
+    else return NaN;
+    if (m > 59) return NaN;
+    if (suf) {
+      if (h > 12 || (h === 0 && suf === 'p')) return NaN;
+      return (h % 12 + (suf === 'p' ? 12 : 0)) * 60 + m;
+    }
+    if (h === 24 && m === 0) return 1440;
+    if (h > 23) return NaN;
+    return h * 60 + m;
+  }
+
+  function fmtTime(min, h12) {
+    if (min === 1440) return '24:00';
+    var h = Math.floor(min / 60), m = min % 60;
+    if (!h12) return pad2(h) + ':' + pad2(m);
+    return ((h % 12) || 12) + ':' + pad2(m) + (h < 12 ? ' AM' : ' PM');
+  }
+  // A counted (rounded) time: an end at 24:00 reads as 12:00 AM on a 12-hour clock.
+  function fmtCounted(min, h12, isEnd) {
+    if (min === 1440) return isEnd && !h12 ? '24:00' : fmtTime(0, h12);
+    return fmtTime(min, h12);
+  }
+  function fmtHM(total) { return Math.floor(total / 60) + ':' + pad2(total % 60); }
+  function fmtWords(total) {
+    var h = Math.floor(total / 60), m = total % 60;
+    if (!m) return plural(h, 'hour', 'hours');
+    if (!h) return plural(m, 'minute', 'minutes');
+    return plural(h, 'hour', 'hours') + ' ' + plural(m, 'minute', 'minutes');
+  }
+  // Hundredths of an hour, rounded half up. total * 5 / 3 is never exactly x.5.
+  function fmtDec(total) {
+    var c = Math.round(total * 5 / 3);
+    return Math.floor(c / 100) + '.' + pad2(c % 100);
+  }
+  function roundTo(min, inc) { return inc ? Math.floor((2 * min + inc) / (2 * inc)) * inc : min; }
+  function is12() { return fmtSel.value === '12'; }
+
+  // Separators: "1,000" and "1,000.50" group thousands and "18,50" has a decimal
+  // comma. In locales that write decimals with a comma, any single comma is
+  // a decimal comma and "1.000,50" groups with dots.
+  var decComma = (1.5).toLocaleString().indexOf(',') !== -1;
+  function plainNumber(s) {
+    if (/^\d{1,3}(\.\d{3})+,\d+$/.test(s)) return s.replace(/\./g, '').replace(',', '.');
+    if (/^\d*,\d+$/.test(s) && (decComma || !/^\d{1,3},\d{3}$/.test(s))) return s.replace(',', '.');
+    if (/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s)) return s.replace(/,/g, '');
+    return s;
+  }
+  // Rate as an integer number of 1/10000 units, or null (empty) / NaN (bad).
+  function parseRate(raw) {
+    var s = String(raw || '').normalize('NFKC').trim().replace(/^[$€£¥₹]\s*/, '').replace(/\s*(\/\s*h(ou)?r?|an hour|per hour)$/i, '').trim();
+    if (!s) return null;
+    s = plainNumber(s);
+    var m = /^(\d{1,7})(?:\.(\d{0,4}))?$/.exec(s) || /^()\.(\d{1,4})$/.exec(s);
+    if (!m) return NaN;
+    return BigInt(m[1] || '0') * 10000n + BigInt(((m[2] || '') + '0000').slice(0, 4));
+  }
+  // Pay in cents for a number of minutes, rounded half up, exactly.
+  function payCents(minutes, rate4) {
+    var num = BigInt(minutes) * rate4, den = 6000n;
+    return (2n * num + den) / (2n * den);
+  }
+  var money = new Intl.NumberFormat(undefined, { numberingSystem: 'latn', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function fmtMoney(cents) { return money.format(Number(cents) / 100); }
+  var intFmt = new Intl.NumberFormat(undefined, { numberingSystem: 'latn' });
+  // Latin digits throughout, since the page itself is in English.
+  var rateFmt = new Intl.NumberFormat(undefined, { numberingSystem: 'latn', minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  function fmtRate(rate4) { return rateFmt.format(Number(rate4) / 10000); }
+
+  // ----- Rows -----
+  function makeRow(start, end, brk) {
+    var id = ++uid;
+    var row = document.createElement('div');
+    row.className = 'hc-row';
+    row.setAttribute('role', 'group');
+    row.innerHTML =
+      '<span class="hc-num"><span class="hc-num-word">Row </span><span class="hc-n"></span></span>' +
+      '<div class="hc-f hc-f-s"><label class="hc-lab" for="hc-s' + id + '">Start</label>' +
+      '<input type="text" class="hc-start" id="hc-s' + id + '" autocomplete="off" spellcheck="false" placeholder="9:00 AM"></div>' +
+      '<div class="hc-f hc-f-e"><label class="hc-lab" for="hc-e' + id + '">End</label>' +
+      '<input type="text" class="hc-end" id="hc-e' + id + '" autocomplete="off" spellcheck="false" placeholder="5:00 PM"></div>' +
+      '<div class="hc-f hc-f-b"><label class="hc-lab" for="hc-b' + id + '">Unpaid break (min)</label>' +
+      '<input type="number" class="hc-break" id="hc-b' + id + '" min="0" max="1440" step="1" inputmode="numeric" placeholder="0"></div>' +
+      '<div class="hc-res"><b class="hc-hm">–</b><span class="hc-dec"></span><span class="hc-tag"></span></div>' +
+      '<button class="btn secondary small hc-del" type="button">&times;</button>' +
+      '<p class="msg error hc-err" id="hc-err' + id + '"></p>';
+    row.querySelector('.hc-start').value = start || '';
+    row.querySelector('.hc-end').value = end || '';
+    row.querySelector('.hc-break').value = brk == null ? '' : brk;
+    ['.hc-start', '.hc-end', '.hc-break'].forEach(function (sel) {
+      row.querySelector(sel).setAttribute('aria-describedby', 'hc-err' + id);
+    });
+    return row;
+  }
+  function rows() { return $$('.hc-row', rowsEl); }
+  function renumber() {
+    var list = rows();
+    list.forEach(function (r, i) {
+      var n = i + 1;
+      r.querySelector('.hc-n').textContent = n;
+      r.setAttribute('aria-label', 'Row ' + n);
+      r.querySelector('.hc-start').setAttribute('aria-label', 'Start, row ' + n);
+      r.querySelector('.hc-end').setAttribute('aria-label', 'End, row ' + n);
+      r.querySelector('.hc-break').setAttribute('aria-label', 'Unpaid break (min), row ' + n);
+      r.querySelector('.hc-del').setAttribute('aria-label', list.length === 1 ? 'Clear row 1' : 'Remove row ' + n);
+    });
+    $('#hc-add').disabled = list.length >= MAX_ROWS;
+  }
+
+  // ----- Calculation -----
+  function readRow(r) {
+    var sIn = r.querySelector('.hc-start'), eIn = r.querySelector('.hc-end'), bIn = r.querySelector('.hc-break');
+    var s = parseTime(sIn.value), e = parseTime(eIn.value);
+    var bRaw = bIn.value.trim(), bad = bIn.validity && bIn.validity.badInput;
+    var out = { sIn: sIn, eIn: eIn, bIn: bIn, s: s, e: e, err: '', invalid: [] };
+    if (s === null && e === null && !bRaw && !bad) { out.blank = true; return out; }
+    if (Number.isNaN(s)) { out.invalid.push(sIn); out.err = 'The start time ' + quote(sIn.value) + ' isn’t a time. Try 9:30, 9:30 pm or 21:30.'; }
+    else if (Number.isNaN(e)) { out.invalid.push(eIn); out.err = 'The end time ' + quote(eIn.value) + ' isn’t a time. Try 5:00, 5 pm or 17:00.'; }
+    var brk = 0;
+    if (bad || (bRaw && !/^\d+$/.test(bRaw))) {
+      out.invalid.push(bIn);
+      if (!out.err) out.err = 'Enter the break as whole minutes, such as 30.';
+    } else if (bRaw && +bRaw > 1440) {
+      out.invalid.push(bIn);
+      if (!out.err) out.err = 'A break can be at most 1,440 minutes (24 hours).';
+    } else if (bRaw) brk = +bRaw;
+    if (out.err) return out;
+    if (s === null || e === null) {
+      out.incomplete = true;
+      out.err = s === null ? 'Enter a start time.' : 'Enter an end time.';
+      out.invalid.push(s === null ? sIn : eIn);
+      return out;
+    }
+    if (s === 1440) s = 0; // 24:00 as a start is the same instant as 00:00
+    var inc = +roundSel.value;
+    var rs = roundTo(s, inc), re = roundTo(e, inc);
+    // Overnight is decided by the times as entered: rounding never reorders
+    // them, but it can make the two ends meet (0:03 to 0:02 rounds to 24:00, not 0).
+    var span = re - rs + (e < s ? 1440 : 0);
+    if (brk > span && !span) {
+      // A break on a zero-length row: the real problem is the times.
+      out.invalid.push(eIn);
+      out.err = inc && (rs !== s || re !== e)
+        ? 'The start and end round to the same time, so there is no time to take a break from.'
+        : 'The start and end are the same, so no time is counted. For a 24-hour shift, enter 24:00 as the end.';
+      return out;
+    }
+    if (brk > span) {
+      out.invalid.push(bIn);
+      out.err = 'The ' + brk + '-minute break is longer than the ' + fmtHM(span) + ' between start and end.';
+      return out;
+    }
+    out.ok = true;
+    out.rs = rs; out.re = re; out.brk = brk; out.span = span; out.worked = span - brk;
+    out.overnight = e < s;
+    out.same = span === 0;
+    out.rounded = inc && (rs !== s || re !== e);
+    return out;
+  }
+
+  function render(showErrors, activeRow) {
+    if (activeRow === undefined) activeRow = document.activeElement && document.activeElement.closest ? document.activeElement.closest('.hc-row') : null;
+    var h12 = is12();
+    var total = 0, breaks = 0, counted = 0, errors = 0;
+    var lines = [];
+    rows().forEach(function (r, i) {
+      var d = readRow(r);
+      // A half-filled row is only flagged once focus has left it.
+      var show = showErrors && !(d.incomplete && r === activeRow);
+      var hm = r.querySelector('.hc-hm'), dec = r.querySelector('.hc-dec'), tag = r.querySelector('.hc-tag'), err = r.querySelector('.hc-err');
+      [d.sIn, d.eIn, d.bIn].forEach(function (el) {
+        var inv = d.invalid.indexOf(el) !== -1 && (show || el.getAttribute('aria-invalid') === 'true');
+        if (inv) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+      });
+      if (!d.ok) {
+        hm.textContent = '–'; dec.textContent = ''; tag.textContent = '';
+        if (!d.blank) errors++;
+        // Keep a message that is already showing up to date; new ones wait for a pause or blur.
+        if (show || err.textContent) err.textContent = d.err || '';
+        return;
+      }
+      err.textContent = '';
+      total += d.worked; breaks += d.brk; counted++;
+      hm.textContent = fmtHM(d.worked);
+      dec.textContent = fmtDec(d.worked) + ' h';
+      var notes = [];
+      if (d.rounded) notes.push('counted ' + fmtCounted(d.rs, h12) + '–' + fmtCounted(d.re, h12, true));
+      if (d.same) notes.push(d.rounded ? 'start and end round to the same time' : 'same start and end; use 24:00 for a full day');
+      else if (d.overnight) notes.push('ends the next day');
+      tag.textContent = notes.join(' · ');
+      lines.push({ n: i + 1, s: d.s, e: d.e, rs: d.rs, re: d.re, brk: d.brk, worked: d.worked, rounded: d.rounded, next: d.overnight });
+    });
+
+    var rate = parseRate(rateIn.value), rateBad = Number.isNaN(rate);
+    if (!rateBad) rateIn.removeAttribute('aria-invalid');
+    else if (showErrors) rateIn.setAttribute('aria-invalid', 'true');
+    var msg = $('#hc-msg');
+    if (rateBad && showErrors) msg.textContent = 'Enter the hourly rate as a number, such as 18.50.';
+    else if (!rateBad) msg.textContent = '';
+
+    $('#hc-total').textContent = fmtHM(total);
+    $('#hc-total-words').textContent = fmtWords(total);
+    $('#hc-total-label').textContent = counted > 1 ? 'Total hours worked (' + counted + ' rows)' : 'Total hours worked';
+    $('#hc-dec').textContent = fmtDec(total);
+    $('#hc-mins').textContent = intFmt.format(total);
+    $('#hc-breaks').textContent = fmtHM(breaks);
+    var pay = null;
+    if (rate !== null && !rateBad) {
+      pay = payCents(total, rate);
+      $('#hc-pay').textContent = fmtMoney(pay);
+      $('#hc-pay-label').textContent = 'Gross pay at ' + fmtRate(rate) + ' an hour';
+    } else {
+      $('#hc-pay').textContent = '–';
+      $('#hc-pay-label').textContent = 'Gross pay';
+    }
+    $('#hc-explain').textContent = explain(total);
+    last = { total: total, counted: counted, errors: errors, lines: lines, pay: pay, rate: rateBad ? null : rate, breaks: breaks };
+  }
+
+  function explain(total) {
+    var h = Math.floor(total / 60), r = total % 60, hm = fmtHM(total);
+    if (!total) return 'Decimal hours are the minutes divided by 60 and added to the whole hours.';
+    if (!r) return hm + ' is exactly ' + fmtDec(total) + ' hours.';
+    if (r % 3 === 0) {
+      var exact = fmtDec(r).slice(1);
+      return r + ' minutes ÷ 60 = 0' + exact + ', so ' + hm + ' is exactly ' + fmtDec(total) + ' hours.';
+    }
+    var digits = String(Math.floor(r * 10000 / 60)).padStart(4, '0');
+    return r + ' minutes ÷ 60 = 0.' + digits + '…, so ' + hm + ' is ' + h + '.' + digits + '… hours, rounded to ' + fmtDec(total) + '.';
+  }
+
+  var status = $('#hc-status');
+  var announce = TT.debounce(function () {
+    if (!last) return;
+    var t = 'Total ' + fmtWords(last.total) + ', ' + fmtDec(last.total) + ' decimal hours';
+    if (last.pay !== null) t += ', pay ' + fmtMoney(last.pay);
+    if (last.errors) t += '. ' + plural(last.errors, 'row needs', 'rows need') + ' attention';
+    status.textContent = t + '.';
+  }, 1200);
+  var showErrorsLater = TT.debounce(function () { afterPointer(function () { render(true); }); }, 900);
+
+  function tidy(input) {
+    var v = parseTime(input.value);
+    if (typeof v === 'number' && !Number.isNaN(v)) input.value = fmtTime(v, is12());
+  }
+
+  rowsEl.addEventListener('input', function () { render(false); showErrorsLater(); announce(); });
+  rowsEl.addEventListener('change', function (e) {
+    if (e.target.matches('.hc-start, .hc-end')) tidy(e.target);
+    render(false);
+    announce();
+  });
+  // Errors show when focus leaves a field, except "missing time" for a row
+  // that focus is moving within (it is still being filled in).
+  rowsEl.addEventListener('focusout', function (e) {
+    var to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest('.hc-row') : null;
+    // While a button is held down, wait for the click; by then focus has
+    // settled, so the row it is in is read afresh (a stale row would flag
+    // the row just added or clicked into).
+    if (pointerIsDown) afterPointer(function () { render(true); });
+    else render(true, to);
+  });
+  // A message that appears while a mouse button or finger is down moves the
+  // page under the pointer, and the click on the button below is lost. Wait
+  // until it is released (the click has been dispatched by then).
+  var pointerIsDown = false, pendingFn = null;
+  document.addEventListener('pointerdown', function () { pointerIsDown = true; }, true);
+  ['pointerup', 'pointercancel'].forEach(function (type) {
+    document.addEventListener(type, function () {
+      pointerIsDown = false;
+      if (pendingFn) { var fn = pendingFn; pendingFn = null; setTimeout(fn, 0); }
+    }, true);
+  });
+  function afterPointer(fn) { if (pointerIsDown) pendingFn = fn; else fn(); }
+  rowsEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('.hc-del');
+    if (!btn) return;
+    var row = btn.closest('.hc-row'), list = rows(), i = list.indexOf(row);
+    if (list.length === 1) {
+      row.querySelector('.hc-start').value = '';
+      row.querySelector('.hc-end').value = '';
+      row.querySelector('.hc-break').value = '';
+      row.querySelector('.hc-err').textContent = '';
+      render(false);
+      row.querySelector('.hc-start').focus();
+    } else {
+      row.remove();
+      renumber();
+      render(false);
+      var after = rows();
+      (after[Math.min(i, after.length - 1)].querySelector('.hc-del')).focus();
+    }
+    announce();
+  });
+  // Enter in a row's last field adds a new row, like a spreadsheet.
+  rowsEl.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.isComposing || !e.target.matches('.hc-break')) return;
+    var list = rows();
+    if (e.target.closest('.hc-row') !== list[list.length - 1]) return;
+    e.preventDefault();
+    addRow();
+  });
+
+  function addRow() {
+    if (rows().length >= MAX_ROWS) return;
+    var row = makeRow('', '', '');
+    rowsEl.appendChild(row);
+    renumber();
+    render(false);
+    row.querySelector('.hc-start').focus();
+  }
+  $('#hc-add').addEventListener('click', addRow);
+  $('#hc-clear').addEventListener('click', function () {
+    rowsEl.textContent = '';
+    rowsEl.appendChild(makeRow('', '', ''));
+    renumber();
+    rateIn.value = '';
+    $('#hc-msg').textContent = '';
+    render(false);
+    announce();
+    $('#hc-clear').focus();
+  });
+  fmtSel.addEventListener('change', function () {
+    $$('.hc-start, .hc-end', rowsEl).forEach(tidy);
+    render(false);
+  });
+  roundSel.addEventListener('change', function () { render(false); announce(); });
+  rateIn.addEventListener('input', function () { render(false); showErrorsLater(); announce(); });
+  rateIn.addEventListener('change', function () { render(true); });
+
+  $('#hc-copy').addEventListener('click', function () {
+    render(true);
+    var h12 = is12(), out = [];
+    last.lines.forEach(function (l) {
+      var t = l.n + '. ' + fmtTime(l.s, h12) + ' – ' + fmtTime(l.e, h12) + (l.next ? ' (next day)' : '');
+      if (l.rounded) t += ', rounded to ' + fmtCounted(l.rs, h12) + ' – ' + fmtCounted(l.re, h12, true);
+      if (l.brk) t += ', break ' + l.brk + ' min';
+      out.push(t + ': ' + fmtHM(l.worked) + ' (' + fmtDec(l.worked) + ' h)');
+    });
+    out.push('Total: ' + fmtHM(last.total) + ' (' + fmtDec(last.total) + ' h)');
+    if (last.pay !== null) out.push('Pay at ' + fmtRate(last.rate) + ' an hour: ' + fmtMoney(last.pay));
+    TT.copy(out.join('\n'), $('#hc-copy'));
+  });
+
+  // Default to the clock style the visitor's locale uses.
+  try {
+    var hc = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
+    fmtSel.value = hc === 'h23' || hc === 'h24' ? '24' : '12';
+  } catch (e) { fmtSel.value = '12'; }
+  rowsEl.appendChild(makeRow(fmtTime(540, is12()), fmtTime(1035, is12()), '30'));
+  renumber();
+  render(false);
+})();
+</script>

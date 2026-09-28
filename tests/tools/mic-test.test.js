@@ -104,6 +104,22 @@ module.exports = async ({ page, open, assert }) => {
   assert.deepEqual(await page.evaluate(() => window.__gum.calls[2].audio.deviceId), { exact: id1 });
   await waitText('#mict-settings', /Fake Audio Input 1/);
 
+  // "Turn all three off" reopens the mic once with every filter off.
+  const nRaw = await page.evaluate(() => window.__gum.calls.length);
+  await page.click('#mict-raw');
+  await page.waitForFunction(n => window.__gum.calls.length === n + 1 && window.__gum.streams.length === n + 1, nRaw);
+  assert.deepEqual(await page.evaluate(n => { const a = window.__gum.calls[n].audio; return [a.echoCancellation, a.noiseSuppression, a.autoGainControl]; }, nRaw), [false, false, false]);
+  assert.deepEqual(await page.$$eval('#mict-ec, #mict-ns, #mict-agc', els => els.map(e => e.checked)), [false, false, false]);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'mict-raw');
+  await waitText('#mict-settings', /Noise suppressionOff/);
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(n => window.__gum.calls.length, nRaw), nRaw + 1, 'exactly one restart');
+  await page.check('#mict-ns');
+  await waitText('#mict-settings', /Noise suppressionOn/);
+  await page.check('#mict-agc');
+  await waitText('#mict-settings', /Auto gain controlOn/);
+  await page.waitForTimeout(300);
+
   // Record a 5-second clip, check playback length and the downloaded WebM file.
   assert.match(await text('#mict-rec'), /Record 5 s clip/);
   // Regression: the live status was rewritten every frame with the elapsed time,
@@ -195,6 +211,46 @@ module.exports = async ({ page, open, assert }) => {
   assert.ok(Math.abs(rms - expRms) < 0.3, `rms ${rms} vs ${expRms}`);
   assert.equal(await text('#mict-clip'), 'None');
   assert.match(await text('#mict-status'), /working/);
+  // The WAV download holds the raw samples: parse it independently and check
+  // the header, the length, and the sine's amplitude (0.5 of full scale:
+  // peak 16384, RMS 0.5/sqrt(2) = 0.354) and frequency (1000 Hz by zero crossings).
+  const rate = Number((await text('#mict-settings')).match(/Analysis sample rate([\d,]+) Hz/)[1].replace(/,/g, ''));
+  // Regression: a double click started and at once stopped the recording.
+  await page.dblclick('#mict-rec');
+  await page.waitForTimeout(600);
+  assert.equal(await text('#mict-rec'), 'Stop recording');
+  await waitText('#mict-rec-status', /Recorded a [45]\.\d s clip/, 10000);
+  await page.waitForSelector('#mict-dl-wav', { state: 'visible' });
+  assert.match(await text('#mict-dl-wav'), /^Download WAV \([\d,]+ KB\)$/);
+  const [wdl] = await Promise.all([page.waitForEvent('download'), page.click('#mict-dl-wav')]);
+  assert.match(wdl.suggestedFilename(), /^mic-test-\d{8}-\d{6}\.wav$/);
+  const wav = fs.readFileSync(await wdl.path());
+  assert.equal(wav.toString('latin1', 0, 4), 'RIFF');
+  assert.equal(wav.readUInt32LE(4), wav.length - 8);
+  assert.equal(wav.toString('latin1', 8, 16), 'WAVEfmt ');
+  assert.equal(wav.readUInt32LE(16), 16);
+  assert.equal(wav.readUInt16LE(20), 1, 'PCM');
+  const ch = wav.readUInt16LE(22), sr = wav.readUInt32LE(24);
+  assert.ok(ch === 1 || ch === 2, `channels ${ch}`);
+  assert.equal(sr, rate);
+  assert.equal(wav.readUInt32LE(28), sr * ch * 2, 'byte rate');
+  assert.equal(wav.readUInt16LE(32), ch * 2, 'block align');
+  assert.equal(wav.readUInt16LE(34), 16, 'bits per sample');
+  assert.equal(wav.toString('latin1', 36, 40), 'data');
+  const dataLen = wav.readUInt32LE(40);
+  assert.equal(dataLen, wav.length - 44);
+  const frames = dataLen / (2 * ch);
+  assert.ok(frames / sr > 4.3 && frames / sr <= 5, `WAV length ${frames / sr} s`);
+  const samples = [];
+  for (let i = 0; i < frames; i++) samples.push(wav.readInt16LE(44 + i * ch * 2) / 32768);
+  const mid = samples.slice(Math.floor(sr * 0.5), Math.floor(sr * 3.5)); // skip the edges
+  const wPeak = mid.reduce((m, x) => Math.max(m, Math.abs(x)), 0);
+  const wRms = Math.sqrt(mid.reduce((a, x) => a + x * x, 0) / mid.length);
+  let crossings = 0;
+  for (let i = 1; i < mid.length; i++) if (mid[i - 1] < 0 && mid[i] >= 0) crossings++;
+  assert.ok(Math.abs(wPeak - 0.5) < 0.01, `WAV peak ${wPeak}`);
+  assert.ok(Math.abs(wRms - 0.5 / Math.SQRT2) < 0.01, `WAV RMS ${wRms}`);
+  assert.ok(Math.abs(crossings / 3 - 1000) < 5, `WAV frequency ${crossings / 3} Hz`);
   await page.click('#mict-stop');
 
   // Digital silence triggers a specific warning after a few seconds.

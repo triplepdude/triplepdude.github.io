@@ -1,4 +1,25 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+
+// CRC-32C (Castagnoli, reflected 0x82F63B78), bit by bit, independent of the page's table code.
+function crc32c(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) { c ^= b; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0x82f63b78 : c >>> 1; }
+  return ((c ^ 0xffffffff) >>> 0).toString(16).padStart(8, '0');
+}
+const crc32 = buf => (zlib.crc32(buf) >>> 0).toString(16).padStart(8, '0');
+// Everything Node's crypto module can compute itself.
+function nodeHashes(buf) {
+  const h = (alg, opts) => crypto.createHash(alg, opts).update(buf).digest('hex');
+  return {
+    md5: h('md5'), sha1: h('sha1'), sha256: h('sha256'), sha384: h('sha384'), sha512: h('sha512'),
+    'sha3-224': h('sha3-224'), 'sha3-256': h('sha3-256'), 'sha3-384': h('sha3-384'), 'sha3-512': h('sha3-512'),
+    shake128: h('shake128', { outputLength: 32 }), shake256: h('shake256', { outputLength: 64 }),
+    blake2b512: h('blake2b512'), blake2s256: h('blake2s256'), ripemd160: h('ripemd160'), crc32: crc32(buf), crc32c: crc32c(buf),
+  };
+}
 
 // Known-answer vectors computed independently with Python's hashlib
 // (hashlib.new(alg, s.encode('utf-8')).digest(), then .hex() and base64.b64encode).
@@ -27,7 +48,7 @@ const V = {
 };
 const ALGS = ['md5', 'sha1', 'sha256', 'sha384', 'sha512'];
 
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, fixtures }) => {
   await open();
   const text = sel => page.locator(sel).textContent();
 
@@ -66,7 +87,7 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('#hg-copy-all');
   const clip = await page.evaluate(() => navigator.clipboard.readText());
   assert.ok(clip.includes('SHA-256: 88b5504a70e83da99e04100fa00636a8488ee8d175b2a518ab378a179591f9bc'), clip);
-  assert.equal(clip.split('\n').length, 5);
+  assert.equal(clip.split('\n').length, 6); // the six algorithms ticked by default
 
   // Compare box.
   await page.fill('#hg-text', 'abc');
@@ -196,7 +217,7 @@ module.exports = async ({ page, open, assert }) => {
   await page.waitForTimeout(1500);
   assert.match(await text('#hg-summary'), /cancelled/);
   assert.equal(await text('#hg-md5-hex'), '–');
-  assert.match(await text('#hg-drop-title'), /Choose a file/);
+  assert.match(await text('#hg-drop-title'), /Choose files/);
   assert.equal(await page.isVisible('#hg-progress-wrap'), false);
   assert.equal(await page.getAttribute('#hg-results', 'data-busy'), '');
 
@@ -281,7 +302,277 @@ module.exports = async ({ page, open, assert }) => {
   await page.selectOption('#hg-enc', 'utf8');
   await page.click('#hg-clear');
 
+  // ---------- Every algorithm ----------
+  const PY = JSON.parse(fs.readFileSync(path.join(fixtures, 'python-vectors.json'), 'utf8'));
+  const B3 = JSON.parse(fs.readFileSync(path.join(fixtures, 'blake3-test-vectors.json'), 'utf8'));
+  const IDS = ['md5', 'sha1', 'sha256', 'sha384', 'sha512', 'sha3-224', 'sha3-256', 'sha3-384', 'sha3-512', 'keccak256', 'shake128', 'shake256', 'blake2b512', 'blake2s256', 'blake3', 'ripemd160', 'crc32', 'crc32c'];
+  const hexOf = async id => page.locator(`#hg-${id}-hex`).textContent();
+  const allHex = async () => Object.fromEntries(await Promise.all(IDS.map(async id => [id, await hexOf(id)])));
+  await page.click('#hg-pick-all');
+  assert.equal(await text('#hg-alg-count'), '19 of 19');
+  for (const id of IDS) assert.equal(await page.isVisible(`#hg-${id}-hex`), true, id);
+  const expectFor = (buf, key) => Object.assign(nodeHashes(buf), { keccak256: PY.keccak256[key], blake3: PY.blake3[key] });
+  const settleAll = async exp => page.waitForFunction(e => Object.entries(e).every(([id, v]) => document.querySelector(`#hg-${id}-hex`).textContent === v), exp, { timeout: 15000 }).catch(() => {});
+  for (const [key, textValue] of [['', ''], ['abc', 'abc'], ['unicode', 'héllo wörld 👋 日本語'], ['fox', 'The quick brown fox jumps over the lazy dog']]) {
+    await page.fill('#hg-text', textValue);
+    const exp = expectFor(Buffer.from(textValue, 'utf8'), key);
+    await settleAll(exp);
+    assert.deepEqual(await allHex(), exp, 'text ' + JSON.stringify(textValue));
+  }
+  // Published answers anchor the reference values: NIST FIPS 202 "abc", Keccak-256 "" (Ethereum),
+  // CRC check values for "123456789".
+  await page.fill('#hg-text', 'abc');
+  await settleAll({ 'sha3-256': '3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532' });
+  assert.equal(await hexOf('sha3-256'), '3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532');
+  assert.equal(PY.keccak256[''], 'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470');
+  await page.fill('#hg-text', '123456789');
+  await settleAll({ crc32: 'cbf43926', crc32c: 'e3069283' });
+  assert.deepEqual([await hexOf('crc32'), await hexOf('crc32c')], ['cbf43926', 'e3069283']);
+  assert.equal(await page.locator('#hg-crc32-b64').textContent(), Buffer.from('cbf43926', 'hex').toString('base64'));
+  // Block and padding boundaries of every algorithm (64, 128, 136, 144, 168-byte blocks).
+  await page.selectOption('#hg-enc', 'hex');
+  for (const n of [55, 56, 57, 63, 64, 65, 111, 112, 119, 120, 127, 128, 129, 135, 136, 137, 143, 144, 167, 168, 169]) {
+    const buf = Buffer.alloc(n);
+    for (let i = 0; i < n; i++) buf[i] = (i * 73 + n) & 255;
+    await page.fill('#hg-text', buf.toString('hex'));
+    const exp = expectFor(buf, 'pad' + n);
+    await settleAll(exp);
+    assert.deepEqual(await allHex(), exp, `${n}-byte message`);
+  }
+  // Official BLAKE3 test vectors: 131-byte extended output, and keyed_hash with the 32-byte key.
+  // Inputs over 64 KB are hashed in the background worker.
+  await page.fill('#hg-blake3-len', String(131 * 8));
+  for (const c of B3.cases.filter(c => [0, 1, 63, 64, 65, 1023, 1024, 1025, 2048, 2049, 3072, 3073, 4097, 8193, 31744, 102400].includes(c.input_len))) {
+    const buf = Buffer.alloc(c.input_len);
+    for (let i = 0; i < buf.length; i++) buf[i] = i % 251;
+    await page.fill('#hg-text', buf.toString('hex'));
+    await page.waitForFunction(v => document.querySelector('#hg-blake3-hex').textContent === v, c.hash, { timeout: 15000 }).catch(() => {});
+    assert.equal(await hexOf('blake3'), c.hash, `BLAKE3 official vector, ${c.input_len} bytes`);
+    if (c.input_len === 102400) assert.equal(await hexOf('sha3-512'), crypto.createHash('sha3-512').update(buf).digest('hex'), 'worker path, SHA3-512');
+  }
+  await page.fill('#hg-key', B3.key);
+  for (const c of B3.cases.filter(c => [0, 1, 1025, 8193].includes(c.input_len))) {
+    const buf = Buffer.alloc(c.input_len);
+    for (let i = 0; i < buf.length; i++) buf[i] = i % 251;
+    await page.fill('#hg-text', buf.toString('hex'));
+    await page.waitForFunction(v => document.querySelector('#hg-blake3-hex').textContent === v, c.keyed_hash, { timeout: 15000 }).catch(() => {});
+    assert.equal(await hexOf('blake3'), c.keyed_hash, `BLAKE3 keyed_hash, ${c.input_len} bytes`);
+  }
+  await page.fill('#hg-key', '');
+  await page.fill('#hg-blake3-len', '256');
+
+  // ---------- SHAKE and BLAKE3 output length ----------
+  await page.selectOption('#hg-enc', 'utf8');
+  await page.fill('#hg-text', 'abc');
+  await page.fill('#hg-shake128-len', '512');
+  await page.waitForFunction(() => document.querySelector('#hg-shake128-hex').textContent.length === 128);
+  assert.equal(await hexOf('shake128'), crypto.createHash('shake128', { outputLength: 64 }).update('abc').digest('hex'));
+  await page.fill('#hg-shake128-len', '100');
+  await page.waitForFunction(() => /8,192 bits, in steps of 8/.test(document.querySelector('#hg-shake128-hex').textContent));
+  await page.fill('#hg-shake128-len', '256');
+  await page.waitForFunction(() => document.querySelector('#hg-shake128-hex').textContent.length === 64);
+
+  // ---------- HMAC and keyed hashes ----------
+  const fox = 'The quick brown fox jumps over the lazy dog';
+  const hmac = (alg, key, msg) => crypto.createHmac(alg, key).update(msg).digest('hex');
+  await page.fill('#hg-text', fox);
+  await page.fill('#hg-key', 'key');
+  // Well-known answers: HMAC-MD5 and HMAC-SHA256("key", fox) as published on Wikipedia.
+  const keyedExp = {
+    md5: '80070713463e7749b90c2dc24911e275', sha256: 'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8',
+    sha1: hmac('sha1', 'key', fox), sha384: hmac('sha384', 'key', fox), sha512: hmac('sha512', 'key', fox),
+    'sha3-224': hmac('sha3-224', 'key', fox), 'sha3-256': hmac('sha3-256', 'key', fox), 'sha3-384': hmac('sha3-384', 'key', fox), 'sha3-512': hmac('sha3-512', 'key', fox),
+    ripemd160: hmac('ripemd160', 'key', fox), blake2b512: PY.keyed.blake2b512, blake2s256: PY.keyed.blake2s256,
+  };
+  assert.equal(hmac('md5', 'key', fox), keyedExp.md5);
+  assert.equal(hmac('sha256', 'key', fox), keyedExp.sha256);
+  await settleAll(keyedExp);
+  for (const [id, v] of Object.entries(keyedExp)) assert.equal(await hexOf(id), v, 'keyed ' + id);
+  assert.equal(await page.locator('.hg-item[data-alg="sha256"] b').textContent(), 'HMAC-SHA-256');
+  assert.equal(await page.locator('.hg-item[data-alg="blake2b512"] b').textContent(), 'BLAKE2b-512 keyed');
+  assert.match(await hexOf('keccak256'), /No keyed version/);
+  assert.equal(await page.isDisabled('button[data-copy-target="#hg-keccak256-hex"]'), true, 'nothing to copy');
+  assert.equal(await page.isVisible('#hg-keccak256-b64'), false);
+  assert.equal(await page.isDisabled('button[data-copy-target="#hg-sha256-hex"]'), false);
+  assert.match(await hexOf('crc32'), /No keyed version/);
+  assert.match(await hexOf('blake3'), /exactly 32 bytes; this one has 3/);
+  assert.match(await text('#hg-summary'), /^HMACs of 43 bytes of text/);
+  assert.match(await text('#hg-key-info'), /Key: 3 bytes/);
+  // RFC 4231 test cases 1 and 6 (hex key; a 131-byte key is hashed first).
+  await page.selectOption('#hg-key-enc', 'hex');
+  await page.fill('#hg-key', '0b'.repeat(20));
+  await page.fill('#hg-text', 'Hi There');
+  await settleAll({ sha256: 'b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7' });
+  assert.equal(await hexOf('sha256'), 'b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7');
+  assert.equal(await hexOf('sha512'), '87aa7cdea5ef619d4ff0b4241a1d6cb02379f4e2ce4ec2787ad0b30545e17cdedaa833b7d6b8a702038b274eaea3f4e4be9d914eeb61f1702e696c203a126854');
+  await page.fill('#hg-key', 'aa'.repeat(131));
+  await page.fill('#hg-text', 'Test Using Larger Than Block-Size Key - Hash Key First');
+  await settleAll({ sha256: '60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54' });
+  assert.equal(await hexOf('sha256'), '60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54');
+  assert.equal(await hexOf('sha3-256'), hmac('sha3-256', Buffer.alloc(131, 0xaa), 'Test Using Larger Than Block-Size Key - Hash Key First'));
+  assert.match(await hexOf('blake2b512'), /at most 64 bytes; this one has 131/);
+  // A 32-byte Base64 key unlocks keyed BLAKE3.
+  await page.selectOption('#hg-key-enc', 'base64');
+  await page.fill('#hg-key', Buffer.from(Array.from({ length: 32 }, (_, i) => i)).toString('base64'));
+  await page.fill('#hg-text', fox);
+  await settleAll({ blake3: PY.keyed32.blake3, blake2s256: PY.keyed32.blake2s256, blake2b512: PY.keyed32.blake2b512 });
+  assert.deepEqual([await hexOf('blake3'), await hexOf('blake2s256'), await hexOf('blake2b512')], [PY.keyed32.blake3, PY.keyed32.blake2s256, PY.keyed32.blake2b512]);
+  await page.fill('#hg-key', 'not*base64');
+  await page.waitForFunction(() => /key is not valid Base64/.test(document.querySelector('#hg-msg').textContent));
+  assert.equal(await page.getAttribute('#hg-key', 'aria-invalid'), 'true');
+  await page.fill('#hg-key', '');
+  await page.selectOption('#hg-key-enc', 'utf8');
+  await settleAll({ sha256: nodeHashes(Buffer.from(fox)).sha256 });
+  assert.equal(await text('#hg-msg'), '');
+  assert.equal(await page.locator('.hg-item[data-alg="sha256"] b').textContent(), 'SHA-256');
+
+  // ---------- Compare finds and ticks the matching algorithm ----------
+  await page.click('#hg-pick-common');
+  assert.equal(await text('#hg-alg-count'), '6 of 19');
+  assert.equal(await page.isVisible('#hg-keccak256-hex'), false);
+  await page.fill('#hg-text', 'abc');
+  await settleAll({ sha256: V.abc.sha256[0] });
+  r = await cmp('0x' + PY.keccak256.abc);
+  assert.match(r.cls, /\bok\b/, r.msg);
+  assert.match(r.msg, /^Match: this is the Keccak-256 hash of the input\./);
+  assert.equal(await page.isChecked('input[data-alg="keccak256"]'), true);
+  assert.equal(await page.isVisible('#hg-keccak256-hex'), true);
+  assert.equal(await page.locator('.hg-item.is-match').getAttribute('data-alg'), 'keccak256');
+  // A 256-bit SHAKE256 value is the start of the 512-bit output: the length follows.
+  r = await cmp(crypto.createHash('shake256', { outputLength: 32 }).update('abc').digest('hex'));
+  assert.match(r.msg, /^Match: this is the SHAKE256 \(256-bit\) hash of the input\./);
+  assert.equal(await page.inputValue('#hg-shake256-len'), '256');
+  // Google Cloud Storage lists CRC-32C as Base64 of the big-endian value.
+  r = await cmp('crc32c=' + Buffer.from(crc32c(Buffer.from('abc')), 'hex').toString('base64'));
+  assert.match(r.msg, /^Match: this is the CRC-32C hash/);
+  r = await cmp(V.abc.sha256[0].slice(0, 63));
+  assert.match(r.msg, /63 hex characters, an odd number/);
+  r = await cmp('00'.repeat(32));
+  assert.match(r.msg, /^No match\. A 64-character hex value is 256 bits, like SHA-256, SHA3-256, Keccak-256 or BLAKE2s-256; none of .* matches\./);
+  await page.fill('#hg-expected', '');
+  await page.fill('#hg-shake256-len', '512');
+  await page.click('#hg-pick-common');
+
+  // ---------- Files with other algorithms, in the worker ----------
+  await page.check('input[name="hg-src"][value="file"]');
+  for (const id of ['sha3-256', 'keccak256', 'blake3', 'blake2b512', 'crc32c']) await page.check(`input[data-alg="${id}"]`);
+  await page.setInputFiles('#hg-file', { name: 'big.bin', mimeType: 'application/octet-stream', buffer: big });
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of big.bin') && document.querySelector('#hg-results').dataset.busy === '', null, { timeout: 60000 });
+  const bigNode = nodeHashes(big);
+  for (const id of ['md5', 'sha256', 'sha512', 'sha3-256', 'blake2b512', 'crc32c']) assert.equal(await hexOf(id), bigNode[id], 'big file ' + id);
+  assert.equal(await hexOf('keccak256'), PY.bigfile.keccak256);
+  assert.equal(await hexOf('blake3'), PY.bigfile.blake3);
+  // Without SHA-1 and SHA-2 the file is not held in memory, and a key gives HMACs of the file.
+  for (const id of ['sha1', 'sha256', 'sha384', 'sha512']) await page.uncheck(`input[data-alg="${id}"]`);
+  await page.fill('#hg-key', 'secret');
+  await page.setInputFiles('#hg-file', { name: 'million-a.txt', mimeType: 'text/plain', buffer: Buffer.alloc(1000000, 'a') });
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('HMACs of million-a.txt'), null, { timeout: 30000 });
+  assert.equal(await hexOf('md5'), crypto.createHmac('md5', 'secret').update(Buffer.alloc(1000000, 'a')).digest('hex'));
+  assert.equal(await hexOf('sha3-256'), crypto.createHmac('sha3-256', 'secret').update(Buffer.alloc(1000000, 'a')).digest('hex'));
+  // Ticking an algorithm hashes the file again with it.
+  await page.check('input[data-alg="sha256"]');
+  await page.waitForFunction(v => document.querySelector('#hg-sha256-hex').textContent === v, crypto.createHmac('sha256', 'secret').update(Buffer.alloc(1000000, 'a')).digest('hex'), { timeout: 30000 });
+  await page.fill('#hg-key', '');
+  await page.click('#hg-pick-common');
+  await page.check('input[name="hg-src"][value="text"]');
+
+  // ---------- Several files: a table and a checksum list ----------
+  const FILES = [['a.txt', Buffer.from('abc')], ['my photo.jpg', crypto.randomBytes(70000)], ['empty.bin', Buffer.alloc(0)]];
+  const digest = (alg, b) => crypto.createHash(alg).update(b).digest('hex');
+  await page.check('input[name="hg-src"][value="file"]');
+  await page.setInputFiles('#hg-file', FILES.map(([name, buffer]) => ({ name, mimeType: 'application/octet-stream', buffer })));
+  await page.waitForFunction(() => /^Hashes of 3 files \([^)]*\)$/.test(document.querySelector('#hg-summary').textContent), null, { timeout: 30000 });
+  assert.equal(await page.isVisible('#hg-results'), false);
+  assert.equal(await page.inputValue('#hg-multi-alg'), 'sha256');
+  const multiRows = () => page.$$eval('#hg-multi-body tr', trs => trs.map(tr => Array.from(tr.cells).map(c => c.textContent)));
+  assert.deepEqual((await multiRows()).map(r => [r[0], r[2]]), FILES.map(([n, b]) => [n, digest('sha256', b)]));
+  assert.equal(await text('#hg-drop-title'), '3 files');
+  await page.selectOption('#hg-multi-alg', 'md5');
+  assert.deepEqual((await multiRows()).map(r => r[2]), FILES.map(([, b]) => digest('md5', b)));
+  const [dlSums] = await Promise.all([page.waitForEvent('download'), page.click('#hg-multi-dl')]);
+  assert.match(dlSums.suggestedFilename(), /^MD5SUMS(\.txt)?$/); // Chrome adds .txt to a text/plain download
+  const sums = fs.readFileSync(await dlSums.path(), 'utf8');
+  assert.equal(sums, FILES.map(([n, b]) => digest('md5', b) + '  ' + n).join('\n') + '\n');
+  // GNU md5sum -c accepts the list for the same files.
+  let md5sum = false;
+  try { md5sum = /GNU coreutils/.test(require('child_process').execFileSync('md5sum', ['--version']).toString()); } catch (e) { md5sum = false; }
+  if (md5sum) {
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sums-'));
+    for (const [n, b] of FILES) fs.writeFileSync(path.join(dir, n), b);
+    fs.writeFileSync(path.join(dir, 'MD5SUMS'), sums);
+    const res = require('child_process').execFileSync('md5sum', ['-c', 'MD5SUMS'], { cwd: dir }).toString();
+    assert.equal(res.trim().split('\n').filter(l => / OK$/.test(l)).length, 3, res);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  await page.click('#hg-multi-copy');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), sums);
+  // Check a pasted SHA256SUMS: one line wrong, one file missing, one extra line, paths ignored.
+  const list = [digest('sha256', FILES[0][1]) + '  ./downloads/a.txt', '0'.repeat(64) + ' *my photo.jpg', digest('sha256', Buffer.from('zzz')) + '  other.iso'].join('\n');
+  await page.fill('#hg-expected', list);
+  let checks = (await multiRows()).map(r => r[3]);
+  assert.deepEqual(checks, ['OK (SHA-256)', 'Different', 'Not in the list']);
+  assert.equal(await text('#hg-compare'), '1 file does not match its checksum. 1 matches. 1 file is not in the list. 1 line in the list names a file you did not choose.');
+  assert.match(await page.getAttribute('#hg-compare', 'class'), /\berror\b/);
+  // BSD-style lines, all matching.
+  await page.fill('#hg-expected', FILES.map(([n, b]) => `SHA3-256 (${n}) = ${digest('sha3-256', b)}`).join('\n'));
+  assert.deepEqual((await multiRows()).map(r => r[3]), ['OK (SHA3-256)', 'OK (SHA3-256)', 'OK (SHA3-256)']);
+  assert.equal(await text('#hg-compare'), 'All 3 checked files match.');
+  // One bare hash: which file is it?
+  await page.fill('#hg-expected', digest('sha512', FILES[1][1]));
+  assert.equal(await text('#hg-compare'), 'Match: this is the SHA-512 hash of my photo.jpg.');
+  await page.fill('#hg-expected', '');
+  assert.equal(await page.isVisible('#hg-multi-check-h'), false);
+  // Several files dropped at once.
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['one'], 'one.txt'));
+    dt.items.add(new File(['two'], 'two.txt'));
+    document.querySelector('.tool-card').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of 2 files'));
+  assert.deepEqual((await multiRows()).map(r => r[2]), [digest('md5', Buffer.from('one')), digest('md5', Buffer.from('two'))]);
+  // Back to one file; a pasted list is matched by its name.
+  await page.setInputFiles('#hg-file', { name: 'two.txt', mimeType: 'text/plain', buffer: Buffer.from('two') });
+  await page.waitForFunction(() => document.querySelector('#hg-summary').textContent.startsWith('Hashes of two.txt'));
+  assert.equal(await page.isVisible('#hg-results'), true);
+  assert.equal(await page.isVisible('#hg-multi'), false);
+  await page.fill('#hg-expected', digest('sha256', Buffer.from('one')) + '  one.txt\n' + digest('sha256', Buffer.from('two')) + '  two.txt');
+  assert.match(await text('#hg-compare'), /^Match: this is the SHA-256 hash of the file\./);
+  await page.fill('#hg-expected', '');
+  await page.click('#hg-clear');
+  assert.match(await text('#hg-drop-title'), /Choose files/);
+  await page.check('input[name="hg-src"][value="text"]');
+
+  // Short text is hashed with every algorithm on each keystroke, so it has to stay fast.
+  const typeMs = await page.evaluate(() => {
+    const el = document.querySelector('#hg-text');
+    el.value = 'x'.repeat(60000);
+    const t = performance.now();
+    el.dispatchEvent(new Event('input'));
+    return performance.now() - t;
+  });
+  assert.ok(typeMs < 100, `hashing 60 KB of text took ${Math.round(typeMs)} ms`);
+  await page.click('#hg-clear');
+
   // The selected Text/File segment has a --muted ring (5.5:1 on the track), not only a colour change.
   const ring = await page.$eval('input[name="hg-src"]:checked + span', el => getComputedStyle(el).boxShadow);
   assert.match(ring, /rgb\(91, 98, 112\)/, ring);
+
+  // SHA-224 (computed on the page; Web Crypto has none) and HMAC-SHA-224. Vectors from
+  // Python: hashlib.sha224(b'abc'), hashlib.sha224(b''), hashlib.sha224(b'a' * 1000) and
+  // hmac.new(b'key', b'The quick brown fox jumps over the lazy dog', 'sha224').
+  await page.check('input[data-alg="sha224"]');
+  for (const [txt, want] of [['abc', '23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7'], ['', 'd14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f'],
+    ['a'.repeat(1000), '4e8f0ce90b64661a2b5e84be6d93a7d9b76871062f1814433d04a03d']]) {
+    await page.fill('#hg-text', txt);
+    await page.waitForFunction(w => document.querySelector('#hg-sha224-hex').textContent === w, want, { timeout: 5000 });
+  }
+  await page.fill('#hg-text', 'The quick brown fox jumps over the lazy dog');
+  await page.fill('#hg-key', 'key');
+  await page.waitForFunction(() => document.querySelector('#hg-sha224-hex').textContent === '88ff8b54675d39b8f72322e65ff945c52d96379988ada25639747e69', null, { timeout: 5000 });
+  assert.equal(await page.textContent('.hg-item[data-alg="sha224"] b'), 'HMAC-SHA-224');
+  await page.fill('#hg-expected', '88ff8b54675d39b8f72322e65ff945c52d96379988ada25639747e69');
+  assert.match(await page.textContent('#hg-compare'), /HMAC-SHA-224/);
+  await page.fill('#hg-key', '');
+  await page.fill('#hg-expected', '');
 };

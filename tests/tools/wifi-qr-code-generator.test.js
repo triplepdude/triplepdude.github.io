@@ -254,4 +254,206 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const live2 = await page.evaluate(() => window.__live);
   assert.equal(live2.filter(t => t.startsWith('wq-error:')).length, 1, JSON.stringify(live2));
   assert.equal(await page.textContent('#wq-status'), '');
+
+
+  // ---------- Password masking ----------
+  // Hiding the password also masks it in the payload box and on the on-screen card,
+  // but Copy text, the downloads and the printed cards use the real password.
+  await open();
+  await page.addScriptTag({ content: fs.readFileSync(path.join(fixtures, 'jsQR.min.js'), 'utf8') });
+  await page.click('#wq-pass-toggle');
+  assert.equal(await payload(), 'WIFI:T:WPA;S:Home Network;P:••••••••;;');
+  assert.equal(await page.textContent('#wq-card-pass'), '•'.repeat(16));
+  await page.click('#wq-copy');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), def);
+  assert.match(await page.textContent('.wq-print-root .wq-card'), /correct horse battery staple/);
+  // Regression: the small on-screen sheet preview masks it too (it showed the real password).
+  assert.doesNotMatch(await page.textContent('#wq-sheet-frame'), /correct horse/);
+  assert.match(await page.textContent('#wq-sheet-frame .wq-card'), /••••/);
+  const masked = await download('#wq-png');
+  assert.equal(Buffer.from((await decode(masked.buf, 'image/png')).bytes).toString('utf8'), def);
+  await page.click('#wq-pass-toggle');
+  assert.equal(await payload(), def);
+  assert.equal(await page.textContent('#wq-card-pass'), 'correct horse battery staple');
+  assert.match(await page.textContent('#wq-sheet-frame .wq-card'), /correct horse battery staple/);
+
+  // Regression: a file dropped outside the logo drop zone must not replace the page
+  // (the browser's default is to open the file); a drop on the zone still works.
+  const outside = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['x'], 'logo.png', { type: 'image/png' }));
+    const res = {};
+    for (const t of ['dragover', 'drop']) {
+      const ev = new DragEvent(t, { bubbles: true, cancelable: true, dataTransfer: dt });
+      document.querySelector('#wq-ssid').dispatchEvent(ev);
+      res[t] = ev.defaultPrevented;
+    }
+    // Plain text dragged between fields keeps its normal behaviour.
+    const tdt = new DataTransfer(); tdt.setData('text/plain', 'abc');
+    const tev = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: tdt });
+    document.querySelector('#wq-ssid').dispatchEvent(tev);
+    res.text = tev.defaultPrevented;
+    return res;
+  });
+  assert.deepEqual(outside, { dragover: true, drop: true, text: false });
+  assert.equal(await page.inputValue('#wq-ssid'), 'Home Network');
+
+  // IEEE 802.11 passphrases are printable ASCII only.
+  await page.fill('#wq-pass', 'mot de passe été');
+  assert.match(await page.textContent('#wq-warn'), /outside printable ASCII/);
+  // Length is counted in characters: 8 emoji are 8, not 16 UTF-16 units.
+  await page.fill('#wq-pass', '😀'.repeat(8));
+  assert.doesNotMatch(await page.textContent('#wq-warn'), /8 to 63 characters/);
+  await page.fill('#wq-pass', 'correct horse battery staple');
+  assert.equal(await page.textContent('#wq-warn'), '');
+
+  // ---------- Colours ----------
+  // Contrast ratios computed with the WCAG formula in Python:
+  // #1a237e on #ffffff = 13.2, #ffffff on #000000 = 21, #999999 on #ffffff = 2.8.
+  assert.equal(await page.textContent('#wq-contrast'), 'Contrast 21.0 : 1, good for scanning.');
+  await page.fill('#wq-fg-hex', '#1a237e');
+  await page.fill('#wq-bg-hex', '#fff8e1');
+  assert.equal(await page.getAttribute('#wq-qr svg path', 'fill'), '#1a237e');
+  assert.equal(await page.getAttribute('#wq-qr svg rect', 'fill'), '#fff8e1');
+  assert.equal(await page.inputValue('#wq-fg'), '#1a237e');
+  assert.equal(await page.textContent('#wq-warn'), '');
+  const coloured = await download('#wq-png');
+  const px = await page.evaluate(async b64 => {
+    const img = new Image();
+    img.src = 'data:image/png;base64,' + b64;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const x = c.getContext('2d');
+    x.drawImage(img, 0, 0);
+    return [Array.from(x.getImageData(2, 2, 1, 1).data), Array.from(x.getImageData(Math.round(img.width * 4.5 / 41), Math.round(img.width * 4.5 / 41), 1, 1).data)];
+  }, coloured.buf.toString('base64'));
+  assert.deepEqual(px[0], [0xff, 0xf8, 0xe1, 255], 'quiet zone is the background colour');
+  assert.deepEqual(px[1], [0x1a, 0x23, 0x7e, 255], 'finder pattern (outer ring, module 4.5 of 41) is the code colour');
+  assert.equal(Buffer.from((await decode(coloured.buf, 'image/png')).bytes).toString('utf8'), def);
+  await page.fill('#wq-fg-hex', '#999');
+  await page.fill('#wq-bg-hex', '#ffffff');
+  assert.match(await page.textContent('#wq-warn'), /close in brightness \(contrast 2\.8 : 1\)/);
+  await page.fill('#wq-fg-hex', '#ffffff');
+  await page.fill('#wq-bg-hex', '#000000');
+  assert.match(await page.textContent('#wq-warn'), /lighter than its background/);
+  await page.fill('#wq-fg-hex', '#zz');
+  assert.equal(await page.getAttribute('#wq-fg-hex', 'aria-invalid'), 'true');
+  assert.match(await page.textContent('#wq-fg-err'), /#ffffff is used/);
+  await page.fill('#wq-fg-hex', '#000000');
+  await page.fill('#wq-bg-hex', '#ffffff');
+  assert.equal(await page.getAttribute('#wq-fg-hex', 'aria-invalid'), 'false');
+
+  // ---------- Logo ----------
+  // Choosing a logo switches error correction to H; the SVG and PNG still decode (jsQR).
+  await page.selectOption('#wq-ecl', 'M');
+  await page.selectOption('#wq-logo', 'wifi');
+  assert.equal(await page.inputValue('#wq-ecl'), 'H');
+  assert.match(await page.textContent('#wq-meta'), /error correction H \(30%\), 58 bytes, with logo$/);
+  assert.equal(await page.locator('#wq-qr svg g path[stroke]').count(), 1, 'Wi-Fi arcs drawn');
+  for (const size of ['0.15', '0.2', '0.25']) {
+    await page.selectOption('#wq-logo-size', size);
+    assert.equal(await page.textContent('#wq-warn'), '', `no warning for a ${size} logo at H`);
+    const lp = await download('#wq-png');
+    assert.equal(Buffer.from((await decode(lp.buf, 'image/png')).bytes).toString('utf8'), def, `PNG with ${size} logo decodes`);
+    const ls = await download('#wq-svg');
+    assert.equal(Buffer.from((await decode(ls.buf, 'image/svg+xml')).bytes).toString('utf8'), def, `SVG with ${size} logo decodes`);
+  }
+  // The modules behind the logo are left blank: none of the path's squares is in the centre.
+  const inCentre = await page.evaluate(() => {
+    const n = Number(document.querySelector('#wq-qr svg').getAttribute('data-modules'));
+    const d = document.querySelector('#wq-qr svg > path').getAttribute('d');
+    const mid = 4 + n / 2;
+    return [...d.matchAll(/M(\d+) (\d+)h(\d+)/g)].some(m => +m[2] <= mid && +m[2] + 1 >= mid && +m[1] <= mid && +m[1] + +m[3] >= mid);
+  });
+  assert.equal(inCentre, false);
+  // A large logo at level L is flagged (it fails to decode at that level).
+  await page.selectOption('#wq-ecl', 'L');
+  assert.match(await page.textContent('#wq-warn'), /more than error correction L can safely repair/);
+  await page.selectOption('#wq-logo-size', '0.2');
+  await page.selectOption('#wq-ecl', 'H');
+  // Turning the logo off and on again only switches to H the first time.
+  await page.selectOption('#wq-logo', 'none');
+  await page.selectOption('#wq-ecl', 'Q');
+  await page.selectOption('#wq-logo', 'wifi');
+  assert.equal(await page.inputValue('#wq-ecl'), 'H');
+  await page.selectOption('#wq-ecl', 'Q');
+  await page.selectOption('#wq-logo-size', '0.15');
+  assert.equal(await page.inputValue('#wq-ecl'), 'Q');
+  await page.selectOption('#wq-ecl', 'H');
+
+  // Your own image: chosen with the file picker, scaled to at most 512 px, kept in the page.
+  await page.selectOption('#wq-logo', 'image');
+  assert.equal(await page.isVisible('#wq-drop'), true);
+  assert.doesNotMatch(await page.textContent('#wq-meta'), /with logo/, 'no logo until an image is chosen');
+  await page.setInputFiles('#wq-logo-file', path.join(fixtures, 'logo.png'));
+  await page.waitForFunction(() => /logo\.png/.test(document.querySelector('#wq-drop-text').textContent));
+  assert.match(await page.textContent('#wq-drop-text'), /logo\.png \(400 × 300 px\)/);
+  assert.match(await page.getAttribute('#wq-qr svg image', 'href'), /^blob:/);
+  assert.match(await page.textContent('#wq-meta'), /with logo$/);
+  const ip = await download('#wq-png');
+  assert.equal(Buffer.from((await decode(ip.buf, 'image/png')).bytes).toString('utf8'), def);
+  const is = await download('#wq-svg');
+  const isText = is.buf.toString('utf8');
+  assert.match(isText, /<image [^>]*href="data:image\/png;base64,[^"]+"/, 'downloaded SVG embeds the image');
+  assert.doesNotMatch(isText, /blob:/);
+  assert.equal(Buffer.from((await decode(is.buf, 'image/svg+xml')).bytes).toString('utf8'), def);
+  // An SVG logo, then a file that is not an image.
+  await page.setInputFiles('#wq-logo-file', path.join(fixtures, 'logo.svg'));
+  await page.waitForFunction(() => /logo\.svg/.test(document.querySelector('#wq-drop-text').textContent));
+  await page.setInputFiles('#wq-logo-file', { name: 'notes.png', mimeType: 'image/png', buffer: Buffer.from('not really a picture') });
+  await page.waitForFunction(() => document.querySelector('#wq-logo-error').textContent !== '');
+  assert.match(await page.textContent('#wq-logo-error'), /notes\.png could not be read as an image/);
+  assert.match(await page.textContent('#wq-drop-text'), /logo\.svg/, 'the previous logo stays');
+  // Drag and drop onto the drop zone.
+  const pngB64 = fs.readFileSync(path.join(fixtures, 'logo.png')).toString('base64');
+  await page.evaluate(b64 => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], 'dropped.png', { type: 'image/png' }));
+    document.querySelector('#wq-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, pngB64);
+  await page.waitForFunction(() => /dropped\.png/.test(document.querySelector('#wq-drop-text').textContent));
+  assert.equal(await page.textContent('#wq-logo-error'), '');
+
+  // ---------- Printable sheet ----------
+  await page.fill('#wq-ssid', 'Seaside Guest House 5G Extra');
+  await page.fill('#wq-pass', 'sunny-harbour-7-lighthouse-breeze-sunny-harbour-7-lighthouse');
+  for (const [per, paper] of [['1', 'a4'], ['2', 'letter'], ['4', 'a4'], ['6', 'letter'], ['8', 'a4'], ['8', 'letter']]) {
+    await page.selectOption('#wq-per-page', per);
+    await page.selectOption('#wq-paper', paper);
+    await page.emulateMedia({ media: 'print' });
+    assert.equal(await page.locator('.wq-print-root .wq-card').count(), Number(per));
+    assert.equal(await page.getAttribute('.wq-print-root .wq-sheet', 'class'), `wq-sheet wq-n${per}${paper === 'letter' ? ' wq-letter' : ''}`);
+    // Every card fits inside its cell, and the sheet inside the printable area.
+    const fit = await page.evaluate(() => {
+      const sheet = document.querySelector('.wq-print-root .wq-sheet').getBoundingClientRect();
+      return [...document.querySelectorAll('.wq-print-root .wq-cell')].map(cell => {
+        const c = cell.getBoundingClientRect(), k = cell.firstElementChild.getBoundingClientRect();
+        return { over: cell.scrollHeight - cell.clientHeight, inside: k.top >= c.top - 1 && k.bottom <= c.bottom + 1 && c.bottom <= sheet.bottom + 1 };
+      });
+    });
+    assert.ok(fit.every(f => f.over <= 1 && f.inside), `${per} per ${paper} page: ${JSON.stringify(fit)}`);
+    assert.match(await page.textContent('.wq-print-root'), /sunny-harbour-7-lighthouse-breeze-sunny-harbour-7-lighthouse/);
+    await page.emulateMedia({ media: 'screen' });
+    assert.match(await page.evaluate(() => [...document.querySelectorAll('head style')].map(s => s.textContent).join('')),
+      new RegExp(`@page \\{ size: ${paper === 'letter' ? 'letter' : 'A4'} portrait; margin: 10mm; \\}`));
+  }
+  assert.equal(await page.textContent('#wq-sheet-note'), '8 cards on each US Letter page, each about 98 × 65 mm, with dashed cut lines.');
+  assert.equal(await page.locator('#wq-sheet-frame .wq-card').count(), 8, 'on-screen sheet preview');
+  const frameBox = await page.$eval('#wq-sheet-frame', el => { const r = el.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; });
+  assert.ok(Math.abs(frameBox[1] / frameBox[0] - 259.4 / 195.9) < 0.03, `preview has the sheet's shape ${frameBox}`);
+  // At phone width the sheet preview and the cards section do not overflow.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(200);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Typing stays fast with an image logo and eight cards on the sheet.
+  const ms = await page.evaluate(() => {
+    const el = document.querySelector('#wq-ssid');
+    const t = performance.now();
+    for (let i = 0; i < 5; i++) { el.value += 'x'; el.dispatchEvent(new Event('input', { bubbles: true })); }
+    return (performance.now() - t) / 5;
+  });
+  assert.ok(ms < 60, `input handler ${ms} ms`);
 };
