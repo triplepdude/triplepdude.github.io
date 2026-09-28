@@ -14,16 +14,19 @@ howto: |
   ## What HEIC is
 
   HEIC is the High Efficiency Image File Format (HEIF, ISO/IEC 23008-12)
-  holding pictures compressed with HEVC, the H.265 video codec. iPhones and
-  iPads have saved photos this way since iOS 11, because a HEIC photo is
-  roughly half the size of a JPG of similar quality. Many websites, older
+  holding pictures compressed with HEVC, the H.265 video codec. The iPhone 7
+  and later models, and recent iPads, have saved photos this way by default
+  since iOS 11, because a HEIC photo is roughly half the size of a JPG of
+  similar quality. Many websites, older
   Windows PCs and editing apps still cannot open it, which is why converting
   to JPG is so common.
 
   ## How the conversion works
 
-  The photo is decoded by libheif, an open-source HEIF library, compiled to
-  WebAssembly and run in a background worker so the page stays responsive.
+  The photo is decoded by libheif, an open-source HEIF library (LGPL-3.0,
+  see its [license and source code](/assets/vendor/libheif/README.txt)),
+  compiled to WebAssembly and run in a background worker so the page stays
+  responsive.
   The decoder, about 1.5 MB, is downloaded only when you add your first HEIC
   file, and your browser caches it. Your photos are never sent anywhere.
 
@@ -35,8 +38,8 @@ howto: |
     than sRGB. The converter maps them to sRGB, the space that web browsers
     and most apps assume, so the JPG looks the same everywhere. Only the most
     saturated colours, beyond sRGB, lose a little intensity.
-  - **Quality.** 90% keeps a JPG visually identical to the original for
-    almost any photo. The JPG is usually larger than the HEIC, because HEVC
+  - **Quality.** At 90% a JPG is very hard to tell apart from the original
+    for almost any photo. The JPG is usually larger than the HEIC, because HEVC
     compresses better than JPG does.
 
   ## Photo metadata (EXIF)
@@ -65,8 +68,10 @@ howto: |
 
   - To have an iPhone shoot JPG from now on, open Settings, then Camera, then
     Formats, and choose **Most Compatible**.
-  - Sharing a photo by email or AirDrop from an iPhone often converts it to
-    JPG automatically, so check the file name ending before converting.
+  - Sharing from an iPhone by Mail, Messages or AirDrop, or copying photos to
+    a Windows PC by cable, may already convert them to JPG (unless Keep
+    Originals is set in the Photos settings), so check the file name ending
+    first.
   - Very large panoramas can exceed what a phone browser can hold in memory;
     a desktop browser handles them better.
 faq:
@@ -91,7 +96,7 @@ faq:
 .h2j-drop p { margin: 10px 0 0; }
 .h2j-drop .hint { margin-top: 4px; }
 .h2j-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
-.h2j-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
+.h2j-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
 .h2j-opts .field { margin: 0; }
 .h2j-qlabel { display: flex; justify-content: space-between; gap: 8px; }
 .h2j-qlabel output { font-variant-numeric: tabular-nums; }
@@ -210,8 +215,8 @@ faq:
     return (i > 0 ? n.slice(0, i) : n) || 'photo';
   }
   function settings() {
-    var v = parseFloat(resizeVal.value);
-    return { fmt: fmtSel.value, quality: +quality.value / 100, meta: meta.value, resize: resizeSel.value, resizeVal: v > 0 && isFinite(v) ? v : 0 };
+    var v = parseFloat(resizeVal.value), opt = fmtSel.options[fmtSel.selectedIndex];
+    return { fmt: opt && !opt.disabled ? fmtSel.value : 'jpeg', quality: +quality.value / 100, meta: meta.value, resize: resizeSel.value, resizeVal: v > 0 && isFinite(v) ? v : 0 };
   }
   function targetSize(w, h, s) {
     if (s.resize === 'none' || !s.resizeVal) return { w: w, h: h };
@@ -295,11 +300,13 @@ faq:
   // Keep recent decodes so a settings change re-encodes without decoding again,
   // up to a total pixel budget. Never drop one that is being converted.
   function remember(id, d) {
+    var old = cache.get(id);
+    if (old && old !== d) TTImage.release(old);
     cache.delete(id);
     cache.set(id, d);
     var total = 0, busy = {};
     cache.forEach(function (v) { total += v.width * v.height; });
-    items.forEach(function (x) { if (x.state === 'working') busy[x.id] = 1; });
+    items.forEach(function (x) { if (x.state === 'working' || x.busy) busy[x.id] = 1; });
     Array.from(cache.keys()).forEach(function (k) {
       if (total <= CACHE_PIXELS || k === id || busy[k]) return;
       total -= cache.get(k).width * cache.get(k).height;
@@ -333,19 +340,25 @@ faq:
     refreshBar();
     pump();
   }
+  // Items whose settings changed mid-way are queued again, but wait until their
+  // current conversion stops, so one file is never decoded twice at once.
   function pump() {
     while (running < CONCURRENCY) {
       var it = null;
-      for (var i = 0; i < items.length; i++) if (items[i].state === 'queued') { it = items[i]; break; }
+      for (var i = 0; i < items.length; i++) if (items[i].state === 'queued' && !items[i].busy) { it = items[i]; break; }
       if (!it) break;
-      running++;
-      it.state = 'working';
-      it.stage = 'Reading…';
-      it.progress = 10;
-      paint(it);
-      convert(it, gen).then(function () { running--; refreshBar(); announce(); pump(); });
+      start(it);
     }
     refreshBar();
+  }
+  function start(it) {
+    running++;
+    it.busy = true;
+    it.state = 'working';
+    it.stage = 'Reading…';
+    it.progress = 10;
+    paint(it);
+    convert(it, gen).then(function () { it.busy = false; running--; refreshBar(); announce(); pump(); });
   }
   function stage(it, g, text, pct) {
     if (g !== gen) return;
@@ -413,6 +426,7 @@ faq:
     if (d.colorProfile === 'converted') n.push('Colours converted from Display P3 (or another wide-gamut profile) to sRGB.');
     if (s.fmt === 'jpeg' && d.hasAlpha) n.push('Transparent areas were filled with white.');
     if (d.animated) n.push('Only the first frame was converted.');
+    if (d.warnings && d.warnings.indexOf('hdr') >= 0) n.push('This is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.');
     if (s.meta !== 'strip') n.push(d.exif ? (s.meta === 'nogps' ? 'EXIF kept without location.' : 'EXIF kept, including any location.') : 'The photo had no EXIF data to keep.');
     return n;
   }
@@ -467,6 +481,14 @@ faq:
     refreshBar();
     status.textContent = 'All photos removed.';
     $('#h2j-choose').focus();
+  });
+  // Safari and older browsers cannot save WebP from a web page.
+  TTImage.canEncode('webp').then(function (ok) {
+    if (ok) return;
+    var o = fmtSel.querySelector('option[value="webp"]');
+    o.disabled = true;
+    o.textContent = 'WebP (this browser cannot save it)';
+    if (fmtSel.value === 'webp') { fmtSel.value = 'jpeg'; onSettings(); }
   });
   syncControls();
 })();

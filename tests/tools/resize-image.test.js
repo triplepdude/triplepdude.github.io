@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 // Reads the pixel size and container type straight from the file bytes.
 function imageInfo(b) {
@@ -26,11 +27,53 @@ function imageInfo(b) {
     }
     if (chunk === 'VP8 ') return { type: 'webp', width: b.readUInt16LE(26) & 0x3fff, height: b.readUInt16LE(28) & 0x3fff };
   }
+  if (b.subarray(4, 12).toString('latin1') === 'ftypavif') {
+    // HEIF image spatial extents ('ispe'): version/flags, then width and height (ISO/IEC 23008-12).
+    const at = b.indexOf('ispe', 0, 'latin1');
+    assert_(at > 0, 'AVIF ispe box');
+    return { type: 'avif', width: b.readUInt32BE(at + 8), height: b.readUInt32BE(at + 12) };
+  }
+  if (b[0] === 0x42 && b[1] === 0x4d) {
+    // BITMAPINFOHEADER: width at 18, height at 22 (positive: rows stored bottom-up), bits per pixel at 28.
+    return { type: 'bmp', width: b.readInt32LE(18), height: b.readInt32LE(22), bpp: b.readUInt16LE(28), offset: b.readUInt32LE(10) };
+  }
+  if (b.readUInt16LE(0) === 0 && b.readUInt16LE(2) === 1) {
+    // ICONDIR, then one 16-byte ICONDIRENTRY per image (0 means 256).
+    const n = b.readUInt16LE(4), entries = [];
+    for (let i = 0; i < n; i++) {
+      const e = 6 + 16 * i, size = b.readUInt32LE(e + 8), off = b.readUInt32LE(e + 12);
+      entries.push({ width: b[e] || 256, height: b[e + 1] || 256, bpp: b.readUInt16LE(e + 6), data: b.subarray(off, off + size) });
+    }
+    return { type: 'ico', width: entries[entries.length - 1].width, height: entries[entries.length - 1].height, entries };
+  }
   throw new Error('unknown image format: ' + b.subarray(0, 16).toString('hex'));
+}
+
+// Reads a ZIP from its central directory (APPNOTE 4.3.12), checking every entry's CRC-32 and size.
+function readZip(buf) {
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert_(eocd >= 0, 'ZIP end of central directory');
+  const n = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    assert_(buf.readUInt32LE(p) === 0x02014b50, 'central directory entry');
+    const method = buf.readUInt16LE(p + 10), crc = buf.readUInt32LE(p + 16), csize = buf.readUInt32LE(p + 20), usize = buf.readUInt32LE(p + 24);
+    const nlen = buf.readUInt16LE(p + 28), elen = buf.readUInt16LE(p + 30), clen = buf.readUInt16LE(p + 32), local = buf.readUInt32LE(p + 42);
+    const name = buf.subarray(p + 46, p + 46 + nlen).toString('utf8');
+    assert_(buf.readUInt32LE(local) === 0x04034b50, 'local header');
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const raw = buf.subarray(start, start + csize);
+    const data = method === 8 ? zlib.inflateRawSync(raw) : Buffer.from(raw);
+    assert_(data.length === usize && zlib.crc32(data) === crc, `${name}: size and CRC-32`);
+    out.push({ name, data });
+    p += 46 + nlen + elen + clen;
+  }
+  return out;
 }
 function assert_(ok, msg) { if (!ok) throw new Error(msg); }
 
-module.exports = async ({ page, open, assert, fixtures }) => {
+module.exports = async ({ page, open, assert, fixtures, url }) => {
   await open();
   const fx = f => path.join(fixtures, f);
   const text = s => page.textContent(s);
@@ -192,8 +235,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual(px[1], [255, 0, 0, 255]);
   await page.selectOption('#ri-format', 'image/jpeg');
   await page.waitForFunction(() => /JPEG/.test(document.querySelector('#ri-fmt').textContent));
+  // JPEG has no transparency, so the Background choice shows and fills it (black is still chosen from above).
+  assert.equal(await page.isVisible('#ri-bg-field'), true, 'background shown for a transparent image saved as JPEG');
   out = await download();
   assert.equal(out.info.type, 'jpeg');
+  close((await pixels(out.buf, [[5, 5]]))[0], [0, 0, 0, 255], 3, 'transparent becomes the chosen black');
+  await page.selectOption('#ri-bg', '#ffffff');
+  await page.waitForTimeout(400);
+  out = await download();
   px = await pixels(out.buf, [[5, 5]]);
   close(px[0], [255, 255, 255, 255], 3, 'transparent becomes white in JPEG');
 
@@ -219,7 +268,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
 
   // Stretching 1600x400 to 100x400 shrinks only the width, 16 times. Each side is halved on its own
   // (800, 400 and 200 wide) and the final step does the last 2x; the old loop needed both sides to
-  // halve and so made one 16x jump. Recorded by wrapping drawImage; 1 px stripes must average to grey.
+  // halve and so made one 16x jump. 1 px stripes must average to grey.
   const wide = Buffer.from(await page.evaluate(async () => {
     const c = document.createElement('canvas');
     c.width = 1600; c.height = 400;
@@ -230,37 +279,327 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     return Array.from(new Uint8Array(await b.arrayBuffer()));
   }));
   await page.selectOption('#ri-preset', 'custom');
+  // Adding to a list keeps the size already set; a fresh list starts from the image's own size.
+  await page.click('#ri-clear');
   await page.setInputFiles('#ri-file', { name: 'wide.png', mimeType: 'image/png', buffer: wide });
   await waitDims('1600 × 400');
   await page.uncheck('#ri-lock');
   await page.selectOption('#ri-fit', 'stretch');
   await page.waitForTimeout(300);
-  await page.evaluate(() => {
-    window.__draws = [];
-    const orig = CanvasRenderingContext2D.prototype.drawImage;
-    CanvasRenderingContext2D.prototype.drawImage = function (...args) {
-      window.__draws.push(this.canvas.width + 'x' + this.canvas.height);
-      return orig.apply(this, args);
-    };
-  });
   await page.fill('#ri-w', '100');
   assert.equal(await page.inputValue('#ri-h'), '400', 'unlocked: the height stays');
   await waitDims('100 × 400');
-  assert.deepEqual(await page.evaluate(() => window.__draws), ['800x400', '400x400', '200x400', '100x400']);
   out = await download();
   assert.deepEqual([out.info.width, out.info.height], [100, 400]);
   const row = [];
   for (let x = 0; x < 100; x += 7) row.push([x, 200]);
   for (const p of await pixels(out.buf, row)) assert.ok(p[0] >= 110 && p[0] <= 145, `stretched stripes average to grey, got ${p[0]}`);
+  // The halving steps themselves, recorded by wrapping drawImage. Normally they run in a worker, so this
+  // uses a browser without OffscreenCanvas, where the same code runs on the page (the fallback path).
+  {
+    const ctx2 = await page.context().browser().newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
+    await ctx2.addInitScript(() => { delete window.OffscreenCanvas; });
+    const p2 = await ctx2.newPage();
+    await p2.goto(url);
+    await p2.setInputFiles('#ri-file', { name: 'wide.png', mimeType: 'image/png', buffer: wide });
+    await p2.waitForFunction(() => document.querySelector('#ri-dims').textContent === '1600 × 400');
+    await p2.uncheck('#ri-lock');
+    await p2.selectOption('#ri-fit', 'stretch');
+    await p2.waitForTimeout(300);
+    await p2.evaluate(() => {
+      window.__draws = [];
+      const orig = CanvasRenderingContext2D.prototype.drawImage;
+      CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+        window.__draws.push(this.canvas.width + 'x' + this.canvas.height);
+        return orig.apply(this, args);
+      };
+    });
+    await p2.fill('#ri-w', '100');
+    await p2.waitForFunction(() => document.querySelector('#ri-dims').textContent === '100 × 400' && !document.querySelector('#ri-download').disabled);
+    const draws = (await p2.evaluate(() => window.__draws)).join(' ');
+    assert.ok(draws.includes('800x400 400x400 200x400 100x400'), `each side halved on its own: ${draws}`);
+    const [dl2] = await Promise.all([p2.waitForEvent('download'), p2.click('#ri-download')]);
+    const buf2 = fs.readFileSync(await dl2.path());
+    assert.deepEqual([imageInfo(buf2).width, imageInfo(buf2).height], [100, 400], 'the no-worker fallback works');
+    await ctx2.close();
+  }
 
   // GIF cannot be encoded by canvas, so "original format" says it saves a PNG, and does.
   const gif = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
   await page.selectOption('#ri-format', 'same');
   await page.check('#ri-lock');
+  await page.click('#ri-clear');
   await page.setInputFiles('#ri-file', { name: 'dot.gif', mimeType: 'image/gif', buffer: gif });
   await waitDims('1 × 1');
   assert.match(await page.locator('#ri-format option[value="same"]').textContent(), /^PNG \(GIF cannot be saved here\)$/);
   out = await download();
   assert.equal(out.name, 'dot-1x1.png');
   assert.equal(out.info.type, 'png');
+
+  // ---------- Crop position, pad colour, fit inside, never enlarge ----------
+  // Band images made here: three 100 px bands, red, green and blue, side by side or stacked.
+  const bands = (w, h, dir) => page.evaluate(async ([w, h, dir]) => {
+    const c = new OffscreenCanvas(w, h), x = c.getContext('2d');
+    ['#ff0000', '#00ff00', '#0000ff'].forEach((col, i) => {
+      x.fillStyle = col;
+      if (dir === 'x') x.fillRect(i * w / 3, 0, w / 3, h); else x.fillRect(0, i * h / 3, w, h / 3);
+    });
+    const b = await c.convertToBlob({ type: 'image/png' });
+    return Array.from(new Uint8Array(await b.arrayBuffer()));
+  }, [w, h, dir]).then(a => Buffer.from(a));
+  const settle = () => page.waitForTimeout(450);
+  await page.click('#ri-clear');
+  assert.equal(await page.isVisible('#ri-drop'), true, 'Remove all brings the drop zone back');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'ri-choose', 'focus moves to Choose images');
+  await page.selectOption('#ri-format', 'image/png');
+  await page.selectOption('#ri-preset', 'custom');
+  await page.check('input[name="ri-by"][value="px"]');
+  await page.setInputFiles('#ri-file', { name: 'wide-bands.png', mimeType: 'image/png', buffer: await bands(300, 100, 'x') });
+  await waitDims('300 × 100');
+  await page.uncheck('#ri-lock');
+  await page.selectOption('#ri-fit', 'crop');
+  assert.equal(await page.isVisible('#ri-grav'), true, 'position grid for Crop');
+  await page.fill('#ri-w', '100');
+  await page.fill('#ri-h', '100');
+  await waitDims('100 × 100');
+  // Covering 100 x 100 needs no scaling (100 / 100 = 1), so the crop is exactly one band.
+  for (const [pos, colour] of [['Left', [255, 0, 0]], ['Centre', [0, 255, 0]], ['Right', [0, 0, 255]]]) {
+    await page.check(`input[name="ri-grav"][aria-label="${pos}"]`);
+    await settle();
+    out = await download();
+    for (const p of await pixels(out.buf, [[2, 50], [97, 50]])) assert.deepEqual(p, [...colour, 255], `crop ${pos}`);
+  }
+  await page.setInputFiles('#ri-file', { name: 'tall-bands.png', mimeType: 'image/png', buffer: await bands(100, 300, 'y') });
+  await waitDims('100 × 100');
+  for (const [pos, colour] of [['Top', [255, 0, 0]], ['Bottom', [0, 0, 255]]]) {
+    await page.check(`input[name="ri-grav"][aria-label="${pos}"]`);
+    await settle();
+    out = await download();
+    for (const p of await pixels(out.buf, [[50, 2], [50, 97]])) assert.deepEqual(p, [...colour, 255], `crop ${pos}`);
+  }
+  // Pad the 100 x 300 image into 300 x 300 with a custom colour, placed on the left or right.
+  await page.selectOption('#ri-fit', 'pad');
+  await page.fill('#ri-w', '300');
+  await page.fill('#ri-h', '300');
+  await page.fill('#ri-bg-color', '#336699');
+  assert.equal(await page.inputValue('#ri-bg'), 'custom', 'picking a colour selects Custom colour');
+  assert.equal(await page.isVisible('#ri-bg-color'), true);
+  await page.check('input[name="ri-grav"][aria-label="Left"]');
+  await settle();
+  out = await download();
+  let px4 = await pixels(out.buf, [[50, 50], [50, 250], [150, 150], [290, 10]]);
+  assert.deepEqual(px4, [[255, 0, 0, 255], [0, 0, 255, 255], [51, 102, 153, 255], [51, 102, 153, 255]], 'image on the left, custom colour elsewhere');
+  await page.check('input[name="ri-grav"][aria-label="Right"]');
+  await settle();
+  out = await download();
+  px4 = await pixels(out.buf, [[10, 150], [250, 50], [250, 150]]);
+  assert.deepEqual(px4, [[51, 102, 153, 255], [255, 0, 0, 255], [0, 255, 0, 255]], 'image on the right');
+  // Fit inside a 150 x 150 box: the 1:3 image becomes 50 x 150, no bands, no position.
+  await page.selectOption('#ri-fit', 'fit');
+  assert.equal(await page.isHidden('#ri-grav'), true, 'no position for Fit inside');
+  await page.fill('#ri-w', '150');
+  await page.fill('#ri-h', '150');
+  await waitDims('50 × 150');
+  // Never enlarge: fitting into 600 x 600 would make 200 x 600; with the box ticked it stays 100 x 300.
+  await page.fill('#ri-w', '600');
+  await page.fill('#ri-h', '600');
+  await waitDims('200 × 600');
+  await page.check('#ri-noup');
+  await waitDims('100 × 300');
+  assert.doesNotMatch(await text('#ri-note'), /enlarges/);
+  await page.check('input[name="ri-by"][value="pct"]');
+  await page.fill('#ri-pct', '250');
+  await settle();
+  await waitDims('100 × 300');
+  await page.fill('#ri-pct', '50');
+  await waitDims('50 × 150');
+  await page.uncheck('#ri-noup');
+
+  // ---------- BMP, ICO and AVIF output ----------
+  await page.check('input[name="ri-by"][value="px"]');
+  await page.check('#ri-lock');
+  await page.fill('#ri-w', '30');
+  await page.selectOption('#ri-format', 'image/bmp');
+  await waitDims('30 × 90');
+  assert.equal(await page.isHidden('#ri-q-field'), true, 'no quality for BMP');
+  out = await download();
+  assert.equal(out.name, 'tall-bands-30x90.bmp');
+  assert.deepEqual([out.info.type, out.info.width, out.info.height, out.info.bpp], ['bmp', 30, 90, 24]);
+  // 24-bit rows are padded to 4 bytes (92 for 30 px) and stored bottom-up, as B, G, R.
+  const bmpAt = (x, y) => { const o = out.info.offset + (90 - 1 - y) * 92 + x * 3; return [out.buf[o + 2], out.buf[o + 1], out.buf[o]]; };
+  assert.deepEqual([bmpAt(15, 10), bmpAt(15, 45), bmpAt(15, 80)], [[255, 0, 0], [0, 255, 0], [0, 0, 255]], 'BMP pixels');
+  await page.selectOption('#ri-format', 'image/x-icon');
+  await page.uncheck('#ri-lock');
+  await page.selectOption('#ri-fit', 'crop');
+  await page.check('input[name="ri-grav"][aria-label="Centre"]');
+  await page.fill('#ri-w', '64');
+  await page.fill('#ri-h', '64');
+  await waitDims('64 × 64');
+  assert.equal(await page.isVisible('#ri-ico-field'), true);
+  assert.equal(await page.isHidden('#ri-max-field'), true, 'no size limit for icons');
+  out = await download();
+  assert.equal(out.name, 'tall-bands-64x64.ico');
+  assert.deepEqual(out.info.entries.map(e => [e.width, e.height, e.bpp]), [[16, 16, 32], [32, 32, 32], [48, 48, 32], [64, 64, 32]]);
+  for (const e of out.info.entries) {
+    assert.equal(e.data.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'each icon is a PNG');
+    assert.deepEqual((await pixels(e.data, [[e.width >> 1, e.width >> 1]]))[0], [0, 255, 0, 255], 'centre crop is green');
+  }
+  await page.uncheck('#ri-ico-multi');
+  await settle();
+  out = await download();
+  assert.equal(out.info.entries.length, 1, 'just the 64 px icon');
+  await page.fill('#ri-w', '300');
+  await page.fill('#ri-h', '300');
+  await page.waitForFunction(() => /at most 256 × 256/.test(document.querySelector('#ri-error').textContent));
+  assert.equal(await page.isDisabled('#ri-download'), true);
+  // AVIF: the browser's own encoder, or the bundled WebAssembly one where it has none (as in Chromium).
+  const avifOk = await page.evaluate(() => TTImage.canEncode('avif', { wasm: true }));
+  const avifOpt = page.locator('#ri-format option[value="image/avif"]');
+  if (avifOk) {
+    await page.selectOption('#ri-format', 'image/avif');
+    await page.waitForFunction(() => /^AVIF at quality \d+$/.test(document.querySelector('#ri-fmt').textContent), null, { timeout: 60000 });
+    out = await download();
+    assert.equal(out.name, 'tall-bands-300x300.avif');
+    assert.deepEqual([out.info.type, out.info.width, out.info.height], ['avif', 300, 300]);
+    assert.equal(out.buf.subarray(4, 12).toString('latin1'), 'ftypavif');
+    // The centre crop of the 100 x 300 bands, enlarged 3x, is the green band.
+    const g = (await pixels(out.buf, [[150, 150]]))[0];
+    [0, 255, 0].forEach((v, i) => assert.ok(Math.abs(g[i] - v) <= 16, `AVIF centre is green: ${g}`));
+  } else {
+    assert.equal(await avifOpt.isDisabled(), true, 'AVIF cannot be chosen where the browser cannot save it');
+    assert.match(await avifOpt.textContent(), /this browser cannot save it/);
+  }
+
+  // ---------- Target file size in KB ----------
+  // Random noise compresses badly: this 800 x 600 JPEG is about 390 KB at quality 90 and 160 KB at 40.
+  const noise = Buffer.from(await page.evaluate(async () => {
+    const c = new OffscreenCanvas(800, 600), x = c.getContext('2d'), img = x.createImageData(800, 600);
+    let seed = 3;
+    for (let i = 0; i < img.data.length; i += 4) {
+      seed = (seed * 1103515245 + 12345) >>> 0;
+      img.data[i] = seed >>> 24; img.data[i + 1] = (seed >>> 16) & 255; img.data[i + 2] = (i >> 8) & 255; img.data[i + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+    const b = await c.convertToBlob({ type: 'image/png' });
+    return Array.from(new Uint8Array(await b.arrayBuffer()));
+  }));
+  await page.click('#ri-clear');
+  await page.setInputFiles('#ri-file', { name: 'noise.png', mimeType: 'image/png', buffer: noise });
+  await page.check('#ri-lock');
+  await page.selectOption('#ri-format', 'image/jpeg');
+  await page.fill('#ri-quality', '90');
+  await waitDims('800 × 600');
+  await page.fill('#ri-maxkb', '250');
+  await page.waitForFunction(() => /Quality lowered to \d+ to fit in 250 KB/.test(document.querySelector('#ri-note').textContent), null, { timeout: 30000 });
+  out = await download();
+  assert.deepEqual([out.info.width, out.info.height], [800, 600], 'dimensions kept');
+  assert.ok(out.buf.length <= 250000, `under 250,000 bytes: ${out.buf.length}`);
+  const q = Number(/quality (\d+)/.exec(await text('#ri-fmt'))[1]);
+  assert.ok(q >= 40 && q < 90, `quality ${q}`);
+  // Independent check of the search with the browser's own encoder: quality q fits and q + 1 does not.
+  const sizesAt = await page.evaluate(async ([bytes, qs]) => {
+    const bmp = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+    const c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(bmp, 0, 0);
+    const out = [];
+    for (const qq of qs) out.push((await c.convertToBlob({ type: 'image/jpeg', quality: qq / 100 })).size);
+    return out;
+  }, [[...noise], [q, q + 1]]);
+  assert.ok(sizesAt[0] <= 250000 && sizesAt[1] > 250000, `quality ${q} is the highest that fits: ${sizesAt}`);
+  assert.equal(sizesAt[0], out.buf.length, 'same bytes as the browser encoder at that quality');
+  // 5 KB is out of reach at quality 40, so the size shrinks too, keeping the 4:3 shape.
+  await page.fill('#ri-maxkb', '5');
+  await page.waitForFunction(() => /Reduced to \d+ × \d+ at quality \d+ to fit in 5 KB/.test(document.querySelector('#ri-note').textContent), null, { timeout: 30000 });
+  out = await download();
+  assert.ok(out.buf.length <= 5000, `under 5,000 bytes: ${out.buf.length}`);
+  assert.ok(out.info.width < 800 && Math.abs(out.info.width / out.info.height - 4 / 3) < 0.02, `shape kept: ${out.info.width} x ${out.info.height}`);
+  assert.equal(await text('#ri-dims'), out.info.width + ' × ' + out.info.height);
+  // PNG is lossless: only the size can shrink.
+  await page.selectOption('#ri-format', 'image/png');
+  await page.fill('#ri-maxkb', '200');
+  await page.waitForFunction(() => /Reduced to \d+ × \d+ to fit in 200 KB/.test(document.querySelector('#ri-note').textContent), null, { timeout: 30000 });
+  out = await download();
+  assert.ok(out.info.type === 'png' && out.buf.length <= 200000 && out.info.width < 800, `PNG ${out.info.width} px, ${out.buf.length} bytes`);
+  // An exact size keeps its pixels: 1 KB cannot hold an 800 x 600 JPEG, so it says so.
+  await page.selectOption('#ri-format', 'image/jpeg');
+  await page.uncheck('#ri-lock');
+  await page.selectOption('#ri-fit', 'stretch');
+  await page.fill('#ri-w', '800');
+  await page.fill('#ri-h', '600');
+  await page.fill('#ri-maxkb', '1');
+  await page.waitForFunction(() => /over the 1 KB limit/.test(document.querySelector('#ri-error').textContent), null, { timeout: 30000 });
+  assert.equal(await page.isDisabled('#ri-download'), true);
+  await page.fill('#ri-maxkb', '');
+  await page.check('#ri-lock');
+  await waitDims('800 × 600');
+
+  // ---------- Batch: HEIC, TIFF, BMP, GIF and AVIF in, one ZIP out ----------
+  // quadrants.heic 240x160: (220,40,40) (40,180,60) / (40,60,200) (240,240,240); two-pages.tif 60x40, left
+  // (200,30,30), right (30,30,200), 2 pages; flag.bmp 32x16 top (250,200,0), bottom (0,90,160);
+  // anim.gif 20x10, 2 frames, red then blue; flat.avif 64x32 (40,120,200).
+  await page.click('#ri-clear');
+  await page.selectOption('#ri-format', 'same');
+  await page.check('input[name="ri-by"][value="px"]');
+  await page.fill('#ri-w', '120');
+  await page.setInputFiles('#ri-file', ['quadrants.heic', 'two-pages.tif', 'flag.bmp', 'anim.gif', 'flat.avif', 'notes.txt'].map(fx));
+  await page.waitForFunction(() => document.querySelectorAll('#ri-list .ri-row').length === 5 && !document.querySelector('#ri-download').disabled, null, { timeout: 30000 });
+  assert.match(await text('#ri-error'), /“notes\.txt” could not be opened/);
+  assert.equal(await page.isVisible('#ri-zip'), true);
+  assert.match(await text('#ri-forig'), /240 × 160 px.*HEIC · image 1 of 5/);
+  await page.fill('#ri-w', '120');
+  await waitDims('120 × 80');
+  assert.equal(await page.locator('#ri-format option[value="same"]').textContent(), 'JPEG (HEIC cannot be saved here)');
+  assert.deepEqual(await page.locator('#ri-list .ri-row-info').allTextContents().then(a => a.map(t => t.replace(/, [\d.]+ K?B$/, ''))),
+    ['240 × 160 → 120 × 80 JPEG', '60 × 40 → 120 × 80 PNG', '32 × 16 → 120 × 60 BMP', '20 × 10 → 120 × 60 PNG', '64 × 32 → 120 × 60 ' + (avifOk ? 'AVIF' : 'JPEG')]);
+  // Preview another image from the list.
+  await page.locator('#ri-list .ri-pick').nth(1).click();
+  await page.waitForFunction(() => /60 × 40 px/.test(document.querySelector('#ri-forig').textContent));
+  await page.waitForFunction(() => /Only the first of its 2 pages is used/.test(document.querySelector('#ri-note').textContent));
+  await waitDims('120 × 80');
+  assert.equal(await page.locator('#ri-list .ri-pick').nth(1).getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#ri-format option[value="same"]').textContent(), 'PNG (TIFF cannot be saved here)');
+  // One row's own download.
+  const [single] = await Promise.all([page.waitForEvent('download'), page.locator('#ri-list .ri-dl').nth(3).click()]);
+  assert.equal(single.suggestedFilename(), 'anim-120x60.png');
+  assert.deepEqual((await pixels(fs.readFileSync(await single.path()), [[60, 30]]))[0], [255, 0, 0, 255], 'first GIF frame');
+  // Everything as a ZIP. Focus comes back to the button afterwards.
+  await page.focus('#ri-zip');
+  const [zdl] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
+  assert.equal(zdl.suggestedFilename(), 'resized-images.zip');
+  const entries = readZip(fs.readFileSync(await zdl.path()));
+  assert.deepEqual(entries.map(e => e.name), ['quadrants-120x80.jpg', 'two-pages-120x80.png', 'flag-120x60.bmp', 'anim-120x60.png', 'flat-120x60.' + (avifOk ? 'avif' : 'jpg')]);
+  const [eq, et, eb, eg] = entries.map(e => e.data);
+  assert.deepEqual([imageInfo(eq).type, imageInfo(eq).width, imageInfo(eq).height], ['jpeg', 120, 80]);
+  const quad = await pixels(eq, [[30, 20], [90, 20], [30, 60], [90, 60]]);
+  [[220, 40, 40], [40, 180, 60], [40, 60, 200], [240, 240, 240]].forEach((c, i) => c.forEach((v, j) => assert.ok(Math.abs(quad[i][j] - v) <= 14, `HEIC quadrant ${i}: ${quad[i]}`)));
+  assert.deepEqual(await pixels(et, [[20, 40], [100, 40]]), [[200, 30, 30, 255], [30, 30, 200, 255]], 'TIFF first page');
+  assert.deepEqual([imageInfo(eb).type, imageInfo(eb).width, imageInfo(eb).height], ['bmp', 120, 60]);
+  assert.deepEqual(await pixels(eb, [[60, 10], [60, 50]]), [[250, 200, 0, 255], [0, 90, 160, 255]], 'BMP stays BMP');
+  assert.deepEqual(await pixels(eg, [[5, 5]]), [[255, 0, 0, 255]]);
+  assert.match(await text('#ri-progress'), /Saved resized-images\.zip: 5 images/);
+  await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'ri-zip');
+  assert.match(await page.locator('#ri-list .ri-row-info').first().textContent(), /→ 120 × 80 JPEG, [\d.]+ KB/, 'rows show the saved size');
+  // Phone width with the list showing.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(150);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1, 'no horizontal scroll at 390 px');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // Remove a row; focus stays in the list.
+  await page.locator('#ri-list .ri-x').nth(1).click();
+  assert.equal(await page.locator('#ri-list .ri-row').count(), 4);
+  assert.match(await page.evaluate(() => document.activeElement.getAttribute('aria-label') || ''), /^Remove flag\.bmp/);
+
+  // ---------- SVG is drawn at the new size ----------
+  // A viewBox-only SVG (100 x 50, red left half, blue right half) resized to 1000 px wide: a raster
+  // upscale would blur the join over several pixels; drawn as vectors it is sharp.
+  await page.click('#ri-clear');
+  await page.selectOption('#ri-format', 'image/png');
+  const halves = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect width="50" height="50" fill="#ff0000"/><rect x="50" width="50" height="50" fill="#0000ff"/></svg>');
+  await page.setInputFiles('#ri-file', { name: 'halves.svg', mimeType: 'image/svg+xml', buffer: halves });
+  await waitDims('100 × 50');
+  await page.fill('#ri-w', '1000');
+  await waitDims('1000 × 500');
+  assert.match(await text('#ri-note'), /stays sharp/);
+  out = await download();
+  assert.deepEqual(await pixels(out.buf, [[498, 250], [501, 250]]), [[255, 0, 0, 255], [0, 0, 255, 255]], 'sharp edge between the halves');
 };

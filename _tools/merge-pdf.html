@@ -30,16 +30,17 @@ howto: |
   ## What is kept
 
   Pages are copied as they are, not redrawn, so text stays selectable and
-  searchable, pictures keep their quality and links inside a page keep
-  working. Each page keeps its size, so A4, Letter and landscape pages can
-  sit in one document. Rotating sets the page's rotation value (the /Rotate
+  searchable, pictures keep their quality and web links keep working. Each
+  page keeps its size, so A4, Letter and landscape pages can sit in one
+  document. Rotating sets the page's rotation value (the /Rotate
   entry of ISO 32000), which every PDF reader honours, so nothing is
   re-rendered and the file does not grow.
 
   Some things belong to the whole document rather than to a page, and are
-  not carried over: bookmarks (the outline), fillable form fields, which
-  keep their current look but stop being editable, digital signatures, which
-  are no longer valid once the file changes, and attachments.
+  not carried over: bookmarks (the outline), links that jump to another
+  page of the same file, fillable form fields, which keep their current look
+  but may no longer be fillable, digital signatures, which are no longer
+  valid once the file changes, and attachments.
 
   ## Password-protected PDFs
 
@@ -63,7 +64,7 @@ faq:
   - q: Is there a limit on the number of files or pages?
     a: There is no fixed limit. Everything happens in your device's memory, so hundreds of files or thousands of pages work on a computer, while a phone may run out of memory sooner.
   - q: Why did the merged PDF lose its bookmarks or form fields?
-    a: Bookmarks and form fields belong to the document, not to its pages, and this tool copies pages. The page content, links and look are kept, but the outline is not, and form fields become plain content. Fill in forms before you merge them.
+    a: Bookmarks and form fields belong to the document, not to its pages, and this tool copies pages. The page content, web links and look are kept, but the outline is not, and form fields may no longer be fillable. Fill in forms before you merge them.
   - q: Can I merge a password-protected PDF?
     a: Yes. PDFs that only restrict editing or printing are unlocked automatically. For a PDF that needs a password to open, type that password in the box next to the file. The merged file is not password-protected.
   - q: Does merging reduce quality?
@@ -81,7 +82,7 @@ faq:
 .mpdf-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-top: 1px solid var(--border); }
 .mpdf-file:first-child { border-top: 0; }
 .mpdf-chip { flex: none; width: 14px; height: 14px; border-radius: 4px; }
-.mpdf-file-main { flex: 1 1 200px; min-width: 0; }
+.mpdf-file-main { flex: 1 1 0; min-width: 0; }
 .mpdf-file-name { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .mpdf-file-meta { color: var(--muted); font-size: 13px; }
 .mpdf-file-meta.is-error { color: var(--danger); }
@@ -259,8 +260,11 @@ faq:
   }
   function openPdf(f, password) {
     return loadPdfjs().then(function (lib) {
-      var task = lib.getDocument({ data: new Uint8Array(f.bytes.slice(0)), password: password || undefined, worker: pdfjsWorker, verbosity: 0, wasmUrl: PDFJS_WASM, isOffscreenCanvasSupported: true });
-      return task.promise;
+      return f.file.arrayBuffer().then(function (buf) {
+        var task = lib.getDocument({ data: new Uint8Array(buf), password: password || undefined, worker: pdfjsWorker, verbosity: 0, wasmUrl: PDFJS_WASM });
+        f.task = task;
+        return task.promise;
+      });
     });
   }
 
@@ -614,14 +618,17 @@ faq:
         for (var fi = 0; fi < msg.files.length; fi++) {
           var f = msg.files[fi];
           try {
-            docs[f.id] = (await unlocker.open(new Uint8Array(f.bytes), f.password || '')).doc;
+            var src;
+            try { src = new Uint8Array(await f.file.arrayBuffer()); } catch (readErr) { var re = new Error('READ'); re.code = 'GONE'; throw re; }
+            docs[f.id] = (await unlocker.open(src, f.password || '')).doc;
+            src = null;
           } catch (err) {
             scope.postMessage({ type: 'error', id: id, fileId: f.id, code: err && err.code || 'READ', message: String(err && err.message || err) });
             return;
           }
           scope.postMessage({ type: 'progress', id: id, value: 0.3 * (fi + 1) / msg.files.length });
         }
-        var outputs = [], transfer = [];
+        var outputs = [];
         for (var ji = 0; ji < msg.jobs.length; ji++) {
           var job = msg.jobs[ji], out = await PDFLib.PDFDocument.create(), byFile = {}, copied = {};
           job.pages.forEach(function (p) { (byFile[p.f] = byFile[p.f] || []).push(p.i); });
@@ -639,12 +646,13 @@ faq:
           }
           out.setProducer('TripleP Tools (pdf-lib)');
           out.setCreator('TripleP Tools Merge PDF');
+          // The Blob is made here, so the page never copies the whole file on its own thread.
           var bytes = await out.save({ useObjectStreams: true, objectsPerTick: 200 });
-          outputs.push({ name: job.name, bytes: bytes.buffer, pages: job.pages.length });
-          transfer.push(bytes.buffer);
+          outputs.push({ name: job.name, blob: new Blob([bytes], { type: 'application/pdf' }), pages: job.pages.length });
+          bytes = null;
           scope.postMessage({ type: 'progress', id: id, value: 0.3 + 0.7 * done / Math.max(1, total) });
         }
-        scope.postMessage({ type: 'done', id: id, outputs: outputs }, transfer);
+        scope.postMessage({ type: 'done', id: id, outputs: outputs });
       } catch (err) {
         scope.postMessage({ type: 'error', id: id, code: 'BUILD', message: String(err && err.message || err) });
       }
@@ -686,8 +694,9 @@ faq:
       return new Promise(function (resolve, reject) {
         var id = ++reqId;
         pending[id] = { resolve: resolve, reject: reject, progress: onProgress };
-        var payload = list.map(function (f) { return { id: f.id, bytes: f.bytes.slice(0), password: f.password || '' }; });
-        w.postMessage({ type: 'build', id: id, files: payload, jobs: jobs }, payload.map(function (f) { return f.bytes; }));
+        // File handles are cheap to send; the worker reads the bytes itself.
+        var payload = list.map(function (f) { return { id: f.id, file: f.file, password: f.password || '' }; });
+        w.postMessage({ type: 'build', id: id, files: payload, jobs: jobs });
       });
     });
   }
@@ -709,10 +718,10 @@ faq:
     incoming.forEach(function (file) {
       chain = chain.then(function () {
         if (file.size > MAX_FILE) { bad.push(file.name + ' is larger than 1 GB.'); return; }
-        return file.arrayBuffer().then(function (buf) {
-          if (!buf.byteLength) { bad.push(file.name + ' is empty.'); return; }
-          if (!isPdf(buf)) { bad.push(file.name + ' is not a PDF file.'); return; }
-          var f = { id: nextId++, name: file.name, size: file.size, bytes: buf, color: COLORS[files.length % COLORS.length], state: 'loading', password: '' };
+        if (!file.size) { bad.push(file.name + ' is empty.'); return; }
+        return file.slice(0, 1024).arrayBuffer().then(function (head) {
+          if (!isPdf(head)) { bad.push(file.name + ' is not a PDF file.'); return; }
+          var f = { id: nextId++, name: file.name, size: file.size, file: file, color: COLORS[files.length % COLORS.length], state: 'loading', password: '' };
           files.push(f);
           if (files.length === 1 && !nameEdited) nameInput.value = baseName(f.name) + '-merged.pdf';
           renderFiles();
@@ -721,7 +730,7 @@ faq:
             if (f.state === 'error') {
               bad.push(f.name + ' ' + f.message);
               files = files.filter(function (x) { return x !== f; });
-              if (f.pdf) f.pdf.destroy();
+              if (f.task) f.task.destroy();
             }
           });
         }, function () { bad.push(file.name + ' could not be read.'); });
@@ -1032,6 +1041,7 @@ faq:
   function explain(err) {
     var f = err && err.fileId ? fileById(err.fileId) : null;
     if (err && err.code === 'PASSWORD') return (f ? f.name : 'A file') + ' needs its password. Enter it next to the file and try again.';
+    if (err && err.code === 'GONE') return (f ? f.name : 'A file') + ' could not be read again. It may have been moved or changed since you added it; remove it and add it again.';
     if (err && err.code === 'UNSUPPORTED') return (f ? f.name : 'A file') + ' uses a kind of encryption this tool cannot remove.';
     if (f) return f.name + ' could not be read for merging. It may be damaged; opening it in a PDF viewer and printing it to a new PDF usually repairs it.';
     return 'The PDF could not be made: ' + (err && err.message || err);
@@ -1058,9 +1068,9 @@ faq:
   $('#mpdf-merge').addEventListener('click', function (e) {
     var btn = e.currentTarget;
     run([jobFor(pages, outName())], 'Merging\u2026', function (outs) {
-      var o = outs[0], blob = new Blob([o.bytes], { type: 'application/pdf' });
-      TT.download(o.name, blob);
-      say('Saved ' + o.name + ': ' + plural(o.pages, 'page', 'pages') + ', ' + fmtBytes(blob.size) + '.');
+      var o = outs[0];
+      TT.download(o.name, o.blob);
+      say('Saved ' + o.name + ': ' + plural(o.pages, 'page', 'pages') + ', ' + fmtBytes(o.blob.size) + '.');
       btn.focus();
     });
   });
@@ -1069,9 +1079,9 @@ faq:
     if (!sel.length) return;
     var name = baseName(outName()) + '-selected.pdf';
     run([jobFor(sel, name)], 'Saving\u2026', function (outs) {
-      var o = outs[0], blob = new Blob([o.bytes], { type: 'application/pdf' });
-      TT.download(o.name, blob);
-      say('Saved ' + o.name + ': ' + plural(o.pages, 'page', 'pages') + ', ' + fmtBytes(blob.size) + '.');
+      var o = outs[0];
+      TT.download(o.name, o.blob);
+      say('Saved ' + o.name + ': ' + plural(o.pages, 'page', 'pages') + ', ' + fmtBytes(o.blob.size) + '.');
       btn.focus();
     });
   });
@@ -1098,7 +1108,7 @@ faq:
     if (!jobs.length) return;
     run(jobs, 'Splitting\u2026', function (outs) {
       var name = base + '-split.zip';
-      window.TTZip.create(outs.map(function (o) { return { name: o.name, data: new Uint8Array(o.bytes) }; }), { compress: 'store' }).then(function (zip) {
+      window.TTZip.create(outs.map(function (o) { return { name: o.name, data: o.blob }; }), { compress: 'store' }).then(function (zip) {
         TT.download(name, zip);
         say('Saved ' + name + ' with ' + plural(outs.length, 'PDF', 'PDFs') + ', ' + fmtBytes(zip.size) + '.');
         btn.focus();
@@ -1207,7 +1217,6 @@ faq:
     var li = e.target.closest('.mpdf-page');
     if (!li || !e.target.closest('.mpdf-thumb') || e.target.closest('button, label, input')) return;
     drag = { id: Number(li.dataset.id), li: li, pid: e.pointerId, x: e.clientX, y: e.clientY, moved: false, from: pageIndex(Number(li.dataset.id)) };
-    try { pageList.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
     e.preventDefault();
   });
   pageList.addEventListener('pointermove', function (e) {
@@ -1215,6 +1224,8 @@ faq:
     if (!drag.moved) {
       if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) < 6) return;
       drag.moved = true;
+      // Captured only now, so a plain click still reaches the thumbnail and toggles its selection.
+      try { pageList.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
       snapshot();
       drag.li.classList.add('is-dragging');
       root.classList.add('is-sorting');

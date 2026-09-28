@@ -39,7 +39,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     const lib = await import('/assets/vendor/pdfjs/pdf.min.js');
     lib.GlobalWorkerOptions.workerSrc = '/assets/vendor/pdfjs/pdf.worker.min.js';
     const data = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    const doc = await lib.getDocument({ data, verbosity: 0 }).promise;
+    const task = lib.getDocument({ data, verbosity: 0 });
+    const doc = await task.promise;
     const meta = await doc.getMetadata();
     const pages = [];
     for (let i = 1; i <= doc.numPages; i++) {
@@ -47,7 +48,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
       const tc = await pg.getTextContent();
       pages.push({ text: tc.items.map(t => t.str).join(' ').replace(/\s+/g, ' ').split(' Fixture')[0].trim(), rotate: pg.rotate, size: Math.round(pg.view[2]) + 'x' + Math.round(pg.view[3]) });
     }
-    await doc.destroy();
+    await task.destroy();
     return { encrypted: !!meta.info.EncryptFilterName, producer: meta.info.Producer, pages };
   }, buf.toString('base64'));
   const save = async sel => {
@@ -63,7 +64,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.isVisible('#mpdf-work'), false);
 
   await page.setInputFiles('#mpdf-file', [fx('alpha.pdf'), fx('bravo.pdf'), fx('restricted.pdf'), fx('locked.pdf'), fx('damaged.pdf')]);
-  await page.waitForFunction(() => document.querySelectorAll('.mpdf-file').length === 4 && !/Reading/.test(document.getElementById('mpdf-files').textContent));
+  // Files are read one after another; the damaged one comes last and is then reported and dropped.
+  await page.waitForFunction(() => /damaged\.pdf/.test(document.getElementById('mpdf-error').textContent) &&
+    document.querySelectorAll('.mpdf-file').length === 4 && !/Reading/.test(document.getElementById('mpdf-files').textContent));
   assert.match(await page.textContent('#mpdf-error'), /damaged\.pdf is damaged or is not a valid PDF/);
   assert.deepEqual(await metas(), ['3 pages · 3.2 KB', '2 pages · 2.2 KB', '1 page · 1.6 KB · unlocked', 'Password protected: enter the password that opens it']);
   assert.equal(await page.inputValue('#mpdf-name'), 'merged.pdf');
@@ -145,8 +148,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.click('#mpdf-reverse');
   assert.deepEqual(await labels(), ['locked 1', 'restricted 1', 'alpha 3', 'alpha 1', 'alpha 2', 'bravo 2', 'bravo 1']);
   await page.click('#mpdf-sort');
-  assert.deepEqual(await labels(), ['alpha 1', 'alpha 2', 'alpha 3', 'bravo 1', 'bravo 2', 'locked 1', 'restricted 1'].map(l => l).sort((a, b) => ['alpha', 'bravo', 'locked', 'restricted'].indexOf(a.split(' ')[0]) - ['alpha', 'bravo', 'locked', 'restricted'].indexOf(b.split(' ')[0])).map((l, i, arr) => l) && await labels());
-  assert.deepEqual((await labels()).map(l => l.split(' ')[0]), ['alpha', 'alpha', 'alpha', 'bravo', 'bravo', 'locked', 'restricted']);
+  // Sorting groups the pages by file in name order, each file keeping its current page order.
+  assert.deepEqual(await labels(), ['alpha 3', 'alpha 1', 'alpha 2', 'bravo 2', 'bravo 1', 'locked 1', 'restricted 1']);
   assert.deepEqual(await page.$$eval('.mpdf-file-name', l => l.map(e => e.textContent)), ['alpha.pdf', 'bravo.pdf', 'locked.pdf', 'restricted.pdf']);
 
   // ---- Splitting into a ZIP ----
@@ -158,13 +161,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual(entries.map(e => e.name), ['report-page-1.pdf', 'report-page-2.pdf', 'report-page-3.pdf', 'report-page-4.pdf', 'report-page-5.pdf', 'report-page-6.pdf', 'report-page-7.pdf']);
   pdf = await inspect(entries[3].data);
   assert.equal(pdf.pages.length, 1);
-  assert.equal(pdf.pages[0].text, 'Bravo 1');
+  assert.equal(pdf.pages[0].text, 'Bravo 2');
   await page.selectOption('#mpdf-split-mode', 'every');
   await page.fill('#mpdf-every', '3');
   out = await save('#mpdf-split');
   entries = unzip(out.buf);
   assert.deepEqual(entries.map(e => e.name), ['report-pages-1-3.pdf', 'report-pages-4-6.pdf', 'report-pages-7.pdf']);
-  assert.deepEqual((await inspect(entries[1].data)).pages.map(p => p.text), ['Bravo 1', 'Bravo 2', 'Locked 1']);
+  assert.deepEqual((await inspect(entries[1].data)).pages.map(p => p.text), ['Bravo 2', 'Bravo 1', 'Locked 1']);
   await page.fill('#mpdf-every', '0');
   await page.click('#mpdf-split');
   assert.match(await page.textContent('#mpdf-error'), /from 1 to 9999/);
@@ -172,7 +175,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   out = await save('#mpdf-split');
   entries = unzip(out.buf);
   assert.deepEqual(entries.map(e => e.name), ['alpha.pdf', 'bravo.pdf', 'locked.pdf', 'restricted.pdf']);
-  assert.deepEqual((await inspect(entries[0].data)).pages.map(p => p.text), ['Alpha 1', 'Alpha 2', 'Alpha 3']);
+  assert.deepEqual((await inspect(entries[0].data)).pages.map(p => p.text + '@' + p.rotate), ['Alpha 3@0', 'Alpha 1@0', 'Alpha 2@270']);
 
   // ---- Removing a file, undo, and a big file with lazy thumbnails ----
   await page.click('.mpdf-file:nth-child(3) .mpdf-fdel');

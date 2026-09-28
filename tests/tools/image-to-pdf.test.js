@@ -32,6 +32,7 @@ function parsePdf(buf, assert) {
   assert.match(trailer, /^trailer/);
   assert.equal(Number(/\/Size (\d+)/.exec(trailer)[1]), count, 'trailer /Size');
   const rootRef = Number(/\/Root (\d+) 0 R/.exec(trailer)[1]);
+  const infoRef = Number(/\/Info (\d+) 0 R/.exec(trailer)[1]);
 
   function obj(n) {
     const off = offsets[n];
@@ -60,6 +61,9 @@ function parsePdf(buf, assert) {
     const mediaBox = /\/MediaBox \[([^\]]+)\]/.exec(pg.dict)[1].trim().split(/\s+/).map(Number);
     const content = obj(Number(/\/Contents (\d+) 0 R/.exec(pg.dict)[1])).data.toString('latin1');
     const cm = /([-\d.\s]+) cm/.exec(content)[1].trim().split(/\s+/).map(Number);
+    // Fill pages clip to the area inside the margins: "x y w h re W n" before the matrix.
+    const clipM = /^q\n([-\d.\s]+) re W n\n/.exec(content);
+    const clip = clipM ? clipM[1].trim().split(/\s+/).map(Number) : null;
     const imName = /\/(\w+) Do/.exec(content)[1];
     const imRef = Number(new RegExp('/' + imName + ' (\\d+) 0 R').exec(pg.dict)[1]);
     const im = obj(imRef);
@@ -67,22 +71,66 @@ function parsePdf(buf, assert) {
     // Either a device colour space name or [/ICCBased N 0 R].
     const cs = /\/ColorSpace (?:\/(\w+)|\[\s*\/ICCBased (\d+) 0 R\s*\])/.exec(im.dict);
     assert.ok(cs, `image ${imRef} has a /ColorSpace`);
-    let icc = null;
+    let icc = null, smask = null;
+    const sm = /\/SMask (\d+) 0 R/.exec(im.dict);
+    if (sm) {
+      const m = obj(Number(sm[1]));
+      smask = { dict: m.dict, data: m.data, width: Number(/\/Width (\d+)/.exec(m.dict)[1]), height: Number(/\/Height (\d+)/.exec(m.dict)[1]) };
+    }
     if (cs[2]) {
       const prof = obj(Number(cs[2]));
       icc = { num: Number(cs[2]), n: Number(/\/N (\d+)/.exec(prof.dict)[1]), alternate: (/\/Alternate \/(\w+)/.exec(prof.dict) || [])[1], data: prof.data };
     }
+    const pred = /\/DecodeParms << \/Predictor (\d+) \/Colors (\d+) \/BitsPerComponent 8 \/Columns (\d+) >>/.exec(im.dict);
     return {
-      mediaBox, cm,
+      mediaBox, cm, clip,
       image: {
         width: num('Width'), height: num('Height'),
-        colorSpace: cs[1] || 'ICCBased', icc,
+        colorSpace: cs[1] || 'ICCBased', icc, smask, dict: im.dict,
         filter: /\/Filter \/(\w+)/.exec(im.dict)[1],
+        predictor: pred ? Number(pred[1]) : null,
         data: im.data,
       },
     };
   });
-  return { pages, text: s, count };
+  return { pages, text: s, count, catalog: catalog.dict, info: obj(infoRef).dict };
+}
+
+// Undoes the PNG row filters of a /Predictor 15 Flate stream (RFC 2083, 6), written from the spec.
+function unpredict(data, colors, width, assert) {
+  const rowLen = colors * width, rows = data.length / (rowLen + 1);
+  assert.ok(Number.isInteger(rows), `predicted data is whole rows: ${data.length} bytes for ${width} columns`);
+  const out = Buffer.alloc(rows * rowLen);
+  let prev = Buffer.alloc(rowLen);
+  for (let y = 0; y < rows; y++) {
+    const f = data[y * (rowLen + 1)];
+    assert.ok(f <= 4, `row ${y} filter type ${f}`);
+    const line = data.subarray(y * (rowLen + 1) + 1, (y + 1) * (rowLen + 1));
+    const cur = out.subarray(y * rowLen, (y + 1) * rowLen);
+    for (let i = 0; i < rowLen; i++) {
+      const a = i >= colors ? cur[i - colors] : 0, b = prev[i], c = i >= colors ? prev[i - colors] : 0;
+      let pr = 0;
+      if (f === 1) pr = a;
+      else if (f === 2) pr = b;
+      else if (f === 3) pr = (a + b) >> 1;
+      else if (f === 4) { const q = a + b - c, pa = Math.abs(q - a), pb = Math.abs(q - b), pc = Math.abs(q - c); pr = pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      cur[i] = (line[i] + pr) & 255;
+    }
+    prev = cur;
+  }
+  return out;
+}
+// Raw pixels of a lossless page image, from its zlib data and predictor.
+function flatePixels(image, assert) {
+  assert.equal(image.filter, 'FlateDecode');
+  assert.equal(image.predictor, 15, 'PNG predictors');
+  return unpredict(zlib.inflateSync(image.data), 3, image.width, assert);
+}
+// Decodes a PDF text string: <FEFF...> UTF-16BE hex.
+function pdfString(dict, key) {
+  const m = new RegExp('/' + key + ' <FEFF([0-9A-F]*)>').exec(dict);
+  if (!m) return null;
+  return Buffer.from(m[1], 'hex').swap16().toString('utf16le');
 }
 
 // Reads width, height and component count from a JPEG's SOF marker.
@@ -240,8 +288,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   near(assert, p2.cm, [30, 0, 0, 22.5, 381, 294.75], 'natural size at 96 dpi, centred');
   near(assert, p3.cm, [24, 0, 0, 30, 384, 291], 'natural size, grey');
   assert.equal(p1.image.filter, 'DCTDecode', 'JPEGs stay JPEG in lossless mode');
-  assert.equal(p2.image.filter, 'FlateDecode');
-  const px = zlib.inflateSync(p2.image.data);
+  const px = flatePixels(p2.image, assert);
   assert.equal(px.length, 40 * 30 * 3);
   const rgb = (x, y) => [...px.subarray((y * 40 + x) * 3, (y * 40 + x) * 3 + 3)];
   assert.deepEqual(rgb(0, 0), [255, 0, 0], 'opaque red stays red');
@@ -264,6 +311,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => !document.querySelector('#itp-make').disabled);
 
   // Drag the third card's handle onto the first card with the mouse.
+  await page.locator('#itp-list .itp-handle').nth(2).scrollIntoViewIfNeeded();
   const handle = await page.locator('#itp-list .itp-handle').nth(2).boundingBox();
   const target = await page.locator('#itp-list .itp-thumb').first().boundingBox();
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
@@ -279,8 +327,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   near(assert, p2.mediaBox, [0, 0, 22.5, 15], 'CMYK 30x20 page');
   near(assert, p3.mediaBox, [0, 0, 18, 18], 'GIF 24x24 page');
   near(assert, p2.cm, [22.5, 0, 0, 15, 0, 0], 'image fills fitted page');
-  assert.deepEqual(zlib.inflateSync(p1.image.data).subarray(0, 3).toJSON().data, [255, 128, 0], 'WebP pixel exact');
-  assert.deepEqual(zlib.inflateSync(p3.image.data).subarray(0, 3).toJSON().data, [0, 128, 0], 'GIF pixel exact');
+  assert.deepEqual([...flatePixels(p1.image, assert).subarray(0, 3)], [255, 128, 0], 'WebP pixel exact');
+  assert.deepEqual([...flatePixels(p3.image, assert).subarray(0, 3)], [0, 128, 0], 'GIF pixel exact');
   // CMYK JPEG is not copied raw; it is decoded by the browser and stored as RGB.
   assert.equal(p2.image.colorSpace, 'DeviceRGB');
   assert.equal(p2.image.filter, 'DCTDecode');
@@ -427,6 +475,223 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual([pdf.pages[0].image.width, pdf.pages[0].image.height], [4096, 4096]);
   near(assert, pdf.pages[0].mediaBox, [0, 0, 3072.75, 3072.75], 'page still follows the original 4097 px size');
   assert.match(await page.textContent('#itp-status'), /“huge\.png” was larger than 16\.7 megapixels.*scaled down/);
+
+  // ---------- HEIC, TIFF, BMP, AVIF and SVG input ----------
+  // quadrants.heic 240x160: (220,40,40) (40,180,60) / (40,60,200) (240,240,240) (from the heic-to-jpg fixtures).
+  // two-pages.tif, flag.bmp and flat.avif were made with Pillow (colours below). The SVG has only a viewBox,
+  // 100 x 50: it used to be read as the browser's 300 x 150 default, squashing it, and drawn at that size.
+  await page.click('#itp-clear');
+  await page.selectOption('#itp-size', 'fit');
+  await page.selectOption('#itp-margin', '0');
+  await page.selectOption('#itp-mode', 'lossless');
+  await page.uncheck('#itp-alpha');
+  const halves = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect width="100" height="50" fill="#ff0000"/><rect x="50" width="50" height="50" fill="#0000ff"/></svg>');
+  await page.setInputFiles('#itp-file', [
+    { name: 'quadrants.heic', mimeType: 'image/heic', buffer: fs.readFileSync(fx('quadrants.heic')) },
+    { name: 'two-pages.tif', mimeType: 'image/tiff', buffer: fs.readFileSync(fx('two-pages.tif')) },
+    { name: 'flag.bmp', mimeType: 'image/bmp', buffer: fs.readFileSync(fx('flag.bmp')) },
+    { name: 'flat.avif', mimeType: 'image/avif', buffer: fs.readFileSync(fx('flat.avif')) },
+    { name: 'halves.svg', mimeType: 'image/svg+xml', buffer: halves },
+    { name: 'empty.png', mimeType: 'image/png', buffer: Buffer.alloc(0) },
+    { name: 'broken.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>') },
+  ]);
+  await page.waitForFunction(() => document.querySelectorAll('#itp-list .itp-item').length === 5 && !document.querySelector('#itp-make').disabled, null, { timeout: 30000 });
+  assert.deepEqual((await page.locator('#itp-list .itp-dims').allTextContents()).map(t => t.replace(/ · [\d.]+ K?B$/, '')),
+    ['240 × 160 · HEIC', '60 × 40 · TIFF', '32 × 16 · BMP', '64 × 32 · AVIF', '100 × 50 · SVG']);
+  assert.match(await page.textContent('#itp-note'), /two-pages\.tif” holds 2 pages; only the first page is added/);
+  const errText = await page.textContent('#itp-error');
+  assert.match(errText, /^2 files could not be added: empty\.png \(The file is empty \(0 bytes\)\); broken\.svg \(This is not valid SVG/, errText);
+  ({ buf, pdf } = await makePdf());
+  const [h1, t1, b1, a1, s1] = pdf.pages;
+  near(assert, h1.mediaBox, [0, 0, 180, 120], 'HEIC page at 96 px per inch');
+  assert.deepEqual([h1.image.width, h1.image.height, h1.image.filter], [240, 160, 'DCTDecode'], 'HEIC photos become JPEG even in lossless mode');
+  const quad = await page.evaluate(async bytes => {
+    const bmp = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }));
+    const c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext('2d');
+    x.drawImage(bmp, 0, 0);
+    return [[60, 40], [180, 40], [60, 120], [180, 120]].map(([px, py]) => Array.from(x.getImageData(px, py, 1, 1).data.slice(0, 3)));
+  }, [...h1.image.data]);
+  [[220, 40, 40], [40, 180, 60], [40, 60, 200], [240, 240, 240]].forEach((c, i) => c.forEach((v, j) => assert.ok(Math.abs(quad[i][j] - v) <= 12, `HEIC quadrant ${i}: ${quad[i]} vs ${c}`)));
+  const tif = flatePixels(t1.image, assert), tpx = (x, y) => [...tif.subarray((y * 60 + x) * 3, (y * 60 + x) * 3 + 3)];
+  assert.deepEqual([tpx(10, 20), tpx(45, 20)], [[200, 30, 30], [30, 30, 200]], 'first TIFF page, exact pixels');
+  const bmpPx = flatePixels(b1.image, assert), bpx = (x, y) => [...bmpPx.subarray((y * 32 + x) * 3, (y * 32 + x) * 3 + 3)];
+  assert.deepEqual([bpx(5, 3), bpx(5, 12)], [[250, 200, 0], [0, 90, 160]], 'BMP pixels exact');
+  assert.deepEqual([a1.image.width, a1.image.height, a1.image.filter], [64, 32, 'DCTDecode'], 'AVIF is a lossy photo: JPEG');
+  // SVG: page 100 x 50 px at 96 px/in = 75 x 37.5 pt; drawn at 300 ppi = 312.5 x 156.25, rounded.
+  near(assert, s1.mediaBox, [0, 0, 75, 37.5], 'SVG keeps its viewBox shape');
+  assert.deepEqual([s1.image.width, s1.image.height], [313, 156], 'SVG rendered at 300 ppi, not its nominal 100 x 50 px');
+  const svgPx = flatePixels(s1.image, assert), spx = (x, y) => [...svgPx.subarray((y * 313 + x) * 3, (y * 313 + x) * 3 + 3)];
+  assert.deepEqual([spx(40, 78), spx(270, 78)], [[255, 0, 0], [0, 0, 255]], 'SVG halves');
+  // The predictor data is standard PNG: wrapped in a PNG file, the browser's own decoder reads the same pixels.
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(Buffer.concat([Buffer.from(type), data])));
+    return Buffer.concat([len, Buffer.from(type), data, crc]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(60, 0); ihdr.writeUInt32BE(40, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const pngWrap = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', t1.image.data), chunk('IEND', Buffer.alloc(0))]);
+  const viaBrowser = await page.evaluate(async bytes => {
+    const bmp = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+    const c = new OffscreenCanvas(60, 40), x = c.getContext('2d');
+    x.drawImage(bmp, 0, 0);
+    const d = x.getImageData(0, 0, 60, 40).data, out = [];
+    for (let i = 0; i < d.length; i += 4) out.push(d[i], d[i + 1], d[i + 2]);
+    return out;
+  }, [...pngWrap]);
+  assert.deepEqual(viaBrowser, [...tif], 'browser PNG decoder agrees with the predictor decoding');
+
+  // ---------- Fit or fill, per page ----------
+  // A4 portrait, 1/2 in (36 pt) margin: the area inside is 523.28 x 769.89 pt.
+  await page.click('#itp-clear');
+  await page.selectOption('#itp-size', 'a4');
+  await page.selectOption('#itp-orient', 'portrait');
+  await page.selectOption('#itp-margin', '36');
+  await page.selectOption('#itp-mode', 'jpeg');
+  await page.check('#itp-enlarge');
+  await page.selectOption('#itp-place', 'fill');
+  await page.setInputFiles('#itp-file', [fx('alpha.png'), fx('gray.jpg')]);
+  await page.waitForFunction(() => document.querySelectorAll('#itp-list .itp-item').length === 2 && !document.querySelector('#itp-make').disabled);
+  assert.deepEqual(await page.locator('#itp-list select.itp-fit').evaluateAll(els => els.map(e => e.value)), ['fill', 'fill'], 'new pages follow the all-pages setting');
+  await page.locator('#itp-list select.itp-fit').nth(1).selectOption('fit');
+  assert.equal(await page.inputValue('#itp-place'), 'mixed', 'the all-pages select says the pages differ');
+  assert.match(await page.textContent('#itp-status'), /Page 2 set to fit/);
+  // The Fill preview overflows its (clipped) area; the Fit one does not.
+  const previewW = await page.locator('#itp-list .itp-area img').evaluateAll(els => els.map(e => parseFloat(e.style.width)));
+  assert.ok(previewW[0] > 150 && Math.abs(previewW[1] - 100) < 0.01, `preview widths ${previewW}`);
+  ({ pdf } = await makePdf());
+  let [f1, f2] = pdf.pages;
+  // alpha.png 40 x 30 px = 30 x 22.5 pt. Cover: max(523.28 / 30, 769.89 / 22.5) = 34.21733, so 1026.52 x 769.89,
+  // centred: x = (595.28 - 1026.52) / 2 = -215.62.
+  near(assert, f1.clip, [36, 36, 523.28, 769.89], 'fill clips to the margins');
+  near(assert, f1.cm, [1026.52, 0, 0, 769.89, -215.62, 36], 'fill covers the area', 0.01);
+  // gray.jpg 32 x 40 px = 24 x 30 pt. Fit: min(523.28 / 24, 769.89 / 30) = 21.80333, so 523.28 x 654.1.
+  assert.equal(f2.clip, null, 'fit needs no clipping');
+  near(assert, f2.cm, [523.28, 0, 0, 654.1, 36, 93.895], 'fit inside the margins', 0.01);
+  await page.selectOption('#itp-place', 'fit');
+  assert.deepEqual(await page.locator('#itp-list select.itp-fit').evaluateAll(els => els.map(e => e.value)), ['fit', 'fit']);
+  await page.selectOption('#itp-size', 'fit');
+  assert.equal(await page.locator('#itp-list select.itp-fit').first().isDisabled(), true, 'placement does not apply to fitted pages');
+  assert.equal(await page.isDisabled('#itp-place'), true);
+
+  // Other page sizes, in points: US Legal, A5, A3 (portrait, whatever the image).
+  for (const [size, box] of [['legal', [612, 1008]], ['a5', [419.53, 595.28]], ['a3', [841.89, 1190.55]]]) {
+    await page.selectOption('#itp-size', size);
+    ({ pdf } = await makePdf());
+    for (const pg of pdf.pages) near(assert, pg.mediaBox, [0, 0, ...box], size);
+  }
+
+  // ---------- Keep transparency ----------
+  // alpha.png: red opaque (x < 20), blue with alpha 0 (x >= 20, y < 20), black with alpha 128 (x >= 20, y >= 20).
+  await page.selectOption('#itp-size', 'fit');
+  await page.selectOption('#itp-margin', '0');
+  await page.selectOption('#itp-mode', 'lossless');
+  await page.check('#itp-alpha');
+  ({ pdf } = await makePdf());
+  [f1, f2] = pdf.pages;
+  const mask = f1.image.smask;
+  assert.ok(mask, 'transparent PNG gets a soft mask');
+  assert.match(mask.dict, /\/ColorSpace \/DeviceGray \/BitsPerComponent 8 \/Matte \[1 1 1\] \/Filter \/FlateDecode \/DecodeParms << \/Predictor 15 \/Colors 1 \/BitsPerComponent 8 \/Columns 40 >>/);
+  assert.deepEqual([mask.width, mask.height], [40, 30]);
+  const alphaPx = unpredict(zlib.inflateSync(mask.data), 1, 40, assert);
+  assert.deepEqual([alphaPx[0], alphaPx[5 * 40 + 30], alphaPx[25 * 40 + 30]], [255, 0, 128], 'alpha values kept');
+  const colour = flatePixels(f1.image, assert);
+  assert.deepEqual([...colour.subarray((5 * 40 + 30) * 3, (5 * 40 + 30) * 3 + 3)], [255, 255, 255], 'invisible pixels are the matte colour, white');
+  colour.subarray((25 * 40 + 30) * 3, (25 * 40 + 30) * 3 + 3).forEach(v => assert.ok(Math.abs(v - 127) <= 2, `pre-blended with white: ${v}`));
+  assert.equal(f2.image.smask, null, 'an opaque JPEG has no mask');
+  await page.selectOption('#itp-mode', 'jpeg');
+  ({ pdf } = await makePdf());
+  assert.equal(pdf.pages[0].image.filter, 'DCTDecode');
+  assert.ok(pdf.pages[0].image.smask, 'JPEG colour with a Flate mask');
+  await page.uncheck('#itp-alpha');
+  ({ buf, pdf } = await makePdf());
+  assert.equal(buf.indexOf('/SMask'), -1, 'no masks unless asked for');
+
+  // ---------- Compression, resolution limit and the size estimate ----------
+  const noiseJpeg = async (w, h, q) => Buffer.from(await page.evaluate(async ([w, h, q]) => {
+    const c = new OffscreenCanvas(w, h), x = c.getContext('2d'), img = x.createImageData(w, h);
+    let seed = 7;
+    for (let i = 0; i < img.data.length; i += 4) {
+      seed = (seed * 1103515245 + 12345) >>> 0;
+      img.data[i] = (seed >>> 8) & 255; img.data[i + 1] = (i >> 6) & 255; img.data[i + 2] = 128; img.data[i + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+    const b = await c.convertToBlob({ type: 'image/jpeg', quality: q });
+    return Array.from(new Uint8Array(await b.arrayBuffer()));
+  }, [w, h, q]));
+  const photo = await noiseJpeg(2000, 1500, 0.95), lowq = await noiseJpeg(200, 150, 0.3);
+  await page.click('#itp-clear');
+  await page.selectOption('#itp-size', 'a4');
+  await page.selectOption('#itp-orient', 'auto');
+  await page.selectOption('#itp-margin', '18');
+  await page.selectOption('#itp-place', 'fit');
+  await page.setInputFiles('#itp-file', [{ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: photo }, { name: 'lowq.jpg', mimeType: 'image/jpeg', buffer: lowq }]);
+  await page.waitForFunction(() => document.querySelectorAll('#itp-list .itp-item').length === 2 && !document.querySelector('#itp-make').disabled);
+  const estimateOf = async () => {
+    await page.waitForFunction(() => /^Estimated PDF size: about [\d.]+ [KM]?B\.$/.test(document.querySelector('#itp-estimate').textContent), null, { timeout: 30000 });
+    const [, v, unit] = /about ([\d.]+) ([KM]?B)/.exec(await page.textContent('#itp-estimate'));
+    return Number(v) * { B: 1, KB: 1024, MB: 1048576 }[unit];
+  };
+  let est = await estimateOf();
+  ({ buf, pdf } = await makePdf());
+  const offSize = buf.length;
+  assert.ok(Math.abs(est - offSize) / offSize < 0.03, `estimate ${est} vs actual ${offSize}`);
+  assert.equal(pdf.pages[0].image.width, 2000, 'compression off copies the photo');
+  assert.equal(Buffer.compare(pdf.pages[0].image.data, metadataFree(photo)), 0);
+  await page.selectOption('#itp-compress', 'on');
+  assert.equal(await page.inputValue('#itp-quality'), '75', 'compression starts from quality 75');
+  assert.equal(await page.isVisible('#itp-ppi-field'), true);
+  assert.equal(await page.isHidden('#itp-mode-field'), true);
+  assert.equal(await page.inputValue('#itp-ppi'), '150');
+  assert.match(await page.textContent('#itp-estimate'), /^Estimating/, 'a stale estimate is replaced at once');
+  // Page 1: landscape A4 (841.89 x 595.28) with 18 pt margins; 1500 x 1125 pt scaled by
+  // min(805.89 / 1500, 559.28 / 1125) = 0.4971378 is 745.707 pt wide. At 150 ppi that is 745.707 / 72 * 150 = 1553.6 px.
+  // Page 2 (200 px wide, 128 ppi at its enlarged size) stays under the limit; at quality 75 it would grow, so it is kept.
+  await page.evaluate(() => {
+    window.__lt = [];
+    new PerformanceObserver(l => l.getEntries().forEach(e => window.__lt.push(Math.round(e.duration)))).observe({ type: 'longtask' });
+  });
+  est = await estimateOf();
+  ({ buf, pdf } = await makePdf());
+  assert.ok(Math.abs(est - buf.length) / buf.length < 0.03, `estimate ${est} vs actual ${buf.length}`);
+  assert.ok(buf.length < offSize / 3, `compressed PDF ${buf.length} vs ${offSize}`);
+  const [c1, c2] = pdf.pages;
+  assert.ok(Math.abs(c1.image.width - 1554) <= 1 && Math.abs(c1.image.height - 1165) <= 1, `150 ppi: ${c1.image.width} x ${c1.image.height}`);
+  assert.equal(c1.image.filter, 'DCTDecode');
+  near(assert, c1.cm, [745.707, 0, 0, 559.28, 48.092, 18], 'same place on the page', 0.01);
+  assert.equal(Buffer.compare(c2.image.data, metadataFree(lowq)), 0, 'a JPEG that would grow is kept as it was');
+  const tasks = await page.evaluate(() => window.__lt);
+  assert.ok(tasks.every(t => t < 200), `no long main-thread tasks while compressing: ${tasks}`);
+  await page.selectOption('#itp-ppi', '300');
+  est = await estimateOf();
+  ({ buf, pdf } = await makePdf());
+  assert.equal(pdf.pages[0].image.width, 2000, 'at 300 ppi the 193 ppi photo keeps its pixels');
+  assert.ok(est > 0);
+  await page.selectOption('#itp-compress', 'off');
+  assert.equal(await page.inputValue('#itp-quality'), '92', 'back to the default quality');
+
+  // ---------- Title and author ----------
+  await page.fill('#itp-title', 'Überweisung – März 😀');
+  await page.fill('#itp-author', 'Zoë (O’Brien)');
+  await page.fill('#itp-name', 'receipts');
+  let res = await makePdf();
+  assert.equal(res.name, 'receipts.pdf');
+  assert.equal(pdfString(res.pdf.info, 'Title'), 'Überweisung – März 😀', 'UTF-16 title with an emoji');
+  assert.equal(pdfString(res.pdf.info, 'Author'), 'Zoë (O’Brien)');
+  assert.match(res.pdf.catalog, /\/ViewerPreferences << \/DisplayDocTitle true >>/, 'readers show the title');
+  await page.fill('#itp-title', '');
+  await page.fill('#itp-author', '  ');
+  res = await makePdf();
+  assert.equal(pdfString(res.pdf.info, 'Title'), 'receipts', 'no title: the file name');
+  assert.equal(pdfString(res.pdf.info, 'Author'), null, 'no empty author');
+  assert.doesNotMatch(res.pdf.catalog, /DisplayDocTitle/);
+
+  // Phone width after adding pages: no sideways scrolling, and the settings sit under the pages.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(150);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1, 'no horizontal scroll at 390 px');
+  const [listBox, sideBox] = [await page.locator('#itp-list').boundingBox(), await page.locator('.itp-side').boundingBox()];
+  assert.ok(sideBox.y >= listBox.y + listBox.height, 'settings below the pages on a phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   // Adding images while a PDF is being created is refused with a message, not silently dropped.
   await page.evaluate(() => {

@@ -1,6 +1,6 @@
 ---
 title: "Image Converter: JPG, PNG, WebP, AVIF, ICO"
-description: Convert images to JPG, PNG, WebP, AVIF, BMP or ICO in your browser. Batch convert with quality, resize and background options, then download a ZIP.
+description: Convert images to JPG, PNG, WebP, AVIF, GIF, TIFF, BMP or ICO in your browser. Batch convert with quality, resize and background options, then get a ZIP.
 category: Image & PDF
 keywords: [image converter, png to jpg, jpg to png, webp to png, webp to jpg, avif to jpg, png to ico, bmp to png]
 howto: |
@@ -11,7 +11,9 @@ howto: |
   in a ZIP. Change a setting and the whole list is converted again with it.
 
   Inputs can be PNG, JPG, WebP, AVIF, GIF, BMP, ICO, TIFF, HEIC and SVG,
-  mixed in one batch. The format is recognised from the file's contents, not
+  mixed in one batch. HEIC and TIFF are read by open-source decoders that
+  load only when needed ([libheif](/assets/vendor/libheif/README.txt), LGPL-3.0,
+  and [UTIF.js](/assets/vendor/utif/README.txt), MIT). The format is recognised from the file's contents, not
   its name, so a WebP saved as *photo.jpg* is still read correctly.
 
   ## Which format to save as
@@ -21,17 +23,20 @@ howto: |
   | JPG | No | Lossy | Photos, email, upload forms |
   | PNG | Yes | Lossless | Screenshots, logos, text, sharp graphics |
   | WebP | Yes | Lossy | Websites: usually smaller than JPG at similar quality |
-  | AVIF | Yes | Lossy | Websites: smaller still, where your browser can save it |
+  | AVIF | Yes | Lossy | Websites: often smaller still, but slower to create |
+  | GIF | On or off only | Lossless up to 256 colours | Simple graphics and old software |
+  | TIFF | Yes | Lossless (LZW) | Printing, publishing and photo editing |
   | BMP | No | None | Older software that wants plain bitmaps |
   | ICO | Yes | PNG inside | Favicons and Windows icons |
 
   ## What changes when you convert
 
   - **Transparency.** JPG and BMP cannot store it, so transparent areas are
-    filled with the background colour you pick (white by default).
+    filled with the background colour you pick (white by default). GIF
+    pixels are either fully transparent or fully opaque.
   - **Quality.** JPG, WebP and AVIF discard detail the eye barely notices.
-    85 to 92% suits photos; lower settings give smaller files with visible
-    blocks or smearing. PNG and BMP ignore the setting.
+    85 to 92% suits photos in JPG and WebP; lower settings give smaller files
+    with visible blocks or smearing. PNG, GIF, TIFF and BMP ignore the setting.
   - **Lossless is not a repair.** Turning a JPG into a PNG keeps every pixel
     exactly, compression artefacts included, and the file usually grows.
   - **Orientation.** A phone photo tagged as rotated is saved upright, so it
@@ -59,22 +64,26 @@ howto: |
 
   ## AVIF output
 
-  Every current browser can open AVIF files, but a web page can only save
-  AVIF when the browser includes an AVIF encoder for its canvas, and most do
-  not. The converter tests this when the page loads: if the AVIF choice is
-  greyed out, your browser cannot write AVIF here, while AVIF files you add
-  still convert to the other formats.
+  Every current browser can open AVIF files, but most cannot create them from
+  a web page. The converter therefore uses libavif, the Alliance for Open
+  Media's open-source AVIF library, with its libaom AV1 encoder, compiled to
+  WebAssembly ([licenses](/assets/vendor/avif/README.txt)). It is
+  downloaded (about 3.5 MB) only the first time you choose
+  AVIF and runs in a background thread. AV1 compression takes real work: a
+  large photo can take several seconds, and the limit is 50 megapixels.
+  AVIF's quality scale is not JPG's: on a typical photo, 60 to 70% comes close
+  to a JPG at 85 to 90% in roughly half the file size.
 faq:
   - q: Are my images uploaded to a server?
-    a: No. Every image is decoded and re-encoded by your own browser. Nothing is sent anywhere or stored, and the page keeps working offline once it has loaded.
+    a: No. Every image is decoded and re-encoded by your own browser. Nothing is sent anywhere or stored. The only extra download is the HEIC or TIFF decoder, fetched from this site the first time you add such a file.
   - q: Why is my PNG larger than the JPG I started with?
     a: PNG is lossless, so it stores every pixel exactly, including the noise and artefacts of the JPG. That takes more space than JPG's lossy compression. For photos, stay with JPG or use WebP.
   - q: Can I convert an animated GIF and keep the animation?
     a: No. This tool saves still images, so only the first frame is converted. The file list says when an input was animated.
   - q: How do I make a favicon.ico from a PNG?
     a: Choose ICO as the output format, tick the 16, 32 and 48 pixel sizes (add 256 for Windows), add your PNG and download the .ico file. Transparency is kept.
-  - q: Why can't I choose AVIF?
-    a: Your browser can display AVIF images but cannot encode them from a web page. Pick WebP for a similar result, or convert AVIF files you have into JPG or PNG, which works in every browser.
+  - q: Why is saving as AVIF slower than the other formats?
+    a: Browsers create JPG, PNG and WebP files themselves, but most cannot create AVIF. The converter uses the libavif encoder compiled to WebAssembly instead, which downloads once (about 3.5 MB) and takes a few seconds for a large photo. It still runs entirely on your device.
 ---
 <style>
 .imc-drop {
@@ -86,7 +95,7 @@ faq:
 .imc-drop p { margin: 10px 0 0; }
 .imc-drop .hint { margin-top: 4px; }
 .imc-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
-.imc-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
+.imc-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
 .imc-opts .field { margin: 0; }
 .imc-qlabel { display: flex; justify-content: space-between; gap: 8px; }
 .imc-qlabel output { font-variant-numeric: tabular-nums; }
@@ -144,6 +153,8 @@ faq:
       <option value="png">PNG</option>
       <option value="webp">WebP</option>
       <option value="avif">AVIF</option>
+      <option value="gif">GIF</option>
+      <option value="tiff">TIFF</option>
       <option value="bmp">BMP</option>
       <option value="ico">ICO (icon)</option>
     </select>
@@ -214,10 +225,12 @@ faq:
   var sizesBox = $('#imc-sizes'), note = $('#imc-note'), errBox = $('#imc-error');
   var summary = $('#imc-summary'), status = $('#imc-status'), zipBtn = $('#imc-zip'), clearBtn = $('#imc-clear');
 
-  var LABEL = { jpeg: 'JPG', png: 'PNG', webp: 'WebP', avif: 'AVIF', bmp: 'BMP', ico: 'ICO' };
-  var EXT = { jpeg: 'jpg', png: 'png', webp: 'webp', avif: 'avif', bmp: 'bmp', ico: 'ico' };
+  var LABEL = { jpeg: 'JPG', png: 'PNG', webp: 'WebP', avif: 'AVIF', gif: 'GIF', tiff: 'TIFF', bmp: 'BMP', ico: 'ICO' };
+  var EXT = { jpeg: 'jpg', png: 'png', webp: 'webp', avif: 'avif', gif: 'gif', tiff: 'tif', bmp: 'bmp', ico: 'ico' };
   var MAX_SIDE = 20000, MAX_PIXELS = 100e6, CACHE_PIXELS = 60e6, CONCURRENCY = 2;
-  var items = [], nextId = 1, gen = 0, running = 0, avifOk = false;
+  var items = [], nextId = 1, gen = 0, running = 0;
+  var cannot = { avif: true }; // output formats this browser cannot encode (checked below)
+  var avifLoaded = false;
   var cache = new Map(); // item id -> decoded result, most recently used last
 
   fileInput.accept = TTImage.accept;
@@ -236,7 +249,7 @@ faq:
   // ---------- Settings ----------
   function settings() {
     var fmt = fmtSel.value;
-    if (fmt === 'avif' && !avifOk) fmt = 'jpeg';
+    if (cannot[fmt]) fmt = 'jpeg';
     var v = parseFloat(resizeVal.value);
     return {
       fmt: fmt,
@@ -269,10 +282,13 @@ faq:
     resizeVal.setAttribute('aria-label', { max: 'Longest side in pixels', width: 'Width in pixels', height: 'Height in pixels', percent: 'Scale in percent' }[resizeSel.value] || 'Size value');
     qualityOut.textContent = quality.value + '%';
     var n = [];
-    if (f === 'avif' && !avifOk) n.push('This browser cannot save AVIF images, so AVIF output is unavailable here. It can still convert AVIF files you add.');
+    if (cannot[f]) n.push('This browser cannot save ' + LABEL[f] + ' images, so ' + LABEL[f] + ' output is unavailable here. It can still convert ' + LABEL[f] + ' files you add.');
     if (f === 'ico') n.push(s.icoSizes.length ? 'One icon file with ' + s.icoSizes.length + (s.icoSizes.length === 1 ? ' size' : ' sizes') + ': ' + s.icoSizes.join(', ') + ' px. Pictures that are not square are centred on a transparent square.' : 'Tick at least one icon size.');
     if (f === 'png') n.push('PNG is lossless: every pixel is kept exactly, and photos make large files.');
     if (f === 'bmp') n.push('BMP files are uncompressed, so they are large: about 3 bytes per pixel.');
+    if (f === 'gif') n.push('GIF holds at most 256 colours: pictures with more get a dithered palette, and each pixel is either fully transparent or opaque. Best for simple graphics, not photos.');
+    if (f === 'tiff') n.push('TIFF is saved losslessly with LZW compression, which print, scanning and photo-editing software reads. Transparency is kept.');
+    if (f === 'avif' && !cannot.avif) n.push('AVIF is encoded by libavif, which loads once (about 3.5 MB); a large photo takes a few seconds. Its quality scale differs from JPG’s: 60 to 70% comes close to a JPG at 85 to 90%, in about half the size.');
     if (resizeSel.value === 'max' && f !== 'ico') n.push('Images smaller than this are not enlarged.');
     note.textContent = n.join(' ');
   }
@@ -306,7 +322,7 @@ faq:
     else if (it.state === 'done') {
       var saved = it.file.size ? Math.round((1 - it.blob.size / it.file.size) * 100) : 0;
       m = it.inLabel + ' ' + it.inW + '×' + it.inH + ', ' + fmtBytes(it.file.size) + ' → ' + LABEL[it.fmt] + ' ' + it.outW + '×' + it.outH + ', ' + fmtBytes(it.blob.size) +
-        (it.fmt === 'ico' ? '' : saved > 0 ? ' (' + saved + '% smaller)' : saved < 0 ? ' (' + (-saved) + '% larger)' : '');
+        (it.fmt === 'ico' ? '' : saved > 99 ? ' (over 99% smaller)' : saved > 0 ? ' (' + saved + '% smaller)' : saved < 0 ? ' (' + (-saved) + '% larger)' : '');
     } else if (it.state === 'error') m = fmtBytes(it.file.size);
     q('.imc-meta').textContent = m;
     dl.disabled = it.state !== 'done';
@@ -346,11 +362,13 @@ faq:
   // Keep recent decodes so a settings change re-encodes without decoding again,
   // up to a total pixel budget. Never drop one that is being converted.
   function remember(id, d) {
+    var old = cache.get(id);
+    if (old && old !== d) TTImage.release(old);
     cache.delete(id);
     cache.set(id, d);
     var total = 0, busy = {};
     cache.forEach(function (v) { total += v.width * v.height; });
-    items.forEach(function (x) { if (x.state === 'working') busy[x.id] = 1; });
+    items.forEach(function (x) { if (x.state === 'working' || x.busy) busy[x.id] = 1; });
     Array.from(cache.keys()).forEach(function (k) {
       if (total <= CACHE_PIXELS || k === id || busy[k]) return;
       total -= cache.get(k).width * cache.get(k).height;
@@ -386,19 +404,25 @@ faq:
     pump();
   }
 
+  // Items whose settings changed mid-way are queued again, but wait until their
+  // current conversion stops, so one file is never decoded twice at once.
   function pump() {
     while (running < CONCURRENCY) {
       var it = null;
-      for (var i = 0; i < items.length; i++) if (items[i].state === 'queued') { it = items[i]; break; }
+      for (var i = 0; i < items.length; i++) if (items[i].state === 'queued' && !items[i].busy) { it = items[i]; break; }
       if (!it) break;
-      running++;
-      it.state = 'working';
-      it.stage = 'Reading…';
-      it.progress = 10;
-      paint(it);
-      convert(it, gen).then(function () { running--; refreshBar(); announce(); pump(); });
+      start(it);
     }
     refreshBar();
+  }
+  function start(it) {
+    running++;
+    it.busy = true;
+    it.state = 'working';
+    it.stage = 'Reading…';
+    it.progress = 10;
+    paint(it);
+    convert(it, gen).then(function () { it.busy = false; running--; refreshBar(); announce(); pump(); });
   }
 
   function stage(it, g, text, pct) {
@@ -427,18 +451,24 @@ faq:
         remember(it.id, d);
       }
       if (g !== gen || items.indexOf(it) < 0) return;
-      stage(it, g, 'Converting to ' + LABEL[s.fmt] + '…', 70);
+      stage(it, g, s.fmt === 'avif' && !avifLoaded ? 'Loading the AVIF encoder (about 3.5 MB, once)…' : 'Converting to ' + LABEL[s.fmt] + '…', 70);
       var t = targetSize(d.width, d.height, s);
       if (t.w > MAX_SIDE || t.h > MAX_SIDE || t.w * t.h > MAX_PIXELS) {
         throw Object.assign(new Error('The resized image would be ' + t.w + ' × ' + t.h + ' pixels, larger than this tool allows (' + MAX_SIDE + ' px per side, 100 megapixels).'), { friendly: true });
       }
-      var blob = await TTImage.encode(d, s.fmt, {
-        width: t.w, height: t.h, quality: s.quality, background: s.fmt === 'jpeg' || s.fmt === 'bmp' ? s.bg : null, icoSizes: s.icoSizes,
-        exif: s.meta !== 'strip' ? d.exif : null, stripGps: s.meta === 'nogps'
-      });
-      // A small preview, so a long list does not keep every full-size image decoded.
-      var k = Math.min(1, 128 / Math.max(t.w, t.h));
-      var thumb = await TTImage.encode(d, 'png', { width: t.w * k, height: t.h * k, background: s.fmt === 'jpeg' || s.fmt === 'bmp' ? s.bg : null });
+      var src = await vectorSource(it, d, t, s), blob, thumb;
+      try {
+        blob = await TTImage.encode(src, s.fmt, {
+          width: t.w, height: t.h, quality: s.quality, background: s.fmt === 'jpeg' || s.fmt === 'bmp' ? s.bg : null, icoSizes: s.icoSizes,
+          exif: s.meta !== 'strip' ? d.exif : null, stripGps: s.meta === 'nogps', wasm: true
+        });
+        if (s.fmt === 'avif') avifLoaded = true;
+        // A small preview, so a long list does not keep every full-size image decoded.
+        var k = Math.min(1, 128 / Math.max(t.w, t.h));
+        thumb = await TTImage.encode(src, 'png', { width: t.w * k, height: t.h * k, background: s.fmt === 'jpeg' || s.fmt === 'bmp' ? s.bg : null });
+      } finally {
+        if (src !== d) src.width = 0;
+      }
       if (g !== gen || items.indexOf(it) < 0) return;
       revoke(it);
       it.blob = blob;
@@ -469,6 +499,22 @@ faq:
     }
   }
 
+  // An SVG is a drawing, not pixels: at any other size it is drawn again at that
+  // size (for ICO, the largest icon), so edges stay sharp instead of being
+  // enlarged from a small picture.
+  async function vectorSource(it, d, t, s) {
+    if (d.format !== 'svg') return d;
+    var w = t.w, h = t.h;
+    if (s.fmt === 'ico') {
+      var k = Math.max.apply(null, s.icoSizes) / Math.max(d.width, d.height);
+      w = Math.max(1, Math.round(d.width * k));
+      h = Math.max(1, Math.round(d.height * k));
+    }
+    if (w === d.width && h === d.height) return d;
+    if (it.svgText == null) it.svgText = await it.file.text();
+    return TTImage.svg.render(it.svgText, w, h);
+  }
+
   function notesFor(d, s, t) {
     var n = [];
     if (d.animated) n.push('Animated image: only the first frame was converted.');
@@ -476,14 +522,17 @@ faq:
     if (d.format === 'tiff' && d.images > 1) n.push('This TIFF has ' + d.images + ' pages; the first was converted.');
     if (d.colorProfile === 'converted') n.push('Colours were converted to sRGB from the file’s wide-gamut profile.');
     if (d.warnings && d.warnings.indexOf('truncated') >= 0) n.push('The file seems to be cut off, so part of the picture may be blank.');
+    if (d.warnings && d.warnings.indexOf('foreignObject') >= 0) n.push('The HTML inside this SVG (a <foreignObject> element) is left out: this browser does not allow it to be converted to an image.');
     if ((s.fmt === 'jpeg' || s.fmt === 'bmp') && d.hasAlpha) n.push('Transparent areas were filled with ' + ({ '#ffffff': 'white', '#000000': 'black' }[s.bg] || s.bg) + '.');
     if (d.orientation > 1) n.push('Rotated upright using the photo’s orientation tag.');
+    if (d.warnings && d.warnings.indexOf('hdr') >= 0) n.push('This is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.');
     if (s.fmt === 'ico') {
       var big = Math.max.apply(null, s.icoSizes);
       if (d.width !== d.height) n.push('Centred on a transparent square.');
-      if (big > Math.max(d.width, d.height)) n.push('The ' + big + ' px icon is enlarged from a ' + d.width + '×' + d.height + ' original and may look soft.');
+      if (d.format === 'svg') n.push('The drawing was rendered at the largest icon size, so it stays sharp.');
+      else if (big > Math.max(d.width, d.height)) n.push('The ' + big + ' px icon is enlarged from a ' + d.width + '×' + d.height + ' original and may look soft.');
     }
-    if (s.fmt !== 'ico' && (t.w > d.width || t.h > d.height)) n.push('Enlarged beyond the original size, so it may look soft.');
+    if (s.fmt !== 'ico' && (t.w > d.width || t.h > d.height)) n.push(d.format === 'svg' ? 'The drawing was rendered at the larger size, so it stays sharp.' : 'Enlarged beyond the original size, so it may look soft.');
     if (s.meta !== 'strip' && (s.fmt === 'jpeg' || s.fmt === 'png' || s.fmt === 'webp')) n.push(d.exif ? (s.meta === 'nogps' ? 'EXIF kept without location.' : 'EXIF kept, including any location.') : 'The original had no EXIF data to keep.');
     return n;
   }
@@ -562,11 +611,15 @@ faq:
     $('#imc-choose').focus();
   });
 
-  TTImage.canEncode('avif').then(function (ok) {
-    avifOk = ok;
-    var o = fmtSel.querySelector('option[value="avif"]');
-    if (!ok) { o.disabled = true; o.textContent = 'AVIF (this browser cannot save it)'; }
-    syncControls();
+  // AVIF uses the WebAssembly encoder where the browser has none of its own.
+  ['webp', 'avif'].forEach(function (f) {
+    TTImage.canEncode(f, { wasm: true }).then(function (ok) {
+      cannot[f] = !ok;
+      var o = fmtSel.querySelector('option[value="' + f + '"]');
+      o.disabled = !ok;
+      o.textContent = ok ? LABEL[f] : LABEL[f] + ' (this browser cannot save it)';
+      syncControls();
+    });
   });
   syncControls();
 })();

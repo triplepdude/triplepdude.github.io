@@ -14,6 +14,7 @@
 //   photo-12mp.heic   4032x3024 in 512 px tiles, like an iPhone photo: a (240,200,40) disc
 //                     around (2000,1500), a (20,20,20) block from (3800,2800), EXIF Make Apple
 //   truncated.heic    the first 60% of quadrants.heic; notes.heic is a text file
+//   hdr-pq.heic       quadrants.heic with the nclx transfer characteristics set to 16 (PQ)
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -273,4 +274,40 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.setInputFiles('#h2j-file', [fx('quadrants.heic')]);
   await page.waitForFunction(() => /^1 of 1 converted\.$/.test(document.querySelector('#h2j-summary').textContent), null, { timeout: 15000 });
   assert.ok(requests.filter(u => /libheif\.wasm$/.test(u)).length <= before + 1);
+
+  // hdr-pq.heic is quadrants.heic with its nclx transfer set to 16 (PQ, HDR):
+  // converted as before, with a note that no tone mapping was done.
+  await page.setInputFiles('#h2j-file', [fx('hdr-pq.heic')]);
+  await page.waitForFunction(() => /^2 of 2 converted\.$/.test(document.querySelector('#h2j-summary').textContent), null, { timeout: 15000 });
+  assert.match(await rowText(1), /hdr-pq\.jpg 240 × 160 px .*This is an HDR photo/);
+  assert.doesNotMatch(await rowText(0), /HDR/);
+
+  // A setting changed while photos are still decoding: each photo is decoded
+  // once, not once per setting (the second decode used to leak the first).
+  await page.click('#h2j-clear');
+  await page.evaluate(() => {
+    const orig = TTImage.decode;
+    window.__decodes = 0;
+    TTImage.decode = async function () {
+      window.__decodes++;
+      const r = await orig.apply(this, arguments);
+      await new Promise(res => setTimeout(res, 700));
+      return r;
+    };
+  });
+  await page.setInputFiles('#h2j-file', [fx('quadrants.heic'), fx('burst.heic')]);
+  await page.waitForTimeout(100);
+  await page.selectOption('#h2j-format', 'png');
+  await page.waitForFunction(() => /^2 of 2 converted\.$/.test(document.querySelector('#h2j-summary').textContent), null, { timeout: 20000 });
+  assert.equal(await page.evaluate(() => window.__decodes), 2, 'decoded once each');
+  assert.deepEqual([(await download(0)).name, (await download(1)).name], ['quadrants.png', 'burst.png']);
+
+  // A browser that cannot encode WebP (Safari): the option is disabled and explained.
+  await page.addInitScript(() => {
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
+  });
+  await open();
+  await page.waitForFunction(() => document.querySelector('#h2j-format option[value="webp"]').disabled);
+  assert.equal(await page.textContent('#h2j-format option[value="webp"]'), 'WebP (this browser cannot save it)');
 };

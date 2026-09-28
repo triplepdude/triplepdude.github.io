@@ -48,8 +48,19 @@ function png(w, h) {
 module.exports = async ({ page, open, assert }) => {
   await open();
   const frame = await (await page.$('#mdw-frame')).contentFrame();
-  await frame.waitForSelector('#mdw-doc h1');
-  await frame.waitForSelector('#mdw-doc .katex');
+  // Waits by polling from the test: inside the sandboxed preview frame no script may run, so
+  // Playwright's own in-page polling (requestAnimationFrame) is blocked there.
+  const inFrame = async (fn, arg, timeout = 15000) => {
+    const end = Date.now() + timeout;
+    for (;;) {
+      if (await frame.evaluate(fn, arg)) return;
+      if (Date.now() > end) throw new Error('timed out waiting in the preview: ' + fn.toString().slice(0, 120));
+      await new Promise(r => setTimeout(r, 50));
+    }
+  };
+  const inFrameSel = sel => inFrame(s => !!document.querySelector(s), sel);
+  await inFrameSel('#mdw-doc h1');
+  await inFrameSel('#mdw-doc .katex');
   assert.equal(await frame.textContent('#mdw-doc h1'), 'Project kickoff notes');
   assert.equal(await page.inputValue('#mdw-name'), 'Project kickoff notes');
   assert.equal(await page.$$eval('h1', l => l.length), 1);
@@ -133,11 +144,25 @@ module.exports = async ({ page, open, assert }) => {
 
   // ---- Links, pictures, HTML tables, page breaks, TOC and options ----
   const img = png(40, 20);
+  // A 40 x 20 JPEG from the browser with an EXIF block spliced in: Orientation 6 (turn 90 degrees clockwise).
+  const jpeg = Buffer.from(await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 40; c.height = 20;
+    const x = c.getContext('2d');
+    x.fillStyle = '#c00'; x.fillRect(0, 0, 40, 20);
+    const b = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+    return Array.from(new Uint8Array(await b.arrayBuffer()));
+  }));
+  const tiff = Buffer.from([0x49, 0x49, 0x2A, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0]);
+  const exif = Buffer.concat([Buffer.from('Exif\0\0', 'binary'), tiff]);
+  const app1 = Buffer.concat([Buffer.from([0xFF, 0xE1, (exif.length + 2) >> 8, (exif.length + 2) & 255]), exif]);
+  const photo = Buffer.concat([jpeg.subarray(0, 2), app1, jpeg.subarray(2)]);
   await page.setInputFiles('#mdw-file', [
+    { name: 'photo.jpg', mimeType: 'image/jpeg', buffer: photo },
     { name: 'chart.png', mimeType: 'image/png', buffer: img },
     { name: 'logo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="30" height="12"><rect width="30" height="12" fill="#c00"/></svg>') }
   ]);
-  await page.waitForFunction(() => /Added 2 images/.test(document.getElementById('mdw-ok').textContent));
+  await page.waitForFunction(() => /Added 3 images/.test(document.getElementById('mdw-ok').textContent));
   await page.check('#mdw-toc');
   await page.uncheck('#mdw-pagenum');
   await page.selectOption('#mdw-page', 'letter');
@@ -147,7 +172,7 @@ module.exports = async ({ page, open, assert }) => {
   await page.selectOption('#mdw-spacing', '360');
   await setMd([
     '# Report', '', '## Intro', '', 'See [the site](https://example.com/a?b=1&c=2), [Details](#details) and <mailto:me@example.com>.', '',
-    '![Chart](img/chart.png) ![Logo](logo.svg) ![Remote](https://example.com/p.png) ![Gone](missing.png)', '', `![Inline](data:image/png;base64,${img.toString('base64')})`, '',
+    '![Chart](img/chart.png) ![Logo](logo.svg) ![Remote](https://example.com/p.png) ![Gone](missing.png)', '', `![Inline](data:image/png;base64,${img.toString('base64')}) ![Photo](photo.jpg)`, '',
     '<table><tr><th colspan="2">Wide</th></tr><tr><td rowspan="2">A</td><td>b</td></tr><tr><td>c</td></tr></table>', '',
     '\\newpage', '', '## Details', '', 'H<sub>2</sub>O, x<sup>2</sup>, <u>u</u>, <mark>m</mark>, ~~s~~, <kbd>Ctrl</kbd>', '', '---', '',
     '> quoted **bold**', '>', '> > deeper'
@@ -171,15 +196,21 @@ module.exports = async ({ page, open, assert }) => {
   // Table of contents after the title: a TOC field whose entries link to the headings.
   assert.match(d.doc, /<w:pStyle w:val="Heading1"\/>[\s\S]*?<\/w:p><w:p><w:pPr><w:pStyle w:val="TOCHeading"\/><\/w:pPr><w:r><w:t>Contents<\/w:t><\/w:r><\/w:p><w:p><w:pPr><w:pStyle w:val="TOC1"\/><\/w:pPr><w:r><w:fldChar w:fldCharType="begin"\/><\/w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u <\/w:instrText>/);
   assert.equal((d.doc.match(/<w:pStyle w:val="TOC1"\/>/g) || []).length, 2);
-  // Pictures: the PNG file and the data: PNG are stored as they are (one media part each), the SVG as a PNG.
+  // Pictures: the PNG file and the data: PNG are stored as they are (one media part each), the SVG as a
+  // PNG, and the sideways photo as an upright 20 x 40 JPEG.
   const media = Object.keys(d.files).filter(n => n.startsWith('word/media/')).sort();
-  assert.deepEqual(media, ['word/media/image1.png', 'word/media/image2.png', 'word/media/image3.png']);
+  assert.deepEqual(media, ['word/media/image1.png', 'word/media/image2.png', 'word/media/image3.png', 'word/media/image4.jpeg']);
+  const upright = d.files['word/media/image4.jpeg'];
+  assert.deepEqual([upright[0], upright[1]], [0xFF, 0xD8]);
+  const sof = (() => { for (let i = 2; i < upright.length;) { const m = upright[i + 1], len = upright.readUInt16BE(i + 2); if (m >= 0xC0 && m <= 0xC3) return upright.readUInt16BE(i + 7) + 'x' + upright.readUInt16BE(i + 5); i += 2 + len; } })();
+  assert.equal(sof, '20x40');
+  assert.match(d.text('[Content_Types].xml'), /<Default Extension="jpeg" ContentType="image\/jpeg"\/>/);
   assert.ok(d.files['word/media/image1.png'].equals(img));
   assert.ok(d.files['word/media/image3.png'].equals(img));
   const svgPng = d.files['word/media/image2.png'];
   assert.equal(svgPng.readUInt32BE(16) + 'x' + svgPng.readUInt32BE(20), '30x12');
   const extents = [...d.doc.matchAll(/<wp:extent cx="(\d+)" cy="(\d+)"\/>/g)].map(m => m[1] + 'x' + m[2]);
-  assert.deepEqual(extents, [`${40 * 9525}x${20 * 9525}`, `${30 * 9525}x${12 * 9525}`, `${40 * 9525}x${20 * 9525}`]);
+  assert.deepEqual(extents, [`${40 * 9525}x${20 * 9525}`, `${30 * 9525}x${12 * 9525}`, `${40 * 9525}x${20 * 9525}`, `${20 * 9525}x${40 * 9525}`]);
   assert.match(d.doc, /<wp:docPr id="1" name="Picture 1" descr="Chart"\/>/);
   // A web picture is not downloaded: it becomes a link to it. A missing file leaves a note.
   const r2 = rel('https://example.com/p.png');
@@ -205,7 +236,7 @@ module.exports = async ({ page, open, assert }) => {
 
   // ---- Math: LaTeX to Office Math ----
   await setMd('Roots $\\sqrt[3]{x}$, $\\sqrt{y}$ and \\(\\sin x\\), limit $\\lim_{n\\to\\infty} a_n$.\n\n$$\n\\int_0^1 x^2\\,dx = \\left(\\frac{1}{3}\\right)\n$$\n\n\\begin{align}\na &= b \\\\\nc &= d\n\\end{align}\n\nCosts $5 and $10.');
-  await frame.waitForSelector('#mdw-doc .katex');
+  await inFrameSel('#mdw-doc .katex');
   d = await download();
   assert.match(d.doc, /<m:rad><m:deg><m:r><w:rPr><w:rFonts w:ascii="Cambria Math" w:hAnsi="Cambria Math"\/><\/w:rPr><m:t xml:space="preserve">3<\/m:t><\/m:r><\/m:deg><m:e>/);
   assert.match(d.doc, /<m:rad><m:radPr><m:degHide m:val="1"\/><\/m:radPr><m:deg\/><m:e>/);
@@ -232,7 +263,7 @@ module.exports = async ({ page, open, assert }) => {
 
   // ---- Copy as rich text: HTML with inline styles, and plain text ----
   await setMd('# Title\n\n**Bold** and `code`.\n\n| A | B |\n|---|--:|\n| 1 | 2 |\n\n- [x] done\n\nMath $x^2$.');
-  await frame.waitForSelector('#mdw-doc .katex');
+  await inFrameSel('#mdw-doc .katex');
   await page.click('#mdw-rich');
   await page.waitForFunction(() => /Copied with formatting/.test(document.getElementById('mdw-status').textContent));
   const clip = await page.evaluate(async () => {

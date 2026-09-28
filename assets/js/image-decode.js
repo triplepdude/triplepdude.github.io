@@ -40,7 +40,10 @@
  *                            converted to sRGB (browsers do this themselves for
  *                            the formats they decode)
  *              decoder,      'browser' | 'libheif' | 'utif' | 'svg'
- *              warnings }    ['truncated'] when a PNG/WebP ends early (the rest is blank)
+ *              warnings }    'truncated' when a PNG/WebP ends early (the rest is blank);
+ *                            'foreignObject' when an SVG's HTML content was left out;
+ *                            'hdr' when a HEIC decoded by libheif is HDR (PQ/HLG), which
+ *                            is converted without tone mapping
  *   Rejects with an Error with a readable .message and a .code: EMPTY,
  *   UNSUPPORTED, CORRUPT, TOO_BIG, NO_SUPPORT (browser lacks AVIF/JPEG XL),
  *   LOAD_FAILED (decoder file could not load), SVG_INVALID; encode() also GONE
@@ -48,11 +51,12 @@
  * TTImage.toCanvas(result) -> Promise<canvas>    the pixels on the page
  * TTImage.release(result)    frees a result's memory (in the page and the worker)
  *
- * TTImage.canEncode(formatOrMime) -> Promise<boolean>
- *   PNG, BMP and ICO always; JPEG/WebP/AVIF by trying canvas.toBlob.
+ * TTImage.canEncode(formatOrMime, { wasm }) -> Promise<boolean>
+ *   PNG, BMP, ICO, TIFF and GIF always; JPEG/WebP/AVIF by trying canvas.toBlob. With
+ *   { wasm: true }, AVIF also counts where the WebAssembly encoder can run.
  * TTImage.encode(source, format, options) -> Promise<Blob>
  *   source:  a decode() result (best), a canvas, an ImageBitmap or an <img>
- *   format:  'png' | 'jpeg' | 'webp' | 'avif' | 'bmp' | 'ico' (or a MIME type)
+ *   format:  'png' | 'jpeg' | 'webp' | 'avif' | 'bmp' | 'ico' | 'tiff' | 'gif' (or a MIME type)
  *   options: { width, height: output size in pixels (default: the source's),
  *                         resized with repeated halving for a smooth result,
  *              quality: 0..1 (JPEG/WebP/AVIF, default 0.92),
@@ -64,20 +68,31 @@
  *                    Orientation reset to 1 (pixels are already upright), the
  *                    pixel size updated and the embedded thumbnail removed,
  *              stripGps: true removes the GPS block from that EXIF,
- *              dpi: print resolution to record (PNG pHYs, JPEG JFIF, BMP header) }
- *   BMP is written as 24-bit; ICO holds one PNG per size. Rejects like decode().
+ *              dpi: print resolution to record (PNG pHYs, JPEG JFIF, BMP header,
+ *                   TIFF XResolution; TIFF defaults to 72),
+ *              wasm: true lets AVIF use the libavif encoder in /assets/vendor/avif/
+ *                    (3.5 MB, loaded on first use, in a module worker) where the
+ *                    browser's canvas cannot encode AVIF; up to 50 megapixels,
+ *              speed: 0..10 for that encoder (default 6, or 8 above 2.5 MP) }
+ *   BMP is written as 24-bit; ICO holds one PNG per size; TIFF is 8-bit RGB (RGBA
+ *   when any pixel is transparent), LZW-compressed with the horizontal predictor;
+ *   GIF keeps up to 256 colours exactly, else a median-cut palette with
+ *   Floyd-Steinberg dithering, and pixels under half opacity become transparent.
+ *   Rejects like decode().
  * TTImage.resize(canvasOrImage, width, height) -> canvas   (on the page)
  * TTImage.exif.orientation(tiffBytes), TTImage.exif.prepare(tiffBytes, {width,
  *   height, stripGps})   the EXIF helpers encode() uses.
  * TTImage.svg.info(text) -> { width, height, from, viewBox, notes[], external,
- *                            scripts, hasText, text }  or { error }
+ *                            scripts, hasText, foreignObject (count), text }  or { error }
  *   Intrinsic size from width/height (px, pt, pc, in, cm, mm, Q, em, ex) and
  *   viewBox, following the SVG sizing rules; adds a missing xmlns and replaces
  *   HTML entities (text is the fixed code).
  * TTImage.svg.render(text, width, height) -> Promise<canvas>
  *   Rasterises through an <img> loaded from a Blob URL, so scripts in the SVG
  *   never run and nothing referenced by URL is fetched; linked images are left
- *   out rather than drawn as broken-image icons.
+ *   out rather than drawn as broken-image icons. Where the browser would lock
+ *   the canvas because of HTML inside <foreignObject> (Chrome does), that
+ *   HTML is left out and canvas.dataset.omitted is 'foreignObject'.
  */
 (function () {
   'use strict';
@@ -154,13 +169,33 @@
     for (var o = 16; o + 4 <= Math.min(size, b.length, 256); o += 4) list.push(ascii(b, o, 4));
     return list;
   }
-  var SVG_RE = /^\s*(?:<\?xml[^>]*>\s*)?(?:(?:<!--[\s\S]*?-->|<!DOCTYPE[^[>]*(?:\[[\s\S]*?\])?\s*>|<\?[\s\S]*?\?>)\s*)*<(?:[A-Za-z_][\w.-]*:)?svg[\s>/]/i;
+  // Does the text start with an <svg> element, after any XML declaration,
+  // comments, processing instructions and DOCTYPE? A plain scan in linear time:
+  // a regular expression for this backtracks exponentially on a text file that
+  // starts with a few dozen comments, freezing the page for minutes.
+  function svgStart(s) {
+    var i = s.charCodeAt(0) === 0xFEFF ? 1 : 0, n = s.length, e;
+    for (;;) {
+      while (i < n && /\s/.test(s.charAt(i))) i++;
+      if (s.startsWith('<!--', i)) e = s.indexOf('-->', i + 4) + 3;
+      else if (s.startsWith('<?', i)) e = s.indexOf('?>', i + 2) + 2;
+      else if (s.substr(i, 9).toUpperCase() === '<!DOCTYPE') {
+        var gt = s.indexOf('>', i), br = s.indexOf('[', i);
+        if (br >= 0 && (gt < 0 || br < gt)) { e = s.indexOf(']', br); e = e < 0 ? -1 : s.indexOf('>', e); }
+        else e = gt;
+        e = e < 0 ? 2 : e + 1;
+      } else break;
+      if (e < 3) return false; // unterminated
+      i = e;
+    }
+    return /^<(?:[A-Za-z_][\w.-]*:)?svg[\s>/]/i.test(s.substr(i, 256));
+  }
   function looksSvg(b) {
     var n = Math.min(b.length, 65536);
     for (var i = 0; i < Math.min(n, 512); i++) if (b[i] === 0) return false;
     var s;
     try { s = new TextDecoder('utf-8').decode(b.subarray(0, n)); } catch (e) { return false; }
-    return SVG_RE.test(s.replace(/^﻿/, ''));
+    return svgStart(s);
   }
   function sniffBytes(b) {
     if (!b || !b.length) return null;
@@ -274,11 +309,6 @@
     } catch (err) { /* ignore */ }
     return 1;
   }
-  function zeroRange(u8, start, len) { if (start >= 0 && start + len <= u8.length) u8.fill(0, start, start + len); }
-  function zeroIfd(t, ifd) {
-    ifd.list.forEach(function (e) { if (e.size > 4) zeroRange(t.u8, e.data, e.size); });
-    zeroRange(t.u8, ifd.off, ifd.next + 4 - ifd.off);
-  }
   // A copy of the EXIF block that is right for a re-encoded image.
   function prepareExif(src, o) {
     try {
@@ -297,23 +327,47 @@
         if (e.type === 3 && p[1] < 65536) t.w16(e.val, p[1]);
         else if (e.type === 4) t.w32(e.val, p[1]);
       });
+      // Bytes still in use by the IFDs that are kept are never wiped, even when a
+      // damaged file points other structures at them (IFD1 pointing back at IFD0).
+      var keep = [];
+      var protect = function (ifd) {
+        if (!ifd) return;
+        keep.push([ifd.off, ifd.next + 4]);
+        ifd.list.forEach(function (e) { if (e.size > 4) keep.push([e.data, e.data + e.size]); });
+      };
+      var wipe = function (a, b) {
+        if (!(a >= 0 && b > a && b <= u8.length)) return;
+        var p = a;
+        keep.filter(function (r) { return r[1] > a && r[0] < b; }).sort(function (x, y) { return x[0] - y[0]; }).forEach(function (r) {
+          if (r[0] > p) u8.fill(0, p, r[0]);
+          p = Math.max(p, r[1]);
+        });
+        if (p < b) u8.fill(0, p, b);
+      };
+      var wipeIfd = function (ifd) {
+        ifd.list.forEach(function (e) { if (e.size > 4) wipe(e.data, e.data + e.size); });
+        wipe(ifd.off, ifd.next + 4);
+      };
+      var interop = findTag(exifIfd, 0xA005);
+      var gps = findTag(ifd0, 0x8825), gpsIfd = gps && ifdEntries(t, t.r32(gps.val));
+      protect(ifd0);
+      protect(exifIfd);
+      protect(interop && ifdEntries(t, t.r32(interop.val)));
+      if (!o.stripGps) protect(gpsIfd);
       // IFD1 holds a thumbnail of the original (possibly sideways) picture: drop it.
       var ifd1 = ifdEntries(t, t.r32(ifd0.next));
       if (ifd1) {
         var jo = findTag(ifd1, 0x0201), jl = findTag(ifd1, 0x0202);
-        if (jo && jl) zeroRange(u8, t.r32(jo.val), t.r32(jl.val));
-        zeroIfd(t, ifd1);
+        if (jo && jl) wipe(t.r32(jo.val), t.r32(jo.val) + t.r32(jl.val));
+        wipeIfd(ifd1);
       }
       t.w32(ifd0.next, 0);
-      if (o.stripGps) {
-        var gps = findTag(ifd0, 0x8825);
-        if (gps) {
-          var g = ifdEntries(t, t.r32(gps.val));
-          if (g) zeroIfd(t, g);
-          u8.copyWithin(gps.pos, gps.pos + 12, ifd0.next + 4);
-          zeroRange(u8, ifd0.next - 8, 12);
-          t.w16(ifd0.off, ifd0.list.length - 1);
-        }
+      if (o.stripGps && gps) {
+        if (gpsIfd) wipeIfd(gpsIfd);
+        // Remove the GPS entry from IFD0: later entries and the (zero) next-IFD link move up.
+        u8.copyWithin(gps.pos, gps.pos + 12, ifd0.next + 4);
+        u8.fill(0, ifd0.next - 8, ifd0.next + 4);
+        t.w16(ifd0.off, ifd0.list.length - 1);
       }
       return u8;
     } catch (e) {
@@ -339,6 +393,14 @@
       i += 2 + len;
     }
     return null;
+  }
+  // An IEND chunk: length 0, type, CRC AE 42 60 82.
+  function hasIend(b) {
+    for (var i = b.length - 12; i >= 0; i--) {
+      if (b[i + 4] === 0x49 && b[i + 5] === 0x45 && b[i + 6] === 0x4E && b[i + 7] === 0x44 && !b[i] && !b[i + 1] && !b[i + 2] && !b[i + 3] &&
+        b[i + 8] === 0xAE && b[i + 9] === 0x42 && b[i + 10] === 0x60 && b[i + 11] === 0x82) return true;
+    }
+    return false;
   }
   function pngChunks(b, fn) {
     var o = 8;
@@ -760,18 +822,67 @@
       }
     }
 
+    // UTIF follows the links inside a TIFF without checking them: a page chain
+    // that loops back, or a tag claiming billions of values, makes it loop
+    // forever or run out of memory (which takes the whole tab down in Chrome).
+    // Walk the structure first and, in this private copy of the file, end a
+    // looping chain and empty any tag whose values lie outside the file.
+    function tiffSanitize(u8) {
+      var n = u8.length, le = u8[0] === 0x49, dv = new DataView(u8.buffer, u8.byteOffset, n);
+      var r16 = function (o) { return dv.getUint16(o, le); }, r32 = function (o) { return dv.getUint32(o, le); };
+      var SIZE = [0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8, 4], seen = new Set(), budget = 100000;
+      var SUB = { 330: 1, 34665: 1, 34853: 1 }; // the sub-IFDs UTIF reads: SubIFDs, EXIF, GPS
+      function drop(p) { dv.setUint32(p + 4, 0, le); }
+      function readable(off) { return off >= 8 && off + 2 <= n && off + 2 + 12 * r16(off) <= n && !seen.has(off); }
+      function walk(off, depth) {
+        seen.add(off);
+        var cnt = r16(off);
+        if ((budget -= cnt) < 0) throw err('CORRUPT');
+        for (var i = 0; i < cnt; i++) {
+          var p = off + 2 + 12 * i, tag = r16(p), type = r16(p + 2), count = r32(p + 4);
+          var size = (SIZE[type] || 0) * count, at = size > 4 ? r32(p + 8) : p + 8;
+          // Private blocks UTIF would parse as more IFDs (DNG, Fujifilm): not needed.
+          if (tag === 50740 || tag === 61440 || (size && at + size > n)) { drop(p); continue; }
+          if (SUB[tag] && (type === 4 || type === 13) && count) {
+            for (var k = 0; k < count; k++) {
+              var so = r32(at + 4 * k);
+              if (depth >= 3 || !readable(so)) { drop(p); break; }
+              walk(so, depth + 1);
+            }
+          }
+        }
+      }
+      var pos = 4, off = r32(4), pages = 0;
+      while (off) {
+        if (pages >= 2000 || !readable(off)) {
+          if (!pages) throw err('CORRUPT');
+          if (pos + 4 <= n) dv.setUint32(pos, 0, le);
+          break;
+        }
+        walk(off, 0);
+        pages++;
+        pos = off + 2 + 12 * r16(off);
+        off = pos + 4 <= n ? r32(pos) : 0;
+      }
+    }
+
     function decodeTiff(m) {
       if (!utifLoaded) {
         try { g.importScripts(m.base + 'pako/pako_inflate.min.js', m.base + 'utif/UTIF.min.js'); } catch (e) { throw err('LOAD_FAILED', 'The TIFF decoder could not be loaded. Check your connection and try again.'); }
         utifLoaded = true;
       }
       var U = g.UTIF, buf = m.buffer, ifds;
+      if (buf.byteLength < 16) throw err('CORRUPT');
       if (new Uint8Array(buf, 2, 1)[0] === 43 || new Uint8Array(buf, 3, 1)[0] === 43) throw err('UNSUPPORTED', 'BigTIFF files are not supported.');
-      try { ifds = U.decode(buf); } catch (e) { throw err('CORRUPT'); }
+      tiffSanitize(new Uint8Array(buf));
+      try { ifds = U.decode(buf, { parseMN: false, debug: false }); } catch (e) { throw err('CORRUPT'); }
       var pages = (ifds || []).filter(function (f) { return f.t256 && f.t257 && !((f.t254 ? f.t254[0] : 0) & 1); });
       if (!pages.length) throw err('CORRUPT');
       var ifd = pages[0], w = ifd.t256[0], h = ifd.t257[0];
       if (w * h > m.maxPixels) throw Object.assign(err('TOO_BIG'), { w: w, h: h });
+      // More than 128 bits per pixel (four 32-bit channels) is not a real image and would need huge buffers.
+      var bits = (ifd.t258 ? ifd.t258[0] : 1) * (ifd.t277 ? ifd.t277[0] : 1);
+      if (!(bits > 0 && bits <= 128)) throw err('CORRUPT', 'This kind of TIFF (compression or colour model) is not supported.');
       var rgba;
       try { U.decodeImage(buf, ifd, ifds); rgba = U.toRGBA8(ifd); } catch (e) { throw err('CORRUPT'); }
       w = ifd.width; h = ifd.height;
@@ -1025,6 +1136,242 @@
       }
       return out;
     }
+    // TIFF LZW (TIFF 6.0 section 13) as libtiff writes it: codes sent MSB first,
+    // starting at 9 bits, one bit wider once the next free code passes the
+    // current maximum, a Clear code when the table reaches 4094 entries.
+    var lzwCode = null, lzwStamp = null, lzwGen = 0;
+    function lzw(input) {
+      if (!lzwCode) { lzwCode = new Int16Array(1 << 20); lzwStamp = new Uint16Array(1 << 20); }
+      var n = input.length, out = new Uint8Array(Math.ceil(n * 1.5) + 16), op = 0, acc = 0, bits = 0, width = 9, next = 258;
+      var put = function (code) {
+        acc = (acc << width) | code;
+        bits += width;
+        while (bits >= 8) { bits -= 8; out[op++] = (acc >>> bits) & 255; }
+        acc &= (1 << bits) - 1;
+      };
+      var reset = function () {
+        next = 258;
+        width = 9;
+        if (++lzwGen > 65535) { lzwStamp.fill(0); lzwGen = 1; }
+      };
+      // After each code the decoder adds a table entry, so the encoder does too.
+      var added = function () {
+        if (++next === 4094) { put(256); reset(); } else if (next > (1 << width) - 1) width++;
+      };
+      reset();
+      put(256);
+      if (!n) { put(257); return out.slice(0, op + (bits ? 1 : 0)); }
+      var prefix = input[0];
+      for (var i = 1; i < n; i++) {
+        var c = input[i], key = (prefix << 8) | c;
+        if (lzwStamp[key] === lzwGen) { prefix = lzwCode[key]; continue; }
+        put(prefix);
+        lzwCode[key] = next;
+        lzwStamp[key] = lzwGen;
+        added();
+        prefix = c;
+      }
+      put(prefix);
+      added();
+      put(257);
+      if (bits) out[op++] = (acc << (8 - bits)) & 255;
+      return out.slice(0, op);
+    }
+    // Baseline TIFF: 8-bit RGB, or RGBA with unassociated alpha when any pixel is
+    // transparent; LZW with the horizontal predictor, in strips of about 128 KB.
+    async function tiff(c, dpi) {
+      var w = c.width, h = c.height, px = ctx(c, { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+      var alpha = false, i, y, x;
+      for (i = 3; i < px.length; i += 4) if (px[i] < 255) { alpha = true; break; }
+      var spp = alpha ? 4 : 3, rowBytes = w * spp, rps = Math.max(1, Math.min(h, Math.floor(131072 / rowBytes)));
+      var nStrips = Math.ceil(h / rps), strips = [];
+      for (var s = 0; s < nStrips; s++) {
+        var y0 = s * rps, rows = Math.min(rps, h - y0), raw = new Uint8Array(rows * rowBytes), o = 0;
+        for (y = 0; y < rows; y++) {
+          var start = o, p = (y0 + y) * w * 4;
+          for (x = 0; x < w; x++, p += 4) {
+            raw[o++] = px[p]; raw[o++] = px[p + 1]; raw[o++] = px[p + 2];
+            if (alpha) raw[o++] = px[p + 3];
+          }
+          // Predictor 2: each sample minus the same sample of the pixel to its left.
+          for (i = o - 1; i >= start + spp; i--) raw[i] = (raw[i] - raw[i - spp]) & 255;
+        }
+        strips.push(lzw(raw));
+        if (s % 32 === 31) await pause();
+      }
+      var tags = [[256, 4, [w]], [257, 4, [h]], [258, 3, alpha ? [8, 8, 8, 8] : [8, 8, 8]], [259, 3, [5]], [262, 3, [2]],
+        [273, 4, strips.map(function () { return 0; })], [277, 3, [spp]], [278, 4, [rps]], [279, 4, strips.map(function (b) { return b.length; })],
+        [282, 5, [Math.round(dpi || 72), 1]], [283, 5, [Math.round(dpi || 72), 1]], [284, 3, [1]], [296, 3, [2]], [317, 3, [2]]];
+      if (alpha) tags.push([338, 3, [2]]);
+      var SZ = { 3: 2, 4: 4, 5: 4 }, ifdSize = 2 + 12 * tags.length + 4, extra = 8 + ifdSize;
+      tags.forEach(function (t) { var len = SZ[t[1]] * t[2].length; t.at = len > 4 ? extra : -1; if (len > 4) extra += len + (len & 1); });
+      var total = extra;
+      strips.forEach(function (b) { total += b.length; });
+      if (total > 0xFFFFFFFF) throw err('TOO_BIG');
+      var out = new Uint8Array(total), dv = new DataView(out.buffer), off = extra;
+      tags[5][2] = strips.map(function (b) { var at = off; off += b.length; return at; });
+      out.set([0x49, 0x49, 42, 0]);
+      dv.setUint32(4, 8, true);
+      dv.setUint16(8, tags.length, true);
+      tags.forEach(function (t, k) {
+        var e = 10 + 12 * k, at = t.at >= 0 ? t.at : e + 8;
+        dv.setUint16(e, t[0], true);
+        dv.setUint16(e + 2, t[1], true);
+        dv.setUint32(e + 4, t[1] === 5 ? t[2].length / 2 : t[2].length, true);
+        if (t.at >= 0) dv.setUint32(e + 8, t.at, true);
+        t[2].forEach(function (v, j) { if (t[1] === 3) dv.setUint16(at + 2 * j, v, true); else dv.setUint32(at + 4 * j, v, true); });
+      });
+      off = extra;
+      strips.forEach(function (b) { out.set(b, off); off += b.length; });
+      return out;
+    }
+    // GIF89a with one 256-entry colour table. Pictures with 256 colours or fewer
+    // (255 when some pixels are transparent) keep them exactly; others get a
+    // median-cut palette and Floyd-Steinberg dithering. GIF has no partial
+    // transparency: pixels less than half opaque become fully transparent.
+    async function gif(c) {
+      var w = c.width, h = c.height, px = ctx(c, { willReadFrequently: true }).getImageData(0, 0, w, h).data, n = w * h, i, k;
+      if (w > 65535 || h > 65535) throw err('TOO_BIG');
+      var clear = false;
+      for (i = 3; i < px.length; i += 4) if (px[i] < 128) { clear = true; break; }
+      var max = clear ? 255 : 256, pal = [], idx = new Uint8Array(n), seen = new Map(), exact = true;
+      for (i = 0; i < n && exact; i++) {
+        if (px[4 * i + 3] < 128) continue;
+        var key = (px[4 * i] << 16) | (px[4 * i + 1] << 8) | px[4 * i + 2], at = seen.get(key);
+        if (at === undefined) {
+          if (pal.length >= max) exact = false;
+          else { at = pal.length; seen.set(key, at); pal.push([px[4 * i], px[4 * i + 1], px[4 * i + 2]]); }
+        }
+        idx[i] = at;
+      }
+      if (!exact) {
+        pal = medianCut(px, max);
+        await pause();
+        dither(px, w, h, pal, idx);
+      }
+      var tIndex = pal.length;
+      if (clear) for (i = 0; i < n; i++) if (px[4 * i + 3] < 128) idx[i] = tIndex;
+      await pause();
+      var data = gifLzw(idx), blocks = Math.ceil(data.length / 255);
+      var out = new Uint8Array(13 + 768 + (clear ? 8 : 0) + 10 + 1 + data.length + blocks + 1 + 1), o = 0;
+      var u16 = function (v) { out[o++] = v & 255; out[o++] = v >> 8; };
+      'GIF89a'.split('').forEach(function (ch) { out[o++] = ch.charCodeAt(0); });
+      u16(w); u16(h);
+      out[o++] = 0xF7; out[o++] = 0; out[o++] = 0;   // global table of 256 colours
+      for (k = 0; k < 256; k++) { var col = pal[k] || [0, 0, 0]; out[o++] = col[0]; out[o++] = col[1]; out[o++] = col[2]; }
+      if (clear) { out.set([0x21, 0xF9, 4, 1, 0, 0, tIndex, 0], o); o += 8; }  // graphic control: transparent index
+      out[o++] = 0x2C; u16(0); u16(0); u16(w); u16(h); out[o++] = 0;
+      out[o++] = 8;                                    // LZW minimum code size
+      for (k = 0; k < data.length; k += 255) {
+        var len = Math.min(255, data.length - k);
+        out[o++] = len;
+        out.set(data.subarray(k, k + len), o);
+        o += len;
+      }
+      out[o++] = 0;
+      out[o++] = 0x3B;
+      return out;
+    }
+    // Median cut on a 5-bit-per-channel histogram: split the box with the most
+    // pixels times its widest side at its median, until there are enough boxes.
+    function medianCut(px, max) {
+      var count = new Uint32Array(32768), sum = new Float64Array(32768 * 3), i, b;
+      for (i = 0; i < px.length; i += 4) {
+        if (px[i + 3] < 128) continue;
+        b = ((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3);
+        count[b]++; sum[3 * b] += px[i]; sum[3 * b + 1] += px[i + 1]; sum[3 * b + 2] += px[i + 2];
+      }
+      var bins = [];
+      for (b = 0; b < 32768; b++) if (count[b]) bins.push(b);
+      var ch = function (bin, c) { return (bin >> (10 - 5 * c)) & 31; };
+      var box = function (list) {
+        var lo = [31, 31, 31], hi = [0, 0, 0], total = 0;
+        list.forEach(function (bin) { total += count[bin]; for (var c = 0; c < 3; c++) { var v = ch(bin, c); if (v < lo[c]) lo[c] = v; if (v > hi[c]) hi[c] = v; } });
+        var axis = 0;
+        for (var c = 1; c < 3; c++) if (hi[c] - lo[c] > hi[axis] - lo[axis]) axis = c;
+        return { list: list, total: total, axis: axis, score: list.length > 1 ? total * (hi[axis] - lo[axis] + 1) : 0 };
+      };
+      var boxes = [box(bins)];
+      while (boxes.length < max) {
+        var best = 0;
+        for (i = 1; i < boxes.length; i++) if (boxes[i].score > boxes[best].score) best = i;
+        var bx = boxes[best];
+        if (!bx.score) break;
+        var sorted = bx.list.slice().sort(function (p, q) { return ch(p, bx.axis) - ch(q, bx.axis); });
+        var half = bx.total / 2, acc = 0, cut = 1;
+        for (i = 0; i < sorted.length - 1; i++) { acc += count[sorted[i]]; if (acc >= half) { cut = i + 1; break; } cut = i + 1; }
+        boxes.splice(best, 1, box(sorted.slice(0, cut)), box(sorted.slice(cut)));
+      }
+      return boxes.map(function (bx) {
+        var r = 0, g2 = 0, bl = 0;
+        bx.list.forEach(function (bin) { r += sum[3 * bin]; g2 += sum[3 * bin + 1]; bl += sum[3 * bin + 2]; });
+        return [Math.round(r / bx.total), Math.round(g2 / bx.total), Math.round(bl / bx.total)];
+      });
+    }
+    // Nearest palette colour for each pixel, spreading the error to its neighbours.
+    function dither(px, w, h, pal, idx) {
+      var cache = new Int16Array(32768).fill(-1), cur = new Float32Array((w + 2) * 3), nxt = new Float32Array((w + 2) * 3);
+      var nearest = function (r, g2, b) {
+        var key = ((r >> 3) << 10) | ((g2 >> 3) << 5) | (b >> 3);
+        if (cache[key] >= 0) return cache[key];
+        var bi = 0, bd = Infinity;
+        for (var p = 0; p < pal.length; p++) {
+          var dr = pal[p][0] - r, dg = pal[p][1] - g2, db = pal[p][2] - b, d = dr * dr + dg * dg + db * db;
+          if (d < bd) { bd = d; bi = p; }
+        }
+        cache[key] = bi;
+        return bi;
+      };
+      for (var y = 0; y < h; y++) {
+        var tmp = cur; cur = nxt; nxt = tmp; nxt.fill(0);
+        for (var x = 0; x < w; x++) {
+          var i = y * w + x, q = 4 * i, e = 3 * (x + 1);
+          if (px[q + 3] < 128) continue;
+          var r = Math.min(255, Math.max(0, px[q] + cur[e])), g2 = Math.min(255, Math.max(0, px[q + 1] + cur[e + 1])), b = Math.min(255, Math.max(0, px[q + 2] + cur[e + 2]));
+          var p2 = nearest(r | 0, g2 | 0, b | 0), col = pal[p2];
+          idx[i] = p2;
+          var er = r - col[0], eg = g2 - col[1], eb = b - col[2];
+          cur[e + 3] += er * 7 / 16; cur[e + 4] += eg * 7 / 16; cur[e + 5] += eb * 7 / 16;
+          nxt[e - 3] += er * 3 / 16; nxt[e - 2] += eg * 3 / 16; nxt[e - 1] += eb * 3 / 16;
+          nxt[e] += er * 5 / 16; nxt[e + 1] += eg * 5 / 16; nxt[e + 2] += eb * 5 / 16;
+          nxt[e + 3] += er / 16; nxt[e + 4] += eg / 16; nxt[e + 5] += eb / 16;
+        }
+      }
+    }
+    // GIF LZW: codes packed least significant bit first, 9 to 12 bits wide; the
+    // code size grows just before the first table entry that needs the extra bit.
+    function gifLzw(input) {
+      if (!lzwCode) { lzwCode = new Int16Array(1 << 20); lzwStamp = new Uint16Array(1 << 20); }
+      var out = new Uint8Array(Math.ceil(input.length * 1.5) + 16), op = 0, cur = 0, shift = 0, size = 9, next = 258;
+      var fresh = function () {
+        next = 258;
+        size = 9;
+        if (++lzwGen > 65535) { lzwStamp.fill(0); lzwGen = 1; }
+      };
+      var emit = function (code) {
+        cur |= code << shift;
+        shift += size;
+        while (shift >= 8) { out[op++] = cur & 255; cur >>>= 8; shift -= 8; }
+      };
+      fresh();
+      emit(256);
+      var prefix = input[0];
+      for (var i = 1; i < input.length; i++) {
+        var k = input[i], key = (prefix << 8) | k;
+        if (lzwStamp[key] === lzwGen) { prefix = lzwCode[key]; continue; }
+        emit(prefix);
+        if (next === 4096) { emit(256); fresh(); } else {
+          if (next >= (1 << size)) size++;
+          lzwCode[key] = next++;
+          lzwStamp[key] = lzwGen;
+        }
+        prefix = k;
+      }
+      emit(prefix);
+      emit(257);
+      if (shift > 0) out[op++] = cur & 255;
+      return out.slice(0, op);
+    }
     // ICO: one PNG per size, the picture fitted and centred on a transparent square.
     async function ico(src, sizes) {
       var d = dims(src), pngs = [];
@@ -1071,6 +1418,10 @@
         var c = scaled(src, o.width, o.height, o.background);
         try {
           if (o.fmt === 'bmp') return await bmp(c, o.dpi);
+          if (o.fmt === 'tiff') return await tiff(c, o.dpi);
+          if (o.fmt === 'gif') return await gif(c);
+          // Raw RGBA (not premultiplied), for encoders that are not built into canvas.
+          if (o.fmt === 'rgba') return new Uint8Array(ctx(c).getImageData(0, 0, c.width, c.height).data.buffer);
           var b = await blobOf(c, o.mime, o.quality);
           if (!b || !b.size) throw err('CORRUPT');
           if (b.type !== o.mime) throw err('NO_SUPPORT');
@@ -1137,7 +1488,7 @@
     }
   }
   function pixelError(code, job) {
-    if (code === 'NO_SUPPORT') return fail('NO_SUPPORT', 'This browser cannot save ' + FORMATS[job.fmt].label + ' images.');
+    if (code === 'NO_SUPPORT') return fail('NO_SUPPORT', 'This browser cannot save ' + (FORMATS[job.fmt] || { label: 'these' }).label + ' images.');
     if (code === 'TOO_BIG' || code === 'TOO_BIG_MEM') return fail('TOO_BIG', 'The image is too large for this browser to process in memory. Try a smaller size.');
     return fail('CORRUPT', 'The browser could not encode the image. It may be too large.');
   }
@@ -1268,7 +1619,8 @@
     return {
       width: w, height: h, from: from, viewBox: vb, widthAttr: wa, heightAttr: ha,
       notes: notes, external: external + urls, scripts: scripts, text: text,
-      hasText: doc.getElementsByTagName('text').length > 0
+      hasText: doc.getElementsByTagName('text').length > 0,
+      foreignObject: doc.getElementsByTagName('foreignObject').length
     };
   }
   async function svgRender(input, w, h) {
@@ -1290,12 +1642,28 @@
     if (!info.viewBox) root.setAttribute('viewBox', '0 0 ' + info.width + ' ' + info.height);
     root.setAttribute('width', String(w));
     root.setAttribute('height', String(h));
-    var src = new XMLSerializer().serializeToString(doc);
-    var img = await loadImg(new Blob([src], { type: 'image/svg+xml' }));
-    if (!img) throw fail('SVG_INVALID', 'The browser could not draw this SVG.');
-    var c = newCanvas(w, h), g = context(c);
-    checkUsable(c, g);
-    g.drawImage(img, 0, 0, w, h);
+    var draw = async function () {
+      var img = await loadImg(new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' }));
+      if (!img) throw fail('SVG_INVALID', 'The browser could not draw this SVG.');
+      // A one-pixel test drawing: would this picture lock the canvas against export?
+      var probe = newCanvas(1, 1), pg = context(probe);
+      pg.drawImage(img, 0, 0, 1, 1);
+      try { pg.getImageData(0, 0, 1, 1); } catch (e) { return null; } finally { probe.width = 0; }
+      var cv = newCanvas(w, h), cg = context(cv);
+      checkUsable(cv, cg);
+      cg.drawImage(img, 0, 0, w, h);
+      return cv;
+    };
+    var c = await draw();
+    if (!c) {
+      // Chrome (and other browsers that do the same) refuses to export a canvas once
+      // HTML inside <foreignObject> has been drawn on it. Draw the SVG again without that HTML.
+      var fo = doc.getElementsByTagName('foreignObject');
+      while (fo.length) fo[0].parentNode.removeChild(fo[0]);
+      c = await draw();
+      if (!c) throw fail('SVG_INVALID', 'This browser does not allow this SVG to be converted to an image.');
+      c.dataset.omitted = 'foreignObject';
+    }
     return c;
   }
 
@@ -1327,15 +1695,19 @@
         var sw = Math.round(info.width), sh = Math.round(info.height);
         if (sw * sh > maxPixels) throw tooBig(sw, sh, maxPixels);
         src = await svgRender(text, sw, sh);
+        if (src.dataset.omitted) res.warnings.push(src.dataset.omitted);
         res.decoder = 'svg';
         if (useWorker) h = worker();
       } else {
         // Byte-level checks and metadata first.
         // Browsers draw a cut-off PNG or WebP with the missing part blank, without an error.
-        if (fmt === 'png' && ascii(await readRange(file, Math.max(0, file.size - 8), file.size), 0, 4) !== 'IEND') {
-          var idat = false;
-          pngChunks(head, function (t, st, len) { if (t === 'IDAT') { idat = st + len <= head.length; return false; } });
-          if (!idat) throw fail('CORRUPT', 'The PNG file is incomplete: it ends before its image data, so there is nothing to convert.');
+        // Some apps add bytes after a PNG's IEND chunk, so look for it near the end.
+        if (fmt === 'png' && !hasIend(await readRange(file, Math.max(0, file.size - 65536), file.size))) {
+          // Refused when it ends before any real amount of image data (a first
+          // IDAT chunk that is complete, or at least 4 KB of it).
+          var idat = null;
+          pngChunks(head, function (t, st, len) { if (t === 'IDAT') { idat = st + len <= file.size || file.size - st >= 4096; return false; } });
+          if (idat === false || (idat === null && head.length >= file.size)) throw fail('CORRUPT', 'The PNG file is incomplete: it ends before its image data, so there is nothing to convert.');
           res.warnings.push('truncated');
         }
         if (fmt === 'webp' && u32le(head, 4) + 8 > file.size) res.warnings.push('truncated');
@@ -1392,6 +1764,8 @@
             throw fail('CORRUPT', r.message || 'The ' + FORMATS[fmt].label + ' file could not be decoded. It may be damaged, incomplete or use a feature this decoder does not support.');
           }
           res.decoder = fmt === 'heic' ? 'libheif' : 'utif';
+          // HDR (PQ or HLG transfer): the decoder gives the raw values, without tone mapping.
+          if (box && box.nclx && (box.nclx.t === 16 || box.nclx.t === 18)) res.warnings.push('hdr');
           res.images = r.images || res.images;
           if (fmt === 'tiff') res.orientation = r.orientation;
           if (r.converted) res.colorProfile = 'converted';
@@ -1537,12 +1911,12 @@
   }
 
   // ---------- Encode ----------
-  var ALIASES = { jpg: 'jpeg', 'image/jpeg': 'jpeg', 'image/jpg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico', 'image/vnd.microsoft.icon': 'ico', tif: 'tiff' };
+  var ALIASES = { 'image/gif': 'gif', jpg: 'jpeg', 'image/jpeg': 'jpeg', 'image/jpg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico', 'image/vnd.microsoft.icon': 'ico', tif: 'tiff', 'image/tiff': 'tiff' };
   function norm(f) { f = String(f || '').toLowerCase(); return ALIASES[f] || f; }
   var encTests = {};
-  function canEncode(f) {
+  function canEncode(f, opts) {
     var fmt = norm(f);
-    if (fmt === 'png' || fmt === 'bmp' || fmt === 'ico') return Promise.resolve(true);
+    if (fmt === 'png' || fmt === 'bmp' || fmt === 'ico' || fmt === 'tiff' || fmt === 'gif') return Promise.resolve(true);
     if (!(fmt === 'jpeg' || fmt === 'webp' || fmt === 'avif')) return Promise.resolve(false);
     if (!encTests[fmt]) {
       encTests[fmt] = (async function () {
@@ -1552,7 +1926,97 @@
         return !!b && b.type === FORMATS[fmt].mime && b.size > 0;
       })().catch(function () { return false; });
     }
+    if (fmt === 'avif' && opts && opts.wasm) return encTests.avif.then(function (ok) { return ok || avifWasmPossible(); });
     return encTests[fmt];
+  }
+
+  // ---------- AVIF through WebAssembly (opt-in: encode(..., { wasm: true })) ----------
+  // Most browsers cannot encode AVIF from a canvas. The libavif/libaom encoder in
+  // /assets/vendor/avif/ (3.5 MB, loaded on first use) runs in its own module
+  // worker; the image worker hands it the resized pixels.
+  var AVIF_MAX = 50e6, avifState = null, avifPossible = null;
+  function avifWasmPossible() {
+    if (avifPossible === null) {
+      avifPossible = false;
+      if (typeof WebAssembly === 'object' && typeof Worker === 'function') {
+        // Browsers without module workers never read the "type" option.
+        var url = URL.createObjectURL(new Blob([''], { type: 'text/javascript' }));
+        try { new Worker(url, { get type() { avifPossible = true; return 'module'; } }).terminate(); } catch (e) { /* none */ }
+        URL.revokeObjectURL(url);
+      }
+    }
+    return avifPossible;
+  }
+  function avifWorker() {
+    if (avifState) return avifState;
+    var src = 'import encoder from ' + JSON.stringify(VENDOR + 'avif/avif_enc.js') + ';\n' +
+      'var mod = null;\n' +
+      'async function load(url) {\n' +
+      '  var res = await fetch(url);\n' +
+      '  if (!res.ok) throw new Error("load");\n' +
+      '  return encoder({ wasmBinary: await res.arrayBuffer(), print: function () {}, printErr: function () {} });\n' +
+      '}\n' +
+      'self.onmessage = async function (e) {\n' +
+      '  var m = e.data, M;\n' +
+      '  try {\n' +
+      '    if (!mod) { mod = load(m.wasm); mod.catch(function () { mod = null; }); }\n' +
+      '    try { M = await mod; } catch (x) { self.postMessage({ id: m.id, ok: false, code: "LOAD_FAILED" }); return; }\n' +
+      '    var out = M.encode(new Uint8Array(m.buffer), m.w, m.h, m.opts);\n' +
+      '    if (!out || !out.length) throw new Error("encode");\n' +
+      '    var copy = out.slice();\n' +
+      '    self.postMessage({ id: m.id, ok: true, buffer: copy.buffer }, [copy.buffer]);\n' +
+      '  } catch (x) {\n' +
+      '    self.postMessage({ id: m.id, ok: false, code: "CORRUPT", fatal: x instanceof WebAssembly.RuntimeError });\n' +
+      '  }\n' +
+      '};\n';
+    var st = { pending: new Map(), seq: 0 };
+    var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    var stop = function (code) {
+      if (avifState === st) avifState = null;
+      st.pending.forEach(function (p) { clearTimeout(p.timer); p.reject(avifError(code)); });
+      st.pending.clear();
+      try { st.worker.terminate(); } catch (e) { /* gone */ }
+      URL.revokeObjectURL(url);
+    };
+    try {
+      st.worker = new Worker(url, { type: 'module' });
+    } catch (e) {
+      URL.revokeObjectURL(url);
+      throw avifError('LOAD_FAILED');
+    }
+    st.worker.onmessage = function (e) {
+      var p = st.pending.get(e.data.id);
+      if (!p) return;
+      st.pending.delete(e.data.id);
+      clearTimeout(p.timer);
+      if (e.data.ok) p.resolve(new Uint8Array(e.data.buffer)); else p.reject(avifError(e.data.code));
+      // After a WebAssembly crash (out of memory) the module cannot be used again.
+      if (e.data.fatal) stop('CORRUPT');
+    };
+    st.worker.onerror = function (e) { if (e && e.preventDefault) e.preventDefault(); stop('LOAD_FAILED'); };
+    st.stop = stop;
+    avifState = st;
+    return st;
+  }
+  function avifError(code) {
+    if (code === 'LOAD_FAILED') return fail('LOAD_FAILED', 'The AVIF encoder could not be loaded. Check your connection and try again.');
+    return fail('CORRUPT', 'The AVIF encoder failed on this image. It may be too large for this browser: try a smaller size.');
+  }
+  function avifEncode(rgba, w, h, quality, speed) {
+    var st;
+    try { st = avifWorker(); } catch (e) { return Promise.reject(e); }
+    return new Promise(function (resolve, reject) {
+      var id = ++st.seq, p = { resolve: resolve, reject: reject };
+      p.timer = setTimeout(function () { if (st.pending.has(id)) { st.pending.delete(id); reject(fail('CORRUPT', 'Encoding the AVIF took too long and was stopped.')); st.stop('CORRUPT'); } }, 300000);
+      st.pending.set(id, p);
+      st.worker.postMessage({
+        id: id, wasm: VENDOR + 'avif/avif_enc.wasm', buffer: rgba.buffer, w: w, h: h,
+        opts: {
+          quality: Math.round(quality * 100), qualityAlpha: -1, denoiseLevel: 0, tileColsLog2: 0, tileRowsLog2: 0,
+          speed: speed, subsample: 1, chromaDeltaQ: false, sharpness: 0, tune: 0, enableSharpYUV: false, bitDepth: 8, lossless: false
+        }
+      }, [rgba.buffer]);
+    });
   }
   async function encode(source, format, options) {
     var o = options || {}, fmt = norm(format);
@@ -1569,7 +2033,7 @@
     if (!src) throw fail('CORRUPT', 'There is no image to save.');
     var d = src._h ? [source.width, source.height] : sizeOf(src);
     if (!d[0] || !d[1]) throw fail('CORRUPT', 'There is no image to save.');
-    if (!(fmt === 'png' || fmt === 'jpeg' || fmt === 'webp' || fmt === 'avif' || fmt === 'bmp' || fmt === 'ico')) throw fail('UNSUPPORTED', 'Saving as ' + format + ' is not supported.');
+    if (!(fmt === 'png' || fmt === 'jpeg' || fmt === 'webp' || fmt === 'avif' || fmt === 'bmp' || fmt === 'ico' || fmt === 'tiff' || fmt === 'gif')) throw fail('UNSUPPORTED', 'Saving as ' + format + ' is not supported.');
     var W = Math.max(1, Math.round(o.width || d[0])), H = Math.max(1, Math.round(o.height || d[1]));
     var bg = o.background && o.background !== 'transparent' ? o.background : null;
     if (fmt === 'jpeg' || fmt === 'bmp') bg = bg || '#ffffff';
@@ -1581,7 +2045,15 @@
     }
     var mime = FORMATS[fmt].mime;
     var job = { fmt: fmt, mime: mime, quality: o.quality == null ? 0.92 : Math.min(1, Math.max(0, +o.quality)), background: bg, width: W, height: H, sizes: sizes, dpi: o.dpi > 0 ? +o.dpi : 0 };
-    var bytes = new Uint8Array((await pixelWork('encode', src, job)).buffer);
+    var bytes;
+    if (fmt === 'avif' && o.wasm && !(await canEncode('avif'))) {
+      if (!avifWasmPossible()) throw fail('NO_SUPPORT', 'This browser cannot save AVIF images.');
+      if (W * H > AVIF_MAX) throw fail('TOO_BIG', 'AVIF files can be made here up to ' + AVIF_MAX / 1e6 + ' megapixels; this image is ' + (W * H / 1e6).toFixed(1) + '. Choose a smaller size.');
+      var rgba = new Uint8Array((await pixelWork('encode', src, Object.assign({}, job, { fmt: 'rgba' }))).buffer);
+      bytes = await avifEncode(rgba, W, H, job.quality, o.speed != null ? +o.speed : W * H > 2.5e6 ? 8 : 6);
+    } else {
+      bytes = new Uint8Array((await pixelWork('encode', src, job)).buffer);
+    }
     if ((o.exif && (fmt === 'jpeg' || fmt === 'png' || fmt === 'webp')) || (job.dpi && (fmt === 'png' || fmt === 'jpeg'))) {
       var ex = o.exif && fmt !== 'avif' ? prepareExif(o.exif, { width: W, height: H, stripGps: !!o.stripGps }) : null;
       if (job.dpi) bytes = withDpi(bytes, fmt, job.dpi) || bytes;

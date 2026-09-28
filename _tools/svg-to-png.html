@@ -60,8 +60,10 @@ howto: |
   installed on your device.
 
   Scripts and event handlers inside the SVG never run, which makes it safe to
-  convert files from unknown sources. Animations are captured in their first
-  frame. Gradients, patterns, masks, clipping paths, filters and CSS styles
+  convert files from unknown sources. HTML embedded with a `<foreignObject>`
+  element is left out in browsers such as Chrome, which refuse to turn it into
+  pixels; the converter tells you when that happens. Animations are captured
+  in their first frame. Gradients, patterns, masks, clipping paths, filters and CSS styles
   inside the file render as they do in the browser.
 
   Copied from a web page, inline SVG often lacks the
@@ -274,8 +276,9 @@ faq:
   }
 
   function settings() {
+    var opt = fmtSel.options[fmtSel.selectedIndex];
     return {
-      fmt: fmtSel.value, mode: modeSel.value, scale: parseFloat(scaleIn.value), w: parseFloat(wIn.value), h: parseFloat(hIn.value),
+      fmt: opt && !opt.disabled ? fmtSel.value : 'png', mode: modeSel.value, scale: parseFloat(scaleIn.value), w: parseFloat(wIn.value), h: parseFloat(hIn.value),
       dpi: parseFloat(dpiIn.value), transparent: transparent.checked && fmtSel.value !== 'jpeg', bg: bgIn.value, quality: +quality.value / 100
     };
   }
@@ -334,6 +337,7 @@ faq:
     var size = outSize(info.width, info.height, s);
     if (size.error) { it.error = size.error; it.blob = null; return; }
     var canvas = await TTImage.svg.render(it.text, size.w, size.h), blob, thumb;
+    it.omitted = canvas.dataset.omitted || null;
     try {
       if (it.token !== t) return;
       blob = await TTImage.encode(canvas, s.fmt, { quality: s.quality, background: s.transparent ? null : s.bg, dpi: s.mode === 'dpi' ? s.dpi : 0 });
@@ -365,6 +369,7 @@ faq:
       var notes = info.notes.slice();
       if (info.external) notes.push('It refers to ' + info.external + (info.external === 1 ? ' external file' : ' external files') + ' by URL (images, fonts or stylesheets). Browsers never load these when drawing an SVG as an image, so they are missing from the output, and nothing is fetched.');
       if (info.scripts) notes.push('Scripts and event handlers in the SVG are ignored; they never run.');
+      if (it.omitted && !it.error) notes.push('The HTML inside this SVG (a <foreignObject> element) is left out: this browser does not allow it to be converted to an image.');
       if (info.hasText) notes.push('Text is drawn with fonts installed on this device.');
       notes.forEach(function (n) { var li = document.createElement('li'); li.textContent = n; notesEl.appendChild(li); });
     }
@@ -469,13 +474,30 @@ faq:
     return { id: nextId++, name: name, text: text, sample: !!sample };
   }
 
+  var MAX_BYTES = 20e6;
+  // .svgz is gzip-compressed SVG. Unpacked in pieces and stopped at 20 MB, so a
+  // small file that expands to gigabytes cannot exhaust the browser's memory.
+  async function gunzip(file) {
+    if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot open compressed .svgz files.');
+    var reader = file.stream().pipeThrough(new DecompressionStream('gzip')).getReader(), parts = [], total = 0;
+    try {
+      for (;;) {
+        var r = await reader.read();
+        if (r.done) break;
+        total += r.value.length;
+        if (total > MAX_BYTES) throw new Error('This .svgz file unpacks to more than 20 MB, too big to be an SVG drawing.');
+        parts.push(r.value);
+      }
+    } catch (e) {
+      reader.cancel().catch(function () {});
+      throw /20 MB/.test(e.message) ? e : new Error('This .svgz file is damaged: it could not be decompressed.');
+    }
+    return new TextDecoder().decode(await new Blob(parts).arrayBuffer());
+  }
   async function readSvg(file) {
     var head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
-    if (head[0] === 0x1F && head[1] === 0x8B) {
-      if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot open compressed .svgz files.');
-      return new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).text();
-    }
-    if (file.size > 20e6) throw new Error('This file is larger than 20 MB, too big to be an SVG drawing.');
+    if (head[0] === 0x1F && head[1] === 0x8B) return gunzip(file);
+    if (file.size > MAX_BYTES) throw new Error('This file is larger than 20 MB, too big to be an SVG drawing.');
     var fmt = await TTImage.sniff(file);
     if (fmt && fmt !== 'svg') throw new Error('This is a ' + TTImage.formats[fmt].label + ' image, not an SVG. Use the image converter to change raster formats.');
     return file.text();
@@ -590,6 +612,15 @@ faq:
     if (!isFileDrag(e)) return;
     e.preventDefault();
     addFiles(e.dataTransfer.files);
+  });
+
+  // Safari and older browsers cannot save WebP from a web page.
+  TTImage.canEncode('webp').then(function (ok) {
+    if (ok) return;
+    var o = fmtSel.querySelector('option[value="webp"]');
+    o.disabled = true;
+    o.textContent = 'WebP (this browser cannot save it)';
+    if (fmtSel.value === 'webp') { fmtSel.value = 'png'; onSettings(); }
   });
 
   items.push(newItem('example.svg', SAMPLE, true));

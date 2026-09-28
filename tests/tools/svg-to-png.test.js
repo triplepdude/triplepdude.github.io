@@ -276,4 +276,41 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.inputValue('#s2p-code'), '');
   await expectOut(/^Paste SVG code or open a file/);
   assert.equal(await page.evaluate(() => document.activeElement.id), 's2p-code');
+
+  // HTML in a <foreignObject> locks the canvas in Chrome: the SVG is drawn
+  // without it, and the page says so (it used to fail with no picture).
+  await setCode(svg('foreign.svg'));
+  await expectOut(/^Output: 200 × 100 px PNG/);
+  assert.match(await notes(), /<foreignObject> element\) is left out/);
+  near((await pixels((await download()).data, [[100, 50]]))[0], [0, 170, 0, 255], 2, 'the rest of the drawing');
+
+  // An image embedded as a data: URI is drawn (only linked files are left out).
+  // embedded-image.svg stretches a 2x1 PNG, red then transparent, over 4x2.
+  await page.click('[data-scale="8"]');
+  await setCode(svg('embedded-image.svg'));
+  await expectOut(/^Output: 32 × 16 px PNG/);
+  px = await pixels((await download()).data, [[4, 8], [28, 8]]);
+  near(px[0], [255, 0, 0, 255], 2, 'embedded image drawn');
+  assert.equal(px[1][3], 0, 'its transparent pixel');
+
+  // .svgz: unpacking stops at 20 MB (bomb.svgz is 21 KB and unpacks to 21 MB),
+  // and a damaged file gets a readable message.
+  await page.setInputFiles('#s2p-file', [
+    { name: 'bomb.svgz', mimeType: 'image/svg+xml', buffer: fs.readFileSync(fx('bomb.svgz')) },
+    { name: 'damaged.svgz', mimeType: 'image/svg+xml', buffer: fs.readFileSync(fx('damaged.svgz')) }
+  ]);
+  await page.waitForFunction(() => document.querySelectorAll('#s2p-list .s2p-item').length === 3 && !/Converting/.test(document.querySelector('#s2p-list').textContent), null, { timeout: 15000 });
+  const bad = await page.$$eval('#s2p-list .s2p-meta', l => l.map(x => x.textContent));
+  assert.match(bad[1], /unpacks to more than 20 MB/);
+  assert.match(bad[2], /This \.svgz file is damaged/);
+
+  // A browser that cannot encode WebP (Safari): the option is disabled and explained.
+  await page.addInitScript(() => {
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
+  });
+  await open();
+  await page.waitForFunction(() => document.querySelector('#s2p-format option[value="webp"]').disabled);
+  assert.equal(await page.textContent('#s2p-format option[value="webp"]'), 'WebP (this browser cannot save it)');
+  await expectOut(/^Output: 560 × 240 px PNG/);
 };

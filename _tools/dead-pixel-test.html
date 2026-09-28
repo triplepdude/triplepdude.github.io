@@ -92,6 +92,9 @@ faq:
 .dpt-pattern, .dpt-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .dpt-canvas[hidden] { display: none; }
 .dpt-stage:fullscreen { width: 100vw; height: 100vh; max-height: none; aspect-ratio: auto; margin: 0; border: 0; border-radius: 0; }
+.dpt-stage:-webkit-full-screen { width: 100vw; height: 100vh; max-height: none; aspect-ratio: auto; margin: 0; border: 0; border-radius: 0; }
+/* Whatever the full-screen flavour, no border or rounded corner may hide the edge pixels. */
+.dpt-stage.is-active { border: 0; border-radius: 0; }
 .dpt-stage.is-pseudo {
   position: fixed; inset: 0; z-index: 2147483647; width: 100vw; height: 100vh; height: 100dvh;
   max-height: none; aspect-ratio: auto; margin: 0; border: 0; border-radius: 0;
@@ -142,6 +145,7 @@ html.dpt-lock, html.dpt-lock body { overflow: hidden; }
 .dpt-opts { align-items: center; }
 .dpt-opts > .field { flex: 0 1 180px; }
 .dpt-keys { margin: 0 0 4px; }
+.msg.dpt-info { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
 .dpt-keys kbd { padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); font-family: var(--mono); font-size: 12px; }
 </style>
 
@@ -167,7 +171,7 @@ html.dpt-lock, html.dpt-lock body { overflow: hidden; }
   <button class="btn secondary" type="button" id="dpt-prev" aria-label="Previous pattern">&larr; Previous</button>
   <button class="btn secondary" type="button" id="dpt-next" aria-label="Next pattern">Next &rarr;</button>
 </div>
-<p class="msg error" id="dpt-msg" aria-live="polite"></p>
+<p class="msg dpt-info" id="dpt-msg" aria-live="polite"></p>
 
 <p class="label" id="dpt-sw-label">Test patterns</p>
 <div class="dpt-swatches" id="dpt-swatches" role="group" aria-labelledby="dpt-sw-label"></div>
@@ -351,27 +355,36 @@ html.dpt-lock, html.dpt-lock body { overflow: hidden; }
     activate('pseudo');
   }
 
+  function fallbackNote(blocked) {
+    var touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    return (blocked ? 'Full screen was blocked' : 'Full screen is not available in this browser') +
+      ', so the test fills the browser window instead.' +
+      (touch ? ' Strips under the browser\'s own bars are not covered, so check those edges with another app or a photo viewer.'
+        : ' Press F11 (Ctrl+Cmd+F on a Mac) to hide the browser toolbars as well.');
+  }
+
   function start() {
     if (active || pending) return;
     msg.textContent = '';
     var req = stage.requestFullscreen ? 'requestFullscreen' : stage.webkitRequestFullscreen ? 'webkitRequestFullscreen' : '';
     var allowed = document.fullscreenEnabled !== false && document.webkitFullscreenEnabled !== false;
-    var fallback = 'Full screen is not available here, so the test fills the browser window instead. Press F11 (Ctrl+Cmd+F on a Mac) for true full screen.';
-    if (!req || !allowed) { enterPseudo(fallback); return; }
+    if (!req || !allowed) { enterPseudo(fallbackNote(false)); return; }
     pending = true;
+    function fail() { if (pending && !active) { pending = false; enterPseudo(fallbackNote(true)); } }
     try {
       var r = stage[req]({ navigationUI: 'hide' });
-      if (r && typeof r.then === 'function') r.then(null, function () { pending = false; if (!active) enterPseudo(fallback); });
-      else setTimeout(function () { if (pending && fsElement() !== stage) { pending = false; enterPseudo(fallback); } }, 1000);
+      if (r && typeof r.then === 'function') r.then(null, fail);
+      // A request that neither succeeds nor fails (old WebKit returns nothing
+      // and may stay silent) must not leave the Start button dead.
+      setTimeout(function () { if (fsElement() !== stage) fail(); }, 1500);
     } catch (e) {
-      pending = false;
-      enterPseudo(fallback);
+      fail();
     }
   }
 
   function exit() {
     if (!active) return;
-    if (mode === 'fs' && fsElement()) {
+    if (fsElement() === stage) {
       var ex = document.exitFullscreen || document.webkitExitFullscreen;
       try {
         var r = ex.call(document);
@@ -383,12 +396,21 @@ html.dpt-lock, html.dpt-lock body { overflow: hidden; }
   }
 
   function onFsChange() {
-    if (fsElement() === stage) { if (!active) activate('fs'); }
-    else if (active && mode === 'fs') deactivate();
+    if (fsElement() === stage) {
+      if (!active) activate('fs');
+      else if (mode === 'pseudo') {
+        // A slow request that succeeded after the window-filling fallback began.
+        mode = 'fs';
+        stage.classList.remove('is-pseudo');
+        document.documentElement.classList.remove('dpt-lock');
+        msg.textContent = '';
+        $('#dpt-note').textContent = '';
+      }
+    } else if (active && mode === 'fs') deactivate();
   }
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
-  document.addEventListener('fullscreenerror', function () { pending = false; if (!active) enterPseudo('Full screen was blocked, so the test fills the browser window instead.'); });
+  document.addEventListener('fullscreenerror', function () { if (pending && !active) { pending = false; enterPseudo(fallbackNote(true)); } });
 
   // ---- Keyboard ----
   document.addEventListener('keydown', function (e) {
@@ -402,6 +424,8 @@ html.dpt-lock, html.dpt-lock body { overflow: hidden; }
       case 'Home': show(0, true); break;
       case 'End': show(N - 1, true); break;
       case 'Escape': case 'Esc': if (active) exit(); else handled = false; break;
+      // The page behind the test is covered, so focus stays on the test screen.
+      case 'Tab': if (active) { stage.focus({ preventScroll: true }); showBar(); } else handled = false; break;
       case 'f': case 'F': if (active) exit(); else start(); break;
       case 'a': case 'A':
         autoBox.checked = !autoBox.checked;
@@ -412,6 +436,12 @@ html.dpt-lock, html.dpt-lock body { overflow: hidden; }
       default: handled = false;
     }
     if (handled) e.preventDefault();
+  });
+
+  // Focus that reaches the hidden page some other way (a screen reader, a
+  // click-through) is brought back to the test screen.
+  document.addEventListener('focusin', function (e) {
+    if (active && !stage.contains(e.target)) stage.focus({ preventScroll: true });
   });
 
   // ---- Pointer ----

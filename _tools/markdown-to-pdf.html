@@ -105,6 +105,7 @@ faq:
 .mdp.is-dragging .mdp-drop { display: flex; }
 .mdp-info { color: var(--muted); font-size: 13px; }
 .mdp-h { margin: 24px 0 12px; font-size: 1.1rem; }
+.mdp-panes + .msg, .mdp-panes + .msg + .msg { margin-top: 12px; }
 .mdp-opts > .field { flex: 1 1 150px; }
 .mdp-name { max-width: 420px; }
 .mdp-print-hint { margin: -6px 0 0; }
@@ -139,7 +140,7 @@ faq:
       </div>
       <textarea id="mdp-input" class="mono" spellcheck="false" autocomplete="off" aria-describedby="mdp-input-hint"># Quarterly project update
 
-A short report written in **Markdown**. Edit this text or paste your own: the preview shows exactly what goes into the PDF.
+A short report written in **Markdown**. Edit this text or paste your own: the preview shows what goes into the PDF.
 
 ## Highlights
 
@@ -478,23 +479,46 @@ $$
       wantKatex();
       return display ? '<span class="md-math-display md-math-src">' + esc(t) + '</span>' : '<span class="md-math-src">' + esc(t) + '</span>';
     }
+    // KaTeX's markup is long, so each formula is cleaned once (all new ones of a render together)
+    // and cached; the document holds a placeholder that is swapped in after it has been cleaned.
     var key = (display ? 'D' : 'I') + t;
-    if (km.cache.has(key)) return km.cache.get(key);
-    var html;
-    try {
-      html = window.katex.renderToString(t, { displayMode: display, throwOnError: false, output: 'htmlAndMathml', trust: false, strict: 'ignore', maxExpand: 500, macros: {} });
-    } catch (e) {
-      html = '<span class="md-math-src">' + esc(t) + '</span>';
+    if (!km.cache.has(key) && !(key in ctx.raw)) {
+      var html;
+      try {
+        html = window.katex.renderToString(t, { displayMode: display, throwOnError: false, output: 'htmlAndMathml', trust: false, strict: 'ignore', maxExpand: 500, macros: {} });
+      } catch (e) { html = '<span class="md-math-src">' + esc(t) + '</span>'; }
+      ctx.raw[key] = html;
+      ctx.rawKeys.push(key);
     }
-    if (km.cache.size > 400) km.cache.clear();
-    km.cache.set(key, html);
-    return html;
+    ctx.kx.push(key);
+    return '<span class="md-kx ' + ctx.nonce + '-' + (ctx.kx.length - 1) + '"></span>';
+  }
+  function cleanNewMath() {
+    var keys = ctx.rawKeys;
+    if (!keys.length) return;
+    if (km.cache.size + keys.length > 3000) km.cache.clear();
+    var sep = '<hr class="md-sep ' + ctx.nonce + '">';
+    var x = keys.map(function (k) { return ctx.raw[k]; }).join(sep);
+    var parts = sanitize(x, 'preview').split(sep);
+    if (parts.length === keys.length) keys.forEach(function (k, i) { km.cache.set(k, parts[i]); });
+    else keys.forEach(function (k) { x = ctx.raw[k]; km.cache.set(k, sanitize(x, 'preview')); });
+    ctx.rawKeys = [];
+  }
+  function spliceMath(html) {
+    if (!ctx.kx.length) return html;
+    cleanNewMath();
+    return html.replace(new RegExp('<span class="md-kx ' + ctx.nonce + '-(\\d+)"></span>', 'g'), function (m, i) { return km.cache.get(ctx.kx[+i]) || ''; });
+  }
+  function nonce() {
+    var a = new Uint8Array(6);
+    crypto.getRandomValues(a);
+    return 'k' + Array.prototype.map.call(a, function (x) { return (x < 16 ? '0' : '') + x.toString(16); }).join('');
   }
 
   // ---------- Markdown ----------
   var ctx = null; // per-render state
   function newCtx(mode) {
-    return { mode: mode, slugs: Object.create(null), heads: [], fnIds: Object.create(null), fnOrder: [], fnNum: Object.create(null), fnRefCount: Object.create(null), fnHtml: Object.create(null), math: false, title: '' };
+    return { mode: mode, slugs: Object.create(null), heads: [], fnIds: Object.create(null), fnOrder: [], fnNum: Object.create(null), fnRefCount: Object.create(null), fnHtml: Object.create(null), math: false, title: '', kx: [], raw: Object.create(null), rawKeys: [], nonce: nonce() };
   }
 
   // GitHub's heading anchors: lower case, keep letters, digits, spaces, - and _, spaces become -.
@@ -765,7 +789,7 @@ $$
         body = m ? m[0] + nav + body.slice(m[0].length) : nav + body;
       }
     }
-    var clean = sanitize(body, mode);
+    var clean = spliceMath(sanitize(body, mode));
     return { html: clean, title: ctx.fmTitle || ctx.title, math: ctx.math };
   }
 
@@ -789,6 +813,21 @@ $$
 
   var autoName = '', nameEdited = false, openedName = '';
   var last = { src: null };
+  // Replaces only the top-level blocks that changed, so an edit in a long document does not
+  // rebuild and re-lay-out the whole preview.
+  function updateDoc(target, html) {
+    var tpl = target.ownerDocument.createElement('template');
+    tpl.innerHTML = html;   // parsed inert: nothing loads until nodes are inserted
+    var next = Array.prototype.slice.call(tpl.content.childNodes), prev = Array.prototype.slice.call(target.childNodes);
+    var a = 0, n = next.length, p = prev.length;
+    while (a < n && a < p && prev[a].isEqualNode(next[a])) a++;
+    while (n > a && p > a && prev[p - 1].isEqualNode(next[n - 1])) { n--; p--; }
+    var ref = prev[p] || null;
+    for (var i = a; i < p; i++) target.removeChild(prev[i]);
+    var frag = target.ownerDocument.createDocumentFragment();
+    for (var j = a; j < n; j++) frag.appendChild(next[j]);
+    target.insertBefore(frag, ref);
+  }
   function render() {
     renderTimer = null;
     if (!md || !doc) return;
@@ -801,11 +840,12 @@ $$
       return;
     }
     if (errBox.dataset.from === 'render') setMsg(errBox, '');
-    doc.innerHTML = out.html;
-    decorate(doc);
+    // Page settings first: measuring the frame now is cheap, after a big insert it forces a full layout.
     applyDocOptions(doc);
     updatePageCss();
     layoutPreview();
+    updateDoc(doc, out.html);
+    decorate(doc);
     last = { src: src, title: out.title, math: out.math };
     autoName = safeName(openedName || out.title || '');
     if (!nameEdited) nameInput.value = autoName;
@@ -1040,7 +1080,16 @@ $$
       fdoc.title = fileBase();
       savedTitle = document.title;
       document.title = fileBase();   // browsers suggest the title as the PDF's file name
-      try { frame.contentWindow.print(); } finally { setTimeout(restoreTitle, 1000); }
+      // Chrome and Safari return from print() when the dialog closes, Firefox at once: the title is
+      // put back when the print is over (afterprint), or at the next click or key press.
+      var t0 = Date.now(), win = frame.contentWindow;
+      win.addEventListener('afterprint', restoreTitle, { once: true });
+      try { win.print(); } finally {
+        if (Date.now() - t0 > 400) restoreTitle();
+        else {
+          ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, restoreTitle, { once: true, capture: true }); });
+        }
+      }
       if (btn) btn.focus();
     }, function () { printing = false; if (btn) btn.disabled = false; });
   }

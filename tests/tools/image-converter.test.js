@@ -80,6 +80,52 @@ function readZip(b) {
   return out;
 }
 
+// TIFF LZW decoder written from TIFF 6.0 section 13 (MSB-first codes, 9 to 12
+// bits, the width grows one code early), independent of the page's encoder.
+function tiffLzw(src) {
+  const out = [];
+  let pos = 0, width = 9, table, prev = null;
+  const reset = () => { table = []; for (let i = 0; i < 258; i++) table.push(i < 256 ? [i] : null); width = 9; prev = null; };
+  const read = () => { let v = 0; for (let k = 0; k < width; k++, pos++) v = (v << 1) | ((src[pos >> 3] >> (7 - (pos & 7))) & 1); return v; };
+  reset();
+  while (pos + width <= src.length * 8) {
+    const code = read();
+    if (code === 257) break;
+    if (code === 256) { reset(); continue; }
+    const entry = code < table.length ? table[code] : code === table.length && prev ? prev.concat([prev[0]]) : null;
+    if (!entry) throw new Error('bad LZW code ' + code);
+    out.push(...entry);
+    if (prev) table.push(prev.concat([entry[0]]));
+    prev = entry;
+    if (table.length + 1 >= (1 << width) && width < 12) width++;
+  }
+  return Uint8Array.from(out);
+}
+// Baseline TIFF reader for what the converter writes: one IFD, LZW or none,
+// horizontal predictor, contiguous 8-bit samples. Returns tags and RGBA pixels.
+function readTiff(b) {
+  if (b.toString('latin1', 0, 4) !== 'II*\0') throw new Error('not a little-endian TIFF');
+  const ifd = b.readUInt32LE(4), n = b.readUInt16LE(ifd), tags = {};
+  const SZ = { 3: 2, 4: 4, 5: 8 };
+  for (let k = 0; k < n; k++) {
+    const p = ifd + 2 + 12 * k, tag = b.readUInt16LE(p), type = b.readUInt16LE(p + 2), count = b.readUInt32LE(p + 4);
+    const at = SZ[type] * count > 4 ? b.readUInt32LE(p + 8) : p + 8;
+    tags[tag] = Array.from({ length: count }, (_, j) => type === 3 ? b.readUInt16LE(at + 2 * j) : type === 4 ? b.readUInt32LE(at + 4 * j) : b.readUInt32LE(at + 8 * j) / b.readUInt32LE(at + 8 * j + 4));
+  }
+  const w = tags[256][0], h = tags[257][0], spp = tags[277][0], rps = tags[278][0], row = w * spp;
+  const px = Buffer.alloc(w * h * 4);
+  tags[273].forEach((off, s) => {
+    let raw = b.subarray(off, off + tags[279][s]);
+    if (tags[259][0] === 5) raw = tiffLzw(raw);
+    for (let y = 0; y < Math.min(rps, h - s * rps); y++) {
+      const r = Uint8Array.from(raw.subarray(y * row, (y + 1) * row));
+      if (tags[317] && tags[317][0] === 2) for (let i = spp; i < row; i++) r[i] = (r[i] + r[i - spp]) & 255;
+      for (let x = 0; x < w; x++) for (let c = 0; c < 4; c++) px[4 * ((s * rps + y) * w + x) + c] = c < spp ? r[x * spp + c] : 255;
+    }
+  });
+  return { tags, w, h, px: (x, y) => [...px.subarray(4 * (y * w + x), 4 * (y * w + x) + 4)] };
+}
+
 module.exports = async ({ page, open, assert, fixtures }) => {
   const fx = f => path.join(fixtures, f);
   const requests = [];
@@ -117,14 +163,21 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   }, [buf.toString('base64'), pts]);
   const near = (got, want, tol, what) => want.forEach((v, i) => assert.ok(Math.abs(got[i] - v) <= tol, `${what}: got ${got} want ${want}`));
 
-  // AVIF output is offered exactly when this browser can encode it.
-  const avif = await page.evaluate(async () => {
+  // AVIF output is offered: Chromium's canvas cannot encode AVIF, so the page
+  // uses the WebAssembly encoder, which is not downloaded until it is needed.
+  await page.waitForFunction(() => document.querySelector('#imc-format option[value="avif"]').textContent === 'AVIF');
+  assert.equal(await page.locator('#imc-format option[value="avif"]').isDisabled(), false);
+  assert.equal(requests.filter(u => /avif_enc/.test(u)).length, 0, 'AVIF encoder loads lazily');
+  // Other tools ask canEncode('avif') without { wasm: true }: that still means the canvas itself.
+  const nativeAvif = await page.evaluate(async () => {
     const c = document.createElement('canvas');
     c.width = c.height = 2;
     const b = await new Promise(r => c.toBlob(r, 'image/avif'));
     return !!b && b.type === 'image/avif';
   });
-  assert.equal(await page.locator('#imc-format option[value="avif"]').isDisabled(), !avif);
+  assert.equal(await page.evaluate(() => TTImage.canEncode('avif')), nativeAvif);
+  assert.equal(await page.evaluate(() => TTImage.canEncode('avif', { wasm: true })), true);
+  assert.deepEqual(await page.evaluate(() => Promise.all(['tiff', 'gif', 'image/tiff'].map(f => TTImage.canEncode(f)))), [true, true, true]);
   assert.equal(await summary(), 'No images added yet.');
   assert.equal(requests.filter(u => /libheif|UTIF|pako/.test(u)).length, 0, 'decoders must load lazily');
 
@@ -251,6 +304,36 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual([...b.subarray(top, top + 3)], [30, 200, 10], 'top-left pixel, BGR');
   assert.deepEqual([...b.subarray(top + 49 * 3, top + 50 * 3)], [250, 250, 250], 'top-right pixel');
 
+  // ---------- TIFF: LZW with the horizontal predictor, alpha when needed ----------
+  await rerun(() => page.selectOption('#imc-format', 'tiff'));
+  assert.equal(await page.locator('#imc-quality-field').isHidden(), true);
+  f = await download(0);
+  assert.equal(f.name, 'alpha.tif');
+  let tif = readTiff(f.data);
+  assert.deepEqual([tif.w, tif.h, tif.tags[259][0], tif.tags[277][0], tif.tags[317][0], tif.tags[338][0], tif.tags[282][0]], [64, 48, 5, 4, 2, 2, 72]);
+  near(tif.px(10, 40), [200, 30, 60, 255], 0, 'TIFF is lossless');
+  assert.equal(tif.px(50, 40)[3], 0, 'TIFF transparent pixel');
+  near(tif.px(50, 10), [20, 100, 220, 128], 1, 'TIFF unassociated alpha');
+  tif = readTiff((await download(3)).data);
+  assert.deepEqual([tif.w, tif.h, tif.tags[277][0], tif.tags[338]], [50, 30, 3, undefined], 'opaque image: RGB, no alpha');
+  near(tif.px(0, 0), [10, 200, 30, 255], 0, 'TIFF top-left');
+  near(tif.px(49, 29), [250, 250, 250, 255], 0, 'TIFF bottom-right');
+
+  // ---------- GIF: exact colours when there are 256 or fewer, on/off transparency ----------
+  await rerun(() => page.selectOption('#imc-format', 'gif'));
+  assert.match(await page.textContent('#imc-note'), /at most 256 colours/);
+  f = await download(0);
+  assert.equal(f.name, 'alpha.gif');
+  assert.equal(f.data.toString('latin1', 0, 6), 'GIF89a');
+  assert.deepEqual([f.data.readUInt16LE(6), f.data.readUInt16LE(8)], [64, 48]);
+  px = await pixels(f.data, [[10, 40], [50, 40], [50, 10]]);
+  near(px[0], [200, 30, 60, 255], 0, 'GIF keeps few colours exactly');
+  assert.equal(px[1][3], 0, 'GIF transparent pixel');
+  near(px[2], [20, 100, 220, 255], 1, 'half-opaque pixel becomes opaque (canvas alpha rounding: 1)');
+  px = await pixels((await download(3)).data, [[5, 5], [45, 5]]);
+  near(px[0], [10, 200, 30, 255], 0, 'GIF green');
+  near(px[1], [250, 250, 250, 255], 0, 'GIF white');
+
   // ---------- ICO: several PNG-coded sizes ----------
   await rerun(() => page.selectOption('#imc-format', 'ico'));
   assert.equal(await page.locator('#imc-sizes').isVisible(), true);
@@ -285,6 +368,24 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(px[0][3], 0, 'WebP keeps transparency');
   near(px[1], [200, 30, 60, 255], 12, 'WebP colour');
 
+  // ---------- AVIF (libavif in WebAssembly), checked with the browser's own AV1 decoder ----------
+  await rerun(() => page.selectOption('#imc-format', 'avif'));
+  assert.ok(requests.some(u => /\/assets\/vendor\/avif\/avif_enc\.wasm$/.test(u)), 'AVIF encoder loaded when chosen');
+  assert.match(await page.textContent('#imc-note'), /libavif/);
+  f = await download(0);
+  assert.equal(f.name, 'alpha.avif');
+  assert.equal(f.data.toString('latin1', 4, 12), 'ftypavif', 'AVIF brand');
+  const ispe = f.data.indexOf('ispe');
+  assert.deepEqual([f.data.readUInt32BE(ispe + 8), f.data.readUInt32BE(ispe + 12)], [64, 48], 'ispe size');
+  px = await pixels(f.data, [[10, 40], [50, 40], [50, 10]]);
+  near(px[0], [200, 30, 60, 255], 12, 'AVIF colour');
+  assert.equal(px[1][3], 0, 'AVIF keeps transparency');
+  near(px[1 + 1], [20, 100, 220, 128], 14, 'AVIF partial transparency');
+  px = await pixels((await download(1)).data, [[75, 60], [10, 60]]);
+  near(px[0], [220, 30, 30, 255], 14, 'AVIF rotated band on the right');
+  near(px[1], [235, 235, 235, 255], 8, 'AVIF background');
+  await rerun(() => page.selectOption('#imc-format', 'webp'));
+
   // ---------- Remove, paste, drop, clear ----------
   await rows.nth(10).locator('[data-act="rm"]').click();
   assert.equal(await rows.count(), 10);
@@ -305,4 +406,97 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await rows.count(), 0);
   assert.equal(await summary(), 'No images added yet.');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'imc-choose');
+
+  // ---------- Hostile and unusual files ----------
+  //   comments.txt   27 XML comments then <html>: the SVG sniffer once backtracked
+  //                  exponentially on this and froze the page for 18 s
+  //   cycle.tif      4x4 red TIFF whose page chain points back to itself (crashed the tab)
+  //   count.tif      4x4 green TIFF with a tag claiming 2^31 values (hung the worker)
+  //   trailing.png   60x40 valid PNG, left (10,120,200) right (240,200,40), bytes after IEND
+  //   cut-big.png    160x120 PNG with one big IDAT, cut at 60%; top 20 rows (200,40,90)
+  //   exif-loop.jpg  EXIF Orientation 6, Make LoopCam, IFD0 linking to itself as IFD1
+  //   foreign.svg    100x50 (0,170,0) rect plus HTML in a <foreignObject>
+  await page.selectOption('#imc-format', 'jpeg');
+  await page.selectOption('#imc-meta', 'keep');
+  await page.evaluate(() => {
+    window.__long = [];
+    new PerformanceObserver(l => l.getEntries().forEach(e => window.__long.push(e.duration))).observe({ type: 'longtask' });
+  });
+  const t0 = Date.now();
+  await page.setInputFiles('#imc-file', ['comments.txt', 'cycle.tif', 'count.tif', 'trailing.png', 'cut-big.png', 'exif-loop.jpg', 'foreign.svg'].map(fx));
+  await page.waitForFunction(() => /^6 of 7 converted, 1 failed\.$/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 30000 });
+  assert.ok(Date.now() - t0 < 10000, `hostile batch took ${Date.now() - t0} ms`);
+  const longH = await page.evaluate(() => window.__long);
+  assert.ok(longH.every(d => d < 200), `main thread blocked: ${longH.map(Math.round)} ms`);
+  assert.match(await rowText(0), /comments\.txt .*not a supported image/);
+  assert.match(await rowText(1), /cycle\.jpg TIFF 4×4/);
+  assert.match(await rowText(2), /count\.jpg TIFF 4×4/);
+  assert.match(await rowText(3), /trailing\.jpg PNG 60×40/);
+  assert.doesNotMatch(await rowText(3), /cut off/, 'bytes after IEND are not a truncated file');
+  assert.match(await rowText(4), /cut-big\.jpg PNG 160×120.*cut off/);
+  assert.match(await rowText(6), /foreign\.jpg SVG 100×50.*foreignObject/);
+  near((await pixels((await download(1)).data, [[2, 2]]))[0], [255, 0, 0, 255], 8, 'cyclic TIFF decoded');
+  near((await pixels((await download(2)).data, [[2, 2]]))[0], [0, 255, 0, 255], 8, 'TIFF with a bad tag decoded');
+  px = await pixels((await download(3)).data, [[10, 20], [50, 20]]);
+  near(px[0], [10, 120, 200, 255], 10, 'trailing.png left');
+  near(px[1], [240, 200, 40, 255], 10, 'trailing.png right');
+  near((await pixels((await download(4)).data, [[80, 10]]))[0], [200, 40, 90, 255], 10, 'rows before the cut');
+  f = await download(5);
+  j = jpegInfo(f.data);
+  ex = exifTags(j.exif);
+  assert.deepEqual([j.w, j.h, ex.ifd0[0x0112], ex.ifd0[0x010F]], [40, 60, 1, 'LoopCam'], 'EXIF kept although IFD1 points at IFD0');
+  near((await pixels((await download(6)).data, [[50, 40]]))[0], [0, 170, 0, 255], 6, 'SVG drawn without its HTML');
+
+  // An SVG is drawn again at the icon size: a sharp edge at 256 px, not a 24 px picture enlarged.
+  await page.click('#imc-clear');
+  await page.selectOption('#imc-format', 'ico');
+  await page.setInputFiles('#imc-file', fx('half.svg'));
+  await page.waitForFunction(() => /^1 of 1 converted\.$/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 15000 });
+  assert.match(await rowText(0), /rendered at the largest icon size/);
+  const vi = (await download(0)).data, n = vi.readUInt16LE(4), e256 = 6 + 16 * (n - 1);
+  assert.equal(vi[e256], 0, 'last entry is the 256 px icon');
+  px = await pixels(vi.subarray(vi.readUInt32LE(e256 + 12), vi.readUInt32LE(e256 + 12) + vi.readUInt32LE(e256 + 8)), [[126, 128], [127, 128], [129, 128]]);
+  near(px[0], [224, 0, 0, 255], 2, 'inside the edge');
+  near(px[1], [224, 0, 0, 255], 2, 'last column of the red half');
+  assert.equal(px[2][3], 0, 'first column past the edge is transparent');
+
+  // A setting changed while files are still decoding: each file is decoded
+  // once, not once per setting (the second decode used to leak the first).
+  await page.click('#imc-clear');
+  await page.selectOption('#imc-format', 'jpeg');
+  await page.evaluate(() => {
+    const orig = TTImage.decode;
+    window.__decodes = 0;
+    TTImage.decode = async function () {
+      window.__decodes++;
+      const r = await orig.apply(this, arguments);
+      await new Promise(res => setTimeout(res, 700));
+      return r;
+    };
+  });
+  await page.setInputFiles('#imc-file', [fx('alpha.png'), fx('green.bmp')]);
+  await page.waitForTimeout(100);
+  await page.selectOption('#imc-format', 'png');
+  await page.waitForFunction(() => /^2 of 2 converted\.$/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 15000 });
+  assert.equal(await page.evaluate(() => window.__decodes), 2, 'decoded once each');
+  assert.deepEqual([(await download(0)).name, (await download(1)).name], ['alpha.png', 'green.png']);
+
+  // Deflate-compressed RGBA TIFF (alpha-deflate.tif = alpha.png as a TIFF): PNG keeps its alpha.
+  await page.click('#imc-clear');
+  await page.setInputFiles('#imc-file', fx('alpha-deflate.tif'));
+  await page.waitForFunction(() => /^1 of 1 converted\.$/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 15000 });
+  assert.match(await rowText(0), /alpha-deflate\.png TIFF 64×48/);
+  px = await pixels((await download(0)).data, [[10, 10], [50, 10], [50, 40]]);
+  near(px[0], [200, 30, 60, 255], 1, 'TIFF opaque red');
+  near(px[1], [20, 100, 220, 128], 3, 'TIFF half-transparent blue');
+  assert.equal(px[2][3], 0, 'TIFF transparent quarter');
+
+  // A browser that cannot encode WebP (Safari): the option is disabled and explained.
+  await page.addInitScript(() => {
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
+  });
+  await open();
+  await page.waitForFunction(() => document.querySelector('#imc-format option[value="webp"]').disabled);
+  assert.equal(await page.textContent('#imc-format option[value="webp"]'), 'WebP (this browser cannot save it)');
 };

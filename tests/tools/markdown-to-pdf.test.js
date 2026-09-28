@@ -30,6 +30,17 @@ module.exports = async ({ page, open, assert, base }) => {
   });
   await open();
   const frame = await (await page.$('#mdp-frame')).contentFrame();
+  // Waits by polling from the test: inside the sandboxed preview frame no script may run, so
+  // Playwright's own in-page polling (requestAnimationFrame) is blocked there.
+  const inFrame = async (fn, arg, timeout = 15000) => {
+    const end = Date.now() + timeout;
+    for (;;) {
+      if (await frame.evaluate(fn, arg)) return;
+      if (Date.now() > end) throw new Error('timed out waiting in the preview: ' + fn.toString().slice(0, 120));
+      await new Promise(r => setTimeout(r, 50));
+    }
+  };
+  const inFrameSel = sel => inFrame(s => !!document.querySelector(s), sel);
   const inDoc = (sel, fn) => frame.$$eval('#mdp-doc ' + sel, fn);
   const html = () => frame.$eval('#mdp-doc', d => d.innerHTML);
   // Rendering follows typing after about 40 ms for short texts.
@@ -43,9 +54,9 @@ module.exports = async ({ page, open, assert, base }) => {
   });
 
   // ---- The example renders on load, with lazily loaded highlighting and math. ----
-  await frame.waitForSelector('#mdp-doc h1');
-  await frame.waitForSelector('#mdp-doc .katex');
-  await frame.waitForSelector('#mdp-doc pre code .hljs-keyword');
+  await inFrameSel('#mdp-doc h1');
+  await inFrameSel('#mdp-doc .katex');
+  await inFrameSel('#mdp-doc pre code .hljs-keyword');
   assert.equal(await frame.textContent('#mdp-doc h1'), 'Quarterly project update');
   assert.equal(await page.inputValue('#mdp-name'), 'Quarterly project update');
   assert.equal(await inDoc('input[type=checkbox]', l => l.map(c => c.checked).join()), 'true,true,false');
@@ -90,7 +101,7 @@ module.exports = async ({ page, open, assert, base }) => {
     'Costs $5 and $10, or \\$3.', '', 'Inline $x^2$ and \\(y_1\\).', '', '$$', '\\sum_{i=1}^n i', '$$', '',
     '\\[', 'E = mc^2', '\\]', '', '```math', '\\frac{a}{b}', '```', '', '\\begin{align}', 'a &= b \\\\', 'c &= d', '\\end{align}'
   ].join('\n'));
-  await frame.waitForSelector('#mdp-doc .katex');
+  await inFrameSel('#mdp-doc .katex');
   assert.equal(await frame.textContent('#mdp-doc p:first-child'), 'Costs $5 and $10, or $3.');
   assert.equal(await inDoc('p:nth-child(2) .katex', l => l.length), 2);
   assert.equal(await inDoc('.katex-display', l => l.length), 4);
@@ -104,7 +115,7 @@ module.exports = async ({ page, open, assert, base }) => {
 
   // An extra highlight.js grammar is fetched when a block asks for it.
   await setMd('```dockerfile\nFROM node:22\nRUN npm ci\n```');
-  await frame.waitForSelector('#mdp-doc code.language-dockerfile .hljs-keyword');
+  await inFrameSel('#mdp-doc code.language-dockerfile .hljs-keyword');
 
   // ---- Sanitising: nothing runs, nothing is fetched from another site. ----
   const evil = [
@@ -164,7 +175,7 @@ module.exports = async ({ page, open, assert, base }) => {
   side.on('pageerror', e => sideErrors.push(e.message));
   await side.goto(base + '/markdown-to-pdf/');
   const sideFrame = await (await side.$('#mdp-frame')).contentFrame();
-  await sideFrame.waitForSelector('#mdp-doc h1');
+  for (let i = 0; i < 200 && !(await sideFrame.evaluate(() => !!document.querySelector('#mdp-doc h1'))); i++) await side.waitForTimeout(50);
   const filler = Array.from({ length: 50 }, (_, i) => `Line ${i}`).join('\n\n');
   await side.fill('#mdp-input', `[web](${base}/about/) [jump](#target) [file](docs/intro.md)\n\n${filler}\n\n## Target\n\n${filler}`);
   await side.waitForTimeout(300);
@@ -204,10 +215,10 @@ module.exports = async ({ page, open, assert, base }) => {
     '[Image: Chart \u2013 add \u201cchart.png\u201d with Open file\u2026 to show it.]'
   ]);
   await page.check('#mdp-remote');
-  await frame.waitForFunction(() => { const i = document.querySelector('#mdp-doc img[alt="Logo"]'); return i && i.complete && i.naturalWidth > 0; });
+  await inFrame(() => { const i = document.querySelector('#mdp-doc img[alt="Logo"]'); return i && i.complete && i.naturalWidth > 0; });
   await page.uncheck('#mdp-remote');
   await page.setInputFiles('#mdp-file', { name: 'chart.png', mimeType: 'image/png', buffer: png(3, 2) });
-  await frame.waitForFunction(() => { const i = document.querySelector('#mdp-doc img[alt="Chart"]'); return i && i.complete && i.naturalWidth === 3; });
+  await inFrame(() => { const i = document.querySelector('#mdp-doc img[alt="Chart"]'); return i && i.complete && i.naturalWidth === 3; });
   assert.match(await frame.getAttribute('#mdp-doc img[alt="Chart"]', 'src'), /^blob:/);
   assert.match(await page.textContent('#mdp-ok'), /Added the image chart\.png/);
   [dl] = await Promise.all([page.waitForEvent('download'), page.click('#mdp-html')]);
@@ -270,7 +281,10 @@ module.exports = async ({ page, open, assert, base }) => {
   await page.waitForFunction(() => window.__prints.length === 1);
   assert.deepEqual(await page.evaluate(() => window.__prints[0]), { frame: true, title: 'My report', frameTitle: 'My report' });
   assert.equal(await page.evaluate(() => document.activeElement.id), 'mdp-print');
-  await page.waitForFunction(() => /Markdown to PDF/.test(document.title));
+  // The page title comes back once printing is over.
+  assert.equal(await page.evaluate(() => document.title), 'My report');
+  await page.evaluate(() => document.getElementById('mdp-frame').contentWindow.dispatchEvent(new Event('afterprint')));
+  assert.match(await page.evaluate(() => document.title), /Markdown to PDF/);
   // Ctrl+P does the same instead of printing the whole page.
   await page.focus('#mdp-input');
   await page.keyboard.press('Control+p');
@@ -291,7 +305,7 @@ module.exports = async ({ page, open, assert, base }) => {
 
   // ---- Download and copy HTML ----
   await setMd('# Title & more\n\nHello $a+b$.');
-  await frame.waitForSelector('#mdp-doc .katex');
+  await inFrameSel('#mdp-doc .katex');
   [dl] = await Promise.all([page.waitForEvent('download'), page.click('#mdp-html')]);
   assert.equal(dl.suggestedFilename(), 'My report.html');
   file = fs.readFileSync(await dl.path(), 'utf8');
@@ -313,5 +327,5 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.match(await page.textContent('#mdp-error'), /nothing to save yet/);
   assert.equal(await page.evaluate(() => window.__prints.length), 2);
   await page.click('#mdp-sample');
-  await frame.waitForSelector('#mdp-doc .katex');
+  await inFrameSel('#mdp-doc .katex');
 };
