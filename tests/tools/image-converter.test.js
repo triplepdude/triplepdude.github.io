@@ -491,6 +491,35 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   near(px[1], [20, 100, 220, 128], 3, 'TIFF half-transparent blue');
   assert.equal(px[2][3], 0, 'TIFF transparent quarter');
 
+  // ICO with every size unticked: the last box stays ticked (it used to report
+  // "ICO -Infinity×-Infinity" and draw an SVG at 1 px before enlarging it).
+  // A UTF-16 SVG (byte order mark) is recognised as SVG.
+  await page.click('#imc-clear');
+  await page.selectOption('#imc-format', 'ico');
+  const svgFx = path.join(fixtures, '..', 'svg-to-png');
+  await page.setInputFiles('#imc-file', [fx('alpha.png'), path.join(svgFx, 'utf16.svg')]);
+  await page.waitForFunction(() => /^2 of 2 converted\.$/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 15000 });
+  for (const v of ['16', '24', '32', '48']) await page.uncheck(`#imc-sizes input[value="${v}"]`);
+  await rerun(() => page.locator('#imc-sizes input[value="256"]').click());
+  assert.equal(await page.isChecked('#imc-sizes input[value="256"]'), true, 'last size stays ticked');
+  assert.match(await page.textContent('#imc-note'), /1 size: 256 px.*at least one size/);
+  assert.match(await rowText(0), /→ ICO 256×256/);
+  assert.match(await rowText(1), /utf16\.ico SVG 30×20/);
+  assert.doesNotMatch(await rowText(0) + await rowText(1), /Infinity/);
+  const u16 = (await download(1)).data;
+  assert.deepEqual([u16.readUInt16LE(4), u16[6]], [1, 0], 'one 256 px entry');
+  const u16png = u16.subarray(u16.readUInt32LE(18), u16.readUInt32LE(18) + u16.readUInt32LE(14));
+  // 30x20 fitted to 256x171, centred: sharp blue edge, drawn at full size.
+  px = await pixels(u16png, [[128, 128], [128, 40], [128, 44]]);
+  near(px[0], [0, 0, 255, 255], 2, 'SVG icon blue');
+  assert.equal(px[1][3], 0, 'transparent band above');
+  assert.equal(px[2][3], 255, 'sharp top edge (rendered at 256 px)');
+  // A resize value of 0 is explained rather than silently ignored.
+  await page.selectOption('#imc-format', 'png');
+  await page.selectOption('#imc-resize', 'width');
+  await page.fill('#imc-resize-val', '0');
+  await page.waitForFunction(() => /Enter a size above 0/.test(document.querySelector('#imc-note').textContent));
+
   // A browser that cannot encode WebP (Safari): the option is disabled and explained.
   await page.addInitScript(() => {
     const toBlob = HTMLCanvasElement.prototype.toBlob;

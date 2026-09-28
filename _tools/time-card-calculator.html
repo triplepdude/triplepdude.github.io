@@ -386,6 +386,9 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
   // For the CSV: plain digits, no thousands separators.
   function plainMoney(c) { var n = c < 0n ? -c : c; return (c < 0n ? '-' : '') + (n / 100n) + '.' + String(n % 100n).padStart(2, '0'); }
 
+  // An exact rate in 1/10^8 units (rate x multiplier), at least 2 decimals: 27.49995, not 27.50.
+  function plainRate8(v) { var f = String(v % 100000000n).padStart(8, '0').replace(/0+$/, ''); return (v / 100000000n) + '.' + (f.length < 2 ? (f + '00').slice(0, 2) : f); }
+
   // ----- Dates (plain day numbers, so time zones cannot interfere) -----
   function dayNumOf(s) {
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
@@ -884,7 +887,7 @@ table.data.tc-pay tfoot th, table.data.tc-pay tfoot td { color: var(--text); fon
     rows.push([]);
     rows.push(['Pay type', 'Hours (decimal)', 'Rate', 'Amount']);
     L.lines.forEach(function (l) {
-      rows.push([l.name, fmtDec(l.min), L.rate !== null ? (Number(L.rate * l.mult) / 1e8).toFixed(4).replace(/0{1,2}$/, '') : '', L.rate !== null ? plainMoney(l.pay) : '']);
+      rows.push([l.name, fmtDec(l.min), L.rate !== null ? plainRate8(L.rate * l.mult) : '', L.rate !== null ? plainMoney(l.pay) : '']);
     });
     rows.push(['Total', fmtDec(L.sum.worked), '', L.totalPay !== null ? plainMoney(L.totalPay) : '']);
     var csv = rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';

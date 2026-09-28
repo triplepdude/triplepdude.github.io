@@ -304,6 +304,44 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(bad[1], /unpacks to more than 20 MB/);
   assert.match(bad[2], /This \.svgz file is damaged/);
 
+  // Files are decoded in their own encoding: the XML declaration's ISO-8859-1
+  // (read as UTF-8 it became "Caf� Gr��e") and a UTF-16 byte order mark.
+  // prefixed-href.svg links an image through a custom XLink prefix (x:href):
+  // it is left out instead of drawn as a broken-image icon.
+  await page.setInputFiles('#s2p-file', [fx('latin1.svg'), fx('utf16.svg'), fx('prefixed-href.svg')]);
+  await page.waitForFunction(() => document.querySelectorAll('#s2p-list .s2p-item').length === 6 && !/Converting/.test(document.querySelector('#s2p-list').textContent), null, { timeout: 15000 });
+  assert.equal(await page.textContent('#s2p-code-name'), 'latin1.svg');
+  assert.match(await page.inputValue('#s2p-code'), />Café Größe</);
+  const encMeta = await page.$$eval('#s2p-list .s2p-meta', l => l.slice(3).map(x => x.textContent));
+  assert.match(encMeta[0], /^200 × 40 → 1600 × 320 px/);
+  assert.match(encMeta[1], /^30 × 20 → 240 × 160 px/);
+  await page.click('#s2p-list .s2p-item:nth-child(5) .s2p-name');
+  assert.match(await page.inputValue('#s2p-code'), /<desc>Ünïcode<\/desc>/);
+  near((await pixels((await download()).data, [[120, 80]]))[0], [0, 0, 255, 255], 2, 'UTF-16 SVG drawn');
+  await page.click('#s2p-list .s2p-item:nth-child(6) .s2p-name');
+  assert.match(await notes(), /refers to 1 external file/);
+  px = await pixels((await download()).data, [[80, 160], [240, 160], [300, 300]]);
+  near(px[0], [0, 170, 0, 255], 2, 'own shapes drawn');
+  assert.equal(px[1][3], 0, 'no broken-image icon: ' + px[1]);
+  assert.equal(px[2][3], 0, 'no broken-image icon: ' + px[2]);
+
+  // Pathological code is handled in linear time (each of these took seconds to
+  // minutes in quadratic regular expressions), and a long unreadable value is
+  // shortened in the note.
+  const timing = await page.evaluate(() => {
+    const cases = [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + '1'.repeat(100000) + 'x!" height="10"/>',
+      '<svg '.repeat(150000),
+      '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>a{fill:url(' + ' '.repeat(300000) + '</style></svg>'
+    ];
+    return cases.map(c => { const t = performance.now(); const i = TTImage.svg.info(c); return [performance.now() - t, i.error || i.notes.join(' ')]; });
+  });
+  timing.forEach(([ms], i) => assert.ok(ms < 300, `case ${i} took ${Math.round(ms)} ms`));
+  assert.match(timing[0][1], /could not be read \(1{40}…\)/);
+  assert.ok(timing[0][1].length < 400, 'note stays short');
+  const ext = await page.evaluate(() => TTImage.svg.info('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><style>a{fill:url(#g)} b{fill:url( "data:x")} c{background:url( \'http://x/y.png\')} @import "z.css";</style></svg>').external);
+  assert.equal(ext, 2, 'one url() and one @import are external; #id and data: are not');
+
   // A browser that cannot encode WebP (Safari): the option is disabled and explained.
   await page.addInitScript(() => {
     const toBlob = HTMLCanvasElement.prototype.toBlob;

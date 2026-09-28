@@ -11,8 +11,8 @@ howto: |
   in a ZIP. Change a setting and the whole list is converted again with it.
 
   Inputs can be PNG, JPG, WebP, AVIF, GIF, BMP, ICO, TIFF, HEIC and SVG,
-  mixed in one batch. HEIC and TIFF are read by open-source decoders that
-  load only when needed ([libheif](/assets/vendor/libheif/README.txt), LGPL-3.0,
+  mixed. HEIC and TIFF are read by open-source decoders that load only
+  when needed ([libheif](/assets/vendor/libheif/README.txt), LGPL-3.0,
   and [UTIF.js](/assets/vendor/utif/README.txt), MIT). The format is recognised from the file's contents, not
   its name, so a WebP saved as *photo.jpg* is still read correctly.
 
@@ -58,21 +58,18 @@ howto: |
   version of Windows since Vista and all current browsers read. For a website
   favicon, 16, 32 and 48 pixels are enough; Windows application icons also
   use a 256 pixel size. A picture that is not square is centred on a
-  transparent square, and sizes larger than the original are enlarged, which
-  looks soft, so start from an image at least 256 pixels wide for a crisp
-  large icon.
+  transparent square. Sizes larger than the original are enlarged and look
+  soft; an SVG is drawn at the largest size instead, so it stays sharp.
 
   ## AVIF output
 
   Every current browser can open AVIF files, but most cannot create them from
-  a web page. The converter therefore uses libavif, the Alliance for Open
-  Media's open-source AVIF library, with its libaom AV1 encoder, compiled to
-  WebAssembly ([licenses](/assets/vendor/avif/README.txt)). It is
-  downloaded (about 3.5 MB) only the first time you choose
-  AVIF and runs in a background thread. AV1 compression takes real work: a
-  large photo can take several seconds, and the limit is 50 megapixels.
-  AVIF's quality scale is not JPG's: on a typical photo, 60 to 70% comes close
-  to a JPG at 85 to 90% in roughly half the file size.
+  a web page, so the converter uses libavif with the libaom AV1 encoder,
+  compiled to WebAssembly ([licenses](/assets/vendor/avif/README.txt)). It
+  downloads (about 3.5 MB) the first time you choose AVIF and runs in a
+  background thread. A large photo can take several seconds; the limit is 50
+  megapixels. AVIF's quality scale is not JPG's: on a typical photo, 60 to
+  70% comes close to a JPG at 85 to 90% in roughly half the file size.
 faq:
   - q: Are my images uploaded to a server?
     a: No. Every image is decoded and re-encoded by your own browser. Nothing is sent anywhere or stored. The only extra download is the HEIC or TIFF decoder, fetched from this site the first time you add such a file.
@@ -118,7 +115,7 @@ faq:
 }
 .imc-thumb {
   display: grid; place-items: center; width: 64px; height: 64px; overflow: hidden; border-radius: 6px;
-  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--bg) 0 50%) 0 0 / 12px 12px;
+  background: repeating-conic-gradient(#c8c8c8 0 25%, #9c9c9c 0 50%) 0 0 / 12px 12px;
   border: 1px solid var(--border);
 }
 .imc-thumb img { display: block; max-width: 100%; max-height: 100%; }
@@ -230,7 +227,7 @@ faq:
   var MAX_SIDE = 20000, MAX_PIXELS = 100e6, CACHE_PIXELS = 60e6, CONCURRENCY = 2;
   var items = [], nextId = 1, gen = 0, running = 0;
   var cannot = { avif: true }; // output formats this browser cannot encode (checked below)
-  var avifLoaded = false;
+  var avifLoaded = false, lastSize = false;
   var cache = new Map(); // item id -> decoded result, most recently used last
 
   fileInput.accept = TTImage.accept;
@@ -258,8 +255,12 @@ faq:
       resizeVal: v > 0 && isFinite(v) ? v : 0,
       bg: bg.value,
       meta: meta.value,
-      icoSizes: TT.$$('input', sizesBox).filter(function (c) { return c.checked; }).map(function (c) { return +c.value; })
+      icoSizes: icoSizes()
     };
+  }
+  function icoSizes() {
+    var list = TT.$$('input', sizesBox).filter(function (c) { return c.checked; }).map(function (c) { return +c.value; });
+    return list.length ? list : [16, 32, 48, 256];
   }
   function targetSize(w, h, s) {
     var k = 1, v = s.resizeVal;
@@ -283,13 +284,14 @@ faq:
     qualityOut.textContent = quality.value + '%';
     var n = [];
     if (cannot[f]) n.push('This browser cannot save ' + LABEL[f] + ' images, so ' + LABEL[f] + ' output is unavailable here. It can still convert ' + LABEL[f] + ' files you add.');
-    if (f === 'ico') n.push(s.icoSizes.length ? 'One icon file with ' + s.icoSizes.length + (s.icoSizes.length === 1 ? ' size' : ' sizes') + ': ' + s.icoSizes.join(', ') + ' px. Pictures that are not square are centred on a transparent square.' : 'Tick at least one icon size.');
+    if (f === 'ico') n.push('One icon file with ' + s.icoSizes.length + (s.icoSizes.length === 1 ? ' size' : ' sizes') + ': ' + s.icoSizes.join(', ') + ' px. Pictures that are not square are centred on a transparent square.' + (lastSize ? ' An icon needs at least one size, so the last one stays ticked.' : ''));
     if (f === 'png') n.push('PNG is lossless: every pixel is kept exactly, and photos make large files.');
     if (f === 'bmp') n.push('BMP files are uncompressed, so they are large: about 3 bytes per pixel.');
     if (f === 'gif') n.push('GIF holds at most 256 colours: pictures with more get a dithered palette, and each pixel is either fully transparent or opaque. Best for simple graphics, not photos.');
     if (f === 'tiff') n.push('TIFF is saved losslessly with LZW compression, which print, scanning and photo-editing software reads. Transparency is kept.');
     if (f === 'avif' && !cannot.avif) n.push('AVIF is encoded by libavif, which loads once (about 3.5 MB); a large photo takes a few seconds. Its quality scale differs from JPG’s: 60 to 70% comes close to a JPG at 85 to 90%, in about half the size.');
-    if (resizeSel.value === 'max' && f !== 'ico') n.push('Images smaller than this are not enlarged.');
+    if (resizeSel.value !== 'none' && f !== 'ico' && !s.resizeVal) n.push('Enter a size above 0 to resize; until then the original size is kept.');
+    else if (resizeSel.value === 'max' && f !== 'ico') n.push('Images smaller than this are not enlarged.');
     note.textContent = n.join(' ');
   }
 
@@ -511,7 +513,7 @@ faq:
       h = Math.max(1, Math.round(d.height * k));
     }
     if (w === d.width && h === d.height) return d;
-    if (it.svgText == null) it.svgText = await it.file.text();
+    if (it.svgText == null) it.svgText = await TTImage.svg.text(it.file);
     return TTImage.svg.render(it.svgText, w, h);
   }
 
@@ -555,7 +557,12 @@ faq:
   resizeVal.addEventListener('input', TT.debounce(onSettings, 500));
   bg.addEventListener('change', onSettings);
   meta.addEventListener('change', onSettings);
-  sizesBox.addEventListener('change', onSettings);
+  // An ICO needs at least one size: unticking the last one is undone (and explained in the note).
+  sizesBox.addEventListener('change', function (e) {
+    lastSize = !TT.$$('input', sizesBox).some(function (c) { return c.checked; });
+    if (lastSize && e.target && e.target.type === 'checkbox') e.target.checked = true;
+    onSettings();
+  });
 
   // ---------- Input ----------
   $('#imc-choose').addEventListener('click', function () { fileInput.click(); });

@@ -22,8 +22,9 @@ howto: |
 
   Money is counted in whole minor units (cents, pence, fils), never in
   floating-point numbers, so the rounding errors that make some tools show
-  1.005 × 1 as 1.00 cannot happen here. Type amounts with one decimal point
-  or comma and no thousands separators, so 1,234 is never ambiguous.
+  1.005 × 1 as 1.00 cannot happen here. Type amounts without thousands
+  separators, using a point or comma for decimals. A number such as 1,234
+  that could mean either is refused rather than guessed.
 
   - **Each line** is quantity × rate, rounded to the currency's smallest unit.
     A half rounds away from zero, so 49.995 becomes 50.00.
@@ -345,9 +346,25 @@ faq:
   // "12.5", "-3", "0,25" -> { v: 125n, s: 1 }. Empty -> null. A problem -> { error }.
   // One decimal separator (point or comma) and no thousands separators, so "1,234" is
   // never ambiguous.
+  // The thousands separator of the chosen number format: "," for 1,234.56 and "." for
+  // 1.234,56. A number such as 1,234 (up to three digits, that separator, three digits) could
+  // be read either way, so it is refused rather than guessed.
+  var groupSep = ',';
+  function setGroupSep(loc) {
+    groupSep = ',';
+    try {
+      var p = new Intl.NumberFormat(loc || browserLocale).formatToParts(1.5).filter(function (x) { return x.type === 'decimal'; })[0];
+      if (p && p.value === ',') groupSep = '.';
+    } catch (e) { /* keep "," */ }
+  }
   function parseDec(raw, opt) {
     var s = asciiDigits(String(raw == null ? '' : raw)).replace(/[\s\u00a0\u202f]/g, '');
     if (!s) return null;
+    var amb = /^(-?)([1-9]\d{0,2})([.,])(\d{3})$/.exec(s.replace(/^\+/, ''));
+    if (amb && amb[3] === groupSep) {
+      var whole = amb[1] + amb[2] + amb[4], frac = amb[1] + amb[2] + (groupSep === ',' ? '.' : ',') + amb[4];
+      return { error: opt.label + ' "' + s + '" could mean ' + whole + ' or ' + frac + '. Type ' + whole + ' without a thousands separator, or ' + frac + ' for a decimal.' };
+    }
     var m = /^([+-]?)(\d*)(?:[.,](\d*))?$/.exec(s);
     if (!m || (m[2] === '' && !m[3])) return { error: opt.label + ' must be a number, such as ' + opt.example + '. Leave out thousands separators.' };
     if (m[1] === '-' && !opt.negative) return { error: opt.label + ' cannot be negative.' };
@@ -537,6 +554,7 @@ faq:
   function compute(st) {
     var errors = [], bad = [];
     var cur = st.currency, d = digitsFor(cur);
+    setGroupSep(st.locale);
     if (d === null) { d = 2; errors.push('"' + cur + '" is not a currency code this browser knows.'); }
     var why = d === 0 ? '(' + cur + ' has no decimal places)' : '(' + cur + ' has ' + d + ')';
     function num(raw, opt, node) {

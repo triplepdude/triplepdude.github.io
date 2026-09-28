@@ -167,4 +167,25 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.inputValue('#pw-input'), '');
   assert.equal(await page.isVisible('#pw-result'), false);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'pw-input');
+
+  // A check that fails hides the previous result, so it is not mistaken for this password's,
+  // and the next password is checked by a fresh worker. The core is stubbed: its check throws
+  // for "boom" and returns a fixed result otherwise.
+  const time = { display: 'stub time', seconds: 1 };
+  const stub = `self.zxcvbnts = self.zxcvbnts || {};
+    self.zxcvbnts.core = { ZxcvbnFactory: function () { this.check = function (p) {
+      if (p === 'boom') throw new Error('analysis failed');
+      return { score: 0, guesses: 7, guessesLog10: Math.log10(7), feedback: { warning: '', suggestions: [] }, sequence: [],
+        crackTimes: { onlineThrottlingXPerHour: ${JSON.stringify(time)}, onlineNoThrottlingXPerSecond: ${JSON.stringify(time)},
+          offlineSlowHashingXPerSecond: ${JSON.stringify(time)}, offlineFastHashingXPerSecond: ${JSON.stringify(time)} } };
+    }; } };`;
+  await page.route('**/zxcvbn-ts-core.min.js', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: stub }));
+  await open();
+  await check('fine', '7');
+  await page.fill('#pw-input', 'boom');
+  await page.waitForFunction(() => /could not be checked/.test(document.querySelector('#pw-error').textContent), null, { timeout: 10000 });
+  assert.equal(await page.isVisible('#pw-result'), false, 'stale result hidden after a failed check');
+  assert.equal(await page.isVisible('#pw-intro'), true);
+  await check('fine again', '7');
+  assert.equal(await text('#pw-error'), '');
 };

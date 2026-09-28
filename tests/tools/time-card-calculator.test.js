@@ -61,6 +61,13 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(csv[14], 'Regular,40.00,18.33,733.20');
   assert.equal(csv[15], 'Overtime (1.5×),2.50,27.495,68.74');
   assert.equal(csv[17], 'Total,42.50,,801.94');
+  // The CSV rate is exact: 18.3333 x 1.5 = 27.49995 (Python Decimal), not 27.50.
+  await page.fill('#tc-rate', '18.3333');
+  const [dl3] = await Promise.all([page.waitForEvent('download'), page.click('#tc-csv')]);
+  const csv3 = fs.readFileSync(await dl3.path(), 'utf8').replace(/^\uFEFF/, '').split('\r\n');
+  assert.equal(csv3[14].split(',')[2], '18.3333');
+  assert.equal(csv3[15].split(',')[2], '27.49995');
+  await page.fill('#tc-rate', '18.33');
   // A name that looks like a formula is neutralised.
   await page.fill('#tc-name', '=HYPERLINK("x")');
   const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('#tc-csv')]);

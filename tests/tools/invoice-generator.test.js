@@ -138,6 +138,30 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#iv-error'), '');
   assert.equal(await page.getAttribute(`${row(1)} .iv-qty`, 'aria-invalid'), null);
   await page.fill(`${row(1)} .iv-qty`, '3');
+  // Regression: a rate of "1,234" (rates may have 6 decimals) was silently read as 1.234, so
+  // 3 x "1,234" made $3.70 instead of $3,702.00. A number that could be either is refused, and
+  // the separator that counts as ambiguous follows the number format.
+  await page.fill(`${row(1)} .iv-rate`, '1,234');
+  await page.waitForFunction(() => document.querySelector('#iv-error').textContent === 'Item 1: rate "1,234" could mean 1234 or 1.234. Type 1234 without a thousands separator, or 1.234 for a decimal.');
+  assert.equal(await page.getAttribute(`${row(1)} .iv-rate`, 'aria-invalid'), 'true');
+  assert.equal((await lineMinors())[0], '0', 'no amount is guessed');
+  await page.fill(`${row(1)} .iv-rate`, '1234');
+  assert.equal((await lineMinors())[0], '370200');
+  await page.fill(`${row(1)} .iv-rate`, '1.234');           // a point is a decimal in en-US: 3.702 -> 3.70
+  assert.equal((await lineMinors())[0], '370');
+  await page.fill(`${row(1)} .iv-rate`, '0,125');           // not a thousands pattern, so a decimal comma: 0.375 -> 0.38
+  assert.equal((await lineMinors())[0], '38');
+  await page.fill('#iv-shipping', '-2,500');
+  await page.waitForFunction(() => /Shipping "-2,500" could mean -2500 or -2\.500/.test(document.querySelector('#iv-error').textContent));
+  await page.fill('#iv-shipping', '5');
+  await page.selectOption('#iv-locale', 'de-DE');           // 1.234,56: now "1.234" is the ambiguous one
+  await page.fill(`${row(1)} .iv-rate`, '1,234');
+  assert.equal((await lineMinors())[0], '370');
+  await page.fill(`${row(1)} .iv-rate`, '1.234');
+  await page.waitForFunction(() => /rate "1\.234" could mean 1234 or 1,234/.test(document.querySelector('#iv-error').textContent));
+  await page.selectOption('#iv-locale', 'en-US');
+  await page.fill(`${row(1)} .iv-rate`, '19.99');
+  assert.equal(await text('#iv-error'), '');
   await page.fill('#iv-shipping', '5.001');
   await page.waitForFunction(() => /Shipping can have at most 2 decimal places \(USD has 2\)/.test(document.querySelector('#iv-error').textContent));
   await page.fill('#iv-shipping', '5');

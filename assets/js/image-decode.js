@@ -87,6 +87,8 @@
  *   Intrinsic size from width/height (px, pt, pc, in, cm, mm, Q, em, ex) and
  *   viewBox, following the SVG sizing rules; adds a missing xmlns and replaces
  *   HTML entities (text is the fixed code).
+ * TTImage.svg.text(blob) -> Promise<string>   an .svg file's text, decoded as its
+ *   UTF-16 byte order mark or XML declaration (encoding="ISO-8859-1") says; UTF-8 otherwise.
  * TTImage.svg.render(text, width, height) -> Promise<canvas>
  *   Rasterises through an <img> loaded from a Blob URL, so scripts in the SVG
  *   never run and nothing referenced by URL is fetched; linked images are left
@@ -190,11 +192,12 @@
     }
     return /^<(?:[A-Za-z_][\w.-]*:)?svg[\s>/]/i.test(s.substr(i, 256));
   }
+  function utf16Bom(b) { return b[0] === 0xFF && b[1] === 0xFE ? 'utf-16le' : b[0] === 0xFE && b[1] === 0xFF ? 'utf-16be' : null; }
   function looksSvg(b) {
-    var n = Math.min(b.length, 65536);
-    for (var i = 0; i < Math.min(n, 512); i++) if (b[i] === 0) return false;
+    var n = Math.min(b.length, 65536), enc = utf16Bom(b);
+    if (!enc) for (var i = 0; i < Math.min(n, 512); i++) if (b[i] === 0) return false;
     var s;
-    try { s = new TextDecoder('utf-8').decode(b.subarray(0, n)); } catch (e) { return false; }
+    try { s = new TextDecoder(enc || 'utf-8').decode(b.subarray(0, n & ~1)); } catch (e) { return false; }
     return svgStart(s);
   }
   function sniffBytes(b) {
@@ -1552,7 +1555,11 @@
   var UNITS = { px: 1, pt: 4 / 3, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6, em: 16, rem: 16, ex: 8, ch: 8 };
   function svgLength(s) {
     if (s == null) return null;
-    var m = /^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)\s*$/i.exec(s);
+    // Trimmed and capped first: a pasted attribute of thousands of digits must not
+    // make the pattern backtrack for seconds (it runs on every edit).
+    s = String(s).trim();
+    if (s.length > 64) return null;
+    var m = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*([a-z%]*)$/i.exec(s);
     if (!m) return null;
     var unit = m[2].toLowerCase();
     if (unit === '%') return { percent: parseFloat(m[1]) };
@@ -1564,9 +1571,11 @@
   function svgFix(text) {
     var notes = [];
     text = String(text).replace(/^﻿/, '');
-    var start = /<svg\b[^>]*>/i.exec(text);
-    if (start) {
-      var tag = start[0], fixed = tag;
+    // The first <svg ...> tag, found with indexOf: the pattern /<svg\b[^>]*>/ rescans
+    // to the end of the text for every unclosed "<svg", which is quadratic.
+    var si = text.search(/<svg\b/i), gt = si < 0 ? -1 : text.indexOf('>', si);
+    if (gt >= 0) {
+      var start = { index: si }, tag = text.slice(si, gt + 1), fixed = tag;
       if (!/\sxmlns\s*=/.test(tag)) { fixed = fixed.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"'); notes.push('Added the missing xmlns="http://www.w3.org/2000/svg" attribute, which standalone SVG files need.'); }
       if (/\bxlink:/.test(text) && !/\sxmlns:xlink\s*=/.test(tag)) fixed = fixed.replace(/^<svg\b/i, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
       if (fixed !== tag) text = text.slice(0, start.index) + fixed + text.slice(start.index + tag.length);
@@ -1600,7 +1609,8 @@
     var W = svgLength(wa), H = svgLength(ha), w = W && W.px, h = H && H.px, from;
     if (W && W.percent != null) notes.push('Width is ' + wa.trim() + ', a percentage of a page that an image does not have, so it is ignored.');
     if (H && H.percent != null) notes.push('Height is ' + ha.trim() + ', a percentage, so it is ignored.');
-    if ((wa && !W) || (ha && !H)) notes.push('A width or height value could not be read (' + [wa, ha].filter(Boolean).join(', ') + ').');
+    var clip = function (v) { v = String(v).trim(); return v.length > 40 ? v.slice(0, 40) + '…' : v; };
+    if ((wa && !W) || (ha && !H)) notes.push('A width or height value could not be read (' + [wa && !W ? wa : null, ha && !H ? ha : null].filter(Boolean).map(clip).join(', ') + ').');
     [W, H].forEach(function (L) { if (L && /^(em|rem|ex|ch)$/.test(L.unit)) notes.push('Font-relative units (' + L.unit + ') are converted at the default 16 px font size.'); });
     if (w && h) from = 'width and height';
     else if (w && vb) { h = w * vb[3] / vb[2]; from = 'width and the viewBox ratio'; }
@@ -1615,7 +1625,9 @@
       for (var j = 0; j < el.attributes.length; j++) if (/^on/i.test(el.attributes[j].name)) scripts++;
     }
     var css = Array.prototype.map.call(doc.getElementsByTagName('style'), function (s) { return s.textContent; }).join('\n');
-    var urls = (css.match(/url\(\s*['"]?\s*(?!data:|#)[^)'"\s]+/gi) || []).length + (css.match(/@import\s*['"]/gi) || []).length;
+    // Each alternative consumes distinct characters, so this cannot backtrack on long runs of spaces.
+    var urls = (css.match(/url\(\s*(?:['"]\s*)?[^)'"\s]+/gi) || []).filter(function (u) { return !/^url\(\s*(?:['"]\s*)?(?:data:|#)/i.test(u); }).length +
+      (css.match(/@import\s*['"]/gi) || []).length;
     return {
       width: w, height: h, from: from, viewBox: vb, widthAttr: wa, heightAttr: ha,
       notes: notes, external: external + urls, scripts: scripts, text: text,
@@ -1634,9 +1646,9 @@
     var all = doc.getElementsByTagName('*');
     for (var i = 0; i < all.length; i++) {
       if (!/^(image|feImage|use)$/.test(all[i].localName)) continue;
-      ['href', 'xlink:href'].forEach(function (a) {
-        var v = all[i].getAttribute(a);
-        if (v && !/^\s*(#|data:)/i.test(v)) all[i].removeAttribute(a);
+      // href in any namespace prefix (xlink:href, or x:href with xmlns:x bound to XLink).
+      Array.prototype.slice.call(all[i].attributes).forEach(function (a) {
+        if (a.localName === 'href' && !/^\s*(#|data:)/i.test(a.value)) all[i].removeAttributeNode(a);
       });
     }
     if (!info.viewBox) root.setAttribute('viewBox', '0 0 ' + info.width + ' ' + info.height);
@@ -1667,6 +1679,20 @@
     return c;
   }
 
+  // The text of an SVG file in its own encoding: UTF-16 with a byte order mark,
+  // or the encoding named in the XML declaration (ISO-8859-1, windows-1252...);
+  // UTF-8 otherwise, the XML default. Reading every file as UTF-8 garbles accents.
+  async function svgText(blob) {
+    var head = await readRange(blob, 0, 512), label = utf16Bom(head) || 'utf-8';
+    if (label === 'utf-8') {
+      var m = /^(?:\xEF\xBB\xBF)?\s*<\?xml\s[^>]*?\bencoding\s*=\s*["']([A-Za-z][\w.:-]{0,39})["']/.exec(ascii(head, 0, head.length));
+      if (m) label = m[1];
+    }
+    var dec;
+    try { dec = new TextDecoder(label); } catch (e) { dec = new TextDecoder('utf-8'); }
+    return dec.decode(new Uint8Array(await blob.arrayBuffer()));
+  }
+
   // ---------- Decode ----------
   async function decode(file, options) {
     var o = options || {};
@@ -1690,7 +1716,7 @@
 
     try {
       if (fmt === 'svg') {
-        var text = await file.text(), info = svgInfo(text);
+        var text = await svgText(file), info = svgInfo(text);
         if (info.error) throw fail('SVG_INVALID', info.error);
         var sw = Math.round(info.width), sh = Math.round(info.height);
         if (sw * sh > maxPixels) throw tooBig(sw, sh, maxPixels);
@@ -2071,7 +2097,7 @@
     canEncode: canEncode,
     encode: encode,
     resize: resize,
-    svg: { info: svgInfo, render: svgRender },
+    svg: { info: svgInfo, render: svgRender, text: svgText },
     release: release,
     toCanvas: toCanvas,
     exif: { orientation: exifOrientation, prepare: prepareExif },

@@ -357,6 +357,16 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await page.isDisabled('#sg-svg'), true);
   await page.fill('#sg-name', 'Jane 李');
   await page.waitForFunction(() => /no letter for 李.*None of the fonts can/.test(document.querySelector('#sg-type-msg').textContent), null, { timeout: 10000 });
+  // Invisible characters pasted along with a name (zero-width space and joiner, soft hyphen, BOM) draw
+  // nothing; before the fix they blocked the font with "has no letter for" an invisible character.
+  await page.fill('#sg-name', 'Jane Doe');
+  await page.waitForFunction(() => !document.querySelector('#sg-svg').disabled);
+  const plainInfo = await page.textContent('#sg-info');
+  await page.fill('#sg-name', '\ufeffJa\u200bne\u00ad D\u200doe\u2060');
+  await page.waitForTimeout(400);
+  await page.waitForFunction(() => !document.querySelector('#sg-svg').disabled);
+  assert.equal(await page.textContent('#sg-type-msg'), '');
+  assert.equal(await page.textContent('#sg-info'), plainInfo, 'same outlines as the plain name');
   // Colour and white background apply to typed signatures too.
   await page.fill('#sg-name', 'Jane Doe');
   await page.waitForFunction(() => !document.querySelector('#sg-svg').disabled);
@@ -424,7 +434,10 @@ module.exports = async ({ page, open, assert, url }) => {
     window.__lt = [];
     new PerformanceObserver(l => l.getEntries().forEach(e => window.__lt.push(Math.round(e.duration)))).observe({ type: 'longtask' });
   });
-  await page.setInputFiles('#sg-photo-file', { name: 'signature-photo.jpg', mimeType: 'image/jpeg', buffer: await makePhoto(true) });
+  // A second photo chosen while the first is still opening wins; before the fix it was silently ignored.
+  const blankPhoto = await makePhoto(false), inkPhoto = await makePhoto(true);
+  await page.setInputFiles('#sg-photo-file', { name: 'blank-first.jpg', mimeType: 'image/jpeg', buffer: blankPhoto });
+  await page.setInputFiles('#sg-photo-file', { name: 'signature-photo.jpg', mimeType: 'image/jpeg', buffer: inkPhoto });
   await page.waitForFunction(() => !document.querySelector('#sg-png').disabled, null, { timeout: 20000 });
   assert.equal(await page.textContent('#sg-photo-msg'), '');
   assert.match(await page.textContent('#sg-cut-out'), /^Auto \(\d+\)$/);

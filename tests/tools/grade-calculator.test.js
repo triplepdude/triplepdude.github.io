@@ -75,6 +75,8 @@ module.exports = async ({ page, open, assert }) => {
   await setRows([['Exams', '90', '50'], ['Labs', '80', '60']]);
   assert.equal(await text('#gc-avg'), '84.55%');
   assert.match(await text('#gc-note'), /add up to 110%, more than 100%/);
+  // Points banked toward 100 would be meaningless (99 of 100) with 110% of weights.
+  assert.equal(await text('#gc-s-banked'), '–');
 
   // Lists: percentages are averaged, fractions are added as points.
   await setRows([['Essays', '88; 92; 95', '100']]);

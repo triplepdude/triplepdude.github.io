@@ -602,4 +602,20 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(await text('#ri-note'), /stays sharp/);
   out = await download();
   assert.deepEqual(await pixels(out.buf, [[498, 250], [501, 250]]), [[255, 0, 0, 255], [0, 0, 255, 255]], 'sharp edge between the halves');
+
+  // ---------- Download straight after a change saves the new size ----------
+  // The preview waits 150 ms after typing; before the fix a click inside that pause saved the previous
+  // result (here 1000 x 500) under the old name.
+  await page.fill('#ri-w', '240');
+  out = await download();
+  assert.equal(out.name, 'halves-240x120.png');
+  assert.deepEqual([out.info.width, out.info.height], [240, 120]);
+  // An invalid size typed just before the click gives the error, not a stale file.
+  await page.fill('#ri-w', '0');
+  let saved = false;
+  page.once('download', () => { saved = true; });
+  await page.click('#ri-download', { force: true, noWaitAfter: true }).catch(() => {});
+  await page.waitForFunction(() => /at least 1 pixel/.test(document.querySelector('#ri-error').textContent));
+  await page.waitForTimeout(300);
+  assert.equal(saved, false, 'no download for an invalid size');
 };

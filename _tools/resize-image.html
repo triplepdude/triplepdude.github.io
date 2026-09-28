@@ -625,7 +625,23 @@ faq:
 
   // Resizes one image with the given settings. The result is kept until a setting changes, so the
   // preview, the single download and the ZIP share the work.
-  async function produce(it, s, retried) {
+  // A request for a result that is already being made (the preview, then Download clicked straight away)
+  // waits for that work instead of starting it again.
+  function produce(it, s) {
+    var t = targetFor(it, s);
+    if (t.error) return Promise.reject(friendly(t.error));
+    var sig = JSON.stringify([s, t, outKey(it, s, t)]);
+    if (it.out && it.out.sig === sig) return Promise.resolve(it.out);
+    if (it.inflight && it.inflight.sig === sig) return it.inflight.p;
+    var p = produceNow(it, s, false);
+    var job = { sig: sig, p: p };
+    it.inflight = job;
+    function done() { if (it.inflight === job) it.inflight = null; }
+    p.then(done, done);
+    return p;
+  }
+
+  async function produceNow(it, s, retried) {
     var t = targetFor(it, s);
     if (t.error) throw friendly(t.error);
     var key = outKey(it, s, t);
@@ -660,7 +676,7 @@ faq:
       }
     } catch (e) {
       // The decoder's worker was restarted (out of memory, say): decode once more.
-      if (e && e.code === 'GONE' && !retried) { releaseSrc(it); return produce(it, s, true); }
+      if (e && e.code === 'GONE' && !retried) { releaseSrc(it); return produceNow(it, s, true); }
       throw e;
     } finally {
       if (done) done();
@@ -914,8 +930,21 @@ faq:
   // ---------- downloads ----------
   function restoreFocus(btn, had) { if (had && !btn.disabled && !btn.hidden) btn.focus(); }
 
-  downloadBtn.addEventListener('click', function () {
-    if (result) TT.download(result.name, result.blob);
+  // The preview follows the settings after a short pause, so a click straight after typing a new size
+  // must not save the previous result: the file is always made for the settings as they are now.
+  downloadBtn.addEventListener('click', async function () {
+    var it = current;
+    if (!it || busy) return;
+    var s = settings(), sig = null, t = targetFor(it, s);
+    if (!t.error) sig = JSON.stringify([s, t, outKey(it, s, t)]);
+    if (result && result.sig === sig) { TT.download(result.name, result.blob); return; }
+    try {
+      var r = await produce(it, s);
+      if (it === current) TT.download(r.name, r.blob);
+    } catch (e) {
+      // Shows the reason in the error box, exactly as the preview does.
+      if (it === current) render();
+    }
   });
 
   async function downloadOne(it, btn) {

@@ -604,7 +604,10 @@ faq:
   }
   function fontId() { var r = $('input[name="sg-font"]:checked'); return r ? r.value : FONTS[0].id; }
   function fontName(id) { return FONTS.filter(function (f) { return f.id === id; })[0].name; }
-  function typedText() { return nameIn.value.normalize('NFC').replace(/\s+/g, ' ').trim(); }
+  // Invisible format characters (zero-width spaces and joiners, soft hyphens, byte order marks, variation
+  // selectors) often come along when a name is pasted from a web page or chat; they draw nothing, so they
+  // are dropped rather than reported as letters the font lacks.
+  function typedText() { return nameIn.value.normalize('NFC').replace(/[\p{Cf}\uFE00-\uFE0F]/gu, '').replace(/\s+/g, ' ').trim(); }
 
   // Outlines of text at size px, baseline at y = 0: commands, exact bounding box, missing characters.
   function shapeOf(font, text, size) {
@@ -703,7 +706,7 @@ faq:
       var others = await fontsFor(text, id);
       if (token !== typed.token) return;
       typeMsg.textContent = fontName(id) + ' has no ' + (s.missing.length === 1 ? 'letter' : 'letters') + ' for ' + s.missing.join(' ') + ', so it cannot write this name. ' +
-        (others.length ? 'Choose ' + others.join(' or ') + '.' : 'None of the fonts can; type the name in Latin letters.');
+        (others.length ? 'Choose ' + others.join(' or ') + '.' : 'None of the fonts can; remove ' + (s.missing.length === 1 ? 'it' : 'them') + ' or type the name in Latin letters.');
       s = { empty: true, missing: s.missing };
     } else {
       typeMsg.textContent = '';
@@ -954,7 +957,9 @@ faq:
   var photo = { src: null, out: null, auto: true, token: 0, busy: false };
 
   async function loadPhoto(file) {
-    if (!file || photo.busy) return;
+    if (!file) return;
+    // A photo chosen while another is still opening replaces it as soon as that one is done.
+    if (photo.busy) { photo.queued = file; return; }
     photoMsg.textContent = '';
     photo.busy = true;
     var had = document.activeElement === $('#sg-photo-choose');
@@ -982,6 +987,9 @@ faq:
       photoMsg.textContent = '“' + (file.name || 'That file') + '” could not be opened. ' + (e && e.friendly ? e.message : 'Try a JPG, PNG or HEIC photo.');
     } finally {
       photo.busy = false;
+      var q = photo.queued;
+      photo.queued = null;
+      if (q) loadPhoto(q);
     }
   }
 

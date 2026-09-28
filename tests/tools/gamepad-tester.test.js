@@ -243,6 +243,14 @@ module.exports = async ({ page, open, assert, url }) => {
   await waitText(li(0) + ' .gpt-bn', /^B$/);
   assert.equal(await text(li(1) + ' .gpt-bn'), 'A');
   assert.equal(await svgText(437, 188), 'B');
+  // An 18th button that the Nintendo and Xbox sets do not name is drawn with
+  // its number, not as a blank shape.
+  assert.equal(await svgText(300, 104), '17');
+  assert.equal(await text(li(17) + ' .gpt-bn'), 'Button 17');
+  await page.selectOption('#gpt-labels', 'xbox');
+  await waitText(li(0) + ' .gpt-bn', /^A$/);
+  assert.equal(await svgText(300, 104), '17');
+  assert.equal(await svgText(300, 190), 'Xbox');
   await page.selectOption('#gpt-labels', 'index');
   await waitText(li(0) + ' .gpt-bn', /^Button 0$/);
   assert.equal(await svgText(437, 188), '0');

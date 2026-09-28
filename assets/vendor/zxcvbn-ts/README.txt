@@ -5,17 +5,13 @@ The page loads these three files in a Web Worker, only when someone starts
 typing a password.
 
 zxcvbn-ts-core.min.js
-  Package:  @zxcvbn-ts/core 4.2.0 (MIT), plus its one dependency
-            fastest-levenshtein 1.0.16 (MIT)
+  Package:  @zxcvbn-ts/core 4.2.0 (MIT), which inlines its one dependency
+            fastest-levenshtein 1.0.16 (MIT) in its browser build
   Source:   https://registry.npmjs.org/@zxcvbn-ts/core/-/core-4.2.0.tgz
-            https://registry.npmjs.org/fastest-levenshtein/-/fastest-levenshtein-1.0.16.tgz
             https://github.com/zxcvbn-ts/zxcvbn
-  Build:    version 4 ships no browser build of the core, so dist/index.mjs was
-            bundled with esbuild 0.25.10:
-              esbuild dist/index.mjs --bundle --format=iife
-                --global-name=zxcvbnts.core --minify --target=es2019
-            The code is unchanged apart from bundling and minification. It
-            defines the global zxcvbnts.core (ZxcvbnFactory, ...).
+  File:     dist/zxcvbn-ts.js (the package's browser build), minified with
+            esbuild 0.25.10 --minify --target=es2019. Defines the global
+            zxcvbnts.core (ZxcvbnFactory, ...).
 
 language-common.min.js
   Package:  @zxcvbn-ts/language-common 4.1.3 (MIT)
