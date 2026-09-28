@@ -328,6 +328,8 @@ faq:
     return (n / 1e6).toFixed(2) + ' MB';
   }
   const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+  // Percentage saved, never rounded up to a misleading 100% while bytes remain.
+  const savedPct = (from, to) => Math.min(to > 0 ? 99 : 100, Math.round((1 - to / from) * 100));
   const mode = () => (document.querySelector('input[name="cmpi-mode"]:checked') || {}).value || 'target';
   const baseName = name => (name || 'image').replace(/\.[^.]+$/, '') || 'image';
 
@@ -976,7 +978,7 @@ faq:
     const done = items.filter(x => x.state === 'done');
     if (items.length === 1) {
       const it = items[0];
-      live.textContent = it.state === 'done' ? 'Compressed to ' + fmtBytes(it.out.blob.size) + (it.out.blob.size < it.file.size ? ', ' + Math.round((1 - it.out.blob.size / it.file.size) * 100) + '% smaller.' : '.') : 'Could not compress the image.';
+      live.textContent = it.state === 'done' ? 'Compressed to ' + fmtBytes(it.out.blob.size) + (it.out.blob.size < it.file.size ? ', ' + savedPct(it.file.size, it.out.blob.size) + '% smaller.' : '.') : 'Could not compress the image.';
       return;
     }
     const a = done.reduce((t, x) => t + x.file.size, 0), b = done.reduce((t, x) => t + x.out.blob.size, 0);
@@ -1011,7 +1013,7 @@ faq:
     if (it.state === 'error') return it.error;
     if (it.state === 'queued') return it.out ? 'Waiting to update…' : 'Waiting…';
     if (it.state === 'working') return it.stage || 'Compressing…';
-    const o = it.out, saved = Math.round((1 - o.blob.size / it.file.size) * 100);
+    const o = it.out, saved = savedPct(it.file.size, o.blob.size);
     return LABEL[o.fmt] + ' · ' + o.w + ' × ' + o.h + ' px · ' + fmtBytes(it.file.size) + ' → ' + fmtBytes(o.blob.size) + (saved > 0 ? ' (−' + saved + '%)' : '');
   }
   function makeRow(it) {
@@ -1055,7 +1057,7 @@ faq:
     if (!many) return;
     const a = done.reduce((t, x) => t + x.file.size, 0), b = done.reduce((t, x) => t + x.out.blob.size, 0);
     $('#cmpi-batch-sum').textContent = plural(items.length, 'image', 'images') + (busy ? ' · compressed ' + done.length + ' so far…'
-      : done.length ? ' · ' + fmtBytes(a) + ' → ' + fmtBytes(b) + (b < a ? ' (−' + Math.round((1 - b / a) * 100) + '%)' : '') : '');
+      : done.length ? ' · ' + fmtBytes(a) + ' → ' + fmtBytes(b) + (b < a ? ' (−' + savedPct(a, b) + '%)' : '') : '');
   }
   function showSelected() {
     const it = selected;
@@ -1073,7 +1075,7 @@ faq:
       return;
     }
     if (it.state === 'error') { progressEl.textContent = ''; noteEl.textContent = ''; return; }
-    const o = it.out, saved = Math.round((1 - o.blob.size / it.file.size) * 100);
+    const o = it.out, saved = savedPct(it.file.size, o.blob.size);
     $('#cmpi-size').textContent = fmtBytes(o.blob.size);
     $('#cmpi-saved').textContent = saved > 0 ? saved + '%' : 'None';
     $('#cmpi-dims').textContent = o.w + ' × ' + o.h;
@@ -1295,6 +1297,17 @@ faq:
     e.preventDefault();
     drop.classList.remove('is-over');
     if (e.dataTransfer && e.dataTransfer.files) add(e.dataTransfer.files);
+  });
+  // A file dropped anywhere else on the page is used too, instead of the browser opening it
+  // in place of this page (and losing the work on it).
+  document.addEventListener('dragover', e => {
+    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') >= 0) e.preventDefault();
+  });
+  document.addEventListener('drop', e => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (e.defaultPrevented || !files || !files.length) return;
+    e.preventDefault();
+    add(files);
   });
   document.addEventListener('paste', e => {
     const files = e.clipboardData ? Array.from(e.clipboardData.files || []).filter(x => /^image\//.test(x.type)) : [];

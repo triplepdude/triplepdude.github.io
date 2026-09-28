@@ -591,4 +591,23 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual((await heard()).filter(l => l.startsWith('jb-status:')), ['jb-status:The payload is not valid JSON: ' + (await text('#jb-msg')).replace(/^The payload is not valid JSON: /, '')]);
   await page.click('#jwt-example');
   await verified('example after the live-region checks');
+
+  // Regression: a payload nested 20,000 levels deep used to build a gigabyte-long indented
+  // string and throw "Invalid string length". Indentation is now capped.
+  const deep = '['.repeat(20000) + ']'.repeat(20000);
+  const put = (sel, v) => page.evaluate(([sel, v]) => { const el = document.querySelector(sel); el.value = v; el.dispatchEvent(new Event('input')); }, [sel, v]);
+  let t0 = Date.now();
+  await put('#jwt-token', b64u('{"alg":"HS256"}') + '.' + b64u(deep) + '.' + b64u('sig'));
+  assert.ok(Date.now() - t0 < 3000, 'deep JSON rendered in ' + (Date.now() - t0) + ' ms');
+  assert.equal(await text('#jwt-msg'), '');
+  assert.ok((await text('#jwt-payload')).length < 3e6);
+  assert.match(await text('#jwt-warn'), /not an object/);
+  // Regression: many BEGIN lines without an END took seconds (backtracking PEM regex).
+  await page.click('#jwt-example');
+  const rsTok = b64u('{"alg":"RS256"}') + '.' + b64u('{"sub":"x"}') + '.' + b64u('x'.repeat(256));
+  await put('#jwt-token', rsTok);
+  t0 = Date.now();
+  await put('#jwt-key', '-----BEGIN A-----\n'.repeat(30000));
+  assert.ok(Date.now() - t0 < 1000, 'PEM scan took ' + (Date.now() - t0) + ' ms');
+  await page.waitForFunction(() => /BEGIN and END lines must match/.test(document.querySelector('#jwt-verify').textContent));
 };

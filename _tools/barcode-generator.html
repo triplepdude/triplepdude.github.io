@@ -524,7 +524,8 @@ faq:
   }
 
   // GS1 predefined-length AIs, which need no FNC1 after them (GS1 General Specifications 7.8.5).
-  function predefined(ai) { return /^(0[0-4]|1[1-9]|20|23|3[1-6]|41)/.test(ai); }
+  // Table 7-6 lists 00-04, 11-19, 20, 31-36 and 41; every other AI takes FNC1 after variable data.
+  function predefined(ai) { return /^(0[0-4]|1[1-9]|20|3[1-6]|41)/.test(ai); }
 
   // Checks one element string. Returns an error message and, when it can be fixed, the fixed value.
   function checkAi(ai, v, info) {
@@ -1050,7 +1051,12 @@ faq:
   }
 
   function num(v) { return String(Math.round(v * 1000) / 1000); }
-  function xmlEscape(s) { return s.replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+  // Control characters (Code 128 and Code 93 can encode them) are not allowed in XML, so a
+  // downloaded SVG would not open; they are shown as Unicode control pictures such as ␝.
+  function visible(s) {
+    return s.replace(/[\x00-\x1f\x7f]/g, function (c) { return String.fromCharCode(c === '\x7f' ? 0x2421 : 0x2400 + c.charCodeAt(0)); });
+  }
+  function xmlEscape(s) { return visible(s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
 
   function toSvg(L, o, title) {
     var out = '<svg xmlns="http://www.w3.org/2000/svg" width="' + L.width + '" height="' + L.height + '" viewBox="0 0 ' + L.width + ' ' + L.height + '">';
@@ -1197,24 +1203,25 @@ faq:
       preview.innerHTML = svg;
       var el = preview.firstElementChild;
       el.setAttribute('role', 'img');
-      el.setAttribute('aria-label', t.name + ' barcode for ' + res.info.encoded);
+      el.setAttribute('aria-label', t.name + ' barcode for ' + visible(res.info.encoded));
       el.setAttribute('data-module', String(o.barWidth));
       el.setAttribute('data-quiet', String(t.quiet[0] * o.barWidth + (res.sym.bearer ? 4 * o.barWidth : 0)));
       errEl.textContent = '';
       dataEl.setAttribute('aria-invalid', 'false');
       addonEl.setAttribute('aria-invalid', 'false');
-      $('#bc-encoded').textContent = res.info.encoded;
+      $('#bc-encoded').textContent = visible(res.info.encoded);
       $('#bc-check').textContent = res.info.check;
       $('#bc-check-label').textContent = res.info.checkLabel;
       $('#bc-size').textContent = L.width + ' × ' + L.height;
       if (res.info.upper) warnings.push('Code 39 has no lowercase letters, so the text was converted to capitals.');
+      if (type === 'itf14' && o.ratio < 2.25) warnings.push('GS1 requires a wide-to-narrow ratio of 2.25 : 1 to 3 : 1 for ITF-14. Choose 2.5 : 1 or 3 : 1.');
       $('#bc-sets-stat').hidden = !res.info.sets;
       $('#bc-sets').textContent = res.info.sets || '–';
       $('#bc-upca-stat').hidden = !res.info.upca;
       $('#bc-upca').textContent = res.info.upca || '–';
       renderGs1Table(res.info.elements);
       setDisabled(false);
-      summary = t.name + ' barcode ready: ' + res.info.encoded + '.';
+      summary = t.name + ' barcode ready: ' + visible(res.info.encoded) + '.';
     } catch (e) {
       if (!(e instanceof InputError)) e = new InputError('Something went wrong while drawing this barcode. Check the data and try again.');
       current = null;
@@ -1374,7 +1381,7 @@ faq:
     body.textContent = '';
     plan.errors.slice(0, MAX_LISTED).forEach(function (er) {
       var tr = document.createElement('tr');
-      [String(er.line), er.data.length > 60 ? er.data.slice(0, 60) + '…' : er.data, er.problem].forEach(function (v, k) {
+      [String(er.line), visible(er.data.length > 60 ? er.data.slice(0, 60) + '…' : er.data), er.problem].forEach(function (v, k) {
         var td = document.createElement('td');
         if (k === 1) td.className = 'mono';
         td.textContent = v;

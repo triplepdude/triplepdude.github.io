@@ -331,9 +331,12 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
 
   // Re-indents valid JSON text without parsing numbers, so big integers and
   // escapes are shown exactly as they appear in the token.
+  // Indentation stops growing after MAX_INDENT levels, so deeply nested JSON (thousands
+  // of "[") cannot blow the output up quadratically.
+  const MAX_INDENT = 32;
   function prettyJson(text) {
     let out = '', depth = 0, i = 0;
-    const n = text.length, nl = () => '\n' + '  '.repeat(depth);
+    const n = text.length, nl = () => '\n' + '  '.repeat(Math.max(0, Math.min(depth, MAX_INDENT)));
     while (i < n) {
       const ch = text[i];
       if (ch === '"') {
@@ -739,6 +742,19 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
     return kidSel.value === '' ? null : keys[+kidSel.value];
   }
 
+  // The first "-----BEGIN X-----" ... "-----END X-----" block, found with indexOf: the regex
+  // /-----BEGIN (...)-----([\s\S]*?)-----END \1-----/ rescans the rest of the text from
+  // every BEGIN line, which took seconds on a paste of many unmatched BEGIN lines.
+  function findPem(text) {
+    const at = text.indexOf('-----BEGIN ');
+    if (at < 0) return null;
+    const m = /^-----BEGIN ([A-Z0-9 ]{1,60})-----/.exec(text.slice(at, at + 80));
+    if (!m) return null;
+    const bodyStart = at + m[0].length, end = text.indexOf('-----END ' + m[1] + '-----', bodyStart);
+    if (end < 0) return null;
+    return [null, m[1], text.slice(bodyStart, end)];
+  }
+
   const PRIVATE_KEY_MSG = 'This is a private key. Verifying needs only the public key, and a private key should never be pasted into a website. Paste the matching public key instead.';
 
   async function importPublicKey(text, spec, alg, header, notes) {
@@ -764,7 +780,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
       }
       return importJwk(obj, spec, alg, notes);
     }
-    const pem = text.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----/);
+    const pem = findPem(text);
     if (pem) {
       const type = pem[1];
       if (/PRIVATE KEY/.test(type)) throw new UserError(PRIVATE_KEY_MSG);
@@ -901,9 +917,14 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
       msgEl.textContent = e.message;
       t = null;
     }
+    if (t) {
+      try { render(t); } catch (e) {
+        msgEl.textContent = 'This token could not be displayed: ' + (e && e.message ? e.message : e) + '.';
+        t = null;
+      }
+    }
     current = t;
     outEl.hidden = !t;
-    if (t) render(t);
     verify();
   }
   function edited() { update(); sayLater(decodeSummary); }
@@ -1015,7 +1036,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
       }
       return key;
     }
-    const pem = text.match(/-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----/);
+    const pem = findPem(text);
     if (!pem) {
       if (/^-----BEGIN/.test(text)) throw new UserError('The PEM block is incomplete: its BEGIN and END lines must match.');
       throw new UserError('Paste the private key as PEM (-----BEGIN PRIVATE KEY-----) or as a JWK with a "d" member.');
@@ -1173,7 +1194,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
     const k = jbKey.value;
     if (k && builderKind() === 'key') {
       const spec = ALGS[jbAlg.value];
-      const fits = /^\s*\{/.test(k) ? true : (() => { try { const m = k.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END/); if (!m || m[1] !== 'PRIVATE KEY') return true; const i = pkcs8Info(b64Bytes(m[2], 'key', 'Base64')); return i.kty === spec.kty && (!spec.crv || i.crv === spec.crv); } catch (e) { return true; } })();
+      const fits = /^\s*\{/.test(k) ? true : (() => { try { const m = findPem(k); if (!m || m[1] !== 'PRIVATE KEY') return true; const i = pkcs8Info(b64Bytes(m[2], 'key', 'Base64')); return i.kty === spec.kty && (!spec.crv || i.crv === spec.crv); } catch (e) { return true; } })();
       if (!fits) jbKey.value = '';
     }
     if (builderKind() === 'key' && !jbKey.value) generateKeyPair($('#jb-gen-key')); else rebuild();

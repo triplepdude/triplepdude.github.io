@@ -626,4 +626,29 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => document.querySelector('#cmpi-error').textContent.length > 0);
   assert.match(await text('#cmpi-error'), /not a supported image/);
   assert.equal(await page.isVisible('#cmpi-result'), false);
+
+  // ---------- Dropped anywhere on the page; savings never shown as a misleading 100% ----------
+  // A 600 x 600 grey 24-bit BMP (1,080,054 bytes) becomes a JPG of a few KB: 99.7% smaller, shown
+  // as −99%, as "−100%" would claim nothing is left.
+  const W = 600, rowLen = W * 3, bmp = Buffer.alloc(54 + rowLen * W, 0x80);
+  bmp.write('BM', 0, 'latin1');
+  bmp.writeUInt32LE(bmp.length, 2); bmp.writeUInt32LE(0, 6); bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14); bmp.writeInt32LE(W, 18); bmp.writeInt32LE(W, 22); bmp.writeUInt16LE(1, 26); bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(0, 30); bmp.writeUInt32LE(rowLen * W, 34); bmp.fill(0, 38, 54);
+  await open();
+  const dropped = await page.evaluate(async b64 => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], 'grey.bmp', { type: 'image/bmp' }));
+    const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(over);
+    const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(ev);
+    return over.defaultPrevented && ev.defaultPrevented;
+  }, bmp.toString('base64'));
+  assert.equal(dropped, true, 'the page takes the drop instead of the browser opening the file');
+  await page.waitForFunction(() => document.querySelector('#cmpi-result').dataset.state === 'done', null, { timeout: 20000 });
+  assert.equal(await text('#cmpi-drop-title'), 'grey.bmp');
+  const outSize = Number((await text('#cmpi-bytes')).match(/JPG: ([\d,]+) bytes/)[1].replace(/,/g, ''));
+  assert.ok(outSize < 1080054 * 0.005, `tiny output: ${outSize}`);
+  assert.equal(await text('#cmpi-saved'), '99%');
 };

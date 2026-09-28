@@ -96,7 +96,12 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await text('#spk-now'), 'Nothing playing. Start with your device volume low.');
   assert.equal(await text('#spk-vol-out'), '50%');
   assert.deepEqual(await page.$$eval('#spk-legend tr td:first-child', t => t.map(e => e.textContent)), ['0:01', '0:04', '0:07', '0:10', '0:19', '0:24', '0:29']);
-  assert.equal(await page.isDisabled('#spk-mark'), true);
+  assert.equal(await page.getAttribute('#spk-mark', 'aria-disabled'), 'true');
+  // Marking with no sweep playing adds nothing (Playwright's click() waits for
+  // aria-disabled to clear, so the button is activated from the keyboard).
+  await page.focus('#spk-mark');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#spk-marks li').count(), 0);
   assert.equal(await page.isVisible('#spk-sur'), false);
 
   // ---- Left, right, centre ----
@@ -188,17 +193,30 @@ module.exports = async ({ page, open, assert, url }) => {
   near(await page.evaluate(() => window.__freq(0, 0.01 + 1, 0.1)), 39.91, 0.8, 'sweep at 10%');
   near(await page.evaluate(() => window.__freq(0, 0.01 + 5)), 632.46, 6, 'sweep at 50%');
   near(await page.evaluate(() => window.__freq(0, 0.01 + 9, 0.01)), 10023.7, 150, 'sweep at 90%');
-  assert.equal(await page.isEnabled('#spk-mark'), true);
+  assert.equal(await page.getAttribute('#spk-mark', 'aria-disabled'), 'false');
   await page.waitForTimeout(800);
   await page.click('#spk-mark');
   const mark = await text('#spk-marks li');
   assert.match(mark, /^\d+ Hz$/);
   assert.ok(+mark.split(' ')[0] >= 20 && +mark.split(' ')[0] < 120, `marked ${mark}`);
   assert.match(await text('#spk-freq'), /^\d+(\.\d+)? k?Hz$/);
+  // Regression: the Mark button was disabled when the sweep ended, which threw
+  // keyboard focus back to the top of the page. It now keeps focus.
+  await page.focus('#spk-mark');
   await page.click('#spk-stop');
   assert.equal(await pressed('[data-test="sweep"]'), 'false');
-  assert.equal(await page.isDisabled('#spk-mark'), true);
+  assert.equal(await page.getAttribute('#spk-mark', 'aria-disabled'), 'true');
   assert.equal(await text('#spk-now'), 'Stopped.');
+  await page.focus('#spk-mark');
+  await page.selectOption('#spk-stime', '10');
+  await page.evaluate(() => document.querySelector('[data-test="sweep"]').click());
+  count++;
+  await page.waitForFunction(n => window.__played.length === n, count);
+  await page.focus('#spk-mark');
+  await page.evaluate(() => document.getElementById('spk-stop').click());
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'spk-mark');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#spk-marks li').count(), 0, 'no mark after the sweep stopped');
 
   await page.selectOption('#spk-range', '20-200');
   await page.selectOption('#spk-sch', 'both');
@@ -228,8 +246,20 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await text('#spk-vol-warn'), '');
   await page.click('#spk-stop');
 
-  // A stereo output: no surround buttons, and the page says why.
+  // A stereo output: no surround buttons, and the page says why (set once, not
+  // re-written, so the polite live region is not re-announced on every sound).
   assert.match(await text('#spk-sur-note'), /^Your output reports [12] channels?, so there are no surround speakers/);
+  const noteMutations = await page.evaluate(async () => {
+    let n = 0;
+    new MutationObserver(m => { n += m.length; }).observe(document.getElementById('spk-sur-note'), { childList: true, characterData: true, subtree: true });
+    document.querySelector('[data-test="right"]').click();
+    await new Promise(r => setTimeout(r, 300));
+    return n;
+  });
+  count++;
+  assert.equal(noteMutations, 0);
+  await page.waitForFunction(n => window.__played.length === n, count);
+  await page.click('#spk-stop');
   assert.equal(await page.isVisible('#spk-sur'), false);
   assert.equal(await page.isVisible('#spk-detect-row'), false);
 

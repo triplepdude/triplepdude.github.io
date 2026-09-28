@@ -27,9 +27,10 @@ howto: |
     all whitespace.
   - **Sentences** end with `.` `?` `!` or `…` followed by a space, or with
     。！？ in Chinese and Japanese. A full stop does not end a sentence after
-    a title such as *Dr.* or *Mrs.*, after an initial such as *J.*, or when the
-    next word starts with a lower-case letter, as after *e.g.* A blank line
-    also ends a sentence, so a heading counts as one.
+    a title such as *Dr.* or *Mrs.*, after an initial such as *J.*, after
+    *No.* or *fig.* when a number follows, or when the next word starts with a
+    lower-case letter, as after *e.g.* A blank line also ends a sentence, so a
+    heading counts as one.
   - **Paragraphs** are blocks of text separated by at least one blank line.
 
   ## Opening documents
@@ -230,9 +231,11 @@ faq:
     var RE_NUM = /^[\p{N}.,:/]+$/u;
     var RE_ALNUM = /[\p{L}\p{N}]/gu;
     var RE_CJKSTOP = /[\u3002\uFF01\uFF1F\uFF61]/;
-    // Titles and short forms after which a full stop rarely ends a sentence.
-    var ABBR = new Set(('mr mrs ms mx dr prof rev hon st mt sr jr capt col gen lt sgt cmdr gov sen rep pres fr ' +
-      'e.g i.e cf vs viz approx dept est fig figs no nos vol vols ch pp ed eds ave blvd rd').split(' '));
+    // Titles and short forms after which a full stop rarely ends a sentence, and short forms
+    // that only continue the sentence before a number ("No. 5", "fig. 3"; but "No. She left.").
+    var ABBR = new Set('mr mrs ms mx dr prof rev hon st mt sr jr capt col gen lt sgt cmdr gov sen rep pres fr e.g i.e cf vs viz'.split(' '));
+    var ABBR_NUM = new Set('no nos vol vols fig figs ch pp p approx est ed eds art sec'.split(' '));
+    var RE_DIGIT = /\p{N}/u;
     var STOP = new Set(('a about above after again against all almost also although am among an and another any are ' +
       "aren't around as at be because been before being below between both but by can can't cannot could couldn't did didn't " +
       "do does doesn't doing don't down during each either else even ever every few for from further get gets got had hadn't has " +
@@ -344,6 +347,7 @@ faq:
         if (lastEnd === i && m[0] === '.' && lastWord) {
           var lw = lastWord.toLowerCase();
           if (ABBR.has(lw) || RE_UPPER1.test(lastWord)) return false;
+          if (ABBR_NUM.has(lw) && k < n && RE_DIGIT.test(text[k])) return false;
         }
         return true;
       }
@@ -433,6 +437,33 @@ faq:
     }
   }
 
+  // Inflates one ZIP entry, stopping at ZIP_CAP bytes whatever size the entry claims,
+  // so a small "zip bomb" cannot fill the memory.
+  var ZIP_CAP = 100 * 1024 * 1024;
+  function inflate(data) {
+    var reader = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+    var chunks = [], total = 0;
+    function pump() {
+      return reader.read().then(function (r) {
+        if (r.done) {
+          var out = new Uint8Array(total), at = 0;
+          chunks.forEach(function (c) { out.set(c, at); at += c.length; });
+          return out;
+        }
+        total += r.value.length;
+        if (total > ZIP_CAP) {
+          reader.cancel().catch(function () {});
+          throw new Error('is too large to read (its text part is over 100 MB).');
+        }
+        chunks.push(r.value);
+        return pump();
+      }, function () {
+        throw new Error('is damaged (its compressed data could not be read).');
+      });
+    }
+    return pump();
+  }
+
   // Minimal ZIP reader for .docx and .odt: central directory, then stored or deflated entries.
   function readZip(buf, names) {
     var u8 = new Uint8Array(buf), dv = new DataView(buf), eocd = -1;
@@ -451,7 +482,7 @@ faq:
       p += 46 + nlen + xlen + clen;
       if (names.indexOf(name) < 0) continue;
       if (flags & 1) return Promise.reject(new Error('is encrypted.'));
-      if (usize > 300 * 1024 * 1024) return Promise.reject(new Error('is too large to read.'));
+      if (usize > ZIP_CAP) return Promise.reject(new Error('is too large to read (its text part is over 100 MB).'));
       if (off + 30 > u8.length || dv.getUint32(off, true) !== 0x04034B50) return Promise.reject(new Error('is damaged (bad ZIP entry).'));
       var start = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
       found[name] = { method: method, data: u8.subarray(start, start + csize) };
@@ -462,8 +493,7 @@ faq:
       if (f.method === 0) return f.data;
       if (f.method !== 8) return Promise.reject(new Error('uses a compression method this page cannot read.'));
       if (typeof DecompressionStream === 'undefined') return Promise.reject(new Error('needs a newer browser to open (DecompressionStream is missing).'));
-      var stream = new Blob([f.data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-      return new Response(stream).arrayBuffer().then(function (b) { return new Uint8Array(b); });
+      return inflate(f.data);
     })).then(function (list) {
       var out = {};
       names.forEach(function (n, i) { out[n] = list[i]; });
@@ -593,8 +623,8 @@ faq:
         .replace(/^\s*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/, '');
       if (/^\s*\|.*\|\s*$/.test(line)) line = line.replace(/^\s*\||\|\s*$/g, '').replace(/\s*\|\s*/g, '\t');
       return line
-        .replace(/!\[([^\]\n]{0,300})\]\([^()\n]{0,2000}\)/g, '$1')
-        .replace(/\[([^\]\n]{1,300})\]\([^()\n]{0,2000}\)/g, '$1')
+        .replace(/!\[([^\]\n]{0,300})\]\((?:[^()\n]|\([^()\n]{0,300}\)){0,2000}\)/g, '$1')
+        .replace(/\[([^\]\n]{1,300})\]\((?:[^()\n]|\([^()\n]{0,300}\)){0,2000}\)/g, '$1')
         .replace(/\[([^\]\n]{1,300})\]\[[^\]\n]{0,300}\]/g, '$1')
         .replace(/<(https?:\/\/[^>\s]{1,2000})>/g, '$1')
         .replace(/<\/?[A-Za-z][^<>\n]{0,500}>/g, '')

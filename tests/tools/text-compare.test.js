@@ -395,13 +395,13 @@ module.exports = async ({ page, open, assert }) => {
   // Same data, different key order, spacing, number spelling and escapes: equivalent.
   await compare('{"b": 1, "a": [1, 2, {"y": true, "x": null}], "n": 1.0, "k": 1e3, "s": "\\u00e9"}', '{"s":"é","k":1000,"n":1,"a":[1,2,{"x":null,"y":true}],"b":1}');
   assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 0, same: 14 });
-  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: only formatting and key order differ.');
+  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: the texts differ only in formatting or key order.');
   await setOpt('#tc-sort', false);
   assert.ok((await stats()).changed + (await stats()).added > 0, 'key order counts when not sorted');
   await setOpt('#tc-sort', true);
   // Comments and trailing commas (tsconfig style) are accepted.
   await compare('{\n  // compiler\n  "strict": true, /* on */\n  "lib": ["dom",],\n}', '{"lib":["dom"],"strict":true}');
-  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: only formatting and key order differ.');
+  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: the texts differ only in formatting or key order.');
   assert.equal(await page.textContent('#tc-json-msg'), '');
   // Invalid JSON: Python reports "Expecting value: line 4 column 1"; the texts are compared as plain text.
   await compare('{\n  "a": 1,\n  "b": \n}', '{"a": 1}');
@@ -412,7 +412,7 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await page.textContent('#tc-json-msg'), /^Original text is not valid JSON: the text ends before the array is closed at line 1, column 6\./);
   // Duplicate keys: the last value counts, as in JavaScript, and they are pointed out.
   await compare('{"a": 1, "a": 2}', '{"a": 2}');
-  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: only formatting and key order differ.');
+  assert.equal(await page.textContent('#tc-ok'), 'The JSON is equivalent: the texts differ only in formatting or key order.');
   assert.equal(await page.textContent('#tc-json-msg'), 'Duplicate key: "a" (original text, line 1, column 10). The last value of each is compared.');
   await setOpt('#tc-json', false);
   assert.equal(await page.textContent('#tc-json-msg'), '');

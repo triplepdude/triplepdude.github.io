@@ -810,12 +810,14 @@ faq:
   var pageStyle = document.createElement('style');
   document.head.appendChild(pageStyle);
 
-  function buildSheet() {
+  // masked: for the on-screen preview, which hides the password while the form does.
+  function buildSheet(masked) {
     var per = GRID[$('#wq-per-page').value] ? Number($('#wq-per-page').value) : 1;
     var paper = PAPER[$('#wq-paper').value] || PAPER.a4;
     var sheet = document.createElement('div');
     sheet.className = 'wq-sheet wq-n' + per + ($('#wq-paper').value === 'letter' ? ' wq-letter' : '');
     var v = cardValues(current.o);
+    if (masked && v.password !== null && passwordHidden()) v.password = '•'.repeat(Math.min(16, Array.from(v.password).length));
     for (var i = 0; i < per; i++) {
       var cell = document.createElement('div');
       cell.className = 'wq-cell';
@@ -854,7 +856,7 @@ faq:
     pageStyle.textContent = '@page { size: ' + ($('#wq-paper').value === 'letter' ? 'letter' : 'A4') + ' portrait; margin: 10mm; }';
     printRoot.appendChild(buildSheet().sheet);
     frame.hidden = false;
-    frame.appendChild(buildSheet().sheet);
+    frame.appendChild(buildSheet(true).sheet);
     // The sheet is always A4 or Letter shaped; a one-card sheet shows the full page too.
     frame.firstElementChild.style.height = paper.h + 'mm';
     fitPreview();
@@ -965,6 +967,14 @@ faq:
   ['dragleave', 'drop'].forEach(function (t) {
     drop.addEventListener(t, function () { drop.classList.remove('wq-over'); });
   });
+  // A file dropped just outside the drop zone would make the browser open it in place of
+  // this page, losing what was typed; ignore such drops instead.
+  var isFileDrag = function (e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; };
+  ['dragover', 'drop'].forEach(function (t) {
+    window.addEventListener(t, function (e) {
+      if (isFileDrag(e) && !drop.contains(e.target)) { e.preventDefault(); if (t === 'dragover') e.dataTransfer.dropEffect = 'none'; }
+    });
+  });
   drop.addEventListener('drop', function (e) {
     e.preventDefault();
     var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
@@ -977,6 +987,7 @@ faq:
     toggleBtn.textContent = hide ? 'Show' : 'Hide';
     toggleBtn.setAttribute('aria-label', hide ? 'Show password' : 'Hide password');
     refresh();
+    syncPrint();
   });
 
   // Copies the real text, even while the password is masked on screen.

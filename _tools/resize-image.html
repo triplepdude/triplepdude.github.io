@@ -12,14 +12,13 @@ howto: |
   2. Pick a preset, or type a width or height in pixels. With **Lock aspect
      ratio** on, the other side follows, so nothing is squashed; in a batch
      every image keeps its own shape. **Percentage** scales both sides.
-  3. Choose the format, quality and, if a form limits it, a maximum file
-     size. Check the preview, then **Download**, or **Download all (ZIP)**
-     for a batch. Click a file name in the list to preview that image.
+  3. Choose the format, quality and, if needed, a maximum file size. Check
+     the preview, then **Download**, or **Download all (ZIP)** for a batch.
 
   ## Exact sizes: fit, crop, pad or stretch
 
-  When the aspect ratio is unlocked, a size such as 1080 × 1080 rarely has
-  your photo's shape, so you choose what happens:
+  With the aspect ratio unlocked, choose what happens when a size such as
+  1080 × 1080 differs from the photo's shape:
 
   | Mode | Output size | What you see |
   |---|---|---|
@@ -31,18 +30,19 @@ howto: |
 
   The 3 × 3 **position** grid picks which part a crop keeps (the top of a
   portrait, say) or where a padded image sits. Pad with white, black, a
-  colour of your choice or transparency. **Never enlarge** leaves images
-  that are already smaller than the target at their own size, which is what
-  you want when shrinking a mixed batch to a maximum width.
+  colour of your choice or transparency. **Never enlarge** never scales an
+  image up: one already smaller than the target keeps its size (a crop frame
+  shrinks to fit inside it, and padding surrounds it), which is what you
+  want when shrinking a mixed batch to a maximum width.
 
   ## Resizing to a file size in KB
 
-  Upload forms often cap the size, for example at 50 KB. Enter the limit
-  and the tool searches for the highest JPEG, WebP or AVIF quality that
-  fits, by encoding the image several times. If even quality 40 is too
+  Upload forms often cap the size, say at 50 KB. The tool finds the
+  highest JPEG, WebP or AVIF quality that
+  fits by encoding the image several times. If even quality 40 is too
   big, it also reduces the width and height, keeping the shape, and tells
-  you the new size. Exact-size modes keep their pixel size and go down to
-  quality 5 instead. PNG and BMP are lossless, so only the size can shrink.
+  you. Exact-size modes keep their pixel size and go down to
+  quality 5 instead. Lossless formats (PNG, BMP) can only shrink in size.
   The limit counts 1 KB as 1,000 bytes, so the file also passes checks that
   count 1,024.
 
@@ -51,11 +51,9 @@ howto: |
   Your browser decodes each image, turning phone photos upright from their
   EXIF orientation tag, and draws it at the new size with its best smoothing
   filter. For big reductions each side is halved step by step until it is at
-  most twice its target, then scaled once more. Every halving averages
-  neighbouring pixels, so fine detail such as hair, text and fabric does not
-  break up into jagged edges and moiré. SVG drawings are rendered straight at
-  the new size, so they stay sharp at any scale. Enlarging a photo cannot add
-  detail: the new pixels are estimated from their neighbours, so edges soften.
+  most twice its target, then scaled once more, so fine detail such as hair
+  and text does not break up into jagged edges and moiré. SVG drawings are
+  rendered straight at the new size, so they stay sharp.
 
   ## Formats
 
@@ -66,13 +64,15 @@ howto: |
   | WebP, AVIF | Yes | Web pages; AVIF is smallest but slowest to save |
   | BMP | No | Old software; 24-bit, uncompressed |
   | ICO | Yes | Icons up to 256 × 256, optionally with 16, 32 and 48 px sizes |
+  | TIFF, GIF | Yes (GIF: on or off) | Kept for TIFF and GIF originals |
   {: .data .ri-table}
 
-  Most browsers cannot write AVIF, so a bundled libavif encoder does it in
-  your browser; it loads (3.5 MB) the first time and takes a few seconds per
-  image. HEIC, TIFF and GIF inputs are saved as JPEG (HEIC) or PNG under
-  "Original format". The new files carry no metadata,
-  so the camera model and GPS location of a photo are not copied.
+  Most browsers cannot write AVIF, so a bundled libavif encoder (3.5 MB,
+  loaded on first use) does it in a few seconds per image. Under "Original
+  format", HEIC is saved as JPEG and SVG as PNG; a TIFF stays a TIFF (first
+  page, LZW) and a GIF a GIF (first frame, up to 256 colours). Icons are
+  square, so a wide image is centred on a transparent square. The new files
+  carry no metadata such as the camera model or GPS location.
 faq:
   - q: Are my images uploaded to a server?
     a: No. Every image is decoded, resized and encoded by your own browser, and the ZIP is built on your device. Nothing leaves it, and the page keeps working offline once it has loaded.
@@ -353,8 +353,8 @@ faq:
     'passport': [600, 600], 'avatar': [400, 400], 'web': [1200, 0], 'email': [800, 0], 'favicon': [32, 32]
   };
   var KEY_OF = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico' };
-  var LABEL = { jpeg: 'JPEG', png: 'PNG', webp: 'WebP', avif: 'AVIF', bmp: 'BMP', ico: 'ICO' };
-  var EXT = { jpeg: 'jpg', png: 'png', webp: 'webp', avif: 'avif', bmp: 'bmp', ico: 'ico' };
+  var LABEL = { jpeg: 'JPEG', png: 'PNG', webp: 'WebP', avif: 'AVIF', bmp: 'BMP', ico: 'ICO', tiff: 'TIFF', gif: 'GIF' };
+  var EXT = { jpeg: 'jpg', png: 'png', webp: 'webp', avif: 'avif', bmp: 'bmp', ico: 'ico', tiff: 'tif', gif: 'gif' };
   var LOSSY = { jpeg: true, webp: true, avif: true };
   var NO_ALPHA = { jpeg: true, bmp: true };
   var canSave = { jpeg: true, png: true, bmp: true, ico: true, webp: true, avif: false };
@@ -412,6 +412,15 @@ faq:
     } else {
       if (!(s.W >= 1) || !(s.H >= 1)) return { error: 'Enter a width and a height of at least 1 pixel.' };
       W = s.W; H = s.H; fit = s.fit;
+      if (s.noUp && fit === 'crop') {
+        // Never enlarge: a frame bigger than the image shrinks, keeping its shape, until it fits inside it.
+        k = Math.min(1, iw / W, ih / H);
+        W = Math.max(1, Math.round(W * k));
+        H = Math.max(1, Math.round(H * k));
+      } else if (s.noUp && fit === 'stretch') {
+        W = Math.min(W, iw);
+        H = Math.min(H, ih);
+      }
       if (fit === 'fit') {
         k = Math.min(W / iw, H / ih);
         if (s.noUp) k = Math.min(k, 1);
@@ -446,7 +455,8 @@ faq:
     return g;
   }
 
-  // The format each image is saved in. Browsers cannot write HEIC, TIFF or GIF.
+  // The format each image is saved in. HEIC, SVG and JPEG XL cannot be written here; TIFF and GIF are
+  // written by TTImage (8-bit RGB(A) LZW TIFF, and a GIF with up to 256 colours).
   function outKey(it, s, t) {
     if (s.fmt !== 'same') {
       var k = KEY_OF[s.fmt] || 'png';
@@ -458,6 +468,7 @@ faq:
     if (f === 'avif') return canSave.avif ? 'avif' : 'jpeg';
     if (f === 'heic' || f === 'jxl') return 'jpeg';
     if (f === 'ico') return t && t.w <= 256 && t.h <= 256 ? 'ico' : 'png';
+    if (f === 'tiff' || f === 'gif') return f;
     return 'png';
   }
   function bgFill(s) { return s.bg && s.bg !== 'transparent' ? s.bg : null; }
@@ -694,9 +705,15 @@ faq:
     if (key === 'ico' && s.icoMulti && Math.max(enc.w, enc.h) > 16) notes.push('The icon file also holds ' + [16, 32, 48].filter(function (x) { return x < Math.max(enc.w, enc.h); }).join(', ') + ' px versions.');
     if (it.frames) notes.push('Only the first frame of the animation is kept.');
     if (it.pages > 1) notes.push('Only the first of its ' + it.pages + ' ' + (it.fmt === 'tiff' ? 'pages' : 'images') + ' is used.');
+    var ow = enc.w, oh = enc.h;
+    if (key === 'ico' && ow !== oh) {
+      // Icon entries are square: the image is centred on a transparent square the size of its long side.
+      ow = oh = Math.max(enc.w, enc.h);
+      notes.push('Icons are square, so the ' + enc.w + ' × ' + enc.h + ' image is centred on a transparent ' + ow + ' × ' + oh + ' icon.');
+    }
     var r = {
-      sig: sig, blob: enc.blob, w: enc.w, h: enc.h, key: key, q: LOSSY[key] ? enc.q : null, fit: t.fit, notes: notes,
-      name: baseName(it.name) + '-' + enc.w + 'x' + enc.h + '.' + EXT[key]
+      sig: sig, blob: enc.blob, w: ow, h: oh, key: key, q: LOSSY[key] ? enc.q : null, fit: t.fit, notes: notes,
+      name: baseName(it.name) + '-' + ow + 'x' + oh + '.' + EXT[key]
     };
     it.out = r;
     return r;
@@ -849,7 +866,7 @@ faq:
     var sameOpt = fmtSel.querySelector('option[value="same"]');
     if (!current) sameOpt.textContent = 'Original format';
     else {
-      var natural = { jpeg: 'jpeg', png: 'png', webp: 'webp', avif: 'avif', bmp: 'bmp', ico: 'ico' }[current.fmt];
+      var natural = { jpeg: 'jpeg', png: 'png', webp: 'webp', avif: 'avif', bmp: 'bmp', ico: 'ico', tiff: 'tiff', gif: 'gif' }[current.fmt];
       var sameKey = outKey(current, Object.assign({}, s, { fmt: 'same' }), t && !t.error ? t : null);
       var fmtLabel = TTImage.formats[current.fmt] ? TTImage.formats[current.fmt].label : 'this format';
       sameOpt.textContent = natural === sameKey ? 'Original (' + LABEL[sameKey] + ')' : LABEL[sameKey] + ' (' + fmtLabel + ' cannot be saved here)';
@@ -1053,7 +1070,7 @@ faq:
     var it = { id: nextId++, file: file, name: name, size: file.size, el: null, out: null, error: null };
     var fmt = file.size ? await TTImage.sniff(file) : null, thumb, k;
     if (fmt === 'svg') {
-      var info = TTImage.svg.info(await file.text());
+      var info = TTImage.svg.info(await TTImage.svg.text(file));
       if (info.error) throw friendly(info.error);
       it.fmt = 'svg';
       it.svg = info.text;

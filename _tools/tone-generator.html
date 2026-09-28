@@ -9,9 +9,8 @@ howto: |
   Pick a frequency with the slider, type an exact value, or use the step
   buttons, then press **Play**. The slider is logarithmic: every octave takes
   the same distance, so 20 to 40 Hz gets as much room as 10 to 20 kHz.
-  Frequency, waveform, channel and volume can all change while the tone
-  plays. **Copy link** saves the current settings in a link (volume is left
-  out, so a shared link never starts loud).
+  Everything can change while the tone plays. **Copy link** saves the
+  settings in a link, except the volume, so a shared link never starts loud.
 
   | Key | Action |
   |---|---|
@@ -21,14 +20,16 @@ howto: |
   | 1, 2, 3, 4 | Sine, square, sawtooth, triangle |
   | L, R, B | Left, right or both channels |
 
-  Shortcuts work whenever the cursor is not in a text box or list.
+  Shortcuts work while a button in the tool has focus, or when nothing is
+  focused and the tool is on screen; never while you type in a field.
 
   ## Waveforms
 
   A **sine** wave is a single frequency with no harmonics, which makes it the
   tone for hearing checks and measurements. A **square** wave adds the odd
-  harmonics at 1/n of the fundamental's amplitude and sounds buzzy; at the same
-  peak level it carries 3 dB more power than a sine, so it sounds louder.
+  harmonics at 1/n of the fundamental's amplitude and sounds buzzy. At the
+  same peak it is about 1.5 dB more powerful than a sine (3 dB for an ideal
+  square; the band-limited one overshoots slightly at each edge).
   **Sawtooth** has every harmonic at 1/n and sounds bright. **Triangle** has
   only odd harmonics that fall off as 1/n², so it sounds close to a sine.
   All four are band-limited: harmonics above half the sample rate are left
@@ -40,7 +41,7 @@ howto: |
   every octave takes the same time, which matches how we hear pitch. A linear
   sweep changes the same number of hertz each second, so a 20 Hz to 20 kHz
   linear sweep spends only 1% of its time below 220 Hz. Sweeps are the quickest
-  way to find where a speaker stops producing bass or where your hearing ends.
+  way to find where a speaker's bass or your hearing ends.
 
   **Binaural beats** play one sine in the left ear and a slightly higher one in
   the right, such as 200 Hz and 210 Hz. Neither ear gets a 10 Hz signal, but
@@ -58,8 +59,7 @@ howto: |
   The volume starts at 20% (−14 dBFS). Lower your device volume before you
   put on headphones, and never turn the volume up to find a tone you cannot
   hear: when you switch back to a lower frequency it can be painfully loud,
-  and inaudible high tones can still damage tweeters. Stop if you notice
-  ringing or discomfort.
+  and inaudible high tones can still damage tweeters.
 
   ## Download as WAV
 
@@ -115,6 +115,8 @@ faq:
 .tg-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
 .tg-panel { margin: 0 0 8px; }
 .tg-panel .row > .field { flex: 1 1 140px; }
+/* The long scale names need a full row on a phone. */
+.tg-panel .row > .tg-scalef { flex: 2 1 260px; }
 .tg-keys { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
 .tg-keys kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); font-family: var(--mono); font-size: 12px; color: var(--text); }
 </style>
@@ -193,11 +195,11 @@ faq:
       </div>
     </div>
     <div class="row">
-      <div class="field">
+      <div class="field tg-scalef">
         <label for="tg-scale">Scale</label>
         <select id="tg-scale">
-          <option value="log" selected>Logarithmic (equal time per octave)</option>
-          <option value="lin">Linear (equal time per hertz)</option>
+          <option value="log" selected>Logarithmic (by octave)</option>
+          <option value="lin">Linear (by hertz)</option>
         </select>
       </div>
       <div class="field">
@@ -327,7 +329,12 @@ faq:
 
   // ---------- Helpers ----------
   function radio(name) { const r = $('input[name="' + name + '"]:checked'); return r ? r.value : ''; }
-  function setRadio(name, v) { const r = $('input[name="' + name + '"][value="' + v + '"]'); if (r) { r.checked = true; return true; } return false; }
+  // Compares values instead of building a selector, so text from the URL can never break the query.
+  function setRadio(name, v) {
+    const r = $$('input[name="' + name + '"]').filter(function (el) { return el.value === v; })[0];
+    if (r) { r.checked = true; return true; }
+    return false;
+  }
   function mode() { return radio('tg-mode') || 'tone'; }
   function wave() { return mode() === 'binaural' ? 'sine' : radio('tg-wave') || 'sine'; }
   function chan() { return radio('tg-ch') || 'both'; }
@@ -412,13 +419,30 @@ faq:
       const n = noteInfo(st.f);
       $('#tg-sub').textContent = n ? n.name + ', ' + centsText(n.cents) : 'Below the lowest musical note (C0, 16.35 Hz)';
     }
-    const f = m === 'sweep' && shown !== null && player.playing ? shown : st.f;
-    const n = noteInfo(f);
+    // A sweep has no single frequency until it plays: the stats then follow it.
+    const f = m === 'sweep' ? (shown !== null && player.playing ? shown : null) : st.f;
+    const n = f ? noteInfo(f) : null;
     $('#tg-note').textContent = n ? n.name + (n.cents ? ' ' + (n.cents > 0 ? '+' : '−') + Math.abs(n.cents) + '¢' : '') : '–';
-    $('#tg-period').textContent = fmtPeriod(f);
-    $('#tg-wl').textContent = fmtWl(f);
-    $('#tg-mode-msg').textContent = (modeSettings().error) || (m === 'binaural' && st.f > 1500 ? 'Binaural beats are hard to hear above about 1,000 Hz. Try a lower frequency.' : '');
+    $('#tg-period').textContent = f ? fmtPeriod(f) : '–';
+    $('#tg-wl').textContent = f ? fmtWl(f) : '–';
+    const err = modeSettings().error;
+    if (!err && /^(Sweep|The beat|The right-ear)/.test($('#tg-error').textContent)) $('#tg-error').textContent = '';
+    showModeMsg(err || (m === 'binaural' && st.f > 1000 ? 'Binaural beats are hard to hear above about 1,000 Hz. Try a lower frequency.' : ''));
     updateSize();
+  }
+
+  // Messages about the sweep and beat fields wait for a pause in typing, so a
+  // half-typed number is not reported; clearing a message is immediate.
+  const modeMsg = $('#tg-mode-msg');
+  let pendingMsg = '', msgTimer = 0;
+  function showModeMsg(text) {
+    // renderInfo also runs ten times a second during a sweep: only a changed
+    // message restarts the wait.
+    if (text === pendingMsg && (msgTimer || modeMsg.textContent === text)) return;
+    pendingMsg = text;
+    clearTimeout(msgTimer); msgTimer = 0;
+    if (!text || modeMsg.textContent === text) { modeMsg.textContent = text; return; }
+    msgTimer = setTimeout(function () { msgTimer = 0; modeMsg.textContent = pendingMsg; }, 700);
   }
 
   function setFreq(f, from) {
@@ -482,12 +506,13 @@ faq:
   [f1In, f2In, sdurIn, scaleSel, repSel, beatIn].forEach(function (el) {
     el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function () {
       if (mode() === 'binaural') player.retune();
-      else if (player.playing && mode() === 'sweep') player.restart();
+      // A half-typed value keeps the current sweep going; it restarts once the settings are valid again.
+      else if (player.playing && mode() === 'sweep' && !sweepSettings().error) player.restart();
       renderInfo();
     });
   });
   $$('input[name="tg-wave"]').forEach(function (r) { r.addEventListener('change', function () { player.reshape(); }); });
-  $$('input[name="tg-ch"]').forEach(function (r) { r.addEventListener('change', function () { player.route(); }); });
+  $$('input[name="tg-ch"]').forEach(function (r) { r.addEventListener('change', function () { player.route(); updateSize(); }); });
 
   function renderVol() {
     const v = vol();
@@ -684,7 +709,7 @@ faq:
     if (e.shiftKey) return;
     if (/^[1-4]$/.test(k) && mode() !== 'binaural') { setRadio('tg-wave', WAVES[+k - 1]); player.reshape(); TT.announce(WAVES[+k - 1] + ' wave'); return; }
     const chKey = { l: 'left', r: 'right', b: 'both' }[k.toLowerCase()];
-    if (chKey && mode() !== 'binaural') { setRadio('tg-ch', chKey); player.route(); TT.announce(chKey === 'both' ? 'Both channels' : chKey + ' channel only'); }
+    if (chKey && mode() !== 'binaural') { setRadio('tg-ch', chKey); player.route(); updateSize(); TT.announce(chKey === 'both' ? 'Both channels' : chKey + ' channel only'); }
   });
 
   // ---------- Share link ----------
@@ -703,7 +728,11 @@ faq:
   (function readLink() {
     let p;
     try { p = new URLSearchParams(location.search); } catch (e) { return; }
-    const okNum = function (s, lo, hi) { const n = Number(s); return s !== null && s !== '' && n >= lo && n <= hi; };
+    const okNum = function (s, lo, hi) {
+      if (s === null || !/^(\d+\.?\d*|\.\d+)$/.test(s)) return false;
+      const n = Number(s);
+      return n >= lo && n <= hi;
+    };
     if (p.get('mode')) setRadio('tg-mode', p.get('mode'));
     if (okNum(p.get('f'), F_MIN, F_MAX)) st.f = round2(Number(p.get('f')));
     if (p.get('wave') && WAVES.indexOf(p.get('wave')) >= 0) setRadio('tg-wave', p.get('wave'));
@@ -855,7 +884,7 @@ faq:
   }
 
   function synth(p, onProgress) {
-    return new Promise(function (resolve) {
+    return new Promise(function (resolve, reject) {
       const buf = new ArrayBuffer(p.bytes), dv = new DataView(buf);
       writeHeader(dv, p);
       const sr = p.sr, amp = p.vol, fadeN = p.fade ? Math.max(1, Math.round(0.01 * sr)) : 0;
@@ -884,6 +913,10 @@ faq:
         else { dv.setFloat32(pos, x, true); pos += 4; }
       };
       (function chunk() {
+        // Later slices run from timers, so an error there must reject explicitly.
+        try { slice(); } catch (e) { reject(e); }
+      })();
+      function slice() {
         const until = performance.now() + 30;
         while (i < frames && performance.now() < until) {
           const end = Math.min(frames, i + 4096);
@@ -908,9 +941,9 @@ faq:
             else { put(left ? x : 0); put(right ? x : 0); }
           }
         }
-        if (i < frames) { onProgress(i / frames); setTimeout(chunk, 0); }
+        if (i < frames) { onProgress(i / frames); setTimeout(function () { try { slice(); } catch (e) { reject(e); } }, 0); }
         else resolve(new Blob([buf], { type: 'audio/wav' }));
-      })();
+      }
     });
   }
 
@@ -938,6 +971,12 @@ faq:
       btn.textContent = 'Download WAV';
       btn.removeAttribute('aria-disabled');
       TT.announce('Saved ' + name);
+    }).catch(function (e) {
+      // For example, not enough memory for a very long 96 kHz file on a phone.
+      busy = false;
+      btn.textContent = 'Download WAV';
+      btn.removeAttribute('aria-disabled');
+      msg.textContent = 'Could not create the WAV file' + (e && e.message ? ' (' + e.message + ')' : '') + '. Try a shorter length or a lower sample rate.';
     });
   });
 

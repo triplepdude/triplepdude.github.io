@@ -50,9 +50,10 @@ howto: |
   pictures stored next to your `.md` file, open or drop the image files as
   well; they are matched by file name. PNG, JPEG and GIF are embedded as
   they are, and other formats, such as WebP or SVG, are converted to PNG.
-  Phone photos stored sideways with a rotation tag are turned upright first,
-  because Word ignores that tag. Pictures on other websites are not downloaded, so they appear as a link
-  to the picture instead.
+  Phone photos stored sideways with an EXIF rotation tag are turned upright
+  first, so they face the right way in every editor, whether or not it reads
+  that tag. Pictures on other websites are not downloaded, so they appear as
+  a link to the picture instead.
 
   ## Tips
 
@@ -70,7 +71,7 @@ faq:
   - q: Will the file open in Word, Google Docs and LibreOffice?
     a: Yes. It is a standard Office Open XML (.docx) document, the format of Word 2007 and later, which Google Docs, LibreOffice, Pages and WPS Office also open.
   - q: Why is my list numbering or a heading level different from the Markdown?
-    a: Markdown decides structure from blank lines and indentation. A list item indented by fewer than two spaces, or a heading without a space after the #, is read as plain text, exactly as GitHub reads it. Check the preview, which shows the same structure the Word file gets.
+    a: Markdown decides structure from blank lines and indentation. A nested list item must be indented to line up with the text of the item above it (two spaces under "- ", three under "1. "), and a heading needs a space after the #; otherwise GitHub, and this tool, read it differently. Check the preview, which shows the same structure the Word file gets.
   - q: How do I paste Markdown into Google Docs with the formatting?
     a: Press Copy as rich text, then paste into Google Docs with Ctrl+V (⌘V on a Mac). Headings, lists, tables, links and code formatting come across. To keep footnotes and equations, download the .docx and open it with Google Docs instead.
 ---
@@ -527,7 +528,7 @@ console.log(`Saved ${saved} tickets`);
   var purifyMode = 'preview';
   var PURIFY = {
     FORBID_TAGS: ['style', 'form', 'video', 'audio', 'source', 'track', 'picture', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'base', 'link', 'meta',
-      'noscript', 'template', 'portal', 'dialog', 'foreignobject', 'image', 'use', 'animate', 'set', 'feimage'],
+      'noscript', 'template', 'portal', 'dialog', 'foreignobject', 'image', 'use', 'animate', 'set', 'feimage', 'mglyph'],
     FORBID_ATTR: ['srcset', 'ping', 'action', 'formaction', 'background', 'poster', 'dynsrc', 'lowsrc', 'autofocus', 'contenteditable', 'tabindex', 'accesskey'],
     ADD_TAGS: ['semantics', 'annotation'],
     SANITIZE_NAMED_PROPS: true,
@@ -545,6 +546,9 @@ console.log(`Saved ${saved} tickets`);
     P.addHook('uponSanitizeAttribute', function (node, data) {
       var n = data.attrName, v = data.attrValue || '';
       if (n === 'style' && RE_CSS_FETCH.test(v)) { data.keepAttr = false; return; }
+      // SVG presentation attributes (fill, filter, mask, clip-path, marker-*) may only point inside the document.
+      if (n !== 'style' && /url\s*\(/i.test(v) && !/^\s*url\s*\(\s*['"]?#[^)]*\)\s*$/i.test(v)) { data.keepAttr = false; return; }
+      if (n === 'src' && node.nodeName !== 'IMG') { data.keepAttr = false; return; }
       if ((n === 'href' || n === 'xlink:href') && node.namespaceURI === 'http://www.w3.org/2000/svg' && node.localName !== 'a' && v.charAt(0) !== '#') data.keepAttr = false;
     });
     P.addHook('afterSanitizeAttributes', function (node) {
@@ -659,7 +663,8 @@ console.log(`Saved ${saved} tickets`);
     if (!md || !doc) return;
     var out;
     try { out = buildHtml(input.value, 'preview'); } catch (e) {
-      setMsg(errBox, 'The Markdown could not be read: ' + (e && e.message || e));
+      setMsg(errBox, e instanceof RangeError ? 'The Markdown is nested too deeply to convert (hundreds of > or list levels). Reduce the nesting and try again.' :
+        'The Markdown could not be read: ' + String(e && e.message || e).split('\n')[0]);
       errBox.dataset.from = 'render';
       return;
     }
@@ -946,7 +951,7 @@ console.log(`Saved ${saved} tickets`);
   Writer.prototype.bookmarkFor = function (elId) {
     if (!elId) return null;
     if (this.bookmarks[elId]) return this.bookmarks[elId];
-    var base = '_' + elId.replace(/^user-content-/, '').replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30) || '_h';
+    var base = '_' + (elId.replace(/^user-content-/, '').replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30) || 'h');
     if (base.charAt(0) !== '_') base = '_' + base;
     var name = base, n = 1;
     while (this.bmNames[name.toLowerCase()]) name = base.slice(0, 30) + '_' + (++n);
@@ -977,6 +982,12 @@ console.log(`Saved ${saved} tickets`);
       else if (p) body += '<w:t xml:space="preserve">' + xe(p) + '</w:t>';
     });
     return body ? '<w:r>' + rPr(f) + body + '</w:r>' : '';
+  }
+  // A relationship target must be a valid URI: spaces, quotes and non-ASCII letters are percent-encoded.
+  function uriSafe(u) {
+    return xmlSafe(u).trim().replace(/[\s"<>\\^`{|}]|[^\x00-\x7F]+/g, function (m) {
+      try { return encodeURIComponent(m); } catch (e) { return ''; }
+    });
   }
   function extend(f, add) { var o = {}, k; for (k in f) o[k] = f[k]; for (k in add) o[k] = add[k]; return o; }
 
@@ -1045,7 +1056,7 @@ console.log(`Saved ${saved} tickets`);
           if (!c.targets[target]) { kids(); return; }
           item.anchor = this.bookmarkFor(target);
         } else if (/^(?:https?:|mailto:|tel:|ftp:)/i.test(href)) {
-          item.rid = this.rel('hyperlink', href, true);
+          item.rid = this.rel('hyperlink', uriSafe(href), true);
         } else { kids(); return; }
         this.inline(n.childNodes, extend(f, { link: true, style: 'Hyperlink' }), item.items, ws, c);
         out.push(item);
@@ -1122,7 +1133,7 @@ console.log(`Saved ${saved} tickets`);
       var web = img.getAttribute('title') || '';
       var label = '[Image' + (alt ? ': ' + alt : '') + ']';
       if (!(f && f.link) && /(^|\s)md-img-web(\s|$)/.test(img.getAttribute('class') || '') && /^https?:/i.test(web)) {
-        var rid = this.rel('hyperlink', web, true);
+        var rid = this.rel('hyperlink', uriSafe(web), true);
         return '<w:hyperlink r:id="' + rid + '" w:history="1">' + textRun(label, { style: 'Hyperlink' }) + '</w:hyperlink>';
       }
       return textRun(label, { i: true, color: '57606A' });
@@ -1137,6 +1148,8 @@ console.log(`Saved ${saved} tickets`);
     var w = aw || (ah ? ah * d.w / d.h : d.w), h = ah || w * d.h / d.w;
     var maxPx = (this.o.textWidth - (c.indent || 0)) / 15;
     if (w > maxPx) { h = h * maxPx / w; w = maxPx; }
+    var maxH = this.o.textHeight / 15;   // and never taller than the page's text area
+    if (h > maxH) { w = w * maxH / h; h = maxH; }
     var cx = Math.max(1, Math.round(w * 9525)), cy = Math.max(1, Math.round(h * 9525)), id = ++this.picN;
     return '<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="' + cx + '" cy="' + cy + '"/><wp:effectExtent l="0" t="0" r="0" b="0"/>' +
       '<wp:docPr id="' + id + '" name="Picture ' + id + '" descr="' + xe(alt) + '"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
@@ -1195,9 +1208,12 @@ console.log(`Saved ${saved} tickets`);
     if (/(^|\s)md-pagebreak(\s|$)/.test(cls)) { out.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>'); return; }
     if (/(^|\s)md-math-block(\s|$)/.test(cls)) {
       var math = n.querySelector('math');
-      if (math && this.o.math) {
-        var ind = (c.indent || 0);
-        out.push('<w:p>' + pPr({ jc: 'center', ind: ind || 0 }) + '<m:oMathPara><m:oMathParaPr><m:jc m:val="center"/></m:oMathParaPr>' + omml(math) + '</m:oMathPara></w:p>');
+      var eq = math && this.o.math ? omml(math) : '';
+      if (eq) {
+        // An equation paragraph must hold an equation; one that draws nothing (\phantom{x}) is left out.
+        out.push('<w:p>' + pPr({ jc: 'center', ind: c.indent || 0 }) + '<m:oMathPara><m:oMathParaPr><m:jc m:val="center"/></m:oMathParaPr>' + eq + '</m:oMathPara></w:p>');
+      } else if (math && this.o.math) {
+        return;
       } else {
         out.push(this.para([n], c, { jc: 'center', f: { mono: true } }));
       }
@@ -1243,7 +1259,7 @@ console.log(`Saved ${saved} tickets`);
     if (ordered) {
       numId = this.numN++;
       var start = parseInt(n.getAttribute('start'), 10);
-      this.nums.push({ id: numId, ilvl: ilvl, start: isNaN(start) ? 1 : Math.max(0, start) });
+      this.nums.push({ id: numId, ilvl: ilvl, start: isNaN(start) ? 1 : Math.min(32767, Math.max(0, start)) });
     }
     for (var li = n.firstElementChild; li; li = li.nextElementSibling) {
       if (li.nodeName !== 'LI') { this.block(li, c, out); continue; }
@@ -1542,7 +1558,7 @@ console.log(`Saved ${saved} tickets`);
     var body = inertBody(out.html);
     var pageW = opt.page.value === 'letter' ? 12240 : 11906, pageH = opt.page.value === 'letter' ? 15840 : 16838;
     var mar = +opt.margin.value || 1440, sideMar = mar;
-    var o = { font: opt.font.value, size: +opt.size.value || 11, line: +opt.spacing.value || 276, textWidth: pageW - 2 * sideMar, math: opt.math.checked && km.ready, color: opt.color.checked };
+    var o = { font: opt.font.value, size: +opt.size.value || 11, line: +opt.spacing.value || 276, textWidth: pageW - 2 * sideMar, textHeight: pageH - 2 * mar, math: opt.math.checked && km.ready, color: opt.color.checked };
     var w = new Writer(o), problems = [];
     // Links to headings become jumps to bookmarks; other in-page links stay plain text.
     var targets = {};
@@ -1677,8 +1693,51 @@ console.log(`Saved ${saved} tickets`);
     });
     return Promise.all(jobs).then(function () {
       var html = '<div style="font-family:' + font.replace(/"/g, "'") + ';font-size:' + size + 'pt;line-height:' + ((+opt.spacing.value || 276) / 240 * 1.17).toFixed(2) + '">' + body.innerHTML + '</div>';
-      return { html: html, text: doc ? doc.innerText : '' };
+      return { html: html, text: plainText(body) };
     });
+  }
+  // The plain-text version for editors that take no formatting: blocks separated by blank lines,
+  // list items with - or their number, table cells separated by tabs.
+  function plainText(el) {
+    var out = '';
+    function brk(n) { out = out.replace(/[ \t]+$/, ''); var have = /\n*$/.exec(out)[0].length; if (out) while (have++ < n) out += '\n'; }
+    function walk(node, pre, depth) {
+      for (var n = node.firstChild; n; n = n.nextSibling) {
+        if (n.nodeType === 3) {
+          var t = pre ? n.data : n.data.replace(/\s+/g, ' ');
+          if (!pre && (/\n$/.test(out) || !out)) t = t.replace(/^ /, '');
+          out += t;
+          continue;
+        }
+        if (n.nodeType !== 1) continue;
+        var tag = n.nodeName;
+        if (tag === 'BR') { out += '\n'; continue; }
+        if (tag === 'IMG') { out += '[Image' + (n.getAttribute('alt') ? ': ' + n.getAttribute('alt') : '') + ']'; continue; }
+        if (tag === 'HR') { brk(2); out += '---'; brk(2); continue; }
+        if (tag === 'LI') {
+          brk(1);
+          var list = n.parentNode, k = 0;
+          for (var s2 = n; s2; s2 = s2.previousElementSibling) if (s2.nodeName === 'LI') k++;
+          var num = list && list.nodeName === 'OL' ? ((parseInt(list.getAttribute('start'), 10) || 1) + k - 1) + '. ' : '- ';
+          out += '  '.repeat(Math.max(0, depth - 1)) + (/^\s*[\u2610\u2612]/.test(n.textContent) ? '' : num);
+          walk(n, pre, depth);
+          brk(1);
+          continue;
+        }
+        if (tag === 'UL' || tag === 'OL') { if (depth) brk(1); else brk(2); walk(n, pre, depth + 1); if (!depth) brk(2); continue; }
+        if (tag === 'TR') { brk(1); var first = true; for (var cell = n.firstElementChild; cell; cell = cell.nextElementSibling) { if (!first) out += '\t'; first = false; walk(cell, pre, depth); } brk(1); continue; }
+        if (tag === 'TABLE') { brk(2); walk(n, pre, depth); brk(2); continue; }
+        if (/^(P|H[1-6]|PRE|BLOCKQUOTE|DIV|SECTION|NAV|DL|DT|DD|FIGURE|DETAILS|SUMMARY)$/.test(tag)) {
+          if (depth && tag === 'P') brk(1); else brk(2);
+          walk(n, pre || tag === 'PRE', depth);
+          if (depth && tag === 'P') brk(1); else brk(2);
+          continue;
+        }
+        walk(n, pre, depth);
+      }
+    }
+    walk(el, false, 0);
+    return out.replace(/\n{3,}/g, '\n\n').trim();
   }
   function readDataUrl(file) {
     return new Promise(function (resolve, reject) {
@@ -1719,7 +1778,8 @@ console.log(`Saved ${saved} tickets`);
       setMsg(statusBox, parts.join(' '));
       TT.flash(btn, 'Downloaded');
     }).catch(function (err) {
-      setMsg(errBox, 'The Word file could not be made: ' + (err && err.message || err));
+      setMsg(errBox, err instanceof RangeError ? 'The Word file could not be made: the Markdown is nested too deeply (hundreds of > or list levels).' :
+        'The Word file could not be made: ' + String(err && err.message || err).split('\n')[0]);
       errBox.dataset.from = 'save';
     }).then(function () { btn.disabled = false; btn.focus(); });
   });

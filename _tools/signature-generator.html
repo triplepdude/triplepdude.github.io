@@ -267,11 +267,11 @@ faq:
   </div>
   <p class="msg error" id="sg-error" role="alert"></p>
   <div class="actions">
-    <button class="btn" type="button" id="sg-png" disabled>Download PNG</button>
+    <button class="btn" type="button" id="sg-png" aria-describedby="sg-info" disabled>Download PNG</button>
     <button class="btn secondary" type="button" id="sg-svg" disabled>Download SVG</button>
     <button class="btn secondary" type="button" id="sg-copy" disabled>Copy image</button>
   </div>
-  <p class="hint sg-info" id="sg-info" aria-live="polite">Draw your signature above to enable the downloads.</p>
+  <p class="hint sg-info" id="sg-info">Draw your signature above to enable the downloads.</p>
 </div>
 
 
@@ -1111,8 +1111,18 @@ faq:
     }
   });
 
+  // The size line changes with every stroke and keystroke, so it is not a live region; screen readers
+  // hear only when the downloads become available or unavailable, after a pause.
+  var lastHas = false;
+  var announceReady = TT.debounce(function () {
+    var has = exportState().has;
+    if (has === lastHas) return;
+    lastHas = has;
+    TT.announce(has ? 'Signature ready to download.' : 'Nothing to download yet.');
+  }, 800);
   function updateExport() {
     var e = exportState();
+    announceReady();
     pngBtn.disabled = copyBtn.disabled = !e.has;
     svgBtn.disabled = !e.has || !e.svg;
     $('#sg-scale-field').hidden = mode === 'photo';

@@ -68,7 +68,7 @@ faq:
   - q: Can I save it as a JPG?
     a: Yes. JPG cannot store transparency, so choosing JPG fills the corners with the background colour, white unless you pick another. For a round image with see-through corners, use PNG or WebP.
   - q: Can I crop an iPhone HEIC photo?
-    a: Yes. HEIC, AVIF and TIFF files are decoded right here on the page, even in browsers that cannot display them, and the photo keeps its rotation.
+    a: Yes. HEIC and TIFF files are decoded right here on the page, even in browsers that cannot display them, and the photo keeps its rotation. AVIF photos open in any browser that can show AVIF, which current Chrome, Edge, Firefox and Safari all can.
 ---
 <style>
 .circ-table { margin: 0 0 18px; }
@@ -120,7 +120,7 @@ faq:
   <input class="circ-input" type="file" id="circ-file">
   <label class="circ-drop" for="circ-file" id="circ-drop">
     <strong id="circ-drop-title"><span>Choose an image</span> or drop it here</strong>
-    <span class="hint" id="circ-drop-hint">Showing a sample picture. JPG, PNG, WebP, HEIC, AVIF or TIFF; you can also paste one with Ctrl+V.</span>
+    <span class="hint" id="circ-drop-hint">Showing a sample picture. JPG, PNG, WebP, HEIC, AVIF, TIFF, GIF, BMP or SVG; you can also paste one with Ctrl+V.</span>
   </label>
 </div>
 <p class="msg error" id="circ-error" role="alert"></p>
@@ -464,9 +464,22 @@ faq:
     let src = null, dec = null;
     const fmt = window.TTImage ? await TTImage.sniff(file) : null;
     if (run !== st.loadRun) return;
+    // SVG is drawn at a size that fills the largest output (an <img> would give it only its
+    // nominal size, often 300 × 150, which then had to be enlarged and looked soft).
+    if (fmt === 'svg') {
+      try {
+        const text = await TTImage.svg.text(file), info = TTImage.svg.info(text);
+        if (info.error) throw fail('This SVG file could not be read: ' + info.error);
+        const k = Math.min(Math.max(1, VIEW_MAX / Math.min(info.width, info.height)), 8192 / Math.max(info.width, info.height));
+        src = await TTImage.svg.render(text, Math.max(1, Math.round(info.width * k)), Math.max(1, Math.round(info.height * k)));
+      } catch (e) {
+        if (run === st.loadRun) errEl.textContent = e && e.friendly ? e.message : 'This SVG file could not be drawn.';
+        return;
+      }
+    }
     // HEIC and TIFF (and anything the browser refuses) go to the shared decoder, which also
     // explains what is wrong with a file that is not an image.
-    if (fmt !== 'heic' && fmt !== 'tiff') { try { src = await decodeNative(file); } catch (e) { src = null; } }
+    else if (fmt !== 'heic' && fmt !== 'tiff') { try { src = await decodeNative(file); } catch (e) { src = null; } }
     if (!src) {
       if (!window.TTImage) { if (run === st.loadRun) errEl.textContent = 'This file could not be opened as an image.'; return; }
       if (run === st.loadRun && (fmt === 'heic' || fmt === 'tiff')) okEl.textContent = 'Opening the ' + TTImage.formats[fmt].label + ' image…';
@@ -481,7 +494,7 @@ faq:
     if (run !== st.loadRun) { if (src.close) src.close(); if (dec) TTImage.release(dec); return; }
     const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
     let view;
-    try { view = await makeView(dec ? null : file, src, w, h); } catch (e) {
+    try { view = await makeView(dec || fmt === 'svg' ? null : file, src, w, h); } catch (e) {
       if (src.close) src.close();
       if (dec) TTImage.release(dec);
       if (run === st.loadRun) errEl.textContent = e.friendly ? e.message : 'This image could not be prepared for editing.';
@@ -490,9 +503,9 @@ faq:
     if (run !== st.loadRun) { if (src.close) src.close(); if (view !== src && view.close) view.close(); if (dec) TTImage.release(dec); return; }
     okEl.textContent = '';
     // Only files the browser decodes itself can be decoded again in the export worker.
-    setImage(src, view, dec ? null : file, w, h, (file.name || 'image').replace(/\.[^.]+$/, '') || 'image', false, dec);
+    setImage(src, view, dec || fmt === 'svg' ? null : file, w, h, (file.name || 'image').replace(/\.[^.]+$/, '') || 'image', false, dec);
     $('#circ-drop-title').textContent = file.name || 'Pasted image';
-    $('#circ-drop-hint').textContent = w + ' × ' + h + ' px. Choose or drop another image to replace it.';
+    $('#circ-drop-hint').textContent = (fmt === 'svg' ? 'SVG, drawn at ' : '') + w + ' × ' + h + ' px. Choose or drop another image to replace it.';
   }
   function sample() {
     const c = document.createElement('canvas');
@@ -731,6 +744,17 @@ faq:
     drop.classList.remove('is-over');
     const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (f) load(f);
+  });
+  // A file dropped anywhere else on the page is used too, instead of the browser opening it
+  // in place of this page (and losing the work on it).
+  document.addEventListener('dragover', e => {
+    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') >= 0) e.preventDefault();
+  });
+  document.addEventListener('drop', e => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (e.defaultPrevented || !files || !files.length) return;
+    e.preventDefault();
+    load(files[0]);
   });
   document.addEventListener('paste', e => {
     const f = e.clipboardData && Array.from(e.clipboardData.files || []).find(x => /^image\//.test(x.type));

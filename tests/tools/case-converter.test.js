@@ -89,6 +89,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await conv('visit example.com. then leave'), 'Visit example.com. Then leave');
   assert.equal(await conv('item 1. second thing. it costs 3.5. then more'), 'Item 1. Second thing. It costs 3.5. Then more');
   assert.equal(await conv('see e.g. this one, or ask j. smith'), 'See e.g. this one, or ask j. smith');
+  // Regression: a kept brand name at the start of a sentence or in
+  // Capitalize Each Word was capitalized ("IPhone").
+  assert.equal(await conv('iPhone sales rise. eBay falls', 'sentence'), 'iPhone sales rise. eBay falls');
+  assert.equal(await conv('iPhone sales rise', 'capital'), 'iPhone Sales Rise');
+  await page.uncheck('#cc-keep');
+  assert.equal(await out(), 'Iphone Sales Rise');
+  await page.check('#cc-keep');
+  await setCase('sentence');
   // Paths are left as typed too.
   assert.equal(await conv('run /usr/bin/env or ~/bin/tool', 'title'), 'Run /usr/bin/env or ~/bin/tool');
   await setCase('sentence');

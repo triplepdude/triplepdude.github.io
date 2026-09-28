@@ -691,4 +691,37 @@ module.exports = async ({ page, open, assert }) => {
   }));
   assert.match(await text('#bc-bulk-summary'), /with 1,000 files/);
   assert.ok(longTask < 250, `longest task while zipping 1,000 SVGs: ${longTask} ms`);
+
+  // Regression: control characters (here GS, 0x1D, and SOH) are valid Code 128 / Code 93 data
+  // but not allowed in XML; the downloaded SVG must still be well-formed, with the
+  // characters shown as Unicode control pictures in the title and the stats.
+  await open();
+  for (const type of ['code128', 'code93']) {
+    await page.selectOption('#bc-type', type);
+    await page.$eval('#bc-data', el => { el.value = 'AB\x1dCD\x01<&>'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    if (type === 'code128') {
+      d = decode128(await modules(), assert);
+      assert.equal(d.text, 'AB\x1dCD\x01<&>', 'the control characters are still encoded');
+    }
+    assert.equal(await text('#bc-encoded'), 'AB\u241dCD\u2401<&>');
+    const svgFile = (await download('#bc-svg')).buf.toString('utf8');
+    assert.ok(!/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(svgFile), `${type}: no XML-illegal characters in the SVG file`);
+    const parsed = await page.evaluate(src => {
+      const doc = new DOMParser().parseFromString(src.replace(/^<\?xml[^>]*>\s*/, ''), 'image/svg+xml');
+      return doc.querySelector('parsererror') ? 'parse error' : doc.querySelector('title').textContent;
+    }, svgFile);
+    assert.equal(parsed, (type === 'code128' ? 'Code 128' : 'Code 93') + ' barcode: AB\u241dCD\u2401<&>');
+  }
+
+  // ITF-14: GS1 allows a wide-to-narrow ratio of 2.25 to 3; 2 : 1 is warned about.
+  await page.selectOption('#bc-type', 'itf14');
+  await setData('1540014128876');
+  await page.selectOption('#bc-ratio', '2');
+  assert.match(await text('#bc-warn'), /2\.25 : 1 to 3 : 1 for ITF-14/);
+  await page.selectOption('#bc-ratio', '2.5');
+  assert.equal(await text('#bc-warn'), '');
+  // Code 39 at 2 : 1 is within ISO/IEC 16388, so no warning there.
+  await page.selectOption('#bc-type', 'code39');
+  await page.selectOption('#bc-ratio', '2');
+  assert.equal(await text('#bc-warn'), '');
 };

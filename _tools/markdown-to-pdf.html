@@ -75,7 +75,7 @@ howto: |
   MathML, which current browsers display without extra files.
 faq:
   - q: Is my Markdown uploaded to a server?
-    a: No. Rendering, highlighting and the PDF all happen in your browser on your own device. Nothing you type or open is sent anywhere or stored, and the page keeps working offline once it has loaded.
+    a: No. Rendering, highlighting and the PDF all happen in your browser on your own device. Nothing you type or open is sent anywhere or stored.
   - q: Is the text in the PDF selectable?
     a: Yes. The browser prints the document as real text with embedded fonts, not as a picture, so you can select, copy and search it, and links stay clickable in Chrome, Edge and Safari.
   - q: How do I remove the date and web address from the PDF pages?
@@ -675,7 +675,7 @@ $$
   var images = new Map();   // lower-case file name -> { url, file }
   var purifyMode = 'preview';
   var FORBID_TAGS = ['style', 'form', 'video', 'audio', 'source', 'track', 'picture', 'iframe', 'frame', 'frameset', 'object', 'embed',
-    'applet', 'base', 'link', 'meta', 'noscript', 'template', 'portal', 'dialog', 'foreignobject', 'image', 'use', 'animate', 'set', 'feimage'];
+    'applet', 'base', 'link', 'meta', 'noscript', 'template', 'portal', 'dialog', 'foreignobject', 'image', 'use', 'animate', 'set', 'feimage', 'mglyph'];
   var PURIFY = {
     FORBID_TAGS: FORBID_TAGS,
     FORBID_ATTR: ['srcset', 'ping', 'action', 'formaction', 'background', 'poster', 'dynsrc', 'lowsrc', 'autofocus', 'contenteditable', 'tabindex', 'accesskey'],
@@ -696,6 +696,9 @@ $$
     P.addHook('uponSanitizeAttribute', function (node, data) {
       var n = data.attrName, v = data.attrValue || '';
       if (n === 'style' && RE_CSS_FETCH.test(v)) { data.keepAttr = false; return; }
+      // SVG presentation attributes (fill, filter, mask, clip-path, marker-*) may only point inside the document.
+      if (n !== 'style' && /url\s*\(/i.test(v) && !/^\s*url\s*\(\s*['"]?#[^)]*\)\s*$/i.test(v)) { data.keepAttr = false; return; }
+      if (n === 'src' && node.nodeName !== 'IMG') { data.keepAttr = false; return; }
       // SVG may only point inside the document; no external files.
       if ((n === 'href' || n === 'xlink:href') && node.namespaceURI === 'http://www.w3.org/2000/svg' && node.localName !== 'a' && v.charAt(0) !== '#') data.keepAttr = false;
     });
@@ -835,7 +838,8 @@ $$
     try {
       out = buildHtml(src, 'preview');
     } catch (e) {
-      setMsg(errBox, 'The Markdown could not be rendered: ' + (e && e.message || e));
+      setMsg(errBox, e instanceof RangeError ? 'The Markdown is nested too deeply to show (hundreds of > or list levels). Reduce the nesting and try again.' :
+        'The Markdown could not be rendered: ' + String(e && e.message || e).split('\n')[0]);
       errBox.dataset.from = 'render';
       return;
     }

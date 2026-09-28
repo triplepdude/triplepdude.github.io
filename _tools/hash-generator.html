@@ -11,10 +11,10 @@ howto: |
   Text is hashed as UTF-8, so it matches `sha256sum` run on a UTF-8 file with
   the same content. Set **Input is** to *Hex bytes* or *Base64* to hash raw
   bytes instead. Files are read in 4 MB pieces in a background worker, so
-  even large files keep the page responsive, and nothing is uploaded.
+  large files keep the page responsive; nothing is uploaded.
 
-  With several files you get a table and a checksum list in the `sha256sum`
-  format (`hash  name`) to copy or download; `sha256sum -c` accepts it. Paste
+  Several files give a table and a checksum list in the `sha256sum` format
+  (`hash  name`) to copy or download; `sha256sum -c` accepts it. Paste
   an existing `SHA256SUMS` or `MD5SUMS` list into the compare box to check
   every file at once.
 
@@ -29,7 +29,7 @@ howto: |
 
   | Algorithm | Output | Standard | Use it for |
   |---|---|---|---|
-  | SHA-256, SHA-384, SHA-512 | 256–512 bits | FIPS 180-4 | checksums, signatures, SRI |
+  | SHA-224 to SHA-512 | 224–512 bits | FIPS 180-4 | checksums, signatures, SRI |
   | SHA3-224 to SHA3-512 | 224–512 bits | FIPS 202 | a SHA-2 alternative with a different design |
   | SHAKE128, SHAKE256 | any length | FIPS 202 | variable-length output |
   | Keccak-256 | 256 bits | original Keccak | Ethereum addresses and function selectors |
@@ -45,8 +45,8 @@ howto: |
   and BLAKE3 you can set the output length in bits; a shorter output is the
   start of a longer one.
 
-  SHA-1 and SHA-2 come from the browser's Web Crypto API. The others are
-  implemented on this page and checked against the NIST, RFC 7693 and BLAKE3
+  SHA-1, SHA-256, SHA-384 and SHA-512 come from the browser's Web Crypto API.
+  The others are implemented on this page and checked against the NIST, RFC 7693 and BLAKE3
   test vectors and Python's hashlib. CRCs are shown most significant byte first
   (`cbf43926` for `123456789`), the form `crc32` tools print; the Base64 form
   matches Google Cloud Storage's `crc32c` value.
@@ -83,7 +83,7 @@ faq:
   - q: Why is my hash different from the one my terminal prints?
     a: Usually because `echo` adds a newline. `echo "hello" | md5sum` hashes six bytes, not five. Run `printf '%s' "hello" | md5sum` instead, or hash the file itself here.
   - q: How large a file can I hash?
-    a: Hundreds of megabytes work on a typical computer. The SHA-1 and SHA-2 hashes need the whole file in memory for Web Crypto; the other algorithms read it piece by piece, so with only those ticked there is no size limit beyond your patience.
+    a: Hundreds of megabytes work on a typical computer. SHA-1, SHA-256, SHA-384 and SHA-512 need the whole file in memory for Web Crypto; the other algorithms read it piece by piece, so with only those ticked there is no size limit beyond your patience.
   - q: Can a hash be decrypted back to the original text?
     a: No. A hash is a one-way fingerprint, not encryption. Short or common inputs can still be found by guessing and comparing, which is why unsalted fast hashes must never protect passwords.
 ---
@@ -234,6 +234,7 @@ textarea.hg-expected { min-height: 44px; height: auto; resize: vertical; white-s
   <div class="checks">
     <label class="check"><input type="checkbox" data-alg="md5" checked> MD5</label>
     <label class="check"><input type="checkbox" data-alg="sha1" checked> SHA-1</label>
+    <label class="check"><input type="checkbox" data-alg="sha224"> SHA-224</label>
     <label class="check"><input type="checkbox" data-alg="sha256" checked> SHA-256</label>
     <label class="check"><input type="checkbox" data-alg="sha384" checked> SHA-384</label>
     <label class="check"><input type="checkbox" data-alg="sha512" checked> SHA-512</label>
@@ -370,6 +371,49 @@ textarea.hg-expected { min-height: 44px; height: auto; resize: vertical; white-s
         h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
       }
       digest() { this.pad(); return this.wordsLE(this.h); }
+    }
+
+    // ---------- SHA-224 (FIPS 180-4): SHA-256's compression, other initial values ----------
+    // Web Crypto has no SHA-224, so it is computed here.
+    const K256 = new Int32Array(64);
+    (function () {
+      // The first 32 bits of the fractional parts of the cube roots of the first 64 primes.
+      const primes = [];
+      for (let n = 2; primes.length < 64; n++) if (primes.every(q => n % q)) primes.push(n);
+      primes.forEach((q, i) => { const c = Math.cbrt(q); K256[i] = Math.floor((c - Math.floor(c)) * 4294967296); });
+    })();
+    class Sha224 extends Block64 {
+      constructor() {
+        super(true);
+        this.h = new Int32Array([0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4]);
+        this.w = new Int32Array(64);
+      }
+      block(m, o) {
+        const w = this.w, h = this.h;
+        for (let i = 0; i < 16; i++, o += 4) w[i] = (m[o] << 24) | (m[o + 1] << 16) | (m[o + 2] << 8) | m[o + 3];
+        for (let i = 16; i < 64; i++) {
+          const a = w[i - 15], b = w[i - 2];
+          const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+          const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+          w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+        }
+        let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7];
+        for (let i = 0; i < 64; i++) {
+          const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+          const t1 = (k + S1 + ((e & f) ^ (~e & g)) + K256[i] + w[i]) | 0;
+          const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+          const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+          k = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+        }
+        h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+        h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + k) | 0;
+      }
+      digest() {
+        this.pad();
+        const out = new Uint8Array(28);
+        for (let i = 0; i < 7; i++) for (let j = 0; j < 4; j++) out[i * 4 + j] = (this.h[i] >>> (24 - 8 * j)) & 255;
+        return out;
+      }
     }
 
     // ---------- RIPEMD-160 ----------
@@ -875,6 +919,7 @@ textarea.hg-expected { min-height: 44px; height: auto; resize: vertical; white-s
         if (key) {
           if (id === 'md5') jobs.push({ id: id, h: new Hmac(() => new Md5(), 64, key) });
           else if (id === 'ripemd160') jobs.push({ id: id, h: new Hmac(() => new Ripemd160(), 64, key) });
+          else if (id === 'sha224') jobs.push({ id: id, h: new Hmac(() => new Sha224(), 64, key) });
           else if (/^sha3-/.test(id)) jobs.push({ id: id, h: new Hmac(sha3Maker(id), KECCAK[id][0], key) });
           else if (id === 'blake2b512' && key.length <= 64) jobs.push({ id: id, h: new Blake2(true, 64, key) });
           else if (id === 'blake2b512') errors[id] = 'BLAKE2b takes a key of at most 64 bytes; this one has ' + key.length + '.';
@@ -892,6 +937,7 @@ textarea.hg-expected { min-height: 44px; height: auto; resize: vertical; white-s
         }
         if (id === 'md5') jobs.push({ id: id, h: new Md5() });
         else if (id === 'ripemd160') jobs.push({ id: id, h: new Ripemd160() });
+        else if (id === 'sha224') jobs.push({ id: id, h: new Sha224() });
         else if (id === 'blake2b512') jobs.push({ id: id, h: new Blake2(true, 64) });
         else if (id === 'blake2s256') jobs.push({ id: id, h: new Blake2(false, 32) });
         else if (id === 'blake3') jobs.push({ id: id, h: new Blake3(), n: xof.blake3 });
@@ -920,7 +966,7 @@ textarea.hg-expected { min-height: 44px; height: auto; resize: vertical; white-s
       };
     }
 
-    return { Md5: Md5, Ripemd160: Ripemd160, Keccak: Keccak, Blake2: Blake2, Blake3: Blake3, Crc: Crc, Hmac: Hmac, plan: plan };
+    return { Md5: Md5, Sha224: Sha224, Ripemd160: Ripemd160, Keccak: Keccak, Blake2: Blake2, Blake3: Blake3, Crc: Crc, Hmac: Hmac, plan: plan };
   }
 
   // Runs in a Web Worker: reads the file (or bytes) in pieces, feeds every hasher,
@@ -960,7 +1006,7 @@ textarea.hg-expected { min-height: 44px; height: auto; resize: vertical; white-s
   const subtle = window.crypto && window.crypto.subtle && typeof window.crypto.subtle.digest === 'function' ? window.crypto.subtle : null;
   // id, display name, output bits (0 = variable), name when keyed, common default
   const ALGS = [
-    ['md5', 'MD5', 128, 'HMAC-MD5'], ['sha1', 'SHA-1', 160, 'HMAC-SHA-1'], ['sha256', 'SHA-256', 256, 'HMAC-SHA-256'],
+    ['md5', 'MD5', 128, 'HMAC-MD5'], ['sha1', 'SHA-1', 160, 'HMAC-SHA-1'], ['sha224', 'SHA-224', 224, 'HMAC-SHA-224'], ['sha256', 'SHA-256', 256, 'HMAC-SHA-256'],
     ['sha384', 'SHA-384', 384, 'HMAC-SHA-384'], ['sha512', 'SHA-512', 512, 'HMAC-SHA-512'],
     ['sha3-224', 'SHA3-224', 224, 'HMAC-SHA3-224'], ['sha3-256', 'SHA3-256', 256, 'HMAC-SHA3-256'], ['sha3-384', 'SHA3-384', 384, 'HMAC-SHA3-384'],
     ['sha3-512', 'SHA3-512', 512, 'HMAC-SHA3-512'], ['keccak256', 'Keccak-256', 256, ''], ['shake128', 'SHAKE128', 0, ''], ['shake256', 'SHAKE256', 0, ''],

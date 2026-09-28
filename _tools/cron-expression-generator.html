@@ -15,8 +15,9 @@ howto: |
   every other format, including a systemd timer.
 
   Run times are shown in the time zone you choose. Crontab, Quartz and Spring
-  use the server's zone; GitHub Actions and AWS EventBridge rules use UTC; a
-  Kubernetes CronJob uses its `timeZone` field.
+  use the server's zone and AWS EventBridge rules use UTC. GitHub Actions uses
+  UTC unless the schedule sets `timezone`, and a Kubernetes CronJob uses its
+  `timeZone` field; the converted snippets include the zone you pick.
 
   ## Cron syntax
 
@@ -30,7 +31,8 @@ howto: |
 
   | Format | Fields | Sunday is | Both day fields set |
   |---|---|---|---|
-  | crontab, GitHub, Kubernetes | min hour day month weekday | 0 or 7 | either one matches |
+  | crontab | min hour day month weekday | 0 or 7 | either one matches |
+  | GitHub, Kubernetes | min hour day month weekday | 0 (range 0–6) | either one matches |
   | Spring, node-cron | sec min hour day month weekday | 0 or 7 | both must match |
   | Quartz | sec min hour day month weekday [year] | 1 | not allowed: one must be `?` |
   | AWS EventBridge | `cron(min hour day month weekday year)` | 1 | not allowed: one must be `?` |
@@ -70,7 +72,7 @@ faq:
   - q: How do I run a cron job every 5 minutes?
     a: Use `*/5 * * * *` in crontab, GitHub Actions or Kubernetes, `0 */5 * * * *` in Spring, `0 0/5 * * * ?` in Quartz and `cron(0/5 * * * ? *)` or `rate(5 minutes)` in AWS EventBridge.
   - q: Is Sunday 0 or 7 in cron?
-    a: Both, in crontab, Kubernetes, GitHub Actions and Spring. Quartz and AWS number the days from 1 (Sunday) to 7 (Saturday) instead. Writing the names `SUN` to `SAT` avoids the confusion.
+    a: Both, in crontab and Spring. Kubernetes accepts only 0 (its range is 0 to 6) and GitHub Actions documents 0 to 6 too. Quartz and AWS number the days from 1 (Sunday) to 7 (Saturday) instead. Writing the names `SUN` to `SAT` avoids the confusion.
   - q: Why does my job run on more days than I expected?
     a: In crontab, if you set both the day of month and the day of week, the job runs on days that match either one, so `0 0 1 * 1` runs on the 1st and on every Monday. Set one field to `*` to use only the other.
   - q: Can cron run a job every few seconds?
@@ -144,7 +146,7 @@ faq:
     <select id="cr-dialect">
       <option value="unix" selected>Unix crontab (5 fields)</option>
       <option value="k8s">Kubernetes CronJob</option>
-      <option value="github">GitHub Actions (UTC)</option>
+      <option value="github">GitHub Actions</option>
       <option value="aws">AWS EventBridge cron() and rate()</option>
       <option value="quartz">Quartz (seconds, optional year)</option>
       <option value="spring">Spring and node-cron (with seconds)</option>
@@ -164,11 +166,11 @@ faq:
 </div>
 <p class="msg error cr-err" id="cr-err"></p>
 <p class="visually-hidden" id="cr-err-status" role="status"></p>
-<div aria-live="polite">
-  <p class="cr-desc" id="cr-desc"></p>
-  <p class="msg cr-warn" id="cr-warn"></p>
-  <p class="msg cr-note" id="cr-note"></p>
-</div>
+<!-- Not a live region: the description changes on every keystroke. #cr-err-status reads
+     the error or the description once typing pauses. -->
+<p class="cr-desc" id="cr-desc"></p>
+<p class="msg cr-warn" id="cr-warn"></p>
+<p class="msg cr-note" id="cr-note"></p>
 
 <div class="cr-builder">
   <h2 class="cr-h">Build a schedule</h2>
@@ -329,8 +331,8 @@ faq:
   //  quartz: one of them must be ?; and: both must match (Spring, node-cron).
   var DIALECTS = {
     unix: { name: 'crontab', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, macros: true, reboot: true, command: true, day: 'vixie', single: 'warn', backwards: 'cronie', zone: 'local' },
-    k8s: { name: 'Kubernetes', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, macros: true, qmark: true, day: 'robfig', zone: 'UTC' },
-    github: { name: 'GitHub Actions', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, day: 'vixie', single: 'warn', zone: 'UTC', fixedZone: true },
+    k8s: { name: 'Kubernetes', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, dowMax: 6, macros: true, qmark: true, day: 'robfig', zone: 'UTC' },
+    github: { name: 'GitHub Actions', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, dow7: 'warn', day: 'vixie', zone: 'UTC' },
     aws: { name: 'AWS EventBridge', fields: ['min', 'hour', 'dom', 'mon', 'dow', 'year'], dowBase: 1, qmark: 'one', specials: true, day: 'quartz', zone: 'UTC', yearMax: 2199 },
     quartz: { name: 'Quartz', fields: ['sec', 'min', 'hour', 'dom', 'mon', 'dow', 'year'], optionalYear: true, dowBase: 1, qmark: 'one', specials: true, day: 'quartz', zone: 'local', yearMax: 2099 },
     spring: { name: 'Spring', fields: ['sec', 'min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, macros: true, qmark: true, specials: true, day: 'and', zone: 'local', fiveOk: true }
@@ -346,7 +348,9 @@ faq:
       case 'mon': return { key: key, label: 'Month', min: 1, max: 12, allowed: '1–12 or JAN–DEC', any: 'every month', names: MON3, base: 1 };
       case 'dow': return dl.dowBase === 1
         ? { key: key, label: 'Day of week', min: 1, max: 7, allowed: '1–7 (1 is Sunday, 7 is Saturday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 1 }
-        : { key: key, label: 'Day of week', min: 0, max: 7, allowed: '0–7 (0 and 7 are Sunday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 0 };
+        : dl.dowMax === 6
+          ? { key: key, label: 'Day of week', min: 0, max: 6, allowed: '0–6 (0 is Sunday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 0 }
+          : { key: key, label: 'Day of week', min: 0, max: 7, allowed: '0–7 (0 and 7 are Sunday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 0 };
       default: return { key: key, label: 'Year', min: 1970, max: dl.yearMax, allowed: '1970–' + dl.yearMax, any: 'every year' };
     }
   }
@@ -449,7 +453,7 @@ faq:
         if (step === 0) throw failF(f, 'the step in "' + part + '" cannot be 0.');
       }
       var lo, hi;
-      if (base === '*') { lo = f.min; hi = f.max; if (k === 0 && step <= 1) starB = true; }
+      if (base === '*') { lo = f.min; hi = f.max; if (step <= 1) starB = true; }
       else if (base === '') throw failF(f, '"' + part + '" needs a value or * before the "/".');
       else if (base.indexOf('-') > 0) {
         var r = base.split('-');
@@ -472,11 +476,15 @@ faq:
           }
         }
       }
+      if (key === 'dow' && dl.dow7 && /(^|-)7$/.test(base) && warn.indexOf(DOW7_WARN) < 0) {
+        warn.push(DOW7_WARN);
+      }
       for (var v = lo; v <= hi; v += step) set.add(norm(f, v));
     }
     return { tok: tok, set: set, star: tok.charAt(0) === '*', starB: starB, warn: warn, f: f };
   }
 
+  var DOW7_WARN = 'Day of week field: GitHub documents weekdays as 0–6, with 0 for Sunday. Write 0 or SUN instead of 7 to be safe.';
   function parseRate(inner) {
     var m = /^\s*(\d+)\s+([a-z]+)\s*$/i.exec(inner);
     if (!m) return { error: 'Write a rate as rate(value unit), for example rate(5 minutes) or rate(1 hour).' };
@@ -960,6 +968,10 @@ faq:
               if (vixie && !wild) {
                 var g = gapEnd(z, t.ms);
                 if (g > fromMs) day.push({ ms: g, note: wall + ' is skipped as clocks go forward; cron runs the job right after the change.' });
+              } else if (dk === 'github') {
+                // GitHub documents that a time skipped by DST advances to the next valid time.
+                var ge = gapEnd(z, t.ms);
+                if (ge > fromMs && !day.some(function (x) { return x.ms === ge; })) day.push({ ms: ge, note: wall + ' does not exist on this day (clocks go forward); GitHub runs it at the next valid time.' });
               } else if (!vixie && t.ms > fromMs) {
                 day.push({ ms: gapEnd(z, t.ms), skipped: true, note: wall + ' does not exist on this day (clocks go forward). Schedulers differ: some run the job right after the change, some skip it.' });
               }
@@ -1240,7 +1252,7 @@ faq:
       var td = document.createElement('td');
       if (r.text) {
         var text = r.text;
-        if (t[0] === 'github') text = "on:\n  schedule:\n    - cron: '" + r.text + "'";
+        if (t[0] === 'github') text = "on:\n  schedule:\n    - cron: '" + r.text + "'" + (tzSel.value === 'UTC' ? '' : '\n      timezone: "' + k8sZone() + '"');
         if (t[0] === 'k8s') text = 'schedule: "' + r.text + '"\ntimeZone: "' + k8sZone() + '"';
         var pre = cell('pre', text);
         pre.id = 'cr-trans-' + t[0];
@@ -1279,7 +1291,6 @@ faq:
     try { res = parse(input.value, dk); } catch (e) { res = { error: 'This expression could not be read.', errors: [] }; }
     current = res;
     $('#cr-err').textContent = res.error || '';
-    errText = res.error || '';
     input.setAttribute('aria-invalid', res.error ? 'true' : 'false');
     var notes = (res.notes || []).slice(), warns = (res.warnings || []).slice();
     if (res.error) {
@@ -1332,10 +1343,11 @@ faq:
         if (p.min.set.has(0) && p.min.set.size === 1) notes.push('GitHub delays or drops scheduled runs when load is high, which is worst at the start of each hour. A minute other than 0 is more reliable.');
       }
     }
-    if (dk === 'github') notes.push('GitHub runs schedules in UTC, from the latest commit on the default branch.');
+    if (dk === 'github') notes.push('GitHub runs schedules in UTC unless the schedule entry sets timezone (an IANA name such as America/New_York), always from the latest commit on the default branch.' + (tzSel.value !== 'UTC' ? ' Add timezone: "' + k8sZone() + '" under the cron line to match the zone chosen above.' : ''));
     if (!res.error && res.command) notes.push('The rest of the line is the command: ' + res.command);
     $('#cr-warn').textContent = res.error ? '' : warns.join('\n');
     $('#cr-note').textContent = res.error ? '' : notes.join(' ');
+    errText = res.error || $('#cr-desc').textContent || '';
     renderFields(res);
     renderRuns();
     renderTrans();
@@ -1544,7 +1556,7 @@ faq:
   }
   input.addEventListener('input', function () { update(false); sayError(false); });
   input.addEventListener('change', function () { sayError(true); });
-  tzSel.addEventListener('change', function () { zonePicked = true; renderRuns(); renderTrans(); });
+  tzSel.addEventListener('change', function () { zonePicked = true; update(true); });
   dialectSel.addEventListener('change', changeDialect);
   TT.$$('.cr-builder select, .cr-builder input').forEach(function (el) {
     el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', applyBuilder);

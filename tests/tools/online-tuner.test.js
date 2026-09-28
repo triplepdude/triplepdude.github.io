@@ -24,8 +24,11 @@ module.exports = async ({ page, open, assert }) => {
       osc.start();
       // White noise (fixed seed) that can be mixed in.
       const nb = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate), d = nb.getChannelData(0);
-      let seed = 12345;
-      for (let i = 0; i < d.length; i++) { seed = (seed * 1103515245 + 12345) >>> 0; d[i] = seed / 2147483648 - 1; }
+      // xorshift32: a full-period generator. (A 32-bit LCG computed with JS
+      // doubles loses precision and repeats after a few thousand samples,
+      // which is periodic and not a fair noise test.)
+      let seed = 0x9E3779B9;
+      for (let i = 0; i < d.length; i++) { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; d[i] = (seed >>> 0) / 2147483648 - 1; }
       const noise = new AudioBufferSourceNode(ac, { buffer: nb, loop: true }), ng = new GainNode(ac, { gain: 0 });
       noise.connect(ng).connect(dest);
       noise.start();
@@ -105,6 +108,11 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#otn-play'), 'Play A5 (880.00 Hz)');
   await page.fill('#otn-a4', '440');
   assert.equal(await text('#otn-a4-msg'), '');
+  // The typed calibration is used as shown (449.99 used to be rounded to 450):
+  // A5 = 2 * 449.99 = 899.98 Hz.
+  await page.fill('#otn-a4', '449.99');
+  assert.equal(await text('#otn-play'), 'Play A5 (899.98 Hz)');
+  await page.fill('#otn-a4', '440');
 
   // ---- Microphone starts with the speech filters off ----
   await page.focus('#otn-toggle');
@@ -216,6 +224,10 @@ module.exports = async ({ page, open, assert }) => {
   assert.deepEqual(await page.$$eval('#otn-strings button > span:first-child', s => s.map(e => e.textContent)), ['Auto', 'G4', 'C4', 'E4', 'A4']);
   await page.selectOption('#otn-inst', 'guitar-eb');
   assert.deepEqual(await page.$$eval('#otn-strings button > span:first-child', s => s.map(e => e.textContent)), ['Auto', 'E♭2', 'A♭2', 'D♭3', 'G♭3', 'B♭3', 'E♭4']);
+  // Solfège in a flat tuning is spelled with flats too (it used to show Re♯ for E-flat).
+  await page.selectOption('#otn-names', 'solfege');
+  assert.deepEqual(await page.$$eval('#otn-strings button > span:first-child', s => s.map(e => e.textContent)), ['Auto', 'Mi♭2', 'La♭2', 'Re♭3', 'Sol♭3', 'Si♭3', 'Mi♭4']);
+  await page.selectOption('#otn-names', 'sharp');
   await page.selectOption('#otn-inst', 'violin');
   assert.deepEqual(await page.$$eval('#otn-strings button > span:first-child', s => s.map(e => e.textContent)), ['Auto', 'G3', 'D4', 'A4', 'E5']);
 

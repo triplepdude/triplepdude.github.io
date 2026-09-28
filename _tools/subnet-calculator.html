@@ -807,8 +807,13 @@ textarea.sc-agg-in { min-height: 140px; }
     if (mode === 'prefix') return { q: parseInt(newPrefixSel.value, 10) };
     const raw = numEl.value.trim().replace(/[,_\s]/g, '');
     if (!/^\d+$/.test(raw) || BigInt(raw) < 1n) throw new InputError(mode === 'count' ? 'Enter the number of subnets you need, 2 or more.' : 'Enter how many hosts each subnet must hold, 1 or more.');
-    const n = BigInt(raw);
     const total = 1n << BigInt(bits - p);
+    // More than 40 digits exceeds 2^128 anyway; refusing early keeps a pasted
+    // 100,000-digit number from freezing the page in BigInt arithmetic.
+    if (raw.replace(/^0+/, '').length > 40) {
+      throw new InputError(mode === 'count' ? 'A /' + p + ' has ' + fmt(total) + ' addresses, so it can be split into at most ' + fmt(total) + ' subnets.' : 'A /' + p + ' has only ' + plural(current.s.usable, 'usable host') + ', so it can\'t hold that many hosts per subnet.');
+    }
+    const n = BigInt(raw);
     if (mode === 'count') {
       if (n < 2n) throw new InputError('Enter 2 or more subnets.');
       const b = bitsForB(n), q = p + b;

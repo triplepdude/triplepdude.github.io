@@ -248,6 +248,9 @@ module.exports = async ({ page, open, assert }) => {
   // ---- Regression: a year range became "2019, present". ----
   assert.equal(await clean('Manager, 2019\u2014present'), 'Manager, 2019-present');
   assert.equal(await clean('2019\u2014Today'), '2019-Today');
+  // Regression: a dash opening a sentence after a full stop became ". , Next" ("20., Start").
+  assert.equal(await clean('It ended. \u2014Next came more. Why? \u2014 Because.'), 'It ended. Next came more. Why? Because.');
+  assert.equal(await clean('Apples, pears, etc.\u2014and more'), 'Apples, pears, etc., and more');
 
   // ---- Markdown: off by default, but counted so you can see it is there. ----
   const md = '# Title\n\nSome **bold**, *italic*, __strong__ and ~~old~~ text with `code_x` and a [link](https://example.com/a_b_c).\n\n' +
@@ -258,7 +261,7 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await count('md'), 15);
   await page.check('#atc-o-md');
   assert.equal(await out(), 'Title\n\nSome bold, italic, strong and old text with code_x and a link (https://example.com/a_b_c).\n\n' +
-    '• one\n• two\n  • nested\n\nquoted line\n\n\nconst a = 2 * 3;\n\n1. keep numbers\n2 * 3 * 4 stays\nsnake_case_name stays\nlogo');
+    '• one\n• two\n  • nested\n\nquoted line\n\nconst a = 2 * 3;\n\n1. keep numbers\n2 * 3 * 4 stays\nsnake_case_name stays\nlogo');
   const report = () => page.$$eval('#atc-report-body tr', trs => trs.map(t => [t.children[0].textContent, t.children[1].textContent]));
   assert.deepEqual(await report(), [
     ['Removed Markdown heading marks (# or an underline)', '1'], ['Removed bold marks (** or __)', '2'], ['Removed italic marks (* or _)', '1'],
@@ -271,6 +274,10 @@ module.exports = async ({ page, open, assert }) => {
   await page.selectOption('#atc-md-bullets', 'dot');
   // Bold italic, a setext heading, a link whose text is its address, escapes and an autolink.
   assert.equal(await clean('Intro\n===\n***Both*** \\*not italic\\* <https://x.org> [https://x.org](https://x.org)'), 'Intro\n\nBoth *not italic* https://x.org https://x.org');
+  // Regression: a link whose address holds brackets (Wikipedia style) was left as raw Markdown.
+  assert.equal(await clean('[Foo](https://en.wikipedia.org/wiki/Foo_(bar)) and ![A](a_(1).png)'), 'Foo (https://en.wikipedia.org/wiki/Foo_(bar)) and A');
+  // Regression: a horizontal rule between blank lines left two blank lines behind.
+  assert.equal(await clean('One\n\n***\n\nTwo'), 'One\n\nTwo');
   // Emphasis marks inside web addresses and code are kept.
   assert.equal(await clean('See https://example.com/_private_/x and `**kwargs`'), 'See https://example.com/_private_/x and **kwargs');
   // A line full of unmatched marks must not make the search slow (patterns are bounded).

@@ -199,6 +199,20 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.fill('#dts-decode', '175928847299117063');
   await page.waitForFunction(() => /Discord ID/.test(document.querySelector('#dts-decode-out').textContent));
   assert.match(await page.locator('#dts-decode-out').textContent(), /2016-04-30 11:18:25\.796 UTC/);
+  // Regression: a 19-digit Unix time in nanoseconds was decoded as a Discord ID
+  // "created" decades in the future. No ID can be from the future, so it is
+  // read as nanoseconds (9e18 ns = 9000000000 s; as an ID it would be dated
+  // 2082-12-30, both checked with Python).
+  await page.fill('#dts-decode', '9000000000000000000');
+  await page.waitForFunction(() => /nanoseconds/.test(document.querySelector('#dts-decode-out').textContent));
+  const nsOut = await page.locator('#dts-decode-out').textContent();
+  assert.match(nsOut, /<t:9000000000:f>/);
+  assert.match(nsOut, /2082-12-30/);
+  assert.doesNotMatch(nsOut, /Discord ID created/);
+  // A 20-digit number below 2^64 would also be a future ID, and is not nanoseconds of any date a browser shows.
+  await page.fill('#dts-decode', '18000000000000000000');
+  await page.waitForFunction(() => /not a Discord ID/.test(document.querySelector('#dts-decode-msg').textContent));
+  assert.match(await page.locator('#dts-decode-msg').textContent(), /2150-12-29, which is in the future/);
 
   // Regression: loading keeps the exact instant, in the repeated DST hour and before 1970.
   await page.selectOption('#dts-zone', 'America/New_York');

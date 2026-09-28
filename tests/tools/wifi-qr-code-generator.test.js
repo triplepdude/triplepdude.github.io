@@ -267,11 +267,36 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.click('#wq-copy');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), def);
   assert.match(await page.textContent('.wq-print-root .wq-card'), /correct horse battery staple/);
+  // Regression: the small on-screen sheet preview masks it too (it showed the real password).
+  assert.doesNotMatch(await page.textContent('#wq-sheet-frame'), /correct horse/);
+  assert.match(await page.textContent('#wq-sheet-frame .wq-card'), /••••/);
   const masked = await download('#wq-png');
   assert.equal(Buffer.from((await decode(masked.buf, 'image/png')).bytes).toString('utf8'), def);
   await page.click('#wq-pass-toggle');
   assert.equal(await payload(), def);
   assert.equal(await page.textContent('#wq-card-pass'), 'correct horse battery staple');
+  assert.match(await page.textContent('#wq-sheet-frame .wq-card'), /correct horse battery staple/);
+
+  // Regression: a file dropped outside the logo drop zone must not replace the page
+  // (the browser's default is to open the file); a drop on the zone still works.
+  const outside = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['x'], 'logo.png', { type: 'image/png' }));
+    const res = {};
+    for (const t of ['dragover', 'drop']) {
+      const ev = new DragEvent(t, { bubbles: true, cancelable: true, dataTransfer: dt });
+      document.querySelector('#wq-ssid').dispatchEvent(ev);
+      res[t] = ev.defaultPrevented;
+    }
+    // Plain text dragged between fields keeps its normal behaviour.
+    const tdt = new DataTransfer(); tdt.setData('text/plain', 'abc');
+    const tev = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: tdt });
+    document.querySelector('#wq-ssid').dispatchEvent(tev);
+    res.text = tev.defaultPrevented;
+    return res;
+  });
+  assert.deepEqual(outside, { dragover: true, drop: true, text: false });
+  assert.equal(await page.inputValue('#wq-ssid'), 'Home Network');
 
   // IEEE 802.11 passphrases are printable ASCII only.
   await page.fill('#wq-pass', 'mot de passe été');

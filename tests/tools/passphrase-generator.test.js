@@ -350,13 +350,21 @@ module.exports = async ({ page, open, assert }) => {
   const before = await phrases();
   await page.selectOption('#pp-wordlist', 'short1');
   await page.waitForFunction(() => document.querySelector('#pp-error').textContent !== '');
-  assert.match(await text('#pp-error'), /The EFF short list 1 could not be loaded/);
-  assert.equal(await page.isDisabled('#pp-generate'), true);
-  assert.deepEqual(await phrases(), before, 'the previous passphrases stay on screen');
+  assert.match(await text('#pp-error'), /The EFF short list 1 could not be loaded.*press Generate new to try again/);
+  // Long-list passphrases must not stay on screen under the short list's strength figures.
+  assert.deepEqual(await phrases(), [], 'no stale passphrases from another list');
+  assert.equal(await page.isEnabled('#pp-generate'), true, 'Generate new retries the download');
+  assert.equal(await page.isDisabled('#pp-copy-all'), true);
+  // Retrying once the file is reachable again draws from short list 1.
+  await page.unroute('**/eff-short-wordlist-1.txt');
+  await page.click('#pp-generate');
+  await page.waitForFunction(() => document.querySelectorAll('#pp-list .pp-item').length === 5);
+  assert.equal(await text('#pp-error'), '');
+  for (const parts of await partsOf()) for (const w of parts) assert.ok(shortLists.short1.includes(w), `${w} is from short list 1 after the retry`);
+  assert.notDeepEqual(await phrases(), before);
   await page.selectOption('#pp-wordlist', 'long');
   assert.equal(await text('#pp-error'), '');
   assert.equal(await page.isEnabled('#pp-generate'), true);
-  await page.unroute('**/eff-short-wordlist-1.txt');
   // Switching again while a list is still loading: only the last choice draws words.
   let releaseShort;
   const heldShort = new Promise(r => { releaseShort = r; });
@@ -369,4 +377,38 @@ module.exports = async ({ page, open, assert }) => {
   const inShort2 = new Set(shortLists.short2);
   for (const parts of await partsOf()) for (const w of parts) assert.ok(inShort2.has(w), `${w} is from short list 2`);
   assert.equal(await text('#pp-error'), '');
+
+  // The other two lists are fetched in the background after the first, so switching
+  // lists still works once the connection is gone (as the FAQ says).
+  await open();
+  await page.waitForSelector('#pp-list .pp-item:not(.pp-placeholder)');
+  await page.waitForTimeout(2200);
+  await page.route('**/*.txt', route => route.abort());
+  for (const [key, set] of [['short1', shortLists.short1], ['short2', shortLists.short2]]) {
+    await page.selectOption('#pp-wordlist', key);
+    assert.equal(await text('#pp-error'), '', `${key} works offline`);
+    assert.equal(await page.isEnabled('#pp-generate'), true);
+    for (const parts of await partsOf()) for (const w of parts) assert.ok(set.includes(w), `${w} is from ${key}`);
+  }
+  await page.unroute('**/*.txt');
+  await page.selectOption('#pp-wordlist', 'long');
+
+  // Lines may break after each separator (and between words with no separator), so a
+  // phone never splits a word in the middle when it fits on a line.
+  await page.selectOption('#pp-count', '1');
+  assert.equal(await page.$$eval('#pp-list .pp-text wbr', els => els.length), 5);
+  await page.selectOption('#pp-sep', '');
+  assert.equal(await page.$$eval('#pp-list .pp-text wbr', els => els.length), 5);
+  assert.equal(await page.$eval('#pp-list .pp-text', el => getComputedStyle(el).overflowWrap), 'break-word');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.selectOption('#pp-sep', '-');
+  for (let round = 0; round < 10; round++) {
+    await page.click('#pp-generate');
+    // Every text node (a word) sits on a single line.
+    const split = await page.$$eval('#pp-list .pp-text', els => els.flatMap(el => Array.from(el.childNodes).filter(n => n.nodeType === 3).map(n => {
+      const r = document.createRange(); r.selectNodeContents(n); return r.getClientRects().length;
+    })).filter(c => c > 1).length);
+    assert.equal(split, 0, 'no word is broken across lines at 390 px');
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
 };

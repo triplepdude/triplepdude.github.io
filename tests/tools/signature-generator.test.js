@@ -303,6 +303,10 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.match(await page.textContent('#sg-info'), /Type your name above/);
   await page.fill('#sg-name', '  Jane   Doe ');
   await page.waitForFunction(() => document.querySelectorAll('#sg-fonts .sg-font-sample svg').length === 5, null, { timeout: 20000 });
+  // The size line is not a live region (it changed on every keystroke and stroke); a short status says once,
+  // after a pause, that the signature can be downloaded.
+  assert.equal(await page.getAttribute('#sg-info', 'aria-live'), null, 'size line is not live');
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('[role="status"][aria-live="polite"]')).some(e => e.textContent === 'Signature ready to download.'), null, { timeout: 5000 });
   assert.deepEqual(await page.$$eval('input[name="sg-font"]', els => els.map(e => e.labels[0].textContent.trim())),
     ['Dancing Script', 'Great Vibes', 'Sacramento', 'Herr Von Muellerhoff', 'Mrs Saint Delafield'], 'each font option is named');
   // Expected sizes come from HarfBuzz shaping and fontTools' exact glyph bounds on the original font files,

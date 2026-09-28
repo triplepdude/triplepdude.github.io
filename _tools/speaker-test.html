@@ -28,7 +28,7 @@ howto: |
   in the sound driver. If Left and Right both come from both sides, the
   system is mono. Look for a **Mono audio** accessibility setting (Windows,
   macOS, Android and iOS all have one), or you are listening on a single
-  speaker such as most Bluetooth speakers and many phones held upright.
+  speaker, as in many portable Bluetooth speakers and some phones.
 
   ## Phase: in phase and out of phase
 
@@ -105,6 +105,8 @@ faq:
 .spk-marks { margin: 0 0 16px; padding-left: 20px; font-variant-numeric: tabular-nums; }
 .spk-marks:empty { display: none; }
 .spk-freq { font-variant-numeric: tabular-nums; }
+/* aria-disabled instead of disabled, so keyboard focus stays on the button when a sweep ends. */
+.spk #spk-mark[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
 .spk .table-wrap table.data td:first-child, .spk .table-wrap table.data th:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: no-preference) { .spk-dot { transition: left 0.08s linear; } }
 @media (max-width: 480px) { .spk-stage { gap: 8px; padding: 12px; } .spk-icon svg { width: 36px; height: 36px; } }
@@ -187,7 +189,7 @@ faq:
   </div>
   <div class="actions">
     <button class="btn secondary" type="button" data-test="sweep" aria-pressed="false">Play sweep</button>
-    <button class="btn secondary" type="button" id="spk-mark" disabled>Mark frequency</button>
+    <button class="btn secondary" type="button" id="spk-mark" aria-disabled="true">Mark frequency</button>
     <span class="spk-freq" id="spk-freq" aria-hidden="true"></span>
   </div>
   <ol class="spk-marks" id="spk-marks" aria-label="Marked frequencies"></ol>
@@ -439,7 +441,7 @@ faq:
     }
     $$('.spk [data-test][aria-pressed="true"], #spk-sur [aria-pressed="true"]').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
     setLights(false, false, 0.5, false);
-    markBtn.disabled = true;
+    markBtn.setAttribute('aria-disabled', 'true');
     freqEl.textContent = '';
     if (announce) nowEl.textContent = announce;
   }
@@ -480,7 +482,7 @@ faq:
       cur = { src: src, t0: t0, spec: spec, name: name };
       src.onended = function () { if (cur && cur.src === src) stop('Finished: ' + label + '.'); };
       nowEl.textContent = 'Playing ' + label + '.';
-      if (spec.sweep) markBtn.disabled = false;
+      if (spec.sweep) markBtn.setAttribute('aria-disabled', 'false');
       (function frame() {
         if (!cur || cur.src !== src) return;
         const t = ac.currentTime - t0 - 0.01;
@@ -516,7 +518,7 @@ faq:
   $('#spk-sound').addEventListener('change', function () { restartIf(['left', 'centre', 'right', 'alternate']); });
   ['#spk-range', '#spk-stime', '#spk-sch'].forEach(function (id) { $(id).addEventListener('change', function () { restartIf(['sweep']); }); });
   markBtn.addEventListener('click', function () {
-    if (!cur || !cur.spec.freq) return;
+    if (!cur || !cur.spec.freq) { TT.announce('Play the sweep first, then mark a frequency.'); return; }
     const f = cur.spec.freq(Math.max(0, ctx.currentTime - cur.t0 - 0.01));
     const li = document.createElement('li');
     li.textContent = fmtHz(f);
@@ -541,6 +543,8 @@ faq:
     $('#spk-detect-row').hidden = true;
     const layout = n >= 8 ? 8 : n >= 6 ? 6 : n >= 4 ? 4 : 0;
     if (!layout) {
+      if (box.dataset.n === '0') return; // already explained; do not re-announce on every sound
+      box.dataset.n = '0';
       note.textContent = 'Your output reports ' + n + (n === 1 ? ' channel' : ' channels') + ', so there are no surround speakers to test. Set 5.1 or 7.1 in your system\'s speaker settings and reload to test them.';
       box.hidden = true;
       return;

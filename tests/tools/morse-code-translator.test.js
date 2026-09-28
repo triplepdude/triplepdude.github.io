@@ -216,6 +216,15 @@ module.exports = async ({ page, open, assert }) => {
   await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')].some(e => e.textContent === 'Dot 50 ms, letter gap 150 ms, word gap 350 ms'));
   await page.fill('#mc-wpm', '20');
 
+  // Regression: long lengths rounded the seconds separately and read
+  // "119 min 60 s". 30,000 E = 30,000 dots + 29,999 letter gaps of 3 units
+  // = 119,997 units x 60 ms = 7,199.82 s.
+  await page.fill('#mc-text', 'E'.repeat(30000));
+  await page.waitForFunction(() => /length 120 min 0 s$/.test(document.querySelector('#mc-timing').textContent));
+  // PARIS without the trailing word gap is 43 units = 2.58 s.
+  await page.fill('#mc-text', 'PARIS');
+  assert.match(await text('#mc-timing'), /length 2\.6 s$/);
+
   // Playback with Web Audio: the button toggles, the light flashes, it ends by itself.
   await page.fill('#mc-text', 'EE');
   await page.evaluate(() => {

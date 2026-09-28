@@ -97,7 +97,8 @@ faq:
 <style>
 .pp-list { display: grid; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
 .pp-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
-.pp-text { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 1.05rem; line-height: 1.45; overflow-wrap: anywhere; }
+/* Lines break after a separator (<wbr>), and inside a word only when one word cannot fit. */
+.pp-text { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 1.05rem; line-height: 1.45; overflow-wrap: break-word; }
 .pp-item:first-child .pp-text { font-size: 1.2rem; font-weight: 600; }
 .pp-sep { color: var(--muted); }
 .pp-len { flex: 0 0 auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
@@ -388,7 +389,8 @@ faq:
           sp.className = 'pp-sep';
           sp.textContent = s.sep;
           text.appendChild(sp);
-        }
+          text.appendChild(document.createElement('wbr'));
+        } else if (i > 0) text.appendChild(document.createElement('wbr'));
         text.appendChild(document.createTextNode(w));
       });
       var full = parts.join(s.sep);
@@ -440,6 +442,7 @@ faq:
     words = loadedLists[s.list] || null;
     genBtn.disabled = copyAllBtn.disabled = !words;
     if (!words) { loadList(s.list, quiet); return; }
+    prefetchOthers();
     if (errEl.textContent) errEl.textContent = '';
     current = [];
     for (var i = 0; i < s.count; i++) current.push(makePassphrase(s));
@@ -505,9 +508,21 @@ faq:
     }).catch(function () {
       delete loading[key];
       if (settings().list !== key) return;
-      errEl.textContent = 'The ' + list.name + ' could not be loaded, so no passphrases can be made from it. Check your connection and try again.';
-      if (!current.length) listEl.textContent = '';
+      errEl.textContent = 'The ' + list.name + ' could not be loaded, so no passphrases can be made from it. Check your connection, then press Generate new to try again.';
+      // Passphrases from another list must not stay under this list's strength figures.
+      current = [];
+      listEl.textContent = '';
+      genBtn.disabled = false;
     });
+  }
+
+  // Once the first list is in, the other two (18 KB together) load in the background, so
+  // switching lists is instant and still works if the connection drops later.
+  var prefetched = false;
+  function prefetchOthers() {
+    if (prefetched) return;
+    prefetched = true;
+    setTimeout(function () { Object.keys(LISTS).forEach(function (k) { loadList(k, false); }); }, 1500);
   }
 
   genBtn.addEventListener('click', function () { generate(); });

@@ -48,6 +48,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual(await counts('Mr. Smith met Dr. J. R. Jones at 10 a.m. on Monday. They talked. Q: Why? A: Because.'), { words: '18', sentences: '4' });
   assert.deepEqual(await counts('e.g. this is fine. Dr. Smith arrived.'), { words: '7', sentences: '2' });
   assert.deepEqual(await counts('Wait... what? Yes!'), { words: '3', sentences: '2' });
+  // Regression: "No." as an answer ended no sentence (it was treated like "No. 5").
+  assert.deepEqual(await counts('Did he agree? No. She refused.'), { words: '6', sentences: '3' });
+  assert.deepEqual(await counts('See No. 5 and fig. 3 for details. Then stop.'), { words: '10', sentences: '2' });
+  assert.deepEqual(await counts('We live on Oak Ave. It is nice.'), { words: '8', sentences: '2' });
   assert.deepEqual(await counts('"Quoted." Next sentence.'), { words: '3', sentences: '2' });
   // A heading without a full stop is its own sentence when a blank line follows.
   assert.deepEqual(await counts('# Heading\n\nText here.'), { words: '3', sentences: '2' });
@@ -205,6 +209,33 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await val('#wc-file-error'), /scan\.pdf is a PDF/);
   await page.setInputFiles('#wc-file', { name: 'broken.docx', mimeType: 'application/octet-stream', buffer: Buffer.from('PK\u0003\u0004 not really a zip') });
   await page.waitForFunction(() => /broken\.docx/.test(document.querySelector('#wc-file-error').textContent));
+  // Regression: a "zip bomb" whose document.xml claims 1,000 bytes but inflates to 110 MB was
+  // inflated in full (12 s and 400+ MB of memory for a 400 KB file); reading now stops at 100 MB.
+  const zlib = require('zlib');
+  const zipOne = (name, raw, claimed) => {
+    const data = zlib.deflateRawSync(raw, { level: 9 });
+    const n = Buffer.from(name);
+    const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(8, 8);
+    lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(claimed, 22); lh.writeUInt16LE(n.length, 26);
+    const cd = Buffer.alloc(46); cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(8, 10);
+    cd.writeUInt32LE(data.length, 20); cd.writeUInt32LE(claimed, 24); cd.writeUInt16LE(n.length, 28);
+    const cdOff = 30 + n.length + data.length;
+    const eo = Buffer.alloc(22); eo.writeUInt32LE(0x06054b50, 0); eo.writeUInt16LE(1, 8); eo.writeUInt16LE(1, 10);
+    eo.writeUInt32LE(46 + n.length, 12); eo.writeUInt32LE(cdOff, 16);
+    return Buffer.concat([lh, n, data, cd, n, eo]);
+  };
+  const bomb = zipOne('word/document.xml', Buffer.alloc(110 * 1024 * 1024, 0x20), 1000);
+  const tb = Date.now();
+  await page.setInputFiles('#wc-file', { name: 'bomb.docx', mimeType: 'application/octet-stream', buffer: bomb });
+  await page.waitForFunction(() => /bomb\.docx/.test(document.querySelector('#wc-file-error').textContent));
+  assert.match(await val('#wc-file-error'), /^bomb\.docx is too large to read/);
+  assert.ok(Date.now() - tb < 5000, `zip bomb took ${Date.now() - tb} ms`);
+  // A damaged deflate stream gets a clear message, not a browser error string.
+  const bad = zipOne('word/document.xml', Buffer.from('<w:document xmlns:w="x"><w:body><w:p><w:r><w:t>Hello there</w:t></w:r></w:p></w:body></w:document>'.repeat(20)), 2000);
+  for (let i = 40; i < 70; i++) bad[i] ^= 0x5a;
+  await page.setInputFiles('#wc-file', { name: 'damaged.docx', mimeType: 'application/octet-stream', buffer: bad });
+  await page.waitForFunction(() => /damaged\.docx/.test(document.querySelector('#wc-file-error').textContent));
+  assert.equal(await val('#wc-file-error'), 'damaged.docx is damaged (its compressed data could not be read).');
   // Several files: one row each and a total; the unreadable one is reported, the rest still count.
   await openFiles(['report.docx', 'trip.odt', 'old.doc', 'page.html']);
   assert.equal(await page.isVisible('#wc-files'), true);

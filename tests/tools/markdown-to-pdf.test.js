@@ -131,7 +131,10 @@ module.exports = async ({ page, open, assert, base }) => {
     '<video poster="https://evil.example/v.png"><source src="https://evil.example/v.mp4"></video>', '',
     '<meta http-equiv="refresh" content="0;url=https://evil.example/">', '', '<base href="https://evil.example/">', '',
     '<link rel="stylesheet" href="https://evil.example/s.css">', '', '<p id="location" name="cookie">clobber</p>', '',
-    '<a href="https://example.com/ok">web link</a>'
+    '<a href="https://example.com/ok">web link</a>', '',
+    // SVG presentation attributes and MathML <mglyph> can fetch files too; only url(#id) may stay.
+    '<svg width="8" height="8"><defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs><rect width="8" height="8" fill="url(#g)" filter="url(https://evil.example/f.svg#f)" mask="url(https://evil.example/m.svg#m)" clip-path="url(\'https://evil.example/c.svg#c\')" marker-start="url(https://evil.example/k.svg#k)"/></svg>', '',
+    '<math><mglyph src="https://evil.example/g.png"></mglyph></math>'
   ].join('\n');
   await setMd(evil);
   await page.waitForTimeout(300);
@@ -147,7 +150,8 @@ module.exports = async ({ page, open, assert, base }) => {
       inputs: [...body.querySelectorAll('input')].map(i => i.type + (i.disabled ? ':disabled' : '')),
       blocked: [...body.querySelectorAll('.md-img-note')].map(n => n.textContent),
       clobber: [...body.querySelectorAll('p')].filter(p => p.textContent === 'clobber').map(p => p.id)[0],
-      headStyles: document.head.querySelectorAll('style').length
+      headStyles: document.head.querySelectorAll('style').length,
+      rect: (r => r && [...r.attributes].map(a => a.name + '=' + a.value).join(' '))(body.querySelector('rect'))
     };
   });
   assert.deepEqual(audit.tags, []);
@@ -158,6 +162,7 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.ok(audit.blocked.some(t => /Image: t from evil\.example is not loaded/.test(t)), audit.blocked.join(' | '));
   assert.equal(audit.clobber, 'user-content-location');
   assert.equal(audit.headStyles, 2, 'a pasted <style> never reaches the preview');
+  assert.equal(audit.rect, 'width=8 height=8 fill=url(#g)', 'only in-document url() references are kept');
   assert.equal(await page.isVisible('header.site-header'), true, 'the page is untouched');
   // The downloaded HTML is cleaned the same way.
   let [dl] = await Promise.all([page.waitForEvent('download'), page.click('#mdp-html')]);
@@ -318,6 +323,13 @@ module.exports = async ({ page, open, assert, base }) => {
   await page.click('#mdp-copy');
   await page.waitForFunction(() => /Copied/.test(document.getElementById('mdp-copy').textContent));
   assert.match(await page.evaluate(() => navigator.clipboard.readText()), /^<h1 id="user-content-title--more">Title &amp; more<\/h1>/);
+
+  // ---- Nesting too deep for the parser: a short, friendly message ----
+  await setMd('>'.repeat(4000) + ' deep');
+  await page.waitForFunction(() => /nested too deeply/.test(document.getElementById('mdp-error').textContent));
+  assert.doesNotMatch(await page.textContent('#mdp-error'), /report this|github/i);
+  await setMd('Back to normal.');
+  assert.equal(await page.textContent('#mdp-error'), '');
 
   // ---- Empty document ----
   await page.click('#mdp-clear');

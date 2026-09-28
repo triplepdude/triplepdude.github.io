@@ -22,8 +22,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await setNow('2026-09-24T10:17:30Z'); // Thursday, 12:17:30 in Rome (CEST)
   await open();
 
-  // The description is announced; the run list, refreshed every 30 s, is not.
-  assert.equal(await page.locator('#cr-desc').evaluate(el => !!el.closest('[aria-live]')), true);
+  // Neither the description (it changes on every key) nor the run list (refreshed every
+  // 30 s) is a live region; #cr-err-status reads a summary once typing pauses.
+  assert.equal(await page.locator('#cr-desc').evaluate(el => !!el.closest('[aria-live]')), false);
   assert.equal(await page.locator('#cr-runs').evaluate(el => !!el.closest('[aria-live]')), false);
 
   // Default: weekdays at 09:00, local time.
@@ -382,14 +383,25 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await text('#cr-err'), /^$|Expected 5 fields/, 'the visible error still updates at once');
   await page.waitForTimeout(1200);
   let log = await heard();
-  assert.ok(log.filter(l => l[0] === 'cr-err-status' && l[2]).length === 0, 'no error read out for a valid result: ' + JSON.stringify(log));
-  assert.ok(log.length <= 3, 'at most a few updates for 11 keys: ' + JSON.stringify(log));
+  assert.deepEqual(log.map(l => l[0]), ['cr-err-status'], 'one status update for 11 keys: ' + JSON.stringify(log));
+  assert.equal(log[0][2], await text('#cr-desc'), 'the pause reads the description, not an error');
+  // Editing a valid expression key by key still gives one announcement, not one per key.
+  await record();
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('2', { delay: 30 });
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('3', { delay: 30 });
+  await page.waitForTimeout(1200);
+  log = await heard();
+  assert.equal(log.filter(l => l[2]).length, 1, JSON.stringify(log));
+  assert.match(log.filter(l => l[2])[0][2], /on Wednesday\./);
+  await setExpr('*/5 9 * * 1');
   // A pause on an unfinished expression reads the error once, as a status.
   await record();
   await page.keyboard.press('Backspace');
   await page.keyboard.press('Backspace');
   await page.keyboard.press('Backspace');
-  assert.equal(await text('#cr-err-status'), '');
+  assert.doesNotMatch(await text('#cr-err-status'), /Expected/, 'not read out while typing');
   await page.waitForTimeout(1200);
   log = (await heard()).filter(l => l[0] === 'cr-err-status');
   assert.equal(log.length, 1, JSON.stringify(log));
@@ -399,7 +411,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.dispatchEvent('#cr-expr', 'change');
   assert.match(await text('#cr-err-status'), /Expected 5 fields .* found 4/);
   await page.click('[data-cron]');
-  assert.equal(await text('#cr-err-status'), '');
+  assert.equal(await text('#cr-err-status'), await text('#cr-desc'), 'an example reads its description');
 
   // ---------- Other formats ----------
   // Reference runs come from tests/fixtures/cron-expression-generator/reference-runs.json: a
@@ -520,11 +532,34 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await pick('aws', 'cron(0 9 LW * ? *)');
   assert.match(await text('#cr-warn'), /"LW" works in Quartz and Spring, but AWS does not document it/);
 
-  // GitHub: UTC only, at most every 5 minutes, and the top of the hour is busy.
+  // GitHub: UTC by default (the schedule may set timezone), at most every 5 minutes,
+  // the top of the hour is busy, and N/step is documented (no Vixie warning).
   await pick('github', '*/2 * * * *');
-  assert.equal(await page.isDisabled('#cr-tz'), true);
+  assert.equal(await page.isDisabled('#cr-tz'), false);
   assert.equal(await page.inputValue('#cr-tz'), 'UTC');
   assert.match(await text('#cr-warn'), /at most once every 5 minutes/);
+  await setExpr('20/15 * * * *');
+  assert.equal(await text('#cr-warn'), '', 'GitHub documents 20/15 as minutes 20, 35 and 50');
+  assert.deepEqual((await runs()).slice(0, 3), ['Thu 2026-09-24 10:20', 'Thu 2026-09-24 10:35', 'Thu 2026-09-24 10:50']);
+  await setExpr('0 9 * * 7');
+  assert.match(await text('#cr-warn'), /GitHub documents weekdays as 0–6/);
+  await setExpr('0 9 * * 1-5');
+  await page.selectOption('#cr-tz', 'America/New_York');
+  assert.match(await text('#cr-note'), /Add timezone: "America\/New_York"/);
+  await page.selectOption('#cr-dialect', 'unix');
+  await page.selectOption('#cr-tz', 'America/New_York');
+  assert.equal((await page.$$eval('#cr-trans tr', trs => Object.fromEntries(trs.map(tr => [tr.dataset.target, tr.cells[1].textContent])))).github,
+    "on:\n  schedule:\n    - cron: '0 9 * * 1-5'\n      timezone: \"America/New_York\"");
+  // Kubernetes (robfig/cron) allows weekdays 0-6 only, and a * anywhere in a day-field list
+  // makes both day fields required.
+  await pick('k8s', '0 9 * * 7');
+  assert.match(await text('#cr-err'), /7 is out of range\. Allowed: 0–6/);
+  // robfig reads 5/1 in the weekday field as 5-6 (its maximum is 6), never Sunday.
+  await setExpr('0 9 * * 5/1');
+  assert.deepEqual((await runs()).slice(0, 3), ['Fri 2026-09-25 09:00', 'Sat 2026-09-26 09:00', 'Fri 2026-10-02 09:00']);
+  await setExpr('0 0 1,* * 1');
+  assert.deepEqual((await runs()).slice(0, 2), ['Mon 2026-09-28 00:00', 'Mon 2026-10-05 00:00']);
+  await pick('github', '*/2 * * * *');
   await setExpr('*/5 * * * *');
   assert.equal(await text('#cr-warn'), '');
   await setExpr('0 * * * *');

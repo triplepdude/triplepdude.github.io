@@ -46,6 +46,20 @@ function imageInfo(b) {
     }
     return { type: 'ico', width: entries[entries.length - 1].width, height: entries[entries.length - 1].height, entries };
   }
+  if (b.subarray(0, 6).toString('latin1') === 'GIF89a' || b.subarray(0, 6).toString('latin1') === 'GIF87a') {
+    // Logical screen descriptor (GIF89a spec, section 18).
+    return { type: 'gif', width: b.readUInt16LE(6), height: b.readUInt16LE(8) };
+  }
+  if (b.subarray(0, 4).toString('hex') === '49492a00' || b.subarray(0, 4).toString('hex') === '4d4d002a') {
+    // TIFF 6.0: first IFD, tags 256 (ImageWidth) and 257 (ImageLength), SHORT or LONG.
+    const le = b[0] === 0x49, u16 = o => le ? b.readUInt16LE(o) : b.readUInt16BE(o), u32 = o => le ? b.readUInt32LE(o) : b.readUInt32BE(o);
+    const ifd = u32(4), n = u16(ifd), tags = {};
+    for (let i = 0; i < n; i++) {
+      const e = ifd + 2 + 12 * i, type = u16(e + 2);
+      tags[u16(e)] = type === 3 ? u16(e + 8) : u32(e + 8);
+    }
+    return { type: 'tiff', width: tags[256], height: tags[257], compression: tags[259] };
+  }
   throw new Error('unknown image format: ' + b.subarray(0, 16).toString('hex'));
 }
 
@@ -95,6 +109,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(bmp, 0, 0);
     return pts.map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data));
+  }, [buf.toString('base64'), points]);
+  // The same through TTImage, for formats the browser cannot decode itself (TIFF).
+  const ttPixels = (buf, points) => page.evaluate(async ([b64, pts]) => {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const res = await TTImage.decode(new Blob([bytes]));
+    const ctx = res.canvas.getContext('2d', { willReadFrequently: true });
+    const out = pts.map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data));
+    TTImage.release(res);
+    return out;
   }, [buf.toString('base64'), points]);
   const close = (actual, expected, tol, msg) =>
     expected.forEach((v, i) => assert.ok(Math.abs(actual[i] - v) <= tol, `${msg}: got [${actual}] expected ~[${expected}]`));
@@ -324,17 +347,17 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await ctx2.close();
   }
 
-  // GIF cannot be encoded by canvas, so "original format" says it saves a PNG, and does.
+  // A GIF stays a GIF under "Original format" (TTImage writes GIF; the old page wrongly said it could not).
   const gif = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
   await page.selectOption('#ri-format', 'same');
   await page.check('#ri-lock');
   await page.click('#ri-clear');
   await page.setInputFiles('#ri-file', { name: 'dot.gif', mimeType: 'image/gif', buffer: gif });
   await waitDims('1 × 1');
-  assert.match(await page.locator('#ri-format option[value="same"]').textContent(), /^PNG \(GIF cannot be saved here\)$/);
+  assert.equal(await page.locator('#ri-format option[value="same"]').textContent(), 'Original (GIF)');
   out = await download();
-  assert.equal(out.name, 'dot-1x1.png');
-  assert.equal(out.info.type, 'png');
+  assert.equal(out.name, 'dot-1x1.gif');
+  assert.deepEqual([out.info.type, out.info.width, out.info.height], ['gif', 1, 1]);
 
   // ---------- Crop position, pad colour, fit inside, never enlarge ----------
   // Band images made here: three 100 px bands, red, green and blue, side by side or stacked.
@@ -413,7 +436,26 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await waitDims('100 × 300');
   await page.fill('#ri-pct', '50');
   await waitDims('50 × 150');
+  // Never enlarge with Crop (bug: the 100 x 300 image was blown up to 600 x 600): the frame shrinks,
+  // keeping its square shape, to fit inside the image, 100 x 100, the centre (green) band.
+  await page.check('input[name="ri-by"][value="px"]');
+  await page.selectOption('#ri-fit', 'crop');
+  await page.check('input[name="ri-grav"][aria-label="Centre"]');
+  await page.fill('#ri-w', '600');
+  await page.fill('#ri-h', '600');
+  await waitDims('100 × 100');
+  out = await download();
+  assert.deepEqual([out.name, out.info.width, out.info.height], ['tall-bands-100x100.png', 100, 100]);
+  assert.deepEqual(await pixels(out.buf, [[50, 2], [50, 97]]), [[0, 255, 0, 255], [0, 255, 0, 255]], 'unscaled centre crop');
+  assert.doesNotMatch(await text('#ri-note'), /enlarges/);
+  // A wide 600 x 200 frame on the 100 x 300 image: k = min(100/600, 300/200) gives 100 x 33.
+  await page.fill('#ri-h', '200');
+  await waitDims('100 × 33');
+  // Stretch clamps each side to the original: 600 x 200 becomes 100 x 200.
+  await page.selectOption('#ri-fit', 'stretch');
+  await waitDims('100 × 200');
   await page.uncheck('#ri-noup');
+  await waitDims('600 × 200');
 
   // ---------- BMP, ICO and AVIF output ----------
   await page.check('input[name="ri-by"][value="px"]');
@@ -448,6 +490,18 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await settle();
   out = await download();
   assert.equal(out.info.entries.length, 1, 'just the 64 px icon');
+  // Icons are square: 64 x 32 is centred on a transparent 64 x 64 icon, and the page says so rather than
+  // naming and showing it as 64 x 32 (bug).
+  await page.fill('#ri-h', '32');
+  await page.selectOption('#ri-fit', 'stretch');
+  await page.waitForFunction(() => /Icons are square/.test(document.querySelector('#ri-note').textContent));
+  await waitDims('64 × 64');
+  assert.match(await text('#ri-note'), /Icons are square, so the 64 × 32 image is centred on a transparent 64 × 64 icon/);
+  out = await download();
+  assert.equal(out.name, 'tall-bands-64x64.ico');
+  assert.deepEqual(out.info.entries.map(e => [e.width, e.height]), [[64, 64]]);
+  assert.deepEqual(await pixels(out.info.entries[0].data, [[32, 4], [32, 32]]), [[0, 0, 0, 0], [0, 255, 0, 255]], 'transparent band above the image');
+  await page.selectOption('#ri-fit', 'crop');
   await page.fill('#ri-w', '300');
   await page.fill('#ri-h', '300');
   await page.waitForFunction(() => /at most 256 × 256/.test(document.querySelector('#ri-error').textContent));
@@ -550,29 +604,31 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await waitDims('120 × 80');
   assert.equal(await page.locator('#ri-format option[value="same"]').textContent(), 'JPEG (HEIC cannot be saved here)');
   assert.deepEqual(await page.locator('#ri-list .ri-row-info').allTextContents().then(a => a.map(t => t.replace(/, [\d.]+ K?B$/, ''))),
-    ['240 × 160 → 120 × 80 JPEG', '60 × 40 → 120 × 80 PNG', '32 × 16 → 120 × 60 BMP', '20 × 10 → 120 × 60 PNG', '64 × 32 → 120 × 60 ' + (avifOk ? 'AVIF' : 'JPEG')]);
+    ['240 × 160 → 120 × 80 JPEG', '60 × 40 → 120 × 80 TIFF', '32 × 16 → 120 × 60 BMP', '20 × 10 → 120 × 60 GIF', '64 × 32 → 120 × 60 ' + (avifOk ? 'AVIF' : 'JPEG')]);
   // Preview another image from the list.
   await page.locator('#ri-list .ri-pick').nth(1).click();
   await page.waitForFunction(() => /60 × 40 px/.test(document.querySelector('#ri-forig').textContent));
   await page.waitForFunction(() => /Only the first of its 2 pages is used/.test(document.querySelector('#ri-note').textContent));
   await waitDims('120 × 80');
   assert.equal(await page.locator('#ri-list .ri-pick').nth(1).getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('#ri-format option[value="same"]').textContent(), 'PNG (TIFF cannot be saved here)');
+  assert.equal(await page.locator('#ri-format option[value="same"]').textContent(), 'Original (TIFF)');
   // One row's own download.
   const [single] = await Promise.all([page.waitForEvent('download'), page.locator('#ri-list .ri-dl').nth(3).click()]);
-  assert.equal(single.suggestedFilename(), 'anim-120x60.png');
+  assert.equal(single.suggestedFilename(), 'anim-120x60.gif');
   assert.deepEqual((await pixels(fs.readFileSync(await single.path()), [[60, 30]]))[0], [255, 0, 0, 255], 'first GIF frame');
   // Everything as a ZIP. Focus comes back to the button afterwards.
   await page.focus('#ri-zip');
   const [zdl] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
   assert.equal(zdl.suggestedFilename(), 'resized-images.zip');
   const entries = readZip(fs.readFileSync(await zdl.path()));
-  assert.deepEqual(entries.map(e => e.name), ['quadrants-120x80.jpg', 'two-pages-120x80.png', 'flag-120x60.bmp', 'anim-120x60.png', 'flat-120x60.' + (avifOk ? 'avif' : 'jpg')]);
+  assert.deepEqual(entries.map(e => e.name), ['quadrants-120x80.jpg', 'two-pages-120x80.tif', 'flag-120x60.bmp', 'anim-120x60.gif', 'flat-120x60.' + (avifOk ? 'avif' : 'jpg')]);
   const [eq, et, eb, eg] = entries.map(e => e.data);
   assert.deepEqual([imageInfo(eq).type, imageInfo(eq).width, imageInfo(eq).height], ['jpeg', 120, 80]);
   const quad = await pixels(eq, [[30, 20], [90, 20], [30, 60], [90, 60]]);
   [[220, 40, 40], [40, 180, 60], [40, 60, 200], [240, 240, 240]].forEach((c, i) => c.forEach((v, j) => assert.ok(Math.abs(quad[i][j] - v) <= 14, `HEIC quadrant ${i}: ${quad[i]}`)));
-  assert.deepEqual(await pixels(et, [[20, 40], [100, 40]]), [[200, 30, 30, 255], [30, 30, 200, 255]], 'TIFF first page');
+  assert.deepEqual([imageInfo(et).type, imageInfo(et).width, imageInfo(et).height, imageInfo(et).compression], ['tiff', 120, 80, 5], 'TIFF stays TIFF, LZW');
+  assert.deepEqual(await ttPixels(et, [[20, 40], [100, 40]]), [[200, 30, 30, 255], [30, 30, 200, 255]], 'TIFF first page');
+  assert.deepEqual([imageInfo(eg).type, imageInfo(eg).width, imageInfo(eg).height], ['gif', 120, 60], 'GIF stays GIF');
   assert.deepEqual([imageInfo(eb).type, imageInfo(eb).width, imageInfo(eb).height], ['bmp', 120, 60]);
   assert.deepEqual(await pixels(eb, [[60, 10], [60, 50]]), [[250, 200, 0, 255], [0, 90, 160, 255]], 'BMP stays BMP');
   assert.deepEqual(await pixels(eg, [[5, 5]]), [[255, 0, 0, 255]]);
@@ -602,6 +658,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(await text('#ri-note'), /stays sharp/);
   out = await download();
   assert.deepEqual(await pixels(out.buf, [[498, 250], [501, 250]]), [[255, 0, 0, 255], [0, 0, 255, 255]], 'sharp edge between the halves');
+
+  // A UTF-16 SVG (byte order mark) is read in its own encoding, not as UTF-8 (which failed to parse).
+  const utf16 = Buffer.concat([Buffer.from([0xFE, 0xFF]), Buffer.from(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="30" height="20"><rect width="30" height="20" fill="#00ff00"/></svg>', 'utf16le').swap16())]);
+  await page.setInputFiles('#ri-file', { name: 'utf16.svg', mimeType: 'image/svg+xml', buffer: utf16 });
+  await page.waitForFunction(() => document.querySelectorAll('#ri-list .ri-row').length === 2 || document.querySelector('#ri-error').textContent);
+  assert.equal(await text('#ri-error'), '', 'UTF-16BE SVG opens');
+  assert.match(await page.locator('#ri-list .ri-row-info').nth(1).textContent(), /^30 × 20 →/);
+  await page.locator('#ri-list .ri-x').nth(1).click();
+  await waitDims('1000 × 500');
 
   // ---------- Download straight after a change saves the new size ----------
   // The preview waits 150 ms after typing; before the fix a click inside that pause saved the previous

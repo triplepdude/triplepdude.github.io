@@ -56,13 +56,14 @@ howto: |
 
   Thumbnails are drawn only when they scroll into view, and the new PDF is
   assembled in a background worker, so the page stays responsive with
-  hundreds of pages. Everything is held in your device's memory, so very
-  large jobs, over about 1 GB in total, are best done on a computer.
+  hundreds of pages. Everything is held in your device's memory, so jobs of
+  several hundred megabytes are best done on a computer rather than a
+  phone. Each file can be up to 1 GB.
 faq:
   - q: Are my PDFs uploaded to a server?
     a: No. The files are read, previewed and merged by JavaScript in this page, on your own device. Nothing is sent over the network, so you can merge confidential documents safely.
   - q: Is there a limit on the number of files or pages?
-    a: There is no fixed limit. Everything happens in your device's memory, so hundreds of files or thousands of pages work on a computer, while a phone may run out of memory sooner.
+    a: Each file can be up to 1 GB, and there is no set limit on the number of files or pages. Everything happens in your device's memory, so hundreds of files or thousands of pages work on a computer, while a phone may run out of memory sooner.
   - q: Why did the merged PDF lose its bookmarks or form fields?
     a: Bookmarks and form fields belong to the document, not to its pages, and this tool copies pages. The page content, web links and look are kept, but the outline is not, and form fields may no longer be fillable. Fill in forms before you merge them.
   - q: Can I merge a password-protected PDF?
@@ -639,7 +640,10 @@ faq:
           }
           for (var pi = 0; pi < job.pages.length; pi++) {
             var p = job.pages[pi], page = copied[p.f][p.i];
-            var angle = (((page.getRotation().angle || 0) + p.rot) % 360 + 360) % 360;
+            // /Rotate must be a multiple of 90 (ISO 32000-1, 7.7.3.3); readers treat any other value as 0.
+            var own = Number(page.getRotation().angle) || 0;
+            if (own % 90) own = 0;
+            var angle = ((own + p.rot) % 360 + 360) % 360;
             page.setRotation(PDFLib.degrees(angle));
             out.addPage(page);
             done++;
@@ -759,12 +763,12 @@ faq:
         if (meta && meta.info && meta.info.EncryptFilterName && meta.info.EncryptFilterName !== 'Standard') {
           f.state = 'error';
           f.message = 'uses ' + meta.info.EncryptFilterName + ' (certificate) encryption, which this tool cannot remove.';
-          return;
         }
-        if (!pages.some(function (p) { return p.fileId === f.id; })) {
+      }, function () { /* metadata is optional */ }).then(function () {
+        if (f.state === 'ready' && !pages.some(function (p) { return p.fileId === f.id; })) {
           for (var i = 0; i < f.pages; i++) pages.push({ id: nextId++, fileId: f.id, index: i, rot: 0, selected: false });
         }
-      }, function () { /* metadata is optional */ });
+      });
     }, function (err) {
       if (err && err.name === 'PasswordException') {
         f.state = 'locked';
@@ -898,42 +902,54 @@ faq:
       '<button type="button" class="btn secondary small mpdf-down">' + ICON.right + '</button></div>';
     if (p.thumb) { TT.$('img', li).src = p.thumb; TT.$('.mpdf-wait', li).remove(); }
     p.el = li;
+    p.ui = { num: TT.$('.mpdf-num', li), chip: TT.$('.mpdf-chip', li), src: TT.$('.mpdf-src', li), img: TT.$('img', li), cb: TT.$('.mpdf-check', li),
+      del: TT.$('.mpdf-del', li), up: TT.$('.mpdf-up', li), down: TT.$('.mpdf-down', li), rl: TT.$('.mpdf-rl', li), rr: TT.$('.mpdf-rr', li), last: {} };
+    p.ui.up.title = 'Move earlier';
+    p.ui.down.title = 'Move later';
+    p.ui.rl.title = 'Rotate left';
+    p.ui.rr.title = 'Rotate right';
+    p.ui.del.title = 'Remove page';
     if (observer) observer.observe(li); else queueThumb(p);
     return li;
   }
 
+  // Writes only what changed, so reordering or rotating hundreds of pages stays quick.
+  function put(ui, key, el, prop, value) {
+    if (ui.last[key] === value) return;
+    ui.last[key] = value;
+    if (prop === 'text') el.textContent = value;
+    else if (prop === 'aria') el.setAttribute('aria-label', value);
+    else if (prop === 'bg') el.style.background = value;
+    else if (prop === 'transform') el.style.transform = value;
+    else if (prop === 'title') el.title = value;
+    else el[prop] = value;
+  }
   function renderPages() {
     var n = pages.length;
     pages.forEach(function (p, i) {
       if (!p.el) buildCard(p);
       if (pageList.children[i] !== p.el) pageList.insertBefore(p.el, pageList.children[i] || null);
-      var f = fileById(p.fileId), label = pageLabel(p), el = p.el;
-      TT.$('.mpdf-num', el).textContent = i + 1;
-      TT.$('.mpdf-chip', el).style.background = f ? f.color : '#999';
-      var src = TT.$('.mpdf-src', el);
-      src.textContent = (f ? f.name : '') + ' \u00B7 p. ' + (p.index + 1);
-      src.title = src.textContent;
-      TT.$('img', el).style.transform = p.rot ? 'rotate(' + p.rot + 'deg)' : '';
-      var cb = TT.$('.mpdf-check', el);
-      cb.checked = !!p.selected;
-      cb.setAttribute('aria-label', 'Select page ' + (i + 1) + ' (' + label + ')');
+      var f = fileById(p.fileId), label = pageLabel(p), el = p.el, u = p.ui, pos = i + 1;
+      put(u, 'num', u.num, 'text', String(pos));
+      put(u, 'chip', u.chip, 'bg', f ? f.color : '#999');
+      var src = (f ? f.name : '') + ' \u00B7 p. ' + (p.index + 1);
+      put(u, 'src', u.src, 'text', src);
+      put(u, 'srcTitle', u.src, 'title', src);
+      put(u, 'rot', u.img, 'transform', p.rot ? 'rotate(' + p.rot + 'deg)' : '');
+      u.cb.checked = !!p.selected;
+      put(u, 'cbLabel', u.cb, 'aria', 'Select page ' + pos + ' (' + label + ')');
       el.classList.toggle('is-selected', !!p.selected);
-      TT.$('.mpdf-del', el).setAttribute('aria-label', 'Remove page ' + (i + 1) + ' (' + label + ')');
-      TT.$('.mpdf-up', el).setAttribute('aria-label', 'Move page ' + (i + 1) + ' earlier');
-      TT.$('.mpdf-down', el).setAttribute('aria-label', 'Move page ' + (i + 1) + ' later');
-      TT.$('.mpdf-rl', el).setAttribute('aria-label', 'Rotate page ' + (i + 1) + ' left');
-      TT.$('.mpdf-rr', el).setAttribute('aria-label', 'Rotate page ' + (i + 1) + ' right');
-      TT.$('.mpdf-up', el).disabled = busy || i === 0;
-      TT.$('.mpdf-down', el).disabled = busy || i === n - 1;
-      TT.$('.mpdf-rl', el).disabled = busy;
-      TT.$('.mpdf-rr', el).disabled = busy;
-      TT.$('.mpdf-del', el).disabled = busy;
-      cb.disabled = busy;
-      TT.$('.mpdf-up', el).title = 'Move earlier';
-      TT.$('.mpdf-down', el).title = 'Move later';
-      TT.$('.mpdf-rl', el).title = 'Rotate left';
-      TT.$('.mpdf-rr', el).title = 'Rotate right';
-      TT.$('.mpdf-del', el).title = 'Remove page';
+      put(u, 'delLabel', u.del, 'aria', 'Remove page ' + pos + ' (' + label + ')');
+      put(u, 'upLabel', u.up, 'aria', 'Move page ' + pos + ' earlier');
+      put(u, 'downLabel', u.down, 'aria', 'Move page ' + pos + ' later');
+      put(u, 'rlLabel', u.rl, 'aria', 'Rotate page ' + pos + ' left');
+      put(u, 'rrLabel', u.rr, 'aria', 'Rotate page ' + pos + ' right');
+      put(u, 'upOff', u.up, 'disabled', busy || i === 0);
+      put(u, 'downOff', u.down, 'disabled', busy || i === n - 1);
+      put(u, 'rlOff', u.rl, 'disabled', busy);
+      put(u, 'rrOff', u.rr, 'disabled', busy);
+      put(u, 'delOff', u.del, 'disabled', busy);
+      put(u, 'cbOff', u.cb, 'disabled', busy);
     });
     while (pageList.children.length > n) {
       var last = pageList.lastChild;

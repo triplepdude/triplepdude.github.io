@@ -95,6 +95,11 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await val('#mg-big'), '18T WL 85631 11326');
   await ll('geo:40.748440,-73.985664;u=35');
   assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  // Regression: decimal commas (European style) were rejected.
+  await ll('40,748440 -73,985664');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  await ll('40,748440; -73,985664');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
   await ll('40:44:54.38N 73:59:08.39W');
   assert.equal(await val('#mg-r-dd'), '40.748439, -73.985664');
   assert.equal(await err(), '');
@@ -120,6 +125,8 @@ module.exports = async ({ page, open, assert }) => {
   // MGRS errors.
   const mgrsErrors = {
     '18TWL123': /same number of digits/,
+    // Regression: two digit groups of different lengths were silently split in half (8563 111326 -> 85631 11326).
+    '18T WL 8563 111326': /same number of digits.*You gave 4 and 6/,
     '33ZXX': /UPS/,
     '32XMH1234': /32X does not exist/,
     '18TIL1234': /never uses the letters I and O/,
@@ -206,8 +213,20 @@ module.exports = async ({ page, open, assert }) => {
     new MutationObserver(() => { if (box.textContent) window.__mgErrors.push(box.textContent); })
       .observe(box, { childList: true, characterData: true, subtree: true });
   });
+  // Regression: the big result was an aria-live region, so every keystroke announced a new reference.
+  // Now one summary is announced after typing pauses.
+  assert.equal(await page.getAttribute('#mg-big', 'aria-live'), null);
+  assert.equal(await page.getAttribute('#mg-note', 'aria-live'), null);
+  await page.evaluate(() => {
+    window.__mgStatus = [];
+    const box = document.querySelector('#mg-status');
+    new MutationObserver(() => window.__mgStatus.push(box.textContent)).observe(box, { childList: true, characterData: true, subtree: true });
+  });
   await page.locator('#mg-ll').pressSequentially('51.5007, -0.1246', { delay: 30 });
-  await page.waitForTimeout(1000);
+  await page.waitForFunction(() => window.__mgStatus.length > 0, null, { timeout: 3000 });
+  await page.waitForTimeout(300);
+  const said = await page.evaluate(() => window.__mgStatus);
+  assert.deepEqual(said, [`MGRS ${await val("#mg-big")}.`], JSON.stringify(said));
   assert.deepEqual(await page.evaluate(() => window.__mgErrors), []);
   assert.equal(await page.textContent('#mg-error'), '');
   assert.match(await val('#mg-big'), /^30U XC \d{5} \d{5}$/);
@@ -369,6 +388,15 @@ module.exports = async ({ page, open, assert }) => {
   // Decimal commas in a semicolon-separated file (European spreadsheets).
   await batch('name;lat;lon\nESB;40,748440;-73,985664');
   assert.equal((await batchRows())[0][3], '18TWL8563111326');
+  // Regression: a UTM line with thousands separators or with the band joined to the easting was
+  // read as latitude/longitude and rejected; decimal commas on a plain line failed too.
+  await batch('Zone 18T, 585,628mE, 4,511,322mN\n18T585628 4511322\n40,748440 -73,985664\n-33.8568, 151.2153');
+  const fixedRows = await batchRows();
+  assert.deepEqual(fixedRows.map(r => r[3]), ['18TWL8562811322', '18TWL8562811322', '18TWL8563111326', '56HLH3490052288'], JSON.stringify(fixedRows));
+  // A coordinate starting with a minus sign is not a formula, so it is written unchanged.
+  await page.click('#mg-batch-copy');
+  const plainCsv = (await page.evaluate(() => navigator.clipboard.readText())).trim().split('\r\n');
+  assert.ok(plainCsv[4].startsWith('"-33.8568, 151.2153",-33.856800,151.215300,56HLH3490052288,'), plainCsv[4]);
   // A header with no rows under it says so instead of "0 of 0".
   await page.fill('#mg-batch', 'name,lat,lon\n');
   await page.waitForFunction(() => /no coordinates below the header/.test(document.querySelector('#mg-batch-sum').textContent));

@@ -651,4 +651,80 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   img = await decode(d.buf, [[3, 3], [20, 3]]);
   assert.deepEqual([img.w, img.h], [24, 16]);
   assert.ok(near(img.px[0], [230, 30, 30]) && near(img.px[1], [40, 90, 210]), JSON.stringify(img.px));
+
+  // ---------- Multi-page TIFF: each page keeps its own orientation ----------
+  // pages.tif: two 30x20 pages, Artist on both, Orientation 6 on page 1 and 3 on page 2.
+  await clear();
+  await page.setInputFiles('#rexif-file', F('pages.tif'));
+  await idle();
+  d = await download(0);
+  let pp = tiffPages(d.buf).pages;
+  assert.equal(pp.length, 2);
+  assert.deepEqual([pp[0][274], pp[1][274]], [[6], [3]], 'page 2 keeps 3, not page 1\'s 6');
+  assert.equal(pp[0][315] === undefined && pp[1][315] === undefined, true, 'Artist removed from both pages');
+  const pOrig = tiffPages(fs.readFileSync(F('pages.tif')));
+  assert.ok(tiffData(d.buf, pp[1]).equals(tiffData(fs.readFileSync(F('pages.tif')), pOrig.pages[1])));
+  // "Rotate the pixels" would make a one-page PNG, so a multi-page TIFF keeps its tags instead.
+  await setMode('bake');
+  d = await download(0);
+  assert.equal(d.name, 'pages-clean.tif');
+  pp = tiffPages(d.buf).pages;
+  assert.deepEqual([pp.length, pp[0][274], pp[1][274]], [2, [6], [3]]);
+  assert.match(await page.textContent(card(0)), /one-page PNG, so each page keeps its own orientation tag/);
+  await setMode('strip');
+  pp = tiffPages((await download(0)).buf).pages;
+  assert.deepEqual([pp[0][274], pp[1][274]], [undefined, undefined]);
+  await setMode('keep');
+
+  // ---------- Crafted files that list millions of entries are refused quickly ----------
+  // TIFF: 1,000 overlapping directories of 65,520 tags each in 790 KB (65 million tags).
+  const N = 0xFFF0, bomb = Buffer.alloc(8 + 2 + N * 12 + 4 * 1001 + 16);
+  bomb.write('II*\0', 0, 'latin1');
+  bomb.writeUInt32LE(8, 4);
+  for (let k = 0; k < 1000; k++) {
+    bomb.writeUInt16LE(N, 8 + 4 * k);
+    bomb.writeUInt32LE(k < 999 ? 12 + 4 * k : 0, 8 + 2 + N * 12 + 4 * k);
+  }
+  // HEIC: an iloc box of 12,000 items, each claiming 65,535 zero-byte extents (786 million).
+  const box = (t, p) => { const h = Buffer.alloc(8); h.writeUInt32BE(8 + p.length); h.write(t, 4, 'latin1'); return Buffer.concat([h, p]); };
+  const fbox = (t, v, p) => box(t, Buffer.concat([Buffer.from([v, 0, 0, 0]), p]));
+  const u16 = (...v) => { const b = Buffer.alloc(2 * v.length); v.forEach((x, i) => b.writeUInt16BE(x, 2 * i)); return b; };
+  const ents = Buffer.concat(Array.from({ length: 12000 }, (_, i) => u16(i + 1, 0, 0, 65535)));
+  const heicBomb = Buffer.concat([
+    box('ftyp', Buffer.from('heic\0\0\0\0mif1heic', 'latin1')),
+    fbox('meta', 0, Buffer.concat([
+      fbox('hdlr', 0, Buffer.concat([Buffer.alloc(4), Buffer.from('pict'), Buffer.alloc(13)])),
+      fbox('pitm', 0, u16(1)),
+      fbox('iinf', 0, Buffer.concat([u16(1), fbox('infe', 2, Buffer.concat([u16(1, 0), Buffer.from('hvc1\0', 'latin1')]))])),
+      fbox('iloc', 1, Buffer.concat([Buffer.from([0, 0]), u16(12000), ents]))
+    ])),
+    box('mdat', Buffer.alloc(16))
+  ]);
+  const t1 = Date.now();
+  await clear();
+  await page.setInputFiles('#rexif-file', [
+    { name: 'bomb.tif', mimeType: 'image/tiff', buffer: bomb },
+    { name: 'bomb.heic', mimeType: 'image/heic', buffer: heicBomb }
+  ]);
+  await idle();
+  assert.ok(Date.now() - t1 < 5000, `crafted files refused in ${Date.now() - t1} ms`);
+  assert.match(await page.textContent(`${card(0)} .rexif-err`), /tag directories are far too large/);
+  assert.match(await page.textContent(`${card(1)} .rexif-err`), /HEIC file is damaged: its item list cannot be read/);
+
+  // ---------- A photo dropped anywhere on the page is cleaned, instead of the browser opening it ----------
+  await clear();
+  const dropped = await page.evaluate(async b64 => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], 'dropped.jpg', { type: 'image/jpeg' }));
+    const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(over);
+    const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(ev);
+    return over.defaultPrevented && ev.defaultPrevented;
+  }, fs.readFileSync(F('gps-rotated.jpg')).toString('base64'));
+  assert.equal(dropped, true);
+  await page.waitForSelector(`${card(0)} [data-rexif-dl]`);
+  await idle();
+  assert.equal(await page.textContent(`${card(0)} strong`), 'dropped.jpg');
+  assert.ok((await table(0))['Location (GPS)']);
 };

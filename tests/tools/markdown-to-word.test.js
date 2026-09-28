@@ -280,7 +280,36 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(clip.html, /<ul style="margin:0 0 8pt;list-style:none;padding-left:1\.2em">\s*<li>☒ done<\/li>/);
   assert.match(clip.html, /\\\(x\^2\\\)/);
   assert.doesNotMatch(clip.html, /class=/);
-  assert.match(clip.text, /^Title\n/);
+  // The plain-text flavour is readable text: formulas once, as LaTeX, the ticked box, cells split by tabs.
+  assert.equal(clip.text, 'Title\n\nBold and code.\n\nA\tB\n1\t2\n\n\u2612 done\n\nMath \\(x^2\\).');
+
+  // ---- Edge cases that once produced an invalid or odd file ----
+  await setMd([
+    '## \u4e2d\u6587\u6807\u9898', '', '[jump](#\u4e2d\u6587\u6807\u9898)', '',
+    '<ol start="99999999999"><li>huge start</li></ol>', '',
+    '$$\\phantom{x}$$', '', 'after', '',
+    '<a href="https://example.com/a b\u00e9">spaced</a>', '',
+    `<img alt="tall" width="10" height="100000" src="data:image/png;base64,${img.toString('base64')}">`, '',
+    '<svg width="8" height="8"><rect width="8" height="8" fill="url(https://evil.example/f.svg#f)"/></svg>'
+  ].join('\n'));
+  await inFrameSel('#mdw-doc .katex');
+  d = await download();
+  // A heading with no ASCII letters still gets a valid bookmark name for the link to jump to.
+  assert.match(d.doc, /<w:bookmarkStart w:id="\d+" w:name="_h"\/>/);
+  assert.match(d.doc, /<w:hyperlink w:anchor="_h" w:history="1">/);
+  // w:start is clamped to Word's largest list number.
+  assert.match(d.text('word/numbering.xml'), /<w:start w:val="32767"\/>/);
+  // An equation that draws nothing leaves no empty m:oMathPara (the schema needs an m:oMath in it).
+  assert.doesNotMatch(d.doc, /<\/m:oMathParaPr><\/m:oMathPara>/);
+  // Relationship targets are valid URIs.
+  assert.match(d.rels, /Target="https:\/\/example\.com\/a%20b%C3%A9" TargetMode="External"/);
+  // A picture is never taller than the text area: page height minus top and bottom margins (twips, 15 per px), in EMU.
+  const tall = /<wp:extent cx="(\d+)" cy="(\d+)"\/>/.exec(d.doc);
+  const pgH = +/<w:pgSz w:w="\d+" w:h="(\d+)"/.exec(d.doc)[1], mar = +/<w:pgMar w:top="(\d+)"/.exec(d.doc)[1];
+  assert.equal(pgH + ' ' + mar, '15840 720');
+  const textH = Math.round((15840 - 2 * 720) / 15 * 9525);
+  assert.ok(Math.abs(+tall[2] - textH) <= 1 && +tall[1] >= 1, tall[0]);
+  assert.equal(await frame.$$eval('#mdw-doc rect', l => l.map(r => r.getAttribute('fill')).join()), '', 'no external url() in the preview');
 
   // ---- Errors ----
   await page.click('#mdw-clear');

@@ -393,4 +393,44 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await p3.waitForFunction(() => { const e = document.querySelector('#circ-editor'); return e.width === Math.round(e.getBoundingClientRect().width * 2); });
   assert.ok(await p3.evaluate(() => window.__paints) >= 2, 'a real resize still redraws');
   await ctx3.close();
+
+  // ---------- SVG is drawn big enough for the largest output, not at its nominal 300 x 150 ----------
+  // viewBox 100 x 50: red with a blue disc of radius 20 at (50, 25). Drawn at 4096 x 2048, so at 100%
+  // the 2048 px height spans the circle and a 2048 px output needs no enlarging.
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect width="100" height="50" fill="#ff0000"/><circle cx="50" cy="25" r="20" fill="#0000ff"/></svg>';
+  await page.setInputFiles('#circ-file', { name: 'logo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
+  await page.waitForFunction(() => /logo\.svg/.test(document.querySelector('#circ-drop-title').textContent));
+  assert.match(await page.textContent('#circ-drop-hint'), /^SVG, drawn at 4096 × 2048 px/);
+  await page.selectOption('#circ-shape', 'circle');
+  await page.selectOption('#circ-size', '2048');
+  assert.doesNotMatch(await page.textContent('#circ-out-hint'), /enlarged/);
+  png = await download();
+  assert.equal(png.name, 'logo-circle-2048.png');
+  // Output x/y map to viewBox units as 25 + x * 50 / 2048: (1024, 1024) is the disc's centre,
+  // (1024, 60) lies 23.5 units above it, outside the disc, on red.
+  assert.deepEqual(png.px(1024, 1024), BLUE);
+  assert.deepEqual(png.px(1024, 60), RED);
+  // The disc's edge is sharp (vector-drawn), not a blurred 300 x 150 enlargement: 1 unit = 41 px, and
+  // at 1 unit inside and outside the edge the colours are pure.
+  assert.deepEqual(png.px(1024, 1024 - 19 * 40.96 | 0), BLUE);
+  assert.deepEqual(png.px(1024, 1024 - 21 * 40.96 | 0), RED);
+  // A broken SVG gets a readable error and the previous image stays.
+  await page.setInputFiles('#circ-file', { name: 'broken.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>') });
+  await page.waitForFunction(() => document.querySelector('#circ-error').textContent.length > 0);
+  assert.match(await page.textContent('#circ-error'), /SVG/);
+  assert.match(await page.textContent('#circ-drop-title'), /logo\.svg/);
+
+  // ---------- A file dropped anywhere on the page opens, instead of replacing the page ----------
+  const dropped = await page.evaluate(async b64 => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], 'dropped.png', { type: 'image/png' }));
+    const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(over);
+    const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(ev);
+    return { over: over.defaultPrevented, drop: ev.defaultPrevented };
+  }, fs.readFileSync(path.join(fixtures, 'stripes.png')).toString('base64'));
+  assert.deepEqual(dropped, { over: true, drop: true });
+  await page.waitForFunction(() => /dropped\.png/.test(document.querySelector('#circ-drop-title').textContent));
+  assert.match(await page.textContent('#circ-drop-hint'), /^400 × 200 px/);
 };

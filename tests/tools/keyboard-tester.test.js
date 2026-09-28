@@ -38,6 +38,9 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#kbt-tested'), '1 / 104');
 
   // Right Shift is location 2 and legacy keyCode 16; Shift+A gives "A".
+  // The wait keeps the second A press slower than the 50 ms chatter threshold
+  // (it used to be a few round trips, which could flag chatter and fail below).
+  await page.waitForTimeout(120);
   await page.keyboard.down('ShiftRight');
   assert.equal(await text('#kbt-ev-keycode'), '16');
   assert.match(await text('#kbt-ev-location'), /^2 /);
@@ -168,6 +171,8 @@ module.exports = async ({ page, open, assert }) => {
   await page.evaluate(() => { document.documentElement.style.scrollBehavior = 'auto'; window.scrollTo(0, 0); });
 
   // Chatter: a key that goes down again 0-1 ms after release is flagged.
+  // Nothing typed so far at human speed may count as chatter.
+  assert.equal(await text('#kbt-chatter'), '0', await text('#kbt-log'));
   await page.evaluate(() => {
     const t = document.getElementById('kbt-scroll');
     t.focus();

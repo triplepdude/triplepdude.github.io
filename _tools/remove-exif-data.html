@@ -54,7 +54,8 @@ howto: |
     tag display rotated or mirrored.
   - **Rotate the pixels** re-encodes only the photos that need turning:
     JPEG and WebP at 92% quality, PNG and lossless WebP without loss, TIFF
-    as PNG. Colours are converted to sRGB.
+    as PNG. Colours are converted to sRGB. A multi-page TIFF keeps its
+    orientation tags instead, since a PNG holds only one page.
 
   HEIC and AVIF store rotation in their own property, which is kept, so
   they always stay upright.
@@ -874,7 +875,7 @@ faq:
     if (u16(2) === 43) throw fail('BigTIFF files are not supported. Save the image as a standard TIFF, JPEG or PNG first.');
     if (ascii(u, 8, 2) === 'CR') throw fail('Canon RAW (CR2) files are not supported. Export a JPEG or TIFF from your photo editor first.');
     const pages = [], seen = new Set();
-    let off = u32(4);
+    let off = u32(4), total = 0;
     while (off && pages.length < 1000) {
       if (seen.has(off) || off + 2 > u.length || off + 2 + u16(off) * 12 + 4 > u.length) {
         if (!pages.length) throw fail('This TIFF file is damaged or truncated.');
@@ -882,6 +883,10 @@ faq:
       }
       seen.add(off);
       const n = u16(off), entries = [];
+      // Overlapping directories in a small crafted file could otherwise list tens of millions of
+      // tags and crash the tab. Real files have a few dozen tags per page.
+      total += n;
+      if (total > 200000) throw fail('This TIFF file is damaged: its tag directories are far too large.');
       for (let i = 0; i < n; i++) {
         const e = off + 2 + i * 12, type = u16(e + 2), count = u32(e + 4);
         const size = (TSIZE[type] || 0) * count;
@@ -952,8 +957,10 @@ faq:
     const align = () => { if (pos & 1) put(new Uint8Array(1)); };
     const setU32 = (buf, o, v) => new DataView(buf.buffer, buf.byteOffset, buf.byteLength).setUint32(o, v, le);
     w.pages.forEach((pg, i) => {
+      // Each page keeps its own orientation value (pages can differ).
+      const ov = pg.tag(274) && w.values(pg.tag(274)), orient = ov && ov[0] >= 2 && ov[0] <= 8 ? ov[0] : 0;
       const keep = pg.entries.filter(en => TIFF_IMAGE_TAGS.has(en.tag) ||
-        (en.tag === 274 && opt.orientation) || (en.tag === 34675 && opt.keepIcc))
+        (en.tag === 274 && opt.keepOrient && orient) || (en.tag === 34675 && opt.keepIcc))
         .sort((a, b) => a.tag - b.tag);
       align();
       if (prevNext) setU32(prevNext, prevNext.length - 4, pos); else setU32(header, 4, pos);
@@ -964,7 +971,7 @@ faq:
       keep.forEach((en, k) => {
         const p = 2 + 12 * k;
         dv.setUint16(p, en.tag, le);
-        if (en.tag === 274) { dv.setUint16(p + 2, 3, le); dv.setUint32(p + 4, 1, le); dv.setUint16(p + 8, opt.orientation, le); return; }
+        if (en.tag === 274) { dv.setUint16(p + 2, 3, le); dv.setUint32(p + 4, 1, le); dv.setUint16(p + 8, orient, le); return; }
         if (TIFF_OFFSETS[en.tag]) {
           const offs = w.values(en), lens = w.values(pg.tag(TIFF_OFFSETS[en.tag]));
           if (!offs || !lens || lens.length < offs.length) throw fail('This TIFF file is damaged: its image data cannot be located.');
@@ -1053,6 +1060,7 @@ faq:
         let q = p + 2;
         const count = readN(u, q, idw);
         M.iloc = { box: b, countAt: q, cw: idw, count, os, bs, entries: [] };
+        let extents = 0;
         q += idw;
         for (let i = 0; i < count; i++) {
           const s = q, id = readN(u, q, idw);
@@ -1065,6 +1073,10 @@ faq:
           q += bs;
           const n = be16(u, q), ext = [];
           q += 2;
+          // Check the extents fit before reading them: with zero-byte offset and length fields a
+          // tiny crafted file could otherwise ask for billions of them.
+          extents += n;
+          if (q + n * (is + os + ls) > b.e || extents > 1000000) throw bad();
           for (let j = 0; j < n; j++) {
             q += is;
             const off = readN(u, q, os);
@@ -1081,8 +1093,8 @@ faq:
         M.iref = {
           box: b, w, refs: boxList(u, p, b.e, what).map(rb => {
             const n = be16(u, rb.d + w), to = [];
-            for (let k = 0; k < n; k++) to.push(readN(u, rb.d + w + 2 + k * w, w));
             if (rb.d + w + 2 + n * w > rb.e) throw bad();
+            for (let k = 0; k < n; k++) to.push(readN(u, rb.d + w + 2 + k * w, w));
             return { box: rb, from: readN(u, rb.d, w), to };
           })
         };
@@ -1303,12 +1315,15 @@ faq:
     const r = entry.report, opt = options();
     const rotatable = r.type === 'jpeg' || r.type === 'png' || r.type === 'webp' || r.type === 'tiff';
     const o = rotatable && r.exif && r.exif.orientation >= 2 && r.exif.orientation <= 8 ? r.exif.orientation : 0;
-    const cOpt = { keepIcc: opt.keepIcc, orientation: opt.mode === 'keep' ? o : 0 };
+    // A PNG holds one page, so a multi-page TIFF keeps its orientation tags instead of being turned.
+    const multiPage = r.type === 'tiff' && r.pages > 1;
+    const mode = opt.mode === 'bake' && multiPage ? 'keep' : opt.mode;
+    const cOpt = { keepIcc: opt.keepIcc, orientation: mode === 'keep' ? o : 0, keepOrient: mode === 'keep' };
     if (r.type === 'webp' && cOpt.orientation && !r._walk.chunks.some(c => c.type === 'VP8X')) cOpt.orientation = 0;
     const cleaner = { jpeg: cleanJpeg, png: cleanPng, webp: cleanWebp, gif: cleanGif, tiff: cleanTiff, heic: cleanHeif, avif: cleanHeif }[r.type];
     let bytes = cleaner(u, r, cOpt);
     let mime = TYPES[r.type].mime, width = r.width, height = r.height, baked = false;
-    if (opt.mode === 'bake' && o) {
+    if (mode === 'bake' && o) {
       const b = await bake(entry, r);
       bytes = b.bytes; mime = b.mime; width = b.width; height = b.height; baked = true;
     }
@@ -1318,7 +1333,8 @@ faq:
     const ext = TYPES[type].exts.indexOf(origExt) >= 0 ? m[2] : TYPES[type].ext;
     return {
       type, blob: new Blob([bytes], { type: mime }), size: bytes.length, name: (m[1] || 'photo') + '-clean.' + ext,
-      width, height, baked, orientation: o, keptOrientation: !!cOpt.orientation, keepIcc: opt.keepIcc && !baked, mode: opt.mode
+      width, height, baked, orientation: o, keptOrientation: !!cOpt.orientation, keepIcc: opt.keepIcc && !baked, mode,
+      pagesNotTurned: opt.mode === 'bake' && multiPage
     };
   }
 
@@ -1538,6 +1554,7 @@ faq:
         ? 'The metadata was overwritten with zeros where it lies in the file, so the file keeps its size and layout.'
         : 'The metadata items were unlinked and overwritten with zeros, so the file keeps its size. The photo keeps its own rotation setting and stays upright.');
     }
+    if (out && out.pagesNotTurned) notes.push('Rotating the pixels would turn this TIFF into a one-page PNG, so each page keeps its own orientation tag instead.');
     if (out && x && out.orientation) {
       const o = ORIENT[out.orientation].replace(/ \(\d\)$/, '').toLowerCase();
       notes.push(out.keptOrientation
@@ -1702,6 +1719,17 @@ faq:
     e.preventDefault();
     drop.classList.remove('is-over');
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
+  // A file dropped anywhere else on the page is used too, instead of the browser opening it
+  // in place of this page (and losing the work on it).
+  document.addEventListener('dragover', e => {
+    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') >= 0) e.preventDefault();
+  });
+  document.addEventListener('drop', e => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (e.defaultPrevented || !files || !files.length) return;
+    e.preventDefault();
+    addFiles(files);
   });
   TT.$$('input[name="rexif-orient"]').forEach(r => r.addEventListener('change', reprocess));
   iccBox.addEventListener('change', reprocess);

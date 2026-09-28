@@ -309,7 +309,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const hexOf = async id => page.locator(`#hg-${id}-hex`).textContent();
   const allHex = async () => Object.fromEntries(await Promise.all(IDS.map(async id => [id, await hexOf(id)])));
   await page.click('#hg-pick-all');
-  assert.equal(await text('#hg-alg-count'), '18 of 18');
+  assert.equal(await text('#hg-alg-count'), '19 of 19');
   for (const id of IDS) assert.equal(await page.isVisible(`#hg-${id}-hex`), true, id);
   const expectFor = (buf, key) => Object.assign(nodeHashes(buf), { keccak256: PY.keccak256[key], blake3: PY.blake3[key] });
   const settleAll = async exp => page.waitForFunction(e => Object.entries(e).every(([id, v]) => document.querySelector(`#hg-${id}-hex`).textContent === v), exp, { timeout: 15000 }).catch(() => {});
@@ -428,7 +428,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
 
   // ---------- Compare finds and ticks the matching algorithm ----------
   await page.click('#hg-pick-common');
-  assert.equal(await text('#hg-alg-count'), '6 of 18');
+  assert.equal(await text('#hg-alg-count'), '6 of 19');
   assert.equal(await page.isVisible('#hg-keccak256-hex'), false);
   await page.fill('#hg-text', 'abc');
   await settleAll({ sha256: V.abc.sha256[0] });
@@ -557,4 +557,22 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // The selected Text/File segment has a --muted ring (5.5:1 on the track), not only a colour change.
   const ring = await page.$eval('input[name="hg-src"]:checked + span', el => getComputedStyle(el).boxShadow);
   assert.match(ring, /rgb\(91, 98, 112\)/, ring);
+
+  // SHA-224 (computed on the page; Web Crypto has none) and HMAC-SHA-224. Vectors from
+  // Python: hashlib.sha224(b'abc'), hashlib.sha224(b''), hashlib.sha224(b'a' * 1000) and
+  // hmac.new(b'key', b'The quick brown fox jumps over the lazy dog', 'sha224').
+  await page.check('input[data-alg="sha224"]');
+  for (const [txt, want] of [['abc', '23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7'], ['', 'd14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f'],
+    ['a'.repeat(1000), '4e8f0ce90b64661a2b5e84be6d93a7d9b76871062f1814433d04a03d']]) {
+    await page.fill('#hg-text', txt);
+    await page.waitForFunction(w => document.querySelector('#hg-sha224-hex').textContent === w, want, { timeout: 5000 });
+  }
+  await page.fill('#hg-text', 'The quick brown fox jumps over the lazy dog');
+  await page.fill('#hg-key', 'key');
+  await page.waitForFunction(() => document.querySelector('#hg-sha224-hex').textContent === '88ff8b54675d39b8f72322e65ff945c52d96379988ada25639747e69', null, { timeout: 5000 });
+  assert.equal(await page.textContent('.hg-item[data-alg="sha224"] b'), 'HMAC-SHA-224');
+  await page.fill('#hg-expected', '88ff8b54675d39b8f72322e65ff945c52d96379988ada25639747e69');
+  assert.match(await page.textContent('#hg-compare'), /HMAC-SHA-224/);
+  await page.fill('#hg-key', '');
+  await page.fill('#hg-expected', '');
 };

@@ -71,7 +71,7 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal((await state()).sym, 'rw-r-----');
 
   // Symbolic -> octal, with an optional file type and ACL/SELinux marker.
-  for (const [sym, oct] of [['rwsr-xr-x', '4755'], ['-rw-r--r--', '644'], ['rwxr-s---', '2750'], ['rwSr--r--', '4644'], ['rwxrwxrwT', '1776'], ['-rw-r--r--.', '644'], ['-rwxr-x---+', '750']]) {
+  for (const [sym, oct] of [['rwsr-xr-x', '4755'], ['-rw-r--r--', '644'], ['rwxr-s---', '2750'], ['rwSr--r--', '4644'], ['rwxrwxrwT', '1776'], ['-rw-r--r--.', '644'], ['-rwxr-x---+', '750'], ['rw-r-----+', '640']]) {
     await page.fill('#cm-symbolic', sym);
     assert.equal(await val('#cm-octal'), oct, sym);
     assert.equal(await bits(), parseInt(oct, 8), sym);

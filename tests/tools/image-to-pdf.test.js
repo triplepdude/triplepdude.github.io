@@ -540,6 +540,18 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   }, [...pngWrap]);
   assert.deepEqual(viaBrowser, [...tif], 'browser PNG decoder agrees with the predictor decoding');
 
+  // An SVG saved as UTF-16 (with a byte order mark) is read in its own encoding. It used to be read as
+  // UTF-8, which turned it into garbage and failed with "not valid SVG"; ISO-8859-1 files lost accents.
+  await page.click('#itp-clear');
+  const utf16 = Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from('<?xml version="1.0" encoding="UTF-16"?><svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="#00ff00"/><!-- café --></svg>', 'utf16le')]);
+  await page.setInputFiles('#itp-file', { name: 'utf16.svg', mimeType: 'image/svg+xml', buffer: utf16 });
+  await page.waitForFunction(() => document.querySelectorAll('#itp-list .itp-item').length === 1 || document.querySelector('#itp-error').textContent);
+  assert.equal(await page.textContent('#itp-error'), '', 'UTF-16 SVG opens');
+  assert.match(await page.locator('#itp-list .itp-dims').first().textContent(), /^80 × 40 · SVG/);
+  ({ pdf } = await makePdf());
+  const u16 = flatePixels(pdf.pages[0].image, assert);
+  assert.deepEqual([...u16.subarray(0, 3)], [0, 255, 0], 'UTF-16 SVG drawn');
+
   // ---------- Fit or fill, per page ----------
   // A4 portrait, 1/2 in (36 pt) margin: the area inside is 523.28 x 769.89 pt.
   await page.click('#itp-clear');

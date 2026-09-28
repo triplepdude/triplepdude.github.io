@@ -767,10 +767,24 @@ faq:
         var msv = Number((id >> 22n) + DISCORD_EPOCH);
         var secv = Math.floor(msv / 1000);
         var created = new Date(msv).toISOString().replace('T', ' ').replace('Z', ' UTC');
-        wrap.appendChild(decodeItem(text, secv, null, 'Discord ID created ' + created));
-        wrap.appendChild(decodeItem(code('F', secv), secv, 'F', ''));
-        decoded = secv;
-        summary = 'Discord ID created ' + render('F', secv);
+        // No ID can be created in the future. A 19-digit number that would be
+        // one is almost certainly a Unix time in nanoseconds (Go, Python time_ns).
+        if (msv > Date.now() + 864e5) {
+          if (digits.length !== 19) {
+            msg.textContent = 'That is not a Discord ID: it would have been created on ' + created.slice(0, 10) + ', which is in the future.';
+            return '';
+          }
+          var nsSec = Number(id / 1000000000n);
+          var nsNote = 'Looks like nanoseconds, not a Discord ID (that would be dated ' + created.slice(0, 10) + ', in the future); Discord needs seconds, so use ' + nsSec;
+          ['f', 'R'].forEach(function (s, i) { wrap.appendChild(decodeItem(code(s, nsSec), nsSec, s, i === 0 ? nsNote : '')); });
+          decoded = nsSec;
+          summary = 'Looks like nanoseconds; Discord needs seconds, so use ' + nsSec + ': ' + render('f', nsSec);
+        } else {
+          wrap.appendChild(decodeItem(text, secv, null, 'Discord ID created ' + created));
+          wrap.appendChild(decodeItem(code('F', secv), secv, 'F', ''));
+          decoded = secv;
+          summary = 'Discord ID created ' + render('F', secv);
+        }
       } else {
         var n = Number(text), note = '';
         if (Math.abs(n) >= 1e14) {

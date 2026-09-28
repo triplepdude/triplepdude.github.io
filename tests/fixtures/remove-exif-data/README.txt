@@ -15,3 +15,6 @@ tiled-o8.tif
 meta.gif
   Pillow two-frame GIF with a comment, plus an XMP ("XMP DataXMP") application block,
   an ImageMagick IPTC block and bytes after the trailer, added by hand.
+pages.tif
+  Pillow two-page uncompressed RGB TIFF (30x20, red left / blue right; page 2 flipped),
+  Artist tag on both pages, Orientation 6 on page 1 and 3 on page 2 (patched by hand).

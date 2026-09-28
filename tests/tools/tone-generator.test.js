@@ -108,6 +108,7 @@ module.exports = async ({ page, open, assert }) => {
   const lastOsc = () => page.evaluate(() => { const o = window.__oscs[window.__oscs.length - 1]; return { type: o.type, f: o.frequency.value }; });
   const levels = () => page.evaluate(() => window.__levels());
   const near = (a, b, tol, what) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a}, expected ${b} ± ${tol}`);
+  const waitText = (sel, re) => page.waitForFunction(([s, src]) => new RegExp(src).test(document.querySelector(s).textContent), [sel, re.source]);
   const download = async () => {
     const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#tg-dl')]);
     return { name: dl.suggestedFilename(), path: await dl.path(), buf: fs.readFileSync(await dl.path()) };
@@ -399,13 +400,34 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('#tg-play');
   await page.waitForTimeout(1500);
   assert.equal(await page.getAttribute('#tg-play', 'aria-pressed'), 'true');
+  // While a sweep plays, the stats follow the live frequency.
+  assert.notEqual(await text('#tg-period'), '–');
+  // Regression: retyping the end frequency used to stop the sweep and leave an
+  // assertive error behind. A half-typed value keeps the old sweep playing, the
+  // polite note waits for a pause, and a valid value restarts the sweep.
+  const oscCount = await page.evaluate(() => window.__oscs.length);
+  await page.fill('#tg-f2', '');
+  assert.equal(await page.getAttribute('#tg-play', 'aria-pressed'), 'true');
+  assert.equal(await text('#tg-error'), '');
+  assert.equal(await text('#tg-mode-msg'), '', 'no message on the first keystroke');
+  await waitText('#tg-mode-msg', /^Sweep frequencies must be from 1 to 22,000 Hz\.$/);
+  await page.type('#tg-f2', '2000');
+  assert.equal(await text('#tg-mode-msg'), '');
+  assert.equal(await page.getAttribute('#tg-play', 'aria-pressed'), 'true');
+  assert.ok(await page.evaluate(n => window.__oscs.length > n, oscCount), 'the sweep restarted with the new range');
+  assert.equal(await page.evaluate(() => window.__oscs[window.__oscs.length - 1].frequency.value > 0), true);
   await page.click('#tg-play');
+  // Idle sweep: no single frequency to describe.
+  assert.deepEqual([await text('#tg-note'), await text('#tg-period'), await text('#tg-wl')], ['–', '–', '–']);
   await page.fill('#tg-f2', '99999');
-  assert.equal(await text('#tg-mode-msg'), 'Sweep frequencies must be from 1 to 22,000 Hz.');
+  await waitText('#tg-mode-msg', /^Sweep frequencies must be from 1 to 22,000 Hz\.$/);
   await page.click('#tg-play');
   assert.equal(await text('#tg-error'), 'Sweep frequencies must be from 1 to 22,000 Hz.');
   assert.equal(await page.getAttribute('#tg-play', 'aria-pressed'), 'false');
   await page.fill('#tg-f2', '1000');
+  assert.equal(await text('#tg-mode-msg'), '');
+  // The Play error clears once the settings are valid again.
+  assert.equal(await text('#tg-error'), '');
 
   // ---- Binaural beats ----
   await page.check('input[name="tg-mode"][value="binaural"]');
@@ -431,10 +453,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(crossings(w.ch[0]).length, 400);
   assert.equal(crossings(w.ch[1]).length, 420);
   await page.fill('#tg-beat', '60');
-  assert.equal(await text('#tg-mode-msg'), 'The beat frequency must be from 0.1 to 50 Hz.');
+  await waitText('#tg-mode-msg', /^The beat frequency must be from 0\.1 to 50 Hz\.$/);
   await page.fill('#tg-beat', '10');
-  await page.fill('#tg-freq', '2000');
-  assert.match(await text('#tg-mode-msg'), /hard to hear above about 1,000 Hz/);
+  assert.equal(await text('#tg-mode-msg'), '');
+  await page.fill('#tg-freq', '1000');
+  assert.equal(await text('#tg-mode-msg'), '');
+  // The hint matches its own text: above 1,000 Hz (it used to wait until 1,500 Hz).
+  await page.fill('#tg-freq', '1200');
+  await waitText('#tg-mode-msg', /hard to hear above about 1,000 Hz/);
 
   // ---- A long file does not freeze the page ----
   await page.check('input[name="tg-mode"][value="tone"]');
@@ -443,6 +469,13 @@ module.exports = async ({ page, open, assert }) => {
   await page.selectOption('#tg-rate', '48000');
   await page.fill('#tg-dur', '60');
   assert.equal(await text('#tg-size'), '60 s, stereo, 11,520,044 bytes (11.0 MB).');
+  // Regression: the size did not follow a channel change (mono <-> stereo).
+  await page.check('input[name="tg-ch"][value="both"]');
+  assert.equal(await text('#tg-size'), '60 s, mono, 5,760,044 bytes (5.5 MB).');
+  await page.evaluate(() => document.activeElement.blur());
+  await page.keyboard.press('r');
+  assert.equal(await text('#tg-size'), '60 s, stereo, 11,520,044 bytes (11.0 MB).');
+  await page.check('input[name="tg-ch"][value="left"]');
   await page.evaluate(() => {
     window.__long = [];
     new PerformanceObserver(l => l.getEntries().forEach(e => window.__long.push(Math.round(e.duration)))).observe({ type: 'longtask' });
@@ -466,4 +499,33 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.isChecked('input[name="tg-mode"][value="sweep"]'), true);
   assert.equal(await text('#tg-big'), '50 → 5,000 Hz');
   assert.equal(await text('#tg-sub'), 'Linear sweep over 4 s, repeating');
+
+  // Hostile or malformed links: values are compared, never put into a CSS
+  // selector (a quote used to throw and stop the page from initialising).
+  const base = link.replace(/\?.*/, '');
+  for (const q of ['?mode=x%22%5D&ch=%22%5D&wave=%22%5D', '?mode=sweep&from=abc&to=1e3&time=0x10', '?f=1e400&beat=Infinity', '?f=-5']) {
+    await page.goto(base + q);
+    assert.equal(await text('#tg-size') !== '' || q.includes('sweep'), true, `initialised for ${q}`);
+    assert.equal(await page.isChecked('input[name="tg-ch"][value="both"]'), true);
+  }
+  await page.goto(base + '?mode=x%22%5D&ch=%22%5D');
+  assert.equal(await text('#tg-big'), '440 Hz');
+  assert.equal(await text('#tg-size'), '5 s, mono, 441,044 bytes (431 KB).');
+  await page.goto(base + '?mode=sweep&from=abc&to=1e3&time=0x10');
+  assert.equal(await val('#tg-f1'), '20', 'invalid start ignored');
+  assert.equal(await val('#tg-f2'), '20000', 'exponent notation ignored');
+  assert.equal(await val('#tg-sdur'), '10', 'hex ignored');
+  assert.equal(await text('#tg-big'), '20 → 20,000 Hz');
+
+  // A failure while building the file (such as running out of memory) is
+  // reported and the button recovers, instead of staying on "Generating".
+  await page.goto(base);
+  await page.fill('#tg-dur', '0.2');
+  await page.evaluate(() => { window.__Blob = window.Blob; window.Blob = function () { throw new RangeError('Array buffer allocation failed'); }; });
+  await page.click('#tg-dl');
+  await waitText('#tg-dl-msg', /^Could not create the WAV file \(Array buffer allocation failed\)\. Try a shorter length/);
+  assert.equal(await text('#tg-dl'), 'Download WAV');
+  await page.evaluate(() => { window.Blob = window.__Blob; });
+  dl = await download();
+  assert.equal(parseWav(dl.buf).frames, 8820);
 };

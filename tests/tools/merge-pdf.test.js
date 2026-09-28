@@ -5,7 +5,8 @@ const zlib = require('zlib');
 // Fixtures (tests/fixtures/merge-pdf) were made with reportlab and pikepdf/qpdf: alpha.pdf (3 A4
 // pages), bravo.pdf (2 Letter pages, the second with /Rotate 90), locked.pdf (AES-256 R6, user
 // password "open sesame", object streams), restricted.pdf (AES-128, owner password only, one
-// landscape A4 page), many.pdf (40 pages) and damaged.pdf. Every page shows its label in large
+// landscape A4 page), many.pdf (40 pages), damaged.pdf, inherit.pdf (2 pages that inherit /Rotate 90
+// from the page tree) and oddrot.pdf (page 1 has the invalid /Rotate 45, page 2 /Rotate -90). Every page shows its label in large
 // text ("Alpha 2"). Outputs are read back with pdf.js, an independent reader (the tool writes with
 // pdf-lib), checking page order, text, /Rotate and encryption. Sizes are in points: A4 595 x 842,
 // Letter 612 x 792.
@@ -201,4 +202,16 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(pdf.pages.length, 40);
   assert.equal(pdf.pages[39].text, 'Many 40');
   assert.match(pdf.producer, /TripleP Tools/);
+
+  // ---- Rotation read from the page tree, and invalid /Rotate values ----
+  // ISO 32000-1 7.7.3.3: /Rotate is inheritable and must be a multiple of 90; readers treat 45 as 0
+  // and -90 as 270. A bad value once made the whole merge fail.
+  await page.click('#mpdf-clear');
+  await page.setInputFiles('#mpdf-file', [fx('inherit.pdf'), fx('oddrot.pdf')]);
+  await page.waitForFunction(() => document.querySelectorAll('.mpdf-page').length === 4);
+  await page.click('.mpdf-page:nth-child(1) .mpdf-rr');
+  out = await save('#mpdf-merge');
+  assert.equal(await page.textContent('#mpdf-error'), '');
+  pdf = await inspect(out.buf);
+  assert.deepEqual(pdf.pages.map(p => p.text + '@' + p.rotate), ['Inh 1@180', 'Inh 2@90', 'Odd 1@0', 'Odd 2@270']);
 };

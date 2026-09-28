@@ -481,4 +481,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForTimeout(100);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, 'no horizontal scroll at 320px');
   await page.setViewportSize(vp);
+
+  // Regression: a pasted 100,000-digit subnet count is refused at once instead of
+  // freezing the page in BigInt loops.
+  await page.fill('#sc-ip', '10.0.0.0/8');
+  await page.selectOption('#sc-split-mode', 'count');
+  const t0 = Date.now();
+  await page.evaluate(() => { const e = document.querySelector('#sc-split-num'); e.value = '9'.repeat(100000); e.dispatchEvent(new Event('input')); });
+  assert.ok(Date.now() - t0 < 1000, 'huge count handled in ' + (Date.now() - t0) + ' ms');
+  assert.match(await page.textContent('#sc-split-msg'), /can be split into at most 16,777,216 subnets/);
 };

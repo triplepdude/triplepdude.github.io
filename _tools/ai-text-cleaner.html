@@ -391,6 +391,8 @@ faq:
     if (/\d/.test(before) && !pre && !post && /^(?:present|now|today|date)\b/i.test(s.slice(end, end + 8))) return '-';
     if (/[.,;:!?)\]}]/.test(after)) return '';
     if (after === '\u201D' || after === '\u2019' || (/["']/.test(after) && !post && (after2 === '' || /[\s.,;:!?)]/.test(after2)))) return ',';
+    // After the end of a sentence ("Done. —Next"), the dash just goes.
+    if (/[.!?]/.test(before) && pre) return pre;
     if (/[,;:]/.test(before)) return ' ';
     if (/[(\[{]/.test(before)) return '';
     return ', ';
@@ -445,7 +447,12 @@ faq:
       if (f && !(f[2][0] === '`' && f[3].indexOf('`') >= 0)) { fence = f[2]; c.fence++; continue; }
       if (/^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/.test(line)) {
         // Under a line of text, --- is a heading underline: keep the line break it stands for.
-        if (/^ {0,3}-+[ \t]*$/.test(line) && out.length && /\S/.test(out[out.length - 1])) { c.heading++; out.push(''); } else c.rule++;
+        if (/^ {0,3}-+[ \t]*$/.test(line) && out.length && /\S/.test(out[out.length - 1])) { c.heading++; out.push(''); }
+        else {
+          c.rule++;
+          // A rule between two blank lines leaves one blank line, not two.
+          if (out.length && !/\S/.test(out[out.length - 1]) && i + 1 < lines.length && !/\S/.test(lines[i + 1])) i++;
+        }
         continue;
       }
       if (/^ {0,3}=+[ \t]*$/.test(line) && out.length && /\S/.test(out[out.length - 1])) { c.heading++; out.push(''); continue; }
@@ -471,8 +478,9 @@ faq:
         c.code++;
         return hold(/^ .*[^ ].* $/.test(code) ? code.slice(1, -1) : code);
       })
-      .replace(/!\[([^\]\n]{0,300})\]\(([^()\s]{1,2000})(?:\s+"[^"\n]{0,300}")?\)/g, function (m, alt) { c.image++; return alt; })
-      .replace(/\[([^\]\n]{1,300})\]\(([^()\s]{1,2000})(?:\s+"[^"\n]{0,300}")?\)/g, function (m, text, url) {
+      // Addresses may hold one level of brackets, as in Wikipedia's Foo_(bar).
+      .replace(/!\[([^\]\n]{0,300})\]\(((?:[^()\s]|\([^()\s]{0,300}\)){1,2000})(?:\s+"[^"\n]{0,300}")?\)/g, function (m, alt) { c.image++; return alt; })
+      .replace(/\[([^\]\n]{1,300})\]\(((?:[^()\s]|\([^()\s]{0,300}\)){1,2000})(?:\s+"[^"\n]{0,300}")?\)/g, function (m, text, url) {
         c.link++;
         return text === url || text.replace(/^https?:\/\//, '') === url.replace(/^https?:\/\//, '') ? hold(url) : text + ' (' + hold(url) + ')';
       })

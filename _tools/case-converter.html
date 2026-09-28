@@ -348,12 +348,14 @@ faq:
       chunk.replace(WORD, function (w, idx) {
         var between = chunk.slice(last, idx);
         out += between; gap += between;
-        var nw = keepOn && isKept(w) ? w : lower(w);
-        if (mode === 'capital') nw = capFirst(nw);
+        // A kept word (NASA, iPhone, eBay) is left exactly as typed, even at
+        // the start of a sentence: capitalizing it gave "IPhone".
+        var kept = keepOn && isKept(w), nw = kept ? w : lower(w);
+        if (mode === 'capital') { if (!kept) nw = capFirst(nw); }
         else {
           // The English pronoun I and its contractions.
           if (!tr() && /^i(?:['’](?:m|ve|ll|d))?$/.test(nw)) nw = 'I' + nw.slice(1);
-          if (first || sentenceEnded(gap, prev)) nw = capFirst(nw);
+          if (!kept && (first || sentenceEnded(gap, prev))) nw = capFirst(nw);
         }
         out += nw;
         first = false; prev = w; gap = ''; last = idx + w.length;
@@ -458,7 +460,7 @@ faq:
   function mode() { var r = TT.$('input[name="cc-case"]:checked'); return r ? r.value : 'title'; }
 
   var HINTS = {
-    sentence: 'Sentence case can’t recognise names, so capitalize proper nouns yourself.',
+    sentence: 'Sentence case can’t recognize names, so capitalize proper nouns yourself.',
     capital: 'Every word gets a capital letter. For a headline, Title Case follows a style guide instead.',
     camel: 'Words are split at spaces, punctuation and case changes, so XMLHttpRequest becomes three words.',
     pascal: 'Words are split at spaces, punctuation and case changes, so XMLHttpRequest becomes three words.'

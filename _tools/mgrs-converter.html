@@ -227,11 +227,12 @@ faq:
 </div>
 
 <p class="msg error" id="mg-error" role="status"></p>
-<p class="msg mg-note" id="mg-note" aria-live="polite"></p>
+<p class="msg mg-note" id="mg-note"></p>
+<p class="visually-hidden" id="mg-status" role="status"></p>
 
 <div id="mg-out">
   <div class="mg-head">
-    <p class="result-big" id="mg-big" aria-live="polite">&nbsp;</p>
+    <p class="result-big" id="mg-big">&nbsp;</p>
     <button class="btn" type="button" data-copy-target="#mg-r-mgrs" aria-label="Copy MGRS grid reference">Copy MGRS</button>
   </div>
   <dl class="mg-list">
@@ -415,7 +416,13 @@ faq:
   }
 
   function parseMGRS(input) {
-    var s = String(input).toUpperCase().replace(/^\s*(?:MGRS|USNG)\s*:?/, '').replace(/\s+/g, '');
+    var raw = String(input).toUpperCase().replace(/^\s*(?:MGRS|USNG)\s*:?/, '');
+    // Easting and northing written as two groups must be the same length (85631 11326).
+    var groups = /[A-Z]\s*(\d+)\s+(\d+)\s*$/.exec(raw);
+    if (groups && groups[1].length !== groups[2].length) {
+      throw new Error('The easting and northing need the same number of digits, for example 85631 11326. You gave ' + groups[1].length + ' and ' + groups[2].length + '.');
+    }
+    var s = raw.replace(/\s+/g, '');
     if (!s) throw new Error('Enter an MGRS grid reference, for example 18T WL 85631 11326.');
     var m = /^(\d{1,2})([A-Z])([A-Z])([A-Z])(\d*)$/.exec(s);
     if (!m) {
@@ -453,6 +460,9 @@ faq:
     if (!s) throw new Error('Enter a latitude and longitude, for example 40.7484, -73.9857.');
     // A geo: URI (RFC 5870) carries "lat,lon" and optional ";param" parts.
     if (/^geo:/i.test(s)) s = s.slice(4).replace(/;.*$/, '');
+    // Decimal commas, as European spreadsheets write them: "40,7484 -73,9857" or "40,7484; -73,9857".
+    var dc = /^\s*([+-]?\d+),(\d+)\s*[;\s]\s*([+-]?\d+),(\d+)\s*$/.exec(s);
+    if (dc) s = dc[1] + '.' + dc[2] + ', ' + dc[3] + '.' + dc[4];
     s = s.replace(/\b(?:latitude|longitude|lat|long|lon|lng)\b\s*[:=]?/gi, ' ')
       // Brackets from copied arrays or tuples, and colons between degrees, minutes and seconds (40:44:54N).
       .replace(/[()[\]{}]/g, ' ')
@@ -545,7 +555,8 @@ faq:
     if (!s) throw new Error('Enter a UTM coordinate, for example 18T 585631 4511327.');
     s = s.replace(/\b(?:utm|zone|wgs\s*-?\s*84|nad\s*-?\s*83)\b\s*:?/gi, ' ')
       .replace(/(\d),(?=\d{3}(?!\d))/g, '$1')   // thousands separators: 4,511,322
-      .replace(/[;,]/g, ' ').replace(/\s+/g, ' ').trim();
+      .replace(/[;,]/g, ' ').replace(/\s+/g, ' ').trim()
+      .replace(/^(\d{1,2} ?[a-z]+)(?=\d)/i, '$1 ');   // 18T585631 4511327
     var m = /^(\d{1,2}) ?([a-z]+)? (.+)$/i.exec(s);
     if (!m) throw new Error('A UTM coordinate starts with the zone number and its band or hemisphere, like 18T 585631 4511327.');
     var zone = +m[1];
@@ -612,14 +623,15 @@ faq:
 
   // Batch lines can be in any format: an MGRS reference, a UTM line or a latitude and longitude.
   var RE_MGRS_LIKE = /^(?:mgrs|usng)?\s*:?\s*\d{1,2}\s*[C-HJ-NP-X]\s*[A-HJ-NP-Z]{2}(?:\s*\d+)*\s*$/i;
-  var RE_UTM_LIKE = /^(?:utm\s*)?(?:zone\s*)?\d{1,2}\s*(?:[a-z]+\b)?[\s,;]+[+-]?\d{5,}/i;
+  var RE_UTM_LIKE = /^(?:utm\s*)?(?:zone\s*)?\d{1,2}(?!\d)\s*(?:[a-z]+)?[\s,;]*[+-]?(?:\d{5,}|\d{1,3}(?:,\d{3})+(?!\d))(?![\d.]*\s*[\u00B0'"])/i;
+  var RE_DEC_COMMAS = /^\s*[+-]?\d+,\d+\s*[;\s]\s*[+-]?\d+,\d+\s*$/;   // 40,7484 -73,9857
   function pointFromText(text) {
     var notes = [], t = String(text).trim(), pt;
     if (RE_MGRS_LIKE.test(t)) {
       var r = parseMGRS(t);
       pt = fromMGRS(r, notes);
       if (r.digits < 5) notes.push('Centre of a ' + (r.unit >= 1000 ? r.unit / 1000 + ' km' : r.unit + ' m') + ' square.');
-    } else if (RE_UTM_LIKE.test(t)) {
+    } else if (RE_UTM_LIKE.test(t) && !RE_DEC_COMMAS.test(t)) {
       var u = parseUTM(t);
       notes = u.notes.slice();
       pt = fromUTM(u, notes);
@@ -701,7 +713,15 @@ faq:
     current = { lat: lat, lon: lon, utm: u, mgrs: compact };
     out.hidden = false;
     noteBox.textContent = notes.join(' ');
+    if (ready) announceSoon();
   }
+
+  // Screen readers hear the result once typing pauses, not on every key.
+  // (Not for the example shown when the page opens.)
+  var statusBox = TT.$('#mg-status'), ready = false;
+  var announceSoon = TT.debounce(function () {
+    statusBox.textContent = current && !out.hidden ? ('MGRS ' + TT.$('#mg-r-mgrs').textContent + '. ' + noteBox.textContent).trim() : '';
+  }, 900);
 
   // The UTM line follows the separate fields when those are edited.
   function syncUtmLine() {
@@ -1019,7 +1039,8 @@ faq:
   // Cells that a spreadsheet would run as a formula get a leading apostrophe; plain numbers don't.
   function csvCell(v) {
     var s = v == null ? '' : String(v);
-    if (/^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+(?:\.\d+)?$/.test(s)) s = "'" + s;
+    // Plain numbers and coordinates (digits, separators, degree marks, N S E W) cannot form a formula.
+    if (/^[=+\-@\t\r]/.test(s) && !/^[+-][\d.,;:\s\u00B0'"\u2032\u2033NSEWnsew]*$/.test(s)) s = "'" + s;
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
   function batchCSV() {
@@ -1108,5 +1129,6 @@ faq:
 
   showPanel();
   convert();
+  ready = true;
 })();
 </script>
