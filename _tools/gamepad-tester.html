@@ -8,7 +8,8 @@ howto: |
 
   1. Connect the controller with a USB cable or pair it over Bluetooth.
   2. Press any button on it. Browsers hide controllers from web pages until
-     a button is pressed while the page is open, so nothing appears before that.
+     you press a button (some also accept a large stick movement) while the
+     page is open, so nothing appears before that.
   3. Press every button and move both sticks and triggers. Each input lights
      up on the drawing and in the button list, and a tick marks every button
      that has worked at least once.
@@ -62,7 +63,8 @@ howto: |
   high-frequency one on the right. Rumble works with many Xbox and
   PlayStation controllers in Chrome and Edge; support in other browsers and
   with other controllers varies. The **Trigger rumble** button appears only
-  when the browser reports trigger motors.
+  when the browser reports trigger motors, such as on an Xbox One or Series
+  controller, and uses the strong motor's strength for both triggers.
 
   **Measure update rate** counts how often new data from the controller
   reaches the page while you move a stick. Browsers poll controllers at a
@@ -80,7 +82,7 @@ faq:
   - q: Is anything from my controller sent over the internet?
     a: No. The page reads the controller with the browser's Gamepad API and everything is shown and measured locally. Nothing is uploaded or stored.
   - q: Why does my controller not show up?
-    a: Browsers only reveal a controller after you press one of its buttons while the page is open. If it still does not appear, check that it is connected (Bluetooth pairing, a data cable rather than a charge-only one) and that no other app has taken exclusive control of it.
+    a: Browsers only reveal a controller after you press one of its buttons (some also accept a stick movement) while the page is open. If it still does not appear, check that it is connected (Bluetooth pairing, a data cable rather than a charge-only one) and that no other app has taken exclusive control of it.
   - q: How do I know if my stick has drift?
     a: Let go of the stick and press Measure drift. An offset below about 0.05 is normal. Between 0.05 and 0.15 most games hide it with their deadzone, and a steady offset above 0.15 is drift that can move your character or camera on its own.
   - q: Can I test a controller on my phone or tablet?
@@ -160,7 +162,7 @@ faq:
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h10a5 5 0 0 1 4.9 6l-1 5.1a2.6 2.6 0 0 1-4.5 1.2L14.6 16H9.4l-1.8 2.3a2.6 2.6 0 0 1-4.5-1.2l-1-5.1A5 5 0 0 1 7 6zm0 3v1.5H5.5v1.5H7v1.5h1.5V12H10v-1.5H8.5V9H7zm9.5.2a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm-2 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg>
   <div>
     <p><strong id="gpt-empty-title">No controller detected yet</strong></p>
-    <p class="hint" id="gpt-empty-text">Connect a controller by USB or Bluetooth, then press any button on it. For privacy, browsers only show a controller to a page after one of its buttons is pressed while the page is open.</p>
+    <p class="hint" id="gpt-empty-text">Connect a controller by USB or Bluetooth, then press any button on it. For privacy, browsers only show a controller to a page once it has been used while the page is open.</p>
   </div>
 </div>
 <p class="msg error" id="gpt-error" role="alert"></p>
@@ -223,7 +225,7 @@ faq:
   <div class="actions">
     <button class="btn secondary" type="button" id="gpt-drift">Measure drift</button>
   </div>
-  <div class="gpt-result" id="gpt-drift-out" aria-live="polite"></div>
+  <div class="gpt-result" id="gpt-drift-out"></div>
 
   <hr class="gpt-sep">
   <h2 class="gpt-h">Vibration</h2>
@@ -260,7 +262,7 @@ faq:
   <div class="actions">
     <button class="btn secondary" type="button" id="gpt-rate">Measure update rate</button>
   </div>
-  <div class="gpt-result" id="gpt-rate-out" aria-live="polite"></div>
+  <div class="gpt-result" id="gpt-rate-out"></div>
 </div>
 
 <script>
@@ -288,9 +290,12 @@ faq:
   var labelSel = $('#gpt-labels'), padSel = $('#gpt-pad'), dzIn = $('#gpt-dz');
   var states = {};   // gamepad.index -> per-controller state
   var sel = null;    // selected gamepad.index
-  var raf = 0, built = '', colors = null, lastCount = -1;
+  var raf = 0, built = '', shownPad = '', colors = null, lastCount = -1;
+  var driftRun = 0, rateRun = 0;
 
   function fixed(v, d) { var s = (Math.abs(v) < Math.pow(10, -d) / 2 ? 0 : v).toFixed(d); return s.charAt(0) === '-' ? MINUS + s.slice(1) : s; }
+  // A driver can report NaN or Infinity; treat those readings as 0.
+  function fin(v) { v = Number(v); return isFinite(v) ? v : 0; }
   function pad4(h) { h = String(h).toLowerCase(); while (h.length < 4) h = '0' + h; return h; }
   function say(t) { var s = $('#gpt-status'); s.textContent = ''; setTimeout(function () { s.textContent = t; }, 30); }
   var sayPress = TT.debounce(function (name) { say(name + ' pressed'); }, 250);
@@ -497,8 +502,19 @@ faq:
 
   // ---- Building the panel for one controller ----
   var stickUI = [];
+  // Drift and update rate results belong to one controller: showing another
+  // one stops any measurement and clears them.
+  function clearResults() {
+    driftRun++;
+    rateRun++;
+    $('#gpt-drift-out').textContent = '';
+    $('#gpt-rate-out').textContent = '';
+  }
+
   function build(p, set) {
     var st = stateFor(p), i = info(p.id);
+    var key = p.index + '\u0001' + p.id;
+    if (key !== shownPad) { shownPad = key; clearResults(); }
     $('#gpt-id').textContent = String(p.id);
     $('#gpt-index').textContent = String(p.index);
     $('#gpt-mapping').textContent = p.mapping === 'standard' ? 'standard' : p.mapping ? p.mapping : 'none';
@@ -570,7 +586,7 @@ faq:
     var lis = $('#gpt-buttons').children;
     var testedChanged = false;
     for (var k = 0; k < p.buttons.length; k++) {
-      var b = p.buttons[k] || {}, v = typeof b.value === 'number' ? b.value : (b.pressed ? 1 : 0), on = !!b.pressed;
+      var b = p.buttons[k] || {}, v = typeof b.value === 'number' && isFinite(b.value) ? b.value : (b.pressed ? 1 : 0), on = !!b.pressed;
       var was = !!st.prev[k];
       if (on && !was) {
         if (!st.tested.has(k)) { st.tested.add(k); testedChanged = true; }
@@ -594,7 +610,7 @@ faq:
 
     var axLis = $('#gpt-axes').children;
     for (var a = 0; a < p.axes.length; a++) {
-      var av = Number(p.axes[a]) || 0, key = 'a' + a, txt = fixed(av, 4);
+      var av = fin(p.axes[a]), key = 'a' + a, txt = fixed(av, 4);
       if (last[key] === txt) continue;
       last[key] = txt;
       var row = axLis[a];
@@ -607,7 +623,7 @@ faq:
 
     var dz = Number(dzIn.value) || 0;
     stickUI.forEach(function (ui) {
-      var d = ui.def, x = Number(p.axes[d.x]) || 0, y = Number(p.axes[d.y]) || 0;
+      var d = ui.def, x = fin(p.axes[d.x]), y = fin(p.axes[d.y]);
       var circ = st.circ[d.key], trail = st.trail[d.key];
       var r = Math.hypot(x, y);
       var sig = x.toFixed(4) + ',' + y.toFixed(4) + ',' + dz;
@@ -639,7 +655,7 @@ faq:
     });
     if (p.mapping === 'standard') {
       knobs.forEach(function (k, n) {
-        var ax2 = Number(p.axes[n * 2]) || 0, ay2 = Number(p.axes[n * 2 + 1]) || 0;
+        var ax2 = fin(p.axes[n * 2]), ay2 = fin(p.axes[n * 2 + 1]);
         var t = 'translate(' + (Math.max(-1, Math.min(1, ax2)) * 18).toFixed(2) + ' ' + (Math.max(-1, Math.min(1, ay2)) * 18).toFixed(2) + ')';
         if (k.g.getAttribute('transform') !== t) k.g.setAttribute('transform', t);
       });
@@ -671,6 +687,8 @@ faq:
       $('#gpt-details').hidden = none;
       if (none) {
         built = '';
+        shownPad = '';
+        clearResults();
         $('#gpt-side').hidden = true;
         svg.style.display = '';
         svg.classList.add('is-dim');
@@ -712,13 +730,14 @@ faq:
   function kick() { if (!raf) raf = requestAnimationFrame(frame); }
 
   // ---- Drift ----
-  var driftRun = 0;
   function measureDrift() {
     var p = padAt(sel), out = $('#gpt-drift-out');
     if (!p) return;
     var sticks = sticksOf(p), run = ++driftRun, index = p.index, samples = [], t0 = performance.now();
     if (!sticks.length) { out.textContent = 'This controller has no stick axes to measure.'; return; }
     out.textContent = 'Measuring… keep your hands off the sticks.';
+    say('Measuring drift for 2 seconds. Keep your hands off the sticks.');
+    var verdicts = [];
     (function step() {
       if (run !== driftRun) return;
       var q = padAt(index);
@@ -729,12 +748,13 @@ faq:
       sticks.forEach(function (s) {
         var sx = 0, sy = 0, maxR = 0;
         samples.forEach(function (a) {
-          var x = Number(a[s.x]) || 0, y = Number(a[s.y]) || 0;
+          var x = fin(a[s.x]), y = fin(a[s.y]);
           sx += x; sy += y;
           maxR = Math.max(maxR, Math.hypot(x, y));
         });
         var mx = sx / samples.length, my = sy / samples.length, off = Math.hypot(mx, my);
         var verdict = maxR < 0.05 ? 'No drift.' : maxR < 0.15 ? 'Slight offset; most games hide this with their deadzone.' : 'Drift: large enough to move a character or camera in many games.';
+        verdicts.push(s.name + ': ' + (maxR < 0.05 ? 'no drift' : maxR < 0.15 ? 'slight offset' : 'drift'));
         var para = document.createElement('p');
         var strong = document.createElement('strong');
         strong.textContent = s.name + ': ';
@@ -742,6 +762,7 @@ faq:
         para.appendChild(document.createTextNode('resting offset ' + off.toFixed(3) + ' (X ' + fixed(mx, 3) + ', Y ' + fixed(my, 3) + '), largest ' + maxR.toFixed(3) + '. ' + verdict));
         out.appendChild(para);
       });
+      say(verdicts.join('. ') + '.');
     })();
   }
 
@@ -787,13 +808,13 @@ faq:
   }
 
   // ---- Update rate ----
-  var rateRun = 0;
   function measureRate() {
     var p = padAt(sel), out = $('#gpt-rate-out');
     if (!p) return;
     var run = ++rateRun, index = p.index, t0 = performance.now(), lastPoll = 0;
-    var lastTs = null, lastSig = null, lastAt = 0, deltas = [], updates = 0;
+    var lastTs = null, lastSig = null, lastAt = 0, tsD = [], wallD = [], updates = 0;
     out.textContent = 'Measuring… keep moving a stick in circles.';
+    say('Measuring the update rate for 3 seconds. Keep moving a stick.');
     var ch = new MessageChannel();
     function sample() {
       if (run !== rateRun) { ch.port1.onmessage = null; return; }
@@ -806,8 +827,8 @@ faq:
           var ts = q.timestamp, sig = q.axes.join(',') + '|' + q.buttons.map(function (b) { return b ? b.value : 0; }).join(',');
           if (ts !== lastTs || sig !== lastSig) {
             if (lastSig !== null) {
-              var byTs = typeof ts === 'number' && typeof lastTs === 'number' && ts > lastTs && ts - lastTs < 1000;
-              deltas.push(byTs ? ts - lastTs : now - lastAt);
+              wallD.push(now - lastAt);
+              if (typeof ts === 'number' && typeof lastTs === 'number' && ts > lastTs && ts - lastTs < 1000) tsD.push(ts - lastTs);
             }
             updates++;
             lastTs = ts; lastSig = sig; lastAt = now;
@@ -817,13 +838,21 @@ faq:
       if (now - t0 < 3000) ch.port2.postMessage(0);
       else { ch.port1.onmessage = null; done(); }
     }
+    function median(a) {
+      var s = a.slice().sort(function (x, y) { return x - y; });
+      return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+    }
     function done() {
-      if (deltas.length < 20) {
+      if (wallD.length < 20) {
         out.textContent = 'Not enough input reached the page (' + updates + ' updates). Keep moving a stick during the whole measurement and try again.';
+        say('Not enough input to measure the update rate.');
         return;
       }
-      var s = deltas.slice().sort(function (a, b) { return a - b; });
-      var med = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+      // gamepad.timestamp is more precise than when this loop saw the change,
+      // but only trusted when it is in milliseconds and agrees with how often
+      // new data actually arrived (some implementations count reports instead).
+      var useTs = tsD.length >= wallD.length * 0.9 && Math.abs(median(tsD) / median(wallD) - 1) < 0.3;
+      var deltas = useTs ? tsD : wallD, med = median(deltas);
       var keep = deltas.filter(function (d) { return d > med * 0.5 && d < med * 1.5; });
       var mean = keep.reduce(function (a, b) { return a + b; }, 0) / keep.length;
       var hz = 1000 / mean;

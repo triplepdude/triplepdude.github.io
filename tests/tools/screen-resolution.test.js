@@ -63,6 +63,39 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#scr-aspect'), '20:9');
   assert.equal(await text('#scr-vp'), '412 × 915');
 
+  // Monitors are sold by their marketed ratio: 1920 x 1200 reduces to 8:5 but is
+  // "16:10"; 3440 x 1440 (43:18 = 2.389) and 2560 x 1080 (64:27 = 2.370) are
+  // "21:9" ultrawides. A 1440 x 3088 phone at DPR 3.5 reports 411 x 882
+  // (882 * 3.5 = 3087), which snaps to the real 3088-pixel panel.
+  const metrics = (w, h, d, sw, sh, mobile = false) => cdp.send('Emulation.setDeviceMetricsOverride',
+    { width: w, height: h, deviceScaleFactor: d, mobile, screenWidth: sw, screenHeight: sh });
+  await metrics(1000, 700, 1, 1920, 1200);
+  await waitText('#scr-phys', /^1920 × 1200$/);
+  assert.equal(await text('#scr-aspect'), '16:10');
+  assert.equal(await row('Aspect ratio'), '16:10 (1.60:1)');
+  await metrics(1000, 700, 1, 3440, 1440);
+  await waitText('#scr-phys', /^3440 × 1440$/);
+  assert.equal(await text('#scr-aspect'), '≈ 21:9');
+  assert.equal(await row('Aspect ratio'), '≈ 21:9 (43:18, 2.39:1)');
+  await metrics(1000, 700, 1, 2560, 1080);
+  await waitText('#scr-phys', /^2560 × 1080$/);
+  assert.equal(await row('Aspect ratio'), '≈ 21:9 (64:27, 2.37:1)');
+  await metrics(411, 800, 3.5, 411, 882, true);
+  await waitText('#scr-phys', /^1440 × 3088$/);
+  // A browser that rounds 2560 / 1.5 = 1706.67 down: 1706 x 1.5 = 2559 is whole
+  // but still a 2560-pixel panel.
+  await metrics(1000, 700, 1.5, 1706, 960);
+  await waitText('#scr-phys', /^2560 × 1440$/);
+  // An iPhone keeps screen.width/height in portrait when rotated; the drawing
+  // of the screen turns with the page (393 x 852 at DPR 3 is 1179 x 2556).
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  await metrics(852, 393, 3, 393, 852, true);
+  await waitText('#scr-caption', /852 × 393 screen/);
+  assert.equal(await text('#scr-phys'), '1179 × 2556');
+  const box = await page.$eval('#scr-screen', e => [parseFloat(e.style.width), parseFloat(e.style.height)]);
+  assert.ok(box[0] > box[1], `screen drawn landscape: ${box}`);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+
   // Chrome at 125% zoom on a 1920 x 1080 screen at 100%: devicePixelRatio is
   // 1.25, screen.width stays 1920, the window is 1920 wide, the viewport 1536.
   await page.evaluate(() => {
@@ -110,6 +143,17 @@ module.exports = async ({ page, open, assert }) => {
   await waitText('#scr-hz', /Hz$/);
   assert.equal(await text('#scr-hz'), '57.3 Hz');
   assert.match(await text('#scr-hz-detail'), /^Measured 57\.30 Hz: 17\.45 ms per frame/);
+  // A hidden tab draws no frames: the measurement pauses and restarts on return.
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => !!window.__hidden });
+    window.__hidden = true;
+  });
+  await page.click('#scr-hz-again');
+  await waitText('#scr-hz', /^Paused$/);
+  assert.match(await text('#scr-hz-detail'), /tab was hidden/);
+  await page.evaluate(() => { window.__hidden = false; document.dispatchEvent(new Event('visibilitychange')); });
+  await waitText('#scr-hz', /Hz$/);
+  assert.equal(await text('#scr-hz'), '57.3 Hz');
 
   // ---- PPI calculator ----
   assert.equal(await page.inputValue('#scr-pw'), '1280');
@@ -117,8 +161,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#scr-ppi'), '–');
   await page.fill('#scr-pw', '1920');
   await page.fill('#scr-ph', '1080');
+  // The results are not a live region: one short summary is spoken once typing pauses.
+  assert.equal(await page.getAttribute('#scr-ppi-out', 'aria-live'), null);
+  assert.equal(await page.getAttribute('#scr-ppi-msg', 'aria-live'), null);
+  await page.fill('#scr-diag', '2');
   await page.fill('#scr-diag', '24');
   assert.equal(await text('#scr-ppi'), '91.79 PPI');
+  assert.equal(await text('#scr-ppi-status'), '', 'nothing announced mid-typing');
+  await waitText('#scr-ppi-status', /^91\.79 pixels per inch, pixel pitch 0\.2767 millimetres\.$/, 3000);
   assert.equal(await text('#scr-pitch'), '0.2767 mm');
   assert.equal(await text('#scr-size-in'), '20.9 × 11.8 in');
   assert.equal(await text('#scr-size-cm'), '53.1 × 29.9 cm');
@@ -134,6 +184,8 @@ module.exports = async ({ page, open, assert }) => {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 800, deviceScaleFactor: 1, mobile: false, screenWidth: 1000, screenHeight: 800 });
   await waitText('#scr-vp', /^1000 × 800$/);
   assert.equal(await page.inputValue('#scr-pw'), '2560');
+  // A resize is announced once, a second after it settles.
+  await waitText('#scr-status', /^Screen 1000 by 800, viewport 1000 by 800 pixels\.$/, 4000);
   // Bad input gives a polite error, never a crash.
   await page.fill('#scr-diag', '0');
   assert.match(await text('#scr-ppi-msg'), /greater than 0 and up to 2540 cm/);

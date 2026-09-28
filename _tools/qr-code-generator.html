@@ -30,8 +30,8 @@ howto: |
   subjects and bodies are percent-encoded as RFC 6068 describes, so a space
   becomes `%20` and a line break `%0D%0A`. In contact and event text, a
   backslash, comma or semicolon gets a backslash in front of it and a line
-  break becomes `\n` (RFC 2426 for vCard, RFC 5545 for iCalendar). The box
-  under the preview shows the exact text, so you can check it. To share a
+  break becomes `\n` (RFC 2426 for vCard, RFC 5545 for iCalendar). The
+  *Text inside the QR code* box shows the exact result. To share a
   Wi-Fi network, use the [Wi-Fi QR code generator](/wifi-qr-code-generator/),
   which also prints a card for guests.
 
@@ -124,6 +124,7 @@ faq:
 .qg-opts { border-top: 1px solid var(--border); padding-top: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .qg-opts h2 { margin: 0; font-size: 1rem; }
 .qg-opts .field { margin-bottom: 0; }
+.qg-ecl-note { margin: -6px 0 0; }
 .qg-colour { display: flex; gap: 8px; align-items: center; }
 .qg-colour input[type="text"] { flex: 1 1 auto; min-width: 0; }
 .qg-colour input[type="color"] { flex: 0 0 52px; width: 52px; }
@@ -269,12 +270,12 @@ faq:
           <input type="text" id="qg-lon" inputmode="decimal" placeholder="2.2945" autocomplete="off">
         </div>
       </div>
-      <p class="hint">Decimal degrees; south and west are negative. You can paste "48.8584, 2.2945" into the latitude box.</p>
+      <p class="hint">Decimal degrees; south and west are negative. You can paste a pair such as "48.8584, 2.2945" into either box.</p>
       <div class="field">
         <label for="qg-geo-format">Format</label>
         <select id="qg-geo-format">
-          <option value="geo" selected>geo: link (opens the phone's map app)</option>
-          <option value="google">Google Maps web link (works everywhere)</option>
+          <option value="geo" selected>geo: link (opens the map app)</option>
+          <option value="google">Google Maps link (works everywhere)</option>
         </select>
       </div>
     </fieldset>
@@ -298,7 +299,9 @@ faq:
       <div class="field"><label for="qg-ev-loc">Location <span class="hint">(optional)</span></label><input type="text" id="qg-ev-loc" autocomplete="off"></div>
       <div class="field"><label for="qg-ev-desc">Description <span class="hint">(optional)</span></label><textarea id="qg-ev-desc"></textarea></div>
     </fieldset>
-    <div class="msg error" id="qg-error" aria-live="polite"></div>
+    <!-- Not live regions: they change as you type. #qg-status announces the first error or a
+         summary once typing pauses. -->
+    <div class="msg error" id="qg-error"></div>
     <div class="msg qg-warn" id="qg-warn"></div>
   </div>
 
@@ -335,6 +338,7 @@ faq:
           </select>
         </div>
       </div>
+      <p class="hint qg-ecl-note" id="qg-ecl-note" hidden>Error correction stays at H while there is a logo.</p>
       <div class="field">
         <label for="qg-margin">Quiet zone (border), in modules</label>
         <input type="number" id="qg-margin" min="0" max="20" step="1" value="4" inputmode="numeric">
@@ -379,7 +383,7 @@ faq:
       <div class="output" id="qg-payload" role="group" aria-labelledby="qg-payload-label"></div>
     </div>
     <div class="actions">
-      <button class="btn secondary small" type="button" data-copy-target="#qg-payload">Copy text</button>
+      <button class="btn secondary small" type="button" id="qg-copy-text" data-copy-target="#qg-payload">Copy text</button>
     </div>
   </div>
 </div>
@@ -398,7 +402,7 @@ faq:
   var qrBox = $('#qg-qr'), metaEl = $('#qg-meta'), payloadEl = $('#qg-payload');
   var errEl = $('#qg-error'), warnEl = $('#qg-warn'), statusEl = $('#qg-status');
   var eclEl = $('#qg-ecl'), sizeEl = $('#qg-size'), marginEl = $('#qg-margin');
-  var pngBtn = $('#qg-png'), svgBtn = $('#qg-svg'), copyBtn = $('#qg-copy-img');
+  var pngBtn = $('#qg-png'), svgBtn = $('#qg-svg'), copyBtn = $('#qg-copy-img'), copyTextBtn = $('#qg-copy-text');
   var current = null; // { qr, payload, name, fg, bg, transparent, margin, logo }
   var logo = null;    // { img, dataUrl, name, aspect }
   var userEcl = eclEl.value;
@@ -430,7 +434,10 @@ faq:
   function textEsc(s) {
     return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r\n|\r|\n/g, '\\n');
   }
-  function withScheme(u) { return /^[a-z][a-z0-9+.\-]*:/i.test(u) ? u : 'https://' + u; }
+  // "tel:+1555..." has a scheme; "example.com:8080/x" and "localhost:3000" are a host and
+  // port, so they get https:// like any other bare address.
+  var HOST_PORT = /^(?:localhost|[^:\/?#@\s]*\.[^:\/?#@\s]*|\[[0-9a-f:.]+\]):\d{1,5}(?:[\/?#]|$)/i;
+  function withScheme(u) { return /^[a-z][a-z0-9+.\-]*:/i.test(u) && !HOST_PORT.test(u) ? u : 'https://' + u; }
   function slug(s) {
     return String(s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).toLowerCase();
   }
@@ -514,8 +521,10 @@ faq:
       var list = to.split(',').map(function (a) { return a.trim(); }).filter(Boolean);
       var wrong = list.filter(function (a) { return !emailOk(a); });
       if (wrong.length) { bad(r, 'qg-email-to', '"' + wrong[0] + '" is not a valid email address.'); return; }
-      // RFC 6068: each address is percent-encoded except "@"; line breaks in the body are CRLF.
-      var p = 'mailto:' + list.map(function (a) { return encodeURIComponent(a).replace(/%40/g, '@'); }).join(','), q = [];
+      // RFC 6068: characters such as "%", "/", "?", "#", "&" and "=" in an address are
+      // percent-encoded; "@" and "+" (as in name+tag@example.com) stay as they are. Line
+      // breaks in the body are CRLF.
+      var p = 'mailto:' + list.map(function (a) { return encodeURIComponent(a).replace(/%40/g, '@').replace(/%2B/g, '+'); }).join(','), q = [];
       if (subject) q.push('subject=' + encodeURIComponent(subject.replace(/\r\n|\r|\n/g, ' ')));
       if (body) q.push('body=' + encodeURIComponent(body.replace(/\r\n|\r|\n/g, '\r\n')));
       r.payload = p + (q.length ? '?' + q.join('&') : '');
@@ -576,7 +585,9 @@ faq:
       r.label = 'QR code with the contact card of ' + fn;
     },
     geo: function (r) {
-      var la = val('qg-lat').replace(/\s+/g, ''), lo = val('qg-lon').replace(/\s+/g, '');
+      // A decimal comma (48,8584) is read as a decimal point.
+      var dec = function (s) { s = s.replace(/\s+/g, ''); return /^[+\-]?\d*,\d*$/.test(s) ? s.replace(',', '.') : s; };
+      var la = dec(val('qg-lat')), lo = dec(val('qg-lon'));
       if (!la || !lo) { r.need = 'Enter a latitude and a longitude to see your QR code.'; return; }
       var num = /^[+\-]?(\d+(\.\d*)?|\.\d+)$/;
       if (!num.test(la) || Math.abs(parseFloat(la)) > 90) bad(r, 'qg-lat', 'Latitude must be a number from -90 to 90, such as 48.8584.');
@@ -621,6 +632,12 @@ faq:
         if (eWall !== null && eWall < sWall) { bad(r, eWall - sWall > -864e5 && ed === sd ? 'qg-ev-etime' : 'qg-ev-edate', 'The event ends before it starts.'); return; }
         L.push('DTSTART:' + fmt(sWall, 'start'));
         if (eWall !== null) L.push('DTEND:' + fmt(eWall, 'end'));
+      }
+      // iCalendar dates have four-digit years (8 digits for the date; 9 means year 10000),
+      // so nothing can end after 9999 in UTC, or on the day after an all-day event's last day.
+      if (L.some(function (l) { return /^DT(?:START|END)[^:]*:\d{9}/.test(l); })) {
+        bad(r, ed !== null ? 'qg-ev-edate' : 'qg-ev-sdate', 'A calendar event must end before the year 10000.');
+        return;
       }
       if (val('qg-ev-loc')) L.push('LOCATION:' + textEsc(val('qg-ev-loc')));
       var desc = raw('qg-ev-desc').trim();
@@ -732,8 +749,12 @@ faq:
     }
     return canvas;
   }
+  // Resolves null instead of throwing when the browser cannot encode the canvas (some
+  // browsers refuse SVG logos that contain foreignObject).
   function pngBlob(c, px) {
-    return new Promise(function (resolve) { drawCanvas(c, px).toBlob(resolve, 'image/png'); });
+    return new Promise(function (resolve) {
+      try { drawCanvas(c, px).toBlob(resolve, 'image/png'); } catch (e) { resolve(null); }
+    });
   }
 
   // ---------- Messages ----------
@@ -791,11 +812,13 @@ faq:
     } else contrastEl.textContent = '';
 
     var m = parseInt(marginEl.value, 10);
-    if (marginEl.value !== '' && (isNaN(m) || m < 0 || m > 20)) bad(r, 'qg-margin', 'The quiet zone must be a whole number from 0 to 20.');
+    if (marginEl.value !== '' && (!/^\d+$/.test(marginEl.value) || m > 20)) bad(r, 'qg-margin', 'The quiet zone must be a whole number from 0 to 20.');
     else if (!isNaN(m) && m < 4) r.warnings.push('The QR standard asks for a quiet zone of at least 4 modules. A narrower border can fail to scan unless the code sits on a plain background of the same colour.');
 
     // A logo covers part of the pattern, so it needs the highest error correction.
     eclEl.disabled = !!logo;
+    $('#qg-ecl-note').hidden = !logo;
+    $('#qg-logo-choose').textContent = logo ? 'Change logo' : 'Add logo';
     if (logo) eclEl.value = 'H';
     else if (eclEl.value !== userEcl) eclEl.value = userEcl;
     var ecl = eclEl.value;
@@ -804,7 +827,7 @@ faq:
     r.bad.forEach(function (id) { var el = document.getElementById(id); if (el) el.setAttribute('aria-invalid', 'true'); });
 
     current = null;
-    pngBtn.disabled = svgBtn.disabled = copyBtn.disabled = true;
+    pngBtn.disabled = svgBtn.disabled = copyBtn.disabled = copyTextBtn.disabled = true;
     if (!lib) {
       setList(errEl, ['The QR code library did not load. Reload the page and try again.']);
       setList(warnEl, []);
@@ -816,7 +839,7 @@ faq:
       setList(warnEl, r.errors.length ? [] : r.warnings);
       payloadEl.textContent = '';
       showEmpty(r.errors.length ? r.errors[0] : r.need);
-      announce(r.errors.length ? '' : r.need);
+      announce(r.errors.length ? r.errors.join(' ') : r.need);
       return;
     }
     var n = bytes(r.payload), qr;
@@ -828,8 +851,9 @@ faq:
       setList(errEl, ['This is too much for one QR code: ' + n.toLocaleString('en-US') + ' bytes, and the maximum at error correction ' + ecl + ' is ' + MAX_BYTES[ecl].toLocaleString('en-US') + ' bytes.' + (logo ? ' Remove the logo to use a lower level, or shorten the content.' : ' Shorten the content, or pick a lower error correction level.')]);
       setList(warnEl, []);
       payloadEl.textContent = r.payload;
+      copyTextBtn.disabled = false;
       showEmpty('Too much content for a QR code');
-      announce('Too much content for a QR code.');
+      announce('Too much content for one QR code: ' + n + ' bytes, and the maximum at error correction ' + ecl + ' is ' + MAX_BYTES[ecl] + '.');
       return;
     }
     var modules = qr.getModuleCount(), version = (modules - 17) / 4;
@@ -847,7 +871,7 @@ faq:
     svg.setAttribute('data-modules', String(modules));
     metaEl.textContent = 'Version ' + version + ', ' + modules + ' × ' + modules + ' modules, error correction ' + ecl + ' (' + ECL_PCT[ecl] + '%), ' + n.toLocaleString('en-US') + (n === 1 ? ' byte' : ' bytes');
     announce('QR code updated: version ' + version + ', ' + n + (n === 1 ? ' byte.' : ' bytes.') + (r.warnings.length ? ' ' + r.warnings.join(' ') : ''));
-    pngBtn.disabled = svgBtn.disabled = copyBtn.disabled = false;
+    pngBtn.disabled = svgBtn.disabled = copyBtn.disabled = copyTextBtn.disabled = false;
   }
 
   function fileBase() {
@@ -862,20 +886,32 @@ faq:
     if (e.target.id === 'qg-ecl') userEcl = eclEl.value;
     if (e.target.id === 'qg-fg' || e.target.id === 'qg-bg') syncColour(e.target.id.slice(3), 'picker');
     if (e.target.id === 'qg-logo-size') $('#qg-logo-size-out').textContent = e.target.value + '%';
-    if (e.target.id === 'qg-lat') splitCoords();
+    // Split a pasted pair at once; a typed one only when the field is left (below), so a
+    // decimal comma typed as "48,8" is never cut in two mid-number.
+    if ((e.target.id === 'qg-lat' || e.target.id === 'qg-lon') && /^insertFrom|^insertReplacement/.test(e.inputType || '')) splitCoords(e.target);
     if (e.target.id === 'qg-ev-sdate' || e.target.id === 'qg-ev-stime') keepDuration();
     update();
   });
   form.addEventListener('change', function (e) {
     if (e.target.id === 'qg-ecl') userEcl = eclEl.value;
     if (e.target.id === 'qg-ev-sdate' || e.target.id === 'qg-ev-stime') keepDuration();
+    if ((e.target.id === 'qg-lat' || e.target.id === 'qg-lon') && splitCoords(e.target)) update();
     if (e.target.matches('select, input[type="checkbox"], input[type="radio"], input[type="color"]')) update();
   });
 
-  // Pasting "lat, lon" into the latitude box fills both fields.
-  function splitCoords() {
-    var m = /^\s*([+\-]?\d+(?:\.\d+)?)\s*[,;\s]\s*([+\-]?\d+(?:\.\d+)?)\s*$/.exec($('#qg-lat').value);
-    if (m) { $('#qg-lat').value = m[1]; $('#qg-lon').value = m[2]; }
+  // A "lat, lon" pair in either box fills both. Pairs are separated by a semicolon, a
+  // space, or a comma followed by a space ("48,8584, 2,2945" with decimal commas); a bare
+  // comma only separates numbers written with decimal points ("48.8584,2.2945"), so
+  // "48,8584" stays one number.
+  var NUM = '([+\\-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))';
+  var PAIR = new RegExp('^\\s*' + NUM + '\\s*(?:;|,\\s|\\s)\\s*' + NUM + '\\s*$');
+  var PAIR_DOT = /^\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*$/;
+  function splitCoords(el) {
+    var s = el.value, m = PAIR.exec(s) || (s.indexOf('.') >= 0 ? PAIR_DOT.exec(s) : null);
+    if (!m) return false;
+    $('#qg-lat').value = m[1];
+    $('#qg-lon').value = m[2];
+    return true;
   }
 
   // Moving the start of an event moves its end too, keeping the duration.
@@ -899,7 +935,7 @@ faq:
     var c = current, name = fileBase() + '.png';
     pngBlob(c, px()).then(function (blob) {
       if (blob) TT.download(name, blob);
-      else setList(errEl, ['Your browser could not create the PNG. Try the SVG download instead.']);
+      else showError('Your browser could not create the PNG. Try the SVG download instead.');
     });
   });
   svgBtn.addEventListener('click', function () {
@@ -913,43 +949,87 @@ faq:
       return;
     }
     // Safari needs the ClipboardItem created synchronously in the click, with a promise inside.
-    var item = new ClipboardItem({ 'image/png': pngBlob(current, px()) });
+    var blob = pngBlob(current, px()).then(function (b) { if (!b) throw new Error('no PNG'); return b; });
+    blob.catch(function () { /* reported by write() below */ });
+    var item;
+    try { item = new ClipboardItem({ 'image/png': blob }); } catch (e) { TT.flash(copyBtn, 'Copy failed'); return; }
     navigator.clipboard.write([item]).then(function () { TT.flash(copyBtn, 'Copied!'); }, function () { TT.flash(copyBtn, 'Copy failed'); });
   });
 
   // ---------- Logo ----------
   var fileInput = $('#qg-logo-file');
+  // Raster logos are decoded once and stored at most 1024 px wide: enough for a 4096 px
+  // PNG (the logo is at most a quarter of it), and it keeps the SVG download small. Images
+  // over 40 megapixels are refused, so a small file that expands to a huge bitmap cannot
+  // freeze the page.
+  var LOGO_SIDE = 1024, LOGO_PIXELS = 40e6, logoToken = 0;
+  // An error from a button or a file, shown and read out (#qg-error is not a live region).
+  function showError(msg) {
+    setList(errEl, [msg]);
+    announce(msg);
+  }
   function setLogo(file) {
     if (!file) return;
     if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) {
-      setList(errEl, ['"' + file.name + '" is not a PNG, JPG, WebP, GIF or SVG image.']);
+      showError('"' + file.name + '" is not a PNG, JPG, WebP, GIF or SVG image.');
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      setList(errEl, ['"' + file.name + '" is larger than 5 MB. Use a smaller logo image.']);
+      showError('"' + file.name + '" is larger than 5 MB. Use a smaller logo image.');
       return;
     }
+    var token = ++logoToken;
+    function use(img, dataUrl, w, h) {
+      if (token !== logoToken) return;
+      logo = { img: img, dataUrl: dataUrl, name: file.name, aspect: w && h ? w / h : 1 };
+      $('#qg-logo-name').textContent = file.name;
+      $('#qg-logo-remove').hidden = false;
+      $('#qg-logo-size-field').hidden = false;
+      update();
+    }
+    var unreadable = function () { if (token === logoToken) showError('"' + file.name + '" could not be read as an image.'); };
     var reader = new FileReader();
     reader.onload = function () {
       var img = new Image();
       img.onload = function () {
         var w = img.naturalWidth, h = img.naturalHeight;
-        logo = { img: img, dataUrl: reader.result, name: file.name, aspect: w && h ? w / h : 1 };
-        $('#qg-logo-name').textContent = file.name;
-        $('#qg-logo-remove').hidden = false;
-        $('#qg-logo-size-field').hidden = false;
-        update();
+        if (file.type === 'image/svg+xml') return use(img, reader.result, w, h);
+        if (!w || !h) return unreadable();
+        if (w * h > LOGO_PIXELS) {
+          if (token === logoToken) showError('"' + file.name + '" is too large (' + w.toLocaleString('en-US') + ' × ' + h.toLocaleString('en-US') + ' pixels). Use an image under 40 megapixels.');
+          return;
+        }
+        if (Math.max(w, h) <= LOGO_SIDE) return use(img, reader.result, w, h);
+        var k = LOGO_SIDE / Math.max(w, h), tw = Math.max(1, Math.round(w * k)), th = Math.max(1, Math.round(h * k));
+        // createImageBitmap decodes and shrinks off the main thread where it can.
+        var shrunk = typeof createImageBitmap === 'function'
+          ? createImageBitmap(file, { resizeWidth: tw, resizeHeight: th, resizeQuality: 'high' }).catch(function () { return img; })
+          : Promise.resolve(img);
+        shrunk.then(function (src) {
+          if (token !== logoToken) return;
+          var c = document.createElement('canvas');
+          c.width = tw; c.height = th;
+          var ctx = c.getContext('2d');
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(src, 0, 0, tw, th);
+          if (src.close) src.close();
+          var url = c.toDataURL('image/png'), small = new Image();
+          small.onload = function () { use(small, url, tw, th); };
+          small.onerror = unreadable;
+          small.src = url;
+        }).catch(unreadable);
       };
-      img.onerror = function () { setList(errEl, ['"' + file.name + '" could not be read as an image.']); };
+      img.onerror = unreadable;
       img.src = reader.result;
     };
-    reader.onerror = function () { setList(errEl, ['"' + file.name + '" could not be read.']); };
+    reader.onerror = function () { if (token === logoToken) showError('"' + file.name + '" could not be read.'); };
     reader.readAsDataURL(file);
   }
   $('#qg-logo-choose').addEventListener('click', function () { fileInput.click(); });
   fileInput.addEventListener('change', function () { setLogo(fileInput.files[0]); fileInput.value = ''; });
   $('#qg-logo-remove').addEventListener('click', function () {
     logo = null;
+    logoToken++;
     $('#qg-logo-name').textContent = 'PNG, JPG, WebP, GIF or SVG. You can also drop it on the page.';
     $('#qg-logo-remove').hidden = true;
     $('#qg-logo-size-field').hidden = true;

@@ -6,6 +6,8 @@ const path = require('path');
 module.exports = async ({ page, open, assert, fixtures, url }) => {
   const vectors = JSON.parse(fs.readFileSync(path.join(fixtures, 'vectors.json'), 'utf8'));
   const vec = name => vectors.find(v => v.name === name);
+  // Long vectors are stored as a unit and a repeat count to keep the fixture small.
+  const textOf = v => (v.t !== undefined ? v.t : v.unit.repeat(v.repeat));
   const text = sel => page.locator(sel).textContent();
   const fmt = n => n.toLocaleString('en-US');
   const requests = [];
@@ -89,10 +91,39 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
       const t0 = performance.now();
       el.dispatchEvent(new Event('input'));
       return performance.now() - t0;
-    }, v.t);
+    }, textOf(v));
     assert.ok(ms < 150, `${v.name}: input handler took ${ms} ms`);
     await page.waitForFunction(n => document.querySelector('#tc-big').textContent === n, fmt(v.oCount), { timeout: 20000 });
   }
+
+  // Regression: a text over 200,000 characters is counted in the worker (a
+  // 4.5 MB file used to block the page for about 0.5 s on every edit), with
+  // the same results. Expected values: Python, regex \X graphemes and UTF-8.
+  const lm = vec('long-multi');
+  assert.ok(textOf(lm).length > 200000);
+  await page.evaluate(t => { const el = document.querySelector('#tc-input'); el.value = t; el.dispatchEvent(new Event('input')); }, textOf(lm));
+  await page.waitForFunction(n => document.querySelector('#tc-chars').textContent === n, fmt(lm.chars), { timeout: 20000 });
+  assert.equal(await text('#tc-words'), fmt(lm.words));
+  assert.equal(await text('#tc-bytes'), fmt(lm.bytes));
+  assert.equal(await text('#tc-n-claude'), `≈ ${fmt(Math.round(lm.chars / 3.5))}–${fmt(Math.round(lm.chars / 3.5 * 1.35))}`);
+  assert.equal(await text('#tc-n-gemini'), `≈ ${fmt(Math.round(lm.chars / 4))}`);
+  await page.waitForFunction(n => document.querySelector('#tc-big').textContent === n, fmt(lm.oCount), { timeout: 20000 });
+  assert.equal(await text('#tc-ratio'), (lm.chars / lm.oCount).toFixed(2));
+  // Back under the limit, counting happens on the page again.
+  await page.fill('#tc-input', 'Hello world');
+  assert.equal(await text('#tc-chars'), '11');
+
+  // Regression: lines wrap between tokens, never inside one. Spaces are drawn
+  // as ·, so without a break opportunity (a <wbr>) between tokens a line
+  // broke in the middle of a token, which then looked like two.
+  await setView('vis');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.click('#tc-example');
+  await page.waitForFunction(() => document.querySelector('#tc-big').textContent === '93' && document.querySelectorAll('#tc-vis .tc-t').length > 50);
+  const cut = await page.$$eval('#tc-vis .tc-t', els => els.filter(e => !e.textContent.includes('\n') && e.getClientRects().length > 1).map(e => e.textContent));
+  assert.deepEqual(cut, [], 'tokens cut by a line wrap');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await setView('ids');
 
   // Load example matches tiktoken exactly.
   await page.click('#tc-example');
@@ -157,6 +188,21 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await p2.textContent('#tc-msg'), '');
   assert.equal(await p2.evaluate(() => document.activeElement.textContent.trim().startsWith('GPT-5')), true);
   await p2.close();
+
+  // Without Web Workers the page says so, and still counts characters and
+  // words (on the page, even for a long text).
+  const p3 = await page.context().newPage();
+  await p3.addInitScript(() => { window.Worker = function () { throw new Error('Workers are disabled'); }; });
+  const p3errors = [];
+  p3.on('pageerror', e => p3errors.push(e.message));
+  await p3.goto(url);
+  await p3.waitForFunction(() => /Web Workers are unavailable/.test(document.querySelector('#tc-msg').textContent));
+  await p3.evaluate(t => { const el = document.querySelector('#tc-input'); el.value = t; el.dispatchEvent(new Event('input')); }, textOf(lm));
+  await p3.waitForFunction(n => document.querySelector('#tc-chars').textContent === n, fmt(lm.chars), { timeout: 20000 });
+  assert.equal(await p3.textContent('#tc-words'), fmt(lm.words));
+  assert.equal(await p3.textContent('#tc-big'), '–');
+  assert.deepEqual(p3errors, []);
+  await p3.close();
 
   await page.click('#tc-clear');
   await page.waitForFunction(() => document.querySelector('#tc-big').textContent === '0');

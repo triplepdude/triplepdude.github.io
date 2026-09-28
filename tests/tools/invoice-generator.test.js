@@ -2,6 +2,24 @@
 // quantized to the currency's minor unit), not with the page. Currency strings
 // are compared with Node's own Intl.NumberFormat.
 const fs = require('fs');
+const zlib = require('zlib');
+
+// A grey PNG of w x h pixels; a 7,000 x 7,000 one (49 megapixels) is only about 50 KB.
+function bigPng(w, h) {
+  const crc = b => { let c = ~0; for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1; } return ~c >>> 0; };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 0;
+  const row = Buffer.alloc(w + 1, 0x80); row[0] = 0;
+  const raw = Buffer.alloc((w + 1) * h);
+  for (let y = 0; y < h; y++) row.copy(raw, y * (w + 1));
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
+}
 
 // A 2x2 red PNG, used as a logo.
 const LOGO = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR4nGP8z8Dwn4GBgYGJAQoAAB3+AgN4ht6aAAAAAElFTkSuQmCC', 'base64');
@@ -79,8 +97,8 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Description, item 3');
   await fillItem(3, 'Tiny part', '1', '1.005');         // 1.005 -> 1.01 (a float gives 1.00)
   assert.deepEqual(await lineMinors(), ['5997', '5000', '101']);
-  assert.equal(await text(`${row(1)} .iv-amt`), '$59.97');
-  assert.equal(await text(`${row(3)} .iv-amt`), '$1.01');
+  assert.equal(await text(`${row(1)} .iv-amt`), 'Amount: $59.97');
+  assert.equal(await text(`${row(3)} .iv-amt-v`), '$1.01');
   await page.fill('#iv-disc-value', '10');
   await page.fill('#iv-shipping', '5');
   await page.check('#iv-ship-tax');
@@ -130,6 +148,11 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('#iv-add-item');
   await fillItem(4, 'Credit', '-1', '0.005');
   assert.equal((await lineMinors())[3], '-1');
+  // Digits from other scripts count: full-width 12 (a Japanese keyboard) x Arabic-Indic 3.5
+  // with the Arabic decimal separator = 42.00.
+  await fillItem(4, 'Credit', '１２', '٣٫٥');
+  assert.equal((await lineMinors())[3], '4200');
+  assert.equal(await text(`${row(4)} .iv-amt-v`), '$42.00');
   await page.click(`${row(4)} .iv-x`);
   assert.equal(await page.locator('#iv-items .iv-item').count(), 3);
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Remove item 3');
@@ -141,6 +164,13 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await page.getAttribute('#iv-sheet .iv-brand img', 'src'), /^data:image\/png;base64,/);
   await page.setInputFiles('#iv-logo-file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('x') });
   assert.match(await text('#iv-error'), /"notes.txt" is not a PNG, JPG, WebP, GIF or SVG image/);
+  // Regression: a small file that expands to a huge bitmap is refused before it is drawn
+  // (a 20,000 px square PNG used to block the page for over 2 seconds).
+  const bomb = bigPng(7000, 7000);
+  await page.setInputFiles('#iv-logo-file', { name: 'huge.png', mimeType: 'image/png', buffer: bomb });
+  await page.waitForFunction(() => /too large/.test(document.querySelector('#iv-error').textContent));
+  assert.equal(await text('#iv-error'), '"huge.png" is too large (7,000 × 7,000 pixels). Use an image under 40 megapixels.');
+  assert.equal(await page.getAttribute('#iv-sheet .iv-brand img', 'src'), 'data:image/png;base64,' + LOGO.toString('base64'), 'the earlier logo stays');
 
   // ----- Save the invoice file -----
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#iv-save')]);
@@ -273,6 +303,67 @@ module.exports = async ({ page, open, assert }) => {
   await page.setInputFiles('#iv-open-file', { name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await page.waitForFunction(() => /"broken.json" is not an invoice file/.test(document.querySelector('#iv-error').textContent));
   assert.equal(await page.inputValue('#iv-number'), 'RE-2026-007', 'a bad file changes nothing');
+
+  // Regression: a file with 20,000 items used to freeze the page for minutes. It is refused.
+  const huge = { ...file, number: 'HUGE', items: Array.from({ length: 20000 }, (_, i) => ({ description: 'x' + i, quantity: '1', rate: '1' })) };
+  const t0 = Date.now();
+  await page.setInputFiles('#iv-open-file', { name: 'huge.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(huge)) });
+  await page.waitForFunction(() => /"huge.json" has 20,000 items\. An invoice here can have at most 500 items and 20 taxes\./.test(document.querySelector('#iv-error').textContent));
+  assert.ok(Date.now() - t0 < 5000, 'refused quickly');
+  assert.equal(await page.inputValue('#iv-number'), 'RE-2026-007');
+  // 300 items open, and each row is labelled.
+  const many = { ...file, number: 'MANY', items: Array.from({ length: 300 }, (_, i) => ({ description: 'Line ' + (i + 1), quantity: '1', rate: '0.01' })) };
+  await page.setInputFiles('#iv-open-file', { name: 'many.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(many)) });
+  await page.waitForFunction(() => document.querySelector('#iv-number').value === 'MANY');
+  assert.equal(await page.locator('#iv-items .iv-item').count(), 300);
+  assert.equal(await page.getAttribute('#iv-items .iv-item:nth-child(300) .iv-desc', 'aria-label'), 'Description, item 300');
+  assert.equal(await minor('#iv-sheet .iv-tot tr[data-row="subtotal"]'), '300');
+
+  // Regression: a damaged logo in a file (quotes and markup in the data URL) used to be put
+  // in the page as is, which logged a console error. Now it is left out, with a note, and
+  // the unknown currency is reported instead of being silently replaced.
+  const damaged = { ...file, number: 'DMG', currency: 'US', logo: 'data:image/png;base64,"><img src=x onerror=alert(1)>' };
+  await page.setInputFiles('#iv-open-file', { name: 'damaged.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(damaged)) });
+  await page.waitForFunction(() => document.querySelector('#iv-number').value === 'DMG');
+  assert.equal(await text('#iv-ok'), 'Opened damaged.json. Its currency "US" is not a currency code, so EUR is selected. Check it. Its logo is not a PNG, JPG, WebP, GIF or SVG image, so it was left out.');
+  assert.equal(await page.locator('#iv-sheet .iv-brand img').count(), 0);
+  // A well-formed logo that decodes to 49 megapixels is also left out, after checking.
+  const bombFile = { ...file, number: 'BOMB', logo: 'data:image/png;base64,' + bomb.toString('base64') };
+  await page.setInputFiles('#iv-open-file', { name: 'bomb.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bombFile)) });
+  await page.waitForFunction(() => /could not be used, so it was left out/.test(document.querySelector('#iv-ok').textContent));
+  assert.equal(await page.locator('#iv-sheet .iv-brand img').count(), 0);
+  // A good logo in a file is shown.
+  const good = { ...file, number: 'LOGO', logo: 'data:image/png;base64,' + LOGO.toString('base64') };
+  await page.setInputFiles('#iv-open-file', { name: 'good.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(good)) });
+  await page.waitForSelector('#iv-sheet .iv-brand img');
+  assert.equal(await text('#iv-ok'), 'Opened good.json.');
+
+  // Regression: a fixed discount on a credit (negative subtotal) used to make the credit
+  // larger; it is refused like any discount above the subtotal.
+  await page.fill(`${row(1)} .iv-qty`, '-2');
+  await page.fill(`${row(1)} .iv-rate`, '10');
+  await page.fill(`${row(2)} .iv-qty`, '0');
+  await page.fill('#iv-disc-value', '5');
+  await page.waitForFunction(() => /A fixed discount needs a subtotal above zero/.test(document.querySelector('#iv-error').textContent));
+  assert.equal(await page.getAttribute('#iv-disc-value', 'aria-invalid'), 'true');
+  // A percentage discount scales the credit down: -20.00 less 10% is -18.00, VAT 19% -3.42.
+  await page.selectOption('#iv-disc-type', 'percent');
+  await page.fill('#iv-disc-value', '10');
+  assert.deepEqual(await totals(), [['subtotal', '-2000'], ['discount', '200'], ['tax-0', '-342'], ['total', '-2142']]);
+  await page.fill('#iv-disc-value', '');
+
+  // Recent ISO 4217 codes that Chromium does not list are offered too (2 decimals).
+  for (const c of ['SLE', 'VED', 'XCG', 'ZWG']) assert.equal(await page.locator(`#iv-currency option[value="${c}"]`).count(), 1, c);
+  await page.selectOption('#iv-currency', 'XCG');
+  await page.selectOption('#iv-locale', 'en-US');
+  await page.fill(`${row(1)} .iv-qty`, '1');
+  await page.fill(`${row(1)} .iv-rate`, '1234.5');
+  // Older ICU data has no symbol for XCG and prints the code; newer data prints "Cg.".
+  assert.match(await text('#iv-sheet .iv-tot tr[data-row="subtotal"] td'), /^(XCG|Cg\.)\s1,234\.50$/);
+  await page.selectOption('#iv-currency', 'EUR');
+  await page.selectOption('#iv-locale', 'de-DE');
+  await page.setInputFiles('#iv-open-file', { name: 're-2026-007.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(file)) });
+  await page.waitForFunction(() => document.querySelector('#iv-number').value === 'RE-2026-007');
 
   // Screen readers get one short total once typing pauses; the preview is not live.
   await page.fill('#iv-paid', '100');

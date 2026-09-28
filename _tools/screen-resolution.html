@@ -54,8 +54,9 @@ howto: |
 
   The reading comes out lower than the monitor's rating when something holds
   frames back. Battery saver modes often cap pages at 30 frames per second,
-  Safari can limit pages to 60 on high refresh rate screens, background tabs
-  are paused, and variable refresh rate displays may idle lower. With several
+  and background tabs are paused. Safari holds pages to 60 on 120 Hz
+  ProMotion screens unless the feature flag "Prefer Page Rendering Updates
+  near 60fps" is turned off. Variable refresh rate displays may idle lower. With several
   monitors, the result is for the one the window is on. If it still reads
   60 Hz, check the rate chosen in your system's display settings and that
   the cable supports it.
@@ -237,9 +238,15 @@ table.data.scr-table td { overflow-wrap: anywhere; font-variant-numeric: tabular
   function physical(css, ratio) {
     var p = css * ratio;
     if (!p) return 0;
-    if (Math.abs(p - Math.round(p)) < 1e-6) return Math.round(p);
+    if (Math.abs(ratio - Math.round(ratio)) < 1e-6) return Math.round(p);
+    // With a fractional ratio the browser rounds the CSS size to whole pixels,
+    // even when the product happens to be whole (882 x 3.5 = 3087 for a
+    // 3088-pixel panel), so any panel within one CSS pixel fits. A known size wins.
     var best = 0, bestD = Infinity;
-    PANEL.forEach(function (n) { var d = Math.abs(n - p); if (d < ratio && d < bestD) { best = n; bestD = d; } });
+    PANEL.forEach(function (n) {
+      var d = Math.abs(n - p);
+      if (Math.abs(n / ratio - css) < 1 && d < bestD) { best = n; bestD = d; }
+    });
     return best || Math.round(p);
   }
 
@@ -531,7 +538,7 @@ table.data.scr-table td { overflow-wrap: anywhere; font-variant-numeric: tabular
       say(msg.textContent);
       return;
     }
-    if (dv === '') { msg.textContent = ''; blank(); return; }
+    if (dv === '') { msg.textContent = ''; blank(); say(''); return; } // '' cancels a pending summary
     var inches = unitSel.value === 'cm' ? diag / 2.54 : diag;
     if (!(inches > 0 && inches <= 1000)) {
       msg.textContent = 'Enter a diagonal greater than 0' + (unitSel.value === 'cm' ? ' and up to 2540 cm.' : ' and up to 1000 inches.');

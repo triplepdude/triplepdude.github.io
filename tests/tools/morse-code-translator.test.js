@@ -52,8 +52,24 @@ module.exports = async ({ page, open, assert }) => {
   // Sentences, lower case, prosigns, % as 0/0, accents, ß, typographic quotes.
   await page.fill('#mc-text', 'Hello, world!');
   assert.equal(await morse(), '.... . .-.. .-.. --- --..-- / .-- --- .-. .-.. -.. -.-.--');
+  // ITU-R M.1677-1 3.3.2: "For 2%, transmit 2-0/0, and not 20/0"; the page
+  // used to send 50% as 500/0. A % on its own is just 0/0.
   await page.fill('#mc-text', '<SOS> <AR> 50%');
-  assert.equal(await morse(), '...---... / .-.-. / ..... ----- ----- -..-. -----');
+  assert.equal(await morse(), '...---... / .-.-. / ..... ----- -....- ----- -..-. -----');
+  await page.fill('#mc-text', '50 %');
+  assert.equal(await morse(), '..... ----- / ----- -..-. -----');
+  // 4.3 and 3.3.2: fractions are joined by a hyphen too ("4-1/2-0/00" for 4½‰),
+  // and 3.5.1: minutes and seconds are one and two apostrophes.
+  await page.fill('#mc-text', '4½‰ 1′15″');
+  assert.equal(await morse(), '....- -....- .---- -..-. ..--- -....- ----- -..-. ----- ----- / .---- .----. .---- ..... .----. .----.');
+  assert.equal(await text('#mc-msg'), '');
+  // Letters without their own code: ẞ like ß, ligatures and superscripts
+  // decomposed, Æ and Ø as Ä and Ö (non-ITU) or AE and O.
+  await page.fill('#mc-text', 'ẞ Œ Ĳ x² Æ Ø');
+  assert.equal(await morse(), '... ... / --- . / .. .--- / -..- ..--- / .-.- / ---.');
+  await page.uncheck('#mc-ext');
+  assert.equal(await morse(), '... ... / --- . / .. .--- / -..- ..--- / .- . / ---');
+  await page.check('#mc-ext');
   await page.fill('#mc-text', 'Straße “ok” – café');
   assert.equal(await morse(), '... - .-. .- ... ... . / .-..-. --- -.- .-..-. / -....- / -.-. .- ..-. ..-..');
   await page.fill('#mc-text', 'señor ô');
@@ -78,6 +94,15 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await text('#mc-msg'), /not a Morse character, shown as #: \.-\.-\.-\.-\./);
   assert.match(await text('#mc-msg'), /“x” was ignored/);
   assert.equal(await page.getAttribute('#mc-msg', 'role'), 'status');
+  // Regression: switching the non-ITU signs off while the Morse was typed by
+  // hand re-encoded the text and deleted the codes it could no longer write.
+  await page.fill('#mc-morse', '-.-.-- .-');
+  assert.equal(await val('#mc-text'), '!A');
+  await page.uncheck('#mc-ext');
+  assert.equal(await morse(), '-.-.-- .-');
+  assert.equal(await val('#mc-text'), '#A');
+  await page.check('#mc-ext');
+  assert.equal(await val('#mc-text'), '!A');
   await page.fill('#mc-morse', '');
   assert.equal(await val('#mc-text'), '');
   assert.equal(await text('#mc-msg'), '');
@@ -93,8 +118,21 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await morse(), '.../---/... // .../---/...');
   await page.fill('#mc-morse', '.../---/...//.-/-...');
   assert.equal(await val('#mc-text'), 'SOS AB');
+  // Regression: a clashing choice used to show an error and leave the Morse
+  // stale; now the other separator moves out of the way.
+  await page.fill('#mc-text', 'SOS SOS');
   await page.selectOption('#mc-wsep', 'slash');
-  assert.match(await text('#mc-msg'), /different separators/);
+  assert.equal(await val('#mc-lsep'), 'space');
+  assert.equal(await morse(), '... --- ... / ... --- ...');
+  await page.selectOption('#mc-lsep', 'slash');
+  assert.equal(await val('#mc-wsep'), 'dslash');
+  assert.equal(await morse(), '.../---/... // .../---/...');
+  await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')].some(e => /Words are now separated by Double slash/.test(e.textContent)));
+  await page.selectOption('#mc-wsep', 'pipe');
+  await page.selectOption('#mc-lsep', 'pipe');
+  assert.equal(await val('#mc-wsep'), 'slash');
+  assert.equal(await morse(), '...|---|... / ...|---|...');
+  assert.equal(await text('#mc-msg'), '');
   await page.selectOption('#mc-lsep', 'space');
   await page.selectOption('#mc-sym', 'under');
   await page.fill('#mc-text', 'SOS');
@@ -169,6 +207,14 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#mc-wpm', '20');
   await page.fill('#mc-fwpm', '20');
   assert.equal(await text('#mc-set-msg'), '');
+  // Regression: the timing line changes with every letter typed, and was an
+  // aria-live region, so screen readers read it out on each keystroke. Now a
+  // speed change is announced once, after a pause.
+  assert.equal(await page.getAttribute('#mc-timing', 'aria-live'), null);
+  assert.equal(await page.locator('#mc-timing').evaluate(e => !!e.closest('[aria-live],[role="status"],[role="alert"]')), false);
+  await page.fill('#mc-wpm', '24');
+  await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')].some(e => e.textContent === 'Dot 50 ms, letter gap 150 ms, word gap 350 ms'));
+  await page.fill('#mc-wpm', '20');
 
   // Playback with Web Audio: the button toggles, the light flashes, it ends by itself.
   await page.fill('#mc-text', 'EE');
@@ -182,6 +228,18 @@ module.exports = async ({ page, open, assert }) => {
   await page.waitForFunction(() => document.querySelector('#mc-play').textContent === 'Play', null, { timeout: 5000 });
   assert.ok(await page.evaluate(() => window.__mcOn) >= 1, 'the light flashed');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'mc-play');
+  // Regression: Flash a light was read only when playback started.
+  await page.fill('#mc-text', 'EEEE');
+  await page.fill('#mc-wpm', '5');
+  await page.uncheck('#mc-flash');
+  await page.evaluate(() => { window.__mcOn = 0; });
+  await page.click('#mc-play');
+  await page.waitForTimeout(700);
+  assert.equal(await page.evaluate(() => window.__mcOn), 0, 'no flashing while unticked');
+  await page.check('#mc-flash');
+  await page.waitForFunction(() => window.__mcOn > 0, null, { timeout: 3000 });
+  await page.click('#mc-play');
+  await page.fill('#mc-wpm', '20');
   // Stop in the middle of a long message.
   await page.fill('#mc-wpm', '5');
   await page.click('#mc-play');

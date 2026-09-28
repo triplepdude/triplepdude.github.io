@@ -15,8 +15,10 @@ module.exports = async ({ page, open, assert, url }) => {
       const axes = p.axes.slice();
       // A controller streaming new input every p.rate ms.
       if (p.rate) { ts = Math.floor(performance.now() / p.rate) * p.rate; axes[0] = Math.sin(ts / 50) * 0.8; }
+      // New input every p.countRate ms, but a timestamp that counts reports, not ms.
+      if (p.countRate) { ts = Math.floor(performance.now() / p.countRate); axes[0] = Math.sin(ts / 10) * 0.8; }
       return { id: p.id, index: p.index, mapping: p.mapping, connected: true, timestamp: ts, axes,
-        buttons: p.buttons.map(b => ({ ...b })), vibrationActuator: p.vibrationActuator };
+        buttons: p.buttons.map(b => ({ ...b })), vibrationActuator: p.vibrationActuator, hapticActuators: p.hapticActuators };
     };
     Object.defineProperty(Navigator.prototype, 'getGamepads', { configurable: true, writable: true, value() {
       const out = [null, null, null, null];
@@ -27,7 +29,10 @@ module.exports = async ({ page, open, assert, url }) => {
       index, id, mapping, timestamp: 1, axes: new Array(na).fill(0), buttons: Array.from({ length: nb }, () => btn(false, 0)),
       vibrationActuator: vib ? {
         type: 'dual-rumble', effects: ['dual-rumble', 'trigger-rumble'],
-        playEffect(type, params) { window.__rumble.push([type, params]); return Promise.resolve('complete'); },
+        playEffect(type, params) {
+          window.__rumble.push([type, params]);
+          return vib === 'reject' ? Promise.reject(new DOMException('No motor', 'NotSupportedError')) : Promise.resolve('complete');
+        },
         reset() { window.__rumble.push(['reset']); return Promise.resolve('complete'); },
       } : null,
     });
@@ -99,6 +104,16 @@ module.exports = async ({ page, open, assert, url }) => {
   await waitText(li(7) + ' .gpt-bx', /^0\.50$/);
   assert.equal(await page.$eval(li(7) + ' .gpt-lvl', e => e.style.width), '50%');
   assert.equal(await page.$eval('#gpt-svg rect.lvl[x="390"]', e => e.getAttribute('height')), '17');
+  // Past the pressed threshold the trigger is outlined, not filled solid, so the
+  // analog level stays visible on the drawing.
+  const trig = await page.$eval('#gpt-svg rect.b.trig[x="390"]', e => {
+    const probe = document.body.appendChild(document.createElement('div'));
+    probe.style.color = 'var(--surface)';
+    const surface = getComputedStyle(probe).color;
+    probe.remove();
+    return { on: e.classList.contains('is-on'), fill: getComputedStyle(e).fill, surface, lvl: getComputedStyle(e.nextElementSibling).opacity };
+  });
+  assert.deepEqual([trig.on, trig.fill, trig.lvl], [true, trig.surface, '0.85']);
   await page.evaluate(() => window.__press(0, 7, 0));
   assert.equal(await text('#gpt-tested'), '2 of 17');
 
@@ -120,6 +135,12 @@ module.exports = async ({ page, open, assert, url }) => {
   for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowLeft');
   assert.equal(await text('#gpt-dz-val'), '0.04');
   await until(() => /Outside deadzone/.test(document.querySelector('#gpt-sticks .gpt-read').textContent));
+
+  // A driver reporting NaN or Infinity is read as 0, not shown or recorded.
+  await page.evaluate(() => window.__axes(0, [NaN, Infinity, -Infinity, 0]));
+  await waitText('#gpt-axes li:nth-child(2) .gpt-av', /^0\.0000$/);
+  assert.deepEqual(await texts('#gpt-axes .gpt-av'), ['0.0000', '0.0000', '0.0000', '0.0000']);
+  assert.match(await stickRead(1), /^X 0\.0000 · Y 0\.0000Distance 0\.000/);
 
   // Circularity: part of a turn, then a full turn with dents at the diagonals.
   await page.click('#gpt-circ-reset');
@@ -148,6 +169,8 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await page.evaluate(() => document.activeElement.id), 'gpt-drift');
   assert.match(await text('#gpt-drift-out'), /^Measuring/);
   await waitText('#gpt-drift-out', /Right stick/, 5000);
+  assert.equal(await page.getAttribute('#gpt-drift-out', 'aria-live'), null);
+  await waitText('#gpt-status', /^Left stick: no drift\. Right stick: drift\.$/);
   assert.deepEqual(await texts('#gpt-drift-out p'), [
     'Left stick: resting offset 0.015 (X 0.012, Y −0.009), largest 0.015. No drift.',
     'Right stick: resting offset 0.200 (X 0.120, Y 0.160), largest 0.200. Drift: large enough to move a character or camera in many games.',
@@ -179,17 +202,29 @@ module.exports = async ({ page, open, assert, url }) => {
   await waitText('#gpt-rate-out', /Hz|Not enough/, 6000);
   assert.match(await text('#gpt-rate-out'), /^About 125 Hz: new input every 8\.00 ms on average \(\d+ updates in 3 seconds\)/);
   await waitText('#gpt-status', /^Update rate about 125 hertz\.$/);
-  await page.evaluate(() => { window.__pads[0].rate = 0; });
+  // A timestamp that is not in milliseconds is not trusted: new data every 4 ms
+  // is 250 Hz, even though the timestamps step by 1.
+  await page.evaluate(() => { window.__pads[0].rate = 0; window.__pads[0].countRate = 4; });
+  await page.click('#gpt-rate');
+  await waitText('#gpt-rate-out', /Hz\b|Not enough/, 6000);
+  const counted = /^About (\d+) Hz/.exec(await text('#gpt-rate-out'));
+  assert.ok(counted && Math.abs(Number(counted[1]) - 250) <= 10, await text('#gpt-rate-out'));
+  await page.evaluate(() => { window.__pads[0].countRate = 0; });
   await page.click('#gpt-rate');
   await waitText('#gpt-rate-out', /Not enough input/, 6000);
 
   // ---- A DualSense connects; pressing Cross on it brings it into view ----
+  // A drift measurement is running on the Xbox controller when that happens.
+  await page.click('#gpt-drift');
   await page.evaluate(() => window.__connect(window.__makePad(1, 'DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)', 'standard', 18, 4, false)));
   await until(() => !document.getElementById('gpt-pad-field').hidden);
   assert.deepEqual(await texts('#gpt-pad option'), ['0: Xbox Wireless Controller', '1: DualSense Wireless Controller']);
   assert.equal(await text('#gpt-index'), '0', 'a new controller does not steal the view');
   await page.evaluate(() => window.__press(1, 0, 1));
   await waitText('#gpt-index', /^1$/);
+  // Results of the Xbox controller are not shown under the DualSense.
+  assert.equal(await text('#gpt-drift-out'), '');
+  assert.equal(await text('#gpt-rate-out'), '');
   assert.equal(await page.inputValue('#gpt-pad'), '1');
   assert.equal(await text('#gpt-vendor'), 'Sony (054c:0ce6)');
   const ps = await texts('#gpt-buttons .gpt-bn');
@@ -201,6 +236,8 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await page.isDisabled('#gpt-rumble'), true);
   assert.match(await text('#gpt-vib-msg'), /not available for this controller/);
   await page.evaluate(() => window.__press(1, 0, 0));
+  await page.waitForTimeout(2300);
+  assert.equal(await text('#gpt-drift-out'), '', 'the stopped measurement never reports');
   // Label sets can be chosen by hand.
   await page.selectOption('#gpt-labels', 'nintendo');
   await waitText(li(0) + ' .gpt-bn', /^B$/);
@@ -248,6 +285,40 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await hidden('#gpt-details'), true);
   assert.equal(await cls('#gpt-svg', 'is-dim'), true);
   await waitText('#gpt-status', /^Controller disconnected: Xbox Wireless Controller$/);
+
+  // ---- Only hapticActuators (older API); the id is shown as text ----
+  const evil = '<img src=x onerror="window.__xss=1">Pad & "co"';
+  await page.evaluate(id => {
+    const pad = window.__makePad(0, id, '', 10, 2, false);
+    pad.hapticActuators = [{ pulse(v, d) { window.__rumble.push(['pulse', v, d]); return Promise.resolve(true); } }];
+    window.__connect(pad);
+  }, evil);
+  await until(() => !document.getElementById('gpt-live').hidden);
+  assert.equal(await text('#gpt-id'), evil);
+  assert.equal(await page.$$eval('.tool-card img', e => e.length), 0);
+  assert.equal(await page.evaluate(() => window.__xss), undefined);
+  assert.equal(await text('#gpt-drift-out'), '', 'results of the unplugged controller are gone');
+  assert.equal(await page.isDisabled('#gpt-rumble'), false);
+  assert.equal(await page.isVisible('#gpt-trigger'), false);
+  const nRumble = await page.evaluate(() => window.__rumble.length);
+  await page.selectOption('#gpt-dur', '250');
+  await page.click('#gpt-rumble');
+  await until(n => window.__rumble.length === n + 1, nRumble);
+  // Strong motor is still at 0.50, weak at 1.00: pulse uses the larger.
+  assert.deepEqual(await page.evaluate(() => window.__rumble[window.__rumble.length - 1]), ['pulse', 1, 250]);
+  await page.click('#gpt-stop');
+  assert.deepEqual(await page.evaluate(() => window.__rumble[window.__rumble.length - 1]), ['pulse', 0, 1]);
+  await page.evaluate(() => window.__disconnect(0));
+  await until(() => !document.getElementById('gpt-empty').hidden);
+
+  // ---- A controller that refuses to rumble gets a clear error ----
+  await page.evaluate(() => window.__connect(window.__makePad(0, 'Generic X-Box pad (STANDARD GAMEPAD Vendor: 0e6f Product: 02a1)', 'standard', 17, 4, 'reject')));
+  await until(() => !document.getElementById('gpt-live').hidden);
+  assert.equal(await text('#gpt-vendor'), 'Unknown (0e6f:02a1)');
+  await page.click('#gpt-rumble');
+  await waitText('#gpt-vib-msg', /did not accept/);
+  assert.equal(await text('#gpt-vib-msg'), 'The controller did not accept the vibration request (NotSupportedError). It may not support rumble in this browser.');
+  assert.equal(await cls('#gpt-vib-msg', 'error'), true);
 
   // ---- A browser without the Gamepad API ----
   await page.goto(url + '?nogp');

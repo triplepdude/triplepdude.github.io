@@ -47,6 +47,14 @@ module.exports = async ({ page, open, assert }) => {
     'part one - a new hope as told by an old man': {
       chicago: 'Part One - A New Hope as Told by an Old Man', ap: 'Part One - A New Hope as Told by an Old Man',
       apa: 'Part One - A New Hope as Told by an Old Man', mla: 'Part One - A New Hope as Told by an Old Man' },
+    // Regressions: "A" in A-list is a word, not a prefix like anti- (Chicago
+    // gave "A-list"); a number before a full stop is not an initial, so the
+    // next word starts a new phrase; versus is a preposition.
+    'a-list celebrities': { chicago: 'A-List Celebrities', ap: 'A-List Celebrities', apa: 'A-List Celebrities', mla: 'A-List Celebrities' },
+    'chapter 1. the beginning': { chicago: 'Chapter 1. The Beginning', ap: 'Chapter 1. The Beginning', apa: 'Chapter 1. The Beginning', mla: 'Chapter 1. The Beginning' },
+    'batman vs. superman versus the world': {
+      chicago: 'Batman vs. Superman versus the World', ap: 'Batman vs. Superman Versus the World',
+      apa: 'Batman vs. Superman Versus the World', mla: 'Batman vs. Superman versus the World' },
   };
   for (const [input, byStyle] of Object.entries(title)) {
     for (const [style, expected] of Object.entries(byStyle)) {
@@ -76,6 +84,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await conv('HELLO WORLD. THIS IS NASA.'), 'Hello world. This is nasa.');
   assert.equal(await conv('ask dr. smith, e.g. by mail. so am i. then go'), 'Ask dr. smith, e.g. by mail. So am I. Then go');
   assert.equal(await conv('first line\nsecond line'), 'First line\nSecond line');
+  // Regressions: a full stop after a web address or a number ends the
+  // sentence; one after e.g. or an initial does not.
+  assert.equal(await conv('visit example.com. then leave'), 'Visit example.com. Then leave');
+  assert.equal(await conv('item 1. second thing. it costs 3.5. then more'), 'Item 1. Second thing. It costs 3.5. Then more');
+  assert.equal(await conv('see e.g. this one, or ask j. smith'), 'See e.g. this one, or ask j. smith');
+  // Paths are left as typed too.
+  assert.equal(await conv('run /usr/bin/env or ~/bin/tool', 'title'), 'Run /usr/bin/env or ~/bin/tool');
+  await setCase('sentence');
 
   // Capitalize Each Word, upper, lower, alternating, inverse.
   assert.equal(await conv("the e-mail from o'brien", 'capital'), "The E-Mail From O'brien");
@@ -88,6 +104,10 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await conv('İ', 'lower'), 'i̇');
   assert.equal(await conv('hello world', 'alternating'), 'hElLo WoRlD');
   assert.equal(await conv('Hello World ß', 'inverse'), 'hELLO wORLD SS');
+  // Regression: letter-by-letter conversion lost the word-final sigma
+  // (Python: 'ΣΑΣ ΣΑΣ. ΑΣ-Β ΣΑ'.swapcase() == 'σας σας. ας-β σα').
+  assert.equal(await conv('ΣΑΣ ΣΑΣ. ΑΣ-Β ΣΑ', 'inverse'), 'σας σας. ας-β σα');
+  assert.equal(await conv('ΣΑΣ', 'alternating'), 'σΑς');
 
   // Turkish and Azerbaijani letter rules.
   await page.selectOption('#cc-lang', 'tr');
@@ -115,6 +135,32 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await out(), 'creme_brulee_a_la_strasse');
   await page.uncheck('#cc-ascii');
   assert.equal(await conv('  ---  ', 'snake'), '');
+
+  // Regressions: long runs of punctuation made the edge-trimming regexes
+  // backtrack quadratically (1.5 s for 50,000 characters), and camelCase
+  // copied its word list once per word (1.5 s for 200,000 characters).
+  const timed = async (t, c) => {
+    await setCase(c);
+    await page.evaluate(v => { document.querySelector('#cc-input').value = v; }, t);
+    return page.evaluate(() => {
+      const a = performance.now();
+      document.querySelector('#cc-style').dispatchEvent(new Event('change')); // converts at once
+      return performance.now() - a;
+    });
+  };
+  for (const t of ['!'.repeat(50000) + 'a', 'a' + '!'.repeat(50000) + 'a', 'a@' + '.'.repeat(50000) + '@']) {
+    for (const c of ['title', 'sentence', 'capital']) {
+      const ms = await timed(t, c);
+      assert.ok(ms < 250, `${c} on ${t.slice(0, 3)}…: ${Math.round(ms)} ms`);
+    }
+  }
+  const prose = 'the quick brown fox of the day '.repeat(7000);
+  for (const c of ['camel', 'pascal', 'snake', 'title', 'sentence']) {
+    const ms = await timed(prose, c);
+    assert.ok(ms < 400, `${c} on 217,000 characters: ${Math.round(ms)} ms`);
+  }
+  await setCase('camel');
+  assert.ok((await out()).startsWith('theQuickBrownFoxOfTheDayTheQuick'));
 
   // Radio group works with arrow keys, and the change is announced.
   await setCase('title');

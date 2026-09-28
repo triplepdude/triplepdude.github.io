@@ -13,7 +13,12 @@ module.exports = async ({ page, open, assert, url }) => {
         return Promise.resolve(l);
       },
     } });
-    if (location.search.includes('nofs')) {
+    const q = location.search;
+    if (q.includes('touch')) { // a phone: the primary pointer is coarse
+      const mm = window.matchMedia.bind(window);
+      window.matchMedia = s => (/pointer:\s*coarse/.test(s) ? { matches: true, media: s, addEventListener() {}, removeEventListener() {} } : mm(s));
+    }
+    if (q.includes('nofs')) {
       delete Element.prototype.requestFullscreen;
       delete Element.prototype.webkitRequestFullscreen;
       return;
@@ -21,7 +26,13 @@ module.exports = async ({ page, open, assert, url }) => {
     let el = null;
     const fire = () => setTimeout(() => document.dispatchEvent(new Event('fullscreenchange')), 10);
     Object.defineProperty(Document.prototype, 'fullscreenElement', { configurable: true, get: () => el });
-    Element.prototype.requestFullscreen = function (opts) { window.__fs.push(['request', this.id, opts && opts.navigationUI]); el = this; fire(); return Promise.resolve(); };
+    Element.prototype.requestFullscreen = function (opts) {
+      window.__fs.push(['request', this.id, opts && opts.navigationUI]);
+      // ?hang: the request never settles; __grant() makes it succeed late.
+      if (q.includes('hang')) { window.__grant = () => { el = this; fire(); }; return new Promise(() => {}); }
+      if (q.includes('reject')) return Promise.reject(new TypeError('Permissions check failed'));
+      el = this; fire(); return Promise.resolve();
+    };
     Document.prototype.exitFullscreen = function () { window.__fs.push(['exit']); el = null; fire(); return Promise.resolve(); };
   });
   await open();
@@ -118,6 +129,17 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.waitForSelector('#dpt-bar-exit', { state: 'visible', timeout: 1000 });
   await page.waitForFunction(() => window.__wake.length === 1);
   assert.deepEqual(await page.evaluate(() => window.__wake), ['request:screen']);
+  // No border or rounded corner may hide edge pixels, whichever full-screen
+  // flavour is in use (the stub, like webkit's prefixed API, never matches :fullscreen).
+  assert.deepEqual(await page.$eval('#dpt-stage', e => { const s = getComputedStyle(e); return [s.borderTopWidth, s.borderLeftWidth, s.borderTopLeftRadius]; }), ['0px', '0px', '0px']);
+  // Tab cannot move focus to the page hidden behind the test.
+  for (const k of ['Tab', 'Shift+Tab', 'Tab']) {
+    await page.keyboard.press(k);
+    assert.equal(await active(), 'dpt-stage', k);
+  }
+  await page.evaluate(() => document.getElementById('dpt-next').focus());
+  assert.equal(await active(), 'dpt-stage', 'focus is pulled back to the test screen');
+  assert.equal(await name(), 'Black', 'Tab does not change the pattern');
 
   // Space, arrows, Page Down and Backspace in full screen.
   const seq = [['Space', 'White'], ['ArrowRight', 'Red'], ['ArrowDown', 'Green'], ['ArrowLeft', 'Red'], ['PageDown', 'Green'],
@@ -189,7 +211,10 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.click('#dpt-start');
   assert.equal(await has('is-pseudo'), true);
   assert.equal(await active(), 'dpt-stage');
-  assert.match(await text('#dpt-msg'), /fills the browser window/);
+  assert.match(await text('#dpt-msg'), /^Full screen is not available in this browser, so the test fills the browser window instead\. Press F11/);
+  assert.equal(await page.getAttribute('#dpt-msg', 'class'), 'msg dpt-info', 'an expected fallback, not an error');
+  await page.keyboard.press('Tab');
+  assert.equal(await active(), 'dpt-stage', 'Tab stays on the covering stage');
   // The note is also shown on the covering stage, where it can be seen.
   await page.waitForSelector('#dpt-note', { state: 'visible', timeout: 1000 });
   assert.match(await text('#dpt-note'), /fills the browser window/);
@@ -211,4 +236,36 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await has('is-pseudo'), true);
   await page.keyboard.press('f');
   assert.equal(await has('is-pseudo'), false);
+
+  // On a phone the F11 advice is useless; the note says what is not covered.
+  await page.goto(url + '?nofs&touch');
+  await page.click('#dpt-start');
+  assert.equal(await has('is-pseudo'), true);
+  assert.match(await text('#dpt-msg'), /Strips under the browser's own bars are not covered/);
+  assert.doesNotMatch(await text('#dpt-msg'), /F11/);
+
+  // A refused request falls back to filling the window.
+  await page.goto(url + '?reject');
+  await page.click('#dpt-start');
+  await page.waitForFunction(() => document.getElementById('dpt-stage').classList.contains('is-pseudo'));
+  assert.match(await text('#dpt-msg'), /^Full screen was blocked, so the test fills the browser window instead\./);
+  await page.keyboard.press('Escape');
+  assert.equal(await has('is-active'), false);
+
+  // A request that never answers must not leave Start dead: after 1.5 s the
+  // test fills the window, and if full screen arrives late it takes over.
+  await page.goto(url + '?hang');
+  await page.click('#dpt-start');
+  assert.equal(await has('is-active'), false);
+  await page.waitForFunction(() => document.getElementById('dpt-stage').classList.contains('is-pseudo'), null, { timeout: 3000 });
+  assert.match(await text('#dpt-msg'), /blocked/);
+  await page.evaluate(() => window.__grant());
+  await page.waitForFunction(() => !document.getElementById('dpt-stage').classList.contains('is-pseudo'));
+  assert.equal(await has('is-active'), true);
+  assert.equal(await text('#dpt-msg'), '');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).overflow), 'visible');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('dpt-stage').classList.contains('is-active'));
+  assert.deepEqual((await page.evaluate(() => window.__fs)).map(c => c[0]), ['request', 'exit'], 'Esc leaves the real full screen');
+  assert.equal(await active(), 'dpt-start');
 };

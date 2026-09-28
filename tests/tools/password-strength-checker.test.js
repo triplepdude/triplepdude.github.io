@@ -2,7 +2,9 @@
 // (packages/libraries/main/test/helper/passwordTests.ts and main.spec.ts in
 // github.com/zxcvbn-ts/zxcvbn), which documents the exact guesses, score,
 // feedback and crack times the library returns with the common + English
-// dictionaries. The character-set entropy is recomputed here with Math.log2.
+// dictionaries. Every vector was also re-checked in Node against the npm packages
+// (@zxcvbn-ts/core 4.2.0, language-common 4.1.3, language-en 4.1.1), independently of
+// the vendored browser builds. The character-set entropy is recomputed with Math.log2.
 
 const VECTORS = [
   // password, guesses, score, warning (or null), patterns in order
@@ -43,6 +45,17 @@ module.exports = async ({ page, open, assert }) => {
     assert.ok(ok, `${pw}: expected ${guesses} guesses, page shows ${await page.getAttribute('#pw-guesses', 'data-guesses')}`);
   };
 
+  // If the word lists fail to load, the page says so, and the next keystroke tries again.
+  const broken = route => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'throw new Error("damaged file");' });
+  await page.route('**/zxcvbn-ts-core.min.js', broken);
+  await page.fill('#pw-input', 'abc');
+  await page.waitForFunction(() => /could not be loaded/.test(document.querySelector('#pw-error').textContent), null, { timeout: 10000 });
+  assert.equal(await page.isVisible('#pw-result'), false);
+  await page.unroute('**/zxcvbn-ts-core.min.js', broken);
+  requests.length = 0;
+  await check('abcd', '17');
+  assert.equal(await text('#pw-error'), '');
+
   await page.focus('#pw-input');
   for (const [pw, guesses, score, warning, patterns] of VECTORS) {
     await check(pw, guesses);
@@ -69,8 +82,10 @@ module.exports = async ({ page, open, assert }) => {
 
   // Hidden password: the matched parts are masked too; Show reveals them.
   await check('P@ssw0rd123!', '150096');
-  const masked = await page.locator('#pw-parts .pw-token').allTextContents();
-  assert.ok(masked.every(t => /^•+$/.test(t)), masked.join('|'));
+  const masked = await page.locator('#pw-parts .pw-token [aria-hidden="true"]').allTextContents();
+  assert.deepEqual(masked, ['•••••••••••', '•']);
+  // Screen readers hear a count, not a row of bullets (aria-label on a plain span is ignored).
+  assert.deepEqual(await page.locator('#pw-parts .pw-token .visually-hidden').allTextContents(), ['11 hidden characters', '1 hidden character']);
   assert.ok(!(await text('#pw-parts')).includes('"password123"'), 'matched word hidden');
   assert.match(await text('#pw-parts-note'), /Press Show/);
   await page.click('#pw-toggle');
@@ -108,6 +123,18 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.$eval('#pw-times tbody tr', tr => tr.lastElementChild.textContent), '1 minute');
   await page.fill('#pw-user', '');
   await page.waitForFunction(() => document.querySelector('#pw-guesses').getAttribute('data-guesses') === '116');
+
+  // A long random password takes a moment to analyse: the page says it is checking and
+  // dims the previous result until the new one is ready.
+  let seed = 7;
+  const random = Array.from({ length: 256 }, () => String.fromCharCode(33 + ((seed = (seed * 48271) % 2147483647) % 94))).join('');
+  await page.fill('#pw-input', random);
+  const sawBusy = await page.waitForFunction(() => !document.querySelector('#pw-busy').hidden && document.querySelector('#pw-result').getAttribute('aria-busy') === 'true', null, { timeout: 5000 }).then(() => true, () => false);
+  await page.waitForFunction(() => document.querySelector('#pw-length').textContent === '256', null, { timeout: 30000 });
+  assert.ok(sawBusy, 'Checking… shown during a slow check');
+  assert.equal(await page.isHidden('#pw-busy'), true);
+  assert.equal(await page.getAttribute('#pw-result', 'aria-busy'), null);
+  assert.equal(await text('#pw-verdict'), 'Very strong');
 
   // Only the first 256 characters are analysed; the page says so.
   await check('x'.repeat(300), '3073');

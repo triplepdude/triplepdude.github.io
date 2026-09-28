@@ -8,20 +8,19 @@ howto: |
 
   Type or paste your text and pick a case. The result updates as you type; copy
   it, download it, or press **Use as input** to convert it again. Each line is
-  converted on its own, so a whole list of headlines or variable names converts
-  at once.
+  converted on its own, so a list of headlines or variable names converts at
+  once.
 
   ## Title case rules by style
 
   All four styles capitalize the first word of a title and of a subtitle,
-  meaning the first word after a colon, an em dash, or a question or
-  exclamation mark. Every other word is capitalized unless the style's list
-  below says otherwise.
+  which starts after a colon, an em dash, a spaced dash, or a question or
+  exclamation mark. Other words are capitalized unless listed below.
 
   | Style | Words kept lowercase | Last word |
   |---|---|---|
-  | Chicago | a, an, the; every preposition (of, in, on, with, from, into, between, without and so on); and, but, for, or, nor; to and as | Always capitalized |
-  | AP | a, an, the; prepositions and conjunctions of three letters or fewer: and, as, at, but, by, for, if, in, nor, of, off, on, or, out, per, so, to, up, via, yet | Always capitalized |
+  | Chicago | a, an, the; every preposition (of, in, on, with, from, into, between, without, versus and so on); and, but, for, or, nor; to and as | Always capitalized |
+  | AP | a, an, the; prepositions and conjunctions of three letters or fewer: and, as, at, but, by, for, if, in, nor, of, off, on, or, out, per, so, to, up, via, vs., yet | Always capitalized |
   | APA | The same short words as AP: articles, and conjunctions and prepositions of three letters or fewer | Not forced; a short final word such as *for* stays lowercase |
   | MLA | a, an, the; every preposition; and, but, for, nor, or, so, yet; to | Always capitalized |
 
@@ -50,8 +49,8 @@ howto: |
   ## Keeping acronyms and brand names
 
   With **Keep acronyms and mixed case** ticked, words in capitals (NASA, 4K) or
-  with capitals inside (iPhone, McDonald's) are left alone. A line typed
-  entirely in capitals is converted normally.
+  with capitals inside (iPhone, McDonald's) are left alone, unless the whole
+  line is in capitals.
 
   ## Programming cases
 
@@ -189,20 +188,20 @@ faq:
 
   // ---------- Word lists for title case ----------
   function set(s) { var o = Object.create(null); s.split(' ').forEach(function (w) { o[w] = true; }); return o; }
-  var PREPOSITIONS = 'aboard about above across after against along alongside amid amidst among amongst around as at atop before behind below beneath beside besides between beyond by despite down during except for from in inside into of off on onto out outside over per since through throughout till to toward towards under underneath until unto up upon via with within without';
+  var PREPOSITIONS = 'aboard about above across after against along alongside amid amidst among amongst around as at atop before behind below beneath beside besides between beyond by despite down during except for from in inside into of off on onto out outside over per since through throughout till to toward towards under underneath until unto up upon versus via vs with within without';
   var MINOR = {
     // Chicago Manual of Style: articles, all prepositions, and/but/for/or/nor, to, as.
     chicago: set('a an the and but for or nor to as ' + PREPOSITIONS),
     // AP: articles, and prepositions and conjunctions of three letters or fewer.
-    ap: set('a an the and as at but by for if in nor of off on or out per so to up via yet'),
+    ap: set('a an the and as at but by for if in nor of off on or out per so to up via vs yet'),
     // APA: minor words of three letters or fewer (conjunctions, articles, short prepositions).
-    apa: set('a an the and as at but by for if in nor of off on or out per so to up via yet'),
+    apa: set('a an the and as at but by for if in nor of off on or out per so to up via vs yet'),
     // MLA: articles, all prepositions, coordinating conjunctions, to.
     mla: set('a an the and but for nor or so yet to ' + PREPOSITIONS)
   };
   var LAST_WORD_RULE = { chicago: true, ap: true, apa: false, mla: true };
   // Chicago 8.161: after a prefix that can't stand alone, the next part stays lowercase.
-  var PREFIXES = set('a anti bi co counter de e extra hyper infra inter intra macro micro mid mini multi neo non post pre pro pseudo re semi sub super supra trans tri ultra un');
+  var PREFIXES = set('anti bi co counter de e extra hyper infra inter intra macro micro mid mini multi neo non post pre pro pseudo re semi sub super supra trans tri ultra un');
   var ABBREVIATIONS = set('mr mrs ms mx dr prof sr jr st mt ft vs cf al fig figs approx dept gen gov capt col lt sgt rev hon');
 
   // Title-case forms that are not simply the upper case (Unicode SpecialCasing).
@@ -240,13 +239,36 @@ faq:
     var first = w.search(/\p{L}/u);
     return /[\p{Lu}\p{Lt}]/u.test(w.slice(first + letters[0].length));
   }
-  var LEAD = /^[^\p{L}\p{N}]+/u, TRAIL = /[^\p{L}\p{N}]+$/u;
-  // Web addresses, email addresses, file names and paths are left as typed.
-  function isVerbatim(chunk) {
-    var s = chunk.replace(LEAD, '').replace(TRAIL, '');
-    if (!s) return false;
-    return /^(?:[a-z][a-z0-9+.-]*:\/\/\S+|www\.\S+|[^\s@]+@[^\s@]+\.[^\s@]+|[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+(?:\/\S*)?|(?:\.{1,2}|~)?\/\S+)$/iu.test(s);
+  // Splits a chunk into [leading punctuation, core, trailing punctuation]; the
+  // core starts and ends with a letter or digit. A loop, not a regex: a regex
+  // such as /[^\p{L}\p{N}]+$/ backtracks quadratically on a long run of
+  // punctuation and froze the page.
+  var ALNUM = /[\p{L}\p{N}]/u;
+  function edges(s) {
+    var a = s.search(ALNUM);
+    if (a < 0) return [s, '', ''];
+    var b = s.length;
+    while (b > a) {
+      var w = 1, lo = s.charCodeAt(b - 1);
+      if (lo >= 0xdc00 && lo <= 0xdfff && b - 2 >= a && (s.charCodeAt(b - 2) & 0xfc00) === 0xd800) w = 2;
+      if (ALNUM.test(s.slice(b - w, b))) break;
+      b -= w;
+    }
+    return [s.slice(0, a), s.slice(a, b), s.slice(b)];
   }
+  // Web addresses, email addresses, file names and paths are left as typed.
+  // Every alternative has one way to match, so the test stays linear.
+  var VERBATIM = /^(?:[a-z][a-z0-9+.-]*:\/\/\S+|www\.\S+|[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+|[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+(?:\/\S*)?|(?:\.{1,2}|~)?\/\S+)$/iu;
+  function isVerbatim(chunk) {
+    var e = edges(chunk), s = e[1];
+    if (!s) return false;
+    var path = /(?:\.{1,2}|~)?\/$/.exec(e[0]); // /usr, ./file, ~/docs
+    return VERBATIM.test(path ? path[0] + s : s);
+  }
+  // e.g, i.e, a.m, U.S, Ph.D: a full stop after these does not end a sentence.
+  var DOTTED_ABBR = /^(?:\p{L}{1,2}\.)+\p{L}{1,2}$/u;
+  // A single letter before a full stop is an initial (J. Smith); I is a word.
+  function isInitial(w) { return /^\p{L}$/u.test(w) && !/^[iI]$/.test(w); }
   function lineHasLower(line) { return /\p{Ll}/u.test(line); }
 
   // ---------- Title case ----------
@@ -263,7 +285,7 @@ faq:
         var v = { verbatim: true, text: chunk, compound: [] };
         v.compound.push(v);
         items.push(v); pieces.push(v);
-        if (/[:?!]/.test((chunk.match(TRAIL) || [''])[0])) v.ends = true;
+        if (/[:?!]/.test(edges(chunk)[2])) v.ends = true;
         return;
       }
       var subs = chunk.split(/([-‐‑–—\/])/), compound = [];
@@ -273,11 +295,11 @@ faq:
           if (s === '—') { endPhrase(); compound = []; } // an em dash starts a new phrase
           return;
         }
-        var m = /^([^\p{L}\p{N}]*)([\s\S]*?)([^\p{L}\p{N}]*)$/u.exec(s);
+        var m = [s].concat(edges(s));
         if (!m[2]) { pieces.push(s); return; }
         var it = { pre: m[1], core: m[2], post: m[3], compound: compound, pos: compound.length };
         compound.push(it); items.push(it); pieces.push(it);
-        var abbr = /\./.test(m[2]) || m[2].length === 1 && !/^[iI]$/.test(m[2]) || ABBREVIATIONS[lower(m[2])];
+        var abbr = /\./.test(m[2]) || isInitial(m[2]) || ABBREVIATIONS[lower(m[2])];
         if (/[:?!…]/.test(m[3]) || (/\./.test(m[3]) && !abbr)) it.ends = true;
       });
     });
@@ -306,7 +328,7 @@ faq:
   function sentenceEnded(gap, prev) {
     if (!/[.!?…‽。！？]/.test(gap)) return false;
     // "Dr. Smith", "e.g. this", "J. Smith": a period after an abbreviation or a single letter.
-    if (/^\.[\s"'”’)\]]*$/.test(gap) && prev && (ABBREVIATIONS[lower(prev)] || (prev.length === 1 && !/^[iI]$/.test(prev)))) return false;
+    if (/^\.[\s"'”’)\]]*$/.test(gap) && prev && (ABBREVIATIONS[lower(prev)] || isInitial(prev))) return false;
     return true;
   }
   function wordsLine(line, mode) {
@@ -315,7 +337,13 @@ faq:
     line.split(/(\s+)/).forEach(function (chunk) {
       if (!chunk) return;
       if (/^\s+$/.test(chunk)) { out += chunk; gap += chunk; return; }
-      if (isVerbatim(chunk)) { out += chunk; first = false; prev = ''; gap = (chunk.match(/[:?!]$/) || [''])[0]; return; }
+      if (isVerbatim(chunk)) {
+        // "Visit example.com. Then..." ends a sentence; "e.g. then" does not.
+        var ve = edges(chunk);
+        out += chunk; first = false; prev = '';
+        gap = /[?!…]/.test(ve[2]) || (/\./.test(ve[2]) && !DOTTED_ABBR.test(ve[1])) ? ve[2] : '';
+        return;
+      }
       var last = 0;
       chunk.replace(WORD, function (w, idx) {
         var between = chunk.slice(last, idx);
@@ -338,19 +366,33 @@ faq:
   }
 
   // ---------- Alternating and inverse ----------
+  // These work letter by letter, so the context-dependent lower case of Greek
+  // capital sigma (ς at the end of a word, σ elsewhere; Unicode Final_Sigma)
+  // is worked out here, as String.prototype.toLowerCase does for whole words.
+  var CASE_IGNORABLE = /[\p{Mn}\p{Me}\p{Cf}\p{Lm}\p{Sk}'.:·’]/u, CASED = /[\p{Lu}\p{Ll}\p{Lt}]/u;
+  function lowerAt(cps, i) {
+    var ch = cps[i];
+    if (ch !== 'Σ') return lower(ch);
+    var j = i - 1;
+    while (j >= 0 && CASE_IGNORABLE.test(cps[j])) j--;
+    if (j < 0 || !CASED.test(cps[j])) return 'σ';
+    j = i + 1;
+    while (j < cps.length && CASE_IGNORABLE.test(cps[j])) j++;
+    return j < cps.length && CASED.test(cps[j]) ? 'σ' : 'ς';
+  }
   function alternating(text) {
-    var n = 0, out = '';
-    for (var ch of text) {
-      var lo = lower(ch), up = upper(ch);
+    var n = 0, out = '', cps = Array.from(text);
+    for (var i = 0; i < cps.length; i++) {
+      var ch = cps[i], lo = lowerAt(cps, i), up = upper(ch);
       if (lo === up) { out += ch; continue; }
       out += n++ % 2 ? up : lo;
     }
     return out;
   }
   function inverse(text) {
-    var out = '';
-    for (var ch of text) {
-      var lo = lower(ch);
+    var out = '', cps = Array.from(text);
+    for (var i = 0; i < cps.length; i++) {
+      var ch = cps[i], lo = lowerAt(cps, i);
       out += lo !== ch ? lo : upper(ch);
     }
     return out;
@@ -384,7 +426,8 @@ faq:
     var s = opts.ascii ? stripAccents(line) : line;
     s = s.replace(/([\p{L}\p{M}\p{N}])['’]([\p{L}\p{M}\p{N}])/gu, '$1$2');
     var words = [];
-    (s.match(/[\p{L}\p{M}\p{N}]+/gu) || []).forEach(function (c) { words = words.concat(splitCase(c)); });
+    // push, not concat: concat copied the whole array for every word (1.5 s for 200,000 characters).
+    (s.match(/[\p{L}\p{M}\p{N}]+/gu) || []).forEach(function (c) { Array.prototype.push.apply(words, splitCase(c)); });
     if (!words.length) return '';
     function capWord(w) { return keepOn && isKept(w) ? w : capFirst(lower(w)); }
     switch (mode) {

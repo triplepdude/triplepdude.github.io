@@ -22,7 +22,8 @@ howto: |
 
   Money is counted in whole minor units (cents, pence, fils), never in
   floating-point numbers, so the rounding errors that make some tools show
-  1.005 × 1 as 1.00 cannot happen here.
+  1.005 × 1 as 1.00 cannot happen here. Type amounts with one decimal point
+  or comma and no thousands separators, so 1,234 is never ambiguous.
 
   - **Each line** is quantity × rate, rounded to the currency's smallest unit.
     A half rounds away from zero, so 49.995 becomes 50.00.
@@ -35,7 +36,10 @@ howto: |
   - **Total** is subtotal − discount + shipping + taxes, and **balance due** is
     the total minus the amount paid.
 
-  The number of decimals follows the currency, as defined in ISO 4217:
+  The number of decimals follows the currency. It comes from the currency data
+  built into your browser, which matches ISO 4217 except for a few currencies
+  whose minor unit is rarely used, such as the Iraqi and Serbian dinars, which
+  get no decimals:
 
   | Currency | Decimals | Example |
   |---|---|---|
@@ -80,7 +84,7 @@ faq:
   - q: How do I save the invoice as a PDF?
     a: Press Download PDF, then choose Save as PDF as the printer in the dialog that opens. If your browser adds a date or web address at the top or bottom of the page, turn off Headers and footers under More settings.
   - q: Which currencies can I use?
-    a: Any ISO 4217 currency your browser knows, which covers every current national currency. Amounts get the right number of decimals (none for the yen, three for the Kuwaiti dinar), and the number format setting chooses separators and symbol placement, such as 1.234,56 € in German.
+    a: Any ISO 4217 currency in your browser's list (about 160 in Chrome), plus recent codes that some browsers lack, such as SLE (Sierra Leone), XCG (Caribbean guilder) and ZWG (Zimbabwe Gold). Amounts get the right number of decimals (none for the yen, three for the Kuwaiti dinar), and the number format setting chooses separators and symbol placement, such as 1.234,56 € in German.
   - q: Can I edit an invoice later?
     a: Yes. Save the invoice file (.json) after you finish, and open it here later with Open invoice file, or drop it onto the page. Every field comes back, and you can change it and download a new PDF.
   - q: Can I write the invoice in another language?
@@ -114,6 +118,8 @@ faq:
 .iv-item input { min-height: 40px; padding: 8px 9px; }
 .iv-item .iv-qty, .iv-item .iv-rate { text-align: right; }
 .iv-amt { overflow: hidden; font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+/* "Amount:" is read by screen readers in both layouts, and shown in the narrow one. */
+.iv-amt-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .iv-x { width: 36px; padding: 0; font-size: 18px; line-height: 1; }
 .iv-tax { display: grid; grid-template-columns: minmax(0, 1fr) 96px auto 36px; gap: 6px; align-items: center; margin-bottom: 6px; }
 .iv-taxhead { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
@@ -140,7 +146,7 @@ faq:
   .iv-item .iv-amt { grid-area: amt; }
   .iv-item .iv-x { grid-area: x; align-self: start; }
   .iv-item .iv-qty, .iv-item .iv-rate { text-align: left; }
-  .iv-amt::before { content: "Amount: "; color: var(--muted); }
+  .iv-amt-l { position: static; width: auto; height: auto; overflow: visible; clip: auto; color: var(--muted); }
 }
 
 /* ----- The invoice itself: paper colours in both themes, sized relative to its width ----- */
@@ -178,7 +184,8 @@ faq:
 .iv-notes { margin-top: 2.2em; break-inside: avoid; }
 .iv-notes > div + div { margin-top: 1em; }
 .iv-notes .iv-lines { color: var(--ink); }
-.iv-ph { color: #9aa1ab; font-style: italic; }
+/* Placeholders show only in the preview (never printed), at 4.8:1 on the paper. */
+.iv-ph { color: #6b7280; font-style: italic; }
 /* Right-to-left names and descriptions keep their own direction but line up with the layout. */
 .iv-sheet [dir="auto"] { text-align: left; }
 .iv-titleblock [dir="auto"] { text-align: right; }
@@ -324,11 +331,22 @@ faq:
     if (r * TWO >= den) q += num < ZERO ? -ONE : ONE;
     return q;
   }
+  // Digits typed in another script count as 0-9: full-width ０-９ from a Japanese or Chinese
+  // keyboard, Arabic-Indic ٠-٩, Devanagari ०-९ and so on. Unicode puts each script's digits
+  // in a run that starts at its zero, so a digit's value is its distance from that zero.
+  var ND = /\p{Nd}/u;
+  function asciiDigits(s) {
+    return s.replace(/\p{Nd}/gu, function (ch) {
+      var cp = ch.codePointAt(0), zero = cp;
+      while (zero > 0 && ND.test(String.fromCodePoint(zero - 1))) zero--;
+      return String((cp - zero) % 10);
+    }).replace(/[\u066b\uff0e]/g, '.').replace(/\uff0c/g, ',').replace(/[\u2212\uff0d]/g, '-');
+  }
   // "12.5", "-3", "0,25" -> { v: 125n, s: 1 }. Empty -> null. A problem -> { error }.
   // One decimal separator (point or comma) and no thousands separators, so "1,234" is
   // never ambiguous.
   function parseDec(raw, opt) {
-    var s = String(raw == null ? '' : raw).replace(/[\s\u00a0\u202f]/g, '').replace(/^\u2212/, '-');
+    var s = asciiDigits(String(raw == null ? '' : raw)).replace(/[\s\u00a0\u202f]/g, '');
     if (!s) return null;
     var m = /^([+-]?)(\d*)(?:[.,](\d*))?$/.exec(s);
     if (!m || (m[2] === '' && !m[3])) return { error: opt.label + ' must be a number, such as ' + opt.example + '. Leave out thousands separators.' };
@@ -349,7 +367,10 @@ faq:
   // ---------- Currencies and locales ----------
   var COMMON = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'CHF', 'JPY', 'CNY', 'INR', 'SGD', 'HKD', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'BRL', 'MXN', 'ZAR', 'AED', 'SAR', 'KWD', 'KRW', 'TRY', 'ILS', 'NGN', 'PHP', 'IDR', 'THB'];
   var REGION = { US: 'USD', GB: 'GBP', CA: 'CAD', AU: 'AUD', NZ: 'NZD', CH: 'CHF', JP: 'JPY', CN: 'CNY', IN: 'INR', SG: 'SGD', HK: 'HKD', SE: 'SEK', NO: 'NOK', DK: 'DKK', PL: 'PLN', CZ: 'CZK', HU: 'HUF', RO: 'RON', BR: 'BRL', MX: 'MXN', AR: 'ARS', CL: 'CLP', CO: 'COP', ZA: 'ZAR', AE: 'AED', SA: 'SAR', KW: 'KWD', BH: 'BHD', OM: 'OMR', QA: 'QAR', KR: 'KRW', TR: 'TRY', IL: 'ILS', NG: 'NGN', KE: 'KES', EG: 'EGP', PH: 'PHP', ID: 'IDR', TH: 'THB', MY: 'MYR', VN: 'VND', PK: 'PKR', BD: 'BDT', UA: 'UAH', TW: 'TWD' };
-  ['AT', 'BE', 'CY', 'DE', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PT', 'SI', 'SK'].forEach(function (r) { REGION[r] = 'EUR'; });
+  ['AT', 'BE', 'BG', 'CY', 'DE', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PT', 'SI', 'SK'].forEach(function (r) { REGION[r] = 'EUR'; });
+  // Current ISO 4217 codes that some browsers do not list yet. All four have 2 decimals,
+  // which is also what Intl uses for a code it has no data for.
+  var EXTRA = { SLE: 'Sierra Leonean leone', VED: 'Venezuelan bolívar soberano', XCG: 'Caribbean guilder', ZWG: 'Zimbabwe Gold' };
   var LOCALES = ['en-US', 'en-GB', 'en-CA', 'en-AU', 'en-IN', 'de-DE', 'de-CH', 'fr-FR', 'fr-CA', 'es-ES', 'es-MX', 'it-IT', 'nl-NL', 'pt-BR', 'pt-PT', 'sv-SE', 'da-DK', 'nb-NO', 'fi-FI', 'pl-PL', 'cs-CZ', 'hu-HU', 'ro-RO', 'tr-TR', 'ru-RU', 'uk-UA', 'el-GR', 'he-IL', 'ar-AE', 'hi-IN', 'th-TH', 'id-ID', 'vi-VN', 'ja-JP', 'ko-KR', 'zh-CN', 'zh-TW'];
   var browserLocale = 'en-US';
   try { browserLocale = new Intl.NumberFormat().resolvedOptions().locale || 'en-US'; } catch (e) { /* keep en-US */ }
@@ -365,9 +386,12 @@ faq:
   (function fillSelects() {
     var cur = $('#iv-currency'), curNames = names('currency'), all = [];
     try { all = Intl.supportedValuesOf('currency').slice(); } catch (e) { all = COMMON.slice(); }
+    Object.keys(EXTRA).forEach(function (c) { if (all.indexOf(c) < 0) all.push(c); });
+    all.sort();
     function opt(code) {
       var o = document.createElement('option');
       var n = curNames ? curNames.of(code) : '';
+      if ((!n || n === code) && EXTRA[code]) n = EXTRA[code];
       o.value = code;
       o.textContent = code + (n && n !== code ? ' – ' + n : '');
       return o;
@@ -426,6 +450,8 @@ faq:
     var qty = el('input', { type: 'text', class: 'iv-qty', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Qty' });
     var rate = el('input', { type: 'text', class: 'iv-rate', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Rate' });
     var amt = el('span', { class: 'iv-amt' });
+    amt.appendChild(el('span', { class: 'iv-amt-l' }, 'Amount: '));
+    amt.appendChild(el('span', { class: 'iv-amt-v' }));
     var x = el('button', { type: 'button', class: 'btn secondary small iv-x' }, '×');
     desc.value = data && data.description || '';
     qty.value = data && data.quantity != null ? data.quantity : '1';
@@ -440,8 +466,8 @@ faq:
     });
     row.appendChild(amt); row.appendChild(x);
     itemsBox.appendChild(row);
-    labelRows();
-    if (focus) desc.focus();
+    if (focus !== 'batch') labelRows();
+    if (focus === true) desc.focus();
     return row;
   }
   function addTax(data, focus) {
@@ -453,8 +479,8 @@ faq:
     rate.value = data && data.rate || '';
     row.appendChild(name); row.appendChild(rate); row.appendChild(el('span', { class: 'iv-pct', 'aria-hidden': 'true' }, '%')); row.appendChild(x);
     taxesBox.appendChild(row);
-    labelRows();
-    if (focus) rate.focus();
+    if (focus !== 'batch') labelRows();
+    if (focus === true) rate.focus();
     return row;
   }
   function labelRows() {
@@ -463,7 +489,6 @@ faq:
       $('.iv-desc', r).setAttribute('aria-label', 'Description, item' + n);
       $('.iv-qty', r).setAttribute('aria-label', 'Quantity, item' + n);
       $('.iv-rate', r).setAttribute('aria-label', 'Rate, item' + n);
-      $('.iv-amt', r).setAttribute('aria-label', 'Amount, item' + n);
       $('.iv-x', r).setAttribute('aria-label', 'Remove item' + n);
     });
     $$('.iv-tax', taxesBox).forEach(function (r, i) {
@@ -543,7 +568,9 @@ faq:
       else if (dv.v > HUNDRED * pow10(dv.s)) { errors.push('The discount cannot be more than 100%.'); bad.push($('#iv-disc-value')); }
       else { discPct = dv; discount = roundDiv(subtotal * dv.v, HUNDRED * pow10(dv.s)); }
     }
-    if (discount > ZERO && subtotal >= ZERO && discount > subtotal) { errors.push('The discount is larger than the subtotal.'); bad.push($('#iv-disc-value')); }
+    // A fixed discount can never exceed the subtotal, which also stops it from making a
+    // credit (a negative subtotal) larger.
+    if (discount > ZERO && discount > subtotal) { errors.push(subtotal > ZERO ? 'The discount is larger than the subtotal.' : 'A fixed discount needs a subtotal above zero.'); bad.push($('#iv-disc-value')); }
     var sv = num(st.shipping.amount, money('Shipping'), $('#iv-shipping'));
     var shipping = sv ? toMinor(sv, d) : ZERO;
     var base = subtotal - discount + (st.shipping.taxable ? shipping : ZERO);
@@ -720,7 +747,7 @@ faq:
     model = { state: st, totals: t, f: f };
     $$('[aria-invalid]', $('#iv')).forEach(function (n) { n.removeAttribute('aria-invalid'); });
     t.bad.forEach(function (n) { if (n) n.setAttribute('aria-invalid', 'true'); });
-    $$('.iv-item', itemsBox).forEach(function (r, i) { $('.iv-amt', r).textContent = f.money(t.lines[i].amount); });
+    $$('.iv-item', itemsBox).forEach(function (r, i) { $('.iv-amt-v', r).textContent = f.money(t.lines[i].amount); });
     renderSheet(st, t, f);
     renderSummary(st, t, f);
     syncPrint();
@@ -791,8 +818,11 @@ faq:
     okEl.textContent = 'Saved ' + name + '. Open it here later to edit this invoice.';
   });
   function str(x) { return typeof x === 'string' ? x : x == null ? '' : typeof x === 'number' ? String(x) : ''; }
+  // Limits for opened files, so a damaged or hostile file cannot freeze the page.
+  var MAX_ITEMS = 500, MAX_TAXES = 20;
+  // Fills the form from a saved invoice. Returns notes about anything that was left out.
   function applyState(o) {
-    var from = o.from || {}, to = o.billTo || {};
+    var from = o.from || {}, to = o.billTo || {}, notes = [];
     $('#iv-title').value = str(o.title) || 'Invoice';
     $('#iv-number').value = str(o.number);
     $('#iv-date').value = str(o.issueDate);
@@ -800,12 +830,14 @@ faq:
     $('#iv-terms').value = $('#iv-terms').querySelector('option[value="' + CSS.escape(terms) + '"]') ? terms : 'custom';
     $('#iv-due').value = str(o.dueDate);
     var cur = str(o.currency).toUpperCase();
-    if (cur && digitsFor(cur) !== null) {
-      if (!$('#iv-currency').querySelector('option[value="' + CSS.escape(cur) + '"]')) {
+    if (/^[A-Z]{3}$/.test(cur) && digitsFor(cur) !== null) {
+      if (!$('#iv-currency').querySelector('option[value="' + cur + '"]')) {
         var op = el('option', { value: cur }, cur);
         $('#iv-currency').appendChild(op);
       }
       $('#iv-currency').value = cur;
+    } else if (cur) {
+      notes.push('Its currency "' + str(o.currency) + '" is not a currency code, so ' + $('#iv-currency').value + ' is selected. Check it.');
     }
     var loc = str(o.locale);
     $('#iv-locale').value = $('#iv-locale').querySelector('option[value="' + CSS.escape(loc) + '"]') ? loc : '';
@@ -818,8 +850,8 @@ faq:
     $('#iv-to-address').value = str(to.address);
     $('#iv-to-email').value = str(to.email);
     itemsBox.textContent = '';
-    (Array.isArray(o.items) ? o.items : []).forEach(function (it) { if (it && typeof it === 'object') addItem({ description: str(it.description), quantity: str(it.quantity), rate: str(it.rate) }); });
-    if (!itemsBox.children.length) addItem();
+    (Array.isArray(o.items) ? o.items : []).forEach(function (it) { if (it && typeof it === 'object') addItem({ description: str(it.description), quantity: str(it.quantity), rate: str(it.rate) }, 'batch'); });
+    if (!itemsBox.children.length) addItem(null, 'batch');
     var disc = o.discount || {};
     $('#iv-disc-type').value = disc.type === 'amount' ? 'amount' : 'percent';
     $('#iv-disc-value').value = str(disc.value);
@@ -827,11 +859,40 @@ faq:
     $('#iv-shipping').value = str(ship.amount);
     $('#iv-ship-tax').checked = !!ship.taxable;
     taxesBox.textContent = '';
-    (Array.isArray(o.taxes) ? o.taxes : []).forEach(function (t) { if (t && typeof t === 'object') addTax({ name: str(t.name), rate: str(t.rate) }); });
+    (Array.isArray(o.taxes) ? o.taxes : []).forEach(function (t) { if (t && typeof t === 'object') addTax({ name: str(t.name), rate: str(t.rate) }, 'batch'); });
+    labelRows();
     $('#iv-paid').value = str(o.amountPaid);
     $('#iv-notes').value = str(o.notes);
     $('#iv-terms-text').value = str(o.terms);
-    setLogo(typeof o.logo === 'string' && /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/.test(o.logo) ? o.logo : null);
+    // The logo is checked before it is shown (see checkLogo); one already on the page is kept.
+    if (o.logo !== logo) {
+      logoToken++; // a logo still being read no longer applies
+      setLogo(null);
+      if (o.logo != null && o.logo !== '') {
+        if (typeof o.logo === 'string' && LOGO_URL.test(o.logo)) checkLogo(o.logo);
+        else notes.push('Its logo is not a PNG, JPG, WebP, GIF or SVG image, so it was left out.');
+      }
+    }
+    return notes;
+  }
+  // A saved logo must be a base64 data URL of an image type this page accepts, must decode,
+  // and must be under the pixel limit (a small file can expand to a huge bitmap).
+  var LOGO_URL = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+\/]+={0,2}$/;
+  var LOGO_PIXELS = 40e6, logoToken = 0;
+  function checkLogo(url) {
+    var token = ++logoToken, img = new Image();
+    img.onload = function () {
+      if (token !== logoToken) return;
+      var w = img.naturalWidth, h = img.naturalHeight;
+      if (!/^data:image\/svg/.test(url) && (!w || !h || w * h > LOGO_PIXELS)) return logoLeftOut();
+      setLogo(url);
+      update();
+    };
+    img.onerror = function () { if (token === logoToken) logoLeftOut(); };
+    img.src = url;
+  }
+  function logoLeftOut() {
+    okEl.textContent = (okEl.textContent ? okEl.textContent + ' ' : '') + 'The logo in the file could not be used, so it was left out.';
   }
   function openFile(file) {
     okEl.textContent = '';
@@ -840,7 +901,7 @@ faq:
     file.text().then(function (text) {
       var o;
       try { o = JSON.parse(text); } catch (e) { o = null; }
-      if (!o || typeof o !== 'object' || o.format !== FORMAT) {
+      if (!o || typeof o !== 'object' || Array.isArray(o) || o.format !== FORMAT) {
         setErrors(['"' + file.name + '" is not an invoice file saved by this tool.']);
         return;
       }
@@ -848,10 +909,15 @@ faq:
         setErrors(['"' + file.name + '" was saved by a newer version of this tool. Reload the page and try again.']);
         return;
       }
-      applyState(o);
+      var nItems = Array.isArray(o.items) ? o.items.length : 0, nTaxes = Array.isArray(o.taxes) ? o.taxes.length : 0;
+      if (nItems > MAX_ITEMS || nTaxes > MAX_TAXES) {
+        setErrors(['"' + file.name + '" has ' + (nItems > MAX_ITEMS ? nItems.toLocaleString('en-US') + ' items' : nTaxes.toLocaleString('en-US') + ' taxes') + '. An invoice here can have at most ' + MAX_ITEMS + ' items and ' + MAX_TAXES + ' taxes.']);
+        return;
+      }
+      var notes = applyState(o);
       listText = null;
       update(true);
-      okEl.textContent = 'Opened ' + file.name + '.';
+      okEl.textContent = ['Opened ' + file.name + '.'].concat(notes).join(' ');
     }, function () { setErrors(['"' + file.name + '" could not be read.']); });
   }
   $('#iv-open').addEventListener('click', function () { $('#iv-open-file').click(); });
@@ -867,28 +933,45 @@ faq:
     $('#iv-logo-remove').hidden = !url;
     $('#iv-logo-add').textContent = url ? 'Change logo' : 'Add logo';
   }
+  // Large pictures are shrunk to 800 px so the saved invoice file stays small; the browser
+  // decodes and shrinks them off the main thread where it can.
   function readLogo(file) {
     okEl.textContent = '';
     if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) { setErrors(['"' + file.name + '" is not a PNG, JPG, WebP, GIF or SVG image.']); return; }
     if (file.size > 10 * 1024 * 1024) { setErrors(['"' + file.name + '" is larger than 10 MB. Use a smaller logo.']); return; }
+    var token = ++logoToken;
+    var fail = function (msg) { if (token === logoToken) setErrors([msg]); };
+    var done = function (url) {
+      if (token !== logoToken) return;
+      setLogo(url);
+      listText = null;
+      update(true);
+    };
     var reader = new FileReader();
-    reader.onerror = function () { setErrors(['"' + file.name + '" could not be read.']); };
+    reader.onerror = function () { fail('"' + file.name + '" could not be read.'); };
     reader.onload = function () {
       var img = new Image();
-      img.onerror = function () { setErrors(['"' + file.name + '" could not be read as an image.']); };
+      img.onerror = function () { fail('"' + file.name + '" could not be read as an image.'); };
       img.onload = function () {
         var url = reader.result, w = img.naturalWidth, h = img.naturalHeight, MAXPX = 800;
-        // Large photos are scaled down so the saved invoice file stays small.
-        if (file.type !== 'image/svg+xml' && w && h && (Math.max(w, h) > MAXPX || file.size > 400 * 1024)) {
-          var k = Math.min(1, MAXPX / Math.max(w, h)), c = document.createElement('canvas');
-          c.width = Math.max(1, Math.round(w * k));
-          c.height = Math.max(1, Math.round(h * k));
-          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-          url = c.toDataURL(file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.9);
-        }
-        setLogo(url);
-        listText = null;
-        update(true);
+        if (file.type === 'image/svg+xml') return done(url);
+        if (!w || !h) return fail('"' + file.name + '" could not be read as an image.');
+        if (w * h > LOGO_PIXELS) return fail('"' + file.name + '" is too large (' + w.toLocaleString('en-US') + ' × ' + h.toLocaleString('en-US') + ' pixels). Use an image under 40 megapixels.');
+        if (Math.max(w, h) <= MAXPX && file.size <= 400 * 1024) return done(url);
+        var k = Math.min(1, MAXPX / Math.max(w, h)), tw = Math.max(1, Math.round(w * k)), th = Math.max(1, Math.round(h * k));
+        var shrunk = typeof createImageBitmap === 'function'
+          ? createImageBitmap(file, { resizeWidth: tw, resizeHeight: th, resizeQuality: 'high' }).catch(function () { return img; })
+          : Promise.resolve(img);
+        shrunk.then(function (src) {
+          if (token !== logoToken) return;
+          var c = document.createElement('canvas');
+          c.width = tw; c.height = th;
+          var ctx = c.getContext('2d');
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(src, 0, 0, tw, th);
+          if (src.close) src.close();
+          done(c.toDataURL(file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.9));
+        }).catch(function () { fail('"' + file.name + '" could not be read as an image.'); });
       };
       img.src = reader.result;
     };
@@ -896,7 +979,7 @@ faq:
   }
   $('#iv-logo-add').addEventListener('click', function () { $('#iv-logo-file').click(); });
   $('#iv-logo-file').addEventListener('change', function (e) { if (e.target.files[0]) readLogo(e.target.files[0]); e.target.value = ''; });
-  $('#iv-logo-remove').addEventListener('click', function () { setLogo(null); update(); $('#iv-logo-add').focus(); });
+  $('#iv-logo-remove').addEventListener('click', function () { logoToken++; setLogo(null); update(); $('#iv-logo-add').focus(); });
 
   // An invoice file or an image dropped anywhere on the page.
   function isFileDrag(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }

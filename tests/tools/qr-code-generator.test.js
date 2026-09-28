@@ -5,6 +5,25 @@
 // decoder that is injected only in this test.
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
+
+// A grey PNG of w x h pixels. Rows of one colour compress to almost nothing, so a
+// 7,000 x 7,000 image (49 megapixels, 196 MB as a bitmap) is a file of about 50 KB.
+function bigPng(w, h) {
+  const crc = b => { let c = ~0; for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1; } return ~c >>> 0; };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 0;
+  const row = Buffer.alloc(w + 1, 0x80); row[0] = 0;
+  const raw = Buffer.alloc((w + 1) * h);
+  for (let y = 0; y < h; y++) row.copy(raw, y * (w + 1));
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
+}
 
 // Byte-mode capacity per version 1-10, from ISO/IEC 18004 table 7.
 const CAPACITY = {
@@ -79,12 +98,24 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.getAttribute('#qg-url', 'aria-invalid'), 'true');
   assert.match(await page.textContent('#qg-qr'), /cannot contain spaces/, 'the preview says what is wrong');
   assert.equal(await page.isDisabled('#qg-png'), true);
+  assert.equal(await page.isDisabled('#qg-copy-text'), true, 'nothing to copy');
   await page.fill('#qg-url', '');
   assert.equal(await err(), '', 'an empty field is a prompt, not an error');
   assert.equal(await page.getAttribute('#qg-url', 'aria-invalid'), null);
   assert.match(await page.textContent('#qg-qr'), /Enter a web address/);
   await page.fill('#qg-url', 'mailto:someone@example.com');
   assert.equal(await payload(), 'mailto:someone@example.com', 'other schemes are kept');
+  // Regression: a host and port is not a scheme, so it still gets https://.
+  for (const [typed, expected] of [
+    ['example.com:8080/menu', 'https://example.com:8080/menu'],
+    ['localhost:3000', 'https://localhost:3000'],
+    ['192.168.1.20:8123', 'https://192.168.1.20:8123'],
+    ['tel:5551234', 'tel:5551234'],
+    ['geo:1.5,2', 'geo:1.5,2'],
+  ]) {
+    await page.fill('#qg-url', typed);
+    assert.equal(await payload(), expected, typed);
+  }
 
   // ----- Text with UTF-8 and line breaks -----
   await pick('text');
@@ -101,9 +132,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.fill('#qg-email-to', 'ana@example.com, bo+x@example.org');
   await page.fill('#qg-email-subject', 'Hi & welcome');
   await page.fill('#qg-email-body', 'Line 1\nLine 2 ü');
-  const mail = 'mailto:ana@example.com,bo%2Bx@example.org?subject=Hi%20%26%20welcome&body=Line%201%0D%0ALine%202%20%C3%BC';
+  // "+" stays literal in the address (RFC 6068 section 5 allows it, and mail apps show it as
+  // typed); "&" and "=" in an address must be encoded.
+  const mail = 'mailto:ana@example.com,bo+x@example.org?subject=Hi%20%26%20welcome&body=Line%201%0D%0ALine%202%20%C3%BC';
   assert.equal(await payload(), mail);
   await decodesTo('#qg-png', mail, 'mailto PNG');
+  await page.fill('#qg-email-to', 'a&b=c@example.com');
+  assert.equal(await payload(), 'mailto:a%26b%3Dc@example.com?subject=Hi%20%26%20welcome&body=Line%201%0D%0ALine%202%20%C3%BC');
   await page.fill('#qg-email-to', 'not-an-address');
   assert.match(await err(), /"not-an-address" is not a valid email address/);
   await page.fill('#qg-email-to', 'ana@example.com');
@@ -161,6 +196,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   ].join('\r\n') + '\r\n';
   assert.equal(await payload(), vcard);
   await decodesTo('#qg-png', vcard, 'vCard PNG');
+  // Copy text copies the exact payload, CRLF line ends included.
+  await page.click('#qg-copy-text');
+  await page.waitForFunction(() => document.querySelector('#qg-copy-text').textContent === 'Copied!');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), vcard);
   // A company alone is enough; FN falls back to it and N stays present (both required in 3.0).
   for (const id of ['#qg-vc-first', '#qg-vc-last', '#qg-vc-title', '#qg-vc-mobile', '#qg-vc-email', '#qg-vc-url', '#qg-vc-street', '#qg-vc-city', '#qg-vc-region', '#qg-vc-zip', '#qg-vc-country', '#qg-vc-note']) await page.fill(id, '');
   assert.equal(await payload(), 'BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nFN:Acme\\, Inc.\r\nORG:Acme\\, Inc.\r\nEND:VCARD\r\n');
@@ -170,10 +209,38 @@ module.exports = async ({ page, open, assert, fixtures }) => {
 
   // ----- Location: geo: URI, pasted pairs split, ranges checked -----
   await pick('geo');
-  await page.fill('#qg-lat', '48.8584, 2.2945');
+  const paste = async (sel, t) => {
+    await page.evaluate(v => navigator.clipboard.writeText(v), t);
+    await page.fill(sel, '');
+    await page.focus(sel);
+    await page.keyboard.press('Control+V');
+  };
+  await paste('#qg-lat', '48.8584, 2.2945');
   assert.equal(await page.inputValue('#qg-lat'), '48.8584');
   assert.equal(await page.inputValue('#qg-lon'), '2.2945');
   assert.equal(await payload(), 'geo:48.8584,2.2945');
+  // Regression: typing a decimal comma is never split mid-number ("48,8" used to become
+  // latitude 48 and longitude 8), and a decimal comma is read as a point.
+  await page.fill('#qg-lat', '');
+  await page.fill('#qg-lon', '');
+  await page.locator('#qg-lat').pressSequentially('48,8584');
+  assert.equal(await page.inputValue('#qg-lat'), '48,8584');
+  assert.equal(await page.inputValue('#qg-lon'), '');
+  await page.locator('#qg-lon').pressSequentially('2,2945');
+  assert.equal(await payload(), 'geo:48.8584,2.2945');
+  // A pair with decimal points and no space, pasted into the longitude box, fills both.
+  await paste('#qg-lon', '-33.8568,151.2153');
+  assert.deepEqual([await page.inputValue('#qg-lat'), await page.inputValue('#qg-lon')], ['-33.8568', '151.2153']);
+  // A typed pair is split when the field is left.
+  await page.fill('#qg-lon', '');
+  await page.fill('#qg-lat', '');
+  await page.locator('#qg-lat').pressSequentially('48,8584, 2,2945');
+  assert.equal(await page.inputValue('#qg-lon'), '', 'not split while typing');
+  await page.press('#qg-lat', 'Tab');
+  assert.deepEqual([await page.inputValue('#qg-lat'), await page.inputValue('#qg-lon')], ['48,8584', '2,2945']);
+  assert.equal(await payload(), 'geo:48.8584,2.2945');
+  await page.fill('#qg-lat', '48.8584');
+  await page.fill('#qg-lon', '2.2945');
   await decodesTo('#qg-png', 'geo:48.8584,2.2945', 'geo PNG');
   await page.fill('#qg-lon', '-.5');
   assert.equal(await payload(), 'geo:48.8584,-0.5');
@@ -241,7 +308,26 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.fill('#qg-ev-edate', '2026-12-20');
   assert.match(await err(), /ends before it starts/);
   assert.equal(await page.getAttribute('#qg-ev-edate', 'aria-invalid'), 'true');
+  // Regression: an all-day event on 31 December 9999 used to get DTEND;VALUE=DATE:100000101,
+  // a five-digit year that no calendar can read.
+  await page.fill('#qg-ev-sdate', '9999-12-30');
+  await page.fill('#qg-ev-edate', '9999-12-30');
+  assert.match(await payload(), /DTSTART;VALUE=DATE:99991230\r\nDTEND;VALUE=DATE:99991231\r\n/);
+  await page.fill('#qg-ev-edate', '9999-12-31');
+  assert.equal(await err(), 'A calendar event must end before the year 10000.');
+  assert.equal(await page.getAttribute('#qg-ev-edate', 'aria-invalid'), 'true');
+  await page.fill('#qg-ev-sdate', '2026-12-24');
+  await page.fill('#qg-ev-edate', '2026-12-24');
   await page.uncheck('#qg-ev-allday');
+  // 22:00 on 31 December 9999 in New York is already 10000-01-01 in UTC.
+  await page.selectOption('#qg-ev-tz', 'America/New_York');
+  await page.fill('#qg-ev-sdate', '9999-12-31');
+  await page.fill('#qg-ev-stime', '18:00');
+  await page.fill('#qg-ev-edate', '9999-12-31');
+  await page.fill('#qg-ev-etime', '18:30');
+  assert.match(await payload(), /DTSTART:99991231T230000Z\r\nDTEND:99991231T233000Z\r\n/);
+  await page.fill('#qg-ev-etime', '22:00');
+  assert.equal(await err(), 'A calendar event must end before the year 10000.');
 
   // ----- Back to a link for the design options -----
   await pick('url');
@@ -250,6 +336,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await warn(), /quiet zone of at least 4 modules/);
   let svg = (await download('#qg-svg')).buf.toString('utf8');
   assert.match(svg, /width="1024" height="1024" viewBox="0 0 29 29"/);
+  await page.fill('#qg-margin', '2.5');
+  assert.match(await err(), /quiet zone must be a whole number/, 'a fraction of a module is refused');
   await page.fill('#qg-margin', '4');
   assert.equal(await warn(), '');
 
@@ -296,6 +384,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForSelector('#qg-logo-remove:not([hidden])');
   assert.equal(await page.inputValue('#qg-ecl'), 'H');
   assert.equal(await page.isDisabled('#qg-ecl'), true);
+  assert.equal(await page.isVisible('#qg-ecl-note'), true, 'says why the level is locked');
+  assert.equal(await page.textContent('#qg-logo-choose'), 'Change logo');
   assert.equal(await modules(), expectedModules('https://example.com/', 'H'));
   assert.equal(await page.textContent('#qg-logo-name'), 'logo.png');
   await decodesTo('#qg-png', 'https://example.com/', 'PNG with logo');
@@ -311,12 +401,46 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.click('#qg-logo-remove');
   assert.equal(await page.isDisabled('#qg-ecl'), false);
   assert.equal(await page.inputValue('#qg-ecl'), 'L', 'the chosen level comes back');
+  assert.equal(await page.isVisible('#qg-ecl-note'), false);
+  assert.equal(await page.textContent('#qg-logo-choose'), 'Add logo');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'qg-logo-choose');
   // A non-image file is refused with a clear message.
   await page.setInputFiles('#qg-logo-file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hi') });
   assert.match(await err(), /"notes.txt" is not a PNG, JPG, WebP, GIF or SVG image/);
+  await page.waitForFunction(() => /"notes.txt" is not a PNG/.test(document.querySelector('#qg-status').textContent));
   await page.fill('#qg-url', 'https://example.com/');
   assert.equal(await err(), '');
+
+  // Regression: a small file that decodes to a huge bitmap is refused before it is drawn
+  // (a 20,000 px square logo used to freeze the page for 20 seconds on Download PNG).
+  await page.evaluate(() => {
+    window.__long = [];
+    new PerformanceObserver(l => l.getEntries().forEach(e => window.__long.push(Math.round(e.duration)))).observe({ type: 'longtask' });
+  });
+  const bomb = bigPng(7000, 7000);
+  assert.ok(bomb.length < 300 * 1024, `bomb is ${bomb.length} bytes`);
+  await page.setInputFiles('#qg-logo-file', { name: 'huge.png', mimeType: 'image/png', buffer: bomb });
+  await page.waitForFunction(() => /too large/.test(document.querySelector('#qg-error').textContent));
+  assert.equal(await err(), '"huge.png" is too large (7,000 × 7,000 pixels). Use an image under 40 megapixels.');
+  assert.equal(await page.isHidden('#qg-logo-remove'), true, 'no logo was set');
+  await decodesTo('#qg-png', 'https://example.com/', 'PNG after the refused logo');
+  assert.deepEqual(await page.evaluate(() => window.__long.filter(d => d > 200)), [], 'no long freeze');
+  // A large but reasonable logo (3,000 x 1,500) is shrunk to 1,024 px wide, so the SVG
+  // stays small, and the code still decodes.
+  const wide = await page.evaluate(async () => {
+    const c = new OffscreenCanvas(3000, 1500), x = c.getContext('2d');
+    for (let i = 0; i < 30; i++) { x.fillStyle = `hsl(${i * 12} 70% 45%)`; x.fillRect(i * 100, 0, 100, 1500); }
+    const b = await c.convertToBlob({ type: 'image/png' });
+    return Array.from(new Uint8Array(await b.arrayBuffer()));
+  });
+  await page.setInputFiles('#qg-logo-file', { name: 'wide.png', mimeType: 'image/png', buffer: Buffer.from(wide) });
+  await page.waitForSelector('#qg-logo-remove:not([hidden])');
+  assert.equal(await err(), '');
+  const wideSvg = await decodesTo('#qg-svg', 'https://example.com/', 'SVG with a shrunk logo');
+  const embedded = wideSvg.buf.toString('utf8').match(/xlink:href="(data:image\/png;base64,[^"]+)"/)[1];
+  const dims = Buffer.from(embedded.split(',')[1], 'base64');
+  assert.deepEqual([dims.readUInt32BE(16), dims.readUInt32BE(20)], [1024, 512], 'embedded logo size');
+  await page.click('#qg-logo-remove');
 
   // ----- Capacity: 2,953 bytes fit at level L (version 40), one more does not -----
   await pick('text');
@@ -325,6 +449,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await warn(), /dense code \(version 40\)/);
   await page.fill('#qg-text', 'a'.repeat(2954));
   assert.match(await err(), /2,954 bytes, and the maximum at error correction L is 2,953 bytes/);
+  // The error box is not a live region (its byte count changes on every keystroke); the
+  // status line reads the error once typing pauses.
+  assert.equal(await page.getAttribute('#qg-error', 'aria-live'), null);
+  await page.waitForFunction(() => document.querySelector('#qg-status').textContent === 'Too much content for one QR code: 2954 bytes, and the maximum at error correction L is 2953.');
   assert.equal(await page.isDisabled('#qg-svg'), true);
   await page.selectOption('#qg-ecl', 'M');
   await page.fill('#qg-text', 'Short again');
@@ -355,5 +483,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForTimeout(300);
   const live = await page.evaluate(() => window.__live.filter(t => !t.startsWith(':')));
   assert.deepEqual(live, ['qg-status:QR code updated: version 1, 12 bytes.'], JSON.stringify(live));
-  for (const sel of ['#qg-payload', '#qg-meta', '#qg-warn']) assert.equal(await page.getAttribute(sel, 'aria-live'), null, `${sel} is not live`);
+  for (const sel of ['#qg-payload', '#qg-meta', '#qg-warn', '#qg-error']) assert.equal(await page.getAttribute(sel, 'aria-live'), null, `${sel} is not live`);
+  // Typing an error is announced once, after the pause, not on every keystroke.
+  await pick('phone');
+  await page.evaluate(() => { window.__live = []; });
+  await page.fill('#qg-phone', '');
+  await page.type('#qg-phone', '555-CALL');
+  await page.waitForFunction(() => /can only contain digits/.test(document.querySelector('#qg-status').textContent));
+  await page.waitForTimeout(300);
+  const heard = await page.evaluate(() => window.__live.filter(t => !t.startsWith(':')));
+  assert.deepEqual(heard, ['qg-status:The phone number can only contain digits, spaces, brackets, dashes and a leading +.'], JSON.stringify(heard));
 };
