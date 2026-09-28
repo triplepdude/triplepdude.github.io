@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 // Expected values computed independently with Python's ipaddress module:
 //   iface = ipaddress.IPv4Interface(case); n = iface.network
@@ -50,7 +51,7 @@ const RANDOM = [
   ["167.219.220.209 0.0.0.63", "167.219.220.192/26", "167.219.220.255", "167.219.220.193", "167.219.220.254", 62],
 ];
 
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, fixtures }) => {
   await open();
   // First text node of a cell (cells for /31 and /32 broadcast carry an explanatory <small>).
   const cell = id => page.$eval('#sc-' + id, el => (el.firstChild ? el.firstChild.textContent : ''));
@@ -126,7 +127,7 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#sc-ip', '');
   await page.selectOption('#sc-prefix', '8');
   assert.equal(await page.inputValue('#sc-ip'), '');
-  assert.match(await text('#sc-msg'), /Enter an IPv4 address/);
+  assert.match(await text('#sc-msg'), /Enter an IPv4 or IPv6 address/);
   await page.selectOption('#sc-prefix', '32');
 
   // Address only, then the mask list.
@@ -139,13 +140,26 @@ module.exports = async ({ page, open, assert }) => {
 
   // Validation errors.
   const errs = [
-    ['', /Enter an IPv4 address/],
+    ['', /Enter an IPv4 or IPv6 address/],
     ['256.1.1.1/24', /256 .*out of range/],
     ['1.2.3/24', /four numbers.*has 3/],
     ['1.2.3.4/33', /\/33 is not a valid prefix/],
     ['1.2.3.4 255.0.255.0', /not contiguous/],
     ['1.2.3.4 255.255.255.1', /not contiguous/],
-    ['2001:db8::1/64', /IPv6/],
+    ['2001:db8::1/129', /IPv6 prefixes run from \/0 to \/128/],
+    ['2001:db8::g/64', /"g" can't appear in an IPv6 address/],
+    ['2001:db8::1::2/64', /"::" only once/],
+    ['2001:db8:1:2:3:4:5/64', /has 7/],
+    ['1:2:3:4:5:6:7:8::/64', /has 8 groups besides/],
+    ['2001:db8::12345/64', /more than 4 hex digits/],
+    ['2001:db8:::1/64', /stray colon/],
+    ['[2001:db8::1]:443', /includes a port number/],
+    ['::1.2.3.4.5', /four numbers/],
+    ['1.2.3.4::1', /IPv4 part can only come last/],
+    // Regression: brackets or a zone with no address threw "Cannot read properties of undefined".
+    ['[]', /Enter the address itself/],
+    ['%eth0', /Enter the address itself/],
+    [' % ', /Enter the address itself/],
     ['1.2..4/24', /empty part/],
     ['1.2.3.x/24', /"x" .*not a number/],
     ['1.2.3.4/', /after the slash/],
@@ -277,6 +291,163 @@ module.exports = async ({ page, open, assert }) => {
   const clip = await page.evaluate(() => navigator.clipboard.readText());
   assert.ok(clip.includes('Network address: 192.168.1.0') && clip.includes('Wildcard mask: 0.0.0.255'), clip);
 
+  // ---------- IPv6 ----------
+  // Expected values: Python's ipaddress (IPv6Interface: compressed, exploded, network,
+  // broadcast_address as the last address, num_addresses, netmask, hostmask, int,
+  // reverse_pointer), generated into tests/fixtures/subnet-calculator/vectors.json.
+  const V = JSON.parse(fs.readFileSync(path.join(fixtures, 'vectors.json'), 'utf8'));
+  const TYPES6 = {
+    '2001:db8:abcd:12::1/64': /^Documentation \(RFC 3849\)/, 'fd12:3456:789a:1::42/48': /^Unique local.*locally assigned/,
+    'fe80::1ff:fe23:4567:890a%eth0/64': /^Link-local/, '[::ffff:192.0.2.1]/128': /^IPv4-mapped/, '::1/128': /^Loopback/,
+    '::/0': /^Unspecified/, '2002:c000:0204::1/48': /^6to4/, 'ff02::1/128': /^Multicast, link-local scope/,
+    '64:ff9b::198.51.100.7/96': /^NAT64 well-known/, '2600:1f18:abcd:1200::/56': /^Global unicast/, '3fff:1:2::5/20': /^Documentation \(RFC 9637\)/,
+    '2001:0:4136:e378:8000:63bf:3fff:fdd2/32': /^Teredo/, '1:2:3:4:5:6:7::/112': /^Reserved by the IETF/, 'FE80:0:0:0:0:0:0:1/10': /^Link-local/,
+  };
+  for (const c of V.v6) {
+    await page.fill('#sc-ip', c.inp);
+    assert.equal(await text('#sc-msg'), '', `${c.inp}: no error`);
+    const got = {};
+    for (const k of ['address', 'expanded', 'network', 'first', 'last', 'total', 'netmask', 'wildcard', 'int', 'rev', 'n64']) got[k] = await cell(k);
+    // Python writes the IPv4 part of a mapped address in dotted form even when "exploded";
+    // the page's expanded form is all 32 hex digits.
+    const exp = c.exp.replace(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/, (m, a, b, cc, d) => [a, b, cc, d].map(x => (+x).toString(16).padStart(2, '0')).join('').replace(/^(.{4})/, '$1:'));
+    assert.deepEqual(got, { address: c.comp, expanded: exp, network: c.net, first: c.net, last: c.last, total: BigInt(c.total).toLocaleString('en-US'),
+      netmask: c.mask, wildcard: c.host, int: c.int, rev: c.rev, n64: BigInt(c.n64).toLocaleString('en-US') }, c.inp);
+    assert.equal(await text('#sc-big'), c.net + '/' + c.p, c.inp);
+    assert.equal(await cell('hex'), '0x' + BigInt(c.int).toString(16).toUpperCase().padStart(32, '0'));
+    assert.equal(await cell('range'), c.net + ' – ' + c.last);
+    assert.equal(await page.inputValue('#sc-prefix'), String(c.p), `${c.inp}: the mask list follows`);
+    if (TYPES6[c.inp]) assert.match(await cell('type'), TYPES6[c.inp], c.inp);
+    for (const id of ['broadcast', 'usable', 'class']) assert.equal(await page.isVisible('#sc-' + id), false, `${c.inp}: no IPv4-only ${id}`);
+  }
+  assert.equal(await page.locator('#sc-prefix option').count(), 129, 'IPv6 mask list /0 to /128');
+  await page.fill('#sc-ip', 'fe80::1ff:fe23:4567:890a%eth0/64');
+  assert.match(await text('#sc-note'), /zone %eth0/);
+  assert.equal(await cell('iid'), '1ff:fe23:4567:890a');
+  assert.equal(await text('#sc-iid'), '1ff:fe23:4567:890a', 'not EUI-64: ff:fe is not in bytes 4 and 5');
+  // Modified EUI-64 (RFC 4291 appendix A): MAC 00:1a:2b:3c:4d:5e -> 021a:2bff:fe3c:4d5e.
+  await page.fill('#sc-ip', 'fe80::21a:2bff:fe3c:4d5e/64');
+  assert.match(await text('#sc-iid'), /MAC address 00:1a:2b:3c:4d:5e\.$/);
+  await page.fill('#sc-ip', '2002:c000:0204::1/48');
+  assert.equal(await cell('embed'), '192.0.2.4'); // Python: .sixtofour
+  await page.fill('#sc-ip', '2001:0:4136:e378:8000:63bf:3fff:fdd2/32');
+  assert.equal(await cell('embed'), '65.54.227.120 (server), 192.0.2.45 (client)'); // Python: .teredo
+  await page.fill('#sc-ip', '2001:db8:abcd:12::1/64');
+  assert.equal(await cell('zone'), '2.1.0.0.d.c.b.a.8.b.d.0.1.0.0.2.ip6.arpa');
+  assert.equal(await text('#sc-type-badge'), 'Documentation');
+  assert.equal(await page.isVisible('#sc-class-badge'), false);
+  const hexBold = (await page.locator('#sc-bin dd').first().locator('.sc-n').textContent());
+  assert.equal(hexBold, '2001:0db8:abcd:0012', 'the 16 hex digits of a /64 network part are bold');
+  await page.fill('#sc-ip', '2001:db8::1/70');
+  assert.match(await text('#sc-note'), /SLAAC/);
+  // The mask list rewrites an IPv6 input too.
+  await page.fill('#sc-ip', '2001:db8::1');
+  assert.equal(await text('#sc-big'), '2001:db8::/70', 'a bare IPv6 address uses the mask list, which keeps the last IPv6 prefix');
+  await page.selectOption('#sc-prefix', '48');
+  assert.equal(await page.inputValue('#sc-ip'), '2001:db8::1/48');
+  // Back to IPv4: the mask list and rows switch back.
+  await page.fill('#sc-ip', '192.168.1.10/24');
+  assert.equal(await page.locator('#sc-prefix option').count(), 33);
+  assert.equal(await page.isVisible('#sc-broadcast'), true);
+  assert.equal(await page.isVisible('#sc-expanded'), false);
+  assert.equal(await cell('range'), '192.168.1.0 – 192.168.1.255');
+  assert.equal(await cell('zone'), '1.168.192.in-addr.arpa');
+  await page.fill('#sc-ip', '10.1.2.3/12');
+  assert.equal(await cell('zone'), '0.10.in-addr.arpa');
+  assert.match(await text('#sc-zone'), /first of 16 \/16 zones/);
+
+  // IPv6 splitting (python: list(ip_network('2001:db8:abcd::/48').subnets(new_prefix=50/64))).
+  await page.fill('#sc-ip', '2001:db8:abcd::/48');
+  assert.equal(await page.locator('#sc-split-mode option[value="hosts"]').isDisabled(), true);
+  await page.selectOption('#sc-split-mode', 'count');
+  await page.fill('#sc-split-num', '4');
+  let rows6 = await page.$$eval('#sc-split-body tr', trs => trs.map(tr => Array.from(tr.cells).map(td => td.textContent)));
+  assert.deepEqual(rows6.map(r => r[1]), ['2001:db8:abcd::/50', '2001:db8:abcd:4000::/50', '2001:db8:abcd:8000::/50', '2001:db8:abcd:c000::/50']);
+  assert.deepEqual(rows6[1], ['2', '2001:db8:abcd:4000::/50', '2001:db8:abcd:4000:: – 2001:db8:abcd:7fff:ffff:ffff:ffff:ffff', (2n ** 78n).toLocaleString('en-US')]);
+  assert.match(await text('#sc-split-info'), /^4 subnets of \/50, 302,231,454,903,657,293,676,544 addresses each\.$/);
+  await page.selectOption('#sc-split-mode', 'prefix');
+  await page.selectOption('#sc-split-prefix', '64');
+  rows6 = await page.$$eval('#sc-split-body tr', trs => trs.map(tr => tr.cells[1].textContent));
+  assert.equal(rows6.length, 512);
+  assert.equal(rows6[511], '2001:db8:abcd:1ff::/64');
+  assert.match(await text('#sc-split-info'), /65,536 subnets of \/64.*first 512.*all of them/);
+  const [dl6] = await Promise.all([page.waitForEvent('download'), page.click('#sc-csv')]);
+  assert.equal(dl6.suggestedFilename(), 'subnets-2001-db8-abcd-48-to-64.csv');
+  const csv6 = fs.readFileSync(await dl6.path(), 'utf8').trim().split(/\r\n/);
+  assert.equal(csv6.length, 65537);
+  assert.equal(csv6[0], 'Subnet,First address,Last address,Addresses');
+  assert.equal(csv6[65536], '2001:db8:abcd:ffff::/64,2001:db8:abcd:ffff::,2001:db8:abcd:ffff:ffff:ffff:ffff:ffff,18446744073709551616');
+  // Counts beyond 2^53 are exact: 2^80 + 1 subnets of a /0 need a /81.
+  await page.fill('#sc-ip', '::/0');
+  await page.selectOption('#sc-split-mode', 'count');
+  await page.fill('#sc-split-num', (2n ** 80n + 1n).toString());
+  assert.match(await text('#sc-split-info'), /not a power of two.*of \/81,/);
+  await page.fill('#sc-ip', '::1/128');
+  assert.match(await text('#sc-split-msg'), /single address and can't be split/);
+  await page.fill('#sc-ip', '192.168.0.0/24');
+  assert.equal(await page.locator('#sc-split-mode option[value="hosts"]').isDisabled(), false);
+
+  // ---------- Range to CIDR (python: ipaddress.summarize_address_range) ----------
+  for (const r of V.ranges) {
+    await page.fill('#sc-r-start', r.a);
+    await page.fill('#sc-r-end', r.b);
+    assert.equal(await text('#sc-r-msg'), '', `${r.a} - ${r.b}`);
+    assert.deepEqual((await text('#sc-r-out')).split('\n'), r.cidrs, `${r.a} - ${r.b}`);
+    assert.ok((await text('#sc-r-info')).startsWith(`${r.cidrs.length.toLocaleString('en-US')} CIDR block${r.cidrs.length === 1 ? '' : 's'} cover ${BigInt(r.count).toLocaleString('en-US')} address`), await text('#sc-r-info'));
+  }
+  assert.match(await text('#sc-r-info'), /cover/);
+  await page.fill('#sc-r-start', '192.168.1.200');
+  await page.fill('#sc-r-end', '192.168.1.10');
+  assert.match(await text('#sc-r-info'), /swapped/);
+  await page.fill('#sc-r-end', '2001:db8::1');
+  assert.match(await text('#sc-r-msg'), /Both addresses must be IPv4, or both IPv6/);
+  await page.fill('#sc-r-end', '192.168.1.300');
+  assert.match(await text('#sc-r-msg'), /^Last address: 300 .*out of range/);
+  assert.equal(await page.getAttribute('#sc-r-end', 'aria-invalid'), 'true');
+  await page.fill('#sc-r-start', '192.168.1.10');
+  await page.fill('#sc-r-end', '192.168.1.20');
+
+  // ---------- Summarize (python: collapse_addresses, and the smallest covering network) ----------
+  const aggCheck = async (res, label) => {
+    const want = [].concat(res['4'] ? res['4'].collapsed : [], res['6'] ? res['6'].collapsed : []);
+    assert.deepEqual((await text('#sc-agg-out')).split('\n'), want, label);
+    assert.deepEqual((await text('#sc-super-out')).split('\n'), [res['4'], res['6']].filter(Boolean).map(r => r.supernet), label);
+    for (const f of ['4', '6']) {
+      if (!res[f]) continue;
+      const extra = BigInt(res[f].extra);
+      assert.ok((await text('#sc-super-info')).includes(`The IPv${f} supernet /${res[f].supernet.split('/')[1]} has ${BigInt(res[f].size).toLocaleString('en-US')} address${res[f].size === '1' ? '' : 'es'}` +
+        (extra ? `, ${extra.toLocaleString('en-US')} of them not in your list.` : ', exactly your list.')), label + ': ' + await text('#sc-super-info'));
+    }
+  };
+  await aggCheck(V.aggDefault, 'default sample');
+  assert.match(await text('#sc-agg-info'), /^8 entries → 3 blocks/);
+  await page.fill('#sc-agg-in', V.aggRandom.items.join('\n'));
+  await page.waitForFunction(() => document.querySelector('#sc-agg-info').textContent.startsWith('300 entries'));
+  await aggCheck(V.aggRandom.res, 'random IPv4');
+  assert.match(await text('#sc-agg-info'), /host bits cleared in \d+/);
+  await page.fill('#sc-agg-in', V.aggRandom6.items.join(', '));
+  await page.waitForFunction(() => document.querySelector('#sc-agg-info').textContent.startsWith('120 entries'));
+  await aggCheck(V.aggRandom6.res, 'random IPv6');
+  await page.fill('#sc-agg-in', '10.0.0.0/24\nbanana\n10.0.1.0/24\n10.0.0.0/33');
+  await page.waitForFunction(() => document.querySelector('#sc-agg-out').textContent === '10.0.0.0/23');
+  assert.match(await text('#sc-agg-msg'), /^Skipped "banana": .* "10\.0\.0\.0\/33": \/33 is too long for IPv4\./);
+  // Long lists summarize without long tasks: 2,000 entries in well under 100 ms, 20,000 in under 500 ms
+  // (python: collapse_addresses of 10.(i >> 8).(i & 255).0/24).
+  for (const [n, want, limit] of [[2000, '10.0.0.0/14 10.4.0.0/15 10.6.0.0/16 10.7.0.0/17 10.7.128.0/18 10.7.192.0/20', 100], [20000, '10.0.0.0/10 10.64.0.0/13 10.72.0.0/14 10.76.0.0/15 10.78.0.0/19', 500]]) {
+    await page.evaluate(n => {
+      window.__long = 0;
+      new PerformanceObserver(l => l.getEntries().forEach(e => { window.__long = Math.max(window.__long, e.duration); })).observe({ type: 'longtask' });
+      const el = document.querySelector('#sc-agg-in');
+      el.value = Array.from({ length: n }, (_, i) => '10.' + (i >> 8) + '.' + (i & 255) + '.0/24').join('\n');
+      el.dispatchEvent(new Event('input'));
+    }, n);
+    await page.waitForFunction(n => document.querySelector('#sc-agg-info').textContent.startsWith(n.toLocaleString('en-US') + ' entries'), n);
+    assert.equal((await text('#sc-agg-out')).split('\n').join(' '), want);
+    await page.waitForTimeout(100);
+    const long = await page.evaluate(() => window.__long);
+    assert.ok(long < limit, `${n} entries: longest task ${long} ms`);
+  }
+
   // Screen readers: the results, the split table and the error messages are redrawn on every
   // keystroke (an address is incomplete until typing ends), so none is a live region or alert;
   // #sc-status announces one short summary once typing pauses.
@@ -310,4 +481,13 @@ module.exports = async ({ page, open, assert }) => {
   await page.waitForTimeout(100);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, 'no horizontal scroll at 320px');
   await page.setViewportSize(vp);
+
+  // Regression: a pasted 100,000-digit subnet count is refused at once instead of
+  // freezing the page in BigInt loops.
+  await page.fill('#sc-ip', '10.0.0.0/8');
+  await page.selectOption('#sc-split-mode', 'count');
+  const t0 = Date.now();
+  await page.evaluate(() => { const e = document.querySelector('#sc-split-num'); e.value = '9'.repeat(100000); e.dispatchEvent(new Event('input')); });
+  assert.ok(Date.now() - t0 < 1000, 'huge count handled in ' + (Date.now() - t0) + ' ms');
+  assert.match(await page.textContent('#sc-split-msg'), /can be split into at most 16,777,216 subnets/);
 };

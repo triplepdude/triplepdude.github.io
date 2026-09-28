@@ -42,9 +42,9 @@ module.exports = async ({ page, open, assert }) => {
     const weekday2 = (t.getUTCDay() + 6) % 7 + 1;
     assert.equal(String(new Date(t.getTime() + (4 - weekday2) * 864e5).getUTCFullYear()), iso.slice(0, 4), `FAQ week-year formula for ${d}`);
   }
-  // The privacy line is in every page's footer; this FAQ slot answers a real question.
+  // The FAQ answers the spreadsheet question and confirms nothing is uploaded.
   const faqs = await page.locator('.faq summary').allTextContents();
-  assert.ok(!faqs.some(q => /uploaded|sent to a server/i.test(q)), faqs.join(' | '));
+  assert.ok(faqs.some(q => /sent to a server/i.test(q)), faqs.join(' | '));
   assert.ok(faqs.some(q => /ISO week number in Excel or Google Sheets/.test(q)), faqs.join(' | '));
   await page.fill('#wn-date', '2021-01-03');
   const line = await text('#wn-date-range');
@@ -119,17 +119,100 @@ module.exports = async ({ page, open, assert }) => {
   const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('#wn-csv')]);
   const us = fs.readFileSync(await dl2.path(), 'utf8').trim().split(/\r\n/);
   assert.equal(us.length, 55);
+  // Regression: the US header had a semicolon, which splits the column in
+  // spreadsheets that use ; as the list separator (much of Europe).
+  assert.equal(us[0], 'US week,Start,End,Days');
   assert.equal(us[1], '1,2028-01-01,2028-01-01,1');
   assert.equal(us[54], '54,2028-12-31,2028-12-31,1');
+
+  // Calendar file (RFC 5545): one all-day event per week, CRLF line endings,
+  // DTEND exclusive. US 2028 (54 weeks): week 1 is Sat Jan 1 only, week 54 is
+  // Sun Dec 31 only (Excel WEEKNUM type 1).
+  const readIcs = async () => {
+    const [d] = await Promise.all([page.waitForEvent('download'), page.click('#wn-ics')]);
+    const raw = fs.readFileSync(await d.path(), 'utf8');
+    assert.ok(/^BEGIN:VCALENDAR\r\n/.test(raw) && /\r\nEND:VCALENDAR\r\n$/.test(raw), 'CRLF-delimited VCALENDAR');
+    assert.ok(!/[^\r]\n/.test(raw), 'every line ends with CRLF');
+    const lines = raw.replace(/\r\n[ \t]/g, '').split('\r\n').filter(Boolean); // unfold
+    assert.ok(lines.every(l => l.length <= 75 || !raw.includes(l)), 'long lines are folded');
+    const events = [];
+    let cur = null;
+    for (const l of lines) {
+      if (l === 'BEGIN:VEVENT') cur = {};
+      else if (l === 'END:VEVENT') { events.push(cur); cur = null; }
+      else if (cur) { const i = l.indexOf(':'); cur[l.slice(0, i)] = l.slice(i + 1); }
+    }
+    return { name: d.suggestedFilename(), raw, events };
+  };
+  let ics = await readIcs();
+  assert.equal(ics.name, 'us-weeks-2028.ics');
+  assert.equal(ics.events.length, 54);
+  assert.match(ics.raw, /\r\nX-WR-CALNAME:US week numbers 2028\r\n/);
+  assert.deepEqual([ics.events[0]['DTSTART;VALUE=DATE'], ics.events[0]['DTEND;VALUE=DATE'], ics.events[0].SUMMARY], ['20280101', '20280102', 'Week 1']);
+  assert.deepEqual([ics.events[53]['DTSTART;VALUE=DATE'], ics.events[53]['DTEND;VALUE=DATE']], ['20281231', '20290101']);
+  assert.equal(ics.events[1].DESCRIPTION, 'US week 2 of 2028 (Sunday start\\, not ISO): Sunday\\, January 2 to Saturday\\, January 8\\, 2028');
+  assert.equal(new Set(ics.events.map(e => e.UID)).size, 54);
+  assert.ok(ics.events.every(e => /^\d{8}T\d{6}Z$/.test(e.DTSTAMP) && e.TRANSP === 'TRANSPARENT'));
+  // Whole-week events for ISO 2026: W01 is Mon 2025-12-29 to Sun 2026-01-04
+  // (DTEND is the next Monday), W53 ends Sun 2027-01-03 (Python fromisocalendar).
+  await page.selectOption('#wn-system', 'iso');
+  await page.fill('#wn-year', '2026');
+  await page.selectOption('#wn-ics-mode', 'week');
+  ics = await readIcs();
+  assert.equal(ics.name, 'iso-weeks-2026.ics');
+  assert.equal(ics.events.length, 53);
+  assert.deepEqual([ics.events[0]['DTSTART;VALUE=DATE'], ics.events[0]['DTEND;VALUE=DATE'], ics.events[0].UID], ['20251229', '20260105', 'iso-week-2026-W01@triplepdude.github.io']);
+  assert.deepEqual([ics.events[38]['DTSTART;VALUE=DATE'], ics.events[38]['DTEND;VALUE=DATE'], ics.events[38].SUMMARY], ['20260921', '20260928', 'Week 39']);
+  assert.deepEqual([ics.events[52]['DTSTART;VALUE=DATE'], ics.events[52]['DTEND;VALUE=DATE']], ['20261228', '20270104']);
+  assert.equal(ics.events[52].DESCRIPTION, 'ISO week 2026-W53: Monday\\, December 28\\, 2026 to Sunday\\, January 3\\, 2027');
+  // The last ISO week of 9999 ends in the year 10000, which DTEND cannot write.
+  await page.fill('#wn-year', '9999');
+  ics = await readIcs();
+  assert.deepEqual([ics.events[51]['DTSTART;VALUE=DATE'], ics.events[51].DURATION, ics.events[51]['DTEND;VALUE=DATE']], ['99991227', 'P7D', undefined]);
+  await page.selectOption('#wn-ics-mode', 'first');
+  ics = await readIcs();
+  assert.deepEqual([ics.events[51]['DTSTART;VALUE=DATE'], ics.events[51]['DTEND;VALUE=DATE']], ['99991227', '99991228']);
+  await page.selectOption('#wn-system', 'us');
+  await page.fill('#wn-year', '2028');
 
   // Bad year: friendly error, no rows, download disabled.
   await page.fill('#wn-year', '0');
   assert.ok((await text('#wn-year-msg')).length > 0);
   assert.equal(await rows.count(), 0);
   assert.equal(await page.locator('#wn-csv').isDisabled(), true);
+  assert.equal(await page.locator('#wn-ics').isDisabled(), true);
   await page.click('#wn-this');
   assert.equal(await page.inputValue('#wn-year'), '2026');
   assert.equal(await rows.count(), 53);
+
+  // Regression: the result blocks were live regions and errors were alerts, so
+  // typing a year announced "2 has 52 ISO weeks", "20 has ..." and whole stat
+  // blocks on every keystroke. Each section now has one short, delayed summary.
+  for (const sel of ['#wn-date-msg', '#wn-date-week', '#wn-find-msg', '#wn-find-out', '#wn-year-msg', '#wn-table-note', '#wn-today-week']) {
+    assert.equal(await page.locator(sel).evaluate(el => !!el.closest('[aria-live]:not([aria-live="off"]), [role="alert"], [role="status"]')), false, `${sel} is not live`);
+  }
+  await page.evaluate(() => {
+    window.__said = [];
+    new MutationObserver(ms => ms.forEach(m => {
+      const el = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const region = el && el.closest('[role="status"]');
+      if (region && region.textContent.trim()) window.__said.push(region.textContent.trim());
+    })).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  await page.selectOption('#wn-system', 'iso');
+  await page.fill('#wn-year', '');
+  await page.waitForTimeout(900);
+  await page.evaluate(() => window.__said.splice(0));
+  await page.locator('#wn-year').pressSequentially('2032', { delay: 80 });
+  await page.waitForFunction(() => document.querySelector('#wn-year-status').textContent === '2032: 53 ISO weeks.');
+  assert.deepEqual(await page.evaluate(() => window.__said.splice(0)), ['2032: 53 ISO weeks.']);
+  await page.fill('#wn-find-year', '2025');
+  await page.fill('#wn-find-week', '53');
+  await page.waitForFunction(() => document.querySelector('#wn-find-status').textContent === '2025 has 52 ISO weeks. Enter a week from 1 to 52.');
+  await page.fill('#wn-date', '2021-01-03');
+  await page.waitForFunction(() => document.querySelector('#wn-date-status').textContent === 'Sunday, January 3, 2021: ISO week 53 of 2020, 2020-W53-7.');
+  await page.click('#wn-next');
+  await page.waitForFunction(() => document.querySelector('#wn-year-status').textContent === '2033: 52 ISO weeks.');
 
   // The page rolls over to the new week at local midnight without a reload.
   await page.clock.setSystemTime(new Date('2026-09-27T23:59:30Z'));

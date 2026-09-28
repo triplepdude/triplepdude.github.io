@@ -193,7 +193,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // ---------- Bad file ----------
   await page.setInputFiles('#circ-file', { name: 'oops.png', mimeType: 'image/png', buffer: Buffer.from('not an image at all') });
   await page.waitForFunction(() => document.querySelector('#circ-error').textContent.length > 0);
-  assert.match(await page.textContent('#circ-error'), /could not be opened as an image/);
+  assert.match(await page.textContent('#circ-error'), /not a supported image/);
   png = await download(); // the previous image is still there
   assert.equal(png.name, 'stripes-circle-128.png');
   // 128 px from a 200 px crop is drawn from a pre-shrunk copy (in the worker): same geometry.
@@ -218,6 +218,124 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(near(png.px(55, 90), [40, 90, 200, 255], 20), `bottom is blue: ${png.px(55, 90)}`);
   assert.equal(png.px(20, 64)[3], 0, 'inside the circle but beside the photo: transparent');
 
+  // ---------- Rounded square and square ----------
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'stripes.png'));
+  await page.waitForFunction(() => /stripes\.png/.test(document.querySelector('#circ-drop-title').textContent));
+  await page.selectOption('#circ-size', '256');
+  assert.equal(await page.isVisible('#circ-radius'), false);
+  await page.selectOption('#circ-shape', 'rounded');
+  assert.equal(await page.isVisible('#circ-radius'), true);
+  assert.equal(await page.inputValue('#circ-radius'), '20');
+  png = await download();
+  assert.equal(png.name, 'stripes-rounded-256.png');
+  // Corner radius 20% of 256 = 51.2 px, arc centred at (51.2, 51.2): (10, 10) lies outside it,
+  // (20, 20) inside; the middle of each edge is fully covered.
+  checkCorners(png, [0, 0, 0, 0]);
+  assert.equal(png.px(10, 10)[3], 0, 'outside the rounded corner');
+  assert.ok(near(png.px(20, 20), RED), `inside the rounded corner ${png.px(20, 20)}`);
+  assert.ok(near(png.px(1, 128), RED) && near(png.px(254, 128), BLUE) && near(png.px(128, 1), GREEN), 'edges reach the sides');
+  await page.waitForFunction(() => document.querySelector('#circ-out-info').textContent === '256 × 256 px PNG, rounded square with transparent corners');
+  await page.fill('#circ-radius', '50');
+  png = await download();
+  assert.equal(png.px(20, 20)[3], 0, '50% makes a circle');
+  await page.fill('#circ-radius', '20');
+  await page.fill('#circ-border', '8');
+  await page.fill('#circ-border-color', '#ffff00');
+  png = await download();
+  assert.deepEqual(png.px(128, 3), [255, 255, 0, 255], 'the border follows the edge');
+  // The 8 px border's centre line is inset 4 px with radius 47.2 about (51.2, 51.2): (18, 18) is
+  // 47 px from that centre, in the middle of the band.
+  assert.deepEqual(png.px(18, 18), [255, 255, 0, 255], 'and the rounded corner');
+  assert.ok(near(png.px(128, 12), GREEN), `inside the border ${png.px(128, 12)}`);
+  await page.fill('#circ-border', '0');
+  await page.selectOption('#circ-shape', 'square');
+  png = await download();
+  assert.equal(png.name, 'stripes-square-256.png');
+  assert.ok(near(png.px(0, 0), RED) && near(png.px(255, 255), BLUE), 'a square crop fills the corners');
+  await page.waitForFunction(() => document.querySelector('#circ-out-info').textContent === '256 × 256 px PNG, square');
+  await page.selectOption('#circ-shape', 'circle');
+
+  // ---------- WebP keeps transparency; JPG fills the corners ----------
+  await page.selectOption('#circ-format', 'webp');
+  assert.equal(await page.textContent('#circ-download'), 'Download WebP');
+  let [dlw] = await Promise.all([page.waitForEvent('download'), page.click('#circ-download')]);
+  assert.equal(dlw.suggestedFilename(), 'stripes-circle-256.webp');
+  let buf = fs.readFileSync(await dlw.path());
+  assert.equal(buf.toString('latin1', 0, 4) + buf.toString('latin1', 8, 12), 'RIFFWEBP');
+  const decodeB = b => page.evaluate(async b64 => {
+    const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), c => c.charCodeAt(0))]));
+    const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    return { w: bmp.width, corner: Array.from(g.getImageData(0, 0, 1, 1).data), centre: Array.from(g.getImageData(128, 128, 1, 1).data) };
+  }, b.toString('base64'));
+  let dec = await decodeB(buf);
+  assert.equal(dec.w, 256);
+  assert.equal(dec.corner[3], 0, 'WebP corner transparent');
+  assert.ok(near(dec.centre, GREEN, 12), `WebP centre ${dec.centre}`);
+  assert.equal(await page.isDisabled('#circ-bg option[value="none"]'), false);
+  await page.selectOption('#circ-format', 'jpeg');
+  assert.equal(await page.inputValue('#circ-bg'), 'all', 'JPG switches to a solid background');
+  assert.equal(await page.inputValue('#circ-bg-color'), '#123456', 'the colour picked earlier is kept');
+  assert.equal(await page.isDisabled('#circ-bg option[value="none"]'), true);
+  await page.waitForFunction(() => /JPG has no transparency/.test(document.querySelector('#circ-out-hint').textContent));
+  [dlw] = await Promise.all([page.waitForEvent('download'), page.click('#circ-download')]);
+  assert.equal(dlw.suggestedFilename(), 'stripes-circle-256.jpg');
+  buf = fs.readFileSync(await dlw.path());
+  assert.deepEqual([buf[0], buf[1], buf[2]], [0xff, 0xd8, 0xff]);
+  dec = await decodeB(buf);
+  assert.ok(near(dec.corner, [0x12, 0x34, 0x56, 255], 6), `JPG corner filled ${dec.corner}`);
+  assert.ok(near(dec.centre, GREEN, 16), `JPG centre ${dec.centre}`);
+  // Copy image is always a PNG.
+  await page.click('#circ-copy');
+  await page.waitForFunction(() => /Copied/.test(document.querySelector('#circ-status').textContent));
+  assert.deepEqual(await page.evaluate(async () => (await navigator.clipboard.read())[0].types), ['image/png']);
+  await page.selectOption('#circ-format', 'png');
+  await page.selectOption('#circ-bg', 'none');
+  assert.equal(await page.textContent('#circ-download'), 'Download PNG');
+
+  // ---------- HEIC and TIFF, which the browser cannot open, go through the shared decoder ----------
+  // gps.heic: 96 x 64 in quadrants red, green / blue, yellow. At 100% the 64 px height spans the
+  // circle, so the crop shows x 16-80: output (40, 40) -> image (36, 20) red, (88, 40) -> (60, 20)
+  // green, (40, 88) -> (36, 44) blue, (88, 88) -> (60, 44) yellow.
+  await page.selectOption('#circ-size', '128');
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'gps.heic'));
+  await page.waitForFunction(() => /gps\.heic/.test(document.querySelector('#circ-drop-title').textContent), null, { timeout: 20000 });
+  assert.match(await page.textContent('#circ-drop-hint'), /^96 × 64 px/);
+  png = await download();
+  assert.equal(png.name, 'gps-circle-128.png');
+  assert.ok(near(png.px(40, 40), [230, 30, 30, 255], 30) && near(png.px(88, 40), [30, 200, 60, 255], 30) &&
+    near(png.px(40, 88), [40, 90, 210, 255], 30) && near(png.px(88, 88), [240, 220, 40, 255], 30), 'HEIC quadrants');
+  checkCorners(png, [0, 0, 0, 0]);
+  // tiled-o8.tif: stored 48 x 32 with Orientation 8, upright 32 x 48 with a red block at x 0-9,
+  // y 32-47 and transparency at y 0-7. At 100% the crop shows y 8-40: output (30, 100) -> image
+  // (7.5, 33) red, (100, 20) -> (25, 13) blue.
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'tiled-o8.tif'));
+  await page.waitForFunction(() => /tiled-o8\.tif/.test(document.querySelector('#circ-drop-title').textContent), null, { timeout: 20000 });
+  assert.match(await page.textContent('#circ-drop-hint'), /^32 × 48 px/, 'upright');
+  png = await download();
+  assert.ok(near(png.px(30, 100), [230, 30, 30, 255], 20), `TIFF red block ${png.px(30, 100)}`);
+  assert.ok(near(png.px(100, 20), [40, 90, 210, 255], 20), `TIFF blue ${png.px(100, 20)}`);
+
+  // ---------- Keyboard: browser shortcuts pass through; no chatter while dragging ----------
+  const passed = await page.$eval('#circ-editor', ed => {
+    const e = new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true });
+    ed.dispatchEvent(e);
+    return !e.defaultPrevented;
+  });
+  assert.equal(passed, true, 'Ctrl+0 (browser zoom reset) is not taken over');
+  assert.equal(await page.getAttribute('#circ-zoom-out', 'aria-hidden'), 'true', 'the zoom value is announced once, by the slider');
+  await page.evaluate(() => {
+    window.__liveChanges = 0;
+    new MutationObserver(m => { window.__liveChanges += m.length; }).observe(document.querySelector('#circ-out-info'), { childList: true, characterData: true, subtree: true });
+  });
+  const eb = await ed.boundingBox();
+  await page.mouse.move(eb.x + eb.width / 2, eb.y + eb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(eb.x + eb.width / 2 + 40, eb.y + eb.height / 2 + 30, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => window.__liveChanges), 0, 'the polite live region is not rewritten on every frame');
+
   // ---------- No OffscreenCanvas: the page draws the PNG itself ----------
   const p2 = await page.context().newPage();
   const p2errors = [];
@@ -233,6 +351,20 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual([png.w, png.h], [128, 128]);
   checkCorners(png, [0, 0, 0, 0]);
   assert.ok(near(png.px(64, 64), GREEN) && near(png.px(10, 64), RED) && near(png.px(118, 64), BLUE), 'same crop without the worker');
+  // JPG on the page, with the untouched default: the corners are white.
+  await p2.selectOption('#circ-format', 'jpeg');
+  assert.equal(await p2.inputValue('#circ-bg-color'), '#ffffff');
+  const [dl2j] = await Promise.all([p2.waitForEvent('download'), p2.click('#circ-download')]);
+  assert.equal(dl2j.suggestedFilename(), 'stripes-circle-128.jpg');
+  const jc = await p2.evaluate(async b64 => {
+    const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), c => c.charCodeAt(0))]));
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const g = c.getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    return Array.from(g.getImageData(0, 0, 1, 1).data);
+  }, fs.readFileSync(await dl2j.path()).toString('base64'));
+  assert.ok(near(jc, [255, 255, 255, 255], 4), `white corner ${jc}`);
   assert.deepEqual(p2errors, []);
   await p2.close();
 
@@ -261,4 +393,44 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await p3.waitForFunction(() => { const e = document.querySelector('#circ-editor'); return e.width === Math.round(e.getBoundingClientRect().width * 2); });
   assert.ok(await p3.evaluate(() => window.__paints) >= 2, 'a real resize still redraws');
   await ctx3.close();
+
+  // ---------- SVG is drawn big enough for the largest output, not at its nominal 300 x 150 ----------
+  // viewBox 100 x 50: red with a blue disc of radius 20 at (50, 25). Drawn at 4096 x 2048, so at 100%
+  // the 2048 px height spans the circle and a 2048 px output needs no enlarging.
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect width="100" height="50" fill="#ff0000"/><circle cx="50" cy="25" r="20" fill="#0000ff"/></svg>';
+  await page.setInputFiles('#circ-file', { name: 'logo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
+  await page.waitForFunction(() => /logo\.svg/.test(document.querySelector('#circ-drop-title').textContent));
+  assert.match(await page.textContent('#circ-drop-hint'), /^SVG, drawn at 4096 × 2048 px/);
+  await page.selectOption('#circ-shape', 'circle');
+  await page.selectOption('#circ-size', '2048');
+  assert.doesNotMatch(await page.textContent('#circ-out-hint'), /enlarged/);
+  png = await download();
+  assert.equal(png.name, 'logo-circle-2048.png');
+  // Output x/y map to viewBox units as 25 + x * 50 / 2048: (1024, 1024) is the disc's centre,
+  // (1024, 60) lies 23.5 units above it, outside the disc, on red.
+  assert.deepEqual(png.px(1024, 1024), BLUE);
+  assert.deepEqual(png.px(1024, 60), RED);
+  // The disc's edge is sharp (vector-drawn), not a blurred 300 x 150 enlargement: 1 unit = 41 px, and
+  // at 1 unit inside and outside the edge the colours are pure.
+  assert.deepEqual(png.px(1024, 1024 - 19 * 40.96 | 0), BLUE);
+  assert.deepEqual(png.px(1024, 1024 - 21 * 40.96 | 0), RED);
+  // A broken SVG gets a readable error and the previous image stays.
+  await page.setInputFiles('#circ-file', { name: 'broken.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>') });
+  await page.waitForFunction(() => document.querySelector('#circ-error').textContent.length > 0);
+  assert.match(await page.textContent('#circ-error'), /SVG/);
+  assert.match(await page.textContent('#circ-drop-title'), /logo\.svg/);
+
+  // ---------- A file dropped anywhere on the page opens, instead of replacing the page ----------
+  const dropped = await page.evaluate(async b64 => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], 'dropped.png', { type: 'image/png' }));
+    const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(over);
+    const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.querySelector('h1').dispatchEvent(ev);
+    return { over: over.defaultPrevented, drop: ev.defaultPrevented };
+  }, fs.readFileSync(path.join(fixtures, 'stripes.png')).toString('base64'));
+  assert.deepEqual(dropped, { over: true, drop: true });
+  await page.waitForFunction(() => /dropped\.png/.test(document.querySelector('#circ-drop-title').textContent));
+  assert.match(await page.textContent('#circ-drop-hint'), /^400 × 200 px/);
 };

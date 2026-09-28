@@ -1,0 +1,988 @@
+---
+title: "Tone Generator: Online Frequency Generator"
+description: Play sine, square, sawtooth or triangle tones from 1 Hz to 22 kHz, sweep frequencies, make binaural beats and download the tone as a WAV file.
+category: Audio
+keywords: [tone generator, frequency generator, online tone generator, sine wave generator, hz generator, frequency sweep generator, binaural beats generator, test tone wav]
+howto: |
+  ## How to use the tone generator
+
+  Pick a frequency with the slider, type an exact value, or use the step
+  buttons, then press **Play**. The slider is logarithmic: every octave takes
+  the same distance, so 20 to 40 Hz gets as much room as 10 to 20 kHz.
+  Everything can change while the tone plays. **Copy link** saves the
+  settings in a link, except the volume, so a shared link never starts loud.
+
+  | Key | Action |
+  |---|---|
+  | Space | Play or stop |
+  | ↑ and ↓ | Up or down one step |
+  | Shift + ↑ and ↓ | Up or down one octave |
+  | 1, 2, 3, 4 | Sine, square, sawtooth, triangle |
+  | L, R, B | Left, right or both channels |
+
+  Shortcuts work while a button in the tool has focus, or when nothing is
+  focused and the tool is on screen; never while you type in a field.
+
+  ## Waveforms
+
+  A **sine** wave is a single frequency with no harmonics, which makes it the
+  tone for hearing checks and measurements. A **square** wave adds the odd
+  harmonics at 1/n of the fundamental's amplitude and sounds buzzy. At the
+  same peak it is about 1.5 dB more powerful than a sine (3 dB for an ideal
+  square; the band-limited one overshoots slightly at each edge).
+  **Sawtooth** has every harmonic at 1/n and sounds bright. **Triangle** has
+  only odd harmonics that fall off as 1/n², so it sounds close to a sine.
+  All four are band-limited: harmonics above half the sample rate are left
+  out, so high tones do not fold back as unrelated whistles.
+
+  ## Sweeps and binaural beats
+
+  A **sweep** glides from a start to an end frequency. On a logarithmic sweep
+  every octave takes the same time, which matches how we hear pitch. A linear
+  sweep changes the same number of hertz each second, so a 20 Hz to 20 kHz
+  linear sweep spends only 1% of its time below 220 Hz. Sweeps are the quickest
+  way to find where a speaker's bass or your hearing ends.
+
+  **Binaural beats** play one sine in the left ear and a slightly higher one in
+  the right, such as 200 Hz and 210 Hz. Neither ear gets a 10 Hz signal, but
+  the brain perceives a 10 Hz pulsing. You need headphones, and the effect is
+  clearest with carriers below about 1,000 Hz and differences below about
+  30 Hz. Research on claims that binaural beats change mood or focus is mixed.
+
+  ## Hearing range and safety
+
+  Young people hear roughly 20 Hz to 20 kHz. The upper limit falls with age,
+  and many adults no longer hear above about 15 kHz. Below 20 Hz, sound is
+  felt more than heard, and most phone and laptop speakers produce little
+  below 100 to 200 Hz, so you may only hear distortion there.
+
+  The volume starts at 20% (−14 dBFS). Lower your device volume before you
+  put on headphones, and never turn the volume up to find a tone you cannot
+  hear: when you switch back to a lower frequency it can be painfully loud,
+  and inaudible high tones can still damage tweeters.
+
+  ## Download as WAV
+
+  **Download WAV** builds the file sample by sample in your browser as
+  uncompressed PCM: 16-bit or 24-bit integer, or 32-bit float, at 44.1, 48
+  or 96 kHz. Both channels saves a mono file; left, right and binaural beats
+  save stereo. The size is sample rate × channels × bytes per sample ×
+  seconds, plus a short header: 10 seconds of 16-bit mono at 48 kHz is
+  960,044 bytes. The peak level follows the volume slider unless you choose a
+  fixed one, such as −18 dBFS for an EBU R68 alignment tone. A 10 ms fade at
+  each end prevents clicks; switch it off for a seamless loop, and choose a
+  length that holds a whole number of cycles.
+faq:
+  - q: Is anything uploaded or recorded?
+    a: No. The tone is synthesised by your browser's Web Audio engine, and the WAV file is built on your device. Nothing is sent to a server or stored.
+  - q: How can I find the highest frequency I can hear?
+    a: Use headphones at a low, comfortable volume and play a logarithmic sweep from 8,000 to 20,000 Hz. Note where the tone disappears. Do not raise the volume to chase it; most speakers and headphones also roll off near the top.
+  - q: Why can I not hear low tones such as 30 Hz?
+    a: Small speakers cannot move enough air at low frequencies, and human hearing is much less sensitive there. Try headphones or a subwoofer. What you hear from a phone speaker at 30 Hz is mostly its harmonics and distortion.
+  - q: Which tone should I use to test audio equipment?
+    a: A 1 kHz sine is the usual reference tone for levels, and 440 Hz is the A that musicians tune to. Use a sweep to check frequency response, and a Left or Right tone to check channel wiring.
+---
+<style>
+.tg fieldset { min-width: 0; margin: 0 0 16px; padding: 0; border: 0; }
+/* Same 44 px as the selects in the same rows (text inputs grow to 47.6 px with the shared padding). */
+.tg input[type="number"] { height: 44px; }
+.tg legend { margin: 0 0 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.tg fieldset .checks { margin-bottom: 0; }
+.tg fieldset:disabled .check { opacity: 0.55; cursor: not-allowed; }
+.tg-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0 0 4px; }
+.tg-top .result-big { margin: 0; font-variant-numeric: tabular-nums; }
+.tg-top .tg-live { color: var(--accent); font-weight: 700; }
+.tg-sub { margin: 0 0 16px; color: var(--muted); }
+.tg .stats { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.tg-freq-row { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; margin: 0 0 12px; }
+.tg-freq-row > .field { flex: 0 1 180px; margin: 0; }
+.tg-freq-row > .tg-slider { flex: 1 1 260px; }
+.tg-slider input { margin: 12px 0 0; }
+.tg-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.tg-steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px; }
+.tg-steps select { width: auto; min-height: 36px; padding: 4px 8px; }
+.tg-stepsel { display: inline-flex; align-items: center; gap: 8px; }
+.tg-steps .tg-steplabel { font-size: 14px; font-weight: 600; }
+@media (hover: none) and (pointer: coarse) { .tg-keys { display: none; } }
+.tg-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.tg-wave svg { width: 28px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.tg-vol { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.tg-vol input { flex: 1 1 220px; }
+.tg-vol output { min-width: 11ch; font-variant-numeric: tabular-nums; }
+.tg-play { min-width: 128px; }
+.tg-play[aria-pressed="true"] { background: var(--danger); color: var(--surface); }
+.tg-h { margin: 24px 0 10px; font-size: 1.05rem; }
+.tg-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+.tg-panel { margin: 0 0 8px; }
+.tg-panel .row > .field { flex: 1 1 140px; }
+/* The long scale names need a full row on a phone. */
+.tg-panel .row > .tg-scalef { flex: 2 1 260px; }
+.tg-keys { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+.tg-keys kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); font-family: var(--mono); font-size: 12px; color: var(--text); }
+</style>
+
+<div class="tg">
+  <div class="tg-top" aria-live="off">
+    <p class="result-big" id="tg-big">440 Hz</p>
+    <span class="tg-live" id="tg-live" hidden>Playing</span>
+  </div>
+  <p class="tg-sub" id="tg-sub">A4, in tune (0 cents)</p>
+
+  <fieldset>
+    <legend>Mode</legend>
+    <div class="checks">
+      <label class="check"><input type="radio" name="tg-mode" value="tone" checked> Steady tone</label>
+      <label class="check"><input type="radio" name="tg-mode" value="sweep"> Frequency sweep</label>
+      <label class="check"><input type="radio" name="tg-mode" value="binaural"> Binaural beats</label>
+    </div>
+  </fieldset>
+
+  <div id="tg-steady">
+    <div class="tg-freq-row">
+      <div class="field">
+        <label for="tg-freq" id="tg-freq-label">Frequency (Hz)</label>
+        <input type="number" id="tg-freq" min="1" max="22000" step="any" value="440" inputmode="decimal">
+      </div>
+      <div class="field tg-slider">
+        <label for="tg-slider">Frequency slider (logarithmic)</label>
+        <input type="range" id="tg-slider" min="0" max="10000" step="1" value="6088" aria-valuetext="440 Hz">
+        <div class="tg-scale" aria-hidden="true"><span>1 Hz</span><span>10</span><span>100</span><span>1k</span><span>10k</span><span>22k</span></div>
+      </div>
+    </div>
+    <p class="msg error" id="tg-freq-msg" aria-live="polite"></p>
+    <div class="tg-steps">
+      <button class="btn secondary small" type="button" data-step="oct-" aria-label="Down one octave">÷2</button>
+      <button class="btn secondary small" type="button" data-step="semi-" aria-label="Down one semitone">−1 semitone</button>
+      <button class="btn secondary small" type="button" data-step="-" id="tg-minus" aria-label="Down 1 Hz">−1 Hz</button>
+      <button class="btn secondary small" type="button" data-step="+" id="tg-plus" aria-label="Up 1 Hz">+1 Hz</button>
+      <button class="btn secondary small" type="button" data-step="semi+" aria-label="Up one semitone">+1 semitone</button>
+      <button class="btn secondary small" type="button" data-step="oct+" aria-label="Up one octave">×2</button>
+      <span class="tg-stepsel">
+        <label class="tg-steplabel" for="tg-step">Step</label>
+        <select id="tg-step">
+          <option value="0.01">0.01 Hz</option>
+          <option value="0.1">0.1 Hz</option>
+          <option value="1" selected>1 Hz</option>
+          <option value="10">10 Hz</option>
+          <option value="100">100 Hz</option>
+        </select>
+      </span>
+    </div>
+    <div class="tg-presets" role="group" aria-label="Common frequencies">
+      <button class="btn secondary small" type="button" data-f="50">50 Hz</button>
+      <button class="btn secondary small" type="button" data-f="60">60 Hz</button>
+      <button class="btn secondary small" type="button" data-f="100">100 Hz</button>
+      <button class="btn secondary small" type="button" data-f="440">440 Hz (A4)</button>
+      <button class="btn secondary small" type="button" data-f="1000">1 kHz</button>
+      <button class="btn secondary small" type="button" data-f="10000">10 kHz</button>
+      <button class="btn secondary small" type="button" data-f="15000">15 kHz</button>
+    </div>
+  </div>
+
+  <div class="tg-panel" id="tg-sweep" hidden>
+    <div class="row">
+      <div class="field">
+        <label for="tg-f1">Start frequency (Hz)</label>
+        <input type="number" id="tg-f1" min="1" max="22000" step="any" value="20" inputmode="decimal">
+      </div>
+      <div class="field">
+        <label for="tg-f2">End frequency (Hz)</label>
+        <input type="number" id="tg-f2" min="1" max="22000" step="any" value="20000" inputmode="decimal">
+      </div>
+      <div class="field">
+        <label for="tg-sdur">Sweep time (seconds)</label>
+        <input type="number" id="tg-sdur" min="0.5" max="300" step="any" value="10" inputmode="decimal">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field tg-scalef">
+        <label for="tg-scale">Scale</label>
+        <select id="tg-scale">
+          <option value="log" selected>Logarithmic (by octave)</option>
+          <option value="lin">Linear (by hertz)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="tg-repeat">Playback</label>
+        <select id="tg-repeat">
+          <option value="once" selected>Once</option>
+          <option value="repeat">Repeat</option>
+          <option value="updown">Up and down, repeating</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="tg-panel" id="tg-bin" hidden>
+    <div class="row">
+      <div class="field">
+        <label for="tg-beat">Beat frequency (Hz)</label>
+        <input type="number" id="tg-beat" min="0.1" max="50" step="any" value="10" inputmode="decimal">
+      </div>
+    </div>
+    <p class="hint" id="tg-bin-hint">Use headphones. The left ear hears the frequency above, the right ear that frequency plus the beat.</p>
+  </div>
+  <p class="msg error" id="tg-mode-msg" aria-live="polite"></p>
+
+  <fieldset id="tg-wave-set">
+    <legend>Waveform</legend>
+    <div class="checks tg-wave">
+      <label class="check"><input type="radio" name="tg-wave" value="sine" checked><svg viewBox="0 0 28 16" aria-hidden="true"><path d="M1 8 C4 -1.5 8 -1.5 7.5 8 S13 17.5 14 8 S18 -1.5 21 8 S26 17.5 27 8"/></svg> Sine</label>
+      <label class="check"><input type="radio" name="tg-wave" value="square"><svg viewBox="0 0 28 16" aria-hidden="true"><path d="M1 8V2h6.5v12H14V2h6.5v12H27V8"/></svg> Square</label>
+      <label class="check"><input type="radio" name="tg-wave" value="sawtooth"><svg viewBox="0 0 28 16" aria-hidden="true"><path d="M1 8 7.5 2v12L20.5 2v12L27 8"/></svg> Sawtooth</label>
+      <label class="check"><input type="radio" name="tg-wave" value="triangle"><svg viewBox="0 0 28 16" aria-hidden="true"><path d="M1 8 4.3 2l6.5 12 6.5-12 6.4 12L27 8"/></svg> Triangle</label>
+    </div>
+  </fieldset>
+
+  <fieldset id="tg-ch-set">
+    <legend>Channel</legend>
+    <div class="checks">
+      <label class="check"><input type="radio" name="tg-ch" value="both" checked> Both</label>
+      <label class="check"><input type="radio" name="tg-ch" value="left"> Left only</label>
+      <label class="check"><input type="radio" name="tg-ch" value="right"> Right only</label>
+    </div>
+  </fieldset>
+
+  <div class="field">
+    <label for="tg-vol">Volume</label>
+    <div class="tg-vol">
+      <input type="range" id="tg-vol" min="0" max="100" step="1" value="20" aria-describedby="tg-vol-out">
+      <output id="tg-vol-out" for="tg-vol">20% (−14.0 dBFS)</output>
+    </div>
+  </div>
+  <p class="msg error" id="tg-vol-warn" aria-live="polite"></p>
+
+  <div class="actions">
+    <button class="btn tg-play" type="button" id="tg-play" aria-pressed="false">Play</button>
+    <button class="btn secondary" type="button" id="tg-link">Copy link</button>
+  </div>
+  <p class="tg-keys">Keys: <kbd>Space</kbd> play or stop, <kbd>↑</kbd> <kbd>↓</kbd> step, <kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd> octave, <kbd>1</kbd>–<kbd>4</kbd> waveform, <kbd>L</kbd> <kbd>R</kbd> <kbd>B</kbd> channel.</p>
+  <p class="msg error" id="tg-error" role="alert"></p>
+
+  <div class="stats">
+    <div class="stat"><b id="tg-note">A4</b><span id="tg-note-label">Nearest note</span></div>
+    <div class="stat"><b id="tg-period">2.273 ms</b><span>Period</span></div>
+    <div class="stat"><b id="tg-wl">78.0 cm</b><span>Wavelength in air</span></div>
+  </div>
+
+  <hr class="tg-sep">
+  <h2 class="tg-h">Download as WAV</h2>
+  <div class="row">
+    <div class="field" id="tg-dur-field">
+      <label for="tg-dur">Length (seconds)</label>
+      <input type="number" id="tg-dur" min="0.1" max="300" step="any" value="5" inputmode="decimal">
+    </div>
+    <div class="field">
+      <label for="tg-rate">Sample rate</label>
+      <select id="tg-rate">
+        <option value="44100" selected>44,100 Hz</option>
+        <option value="48000">48,000 Hz</option>
+        <option value="96000">96,000 Hz</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="tg-level">Peak level</label>
+      <select id="tg-level">
+        <option value="vol" selected>Same as volume</option>
+        <option value="0">0 dBFS (full scale)</option>
+        <option value="-1">−1 dBFS</option>
+        <option value="-3">−3 dBFS</option>
+        <option value="-6">−6 dBFS</option>
+        <option value="-12">−12 dBFS</option>
+        <option value="-18">−18 dBFS (EBU R68 alignment)</option>
+        <option value="-20">−20 dBFS (SMPTE RP155 reference)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="tg-bits">Format</label>
+      <select id="tg-bits">
+        <option value="16" selected>16-bit PCM</option>
+        <option value="24">24-bit PCM</option>
+        <option value="32">32-bit float</option>
+      </select>
+    </div>
+  </div>
+  <div class="checks">
+    <label class="check"><input type="checkbox" id="tg-fade" checked> Fade in and out (10 ms)</label>
+  </div>
+  <p class="hint" id="tg-size"></p>
+  <div class="actions">
+    <button class="btn" type="button" id="tg-dl">Download WAV</button>
+  </div>
+  <p class="msg error" id="tg-dl-msg" aria-live="polite"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$, $$ = TT.$$;
+  const F_MIN = 1, F_MAX = 22000, LN_MAX = Math.log(F_MAX), SEMI = Math.pow(2, 1 / 12);
+  const NOTES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+  const WAVES = ['sine', 'square', 'sawtooth', 'triangle'];
+
+  const freqIn = $('#tg-freq'), slider = $('#tg-slider'), stepSel = $('#tg-step');
+  const volIn = $('#tg-vol'), playBtn = $('#tg-play');
+  const f1In = $('#tg-f1'), f2In = $('#tg-f2'), sdurIn = $('#tg-sdur'), scaleSel = $('#tg-scale'), repSel = $('#tg-repeat');
+  const beatIn = $('#tg-beat'), durIn = $('#tg-dur'), rateSel = $('#tg-rate'), bitsSel = $('#tg-bits'), fadeBox = $('#tg-fade');
+
+  const st = { f: 440, lastSweepF: null };
+
+  // ---------- Helpers ----------
+  function radio(name) { const r = $('input[name="' + name + '"]:checked'); return r ? r.value : ''; }
+  // Compares values instead of building a selector, so text from the URL can never break the query.
+  function setRadio(name, v) {
+    const r = $$('input[name="' + name + '"]').filter(function (el) { return el.value === v; })[0];
+    if (r) { r.checked = true; return true; }
+    return false;
+  }
+  function mode() { return radio('tg-mode') || 'tone'; }
+  function wave() { return mode() === 'binaural' ? 'sine' : radio('tg-wave') || 'sine'; }
+  function chan() { return radio('tg-ch') || 'both'; }
+  function vol() { return Math.max(0, Math.min(100, +volIn.value || 0)) / 100; }
+  function round2(f) { return Math.round(f * 100) / 100; }
+  function tidy(f) { return f >= 1000 ? Math.round(f) : f >= 100 ? Math.round(f * 10) / 10 : round2(f); }
+  function fmtNum(v, max) { return v.toLocaleString('en-US', { maximumFractionDigits: max == null ? 2 : max }); }
+  function fmtHz(f) { return fmtNum(f) + ' Hz'; }
+  function num(el) {
+    const s = String(el.value).trim();
+    if (!/^[+]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(s)) return NaN;
+    return Number(s);
+  }
+  function sliderPos(f) { return Math.round(10000 * Math.log(f) / LN_MAX); }
+  function noteInfo(f) {
+    if (!(f >= 16.35)) return null;
+    const m = 69 + 12 * Math.log2(f / 440), r = Math.round(m), c = Math.round((m - r) * 100);
+    return { name: NOTES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1), cents: c };
+  }
+  function fmtPeriod(f) {
+    const p = 1 / f;
+    if (p >= 1) return p.toFixed(3) + ' s';
+    if (p >= 0.001) return (p * 1000).toPrecision(4) + ' ms';
+    return (p * 1e6).toPrecision(4) + ' µs';
+  }
+  function fmtWl(f) {
+    const w = 343 / f;
+    if (w >= 1) return (w >= 100 ? w.toFixed(0) : w.toFixed(2)) + ' m';
+    if (w >= 0.1) return (w * 100).toFixed(1) + ' cm';
+    return (w * 1000).toFixed(1) + ' mm';
+  }
+  function centsText(c) { return c === 0 ? 'in tune (0 cents)' : (c > 0 ? '+' : '−') + Math.abs(c) + (Math.abs(c) === 1 ? ' cent' : ' cents'); }
+
+  // ---------- Settings and validation ----------
+  function sweepSettings() {
+    const f1 = num(f1In), f2 = num(f2In), d = num(sdurIn);
+    if (!(f1 >= F_MIN && f1 <= F_MAX) || !(f2 >= F_MIN && f2 <= F_MAX)) return { error: 'Sweep frequencies must be from 1 to 22,000 Hz.' };
+    if (!(d >= 0.5 && d <= 300)) return { error: 'Sweep time must be from 0.5 to 300 seconds.' };
+    return { f1: f1, f2: f2, dur: d, scale: scaleSel.value === 'lin' ? 'lin' : 'log', repeat: repSel.value };
+  }
+  function beatSettings() {
+    const b = num(beatIn);
+    if (!(b >= 0.1 && b <= 50)) return { error: 'The beat frequency must be from 0.1 to 50 Hz.' };
+    if (st.f + b > F_MAX) return { error: 'The right-ear tone (' + fmtHz(st.f + b) + ') would be above 22,000 Hz. Lower the frequency.' };
+    return { beat: b };
+  }
+  function modeSettings() {
+    const m = mode();
+    if (m === 'sweep') return sweepSettings();
+    if (m === 'binaural') return beatSettings();
+    return {};
+  }
+  function sweepFreqAt(sw, t) {
+    // Frequency t seconds after the sweep started (segments alternate direction for up-and-down).
+    const seg = Math.floor(t / sw.dur), u = Math.min(1, (t - seg * sw.dur) / sw.dur);
+    const down = sw.repeat === 'updown' && seg % 2 === 1;
+    const a = down ? sw.f2 : sw.f1, b = down ? sw.f1 : sw.f2;
+    return sw.scale === 'lin' ? a + (b - a) * u : a * Math.pow(b / a, u);
+  }
+
+  // ---------- Display ----------
+  function renderInfo() {
+    const m = mode();
+    const shown = m === 'sweep' ? st.lastSweepF : st.f;
+    $('#tg-freq-label').textContent = m === 'binaural' ? 'Left-ear frequency (Hz)' : 'Frequency (Hz)';
+    if (m === 'sweep') {
+      const sw = sweepSettings();
+      if (sw.error) { $('#tg-big').textContent = '–'; $('#tg-sub').textContent = sw.error; }
+      else if (shown !== null && player.playing) {
+        $('#tg-big').textContent = fmtHz(tidy(shown));
+        $('#tg-sub').textContent = 'Sweeping ' + fmtHz(sw.f1) + ' → ' + fmtHz(sw.f2) + ', ' + (sw.scale === 'lin' ? 'linear' : 'logarithmic');
+      } else {
+        $('#tg-big').textContent = fmtNum(sw.f1) + ' → ' + fmtHz(sw.f2);
+        $('#tg-sub').textContent = (sw.scale === 'lin' ? 'Linear' : 'Logarithmic') + ' sweep over ' + fmtNum(sw.dur) + ' s' + (sw.repeat === 'once' ? '' : sw.repeat === 'repeat' ? ', repeating' : ', up and down');
+      }
+    } else if (m === 'binaural') {
+      const b = beatSettings();
+      $('#tg-big').textContent = b.error ? fmtHz(st.f) : fmtHz(st.f) + ' + ' + fmtHz(round2(st.f + b.beat));
+      $('#tg-sub').textContent = b.error ? b.error : 'Left ' + fmtHz(st.f) + ', right ' + fmtHz(round2(st.f + b.beat)) + ': a ' + fmtHz(b.beat) + ' binaural beat';
+    } else {
+      $('#tg-big').textContent = fmtHz(st.f);
+      const n = noteInfo(st.f);
+      $('#tg-sub').textContent = n ? n.name + ', ' + centsText(n.cents) : 'Below the lowest musical note (C0, 16.35 Hz)';
+    }
+    // A sweep has no single frequency until it plays: the stats then follow it.
+    const f = m === 'sweep' ? (shown !== null && player.playing ? shown : null) : st.f;
+    const n = f ? noteInfo(f) : null;
+    $('#tg-note').textContent = n ? n.name + (n.cents ? ' ' + (n.cents > 0 ? '+' : '−') + Math.abs(n.cents) + '¢' : '') : '–';
+    $('#tg-period').textContent = f ? fmtPeriod(f) : '–';
+    $('#tg-wl').textContent = f ? fmtWl(f) : '–';
+    const err = modeSettings().error;
+    if (!err && /^(Sweep|The beat|The right-ear)/.test($('#tg-error').textContent)) $('#tg-error').textContent = '';
+    showModeMsg(err || (m === 'binaural' && st.f > 1000 ? 'Binaural beats are hard to hear above about 1,000 Hz. Try a lower frequency.' : ''));
+    updateSize();
+  }
+
+  // Messages about the sweep and beat fields wait for a pause in typing, so a
+  // half-typed number is not reported; clearing a message is immediate.
+  const modeMsg = $('#tg-mode-msg');
+  let pendingMsg = '', msgTimer = 0;
+  function showModeMsg(text) {
+    // renderInfo also runs ten times a second during a sweep: only a changed
+    // message restarts the wait.
+    if (text === pendingMsg && (msgTimer || modeMsg.textContent === text)) return;
+    pendingMsg = text;
+    clearTimeout(msgTimer); msgTimer = 0;
+    if (!text || modeMsg.textContent === text) { modeMsg.textContent = text; return; }
+    msgTimer = setTimeout(function () { msgTimer = 0; modeMsg.textContent = pendingMsg; }, 700);
+  }
+
+  function setFreq(f, from) {
+    f = round2(Math.max(F_MIN, Math.min(F_MAX, f)));
+    st.f = f;
+    if (from !== 'input') freqIn.value = String(f);
+    if (from !== 'slider') slider.value = String(sliderPos(f));
+    slider.setAttribute('aria-valuetext', fmtHz(f));
+    $('#tg-freq-msg').textContent = '';
+    player.retune();
+    renderInfo();
+  }
+
+  const freqErr = TT.debounce(function () {
+    const v = num(freqIn);
+    if (!(v >= F_MIN && v <= F_MAX)) $('#tg-freq-msg').textContent = 'Enter a frequency from 1 to 22,000 Hz. The tone stays at ' + fmtHz(st.f) + '.';
+  }, 900);
+  freqIn.addEventListener('input', function () {
+    const v = num(freqIn);
+    if (v >= F_MIN && v <= F_MAX) setFreq(v, 'input'); else freqErr();
+  });
+  freqIn.addEventListener('change', function () {
+    const v = num(freqIn);
+    if (!(v >= F_MIN && v <= F_MAX)) $('#tg-freq-msg').textContent = 'Enter a frequency from 1 to 22,000 Hz. The tone stays at ' + fmtHz(st.f) + '.';
+  });
+  slider.addEventListener('input', function () {
+    setFreq(tidy(Math.exp(+slider.value / 10000 * LN_MAX)), 'slider');
+  });
+
+  function stepBy(kind) {
+    const step = +stepSel.value || 1;
+    let f = st.f;
+    if (kind === '+') f = f + step;
+    else if (kind === '-') f = f - step;
+    else if (kind === 'oct+') f = f * 2;
+    else if (kind === 'oct-') f = f / 2;
+    else if (kind === 'semi+') f = f * SEMI;
+    else if (kind === 'semi-') f = f / SEMI;
+    setFreq(f);
+  }
+  $$('.tg-steps [data-step]').forEach(function (b) { b.addEventListener('click', function () { stepBy(b.dataset.step); }); });
+  stepSel.addEventListener('change', function () {
+    const s = stepSel.options[stepSel.selectedIndex].text;
+    $('#tg-minus').textContent = '−' + s; $('#tg-minus').setAttribute('aria-label', 'Down ' + s);
+    $('#tg-plus').textContent = '+' + s; $('#tg-plus').setAttribute('aria-label', 'Up ' + s);
+  });
+  $$('.tg-presets [data-f]').forEach(function (b) { b.addEventListener('click', function () { setFreq(+b.dataset.f); }); });
+
+  function showMode() {
+    const m = mode();
+    $('#tg-steady').hidden = m === 'sweep';
+    $('#tg-sweep').hidden = m !== 'sweep';
+    $('#tg-bin').hidden = m !== 'binaural';
+    $('#tg-wave-set').disabled = m === 'binaural';
+    $('#tg-ch-set').disabled = m === 'binaural';
+    $('#tg-dur-field').hidden = m === 'sweep';
+  }
+  $$('input[name="tg-mode"]').forEach(function (r) {
+    r.addEventListener('change', function () { player.stop(); st.lastSweepF = null; showMode(); renderInfo(); });
+  });
+  [f1In, f2In, sdurIn, scaleSel, repSel, beatIn].forEach(function (el) {
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function () {
+      if (mode() === 'binaural') player.retune();
+      // A half-typed value keeps the current sweep going; it restarts once the settings are valid again.
+      else if (player.playing && mode() === 'sweep' && !sweepSettings().error) player.restart();
+      renderInfo();
+    });
+  });
+  $$('input[name="tg-wave"]').forEach(function (r) { r.addEventListener('change', function () { player.reshape(); }); });
+  $$('input[name="tg-ch"]').forEach(function (r) { r.addEventListener('change', function () { player.route(); updateSize(); }); });
+
+  function renderVol() {
+    const v = vol();
+    const db = v > 0 ? 20 * Math.log10(v) : -Infinity;
+    $('#tg-vol-out').textContent = Math.round(v * 100) + '% (' + (db === -Infinity ? '−∞' : (db < 0 ? '−' : '') + Math.abs(db).toFixed(1)) + ' dBFS)';
+    volIn.setAttribute('aria-valuetext', $('#tg-vol-out').textContent);
+    $('#tg-vol-warn').textContent = v > 0.5 ? 'Careful: that is loud. Lower your device volume first, especially with headphones, and keep sessions short.' : '';
+  }
+  volIn.addEventListener('input', function () { renderVol(); player.volume(); });
+
+  // ---------- Live audio ----------
+  const player = (function () {
+    let ctx = null, master = null, v = null, sched = 0, raf = 0, token = 0;
+    const api = { playing: false };
+
+    function ensure() {
+      if (!ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) throw new Error('This browser cannot play sound (no Web Audio support).');
+        ctx = new AC();
+        master = ctx.createGain();
+        master.connect(ctx.destination);
+      }
+      return ctx;
+    }
+    function chGains() { const c = chan(); return mode() === 'binaural' ? [1, 1] : [c === 'right' ? 0 : 1, c === 'left' ? 0 : 1]; }
+
+    function build(t) {
+      const m = mode(), g = chGains();
+      const merger = ctx.createChannelMerger(2), env = ctx.createGain();
+      env.gain.setValueAtTime(0, t);
+      env.gain.linearRampToValueAtTime(1, t + 0.02);
+      merger.connect(env).connect(master);
+      const out = { env: env, merger: merger, oscs: [], gains: [] };
+      if (m === 'binaural') {
+        const b = beatSettings();
+        [st.f, st.f + b.beat].forEach(function (f, i) {
+          const o = ctx.createOscillator();
+          o.type = 'sine';
+          o.frequency.value = f;
+          o.connect(merger, 0, i);
+          out.oscs.push(o);
+        });
+      } else {
+        const o = ctx.createOscillator();
+        o.type = wave();
+        o.frequency.value = m === 'sweep' ? sweepSettings().f1 : st.f;
+        [0, 1].forEach(function (i) {
+          const cg = ctx.createGain();
+          cg.gain.value = g[i];
+          o.connect(cg).connect(merger, 0, i);
+          out.gains.push(cg);
+        });
+        out.oscs.push(o);
+      }
+      out.oscs.forEach(function (o) { o.start(t); });
+      return out;
+    }
+
+    function release(voice, t) {
+      if (!voice) return;
+      voice.env.gain.cancelScheduledValues(t);
+      voice.env.gain.setValueAtTime(voice.env.gain.value, t);
+      voice.env.gain.linearRampToValueAtTime(0, t + 0.03);
+      voice.oscs.forEach(function (o) {
+        try { o.stop(t + 0.05); } catch (e) { /* already stopped */ }
+        o.onended = function () { voice.merger.disconnect(); voice.env.disconnect(); };
+      });
+    }
+
+    // Sweeps are scheduled a couple of seconds ahead; a timer (not animation
+    // frames) keeps repeating sweeps going in a background tab.
+    function scheduleSweep() {
+      if (!v || !v.sweep) return;
+      const sw = v.sweep, horizon = ctx.currentTime + 2.5, p = v.oscs[0].frequency;
+      while (v.segEnd < horizon) {
+        const k = v.seg, ts = v.t0 + k * sw.dur, te = ts + sw.dur;
+        const down = sw.repeat === 'updown' && k % 2 === 1;
+        const a = down ? sw.f2 : sw.f1, b = down ? sw.f1 : sw.f2;
+        p.setValueAtTime(a, ts);
+        if (sw.scale === 'lin') p.linearRampToValueAtTime(b, te); else p.exponentialRampToValueAtTime(b, te);
+        v.seg++; v.segEnd = te;
+        if (sw.repeat === 'once') {
+          v.env.gain.setValueAtTime(1, te);
+          v.env.gain.linearRampToValueAtTime(0, te + 0.03);
+          v.oscs[0].stop(te + 0.05);
+          const mine = v;
+          v.oscs[0].onended = function () { mine.merger.disconnect(); mine.env.disconnect(); if (v === mine) { api.stop(); TT.announce('Sweep finished'); } };
+          v.segEnd = Infinity;
+          break;
+        }
+      }
+    }
+
+    // The live sweep frequency is shown ten times a second.
+    function frame() {
+      if (!api.playing || !v || !v.sweep) return;
+      const t = ctx.currentTime - v.t0;
+      st.lastSweepF = t >= 0 ? sweepFreqAt(v.sweep, t) : v.sweep.f1;
+      renderInfo();
+      raf = setTimeout(frame, 100);
+    }
+
+    api.start = function () {
+      const err = modeSettings().error;
+      if (err) { $('#tg-error').textContent = err; return; }
+      $('#tg-error').textContent = '';
+      try { ensure(); } catch (e) { $('#tg-error').textContent = e.message; return; }
+      const mine = ++token;
+      const go = function () {
+        if (mine !== token) return;
+        master.gain.value = vol();
+        const t = ctx.currentTime + 0.01;
+        v = build(t);
+        if (mode() === 'sweep') { v.sweep = sweepSettings(); v.t0 = t; v.seg = 0; v.segEnd = t; scheduleSweep(); sched = setInterval(scheduleSweep, 250); }
+        api.playing = true;
+        playBtn.textContent = 'Stop';
+        playBtn.setAttribute('aria-pressed', 'true');
+        $('#tg-live').hidden = false;
+        frame();
+        TT.announce('Playing ' + $('#tg-big').textContent.replace('→', 'to'));
+      };
+      if (ctx.state === 'suspended') ctx.resume().then(go, function () { $('#tg-error').textContent = 'The browser blocked audio playback. Press Play again.'; });
+      else go();
+    };
+    api.stop = function () {
+      token++;
+      clearInterval(sched); clearTimeout(raf);
+      if (v && ctx) release(v, ctx.currentTime);
+      v = null;
+      const was = api.playing;
+      api.playing = false;
+      st.lastSweepF = null;
+      playBtn.textContent = 'Play';
+      playBtn.setAttribute('aria-pressed', 'false');
+      $('#tg-live').hidden = true;
+      renderInfo();
+      return was;
+    };
+    api.restart = function () { if (api.playing) { api.stop(); api.start(); } };
+    api.retune = function () {
+      if (!v || !ctx) return;
+      const t = ctx.currentTime;
+      if (mode() === 'binaural') {
+        const b = beatSettings();
+        if (b.error) return;
+        [st.f, st.f + b.beat].forEach(function (f, i) { v.oscs[i].frequency.cancelScheduledValues(t); v.oscs[i].frequency.setTargetAtTime(f, t, 0.008); });
+      } else if (!v.sweep) {
+        v.oscs[0].frequency.cancelScheduledValues(t);
+        v.oscs[0].frequency.setTargetAtTime(st.f, t, 0.008);
+      }
+    };
+    api.reshape = function () { if (v && mode() !== 'binaural') v.oscs[0].type = wave(); };
+    api.route = function () {
+      if (!v || !v.gains.length) return;
+      const g = chGains(), t = ctx.currentTime;
+      v.gains.forEach(function (cg, i) { cg.gain.setTargetAtTime(g[i], t, 0.01); });
+    };
+    api.volume = function () { if (master && ctx) master.gain.setTargetAtTime(vol(), ctx.currentTime, 0.02); };
+    return api;
+  })();
+
+  playBtn.addEventListener('click', function () {
+    if (player.playing) { player.stop(); TT.announce('Stopped'); } else player.start();
+  });
+  window.addEventListener('pagehide', function () { player.stop(); });
+
+  // ---------- Keyboard shortcuts ----------
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    const t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+    // Keys belong to the page (scrolling, links) unless focus is in the tool,
+    // or nothing is focused while the tool is on screen.
+    const tool = $('.tg');
+    if (t && t.closest && !t.closest('.tg')) {
+      if (t !== document.body && t !== document.documentElement) return;
+      const r = tool.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;
+    }
+    const k = e.key;
+    if (k === ' ' || k === 'Spacebar') {
+      if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space activates those
+      e.preventDefault();
+      playBtn.click();
+      return;
+    }
+    if (k === 'ArrowUp' || k === 'ArrowDown') {
+      if (mode() === 'sweep') return;
+      e.preventDefault();
+      stepBy((e.shiftKey ? 'oct' : '') + (k === 'ArrowUp' ? '+' : '-'));
+      return;
+    }
+    if (e.shiftKey) return;
+    if (/^[1-4]$/.test(k) && mode() !== 'binaural') { setRadio('tg-wave', WAVES[+k - 1]); player.reshape(); TT.announce(WAVES[+k - 1] + ' wave'); return; }
+    const chKey = { l: 'left', r: 'right', b: 'both' }[k.toLowerCase()];
+    if (chKey && mode() !== 'binaural') { setRadio('tg-ch', chKey); player.route(); updateSize(); TT.announce(chKey === 'both' ? 'Both channels' : chKey + ' channel only'); }
+  });
+
+  // ---------- Share link ----------
+  $('#tg-link').addEventListener('click', function (e) {
+    const p = new URLSearchParams();
+    const m = mode();
+    p.set('mode', m);
+    if (m === 'sweep') {
+      p.set('from', f1In.value.trim()); p.set('to', f2In.value.trim()); p.set('time', sdurIn.value.trim());
+      p.set('scale', scaleSel.value); p.set('play', repSel.value);
+    } else p.set('f', String(st.f));
+    if (m === 'binaural') p.set('beat', beatIn.value.trim());
+    else { p.set('wave', wave()); p.set('ch', chan()); }
+    TT.copy(location.origin + location.pathname + '?' + p.toString(), e.currentTarget);
+  });
+  (function readLink() {
+    let p;
+    try { p = new URLSearchParams(location.search); } catch (e) { return; }
+    const okNum = function (s, lo, hi) {
+      if (s === null || !/^(\d+\.?\d*|\.\d+)$/.test(s)) return false;
+      const n = Number(s);
+      return n >= lo && n <= hi;
+    };
+    if (p.get('mode')) setRadio('tg-mode', p.get('mode'));
+    if (okNum(p.get('f'), F_MIN, F_MAX)) st.f = round2(Number(p.get('f')));
+    if (p.get('wave') && WAVES.indexOf(p.get('wave')) >= 0) setRadio('tg-wave', p.get('wave'));
+    if (p.get('ch')) setRadio('tg-ch', p.get('ch'));
+    if (okNum(p.get('from'), F_MIN, F_MAX)) f1In.value = p.get('from');
+    if (okNum(p.get('to'), F_MIN, F_MAX)) f2In.value = p.get('to');
+    if (okNum(p.get('time'), 0.5, 300)) sdurIn.value = p.get('time');
+    if (p.get('scale') === 'lin' || p.get('scale') === 'log') scaleSel.value = p.get('scale');
+    if (['once', 'repeat', 'updown'].indexOf(p.get('play')) >= 0) repSel.value = p.get('play');
+    if (okNum(p.get('beat'), 0.1, 50)) beatIn.value = p.get('beat');
+  })();
+
+  // ---------- WAV synthesis ----------
+  // PolyBLEP / PolyBLAMP: two-sample corrections that round off the jumps and
+  // corners of the naive waveforms, so harmonics above Nyquist are strongly
+  // reduced instead of aliasing back into the audible range.
+  function blep(t, dt) {
+    if (t < dt) { const x = t / dt; return x + x - x * x - 1; }
+    if (t > 1 - dt) { const x = (t - 1) / dt; return x * x + x + x + 1; }
+    return 0;
+  }
+  function blamp(t, dt) {
+    let x;
+    if (t < dt) x = t / dt; else if (t > 1 - dt) x = (1 - t) / dt; else return 0;
+    const y = 1 - x;
+    return y * y * y / 6;
+  }
+  function frac(x) { return x - Math.floor(x); }
+
+  // Band-limited wavetables: one cycle built from the waveform's Fourier
+  // series with only the harmonics below Nyquist, normalised to a peak of 1.
+  // Reading them never aliases. Very low tones (below about 11 Hz at 44.1 kHz)
+  // would need more harmonics than a table holds; PolyBLEP is clean there.
+  const TN = 16384, tables = new Map();
+  function fft(re, im) {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = 2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang), half = len >> 1;
+      for (let i = 0; i < n; i += len) {
+        let cr = 1, ci = 0;
+        for (let k = 0; k < half; k++) {
+          const a = i + k, b = a + half;
+          const xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+          re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+          const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+        }
+      }
+    }
+  }
+  function coeff(shape, k) {
+    if (shape === 'sawtooth') return (k % 2 ? 2 : -2) / (Math.PI * k);
+    if (k % 2 === 0) return 0;
+    if (shape === 'square') return 4 / (Math.PI * k);
+    return ((k - 1) / 2 % 2 ? -8 : 8) / (Math.PI * Math.PI * k * k); // triangle
+  }
+  function bandTable(shape, K) {
+    const key = shape + K;
+    let t = tables.get(key);
+    if (t) return t;
+    const re = new Float64Array(TN), im = new Float64Array(TN);
+    // x[n] = sum b_k sin(2 pi k n / N): X[k] = -i b_k / 2, X[N-k] = +i b_k / 2.
+    for (let k = 1; k <= K; k++) { const b = coeff(shape, k); im[k] = -b / 2; im[TN - k] = b / 2; }
+    fft(re, im);
+    let peak = 0;
+    for (let i = 0; i < TN; i++) peak = Math.max(peak, Math.abs(re[i]));
+    t = new Float32Array(TN + 1);
+    for (let i = 0; i < TN; i++) t[i] = re[i] / peak;
+    t[TN] = t[0];
+    tables.set(key, t);
+    return t;
+  }
+  // exact: harmonics up to Nyquist for this frequency (steady tones);
+  // otherwise quarter-octave bands, so a sweep reuses a few dozen tables.
+  function tableFor(shape, f, sr, exact) {
+    if (shape === 'sine') return null;
+    const top = exact ? f : Math.pow(2, Math.ceil(Math.log2(f) * 4) / 4);
+    const K = Math.max(1, Math.ceil(sr / 2 / top) - 1);
+    return K > TN / 8 ? null : bandTable(shape, K);
+  }
+  function osc(shape, ph, f, sr, tab) {
+    if (!tab) return sample(shape, ph, f / sr);
+    const x = ph * TN, i = x | 0;
+    return tab[i] + (tab[i + 1] - tab[i]) * (x - i);
+  }
+  // Same phase conventions as the Web Audio oscillators: every shape but the square starts at 0 and rises.
+  function sample(shape, ph, dt) {
+    // When the next harmonic would be above Nyquist, only the fundamental is
+    // left, which is a sine (the Web Audio oscillators do the same).
+    if (shape === 'sine' || dt >= (shape === 'sawtooth' ? 0.25 : 1 / 6)) return Math.sin(2 * Math.PI * ph);
+    if (shape === 'square') return (ph < 0.5 ? 1 : -1) + blep(ph, dt) - blep(frac(ph + 0.5), dt);
+    if (shape === 'sawtooth') { const t = frac(ph + 0.5); return 2 * t - 1 - blep(t, dt); }
+    // Triangle: corners at 0.25 (slope +4 to -4) and 0.75 (-4 to +4).
+    const tri = ph < 0.25 ? 4 * ph : ph < 0.75 ? 2 - 4 * ph : 4 * ph - 4;
+    return tri + 8 * dt * (blamp(frac(ph + 0.25), dt) - blamp(frac(ph - 0.25), dt));
+  }
+
+  function wavPlan() {
+    const m = mode(), sr = +rateSel.value || 44100, bits = +bitsSel.value || 16;
+    const ms = modeSettings();
+    if (ms.error) return { error: ms.error };
+    let dur;
+    if (m === 'sweep') dur = ms.dur * (ms.repeat === 'updown' ? 2 : 1);
+    else {
+      dur = num(durIn);
+      if (!(dur >= 0.1 && dur <= 300)) return { error: 'Enter a length from 0.1 to 300 seconds.' };
+    }
+    const nch = m === 'binaural' || chan() !== 'both' ? 2 : 1;
+    const frames = Math.round(dur * sr), data = frames * nch * bits / 8;
+    const header = bits === 32 ? 58 : 44;
+    // RIFF chunks are word-aligned: odd-sized data (24-bit mono, odd frame count) gets a pad byte.
+    const lv = $('#tg-level').value, amp = lv === 'vol' ? vol() : Math.pow(10, (+lv || 0) / 20);
+    return { mode: m, sr: sr, bits: bits, nch: nch, frames: frames, dur: dur, bytes: header + data + (data % 2), pad: data % 2, header: header, ms: ms, wave: wave(), ch: chan(), f: st.f, vol: amp, fade: fadeBox.checked };
+  }
+
+  function updateSize() {
+    const p = wavPlan(), el = $('#tg-size');
+    if (p.error) { el.textContent = ''; return; }
+    const mb = p.bytes / 1048576;
+    el.textContent = fmtNum(p.dur, 3) + ' s, ' + (p.nch === 2 ? 'stereo' : 'mono') + ', ' + fmtNum(p.bytes, 0) + ' bytes (' + (mb >= 1 ? mb.toFixed(1) + ' MB' : Math.max(1, Math.round(p.bytes / 1024)) + ' KB') + ').';
+  }
+  [durIn, rateSel, bitsSel, fadeBox].forEach(function (el) { el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', updateSize); });
+
+  function writeHeader(dv, p) {
+    const w = function (o, s) { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+    const bps = p.bits / 8, dataLen = p.frames * p.nch * bps;
+    w(0, 'RIFF'); dv.setUint32(4, p.header - 8 + dataLen + p.pad, true); w(8, 'WAVE');
+    w(12, 'fmt ');
+    const fmtLen = p.bits === 32 ? 18 : 16;
+    dv.setUint32(16, fmtLen, true);
+    dv.setUint16(20, p.bits === 32 ? 3 : 1, true);           // 1 = PCM, 3 = IEEE float
+    dv.setUint16(22, p.nch, true);
+    dv.setUint32(24, p.sr, true);
+    dv.setUint32(28, p.sr * p.nch * bps, true);              // byte rate
+    dv.setUint16(32, p.nch * bps, true);                     // block align
+    dv.setUint16(34, p.bits, true);
+    let o = 36;
+    if (p.bits === 32) {
+      dv.setUint16(36, 0, true);                             // cbSize
+      w(38, 'fact'); dv.setUint32(42, 4, true); dv.setUint32(46, p.frames, true);
+      o = 50;
+    }
+    w(o, 'data'); dv.setUint32(o + 4, dataLen, true);
+  }
+
+  function synth(p, onProgress) {
+    return new Promise(function (resolve, reject) {
+      const buf = new ArrayBuffer(p.bytes), dv = new DataView(buf);
+      writeHeader(dv, p);
+      const sr = p.sr, amp = p.vol, fadeN = p.fade ? Math.max(1, Math.round(0.01 * sr)) : 0;
+      const bps = p.bits / 8, nch = p.nch, frames = p.frames;
+      const shape = p.wave, ms = p.ms;
+      const left = p.ch !== 'right', right = p.ch !== 'left';
+      const steadyTab = p.mode === 'tone' ? tableFor(shape, p.f, sr, true) : null;
+      let pos = p.header, i = 0;
+      // Phase at time t (cycles) and instantaneous frequency, in closed form so
+      // long files do not accumulate rounding error.
+      let phase, freqAt;
+      if (p.mode === 'sweep') {
+        const T = ms.dur, segPhase = function (a, b, t) {
+          if (ms.scale === 'lin') return a * t + (b - a) * t * t / (2 * T);
+          const k = b / a;
+          return k === 1 ? a * t : a * T * (Math.pow(k, t / T) - 1) / Math.log(k);
+        };
+        const up = segPhase(ms.f1, ms.f2, T);
+        phase = function (t) { return t <= T ? segPhase(ms.f1, ms.f2, t) : up + segPhase(ms.f2, ms.f1, t - T); };
+        freqAt = function (t) { return t <= T ? sweepFreqAt(ms, t) : sweepFreqAt({ f1: ms.f1, f2: ms.f2, dur: T, scale: ms.scale, repeat: 'updown' }, t); };
+      }
+      const put = function (x) {
+        x = Math.max(-1, Math.min(1, x));
+        if (bps === 2) { dv.setInt16(pos, Math.round(x * 32767), true); pos += 2; }
+        else if (bps === 3) { const v = Math.round(x * 8388607); dv.setUint8(pos, v & 255); dv.setUint8(pos + 1, (v >> 8) & 255); dv.setUint8(pos + 2, (v >> 16) & 255); pos += 3; }
+        else { dv.setFloat32(pos, x, true); pos += 4; }
+      };
+      (function chunk() {
+        // Later slices run from timers, so an error there must reject explicitly.
+        try { slice(); } catch (e) { reject(e); }
+      })();
+      function slice() {
+        const until = performance.now() + 30;
+        while (i < frames && performance.now() < until) {
+          const end = Math.min(frames, i + 4096);
+          for (; i < end; i++) {
+            const t = i / sr;
+            let g = amp;
+            if (fadeN) {
+              if (i < fadeN) g *= 0.5 - 0.5 * Math.cos(Math.PI * i / fadeN);
+              const back = frames - 1 - i;
+              if (back < fadeN) g *= 0.5 - 0.5 * Math.cos(Math.PI * back / fadeN);
+            }
+            if (p.mode === 'binaural') {
+              put(g * Math.sin(2 * Math.PI * frac(p.f * t)));
+              put(g * Math.sin(2 * Math.PI * frac((p.f + ms.beat) * t)));
+              continue;
+            }
+            let x;
+            if (p.mode === 'sweep') { const f = freqAt(t); x = osc(shape, frac(phase(t)), f, sr, tableFor(shape, f, sr, false)); }
+            else x = osc(shape, frac(p.f * t), p.f, sr, steadyTab);
+            x *= g;
+            if (nch === 1) put(x);
+            else { put(left ? x : 0); put(right ? x : 0); }
+          }
+        }
+        if (i < frames) { onProgress(i / frames); setTimeout(function () { try { slice(); } catch (e) { reject(e); } }, 0); }
+        else resolve(new Blob([buf], { type: 'audio/wav' }));
+      }
+    });
+  }
+
+  let busy = false;
+  $('#tg-dl').addEventListener('click', function () {
+    if (busy) return;
+    const msg = $('#tg-dl-msg'), btn = $('#tg-dl');
+    const p = wavPlan();
+    if (p.error) { msg.textContent = p.error; return; }
+    if (p.bytes > 200 * 1048576) { msg.textContent = 'That file would be ' + Math.round(p.bytes / 1048576) + ' MB. Shorten it or lower the sample rate (200 MB at most).'; return; }
+    msg.textContent = '';
+    busy = true;
+    btn.textContent = 'Generating…';
+    btn.setAttribute('aria-disabled', 'true');
+    synth(p, function (fr) { btn.textContent = 'Generating… ' + Math.round(fr * 100) + '%'; }).then(function (blob) {
+      const hz = function (f) { return String(f).replace('.', '_') + 'hz'; };
+      let name;
+      if (p.mode === 'sweep') name = 'sweep-' + hz(p.ms.f1) + '-' + hz(p.ms.f2) + '-' + p.ms.scale + (p.ms.repeat === 'updown' ? '-updown' : '');
+      else if (p.mode === 'binaural') name = 'binaural-' + hz(p.f) + '-beat-' + hz(p.ms.beat);
+      else name = 'tone-' + hz(p.f) + '-' + p.wave;
+      if (p.mode !== 'binaural' && p.ch !== 'both') name += '-' + p.ch;
+      name += '-' + String(Math.round(p.dur * 100) / 100).replace('.', '_') + 's.wav';
+      TT.download(name, blob);
+      busy = false;
+      btn.textContent = 'Download WAV';
+      btn.removeAttribute('aria-disabled');
+      TT.announce('Saved ' + name);
+    }).catch(function (e) {
+      // For example, not enough memory for a very long 96 kHz file on a phone.
+      busy = false;
+      btn.textContent = 'Download WAV';
+      btn.removeAttribute('aria-disabled');
+      msg.textContent = 'Could not create the WAV file' + (e && e.message ? ' (' + e.message + ')' : '') + '. Try a shorter length or a lower sample rate.';
+    });
+  });
+
+  renderVol();
+  showMode();
+  setFreq(st.f);
+  stepSel.dispatchEvent(new Event('change'));
+})();
+</script>

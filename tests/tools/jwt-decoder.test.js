@@ -361,9 +361,195 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.keyboard.press('End');
   await page.waitForFunction(() => document.querySelector('#jwt-payload').scrollTop > 0);
 
+  // ---------- JWKS: pick a key by hand ----------
+  const rsTokNoKid = makeToken({ alg: 'RS256' }, { sub: 'nokid' }, d => crypto.sign('sha256', d, rsa.privateKey));
+  const jwkA = Object.assign(rsaOther.publicKey.export({ format: 'jwk' }), { kid: 'a' });
+  const jwkB = Object.assign(rsa.publicKey.export({ format: 'jwk' }), { kid: 'b' });
+  await page.fill('#jwt-token', rsTokNoKid);
+  await page.fill('#jwt-key', JSON.stringify({ keys: [jwkA, jwkB] }));
+  await invalid('no kid: the first RSA key is tried');
+  assert.equal(await page.isVisible('#jwt-kid'), true);
+  assert.deepEqual(await page.$$eval('#jwt-kid option', os => os.map(o => o.textContent)), ['Match the token’s kid', 'kid a · RSA', 'kid b · RSA']);
+  await page.selectOption('#jwt-kid', '1');
+  await verified('key picked from the set');
+  assert.match(await text('#jwt-key-note'), /Using the key you picked, kid "b"/);
+  // A kid that is not in the set: the message points to the list.
+  await page.fill('#jwt-token', rsToken); // kid "k1"
+  await page.selectOption('#jwt-kid', '');
+  await expectVerify(/No key in this JWKS has the token's kid "k1".*Pick a key from the set/, 'kid not in set');
+  await page.selectOption('#jwt-kid', '1');
+  await verified('picked key despite another kid');
+  assert.match(await text('#jwt-key-note'), /although the token names kid "k1"/);
+  await page.fill('#jwt-key', rsa.publicKey.export({ type: 'spki', format: 'pem' }));
+  await verified('PEM again');
+  assert.equal(await page.isVisible('#jwt-kid'), false, 'the list is only shown for a key set');
+
+  // ---------- Builder ----------
+  const jb = sel => page.locator(sel);
+  const tokenOut = () => page.inputValue('#jb-token');
+  const waitToken = async prev => { await page.waitForFunction(p => { const v = document.querySelector('#jb-token').value; return v && v !== p; }, prev, { timeout: 10000 }); return tokenOut(); };
+  const parts = t => t.split('.').map((x, i) => (i < 2 ? Buffer.from(x, 'base64url').toString() : x));
+  // On load: HS256 with a random 64-byte secret, iat now and exp in an hour.
+  let tok = await tokenOut();
+  let [bh, bp] = parts(tok);
+  assert.equal(bh, '{"alg":"HS256","typ":"JWT"}');
+  const loadClaims = JSON.parse(bp);
+  assert.ok(Math.abs(loadClaims.iat - now) < 120 && loadClaims.exp === loadClaims.iat + 3600, bp);
+  const secret0 = await page.inputValue('#jb-secret');
+  assert.match(secret0, /^[A-Za-z0-9_-]{86}$/, 'random 64-byte secret, Base64url text');
+  assert.equal(tok.split('.')[2], b64u(hmac('sha256', secret0)(Buffer.from(tok.split('.').slice(0, 2).join('.')))));
+  assert.match(await text('.jb-warn'), /For testing only/);
+  // The jwt.io example, rebuilt exactly.
+  await page.fill('#jb-header', '{\n  "alg": "HS256",\n  "typ": "JWT"\n}');
+  await page.fill('#jb-payload', '{\n  "sub": "1234567890",\n  "name": "John Doe",\n  "iat": 1516239022\n}');
+  await page.fill('#jb-secret', 'your-256-bit-secret');
+  await page.waitForFunction(v => document.querySelector('#jb-token').value === v, JWT_IO);
+  assert.match(await text('#jb-note'), /19 bytes; RFC 7518 requires at least 32/);
+  // HS384 and HS512, the header follows the algorithm; Base64 secret.
+  const claims = '{"sub":"x","id":12345678901234567890,"nested":{"a":[1,2,3]},"text":"a \\" b"}';
+  await page.fill('#jb-payload', claims);
+  for (const [alg, h] of [['HS384', 'sha384'], ['HS512', 'sha512']]) {
+    await page.selectOption('#jb-alg', alg);
+    await page.fill('#jb-secret', Buffer.from('k'.repeat(64)).toString('base64'));
+    await page.check('#jb-secret-b64');
+    const input = b64u(`{"alg":"${alg}","typ":"JWT"}`) + '.' + b64u(claims);
+    await page.waitForFunction(v => document.querySelector('#jb-token').value === v, input + '.' + b64u(hmac(h, 'k'.repeat(64))(Buffer.from(input))));
+    assert.equal(await text('#jb-note'), '');
+    await page.uncheck('#jb-secret-b64');
+  }
+  // Big integers keep every digit (the payload is minified, not re-serialized).
+  assert.equal(parts(await tokenOut())[1], claims);
+  // JSON and header problems.
+  await page.fill('#jb-payload', '{"sub": }');
+  await page.waitForFunction(() => /payload is not valid JSON/.test(document.querySelector('#jb-msg').textContent));
+  assert.equal(await tokenOut(), '');
+  assert.equal(await page.isDisabled('#jb-load'), true);
+  await page.fill('#jb-payload', '[1, 2]');
+  await page.waitForFunction(() => /payload must be a JSON object/.test(document.querySelector('#jb-msg').textContent));
+  await page.fill('#jb-payload', '{"sub":"x"}');
+  await page.fill('#jb-header', '{"alg":"none"}');
+  await page.waitForFunction(() => /header’s "alg" is "none", but the token is signed with HS512/.test(document.querySelector('#jb-msg').textContent));
+  await page.fill('#jb-header', '{"alg":"HS512","typ":"JWT","kid":"test-1"}');
+  await page.waitForFunction(() => document.querySelector('#jb-msg').textContent === '' && document.querySelector('#jb-token').value !== '');
+  // "iat now, exp in 1 hour".
+  await page.click('#jb-now');
+  const withTimes = JSON.parse(await page.inputValue('#jb-payload'));
+  assert.ok(Math.abs(withTimes.iat - now) < 120 && withTimes.exp === withTimes.iat + 3600);
+  assert.equal(withTimes.sub, 'x');
+
+  // RS256 is deterministic: the token must equal Node's, whatever the private key's format.
+  const rsInput = b64u('{"alg":"RS256","typ":"JWT","kid":"k1"}') + '.' + b64u('{"sub":"rs"}');
+  const rsExpected = rsInput + '.' + b64u(crypto.sign('sha256', Buffer.from(rsInput), rsa.privateKey));
+  await page.fill('#jb-header', '{"alg":"RS256","typ":"JWT","kid":"k1"}');
+  await page.fill('#jb-payload', '{"sub":"rs"}');
+  await page.selectOption('#jb-alg', 'RS256');
+  assert.equal(await page.isVisible('#jb-key'), true);
+  assert.equal(await page.isVisible('#jb-secret'), false);
+  for (const [label, key] of [['PKCS#8', rsa.privateKey.export({ type: 'pkcs8', format: 'pem' })], ['PKCS#1', rsa.privateKey.export({ type: 'pkcs1', format: 'pem' })],
+    ['JWK', JSON.stringify(rsa.privateKey.export({ format: 'jwk' }))]]) {
+    await page.fill('#jb-key', key);
+    await page.waitForFunction(v => document.querySelector('#jb-token').value === v, rsExpected, { timeout: 10000 }).catch(() => {});
+    assert.equal(await tokenOut(), rsExpected, 'RS256 with a ' + label + ' key');
+  }
+  // The public key shown matches the private key; its JWK carries the header's kid.
+  assert.equal((await text('#jb-pub')).trim(), rsa.publicKey.export({ type: 'spki', format: 'pem' }).trim());
+  const pubJwk = JSON.parse(await text('#jb-pub-jwk'));
+  assert.deepEqual([pubJwk.kty, pubJwk.n, pubJwk.e, pubJwk.kid, pubJwk.alg], ['RSA', rsa.publicKey.export({ format: 'jwk' }).n, 'AQAB', 'k1', 'RS256']);
+  // Decode and verify it above: the decoder gets the token and the public JWK.
+  await page.click('#jb-load');
+  assert.equal(await page.inputValue('#jwt-token'), rsExpected);
+  await verified('builder token in the decoder');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'jb-load', 'focus stays on the button');
+  // PS256 and ES256/384/512 are randomized: verify with Node instead.
+  const verifyWithNode = async (alg, key) => {
+    const t = await tokenOut();
+    const [h64, p64, s64] = t.split('.');
+    assert.equal(JSON.parse(Buffer.from(h64, 'base64url')).alg, alg);
+    const data = Buffer.from(h64 + '.' + p64), sig = Buffer.from(s64, 'base64url');
+    const hash = { 256: 'sha256', 384: 'sha384', 512: 'sha512' }[alg.slice(2)];
+    if (alg[0] === 'P') return crypto.verify(hash, data, { key, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: +alg.slice(2) / 8 }, sig);
+    if (alg[0] === 'E' && alg !== 'EdDSA') return crypto.verify(hash, data, { key, dsaEncoding: 'ieee-p1363' }, sig);
+    return crypto.verify(null, data, key, sig);
+  };
+  await page.fill('#jb-header', '{"alg":"RS256","typ":"JWT"}');
+  await page.selectOption('#jb-alg', 'PS256');
+  await page.waitForFunction(() => document.querySelector('#jb-token').value.startsWith('eyJhbGciOiJQUzI1NiIs'));
+  assert.equal(await verifyWithNode('PS256', rsa.publicKey), true, 'PS256 verifies in Node');
+  for (const [alg, pair, fmt] of [['ES256', p256, 'sec1'], ['ES384', p384, 'pkcs8'], ['ES512', p521, 'jwk']]) {
+    await page.selectOption('#jb-alg', alg);
+    const prev = await tokenOut();
+    await page.fill('#jb-key', fmt === 'jwk' ? JSON.stringify(pair.privateKey.export({ format: 'jwk' })) : pair.privateKey.export({ type: fmt, format: 'pem' }));
+    const t = await waitToken(prev);
+    assert.equal(t.split('.')[2].length, { ES256: 86, ES384: 128, ES512: 176 }[alg], alg + ' raw R||S signature length');
+    assert.equal(await verifyWithNode(alg, pair.publicKey), true, alg + ' verifies in Node (' + fmt + ' key)');
+  }
+  // EdDSA is deterministic too.
+  await page.selectOption('#jb-alg', 'EdDSA');
+  await page.fill('#jb-key', ed.privateKey.export({ type: 'pkcs8', format: 'pem' }));
+  const edInput = b64u('{"alg":"EdDSA","typ":"JWT"}') + '.' + b64u('{"sub":"rs"}');
+  await page.waitForFunction(v => document.querySelector('#jb-token').value === v, edInput + '.' + b64u(crypto.sign(null, Buffer.from(edInput), ed.privateKey)), { timeout: 10000 });
+  // Key problems are explained.
+  for (const [key, re] of [
+    [p256.privateKey.export({ type: 'pkcs8', format: 'pem' }), /This is an EC P-256 key, but EdDSA needs an Ed25519 private key/],
+    [ed.publicKey.export({ type: 'spki', format: 'pem' }), /This is a public key or certificate/],
+    ['-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIB\n-----END ENCRYPTED PRIVATE KEY-----', /encrypted with a passphrase/],
+    ['-----BEGIN OPENSSH PRIVATE KEY-----\nb3Bl\n-----END OPENSSH PRIVATE KEY-----', /ssh-keygen -p -m PKCS8/],
+    [JSON.stringify(ed.publicKey.export({ format: 'jwk' })), /no "d" member, so it is a public key/],
+    ['hello', /Paste the private key as PEM/],
+  ]) {
+    await page.fill('#jb-key', key);
+    await page.waitForFunction(r => new RegExp(r).test(document.querySelector('#jb-msg').textContent), re.source, { timeout: 5000 }).catch(() => {});
+    assert.match(await text('#jb-msg'), re);
+    assert.equal(await page.getAttribute('#jb-key', 'aria-invalid'), 'true');
+  }
+  // Generated test key pairs: switching to ES256 with an unusable key makes a fresh pair.
+  await page.fill('#jb-key', '');
+  await page.focus('#jb-alg');
+  await page.selectOption('#jb-alg', 'ES256');
+  await page.waitForFunction(() => /BEGIN PRIVATE KEY/.test(document.querySelector('#jb-key').value) && document.querySelector('#jb-token').value.startsWith('eyJhbGciOiJFUzI1NiIs'), null, { timeout: 10000 });
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'jb-alg', 'focus stays on the list when a key pair is made for it');
+  const genPub = crypto.createPublicKey(await text('#jb-pub'));
+  assert.equal(genPub.asymmetricKeyDetails.namedCurve, 'prime256v1');
+  assert.equal(await verifyWithNode('ES256', genPub), true, 'generated ES256 pair');
+  let prevTok = await tokenOut();
+  await page.selectOption('#jb-alg', 'RS512');
+  await page.waitForFunction(p => { const v = document.querySelector('#jb-token').value; return v !== p && v.startsWith('eyJhbGciOiJSUzUxMiIs'); }, prevTok, { timeout: 20000 });
+  const rsGenPub = crypto.createPublicKey(await text('#jb-pub'));
+  assert.equal(rsGenPub.asymmetricKeyDetails.modulusLength, 2048);
+  assert.equal(await verifyWithNode('RS512', rsGenPub) || crypto.verify('sha512', Buffer.from((await tokenOut()).split('.').slice(0, 2).join('.')), rsGenPub, Buffer.from((await tokenOut()).split('.')[2], 'base64url')), true, 'generated RS512 pair');
+  prevTok = await tokenOut();
+  await page.click('#jb-gen-key');
+  await waitToken(prevTok);
+  await page.click('#jb-load');
+  await verified('generated RS512 token in the decoder');
+  // Back to a shared secret, loaded with its secret.
+  await page.selectOption('#jb-alg', 'HS256');
+  await page.click('#jb-gen-secret');
+  await page.waitForFunction(() => document.querySelector('#jb-token').value.startsWith('eyJhbGciOiJIUzI1NiIs'));
+  await page.click('#jb-load');
+  await verified('HS256 builder token in the decoder');
+  assert.equal(await page.inputValue('#jwt-secret'), await page.inputValue('#jb-secret'));
+
+  // A browser without Ed25519 in Web Crypto gets a clear message instead of a raw error.
+  const noEd = await page.context().newPage();
+  await noEd.addInitScript(() => {
+    const orig = SubtleCrypto.prototype.importKey;
+    SubtleCrypto.prototype.importKey = function (fmt, data, alg, ...rest) {
+      const name = typeof alg === 'string' ? alg : alg && alg.name;
+      if (name === 'Ed25519') return Promise.reject(new DOMException('Unrecognized name.', 'NotSupportedError'));
+      return orig.call(this, fmt, data, alg, ...rest);
+    };
+  });
+  await noEd.goto(url);
+  await noEd.fill('#jwt-token', makeToken({ alg: 'EdDSA' }, { sub: 'ed' }, d => crypto.sign(null, d, ed.privateKey)));
+  await noEd.fill('#jwt-key', ed.publicKey.export({ type: 'spki', format: 'pem' }));
+  await noEd.waitForFunction(() => /does not support Ed25519 yet/.test(document.querySelector('#jwt-verify').textContent), null, { timeout: 5000 });
+  await noEd.close();
+
   // Screen readers: the decoded output, the error and the verification message change on
   // every edit, so none is a live region or alert; #jwt-status says one short summary once
   // typing pauses, built after the signature check has finished.
+  await page.waitForTimeout(1000); // let the builder's delayed status settle first
   assert.equal(await page.getAttribute('#jwt-out', 'aria-live'), null);
   assert.equal(await page.getAttribute('#jwt-verify', 'aria-live'), null);
   assert.equal(await page.getAttribute('#jwt-msg', 'role'), null);
@@ -392,6 +578,36 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#jwt-token', '');
   await page.type('#jwt-token', 'abc', { delay: 40 });
   assert.deepEqual(await heard(), ['jwt-status:This is not a JWT: it has no dots. A JWT has three Base64url parts joined by dots: header.payload.signature.']);
+  // The builder: one short status once typing pauses, errors included, never an alert.
+  assert.equal(await page.locator('#jb-msg[role], #jb-token[aria-live]').count(), 0);
+  await page.evaluate(() => { window.__live = []; });
+  await page.selectOption('#jb-alg', 'HS256');
+  await page.fill('#jb-payload', '');
+  await page.type('#jb-payload', '{"sub":"z"}', { delay: 30 });
+  const jbHeard = (await heard()).filter(l => l.startsWith('jb-status:'));
+  assert.equal(jbHeard.length, 1, JSON.stringify(jbHeard));
+  assert.match(jbHeard[0], /^jb-status:Signed HS256 token ready, \d+ characters\.$/);
+  await page.type('#jb-payload', ',', { delay: 30 });
+  assert.deepEqual((await heard()).filter(l => l.startsWith('jb-status:')), ['jb-status:The payload is not valid JSON: ' + (await text('#jb-msg')).replace(/^The payload is not valid JSON: /, '')]);
   await page.click('#jwt-example');
   await verified('example after the live-region checks');
+
+  // Regression: a payload nested 20,000 levels deep used to build a gigabyte-long indented
+  // string and throw "Invalid string length". Indentation is now capped.
+  const deep = '['.repeat(20000) + ']'.repeat(20000);
+  const put = (sel, v) => page.evaluate(([sel, v]) => { const el = document.querySelector(sel); el.value = v; el.dispatchEvent(new Event('input')); }, [sel, v]);
+  let t0 = Date.now();
+  await put('#jwt-token', b64u('{"alg":"HS256"}') + '.' + b64u(deep) + '.' + b64u('sig'));
+  assert.ok(Date.now() - t0 < 3000, 'deep JSON rendered in ' + (Date.now() - t0) + ' ms');
+  assert.equal(await text('#jwt-msg'), '');
+  assert.ok((await text('#jwt-payload')).length < 3e6);
+  assert.match(await text('#jwt-warn'), /not an object/);
+  // Regression: many BEGIN lines without an END took seconds (backtracking PEM regex).
+  await page.click('#jwt-example');
+  const rsTok = b64u('{"alg":"RS256"}') + '.' + b64u('{"sub":"x"}') + '.' + b64u('x'.repeat(256));
+  await put('#jwt-token', rsTok);
+  t0 = Date.now();
+  await put('#jwt-key', '-----BEGIN A-----\n'.repeat(30000));
+  assert.ok(Date.now() - t0 < 1000, 'PEM scan took ' + (Date.now() - t0) + ' ms');
+  await page.waitForFunction(() => /BEGIN and END lines must match/.test(document.querySelector('#jwt-verify').textContent));
 };

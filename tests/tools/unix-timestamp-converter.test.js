@@ -136,6 +136,149 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await r('iso'), '1970-01-20T16:13:20Z');
   assert.match(await text('#ut-detected'), /as milliseconds/);
 
+  // Other formats, read from input. Expected dates come from Python's datetime
+  // (FILETIME/WebKit from 1601-01-01, ticks from 0001-01-01, Excel serials from
+  // 1899-12-30, or 1899-12-31 below serial 60) and astropy's GPS/JD/MJD scales.
+  const reads = [
+    ['filetime', '0', '1601-01-01T00:00:00Z'],
+    ['filetime', '133444736005000000', '2023-11-14T22:13:20.500Z'],
+    ['filetime', '0x01D8F1A2B3C4D5E6', '2022-11-06T05:43:31.044707800Z'],
+    ['ticks', '638355968005000000', '2023-11-14T22:13:20.500Z'],
+    ['ticks', '0', '0001-01-01T00:00:00Z'],
+    ['ticks', '3155378975999999999', '9999-12-31T23:59:59.999999900Z'],
+    ['webkit', '13344473600500000', '2023-11-14T22:13:20.500Z'],
+    ['excel1900', '1', '1900-01-01T00:00:00Z'],
+    ['excel1900', '59', '1900-02-28T00:00:00Z'],
+    ['excel1900', '61', '1900-03-01T00:00:00Z'],
+    ['excel1900', '45292.75', '2024-01-01T18:00:00Z'],
+    ['excel1900', '0.5', '1899-12-31T12:00:00Z'],
+    ['excel1904', '0', '1904-01-01T00:00:00Z'],
+    ['excel1904', '43830.5', '2024-01-01T12:00:00Z'],
+    ['cocoa', '700000000', '2023-03-08T20:26:40Z'],
+    ['hfs', '4294967295', '2040-02-06T06:28:15Z'],
+    ['gps', '0', '1980-01-06T00:00:00Z'],
+    ['gps', '46828801', '1981-07-01T00:00:00Z'],
+    ['gps', '1167264016', '2016-12-31T23:59:59Z'],
+    ['gps', '1167264018', '2017-01-01T00:00:00Z'],
+    ['gps', '1400000000', '2024-05-17T16:53:02Z'],
+    ['jd', '2451545.0', '2000-01-01T12:00:00Z'],
+    ['mjd', '51544.5', '2000-01-01T12:00:00Z'],
+    ['jd', '0', '-004713-11-24T12:00:00Z'],
+    ['hex', '7fffffff', '2038-01-19T03:14:07Z'],
+  ];
+  for (const [fmt, v, want] of reads) {
+    await conv(v, fmt);
+    assert.equal(await text('#ut-ts-msg'), '', `${fmt} ${v}`);
+    assert.equal(await r('iso'), want, `${fmt} ${v}`);
+  }
+  assert.match(await text('#ut-detected'), /hexadecimal 0x7fffffff = 2147483647/);
+  // JD 0 is 2440587.5 days before the epoch: -210866760000 s.
+  await conv('0', 'jd');
+  assert.equal(await r('s'), '-210866760000');
+  // Format notes: the leap second GPS cannot map (astropy: 1981-06-30T23:59:60),
+  // Excel's time-only serials and its fake 1900-02-29, and the 32-bit HFS+ limit.
+  await conv('46828800', 'gps');
+  assert.equal(await r('iso'), '1981-06-30T23:59:59Z');
+  assert.match(await text('#ut-note'), /leap second, 23:59:60 UTC/);
+  await conv('1167264017', 'gps');
+  assert.equal(await r('iso'), '2016-12-31T23:59:59Z');
+  await conv('0.5', 'excel1900');
+  assert.match(await text('#ut-note'), /1900-01-00/);
+  await conv('30', 'excel1900');
+  assert.match(await text('#ut-note'), /Google Sheets and LibreOffice/);
+  await conv('4294967296', 'hfs');
+  assert.match(await text('#ut-note'), /32-bit HFS\+/);
+  for (const [fmt, v, re] of [['excel1900', '60', /February 29, 1900/], ['excel1900', '60.5', /February 29, 1900/], ['excel1900', '-1', /never negative/],
+    ['excel1900', '2958466', /9999-12-31/], ['excel1904', '2957004', /9999-12-31/], ['filetime', '-1', /whole number/], ['filetime', '1.5', /whole number/],
+    ['ticks', '3155378976000000000', /9999-12-31/], ['gps', '-5', /never negative/], ['hfs', '-1', /never negative/], ['webkit', '1.5', /whole numbers/]]) {
+    await conv(v, fmt);
+    assert.match(await text('#ut-ts-msg'), re, `${fmt} ${v}`);
+    assert.equal(await r('iso'), '–');
+  }
+
+  // Every other format, written out for 1e9 s (2001-09-09T01:46:40Z). Python:
+  // FILETIME 126444736000000000, ticks 631355968000000000, WebKit
+  // 12644473600000000, Excel 37143.07407407407 / 35681.07407407407 (1e9/86400 +
+  // 25569 or + 24107), Cocoa 21692800, HFS+ 3082844800; astropy: GPS 684035213
+  // (13 leap seconds), JD 2452161.574074074, MJD 52161.07407407407.
+  await conv('1000000000');
+  const others = {
+    hex: '0x3b9aca00', filetime: '126444736000000000', ticks: '631355968000000000', webkit: '12644473600000000',
+    excel1900: '37143.0740740741', excel1904: '35681.0740740741', cocoa: '21692800', hfs: '3082844800',
+    gps: '684035213', gpsweek: 'week 1131, 6413 s', jd: '2452161.57407407', mjd: '52161.0740740741',
+  };
+  for (const [k, want] of Object.entries(others)) assert.equal(await r(k), want, k);
+  await page.locator('#ut-r-filetime + td button').click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '126444736000000000');
+  // Formats that cannot hold a moment say so and cannot be copied.
+  await conv('-2209075201'); // 1899-12-30T23:59:59Z
+  for (const k of ['gps', 'excel1900', 'excel1904']) {
+    assert.match(await r(k), /^Before/, k);
+    assert.equal(await page.locator(`#ut-r-${k} + td button`).isDisabled(), true, k);
+  }
+  assert.equal(await r('filetime'), '94353983990000000');
+  assert.equal(await r('hex'), '-0x83abd001');
+
+  // Auto-detect reads 17- and 18-digit and small numbers as Unix time, and offers
+  // formats that would give a date from 1980 to 2100 under "Could also be".
+  await conv('126444736000000000');
+  assert.match(await text('#ut-detected'), /nanoseconds/);
+  assert.equal(await page.locator('#ut-alt').isVisible(), true);
+  assert.deepEqual(await page.locator('#ut-alt-list button').allTextContents(), ['Windows FILETIME: 2001-09-09 01:46 UTC']);
+  await page.click('#ut-alt-list button');
+  assert.equal(await page.inputValue('#ut-unit'), 'filetime');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'ut-unit');
+  assert.equal(await r('iso'), '2001-09-09T01:46:40Z');
+  assert.equal(await page.locator('#ut-alt').isVisible(), false);
+  await conv('37143.07407407407');
+  assert.deepEqual(await page.locator('#ut-alt-list button').allTextContents(),
+    ['Excel, 1900 system: 2001-09-09 01:46 UTC', 'Excel, 1904 system: 2005-09-10 01:46 UTC']);
+  await conv('13344473600500000');
+  assert.deepEqual(await page.locator('#ut-alt-list button').allTextContents(), ['WebKit / Chrome: 2023-11-14 22:13 UTC']);
+  await conv('2452161.574074074');
+  assert.deepEqual(await page.locator('#ut-alt-list button').allTextContents(), ['Julian Day: 2001-09-09 01:46 UTC']);
+  for (const v of ['1000000000', '1700000000000', '1700000000000000', '1700000000000000000']) {
+    await conv(v);
+    assert.equal(await page.locator('#ut-alt').isVisible(), false, `no suggestions for Unix time ${v}`);
+  }
+
+  // Hexadecimal: a 0x prefix, or 8+ hex digits with a letter; shorter needs 0x.
+  await conv('0x3B9ACA00');
+  assert.equal(await r('iso'), '2001-09-09T01:46:40Z');
+  assert.match(await text('#ut-detected'), /hexadecimal 0x3b9aca00 = 1000000000, read as seconds/);
+  await conv('3b9aca00');
+  assert.equal(await r('iso'), '2001-09-09T01:46:40Z');
+  await conv('abc');
+  assert.match(await text('#ut-ts-msg'), /looks like hexadecimal/);
+  await conv('1e9');
+  assert.equal(await r('iso'), '2001-09-09T01:46:40Z');
+  // Regression: the hex check backtracked quadratically (0.5 s for 20,000 letters).
+  const hexMs = await page.evaluate(() => {
+    const el = document.querySelector('#ut-ts');
+    el.value = 'a'.repeat(20000) + 'x';
+    const t = performance.now();
+    el.dispatchEvent(new Event('input'));
+    return performance.now() - t;
+  });
+  assert.ok(hexMs < 100, `hex check took ${hexMs} ms`);
+  assert.match(await text('#ut-ts-msg'), /not a number/);
+  // Regression: a Unicode minus (as pasted from documents) and a decimal comma
+  // were rejected or misread (1700000000,5 became 17000000005).
+  await conv('\u22121700000000');
+  assert.equal(await r('iso'), '1916-02-18T01:46:40Z');
+  await conv('1700000000,5');
+  assert.equal(await r('iso'), '2023-11-14T22:13:20.500Z');
+  await conv('1,700,000,000');
+  assert.equal(await r('iso'), '2023-11-14T22:13:20Z');
+  await conv('17,00,0');
+  assert.match(await text('#ut-ts-msg'), /not a number/);
+  // Regression: 0001-01-01T00:00Z seen from New York is still 1 BC, but the
+  // era was only added for UTC years below 1.
+  await page.selectOption('#ut-view-zone', 'America/New_York');
+  await conv('-62135596800');
+  assert.match(await r('local'), /^Sunday, December 31, 1 BC at 7:03:58 PM/);
+  await page.selectOption('#ut-view-zone', 'Europe/Rome');
+
   // Bad input never throws; it shows a message.
   await conv('abc');
   assert.ok((await text('#ut-ts-msg')).length > 0);
@@ -163,6 +306,17 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await text('#ut-out-s'), '2147483647');
   assert.equal(await text('#ut-out-ms'), '2147483647000');
   assert.equal(await text('#ut-out-iso'), '2038-01-19T03:14:07Z');
+  // The same moment in every other format (Python / astropy for 2147483647 s:
+  // FILETIME 137919572470000000, ticks 642830804470000000, WebKit 13791957247000000,
+  // Excel 50424.1348032407 / 48962.1348032407, Cocoa 1169176447, HFS+ 4230328447,
+  // GPS 1831518865 = week 3028 + 184465 s, JD 2465442.6348032407, MJD 65442.13480324074).
+  const d = k => text('#ut-d-' + k);
+  const dates = {
+    hex: '0x7fffffff', filetime: '137919572470000000', ticks: '642830804470000000', webkit: '13791957247000000',
+    excel1900: '50424.1348032407', excel1904: '48962.1348032407', cocoa: '1169176447', hfs: '4230328447',
+    gps: '1831518865', gpsweek: 'week 3028, 184465 s', jd: '2465442.63480324', mjd: '65442.1348032407',
+  };
+  for (const [k, want] of Object.entries(dates)) assert.equal(await d(k), want, k);
   await page.fill('#ut-date', '1969-12-31');
   await page.fill('#ut-time', '23:59:59');
   assert.equal(await text('#ut-out-s'), '-1');
@@ -186,6 +340,18 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.fill('#ut-date', '');
   assert.equal(await text('#ut-date-msg'), 'Enter a date.');
   assert.equal(await text('#ut-out-s'), '–');
+  assert.equal(await text('#ut-d-filetime'), '–');
+  // Regression: the results were a live region and the error an alert, so
+  // every edit of the date re-read three numbers or "Enter a date." at once.
+  // One short summary is announced once editing pauses.
+  for (const sel of ['#ut-date-msg', '.ut-stats', '#ut-date-other']) {
+    assert.equal(await page.locator(sel).evaluate(el => !!el.closest('[aria-live]:not([aria-live="off"]), [role="alert"], [role="status"]')), false, `${sel} is not live`);
+  }
+  await page.fill('#ut-date', '2038-01-19');
+  await page.fill('#ut-time', '03:14:07');
+  // 03:14:07 EST is 08:14:07 UTC (Python zoneinfo): 2147483647 + 5 * 3600.
+  await page.waitForFunction(() => document.querySelector('#ut-date-status').textContent === 'Unix time 2147501647 seconds, 2038-01-19T08:14:07Z');
+  assert.equal(await text('#ut-d-filetime'), '137919752470000000');
 
   // Date strings.
   await page.selectOption('#ut-zone', 'UTC');
@@ -225,6 +391,9 @@ module.exports = async ({ page, open, assert, url }) => {
     'Sun, 09 Sep 2001 01:46:40 EDT': '1000014400',
     'Sun Sep 09 2001 03:46:40 GMT+0200 (Central European Summer Time)': '1000000000',
     '+275760-09-13T00:00:00Z': '8640000000000',
+    '20010909T014640Z': '1000000000', // ISO 8601 basic format
+    '20010909T034640+0200': '1000000000',
+    '2001-09-08T24:00:00Z': '999993600', // end of day = 2001-09-09T00:00:00Z
   };
   for (const [str, want] of Object.entries(forms)) {
     await page.fill('#ut-parse', str);
@@ -290,9 +459,9 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.fill('#ut-parse', 'hello 1');
   await status('#ut-parse-status', 'Could not read that date.');
 
-  // The privacy line is in every page's footer; this slot answers a real question.
+  // The FAQ answers the spreadsheet question and confirms nothing is uploaded.
   const faqs = await page.locator('.faq summary').allTextContents();
-  assert.ok(!faqs.some(q => /uploaded|sent to a server/i.test(q)), faqs.join(' | '));
+  assert.ok(faqs.some(q => /sent to a server/i.test(q)), faqs.join(' | '));
   assert.ok(faqs.some(q => /Excel or Google Sheets/.test(q)), faqs.join(' | '));
   // The FAQ's spreadsheet formula =A2/86400 + DATE(1970,1,1): DATE(1970,1,1) is
   // serial 25569 in Excel's 1900 system, and 1e9 s gives 2001-09-09 01:46:40.

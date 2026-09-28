@@ -95,6 +95,11 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await val('#mg-big'), '18T WL 85631 11326');
   await ll('geo:40.748440,-73.985664;u=35');
   assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  // Regression: decimal commas (European style) were rejected.
+  await ll('40,748440 -73,985664');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  await ll('40,748440; -73,985664');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
   await ll('40:44:54.38N 73:59:08.39W');
   assert.equal(await val('#mg-r-dd'), '40.748439, -73.985664');
   assert.equal(await err(), '');
@@ -120,6 +125,8 @@ module.exports = async ({ page, open, assert }) => {
   // MGRS errors.
   const mgrsErrors = {
     '18TWL123': /same number of digits/,
+    // Regression: two digit groups of different lengths were silently split in half (8563 111326 -> 85631 11326).
+    '18T WL 8563 111326': /same number of digits.*You gave 4 and 6/,
     '33ZXX': /UPS/,
     '32XMH1234': /32X does not exist/,
     '18TIL1234': /never uses the letters I and O/,
@@ -206,8 +213,20 @@ module.exports = async ({ page, open, assert }) => {
     new MutationObserver(() => { if (box.textContent) window.__mgErrors.push(box.textContent); })
       .observe(box, { childList: true, characterData: true, subtree: true });
   });
+  // Regression: the big result was an aria-live region, so every keystroke announced a new reference.
+  // Now one summary is announced after typing pauses.
+  assert.equal(await page.getAttribute('#mg-big', 'aria-live'), null);
+  assert.equal(await page.getAttribute('#mg-note', 'aria-live'), null);
+  await page.evaluate(() => {
+    window.__mgStatus = [];
+    const box = document.querySelector('#mg-status');
+    new MutationObserver(() => window.__mgStatus.push(box.textContent)).observe(box, { childList: true, characterData: true, subtree: true });
+  });
   await page.locator('#mg-ll').pressSequentially('51.5007, -0.1246', { delay: 30 });
-  await page.waitForTimeout(1000);
+  await page.waitForFunction(() => window.__mgStatus.length > 0, null, { timeout: 3000 });
+  await page.waitForTimeout(300);
+  const said = await page.evaluate(() => window.__mgStatus);
+  assert.deepEqual(said, [`MGRS ${await val("#mg-big")}.`], JSON.stringify(said));
   assert.deepEqual(await page.evaluate(() => window.__mgErrors), []);
   assert.equal(await page.textContent('#mg-error'), '');
   assert.match(await val('#mg-big'), /^30U XC \d{5} \d{5}$/);
@@ -239,6 +258,177 @@ module.exports = async ({ page, open, assert }) => {
   await page.keyboard.press('ArrowRight');
   assert.match(await segShadow(), /inset.*inset/, 'focus ring after moving with the arrow keys');
   await mode('ll');
+
+  // ---- USNG: the same reference written with spaces, plus its short in-zone form. ----
+  await ll('40.748440, -73.985664');
+  assert.equal(await val('#mg-r-usng'), '18T WL 85631 11326');
+  assert.match(await val('#mg-r-usng-sub'), /shortened to WL 85631 11326\./);
+  assert.match(await val('#mg-r-utm-sub'), /^Zone 18, northern hemisphere: 18N 585631 4511327/);
+
+  // ---- DDM input in the Garmin style (hemisphere first). mgrs package: 18TWL8563111326 and
+  // 32VKN9747600831; the decimal degrees are 44.906/60 and 59.140/60 worked out by hand. ----
+  await ll('N40 44.906 W073 59.140');
+  assert.equal(await val('#mg-r-dd'), '40.748433, -73.985667');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  assert.equal(await val('#mg-r-ddm'), '40°44.9060\'N 73°59.1400\'W');
+  await ll('N60 23.580 E005 19.448');
+  assert.equal(await val('#mg-big'), '32V KN 97476 00831');
+  await page.click('button[data-example^="S22"]');
+  assert.equal(await val('#mg-big'), '23K PQ 83478 60685');
+
+  // ---- Regression: a value that rounds to zero printed as -0.000000 with a south hemisphere. ----
+  await ll('-0.0000001, 0');
+  assert.equal(await val('#mg-r-dd'), '0.000000, 0.000000');
+  assert.equal(await val('#mg-r-dms'), '0°00\'00.00"N 0°00\'00.00"E');
+
+  // ---- Regression: the reference this page gives for 84°N could not be read back, because the
+  // centre of its square lies a hair north of 84° (pyproj: 84.000001, 20.000036). ----
+  await mode('mgrs');
+  await page.fill('#mg-mgrs', '33XWP5827830624');
+  assert.equal(await err(), '');
+  assert.equal(await val('#mg-r-dd'), '84.000001, 20.000036');
+  assert.equal(await val('#mg-big'), '33X WP 58278 30624');
+  assert.match(await val('#mg-note'), /just north of 84°N/);
+  // A typed latitude past 84°N is still refused, and so is a USNG reference with a prefix typo.
+  await page.fill('#mg-mgrs', 'USNG: 18T WL 85631 11326');
+  assert.equal(await val('#mg-big'), '18T WL 85631 11326');
+  await ll('84.2, 20');
+  assert.match(await err(), /north of 84/);
+
+  // ---- One-line UTM input. Expected points from pyproj (EPSG 326xx/327xx inverse). ----
+  await mode('utm');
+  const utm = async s => { await page.fill('#mg-utm-line', s); };
+  await utm('18T 585628 4511322');
+  within(await val('#mg-r-dd'), 40.748396012, -73.985704906, 1e-6, '18T line');
+  assert.equal(await val('#mg-big'), '18T WL 85628 11322');
+  assert.deepEqual([await page.inputValue('#mg-zone'), await page.inputValue('#mg-hemi'), await page.inputValue('#mg-east'), await page.inputValue('#mg-north')], ['18', 'N', '585628', '4511322']);
+  await utm('Zone 18T, 585628mE, 4511322mN');
+  assert.equal(await val('#mg-big'), '18T WL 85628 11322');
+  await utm('18T 4511322N 585628E');
+  assert.equal(await val('#mg-big'), '18T WL 85628 11322');
+  // Metre units and thousands separators.
+  await utm('18T 585,628m 4,511,322m');
+  assert.equal(await val('#mg-big'), '18T WL 85628 11322');
+  // N: northern hemisphere either way.
+  await utm('18N 585628 4511322');
+  assert.equal(await val('#mg-big'), '18T WL 85628 11322');
+  assert.match(await val('#mg-note'), /18N: N is read as the northern hemisphere/);
+  // S with a northing inside band S (32-40°N) is band S; outside it, the southern hemisphere.
+  await utm('18S 585628 4200000');
+  within(await val('#mg-r-dd'), 37.943553619, -74.025466449, 1e-6, '18S as band S');
+  assert.equal(await val('#mg-big'), '18S WH 85628 00000');
+  assert.match(await val('#mg-note'), /read as latitude band S/);
+  assert.equal(await page.inputValue('#mg-hemi'), 'N');
+  // A typed UTM value is exact, so its 1 m square is 34901 52289 (the mgrs package, going through
+  // latitude and longitude, lands a micrometre short and writes 34900).
+  await utm('56S 334901 6252289');
+  within(await val('#mg-r-dd'), -33.85679784, 151.215304696, 1e-6, '56S as south');
+  assert.equal(await val('#mg-big'), '56H LH 34901 52289');
+  assert.match(await val('#mg-note'), /read as the southern hemisphere/);
+  assert.equal(await page.inputValue('#mg-hemi'), 'S');
+  await utm('18 south 585628 4200000');
+  within(await val('#mg-r-dd'), -52.343607525, -73.743025547, 1e-6, '18 south');
+  // A wrong band letter is pointed out; bad lines are explained.
+  await utm('18X 585628 4511322');
+  assert.match(await val('#mg-note'), /this point lies in band T, not X/);
+  const utmErrors = { '18B 585628 4511322': /polar UPS grid/, '61T 585628 4511322': /1 to 60/, '18T 585628': /easting and then the northing/,
+    '18T 58 45': /eastings lie between/, '18Q 585628E 4511322E': /Both numbers are labelled easting/, '18TT 585628 4511322': /"TT" is not a latitude band/ };
+  for (const [s, re] of Object.entries(utmErrors)) {
+    await utm(s);
+    assert.match(await err(), re, s);
+  }
+  // Editing a field rewrites the line in its canonical form.
+  await utm('18T 585628 4511322');
+  await page.fill('#mg-east', '585631');
+  assert.equal(await page.inputValue('#mg-utm-line'), '18T 585631 4511322');
+
+  // ---- Batch: lines in mixed formats, and CSV with named columns. Expected values from the mgrs
+  // package and pyproj (Empire State 18TWL8563111326, E 585631.40 N 4511326.92; Sydney
+  // 56HLH3490052288, E 334900.57 N 6252288.75; Big Ben 30UXC9956409429; Tokyo 54SUE8843549293). ----
+  await mode('batch');
+  assert.equal(await page.isVisible('#mg-out'), false);
+  const batchRows = () => page.$$eval('#mg-batch-body tr', trs => trs.map(t => [...t.children].map(c => c.textContent)));
+  const batch = async text => {
+    await page.evaluate(() => { document.querySelector('#mg-batch-sum').textContent = ''; });
+    await page.fill('#mg-batch', text);
+    await page.waitForFunction(() => /^Converted/.test(document.querySelector('#mg-batch-sum').textContent));
+  };
+  await batch('40.748440, -73.985664\n18T WL 85631 11326\n56H 334901 6252289\nN60 23.580 E005 19.448\n\nhello');
+  let rowsNow = await batchRows();
+  assert.deepEqual(rowsNow.map(r => [r[0], r[3]]), [['1', '18TWL8563111326'], ['2', '18TWL8563111326'], ['3', '56HLH3490152289'], ['4', '32VKN9747600831'], ['6', '']]);
+  assert.match(rowsNow[4][5], /Unexpected "h"/);
+  assert.equal(await page.textContent('#mg-batch-sum'), 'Converted 4 of 5 rows. Row 6 could not be read. See the note column.');
+  // The CSV example: named columns, DMS in a cell, a row with an impossible latitude.
+  await page.click('#mg-batch-example');
+  await page.waitForFunction(() => /^Converted 4 of 5/.test(document.querySelector('#mg-batch-sum').textContent));
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#mg-batch-csv')]);
+  assert.equal(dl.suggestedFilename(), 'coordinates-converted.csv');
+  const csvText = require('fs').readFileSync(await dl.path(), 'utf8');
+  assert.ok(csvText.startsWith('\uFEFF'), 'BOM for spreadsheet apps');
+  const csv = csvText.slice(1).trim().split('\r\n');
+  assert.equal(csv[0], 'name,latitude,longitude,latitude_converted,longitude_converted,mgrs,utm_zone,utm_band,utm_hemisphere,utm_easting,utm_northing,note,error');
+  assert.equal(csv[1], 'Empire State Building,40.748440,-73.985664,40.748440,-73.985664,18TWL8563111326,18,T,N,585631.40,4511326.92,,');
+  assert.equal(csv[2], 'Sydney Opera House,-33.8568,151.2153,-33.856800,151.215300,56HLH3490052288,56,H,S,334900.57,6252288.75,,');
+  assert.match(csv[3], /^Big Ben,"51°30'02\.6""N","0°07'28\.7""W",51\.500722,-0\.124639,30UXC9956409429,30,U,N,699564\.74,5709429\.93,,$/);
+  assert.equal(csv[4].split(',').slice(5, 11).join(','), '54SUE8843549293,54,S,N,388435.69,3949293.98');
+  assert.match(csv[5], /^Nowhere,95,10(,){10}"Latitude must be between -90 and 90 degrees/);
+  // Precision applies to the batch too (mgrs package at 4 digits per axis: 18TWL85631132).
+  await page.selectOption('#mg-prec', '4');
+  await page.waitForFunction(() => document.querySelector('#mg-batch-body td:nth-child(4)').textContent === '18TWL85631132');
+  await page.selectOption('#mg-prec', '5');
+  // Zone, hemisphere, easting and northing columns; quoted names; semicolons; formula-like cells.
+  await batch('id;zone;hemisphere;easting;northing\n"=HYPERLINK(""x"")";56;S;334901;6252289\n"Smith; J";18;N;585628;4511322');
+  rowsNow = await batchRows();
+  assert.deepEqual(rowsNow.map(r => r[3]), ['56HLH3490152289', '18TWL8562811322']);
+  const copied = await (async () => { await page.click('#mg-batch-copy'); return page.evaluate(() => navigator.clipboard.readText()); })();
+  const copiedLines = copied.trim().split('\r\n');
+  assert.equal(copiedLines[0], 'id,zone,hemisphere,easting,northing,latitude,longitude,mgrs,utm_zone,utm_band,utm_hemisphere,utm_easting,utm_northing,note,error');
+  assert.ok(copiedLines[1].startsWith('"\'=HYPERLINK(""x"")",56,S,'), copiedLines[1]);
+  assert.ok(copiedLines[2].startsWith('Smith; J,18,N,585628,4511322,40.748396,-73.985705,18TWL8562811322'), copiedLines[2]);
+  // Decimal commas in a semicolon-separated file (European spreadsheets).
+  await batch('name;lat;lon\nESB;40,748440;-73,985664');
+  assert.equal((await batchRows())[0][3], '18TWL8563111326');
+  // Regression: a UTM line with thousands separators or with the band joined to the easting was
+  // read as latitude/longitude and rejected; decimal commas on a plain line failed too.
+  await batch('Zone 18T, 585,628mE, 4,511,322mN\n18T585628 4511322\n40,748440 -73,985664\n-33.8568, 151.2153');
+  const fixedRows = await batchRows();
+  assert.deepEqual(fixedRows.map(r => r[3]), ['18TWL8562811322', '18TWL8562811322', '18TWL8563111326', '56HLH3490052288'], JSON.stringify(fixedRows));
+  // A coordinate starting with a minus sign is not a formula, so it is written unchanged.
+  await page.click('#mg-batch-copy');
+  const plainCsv = (await page.evaluate(() => navigator.clipboard.readText())).trim().split('\r\n');
+  assert.ok(plainCsv[4].startsWith('"-33.8568, 151.2153",-33.856800,151.215300,56HLH3490052288,'), plainCsv[4]);
+  // A header with no rows under it says so instead of "0 of 0".
+  await page.fill('#mg-batch', 'name,lat,lon\n');
+  await page.waitForFunction(() => /no coordinates below the header/.test(document.querySelector('#mg-batch-sum').textContent));
+  // Download before anything is entered explains what to do.
+  await page.fill('#mg-batch', '');
+  await page.waitForTimeout(400);
+  await page.click('#mg-batch-csv');
+  assert.match(await page.textContent('#mg-batch-sum'), /Paste some coordinates first/);
+  // A tab-separated file opened from disk, with an MGRS column.
+  await page.setInputFiles('#mg-batch-file', { name: 'points.tsv', mimeType: 'text/tab-separated-values', buffer: Buffer.from('label\tMGRS\nNYC\t18TWL8563111326\n') });
+  await page.waitForFunction(() => document.querySelector('#mg-batch-sum').textContent === 'Converted 1 of 1 row.');
+  within((await batchRows())[0][2], 40.748440, -73.985664, 1e-5, 'TSV MGRS row');
+  // 20,000 rows are converted in slices, so the page never freezes.
+  const lines = Array.from({ length: 20000 }, (_, i) => `${(-60 + i * 0.006).toFixed(4)}, ${(-170 + i * 0.017).toFixed(4)}`).join('\n');
+  const longest = await page.evaluate(async text => {
+    const tasks = [];
+    const obs = new PerformanceObserver(l => l.getEntries().forEach(e => tasks.push(e.duration)));
+    const el = document.querySelector('#mg-batch');
+    el.value = text;
+    await new Promise(r => setTimeout(r, 300));
+    obs.observe({ entryTypes: ['longtask'] });
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    while (!/^Converted 20,000/.test(document.querySelector('#mg-batch-sum').textContent)) await new Promise(r => setTimeout(r, 20));
+    obs.disconnect();
+    return Math.max(0, ...tasks);
+  }, lines);
+  assert.ok(longest < 200, `batch blocked the page for ${Math.round(longest)} ms`);
+  assert.equal(await page.locator('#mg-batch-body tr').count(), 200);
+  assert.match(await page.textContent('#mg-batch-more'), /first 200 of 20,000 rows/);
+  await mode('ll');
+  assert.equal(await page.isVisible('#mg-out'), true);
+  await ll('40.748440, -73.985664');
 
   // Copy button.
   await page.click('.mg-head button');
