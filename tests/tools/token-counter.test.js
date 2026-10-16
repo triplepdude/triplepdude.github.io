@@ -10,6 +10,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const textOf = v => (v.t !== undefined ? v.t : v.unit.repeat(v.repeat));
   const text = sel => page.locator(sel).textContent();
   const fmt = n => n.toLocaleString('en-US');
+  // Chromium itself needs 12-18 s to lay out a textarea holding the 20,000
+  // skin-tone emoji of the long-multi vector (measured in a bare <textarea>;
+  // the tokenizer takes about 0.1 s), so waits on that text get more time.
+  const LONG = 60000;
   const requests = [];
   page.on('request', r => requests.push(r.url()));
 
@@ -93,7 +97,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
       return performance.now() - t0;
     }, textOf(v));
     assert.ok(ms < 150, `${v.name}: input handler took ${ms} ms`);
-    await page.waitForFunction(n => document.querySelector('#tc-big').textContent === n, fmt(v.oCount), { timeout: 20000 });
+    await page.waitForFunction(n => document.querySelector('#tc-big').textContent === n, fmt(v.oCount), { timeout: v.unit ? LONG : 20000 });
   }
 
   // Regression: a text over 200,000 characters is counted in the worker (a
@@ -102,12 +106,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const lm = vec('long-multi');
   assert.ok(textOf(lm).length > 200000);
   await page.evaluate(t => { const el = document.querySelector('#tc-input'); el.value = t; el.dispatchEvent(new Event('input')); }, textOf(lm));
-  await page.waitForFunction(n => document.querySelector('#tc-chars').textContent === n, fmt(lm.chars), { timeout: 20000 });
+  await page.waitForFunction(n => document.querySelector('#tc-chars').textContent === n, fmt(lm.chars), { timeout: LONG });
   assert.equal(await text('#tc-words'), fmt(lm.words));
   assert.equal(await text('#tc-bytes'), fmt(lm.bytes));
   assert.equal(await text('#tc-n-claude'), `≈ ${fmt(Math.round(lm.chars / 3.5))}–${fmt(Math.round(lm.chars / 3.5 * 1.35))}`);
   assert.equal(await text('#tc-n-gemini'), `≈ ${fmt(Math.round(lm.chars / 4))}`);
-  await page.waitForFunction(n => document.querySelector('#tc-big').textContent === n, fmt(lm.oCount), { timeout: 20000 });
+  await page.waitForFunction(n => document.querySelector('#tc-big').textContent === n, fmt(lm.oCount), { timeout: LONG });
   assert.equal(await text('#tc-ratio'), (lm.chars / lm.oCount).toFixed(2));
   // Back under the limit, counting happens on the page again.
   await page.fill('#tc-input', 'Hello world');
@@ -198,7 +202,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await p3.goto(url);
   await p3.waitForFunction(() => /Web Workers are unavailable/.test(document.querySelector('#tc-msg').textContent));
   await p3.evaluate(t => { const el = document.querySelector('#tc-input'); el.value = t; el.dispatchEvent(new Event('input')); }, textOf(lm));
-  await p3.waitForFunction(n => document.querySelector('#tc-chars').textContent === n, fmt(lm.chars), { timeout: 20000 });
+  await p3.waitForFunction(n => document.querySelector('#tc-chars').textContent === n, fmt(lm.chars), { timeout: LONG });
   assert.equal(await p3.textContent('#tc-words'), fmt(lm.words));
   assert.equal(await p3.textContent('#tc-big'), '–');
   assert.deepEqual(p3errors, []);

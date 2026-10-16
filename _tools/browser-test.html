@@ -1,0 +1,1571 @@
+---
+title: "What Browser Am I Using? Browser Test"
+description: See which browser, version and operating system you are using, with your user agent, client hints, live feature tests and fingerprint signals.
+category: Device Tests
+keywords: [what browser am i using, what is my browser, browser test, browser checker, my user agent, browser feature test, browser fingerprint test, what version of chrome do i have]
+howto: |
+  ## How this browser test works
+
+  Everything on this page is worked out by JavaScript on your device. The
+  summary combines your user agent string with User-Agent Client Hints,
+  which Chrome, Edge and other Chromium browsers provide. Where a simple
+  property check could mislead, the feature grid tests for real: it creates
+  WebGL contexts, asks for a WebGPU adapter, decodes tiny AVIF, WebP and JPEG
+  XL images, validates WebAssembly modules and asks the media stack about
+  each codec. **Copy report** gives IT support a plain-text summary, and
+  **Download report** saves everything as JSON.
+
+  ## Find your browser version by hand
+
+  | Browser | Where to look |
+  |---|---|
+  | Chrome | Menu (⋮) > Help > About Google Chrome |
+  | Edge | Menu (…) > Help and feedback > About Microsoft Edge |
+  | Firefox | Menu (☰) > Help > About Firefox |
+  | Safari on a Mac | Safari menu > About Safari |
+  | Safari on iPhone or iPad | Settings > General > About (Safari's version matches iOS) |
+  | Chrome on Android | Menu (⋮) > Settings > About Chrome |
+  | Samsung Internet | Menu (☰) > Settings > About Samsung Internet |
+
+  Chrome, Edge and Firefox check for updates when you open that page; restart
+  the browser when asked. Safari updates with macOS or iOS through Software
+  Update, and phone browsers update from the App Store or Google Play. This
+  page cannot tell you whether a newer version exists, because that would
+  need an online lookup.
+
+  ## Why the user agent can be wrong
+
+  The user agent string is no longer a reliable ID. Chrome and Edge send a
+  reduced string: the version always ends in .0.0.0 and Android phones
+  appear as "Android 10; K". In every major browser, Windows 11 appears as
+  "Windows NT 10.0", the same as Windows 10, and a recent Mac as running
+  macOS 10.15. Since iOS 26, Safari reports an older, frozen iOS version
+  (18.6 or 18.7). Brave and Vivaldi send exactly the same string as Chrome,
+  Edge differs only by an "Edg/" token, and extensions or developer tools
+  can replace the string entirely. Client Hints supply the hidden details in
+  a structured form, which is why this page reads them where they exist.
+
+  ## Feature detection beats browser sniffing
+
+  Feature detection asks the browser whether it can do something instead of
+  guessing from its name. A site that blocks "unsupported browsers" by user
+  agent can lock out a capable browser, while one that tests
+  `CSS.supports('selector(:has(a))')` or tries to create a WebGL context gets
+  the right answer even for a browser it has never heard of. Some features
+  need more than browser support: SharedArrayBuffer only works on pages that
+  are cross-origin isolated with COOP and COEP headers. GitHub Pages, which
+  hosts this site, cannot send those headers, so SharedArrayBuffer shows as
+  unavailable here even in browsers that support it.
+
+  ## Fingerprinting and how to reduce it
+
+  A fingerprint combines many small signals, such as fonts, screen size, time
+  zone, GPU and tiny differences in how your device draws graphics or
+  processes audio, into an identifier that can recognise you without
+  cookies. The hashes on this page show what any site could compute. To be
+  harder to track, use a browser that limits or randomises these signals,
+  such as Brave, Firefox with Enhanced Tracking Protection set to Strict,
+  Safari or Tor Browser. Keep extensions and extra fonts to a minimum, and
+  leave browser zoom and language at common settings.
+
+  To test individual devices, use the [screen resolution
+  checker](/screen-resolution/), [webcam test](/webcam-test/), [mic
+  test](/mic-test/) and [keyboard tester](/keyboard-tester/).
+faq:
+  - q: Is any of this information uploaded or stored?
+    a: No. Every check runs in JavaScript on your device. None of the results are sent to a server, logged, or saved in cookies or browser storage, and the fingerprint hashes are gone when you close the tab. The report only exists when you copy or download it, and then only on your clipboard or in your Downloads folder. As with any website, the request that loaded this page carried your user agent string and basic Client Hints, which the web host receives.
+  - q: Does this page tell me whether my browser is up to date?
+    a: No. That would mean looking up the newest release online, and the answer would soon be out of date. Open your browser's About page as shown in the table above. Chrome, Edge and Firefox check for updates there and offer to restart.
+  - q: Why does the page say Chrome when I use a different browser?
+    a: Brave, Vivaldi and several other browsers are built on Chromium and send the same user agent as Chrome. Brave is recognised through its `navigator.brave` property, and Edge, Opera and Samsung Internet through their own user agent tokens or Client Hints, but some browsers cannot be told apart from Chrome at all.
+  - q: Why are WebGL or WebGPU shown as unsupported when my browser supports them?
+    a: These checks create a real graphics context, so they fail when hardware acceleration is off, the graphics driver is blocklisted or the GPU process has crashed. In Chrome or Edge, open `chrome://gpu` or `edge://gpu` to see why. WebGPU also needs a supported GPU and is not yet turned on for every operating system.
+  - q: Why are my fingerprint hashes different in another browser or a private window?
+    a: The hashes depend on the browser and its version, the graphics driver, installed fonts and settings, so another browser on the same computer gives different values. Brave adds small random changes for each site and session, and Safari and Firefox limit or add noise to some signals, especially in private windows. That is the protection working.
+---
+<style>
+.bt-sec { margin: 0 0 18px; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; scroll-margin-top: 12px; }
+.bt-sec:last-child { margin-bottom: 0; }
+.bt-sec > h2 { margin: 0 0 12px; font-size: 1.2rem; line-height: 1.3; }
+.bt-sec h3 { margin: 18px 0 8px; font-size: 1rem; }
+.bt-sec p { margin: 0 0 12px; }
+.bt-sec .hint { margin: 0 0 12px; font-size: 14px; }
+.bt-sentence { margin: 0 0 14px; font-size: clamp(1.3rem, 3.6vw, 1.85rem); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.stats.bt-sum { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+.bt-sum .stat b { font-size: 1.1rem; }
+@media (max-width: 480px) {
+  .stats.bt-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Long version numbers get the full width; OS and device type share a row. */
+  .bt-sum .stat:nth-child(-n+2) { grid-column: 1 / -1; }
+  .bt-sum .stat b { font-size: 1rem; }
+}
+.bt-notes { margin: 0 0 12px; padding-left: 20px; color: var(--muted); font-size: 14px; }
+.bt-notes li + li { margin-top: 4px; }
+.bt-jump { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 4px 0 0; font-size: 14px; }
+.bt-jump span { color: var(--muted); }
+.bt-jump a { padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); text-decoration: none; }
+.bt-jump a:hover { border-color: var(--accent); }
+.output.bt-ua { margin-bottom: 10px; }
+.bt-sec .table-wrap { margin-bottom: 0; }
+table.data.bt-table th { width: 40%; color: var(--text); }
+table.data.bt-table th small, table.data.bt-table td small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
+table.data.bt-table th small { font-family: var(--mono); }
+table.data.bt-table td { overflow-wrap: anywhere; }
+table.data.bt-table td small { margin-top: 2px; font-size: 13px; }
+@media (max-width: 560px) {
+  table.data.bt-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  table.data.bt-table th, table.data.bt-table td { display: block; width: auto; padding: 0 4px; border: 0; }
+  table.data.bt-table td { padding-top: 2px; }
+  table.data.bt-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+.bt-score-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 0 0 12px; }
+.bt-score { margin: 0; font-size: clamp(1.4rem, 4vw, 2rem); font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.bt-bar { flex: 1 1 180px; height: 10px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; }
+.bt-bar span { display: block; width: 0; height: 100%; background: var(--accent); transition: width .3s ease; }
+@media (prefers-reduced-motion: reduce) { .bt-bar span { transition: none; } }
+.bt-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.bt-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.bt-group h3 { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+.bt-gcount { color: var(--muted); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.bt-feats { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.bt-feat { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.bt-ico, .bt-legend i { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; font-size: 13px; font-style: normal; font-weight: 700; line-height: 1; }
+.is-yes .bt-ico, .bt-legend i.l-yes { background: var(--accent); color: var(--accent-text); }
+.is-no .bt-ico, .bt-legend i.l-no { border: 2px solid var(--muted); color: var(--muted); }
+.is-wait .bt-ico { border: 2px dashed var(--border); color: var(--muted); }
+.bt-fbody { flex: 1 1 auto; min-width: 0; }
+/* The name wraps in its own column, so "Yes"/"No" stays top right. */
+.bt-fhead { display: flex; align-items: baseline; justify-content: space-between; gap: 0 10px; }
+.bt-fname { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.bt-fval { flex: none; font-size: 13px; font-weight: 700; }
+.is-yes .bt-fval { color: var(--accent); }
+.is-no .bt-fval, .is-wait .bt-fval { color: var(--muted); }
+.bt-fnote, .bt-fdetail { display: block; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.bt-fdetail { margin-top: 3px; color: var(--text); }
+.bt-only-no .bt-feat.is-yes { display: none; }
+.bt-full-note { margin: 0; color: var(--muted); font-size: 14px; }
+.stats.bt-fp { grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
+.bt-fp .stat b { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+.bt-fp .stat.bt-fp-all { border-color: var(--accent); }
+.bt-fp-art { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 20px; margin: 0 0 12px; }
+.bt-fp-art figure { flex: 0 1 300px; margin: 0; }
+.bt-fp-art canvas { display: block; width: 300px; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 6px; }
+.bt-fp-art figcaption { margin-top: 4px; color: var(--muted); font-size: 13px; }
+.bt-fonts { flex: 1 1 260px; min-width: 0; }
+.bt-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
+.bt-chips li { padding: 2px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; font-size: 13px; }
+.msg.bt-note { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
+.bt-sec .actions { margin-bottom: 12px; }
+.bt-preview { margin: 0; }
+.bt-preview summary { padding: 6px 0; font-size: 14px; font-weight: 600; cursor: pointer; }
+.bt-preview .output { max-height: 360px; margin: 8px 0 0; overflow: auto; font-size: 13px; }
+/* Focusable so keyboard users can scroll it. */
+.bt-preview .output:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 560px) {
+  .bt-sec { padding: 14px 12px; }
+}
+</style>
+
+<noscript>
+  <p class="msg error">JavaScript is turned off, so this page cannot test your browser. Websites can still read the user agent string your browser sends with every request; turn JavaScript on in your browser's settings to see everything else.</p>
+</noscript>
+
+<!-- Hidden until the script runs, so visitors without JavaScript see only the notice above. -->
+<div id="bt" data-state="checking" hidden>
+
+<section class="bt-sec" id="bt-sec-summary" aria-labelledby="bt-h-summary">
+  <h2 id="bt-h-summary">Summary</h2>
+  <p class="bt-sentence" id="bt-sentence">Checking your browser…</p>
+  <div class="stats bt-sum">
+    <div class="stat"><b id="bt-browser">Checking…</b><span>Browser and version</span></div>
+    <div class="stat"><b id="bt-engine">Checking…</b><span>Rendering engine</span></div>
+    <div class="stat"><b id="bt-os">Checking…</b><span>Operating system</span></div>
+    <div class="stat"><b id="bt-device">Checking…</b><span>Device type</span></div>
+  </div>
+  <ul class="bt-notes" id="bt-notes" hidden></ul>
+  <p class="visually-hidden" id="bt-status" role="status"></p>
+  <nav class="bt-jump" aria-label="Browser test sections">
+    <span>Jump to:</span>
+    <a href="#bt-sec-ua">User agent</a>
+    <a href="#bt-sec-features">Features</a>
+    <a href="#bt-sec-hardware">Hardware</a>
+    <a href="#bt-sec-privacy">Privacy</a>
+    <a href="#bt-sec-fp">Fingerprint</a>
+    <a href="#bt-sec-report">Report</a>
+  </nav>
+</section>
+
+<section class="bt-sec" id="bt-sec-ua" aria-labelledby="bt-h-ua">
+  <h2 id="bt-h-ua">User agent</h2>
+  <p class="label">Your user agent string</p>
+  <p class="output bt-ua" id="bt-ua">Checking…</p>
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="bt-ua-copy" data-copy-target="#bt-ua">Copy user agent</button>
+  </div>
+  <p class="hint">Browsers send this string with every request. To limit tracking, Chrome, Edge, Safari and Firefox now freeze or reduce parts of it, so it says less than it seems:</p>
+  <ul class="bt-notes" id="bt-ua-notes"></ul>
+  <h3 id="bt-h-ch">Client Hints</h3>
+  <p class="hint" id="bt-ch-intro">User-Agent Client Hints replace the frozen details with structured values. The first three are sent with every HTTPS request; the others only to sites that ask, as this page does with <code>getHighEntropyValues()</code>.</p>
+  <p class="msg bt-note" id="bt-ch-none" hidden></p>
+  <div class="table-wrap" id="bt-ch-wrap">
+    <table class="data bt-table">
+      <caption class="visually-hidden">User-Agent Client Hints reported by this browser</caption>
+      <thead><tr><th scope="col">Hint</th><th scope="col">Value</th></tr></thead>
+      <tbody id="bt-ch-rows"><tr><td colspan="2">Checking…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="bt-sec" id="bt-sec-features" aria-labelledby="bt-h-features">
+  <h2 id="bt-h-features">Feature support</h2>
+  <div class="bt-score-row">
+    <p class="bt-score" id="bt-score">Checking…</p>
+    <div class="bt-bar" aria-hidden="true"><span id="bt-bar"></span></div>
+  </div>
+  <p class="hint">Each feature is tested in this browser, not looked up by name: graphics contexts are created, sample images decoded, WebAssembly modules validated and codecs queried.</p>
+  <div class="bt-legend" aria-hidden="true">
+    <span><i class="l-yes">✓</i>Yes, supported</span>
+    <span><i class="l-no">✕</i>No, not available here</span>
+  </div>
+  <label class="check"><input type="checkbox" id="bt-only-no"> Show only features this browser lacks</label>
+  <div id="bt-groups"></div>
+</section>
+
+<section class="bt-sec" id="bt-sec-hardware" aria-labelledby="bt-h-hardware">
+  <h2 id="bt-h-hardware">Hardware and display</h2>
+  <p class="hint">What the browser reveals about your device. For refresh rate and exact pixels, use the <a href="/screen-resolution/">screen resolution checker</a>; to check the devices themselves, try the <a href="/webcam-test/">webcam test</a>, <a href="/mic-test/">mic test</a> and <a href="/keyboard-tester/">keyboard tester</a>.</p>
+  <div class="table-wrap">
+    <table class="data bt-table">
+      <caption class="visually-hidden">Hardware and display details</caption>
+      <tbody id="bt-hw-rows"><tr><td>Checking…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="bt-sec" id="bt-sec-privacy" aria-labelledby="bt-h-privacy">
+  <h2 id="bt-h-privacy">Privacy and settings</h2>
+  <p class="hint">Preferences and privacy signals any website can read without asking. Nothing here is changed or saved by this page.</p>
+  <div class="table-wrap">
+    <table class="data bt-table">
+      <caption class="visually-hidden">Privacy settings and preferences</caption>
+      <tbody id="bt-pv-rows"><tr><td>Checking…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="bt-sec" id="bt-sec-fp" aria-labelledby="bt-h-fp">
+  <h2 id="bt-h-fp">Fingerprint signals</h2>
+  <p class="hint">Fingerprinting recognises a browser from details it reveals without asking, such as how it draws graphics, processes audio and which fonts it has, instead of from a cookie. These SHA-256 hashes are what any site could compute. They are made on your device, never sent anywhere and not stored.</p>
+  <p class="hint">In the same browser they usually stay the same on every visit, and they often differ in other browsers and on other devices, though identical devices with the same software, such as two iPhones of the same model, can give the same values. Brave, Firefox, Safari and Tor Browser randomise or limit some of them. How unique they make you cannot be known without a database of other visitors, which this page does not have.</p>
+  <div class="stats bt-fp">
+    <div class="stat"><b id="bt-fp-canvas-hash">Checking…</b><span>Canvas drawing</span></div>
+    <div class="stat"><b id="bt-fp-webgl-hash">Checking…</b><span>WebGL parameters</span></div>
+    <div class="stat"><b id="bt-fp-audio-hash">Checking…</b><span>Audio processing</span></div>
+    <div class="stat"><b id="bt-fp-fonts-hash">Checking…</b><span>Installed fonts</span></div>
+    <div class="stat bt-fp-all"><b id="bt-fp-combined">Checking…</b><span>Combined, all signals</span></div>
+  </div>
+  <p class="hint">Hashes are shortened to their first 16 hex digits; the downloaded report has them in full.</p>
+  <div class="bt-fp-art">
+    <figure>
+      <canvas id="bt-fp-canvas" width="300" height="80" role="img" aria-label="The test drawing used for the canvas hash: text, an emoji, a gradient and overlapping circles"></canvas>
+      <figcaption>The image drawn for the canvas hash</figcaption>
+    </figure>
+    <div class="bt-fonts">
+      <p class="label" id="bt-fonts-label">Fonts found</p>
+      <p class="hint" id="bt-fonts-sum">Checking…</p>
+      <ul class="bt-chips" id="bt-fonts" aria-labelledby="bt-fonts-label"></ul>
+    </div>
+  </div>
+  <p class="msg bt-note" id="bt-fp-msg"></p>
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="bt-fp-again">Run the fingerprint again</button>
+  </div>
+</section>
+
+<section class="bt-sec" id="bt-sec-report" aria-labelledby="bt-h-report">
+  <h2 id="bt-h-report">Report</h2>
+  <p class="hint">A plain-text summary for IT support, or every result as JSON. The text leaves out the fingerprint hashes; the JSON file includes them. Both are created on your device only when you press a button.</p>
+  <div class="actions">
+    <button class="btn small" type="button" id="bt-copy">Copy report</button>
+    <button class="btn secondary small" type="button" id="bt-download">Download report (JSON)</button>
+  </div>
+  <details class="bt-preview">
+    <summary>Show the report text</summary>
+    <pre class="output" id="bt-report-text" tabindex="0" role="region" aria-label="Report text">Checking…</pre>
+  </details>
+</section>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const nav = window.navigator;
+  const root = $('#bt');
+  root.hidden = false;
+
+  // ---------- Small helpers ----------
+  function safe(fn, fallback) { try { return fn(); } catch (e) { return fallback; } }
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms || 0));
+  // Settles with the fallback when the promise rejects or takes longer than ms.
+  function settle(p, ms, fallback) {
+    return Promise.race([Promise.resolve().then(() => p).catch(() => fallback), wait(ms).then(() => fallback)]);
+  }
+  // Throws when matchMedia does not work, so the table row says it could not be read
+  // instead of claiming "no preference".
+  const mq = q => window.matchMedia(q).matches === true;
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  const X = ' × ';
+  const major = v => String(v || '').split('.')[0];
+  // "141.0.0.0" (a reduced Chromium version) becomes "141"; anything else is kept.
+  const cleanVer = v => String(v || '').replace(/^(\d+)\.0\.0\.0$/, '$1');
+  // "14.0.0" becomes "14", "15.6.0" becomes "15.6".
+  const osVer = v => String(v || '').replace(/(?:\.0)+$/, '');
+  function bytes(n) {
+    if (!(n >= 0)) return 'unknown';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + ' GB';
+    if (n >= 1e6) return Math.round(n / 1e6) + ' MB';
+    if (n >= 1e3) return Math.round(n / 1e3) + ' kB';
+    return n + ' bytes';
+  }
+  function hex(buf) { return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join(''); }
+  async function sha256(data) {
+    if (!(window.crypto && crypto.subtle && typeof crypto.subtle.digest === 'function')) return '';
+    const input = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    return hex(await crypto.subtle.digest('SHA-256', input));
+  }
+
+  const S = {
+    ua: String(nav.userAgent || ''),
+    low: null, high: null, brave: false,
+    d: null, feats: [], hw: [], pv: [], gl: null, gpuInfo: null, quota: null,
+    fp: null, fpFirst: null, fpRuns: 0, done: false
+  };
+
+  // ---------- 1. Browser, engine and operating system ----------
+  // GREASE brands look like "Not?A_Brand", "Not)A;Brand" or ";Not A Brand".
+  const GREASE = /^[^a-z0-9]*not[^a-z0-9]*a[^a-z0-9]*brand[^a-z0-9]*$/i;
+  const BRANDS = {
+    'Google Chrome': 'Chrome', 'Microsoft Edge': 'Edge', 'Microsoft Edge WebView2': 'Edge WebView2', 'Opera': 'Opera', 'Opera GX': 'Opera GX',
+    'Brave': 'Brave', 'Samsung Internet': 'Samsung Internet', 'Yandex': 'Yandex Browser', 'YaBrowser': 'Yandex Browser', 'Vivaldi': 'Vivaldi',
+    'DuckDuckGo': 'DuckDuckGo', 'HeadlessChrome': 'Headless Chrome', 'Android WebView': 'Android WebView', 'Chromium': 'Chromium'
+  };
+  // Some browsers list several brands; the most specific one names the browser
+  // (Edge WebView2 also lists "Microsoft Edge", Yandex also lists "Yowser").
+  const BRAND_RANK = { 'Microsoft Edge WebView2': 2, 'Android WebView': 3, 'Microsoft Edge': 4, 'Google Chrome': 5, 'Chromium': 9, 'Yowser': 9 };
+  const brandRank = b => BRAND_RANK[b.brand] || 1;
+  const MAC_NAMES = { 11: 'Big Sur', 12: 'Monterey', 13: 'Ventura', 14: 'Sonoma', 15: 'Sequoia', 26: 'Tahoe',
+    '10.11': 'El Capitan', '10.12': 'Sierra', '10.13': 'High Sierra', '10.14': 'Mojave', '10.15': 'Catalina' };
+  function macName(v) {
+    const p = String(v || '').split('.');
+    return (p[0] === '10' ? MAC_NAMES['10.' + p[1]] : MAC_NAMES[p[0]]) || '';
+  }
+  // Apps that open links in their own browser view and say so in the user agent.
+  const IN_APP = [
+    [/\bFBAN\/Messenger|\bFB_IAB\/Orca-Android|\bMessengerLite/, 'Messenger', /FBAV\/([\d.]+)/],
+    [/\bFBAN\/|\bFBAV\/|\bFB_IAB\/|\bFB4A\b|\bFBIOS\b/, 'Facebook', /FBAV\/([\d.]+)/],
+    [/\bInstagram\b/, 'Instagram', /Instagram ([\d.]+)/],
+    [/\bLinkedInApp\b/, 'LinkedIn', /LinkedInApp\/([\d.]+)/],
+    [/\bSnapchat\b/, 'Snapchat', /Snapchat\/([\d.]+)/],
+    [/\bmusical_ly_|\bBytedanceWebview\/|\bTikTok\b|\btrill_\d/i, 'TikTok', /(?:musical_ly|TikTok)[_ /]([\d.]+)/i],
+    [/\bMicroMessenger\//, 'WeChat', /MicroMessenger\/([\d.]+)/],
+    [/\bLine\/[\d.]+/, 'LINE', /\bLine\/([\d.]+)/],
+    [/\bGSA\/[\d.]+/, 'Google app', /\bGSA\/([\d.]+)/]
+  ];
+  const IOS_FROZEN = /^18\.(?:6|6\.2|7)$/;
+  const FORM_FACTORS = { Desktop: 'Desktop', Mobile: 'Mobile', Tablet: 'Tablet', XR: 'XR headset', EInk: 'E-ink reader', Watch: 'Watch', Automotive: 'Car' };
+
+  function parseUA(ua, touch) {
+    const d = { name: '', version: '', engine: '', engineVersion: '', os: '', osVersion: '', osBuild: '', osHidden: false, device: 'Desktop', model: '',
+      inApp: '', iosNote: '', iPadAsMac: false, notes: [] };
+    const has = re => re.test(ua);
+    const get = re => { const m = re.exec(ua); return m ? m[1] : ''; };
+    const chromeVer = get(/\b(?:Chrome|Chromium|HeadlessChrome)\/([\d.]+)/);
+
+    // Operating system and device type
+    const iDev = get(/\b(iPhone|iPod|iPad)\b/);
+    // iPads ask for desktop sites with a Mac user agent; no Mac has a touch
+    // screen, and no iPad browser sends a "Chrome/" token.
+    const iPadAsMac = !iDev && has(/Macintosh/) && touch > 1 && !chromeVer;
+    if (iDev || iPadAsMac) {
+      d.os = iDev === 'iPad' || iPadAsMac ? 'iPadOS' : 'iOS';
+      // Chrome on iOS sends the full version, such as "26_0_0".
+      d.osVersion = osVer(get(/\bOS (\d+(?:_\d+)*) like Mac OS X/).replace(/_/g, '.'));
+      d.device = d.os === 'iPadOS' ? 'Tablet' : 'Mobile';
+      d.model = iPadAsMac ? 'iPad' : iDev;
+      d.iPadAsMac = iPadAsMac;
+    } else if (has(/Windows Phone/)) {
+      d.os = 'Windows Phone'; d.osVersion = get(/Windows Phone (?:OS )?([\d.]+)/); d.device = 'Mobile';
+    } else if (has(/\bXbox\b/)) {
+      d.os = 'Xbox'; d.device = 'Game console';
+    } else if (has(/\bOpenHarmony\b/)) {
+      d.os = 'HarmonyOS'; d.osVersion = get(/OpenHarmony ([\d.]+)/);
+      d.device = has(/\(Tablet;/) ? 'Tablet' : has(/\(PC;/) ? 'Desktop' : 'Mobile';
+    } else if (has(/Android/)) {
+      d.os = has(/HarmonyOS/) ? 'HarmonyOS' : 'Android';
+      if (d.os === 'Android') d.osVersion = get(/Android (\d+(?:\.\d+)*)/);
+      d.device = has(/Tablet/) || !has(/Mobi/) ? 'Tablet' : 'Mobile';
+      if (has(/Android 10; K\)/)) { d.osVersion = ''; d.osHidden = true; }
+      else {
+        const m = get(/Android [\d.]+; ([^;)]+?)(?: Build\/[^;)]*)?[;)]/);
+        if (m && !/^(Mobile|Tablet|wv|K|Linux|U|HarmonyOS)$/i.test(m) && !/^[a-z]{2}[-_][a-z]{2}$/i.test(m)) d.model = m.trim();
+      }
+    } else if (has(/\bTizen\b/)) {
+      d.os = 'Tizen'; d.osVersion = get(/\bTizen ([\d.]+)/);
+    } else if (has(/\bWeb0S\b|\bwebOS\b/)) {
+      d.os = 'webOS';
+    } else if (has(/CrOS/)) {
+      d.os = 'ChromeOS';
+    } else if (has(/Windows/)) {
+      d.os = 'Windows';
+      const nt = get(/Windows NT (\d+\.\d+)/);
+      d.osVersion = { '10.0': '10 or 11', '6.3': '8.1', '6.2': '8', '6.1': '7', '6.0': 'Vista', '5.1': 'XP' }[nt] || '';
+    } else if (has(/PlayStation/)) {
+      d.os = 'PlayStation'; d.model = get(/(PlayStation (?:\d+|Vita|Portable))/); d.device = 'Game console';
+    } else if (has(/Nintendo/)) {
+      d.os = 'Nintendo'; d.model = get(/(Nintendo (?:Switch|WiiU|3DS))/); d.device = 'Game console';
+    } else if (has(/Mac OS X|Macintosh/)) {
+      d.os = 'macOS';
+      const mv = get(/Mac OS X (\d+[._]\d+(?:[._]\d+)?)/).replace(/_/g, '.');
+      if (/^10\.15(\.7)?$/.test(mv)) d.osHidden = true;
+      else d.osVersion = mv;
+    } else if (has(/Linux|X11|Ubuntu|Fedora/)) {
+      d.os = has(/Ubuntu/) ? 'Ubuntu Linux' : has(/Fedora/) ? 'Fedora Linux' : 'Linux';
+    }
+    if (!d.os) d.device = has(/Mobi/) ? 'Mobile' : has(/Tablet/) ? 'Tablet' : '';
+    if (has(/SmartTV|SMART-TV|\bTizen\b|\bWeb0S\b|\bwebOS\b|\bCrKey\b|\bAFT[A-Z]|BRAVIA|HbbTV|GoogleTV|Android TV|AppleTV|\bTV Safari\//)) d.device = 'TV';
+    const ios = d.os === 'iOS' || d.os === 'iPadOS';
+
+    // Rendering engine. Legacy Edge (EdgeHTML) sent "Edge/" and a Chrome token
+    // below 79; Chromium Edge sends "Edg/" ("Edge/" only on Xbox, with a new Chrome token).
+    const edgeHTML = has(/\bEdge\/\d/) && !has(/\bEdg(?:A|iOS)?\//) && (!chromeVer || Number(major(chromeVer)) < 79);
+    if (ios) { d.engine = 'WebKit'; d.engineVersion = get(/AppleWebKit\/([\d.]+)/); }
+    else if (edgeHTML) { d.engine = 'EdgeHTML'; d.engineVersion = get(/\bEdge\/([\d.]+)/); }
+    else if (has(/\brv:[\d.]+\) Gecko\//)) { d.engine = 'Gecko'; d.engineVersion = get(/\bFirefox\/([\d.]+)/) || get(/\brv:([\d.]+)\)/); }
+    else if (chromeVer) { d.engine = 'Blink'; d.engineVersion = chromeVer; }
+    // Blink froze "AppleWebKit/537.36" when it split from WebKit; WebKit never sent it.
+    else if (has(/AppleWebKit\/537\.36\b/)) { d.engine = 'Blink'; }
+    else if (has(/AppleWebKit\//)) { d.engine = 'WebKit'; d.engineVersion = get(/AppleWebKit\/([\d.]+)/); }
+    else if (has(/Trident\//)) { d.engine = 'Trident'; d.engineVersion = get(/Trident\/([\d.]+)/); }
+    else if (has(/Presto\//)) { d.engine = 'Presto'; d.engineVersion = get(/Presto\/([\d.]+)/); }
+
+    // Browser: specific tokens first, because most browsers also claim to be Chrome or Safari.
+    const app = IN_APP.find(a => a[0].test(ua));
+    const tokens = [
+      [/\bEdg(?:A|iOS)?\/([\d.]+)/, 'Edge'],
+      [/\bOpera Mini\/([\d.]+)/, 'Opera Mini'],
+      [/\b(?:OPR|OPT|OPiOS|OPX)\/([\d.]+)/, 'Opera'],
+      [/\bSamsungBrowser\/([\d.]+)/, 'Samsung Internet'],
+      [/\bYaBrowser\/([\d.]+)/, 'Yandex Browser'],
+      [/\bVivaldi\/([\d.]+)/, 'Vivaldi'],
+      [/\b(?:DuckDuckGo|Ddg)\/([\d.]+)/, 'DuckDuckGo', true], // its number is not its version
+      [/\bUCBrowser\/([\d.]+)/, 'UC Browser'],
+      [/\bSilk\/([\d.]+)/, 'Amazon Silk'],
+      [/\bMiuiBrowser\/([\d.]+)/, 'Mi Browser'],
+      [/\bHuaweiBrowser\/([\d.]+)/, 'Huawei Browser'],
+      [/\bWhale\/([\d.]+)/, 'Naver Whale'],
+      [/\bCriOS\/([\d.]+)/, 'Chrome'],
+      [/\bFxiOS\/([\d.]+)/, 'Firefox'],
+      [/\bFirefox\/([\d.]+)/, 'Firefox'],
+      [/\bHeadlessChrome\/([\d.]+)/, 'Headless Chrome'],
+      [/\bEdge\/([\d.]+)/, edgeHTML ? 'Edge Legacy' : 'Edge', true], // the number is EdgeHTML's or the Xbox's, not the browser's
+      [/\bMSIE ([\d.]+)/, 'Internet Explorer'],
+      [/\bTrident\/[\d.]+;.*\brv:([\d.]+)/, 'Internet Explorer'],
+      [/\bArkWeb\/([\d.]+)/, 'ArkWeb']
+    ];
+    if (app) {
+      d.inApp = app[1];
+      d.name = app[1] + ' in-app browser';
+      d.version = get(app[2]);
+    } else {
+      const t = tokens.find(x => x[0].test(ua));
+      if (t) { d.name = t[1]; d.version = t[2] ? '' : get(t[0]); }
+      else if (chromeVer && has(/; wv\)/)) { d.name = 'Android WebView'; d.version = chromeVer; }
+      else if (has(/\bChromium\//)) { d.name = 'Chromium'; d.version = get(/\bChromium\/([\d.]+)/); }
+      else if (chromeVer) { d.name = 'Chrome'; d.version = chromeVer; }
+      else if (has(/Safari\//) && has(/\bVersion\/[\d.]/) && d.engine === 'WebKit') { d.name = 'Safari'; d.version = get(/\bVersion\/([\d.]+)/); }
+      else if (ios) { d.name = 'In-app browser'; d.inApp = 'An app'; }
+    }
+
+    // From iOS 26, Safari and WebKit views report a frozen iOS version: 18.6 at
+    // first, then 18.6.2 and 18.7. Real iOS 18.6 and 18.7 exist too, so for
+    // other browsers these values only mean "this version or later".
+    if (ios && d.name === 'Safari' && Number(major(d.version)) >= 26) {
+      // Safari's version always matches iOS, so Safari 26.1 means iOS 26.1.
+      d.osVersion = safariShort(d.version);
+      d.iosNote = 'safari';
+    } else if (ios && d.name !== 'Safari' && IOS_FROZEN.test(d.osVersion)) {
+      const fromApp = get(/\bFBSV\/(\d+(?:\.\d+)*)/) || get(/\biOS (\d+(?:_\d+)+)[;)]/).replace(/_/g, '.');
+      if (fromApp && Number(major(fromApp)) >= 18) {
+        d.osVersion = osVer(fromApp);
+        if (Number(major(fromApp)) >= 26) d.iosNote = 'app';
+      } else {
+        d.osVersion += ' or later';
+        d.iosNote = 'unknown';
+      }
+    }
+    // Firefox for Android (122 and later) reports any version older than 10 as Android 10.
+    if (d.engine === 'Gecko' && d.os === 'Android' && d.osVersion === '10' && Number(major(d.version)) >= 122) {
+      d.osVersion = '10 or earlier';
+      d.ffAndroid10 = true;
+    }
+    if (iPadAsMac) d.osVersion = d.name === 'Safari' ? safariShort(d.version) : '';
+    return d;
+  }
+
+  function safariShort(v) {
+    const p = String(v || '').split('.');
+    return p[1] && p[1] !== '0' ? p[0] + '.' + p[1] : p[0];
+  }
+
+  // Browsers built for an older macOS see a compatibility number: 10.16 for
+  // macOS 11 and 16 for macOS 26.
+  function macVersion(pv) {
+    const p = String(pv).split('.');
+    if (p[0] === '10' && Number(p[1]) >= 16) return '11';
+    if (p[0] === '16') return '26';
+    return osVer(pv);
+  }
+  const hintOS = plat => (plat === 'Chrome OS' || plat === 'Chromium OS' ? 'ChromeOS' : plat);
+  function sameOS(a, b) {
+    if (a === b) return true;
+    if (/Linux$/.test(a) && b === 'Linux') return true;
+    return (a === 'HarmonyOS' && b === 'Android') || (a === 'Xbox' && b === 'Windows');
+  }
+  function describeUA(d) {
+    const ios = d.os === 'iOS' || d.os === 'iPadOS';
+    return (d.name || 'another browser') + (ios && d.model ? ' on an ' + d.model : d.os ? ' on ' + d.os : '');
+  }
+
+  function applyHints(d, low, high, brave) {
+    const arr = v => (Array.isArray(v) ? v : []);
+    const list = high && arr(high.fullVersionList).length ? arr(high.fullVersionList) : arr(low && low.brands);
+    const real = list.filter(b => b && typeof b.brand === 'string' && b.brand && !GREASE.test(b.brand));
+    const chromium = real.find(b => b.brand === 'Chromium');
+    const special = real.filter(b => brandRank(b) < 9).sort((a, b) => brandRank(a) - brandRank(b))[0];
+    const plat = hintOS(String((high && high.platform) || (low && low.platform) || ''));
+    const uaOS = d.os;
+    let spoofed = false;
+    if (low && (chromium || special)) {
+      // Only Chromium browsers have Client Hints, so a user agent naming another
+      // engine (Firefox, Safari, anything on iPhone or iPad) has been replaced.
+      if (d.engine !== 'Blink') {
+        spoofed = true;
+        d.notes.push('The user agent claims ' + describeUA(d) + ', but this browser supports Client Hints, which only Chromium browsers do. An extension or developer tools has probably changed the user agent string, so the details shown come from Client Hints.');
+        Object.assign(d, { name: '', version: '', inApp: '', iosNote: '', iPadAsMac: false, ffAndroid10: false, model: '', osHidden: false, device: 'Desktop' });
+        if (plat) { d.os = ''; d.osVersion = ''; }
+      }
+      if (chromium) d.engineVersion = chromium.version;
+      else if (d.engine !== 'Blink') d.engineVersion = '';
+      d.engine = 'Blink';
+      // A browser named by its own user agent token (DuckDuckGo on Android is
+      // a WebView) keeps that name over a generic brand.
+      const named = /^(Edge|Opera|Opera Mini|Samsung Internet|Yandex Browser|Vivaldi|DuckDuckGo|UC Browser|Amazon Silk|Mi Browser|Huawei Browser|Naver Whale)$/.test(d.name);
+      const generic = !special || /^(Google Chrome|Android WebView)$/.test(special.brand);
+      if (!d.inApp && !(named && generic)) {
+        if (special) { d.name = BRANDS[special.brand] || special.brand; d.version = String(special.version || ''); }
+        else if (d.name !== 'Android WebView') {
+          d.name = 'Chromium';
+          d.version = chromium.version;
+          d.notes.push('This browser reports only Chromium brands, as Chromium itself and some browsers built on it, such as Vivaldi, do.');
+        }
+      }
+    } else if (low && !real.length && !plat) {
+      d.notes.push('This browser has Client Hints, but they are empty. That happens when developer tools or an extension override the user agent string.');
+    }
+    if (high && typeof high.uaFullVersion === 'string' && d.name && !d.inApp && /^\d+$/.test(cleanVer(d.version)) && major(high.uaFullVersion) === major(d.version)) {
+      d.version = high.uaFullVersion;
+    }
+    const pv = high && typeof high.platformVersion === 'string' ? high.platformVersion : '';
+    // The hints win; a platform that differs from the user agent's drops what the user agent said about it.
+    const setOS = (name, ver) => {
+      if (d.os && sameOS(d.os, name)) {
+        if (/Linux$/.test(d.os) && name === 'Linux') name = d.os;
+        else if (d.os !== name) return; // keep HarmonyOS and Xbox
+      }
+      if (d.os !== name) {
+        if (!spoofed && uaOS) d.notes.push('The user agent says ' + uaOS + ', but Client Hints say ' + name + '. Desktop-site mode, an extension or developer tools can change the user agent string; Client Hints are usually right.');
+        Object.assign(d, { os: name, osVersion: '', osHidden: false, model: '', iPadAsMac: false, iosNote: '', ffAndroid10: false });
+        if (d.device !== 'TV' && d.device !== 'Game console') d.device = 'Desktop';
+      }
+      if (ver) { d.osVersion = ver; d.osHidden = false; }
+    };
+    if (plat === 'Windows') {
+      const m = parseInt(pv, 10);
+      setOS('Windows', !pv ? '' : m >= 13 ? '11' : m > 0 ? '10' : ({ '0.1': '7', '0.2': '8', '0.3': '8.1' })[pv.split('.').slice(0, 2).join('.')] || '10 or 11');
+      if (d.os === 'Windows' && !d.osVersion) d.osVersion = '10 or 11';
+    } else if (plat === 'macOS') {
+      setOS('macOS', pv ? macVersion(pv) : '');
+      if (!pv && d.os === 'macOS' && !d.osVersion) d.osHidden = true;
+    } else if (plat === 'Android') {
+      setOS('Android', pv ? osVer(pv) : '');
+    } else if (plat === 'ChromeOS') {
+      setOS('ChromeOS', '');
+      // The hint is the platform build number, not the version people know.
+      d.osBuild = pv;
+    } else if (plat && plat !== 'Unknown') {
+      setOS(plat, '');
+    }
+    if (high && typeof high.model === 'string' && high.model.trim()) d.model = high.model.trim();
+    if (d.device !== 'TV' && d.device !== 'Game console') {
+      const ff = high && Array.isArray(high.formFactors) ? high.formFactors.map(f => FORM_FACTORS[f]).filter(Boolean) : [];
+      // "Mobile" with only a Desktop form factor comes from device emulation on a
+      // computer; the page is then served as to a phone, so that wins.
+      if (ff.length && !(low && low.mobile === true && ff.every(f => f === 'Desktop'))) d.device = ff[0];
+      else if (low && low.mobile === true) d.device = 'Mobile';
+      else if (low && plat === 'Android' && low.mobile === false) d.device = 'Tablet';
+    }
+    if (brave) {
+      d.name = 'Brave';
+      if (d.engine === 'Blink') {
+        d.version = d.engineVersion || d.version;
+        d.notes.push('Brave sends the same user agent as Chrome; it was recognised through navigator.brave. It reports the Chromium version it is built on, not Brave\'s own version number, which is under Settings > About Brave.');
+      } else {
+        d.version = '';
+        d.notes.push('Brave was recognised through navigator.brave; its user agent is the same as Safari\'s, so its version is not shown.');
+      }
+    }
+    return d;
+  }
+
+  function finishDetection(d) {
+    const ios = d.os === 'iOS' || d.os === 'iPadOS';
+    if (ios && d.iosNote === 'safari') {
+      d.notes.push('Safari 26 and later report a frozen iOS version (18.6 or 18.7) in the user agent, so the version shown comes from Safari, whose version always matches iOS.');
+    } else if (ios && d.iosNote === 'app') {
+      d.notes.push('Since iOS 26 the user agent reports a frozen iOS version (18.6 or 18.7), but this app adds the real iOS version to it, which is the one shown.');
+    } else if (ios && d.iosNote === 'unknown') {
+      d.notes.push('Since iOS 26, Safari and many in-app browsers report a frozen iOS version (18.6 or 18.7) in the user agent, so this could be iOS ' + d.osVersion.replace(/ or later$/, '') + ' or any later version. Settings > General > About shows the real one.');
+    }
+    if (d.ffAndroid10 && d.engine === 'Gecko' && d.os === 'Android') {
+      d.notes.push('Firefox reports every Android version older than 10 as Android 10, so this could be Android 10 or an earlier version. Settings > About phone shows the real one.');
+    }
+    if (ios && d.iPadAsMac) d.notes.push('iPads ask for desktop websites and identify as a Mac; the touch screen shows that this is an iPad.');
+    if (ios && d.engine === 'WebKit' && d.name && d.name !== 'Safari') {
+      d.notes.push('On iPhone and iPad, browsers such as Chrome, Firefox and Edge use Apple\'s WebKit engine, so their web features match Safari\'s.');
+    }
+    if (d.os === 'Windows' && d.osVersion === '10 or 11') {
+      d.notes.push('Windows 10 and 11 send the same user agent ("Windows NT 10.0"), and this browser gave no Client Hints to tell them apart. Settings > System > About shows which one you have.');
+    }
+    if (d.os === 'macOS' && d.osHidden) {
+      d.notes.push('This browser reports every recent Mac as macOS 10.15, so the real version is hidden. Apple menu > About This Mac shows it.');
+    }
+    if (d.os === 'Android' && d.osHidden) {
+      d.notes.push('The user agent hides the Android version and phone model behind the placeholder "Android 10; K", and this browser gave no Client Hints with the real values. Settings > About phone shows them.');
+    }
+    if (d.os === 'ChromeOS' && d.osBuild) {
+      d.notes.push('ChromeOS reports its platform build number, not the version shown in Settings > About ChromeOS, which matches the built-in Chrome\'s version.');
+    }
+    if (d.engine === 'EdgeHTML') d.notes.push('This is the original Edge, which Microsoft retired in 2021; the number in its user agent is the EdgeHTML engine version.');
+    if (d.inApp) {
+      d.notes.push('This is an app\'s built-in browser, not your usual browser. In-app browsers can behave differently; use the app\'s "Open in browser" option for anything important.');
+    }
+    if (d.name === 'Headless Chrome') d.notes.push('This is Chrome\'s headless mode, which automated tests and scripts use.');
+    if (!d.name) d.notes.push('This browser could not be recognised from its user agent. The feature tests below still show what it can do.');
+    // "AppleWebKit/605.1.15" has been frozen since 2017. The engine that ships
+    // with iOS or Safari is what that version really is.
+    if (d.engine === 'WebKit' && (!d.engineVersion || d.engineVersion === '605.1.15')) {
+      d.engineVersion = '';
+      d.engineText = 'WebKit' + (ios && d.osVersion ? ' (' + d.os + ' ' + d.osVersion + ')' : d.name === 'Safari' && d.version ? ' (Safari ' + safariShort(d.version) + ')' : '');
+    } else {
+      d.engineText = d.engine ? d.engine + (d.engineVersion ? ' ' + cleanVer(d.engineVersion) : '') : 'Not recognised';
+    }
+    // Display strings
+    const v = cleanVer(d.version);
+    if (d.name === 'Brave') d.browserText = 'Brave' + (v ? ' (Chromium ' + v + ')' : '');
+    else if (d.inApp) d.browserText = d.name + (v ? ' (app ' + v + ')' : '');
+    else d.browserText = d.name ? d.name + (v ? ' ' + v : '') : 'Not recognised';
+    let os = d.os ? d.os + (d.osVersion ? ' ' + d.osVersion : '') : '';
+    d.osSentence = os || 'an operating system this page does not recognise';
+    if (d.os === 'macOS' && d.osVersion && macName(d.osVersion)) os += ' (' + macName(d.osVersion) + ')';
+    if (d.osBuild) os += ' (platform ' + d.osBuild + ')';
+    if (d.osHidden && !d.osVersion) os += ' (version hidden)';
+    d.osText = os || 'Not recognised';
+    d.deviceText = d.device ? d.device + (d.model && d.model !== d.device ? ' (' + d.model + ')' : '') : 'Not recognised';
+    let who;
+    if (d.inApp === 'An app') who = 'an app\'s built-in browser';
+    else if (d.inApp) who = d.inApp + '\'s in-app browser';
+    else if (!d.name) who = 'a browser this page does not recognise';
+    else if (d.name === 'Brave') who = 'Brave' + (d.version ? ' (Chromium ' + major(d.version) + ')' : '');
+    else if (d.name === 'Safari') who = 'Safari' + (d.version ? ' ' + safariShort(d.version) : '');
+    else who = d.name + (d.version ? ' ' + major(d.version) : '');
+    d.sentence = 'You are using ' + who + ' on ' + d.osSentence + '.';
+    return d;
+  }
+
+  // Never throws: hints that are malformed fall back to the user agent alone.
+  function detect(ua, touch, low, high, brave) {
+    try { return finishDetection(applyHints(parseUA(ua, touch), low, high, brave)); } catch (e) { /* fall through */ }
+    try { return finishDetection(parseUA(ua, touch)); } catch (e) { /* fall through */ }
+    return finishDetection(parseUA('', 0));
+  }
+
+  // What in this user agent string is frozen, reduced or historical.
+  function uaNotes(ua, d) {
+    const n = [];
+    const blink = !!d && d.engine === 'Blink';
+    const red = /\b(?:Chrome|HeadlessChrome)\/(\d+)\.0\.0\.0\b/.exec(ua);
+    if (red) {
+      const full = blink && d.engineVersion && !/^\d+(\.0)+$/.test(d.engineVersion) ? ' (' + d.engineVersion + ')' : '';
+      n.push('"Chrome/' + red[1] + '.0.0.0": the version is reduced to its first number. The full version' + full + ' is only available through Client Hints.');
+    }
+    const redApp = /\b(Edg|EdgA|OPR)\/(\d+)\.0\.0\.0\b/.exec(ua);
+    if (redApp) n.push('"' + redApp[1] + '/' + redApp[2] + '.0.0.0" is reduced in the same way.');
+    if (/Windows NT 10\.0/.test(ua)) n.push('"Windows NT 10.0" is sent by both Windows 10 and Windows 11.');
+    if (blink && /Windows NT 10\.0; Win64; x64\)/.test(ua)) n.push('"Win64; x64" is fixed in Chromium browsers, so Windows PCs with ARM processors send it too.');
+    if (blink && /\(X11; Linux x86_64\)/.test(ua)) n.push('"X11; Linux x86_64" is fixed in Chromium browsers, whatever the processor.');
+    if (/CrOS \S+ 14541\.0\.0\b/.test(ua)) n.push('"CrOS x86_64 14541.0.0" is frozen: every Chromebook sends it, whatever its processor or ChromeOS version.');
+    if (/Mac OS X 10[._]15(?:[._]7)?\b/.test(ua)) n.push('"Mac OS X 10_15_7" (10.15 in Firefox) is frozen: every recent Mac reports it, and Macs with Apple silicon still say "Intel".');
+    if (/Android 10; K\)/.test(ua)) n.push('"Android 10; K" is a fixed placeholder for the real Android version and phone model.');
+    // Real iOS 18.6 and 18.7 send these values too, so only Safari 26 and later prove a freeze.
+    const frozenIOS = /\bOS (18_6(?:_2)?|18_7) like Mac OS X/.exec(ua);
+    if (frozenIOS && d && (d.os === 'iOS' || d.os === 'iPadOS')) {
+      if (d.name === 'Safari' && Number(major(d.version)) >= 26) n.push('"OS ' + frozenIOS[1] + '" is frozen: Safari 26 and later report iOS 18.6 or 18.7 whatever the real version is.');
+      else if (d.name !== 'Safari') n.push('"OS ' + frozenIOS[1] + '" may be frozen: since iOS 26, Safari and many in-app browsers report iOS 18.6 or 18.7 instead of the real version.');
+    }
+    if (/AppleWebKit\/605\.1\.15/.test(ua)) n.push('"AppleWebKit/605.1.15" is frozen and no longer tracks the WebKit version.');
+    if (/AppleWebKit\/537\.36/.test(ua)) n.push('"AppleWebKit/537.36", "KHTML, like Gecko" and "Safari/537.36" are leftovers kept so old sites still work; the engine is ' + (d && d.engine === 'EdgeHTML' ? 'EdgeHTML' : 'Blink') + '.');
+    if (/Gecko\/20100101/.test(ua)) n.push('"Gecko/20100101" is a fixed date that desktop Firefox always sends.');
+    if (/^Mozilla\/5\.0/.test(ua)) n.push('"Mozilla/5.0" is a historical token that every browser sends.');
+    return n;
+  }
+
+  // ---------- 2. Feature support ----------
+  const GROUPS = [
+    ['js', 'JavaScript'], ['css', 'CSS'], ['html', 'HTML & DOM'], ['gfx', 'Graphics'], ['media', 'Media & codecs'],
+    ['storage', 'Storage & offline'], ['devices', 'Devices & sensors'], ['security', 'Security & privacy'], ['perf', 'Performance']
+  ];
+  const fn = (o, k) => !!o && typeof o[k] === 'function';
+  const own = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+  const css = q => typeof CSS !== 'undefined' && fn(CSS, 'supports') && CSS.supports(q);
+  function syntax(src) { try { new Function(src); return true; } catch (e) { return false; } }
+  const wasm = b => typeof WebAssembly === 'object' && fn(WebAssembly, 'validate') && WebAssembly.validate(new Uint8Array(b));
+  const WASM = {
+    base: [0, 97, 115, 109, 1, 0, 0, 0],
+    // i8x16.splat + i8x16.popcnt
+    simd: [0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11],
+    // a shared memory and an atomic load
+    threads: [0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0, 3, 2, 1, 0, 5, 4, 1, 3, 1, 1, 10, 11, 1, 9, 0, 65, 0, 254, 16, 2, 0, 26, 11],
+    // return_call
+    tail: [0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0, 3, 2, 1, 0, 10, 6, 1, 4, 0, 18, 0, 11],
+    // a struct type
+    gc: [0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 95, 1, 120, 0]
+  };
+  // Tiny images: decoding one proves the format is supported.
+  const IMG = {
+    avif: 'data:image/avif;base64,AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADybWV0YQAAAAAAAAAoaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAGxpYmF2aWYAAAAADnBpdG0AAAAAAAEAAAAeaWxvYwAAAABEAAABAAEAAAABAAABGgAAAB0AAAAoaWluZgAAAAAAAQAAABppbmZlAgAAAAABAABhdjAxQ29sb3IAAAAAamlwcnAAAABLaXBjbwAAABRpc3BlAAAAAAAAAAIAAAACAAAAEHBpeGkAAAAAAwgICAAAAAxhdjFDgQ0MAAAAABNjb2xybmNseAACAAIAAYAAAAAXaXBtYQAAAAAAAAABAAEEAQKDBAAAACVtZGF0EgAKCBgANogQEAwgMg8f8D///8WfhwB8+ErK42A=',
+    webp: 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==',
+    jxl: 'data:image/jxl;base64,/woIELASCAgQAFwASxLFgkWAHL0xqnCBCV0qDp901Te/5QM='
+  };
+  function decodes(src) {
+    return new Promise(resolve => {
+      const img = new Image();
+      let settled = false;
+      const done = ok => { if (!settled) { settled = true; img.onload = img.onerror = null; resolve(ok); } };
+      img.onload = () => done(img.naturalWidth > 0);
+      img.onerror = () => done(false);
+      setTimeout(() => done(false), 3000);
+      img.src = src;
+    });
+  }
+  function codec(kind, types) {
+    const m = document.createElement(kind);
+    const MS = window.MediaSource, MMS = window.ManagedMediaSource;
+    const hit = types.find(t => safe(() => m.canPlayType(t) !== '', false) ||
+      safe(() => !!MS && MS.isTypeSupported(t), false) || safe(() => !!MMS && MMS.isTypeSupported(t), false));
+    if (!hit) return false;
+    const mc = nav.mediaCapabilities;
+    if (kind !== 'video' || !mc || !fn(mc, 'decodingInfo')) return true;
+    const query = safe(() => mc.decodingInfo({ type: 'file', video: { contentType: hit, width: 1920, height: 1080, bitrate: 5000000, framerate: 30 } }), null);
+    if (!query || typeof query.then !== 'function') return true;
+    return settle(query.then(r => ({
+      ok: true,
+      detail: r && r.supported ? (r.powerEfficient ? 'Power-efficient (usually hardware) decoding at 1080p.' : 'Plays, but not power-efficiently at 1080p, so probably decoded in software.') : ''
+    })), 2000, true);
+  }
+
+  // One WebGL context gives the support answer, the GPU name and the fingerprint parameters.
+  const GL_PARAMS = ['VERSION', 'SHADING_LANGUAGE_VERSION', 'VENDOR', 'RENDERER', 'MAX_TEXTURE_SIZE', 'MAX_CUBE_MAP_TEXTURE_SIZE',
+    'MAX_RENDERBUFFER_SIZE', 'MAX_VIEWPORT_DIMS', 'MAX_VERTEX_ATTRIBS', 'MAX_VERTEX_UNIFORM_VECTORS', 'MAX_FRAGMENT_UNIFORM_VECTORS',
+    'MAX_VARYING_VECTORS', 'MAX_TEXTURE_IMAGE_UNITS', 'MAX_VERTEX_TEXTURE_IMAGE_UNITS', 'MAX_COMBINED_TEXTURE_IMAGE_UNITS',
+    'ALIASED_LINE_WIDTH_RANGE', 'ALIASED_POINT_SIZE_RANGE', 'RED_BITS', 'GREEN_BITS', 'BLUE_BITS', 'ALPHA_BITS', 'DEPTH_BITS',
+    'STENCIL_BITS', 'SUBPIXEL_BITS', 'SAMPLES', 'SAMPLE_BUFFERS'];
+  function loseContext(gl) { safe(() => { const x = gl.getExtension('WEBGL_lose_context'); if (x) x.loseContext(); }); }
+  // Resolves with S.gl. Creating the context and setting up its extensions can each
+  // take a while (they wait for the GPU process), so they run in separate tasks.
+  let glPromise = null;
+  function glProbe() {
+    if (glPromise) return glPromise;
+    const out = S.gl = { webgl: false, vendor: '', renderer: '', params: null };
+    glPromise = (async () => {
+      const gl = safe(() => { const c = document.createElement('canvas'); return c.getContext('webgl') || c.getContext('experimental-webgl'); }, null);
+      if (!gl) return out;
+      out.webgl = true;
+      const params = {};
+      GL_PARAMS.forEach(k => {
+        const v = safe(() => gl.getParameter(gl[k]), null);
+        params[k] = v && typeof v === 'object' && 'length' in v ? Array.from(v) : v;
+      });
+      out.vendor = params.VENDOR || '';
+      out.renderer = params.RENDERER || '';
+      await wait(0);
+      safe(() => readExtensions(gl, out, params));
+      out.params = params;
+      loseContext(gl);
+      return out;
+    })().catch(() => out);
+    return glPromise;
+  }
+  function readExtensions(gl, out, params) {
+    const dbg = safe(() => gl.getExtension('WEBGL_debug_renderer_info'), null);
+    if (dbg) {
+      out.vendor = safe(() => gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL), '') || out.vendor;
+      out.renderer = safe(() => gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL), '') || out.renderer;
+    }
+    params.UNMASKED = [out.vendor, out.renderer];
+    const aniso = safe(() => gl.getExtension('EXT_texture_filter_anisotropic'), null);
+    params.MAX_ANISOTROPY = aniso ? safe(() => gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT), null) : null;
+    params.extensions = (safe(() => gl.getSupportedExtensions(), null) || []).slice().sort();
+    params.precision = ['VERTEX_SHADER', 'FRAGMENT_SHADER'].map(s => ['HIGH_FLOAT', 'MEDIUM_FLOAT', 'LOW_FLOAT', 'HIGH_INT'].map(p => {
+      const f = safe(() => gl.getShaderPrecisionFormat(gl[s], gl[p]), null);
+      return f ? [f.rangeMin, f.rangeMax, f.precision] : null;
+    }));
+  }
+  function gl2Probe() {
+    return safe(() => {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      if (!gl) return false;
+      loseContext(gl);
+      return true;
+    }, false);
+  }
+  let gpuPromise = null;
+  function gpuProbe() {
+    if (gpuPromise) return gpuPromise;
+    gpuPromise = (async () => {
+      if (!nav.gpu || !fn(nav.gpu, 'requestAdapter')) return false;
+      // A request that never answers is reported as such, not as "no adapter".
+      const late = {};
+      const a = await Promise.race([Promise.resolve().then(() => nav.gpu.requestAdapter()).catch(() => null), wait(3000).then(() => late)]);
+      if (a === late) return { ok: false, detail: 'The browser did not answer the request for a GPU adapter in time.' };
+      if (!a) return { ok: false, detail: 'The API is present, but the browser offered no GPU adapter: hardware acceleration may be off, the driver blocked, or WebGPU not yet enabled on this system.' };
+      let info = a.info || null;
+      if (!info && fn(a, 'requestAdapterInfo')) info = await settle(a.requestAdapterInfo(), 1000, null);
+      if (info) S.gpuInfo = { vendor: info.vendor || '', architecture: info.architecture || '', device: info.device || '', description: info.description || '' };
+      const fallback = (info && info.isFallbackAdapter) || a.isFallbackAdapter;
+      return { ok: true, detail: fallback ? 'Only a software (fallback) adapter is available.' : '' };
+    })().catch(() => false);
+    return gpuPromise;
+  }
+
+  const F = [
+    ['js', 'private-fields', 'Private class fields', 'Truly private #fields and #methods in classes.', () => syntax('class A { #x = 1; static has(o) { return #x in o; } }')],
+    ['js', 'regexp-v', 'RegExp v flag', 'Set operations and Unicode string properties in regular expressions.', () => { try { new RegExp('[\\p{L}--[a-z]]', 'v'); return true; } catch (e) { return false; } }],
+    ['js', 'array-copy', 'Array copy methods', 'toSorted(), toReversed() and with() return a new array instead of changing it.', () => fn(Array.prototype, 'toSorted') && fn(Array.prototype, 'with')],
+    ['js', 'group-by', 'Object.groupBy()', 'Groups the items of a list by a key.', () => fn(Object, 'groupBy')],
+    ['js', 'with-resolvers', 'Promise.withResolvers()', 'Creates a promise together with its resolve and reject functions.', () => fn(Promise, 'withResolvers')],
+    ['js', 'set-methods', 'Set methods', 'union(), intersection(), difference() and subset checks on Set.', () => fn(Set.prototype, 'union') && fn(Set.prototype, 'isSubsetOf')],
+    ['js', 'iterator-helpers', 'Iterator helpers', 'map(), filter() and take() directly on iterators, without building arrays.', () => typeof Iterator === 'function' && fn(Iterator.prototype, 'map')],
+    ['js', 'using', 'using declarations', 'Automatic clean-up of files, locks and other resources when a block ends.', () => syntax('{ using x = null; }')],
+    ['js', 'temporal', 'Temporal', 'The modern date and time API that replaces Date.', () => typeof Temporal === 'object' && Temporal !== null && typeof Temporal.Now === 'object'],
+    ['js', 'base64', 'Uint8Array Base64', 'Built-in Base64 and hex conversion for binary data.', () => fn(Uint8Array, 'fromBase64') && fn(Uint8Array.prototype, 'toBase64')],
+    ['js', 'import-maps', 'Import maps', 'Maps bare module names to URLs, so modules work without a build step.', () => fn(HTMLScriptElement, 'supports') && HTMLScriptElement.supports('importmap')],
+
+    ['css', 'container-queries', 'Container queries', 'Styles that respond to the size of a container instead of the window.', () => css('container-type: inline-size')],
+    ['css', 'has', ':has() selector', 'Selects an element by what it contains, the long-awaited parent selector.', () => css('selector(:has(a))')],
+    ['css', 'nesting', 'CSS nesting', 'Rules written inside other rules, as in Sass, with no build step.', () => css('selector(&)')],
+    ['css', 'subgrid', 'Subgrid', 'Nested grids that line up with their parent grid.', () => css('grid-template-rows: subgrid')],
+    ['css', 'layers', 'Cascade layers', '@layer decides which groups of styles win.', () => typeof CSSLayerBlockRule === 'function'],
+    ['css', 'scope', '@scope', 'Limits styles to one part of the page.', () => typeof CSSScopeRule === 'function'],
+    ['css', 'view-transitions', 'View transitions', 'Animated transitions between states of a page.', () => fn(document, 'startViewTransition') && css('view-transition-name: a')],
+    ['css', 'anchor', 'Anchor positioning', 'Ties tooltips and menus to another element in pure CSS.', () => css('anchor-name: --a')],
+    ['css', 'scroll-timeline', 'Scroll-driven animations', 'Animations that follow the scroll position, without script.', () => css('animation-timeline: scroll()')],
+    ['css', 'color-mix', 'color-mix()', 'Blends two colours.', () => css('color: color-mix(in srgb, red, blue)')],
+    ['css', 'oklch', 'OKLCH colours', 'A perceptually even colour space that reaches wide-gamut colours.', () => css('color: oklch(50% 0.1 120)')],
+    ['css', 'relative-color', 'Relative colour syntax', 'Derives a colour from another, such as a lighter or transparent shade.', () => css('color: rgb(from red r g b)')],
+    ['css', 'text-wrap-balance', 'Balanced text wrapping', 'text-wrap: balance evens out the lines of headings.', () => css('text-wrap: balance')],
+
+    ['html', 'dialog', '<dialog> element', 'Native modal dialogs that handle focus and the Esc key.', () => typeof HTMLDialogElement === 'function' && 'showModal' in HTMLDialogElement.prototype],
+    ['html', 'popover', 'Popover API', 'Menus and tooltips that float above the page, with no script.', () => own(HTMLElement.prototype, 'popover')],
+    ['html', 'invokers', 'Invoker commands', 'Buttons that open dialogs and popovers declaratively with command and commandfor.', () => 'command' in HTMLButtonElement.prototype],
+    ['html', 'dsd', 'Declarative Shadow DOM', 'Web components rendered from HTML alone, including from a server.', () => own(HTMLTemplateElement.prototype, 'shadowRootMode')],
+    ['html', 'inert', 'inert attribute', 'Makes part of the page unclickable and unreachable with the keyboard.', () => 'inert' in HTMLElement.prototype],
+    ['html', 'base-select', 'Customisable select', 'Drop-down menus that can be fully styled (appearance: base-select).', () => css('appearance: base-select')],
+    ['html', 'navigation-api', 'Navigation API', 'A modern replacement for the History API in single-page apps.', () => typeof window.navigation === 'object' && window.navigation !== null],
+    ['html', 'web-share', 'Web Share', 'Opens the system share sheet.', () => fn(nav, 'share')],
+    ['html', 'clipboard', 'Async Clipboard API', 'Copies and pastes text and images from script.', () => !!nav.clipboard && fn(nav.clipboard, 'writeText')],
+
+    ['gfx', 'canvas', 'Canvas 2D', 'The 2D drawing surface behind charts, games and image editors.', () => !!document.createElement('canvas').getContext('2d')],
+    ['gfx', 'offscreen-canvas', 'OffscreenCanvas', 'Canvas drawing in a background worker.', () => typeof OffscreenCanvas === 'function' && !!new OffscreenCanvas(1, 1).getContext('2d')],
+    ['gfx', 'p3-canvas', 'Wide-gamut canvas', 'Canvas drawing in the Display P3 colour space.', () => {
+      const c = document.createElement('canvas').getContext('2d', { colorSpace: 'display-p3' });
+      return !!c && fn(c, 'getContextAttributes') && c.getContextAttributes().colorSpace === 'display-p3';
+    }],
+    // Each graphics context is created in its own task: starting the GPU can take a while.
+    ['gfx', 'webgl', 'WebGL', '3D graphics on the GPU, tested by creating a context.', () => wait(0).then(glProbe).then(g => g.webgl)],
+    ['gfx', 'webgl2', 'WebGL 2', 'The newer 3D graphics API most web games use, tested by creating a context.', () => wait(0).then(gl2Probe)],
+    ['gfx', 'webgpu', 'WebGPU', 'Modern GPU access for graphics and AI, tested by requesting a GPU adapter.', () => gpuProbe()],
+    ['gfx', 'avif', 'AVIF images', 'A modern image format, much smaller than JPEG, tested by decoding an image.', () => decodes(IMG.avif)],
+    ['gfx', 'webp', 'WebP images', 'Smaller images than JPEG and PNG, tested by decoding an image.', () => decodes(IMG.webp)],
+    ['gfx', 'jxl', 'JPEG XL images', 'An efficient successor to JPEG, tested by decoding an image.', () => decodes(IMG.jxl)],
+
+    ['media', 'h264', 'H.264 video', 'The most widely used video codec, in MP4 files.', () => codec('video', ['video/mp4; codecs="avc1.42E01E"'])],
+    ['media', 'hevc', 'H.265 (HEVC) video', 'Efficient codec used by iPhone videos and 4K streams; usually needs hardware support.', () => codec('video', ['video/mp4; codecs="hvc1.1.6.L93.B0"', 'video/mp4; codecs="hev1.1.6.L93.B0"'])],
+    ['media', 'vp9', 'VP9 video', 'Royalty-free codec used by YouTube.', () => codec('video', ['video/webm; codecs="vp09.00.10.08"', 'video/mp4; codecs="vp09.00.10.08"', 'video/webm; codecs="vp9"'])],
+    ['media', 'av1', 'AV1 video', 'The newest royalty-free codec, used for high-quality streaming.', () => codec('video', ['video/mp4; codecs="av01.0.05M.08"', 'video/webm; codecs="av01.0.05M.08"'])],
+    ['media', 'aac', 'AAC audio', 'The standard audio codec in MP4 files and most streams.', () => codec('audio', ['audio/mp4; codecs="mp4a.40.2"'])],
+    ['media', 'opus', 'Opus audio', 'Royalty-free audio codec for calls and streaming.', () => codec('audio', ['audio/webm; codecs="opus"', 'audio/ogg; codecs="opus"', 'audio/mp4; codecs="opus"'])],
+    ['media', 'mse', 'Media Source Extensions', 'Adaptive streaming, as used by YouTube and Netflix.', () => typeof window.MediaSource === 'function' || typeof window.ManagedMediaSource === 'function'],
+    ['media', 'eme', 'Encrypted Media Extensions', 'The DRM interface paid streaming services need (presence only; no licence is requested).', () => fn(nav, 'requestMediaKeySystemAccess')],
+    ['media', 'webcodecs', 'WebCodecs', 'Low-level video encoding and decoding for editors and streaming apps.', () => typeof VideoDecoder === 'function' && typeof VideoEncoder === 'function'],
+    ['media', 'webrtc', 'WebRTC', 'Real-time video calls and peer-to-peer data in the browser.', () => typeof RTCPeerConnection === 'function'],
+    ['media', 'web-audio', 'Web Audio API', 'Audio synthesis and processing, used by tuners and music apps.', () => typeof AudioContext === 'function' || typeof window.webkitAudioContext === 'function'],
+
+    ['storage', 'local-storage', 'Web Storage', 'localStorage and sessionStorage for small saved settings (checked without writing).', () => { try { return !!window.localStorage; } catch (e) { return { ok: false, detail: 'Blocked by your browser settings.' }; } }],
+    ['storage', 'indexeddb', 'IndexedDB', 'A database in the browser for offline apps.', () => { try { return !!window.indexedDB; } catch (e) { return { ok: false, detail: 'Blocked by your browser settings.' }; } }],
+    ['storage', 'cache-api', 'Cache API', 'Stores downloaded files so sites work offline.', () => 'caches' in window],
+    ['storage', 'service-worker', 'Service workers', 'Background scripts for offline sites and push notifications.', () => 'serviceWorker' in nav],
+    ['storage', 'opfs', 'Origin private file system', 'Fast private files for apps such as photo editors and databases.', () => !!nav.storage && fn(nav.storage, 'getDirectory')],
+    ['storage', 'fs-access', 'File System Access', 'Opens, edits and saves files on your disk, with your permission.', () => fn(window, 'showOpenFilePicker')],
+    ['storage', 'storage-estimate', 'Storage estimate', 'Tells a site how much space it may use.', () => !!nav.storage && fn(nav.storage, 'estimate')],
+    ['storage', 'persist', 'Persistent storage', 'A site can ask that its data is not cleared automatically.', () => !!nav.storage && fn(nav.storage, 'persist')],
+    ['storage', 'cookie-store', 'Cookie Store API', 'Asynchronous access to cookies from script.', () => 'cookieStore' in window],
+
+    ['devices', 'media-devices', 'Camera and microphone', 'getUserMedia, used by video calls and the webcam and mic tests; it asks permission first.', () => !!nav.mediaDevices && fn(nav.mediaDevices, 'getUserMedia')],
+    ['devices', 'screen-capture', 'Screen sharing', 'getDisplayMedia, for sharing a tab, window or screen.', () => !!nav.mediaDevices && fn(nav.mediaDevices, 'getDisplayMedia')],
+    ['devices', 'gamepad', 'Gamepad API', 'Game controllers in web games.', () => fn(nav, 'getGamepads')],
+    ['devices', 'webusb', 'WebUSB', 'Direct access to USB devices, for firmware updaters and lab equipment.', () => 'usb' in nav],
+    ['devices', 'bluetooth', 'Web Bluetooth', 'Connects to Bluetooth Low Energy devices such as fitness trackers.', () => 'bluetooth' in nav],
+    ['devices', 'serial', 'Web Serial', 'Serial ports, for microcontrollers and 3D printers.', () => 'serial' in nav],
+    ['devices', 'hid', 'WebHID', 'Low-level access to keyboards, game controllers and other input devices.', () => 'hid' in nav],
+    ['devices', 'midi', 'Web MIDI', 'Music keyboards and other MIDI instruments.', () => fn(nav, 'requestMIDIAccess')],
+    ['devices', 'webxr', 'WebXR', 'Virtual and augmented reality headsets.', () => 'xr' in nav],
+    ['devices', 'wake-lock', 'Screen Wake Lock', 'Keeps the screen on, for recipes and presentations.', () => 'wakeLock' in nav],
+
+    ['security', 'secure-context', 'Secure context', 'The page was loaded over HTTPS, which many APIs require.', () => window.isSecureContext === true],
+    ['security', 'coi', 'Cross-origin isolation', 'Needs COOP and COEP response headers, which GitHub Pages, the host of this site, cannot send.', () => window.crossOriginIsolated === true],
+    ['security', 'sab', 'SharedArrayBuffer', 'Memory shared between threads, needed by multi-threaded WebAssembly; only on cross-origin isolated pages.', () => typeof SharedArrayBuffer === 'function' ||
+      { ok: false, detail: window.crossOriginIsolated ? '' : 'Unavailable on this page because it is not cross-origin isolated. Your browser may still support it on sites that are.' }],
+    ['security', 'web-crypto', 'Web Crypto', 'Hashing and encryption built into the browser, used for the hashes on this page.', () => !!window.crypto && !!crypto.subtle && fn(crypto.subtle, 'digest')],
+    ['security', 'webauthn', 'Passkeys (WebAuthn)', 'Sign-in with a fingerprint, face or security key instead of a password.', () => typeof PublicKeyCredential === 'function'],
+    ['security', 'passkey-autofill', 'Passkey autofill', 'Passkeys offered in the username field\'s autofill list.', () => typeof PublicKeyCredential === 'function' && fn(PublicKeyCredential, 'isConditionalMediationAvailable') ?
+      PublicKeyCredential.isConditionalMediationAvailable().then(v => v === true) : false],
+    ['security', 'fedcm', 'FedCM', '"Sign in with" accounts that work without third-party cookies.', () => typeof IdentityCredential === 'function'],
+    ['security', 'trusted-types', 'Trusted Types', 'Blocks a common class of cross-site scripting bugs.', () => typeof trustedTypes === 'object' && trustedTypes !== null && fn(trustedTypes, 'createPolicy')],
+    ['security', 'storage-access', 'Storage Access API', 'Embedded content has to ask before it can use its cookies.', () => fn(document, 'requestStorageAccess')],
+
+    ['perf', 'wasm', 'WebAssembly', 'Near-native speed for code compiled from C, C++ or Rust, tested by validating a module.', () => wasm(WASM.base)],
+    ['perf', 'wasm-simd', 'WebAssembly SIMD', 'Vector instructions that speed up media, games and AI.', () => wasm(WASM.simd)],
+    ['perf', 'wasm-threads', 'WebAssembly threads', 'Shared memory and atomics; running threads also needs SharedArrayBuffer.', () => wasm(WASM.threads)],
+    ['perf', 'wasm-tail', 'WebAssembly tail calls', 'Efficient calls for functional languages compiled to WebAssembly.', () => wasm(WASM.tail)],
+    ['perf', 'wasm-gc', 'WebAssembly GC', 'Garbage-collected languages such as Kotlin and Dart without shipping their own collector.', () => wasm(WASM.gc)],
+    ['perf', 'workers', 'Web Workers', 'Scripts that run in the background without freezing the page.', () => typeof Worker === 'function'],
+    ['perf', 'shared-workers', 'Shared Workers', 'One background script shared by several tabs of a site.', () => typeof SharedWorker === 'function'],
+    ['perf', 'post-task', 'Prioritised scheduling', 'scheduler.postTask() runs work at user-blocking, normal or background priority.', () => typeof scheduler === 'object' && scheduler !== null && fn(scheduler, 'postTask')],
+    ['perf', 'speculation-rules', 'Speculation rules', 'Prefetches or prerenders the next page for instant navigation.', () => fn(HTMLScriptElement, 'supports') && HTMLScriptElement.supports('speculationrules')]
+  ];
+
+  function buildFeatures() {
+    const box = $('#bt-groups');
+    S.feats = F.map(f => ({ group: f[0], id: f[1], name: f[2], note: f[3], test: f[4], ok: false, detail: '', done: false }));
+    GROUPS.forEach(g => {
+      const wrap = el('div', 'bt-group');
+      wrap.dataset.group = g[0];
+      const h = el('h3', '', g[1] + ' ');
+      h.id = 'bt-g-' + g[0];
+      const count = el('span', 'bt-gcount', 'Checking…');
+      h.appendChild(count);
+      const ul = el('ul', 'bt-feats');
+      ul.setAttribute('aria-labelledby', h.id);
+      const full = el('p', 'bt-full-note', 'All supported.');
+      full.hidden = true;
+      S.feats.filter(f => f.group === g[0]).forEach(f => {
+        const li = el('li', 'bt-feat is-wait');
+        li.dataset.feature = f.id;
+        const ico = el('span', 'bt-ico', '…');
+        ico.setAttribute('aria-hidden', 'true');
+        const body = el('span', 'bt-fbody');
+        const head = el('span', 'bt-fhead');
+        f.val = el('span', 'bt-fval', 'Checking…');
+        head.append(el('span', 'bt-fname', f.name), f.val);
+        f.det = el('span', 'bt-fdetail');
+        f.det.hidden = true;
+        body.append(head, el('span', 'bt-fnote', f.note), f.det);
+        li.append(ico, body);
+        f.li = li; f.ico = ico;
+        ul.appendChild(li);
+      });
+      wrap.append(h, ul, full);
+      box.appendChild(wrap);
+      g.count = count; g.full = full;
+    });
+  }
+  function norm(v) {
+    return v && typeof v === 'object' ? { ok: !!v.ok, detail: String(v.detail || '') } : { ok: !!v, detail: '' };
+  }
+  function setFeature(f, r) {
+    r = norm(r);
+    f.ok = r.ok; f.detail = r.detail; f.done = true;
+    f.li.className = 'bt-feat ' + (f.ok ? 'is-yes' : 'is-no');
+    f.li.dataset.supported = f.ok ? 'yes' : 'no';
+    f.ico.textContent = f.ok ? '✓' : '✕';
+    f.val.textContent = f.ok ? 'Yes' : 'No';
+    f.det.textContent = f.detail;
+    f.det.hidden = !f.detail;
+  }
+  function updateScore() {
+    const done = S.feats.filter(f => f.done);
+    const yes = done.filter(f => f.ok).length;
+    const all = S.feats.length;
+    $('#bt-score').textContent = done.length < all ? 'Checking… ' + yes + ' of ' + all + ' so far' : yes + ' of ' + all + ' supported';
+    $('#bt-bar').style.width = (all ? yes / all * 100 : 0) + '%';
+    GROUPS.forEach(g => {
+      const fs = S.feats.filter(f => f.group === g[0]);
+      const ok = fs.filter(f => f.ok).length;
+      const finished = fs.every(f => f.done);
+      g.count.textContent = finished ? ok + ' of ' + fs.length : 'Checking…';
+      g.full.hidden = !(finished && ok === fs.length && $('#bt-only-no').checked);
+    });
+  }
+  async function runFeatures() {
+    const pending = [];
+    for (const g of GROUPS) {
+      for (const f of S.feats.filter(x => x.group === g[0])) {
+        let r;
+        try { r = f.test(); } catch (e) { r = false; }
+        if (r && typeof r.then === 'function') {
+          const slow = wait(5000).then(() => ({ ok: false, detail: 'The check did not finish in time.' }));
+          pending.push(Promise.race([Promise.resolve(r).catch(() => false), slow]).then(v => { setFeature(f, v); updateScore(); }));
+        } else {
+          setFeature(f, r);
+        }
+      }
+      updateScore();
+      await wait(0); // let the page breathe between groups
+    }
+    await Promise.all(pending);
+    updateScore();
+  }
+
+  // ---------- 3. Tables ----------
+  function fillRows(tbody, rows) {
+    tbody.textContent = '';
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.dataset.key = r.key;
+      const th = el('th', '', r.label);
+      th.scope = 'row';
+      if (r.src) th.appendChild(el('small', '', r.src));
+      const td = document.createElement('td');
+      td.appendChild(el('span', 'bt-v', r.value));
+      if (r.note) td.appendChild(el('small', '', r.note));
+      tr.append(th, td);
+      tbody.appendChild(tr);
+    });
+  }
+
+  const CH_ROWS = [
+    ['brands', 'Brands', 'Sec-CH-UA', true],
+    ['mobile', 'Mobile', 'Sec-CH-UA-Mobile', true],
+    ['platform', 'Platform', 'Sec-CH-UA-Platform', true],
+    ['platformVersion', 'Platform version', 'Sec-CH-UA-Platform-Version', false],
+    ['architecture', 'Architecture', 'Sec-CH-UA-Arch', false],
+    ['bitness', 'Bitness', 'Sec-CH-UA-Bitness', false],
+    ['model', 'Model', 'Sec-CH-UA-Model', false],
+    ['fullVersionList', 'Full version list', 'Sec-CH-UA-Full-Version-List', false],
+    ['formFactors', 'Form factors', 'Sec-CH-UA-Form-Factors', false],
+    ['wow64', 'WoW64', 'Sec-CH-UA-WoW64', false]
+  ];
+  const brandList = list => list.filter(b => b && typeof b === 'object').map(b => b.brand + ' ' + b.version + (GREASE.test(String(b.brand)) ? ' (placeholder)' : '')).join(', ');
+  function chValue(key, v, platform) {
+    if (v === undefined || v === null) return { value: 'Not provided' };
+    if (Array.isArray(v)) {
+      if (!v.length) return { value: 'Empty' };
+      if (v[0] && typeof v[0] === 'object') {
+        const grease = v.some(b => b && GREASE.test(String(b.brand)));
+        return { value: brandList(v), note: grease ? 'The odd "Not A Brand" entry is a deliberate fake (GREASE) that stops sites from expecting an exact list.' : '' };
+      }
+      return { value: v.join(', ') };
+    }
+    if (typeof v === 'boolean') {
+      return { value: v ? 'Yes' : 'No', note: key === 'wow64' && v ? 'A 32-bit browser running on 64-bit Windows.' : '' };
+    }
+    const s = String(v);
+    if (key === 'platformVersion' && s) {
+      if (platform === 'Windows') {
+        const m = parseInt(s, 10);
+        return { value: s, note: m >= 13 ? 'Version 13 and above means Windows 11.' : m > 0 ? 'Versions 1 to 10 mean Windows 10.' : 'Windows 8.1 or earlier.' };
+      }
+      if (platform === 'Linux') return { value: s, note: 'On Linux this is the kernel version.' };
+      if (platform === 'Chrome OS' || platform === 'Chromium OS') return { value: s, note: 'The ChromeOS platform build number, listed under Settings > About ChromeOS > Additional details; it is not the ChromeOS version.' };
+      if (platform === 'macOS' && /^(16|10\.16)\b/.test(s)) return { value: s, note: 'A compatibility number: browsers built for older Macs see 16 on macOS 26 and 10.16 on macOS 11.' };
+    }
+    if (key === 'model' && !s) return { value: 'Empty', note: 'Only phones and tablets report a model.' };
+    if (key === 'architecture' && s) return { value: s, note: s === 'arm' ? 'An ARM processor.' : s === 'x86' ? 'An Intel or AMD processor.' : '' };
+    return { value: s || 'Empty' };
+  }
+  function chRows() {
+    const low = S.low, high = S.high || {};
+    if (!low) return [];
+    const merged = { brands: low.brands, mobile: low.mobile, platform: low.platform };
+    CH_ROWS.slice(3).forEach(r => { merged[r[0]] = high[r[0]]; });
+    return CH_ROWS.map(r => {
+      const v = chValue(r[0], merged[r[0]], merged.platform);
+      return { key: r[0], label: r[1], src: r[2] + (r[3] ? ' · sent with every request' : ' · sent when a site asks'), value: v.value, note: v.note || '' };
+    });
+  }
+  function renderUA() {
+    const d = S.d;
+    $('#bt-ua').textContent = S.ua || '(empty: this browser sends no user agent string)';
+    const list = $('#bt-ua-notes');
+    list.textContent = '';
+    const notes = uaNotes(S.ua, d);
+    if (!notes.length) notes.push('Nothing in this string looks frozen or reduced.');
+    notes.forEach(t => list.appendChild(el('li', '', t)));
+    const rows = chRows();
+    const none = $('#bt-ch-none');
+    if (rows.length) {
+      none.hidden = true;
+      none.textContent = '';
+      $('#bt-ch-wrap').hidden = false;
+      fillRows($('#bt-ch-rows'), rows);
+      if (!S.high) {
+        none.hidden = false;
+        none.textContent = 'This browser did not answer the request for the detailed hints, so only the three basic ones are shown.';
+      }
+    } else {
+      $('#bt-ch-wrap').hidden = true;
+      none.hidden = false;
+      none.textContent = d && d.engine === 'Blink' ?
+        'This browser did not provide User-Agent Client Hints, so the user agent string above is all a website gets.' :
+        'This browser does not support User-Agent Client Hints. Firefox and Safari have not implemented them, so the user agent string above is all a website gets.';
+    }
+  }
+
+  function memText(gb) { return gb < 1 ? Math.round(gb * 1024) + ' MB' : gb + ' GB'; }
+  function gamut() {
+    if (mq('(color-gamut: rec2020)')) return 'Rec. 2020 (very wide)';
+    if (mq('(color-gamut: p3)')) return 'Display P3 (wide)';
+    if (mq('(color-gamut: srgb)')) return 'sRGB (standard)';
+    return 'Not reported';
+  }
+  function round(v, d) { const f = Math.pow(10, d); return Math.round(v * f) / f; }
+  // Each row is read on its own, so a getter that throws empties one cell, not the table.
+  function rowList() {
+    const rows = [];
+    rows.add = (key, label, src, read) => {
+      let r;
+      try { r = read(); } catch (e) { r = { value: 'Could not be read in this browser' }; }
+      if (r) rows.push({ key, label, src, value: String(r.value), note: r.note || '' });
+    };
+    return rows;
+  }
+  function hardwareRows() {
+    const rows = rowList();
+    rows.add('cores', 'CPU cores', 'navigator.hardwareConcurrency', () => {
+      const cores = nav.hardwareConcurrency;
+      return cores > 0 ? { value: cores + ' logical processors', note: 'Counts threads, so a 4-core CPU with hyper-threading shows 8. Some browsers cap or randomise this number.' } : { value: 'Not reported' };
+    });
+    const h = S.high || {};
+    const d = S.d || {};
+    rows.add('arch', 'CPU architecture', h.architecture ? 'Client Hints' : 'navigator.userAgent', () => {
+      if (h.architecture) return { value: (h.architecture === 'x86' ? 'x86 (Intel or AMD)' : h.architecture === 'arm' ? 'ARM' : h.architecture) + (h.bitness ? ', ' + h.bitness + '-bit' : '') };
+      if (d.os === 'iOS' || d.os === 'iPadOS') return { value: 'Not reported (every current iPhone and iPad has a 64-bit ARM chip)' };
+      if (/Mac OS X/.test(S.ua)) return { value: 'Not reported: Mac user agents say "Intel" even on Apple silicon' };
+      // Chromium sends a fixed "Win64; x64" and "Linux x86_64" whatever the processor.
+      if (d.engine === 'Blink' && /Win64; x64|Linux x86_64|CrOS x86_64/.test(S.ua)) return { value: 'Not reported: the "x64" in Chromium user agents is fixed' };
+      if (/Win64|x64|x86_64|WOW64|amd64/i.test(S.ua)) {
+        return { value: 'x64 (64-bit Intel or AMD), according to the user agent', note: /Windows/.test(S.ua) ? 'Windows PCs with ARM processors can report x64 too.' : '' };
+      }
+      if (/aarch64|arm64/i.test(S.ua)) return { value: 'ARM, 64-bit, according to the user agent' };
+      return { value: 'Not reported by this browser' };
+    });
+    // The Device Memory spec rounds to the nearest power of two (so 6 GB can show as 4 or 8)
+    // and clamps it to a range the browser chooses. Chrome 147 changed its range from
+    // 0.25-8 GB to 2-32 GB (2-8 GB on Android); only the ends of the range are "or more/less".
+    rows.add('memory', 'Device memory', 'navigator.deviceMemory', () => {
+      const mem = nav.deviceMemory;
+      if (!(typeof mem === 'number' && mem > 0)) return { value: 'Not reported by this browser', note: 'Firefox and Safari do not share the amount of memory.' };
+      const recent = (d.engine === 'Blink' && Number(major(d.engineVersion)) >= 147) || mem > 8;
+      const top = recent && d.os !== 'Android' ? 32 : 8;
+      const bottom = recent ? 2 : 0.25;
+      return {
+        value: 'About ' + memText(mem) + (mem >= top ? ' or more' : mem <= bottom ? ' or less' : ''),
+        note: 'Browsers round the real amount to the nearest power of two and report only a limited range, to limit fingerprinting. Chrome 147 and later report 2 to 32 GB (2 to 8 GB on Android); earlier versions reported 0.25 to 8 GB.'
+      };
+    });
+    const g = S.gl || {};
+    const gi = S.gpuInfo;
+    rows.add('gpu', 'Graphics (GPU)', g.renderer ? 'WebGL renderer' : 'WebGPU adapter', () => {
+      const soft = /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(g.renderer || '');
+      return {
+        value: g.renderer || (gi && (gi.description || [gi.vendor, gi.architecture].filter(Boolean).join(' '))) || 'Not reported (WebGL is unavailable)',
+        note: soft ? 'Software rendering: the browser draws 3D graphics on the CPU, usually because hardware acceleration is off or the GPU is blocklisted, so graphics-heavy sites will be slow.' :
+          g.renderer && /^(Apple GPU|Mozilla|WebKit WebGL)$/.test(g.renderer) ? 'This browser shows a generic name instead of the real GPU model, to limit fingerprinting.' : ''
+      };
+    });
+    rows.add('gpu-vendor', 'GPU vendor', 'WebGL vendor', () => (g.vendor ? { value: g.vendor } : null));
+    rows.add('webgpu', 'WebGPU adapter', 'GPUAdapter.info', () => (gi && (gi.vendor || gi.architecture) ? { value: [gi.vendor, gi.architecture].filter(Boolean).join(', ') } : null));
+    rows.add('touch', 'Touch points', 'navigator.maxTouchPoints', () => {
+      const touch = nav.maxTouchPoints || 0;
+      return { value: touch ? touch + ' (touch screen)' : 'None (no touch screen)' };
+    });
+    rows.add('pointer', 'Primary pointer', '@media (pointer), (hover)', () => ({
+      value: (mq('(pointer: coarse)') ? 'Coarse (finger)' : mq('(pointer: fine)') ? 'Fine (mouse, trackpad or pen)' : 'None') + (mq('(hover: hover)') ? ', can hover' : ', cannot hover')
+    }));
+    const dpr = safe(() => window.devicePixelRatio || 1, 1);
+    rows.add('screen', 'Screen size', 'screen.width, screen.height', () => {
+      const sw = screen.width, sh = screen.height;
+      return { value: sw + X + sh + ' CSS pixels', note: dpr !== 1 ? 'About ' + Math.round(sw * dpr) + X + Math.round(sh * dpr) + ' physical pixels.' : 'The same in physical pixels.' };
+    });
+    rows.add('dpr', 'Device pixel ratio', 'window.devicePixelRatio', () => ({ value: String(round(dpr, 3)) }));
+    rows.add('depth', 'Colour depth', 'screen.colorDepth', () => ({ value: screen.colorDepth ? screen.colorDepth + '-bit' : 'Not reported' }));
+    rows.add('gamut', 'Colour gamut', '@media (color-gamut)', () => ({ value: gamut() }));
+    rows.add('hdr', 'HDR', '@media (dynamic-range: high)', () => ({ value: mq('(dynamic-range: high)') ? 'Yes' : 'No' }));
+    rows.add('network', 'Network (browser estimate)', 'navigator.connection', () => {
+      const c = nav.connection;
+      if (!(c && (c.effectiveType || typeof c.downlink === 'number'))) return { value: 'Not reported by this browser' };
+      const types = { 'slow-2g': 'Slow 2G', '2g': '2G', '3g': '3G', '4g': '4G' };
+      // "4g" is the top category and Chrome caps downlink at 10 Mb/s, so both mean "at least".
+      return {
+        value: [c.effectiveType ? (types[c.effectiveType] || c.effectiveType) + (c.effectiveType === '4g' ? '-class or faster connection' : '-class connection') : '',
+          typeof c.downlink === 'number' ? (c.downlink >= 10 ? '10 Mb/s or more' : 'about ' + c.downlink + ' Mb/s') : '',
+          c.rtt > 0 ? 'about ' + c.rtt + ' ms round trip' : ''].filter(Boolean).join(', ') + (c.saveData ? ', Data Saver on' : ''),
+        note: 'A rough browser estimate from recent traffic, rounded and capped to limit fingerprinting. It is not a speed test.'
+      };
+    });
+    return rows;
+  }
+
+  function offsetText() {
+    const m = -new Date().getTimezoneOffset();
+    const a = Math.abs(m);
+    return 'UTC' + (m >= 0 ? '+' : '-') + String(Math.floor(a / 60)).padStart(2, '0') + ':' + String(a % 60).padStart(2, '0');
+  }
+  function privacyRows() {
+    const rows = rowList();
+    rows.add('cookies', 'Cookies', 'navigator.cookieEnabled', () => ({ value: nav.cookieEnabled ? 'Enabled' : 'Blocked',
+      note: 'This page sets no cookies. Blocking only third-party cookies does not change this value.' }));
+    rows.add('javascript', 'JavaScript', '', () => ({ value: 'On', note: 'Scripts are running, or you would see a notice instead of these results.' }));
+    rows.add('dnt', 'Do Not Track', 'navigator.doNotTrack', () => {
+      const dnt = nav.doNotTrack !== undefined ? nav.doNotTrack : window.doNotTrack;
+      const d = S.d || {};
+      // Firefox 135 removed the setting; it now always reports "unspecified".
+      const ffRemoved = dnt === 'unspecified' && d.engine === 'Gecko' && Number(major(d.version)) >= 135;
+      return { value: dnt === '1' || dnt === 'yes' ? 'On' : dnt === undefined ? 'Not supported by this browser' : ffRemoved ? 'Not available: Firefox 135 and later no longer send it' : 'Off',
+        note: 'An older request not to be tracked, which few websites honour. Safari removed it in 2019, and Firefox replaced it with Global Privacy Control in version 135.' };
+    });
+    rows.add('gpc', 'Global Privacy Control', 'navigator.globalPrivacyControl', () => {
+      const gpc = nav.globalPrivacyControl;
+      return { value: gpc === true ? 'On' : gpc === false ? 'Off' : 'Not supported by this browser',
+        note: 'Asks sites not to sell or share your data, and some privacy laws, such as California\'s, require them to honour it. Brave and DuckDuckGo send it by default; Firefox sends it in private windows and has a setting for normal ones.' };
+    });
+    rows.add('languages', 'Languages', 'navigator.languages', () => ({
+      value: Array.isArray(nav.languages) && nav.languages.length ? nav.languages.join(', ') : (nav.language || 'Not reported'),
+      note: 'In the order set in your browser\'s language settings.' }));
+    const ro = safe(() => Intl.DateTimeFormat().resolvedOptions(), null) || {};
+    rows.add('locale', 'Number and date format', 'Intl.DateTimeFormat', () => {
+      const sample = safe(() => new Intl.NumberFormat().format(1234567.89) + ' and ' + new Intl.DateTimeFormat().format(new Date()), '');
+      return { value: (ro.locale || 'Not reported') + (sample ? ' (' + sample + ')' : '') };
+    });
+    rows.add('timezone', 'Time zone', 'Intl.DateTimeFormat().resolvedOptions()', () => ({ value: (ro.timeZone || 'Not reported') + ' (' + offsetText() + ')',
+      note: 'Read from your device\'s time zone setting; this page does not ask for your location.' }));
+    rows.add('scheme', 'Colour scheme', '@media (prefers-color-scheme)', () => ({ value: mq('(prefers-color-scheme: dark)') ? 'Dark' : mq('(prefers-color-scheme: light)') ? 'Light' : 'No preference' }));
+    rows.add('motion', 'Reduced motion', '@media (prefers-reduced-motion)', () => ({ value: mq('(prefers-reduced-motion: reduce)') ? 'On (reduce animations)' : 'Off (no preference)' }));
+    rows.add('contrast', 'Contrast', '@media (prefers-contrast), (forced-colors)', () => {
+      const contrast = mq('(prefers-contrast: more)') ? 'More' : mq('(prefers-contrast: less)') ? 'Less' : mq('(prefers-contrast: custom)') ? 'Custom' : 'No preference';
+      return { value: contrast + (mq('(forced-colors: active)') ? ', forced colours on (such as a Windows contrast theme)' : '') };
+    });
+    rows.add('pdf', 'PDF viewer', 'navigator.pdfViewerEnabled', () => {
+      const pdf = nav.pdfViewerEnabled;
+      return { value: pdf === true ? 'Built-in viewer on' : pdf === false ? 'Off or not available, so PDFs download instead' : 'Not reported by this browser' };
+    });
+    rows.add('automation', 'Controlled by automation', 'navigator.webdriver', () => ({
+      value: nav.webdriver === true ? 'Yes: automation software (WebDriver) is driving this browser' : nav.webdriver === false ? 'No' : 'Not reported' }));
+    rows.add('private', 'Private browsing', '', () => ({ value: 'Cannot be detected reliably',
+      note: 'Browsers deliberately hide private mode from websites. Tricks that claim to detect it rely on side effects, such as a smaller storage quota, that also happen in normal windows.' }));
+    rows.add('storage', 'Storage quota for this site', 'navigator.storage.estimate()', () => {
+      const q = S.quota;
+      return { value: q === null ? 'Checking…' : q && typeof q.quota === 'number' ? 'About ' + bytes(q.quota) + ' allowed, ' + bytes(q.usage || 0) + ' used' : 'Not reported by this browser',
+        note: 'A read-only estimate; this page stores nothing. Browsers usually allow a share of the disk\'s total size.' };
+    });
+    return rows;
+  }
+
+  // ---------- 4. Fingerprint signals ----------
+  const FONTS = ['Arial', 'Arial Black', 'Bahnschrift', 'Calibri', 'Cambria', 'Candara', 'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel',
+    'Courier New', 'Franklin Gothic Medium', 'Georgia', 'Impact', 'Lucida Console', 'Palatino Linotype', 'Segoe UI', 'Tahoma',
+    'Times New Roman', 'Trebuchet MS', 'Verdana', 'Avenir', 'Futura', 'Gill Sans', 'Helvetica Neue', 'Menlo', 'Monaco', 'Optima',
+    'Cantarell', 'DejaVu Sans', 'Liberation Sans', 'Noto Sans', 'Roboto', 'Ubuntu'];
+  function drawFp(c) {
+    c.width = 300; c.height = 80;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 300, 80);
+    ctx.fillStyle = '#f60';
+    ctx.fillRect(150, 4, 80, 24);
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#069';
+    ctx.font = '17px Arial, sans-serif';
+    ctx.fillText('Cwm fjord bank glyphs 😃', 6, 24);
+    ctx.fillStyle = 'rgba(102, 204, 0, 0.75)';
+    ctx.font = 'italic 15px Georgia, serif';
+    ctx.fillText('Cwm fjord bank glyphs 😃', 8, 46);
+    const grad = ctx.createLinearGradient(0, 0, 300, 0);
+    grad.addColorStop(0, '#d33'); grad.addColorStop(0.5, '#3a3'); grad.addColorStop(1, '#33d');
+    ctx.fillStyle = grad;
+    ctx.fillRect(6, 60, 200, 12);
+    ctx.globalCompositeOperation = 'multiply';
+    [['#f0f', 238, 46], ['#0ff', 262, 46], ['#ff0', 250, 64]].forEach(p => {
+      ctx.fillStyle = p[0];
+      ctx.beginPath();
+      ctx.arc(p[1], p[2], 16, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalCompositeOperation = 'source-over';
+    return ctx.getImageData(0, 0, 300, 80).data;
+  }
+  async function audioHash() {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OAC) return '';
+    const ctx = new OAC(1, 5000, 44100);
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = 10000;
+    const comp = ctx.createDynamicsCompressor();
+    [['threshold', -50], ['knee', 40], ['ratio', 12], ['attack', 0], ['release', 0.25]].forEach(p => { if (comp[p[0]]) comp[p[0]].value = p[1]; });
+    osc.connect(comp);
+    comp.connect(ctx.destination);
+    osc.start(0);
+    const rendering = new Promise(resolve => {
+      ctx.oncomplete = e => resolve(e.renderedBuffer);
+      const p = ctx.startRendering();
+      if (p && typeof p.then === 'function') p.then(resolve, () => resolve(null));
+    });
+    const buf = await settle(rendering, 3000, null);
+    if (!buf) return '';
+    const data = buf.getChannelData(0).slice(4500);
+    return sha256(new Uint8Array(data.buffer));
+  }
+  // null means the fonts could not be checked at all.
+  async function fontList() {
+    const ctx = document.createElement('canvas').getContext('2d');
+    if (!ctx) return null;
+    const text = 'mmmmmmmmmmlli10OQ@#WwQq';
+    const bases = ['monospace', 'sans-serif', 'serif'];
+    const width = f => { ctx.font = '72px ' + f; return ctx.measureText(text).width; };
+    const base = bases.map(width);
+    const found = [];
+    // Font look-ups can be slow on some systems, so the page yields every ~16 ms.
+    const now = () => (window.performance && performance.now ? performance.now() : Date.now());
+    let start = now();
+    for (const f of FONTS) {
+      if (bases.some((b, j) => width('"' + f + '", ' + b) !== base[j])) found.push(f);
+      if (now() - start > 16) { await wait(0); start = now(); }
+    }
+    return found;
+  }
+  // Every signal is read on its own and the slow ones run side by side, so a
+  // signal that fails or never answers leaves only its own hash empty.
+  async function fingerprint() {
+    const px = safe(() => drawFp($('#bt-fp-canvas')), null);
+    await wait(0);
+    const px2 = safe(() => drawFp(document.createElement('canvas')), null);
+    const glParams = S.gl && S.gl.params ? safe(() => JSON.stringify(S.gl.params), '') : '';
+    const hash = data => settle(sha256(data), 2000, '');
+    const r = await Promise.all([px ? hash(px) : '', px2 ? hash(px2) : '', glParams ? hash(glParams) : '', settle(audioHash(), 4000, ''), settle(fontList(), 4000, null)]);
+    const fp = { canvas: r[0], canvasRepeat: r[1], webgl: r[2], audio: r[3], fonts: Array.isArray(r[4]) ? r[4] : [], fontsChecked: Array.isArray(r[4]) };
+    const h = S.high || {};
+    const signals = {
+      ua: S.ua, languages: safe(() => Array.from(nav.languages), []), timeZone: safe(() => Intl.DateTimeFormat().resolvedOptions().timeZone, ''),
+      screen: safe(() => [screen.width, screen.height, window.devicePixelRatio, screen.colorDepth], []), cores: safe(() => nav.hardwareConcurrency, null),
+      memory: safe(() => nav.deviceMemory, null), touch: safe(() => nav.maxTouchPoints, null), hints: [h.platform, h.platformVersion, h.architecture, h.bitness, h.model],
+      canvas: fp.canvas, webgl: fp.webgl, audio: fp.audio, fonts: fp.fonts
+    };
+    const r2 = await Promise.all([fp.fontsChecked ? hash(fp.fonts.join(',')) : '', hash(JSON.stringify(signals))]);
+    fp.fontsHash = r2[0];
+    fp.combined = r2[1];
+    return fp;
+  }
+  const short = h => h ? h.slice(0, 16) : 'Not available';
+  function renderFingerprint(fp) {
+    $('#bt-fp-canvas-hash').textContent = short(fp.canvas);
+    $('#bt-fp-webgl-hash').textContent = S.gl && S.gl.params ? short(fp.webgl) : 'No WebGL';
+    $('#bt-fp-audio-hash').textContent = short(fp.audio);
+    $('#bt-fp-fonts-hash').textContent = short(fp.fontsHash);
+    $('#bt-fp-combined').textContent = short(fp.combined);
+    $('#bt-fonts-sum').textContent = fp.fontsChecked ? fp.fonts.length + ' of the ' + FONTS.length + ' common fonts checked were found. A font can also count when the system substitutes a look-alike.' :
+      'The fonts could not be checked in this browser.';
+    const ul = $('#bt-fonts');
+    ul.textContent = '';
+    fp.fonts.forEach(f => ul.appendChild(el('li', '', f)));
+  }
+  function compareRuns(a, b) {
+    const names = { canvas: 'canvas', webgl: 'WebGL', audio: 'audio', fontsHash: 'fonts' };
+    return Object.keys(names).filter(k => a[k] !== b[k]).map(k => names[k]);
+  }
+  function fpMessage() {
+    const fp = S.fp, first = S.fpFirst;
+    if (!fp) return '';
+    const parts = [];
+    if (fp.canvas && fp.canvasRepeat && fp.canvas !== fp.canvasRepeat) {
+      parts.push('Drawing the same image twice gave different canvas hashes, so this browser adds random noise to canvas reads.');
+    }
+    if (S.fpRuns > 1 && first) {
+      const changed = compareRuns(first, fp);
+      parts.push(changed.length ?
+        'Run ' + S.fpRuns + ': the ' + changed.join(', ') + ' ' + (changed.length === 1 ? 'hash' : 'hashes') + ' changed since the first run, so this browser randomises ' + (changed.length === 1 ? 'that signal' : 'those signals') + '.' :
+        'Run ' + S.fpRuns + ': every hash matches the first run, so these values are stable during this visit.');
+    }
+    // Brave's noise is fixed for each site and browser session, so repeat runs match.
+    if (S.brave) parts.push('Brave changes its fingerprint noise for each site and each browser session, so expect different hashes after restarting Brave.');
+    return parts.join(' ');
+  }
+  // A busy flag rather than disabling the button, which would drop keyboard focus.
+  let fpBusy = false;
+  async function runFingerprint() {
+    if (fpBusy) return;
+    fpBusy = true;
+    try {
+      const fp = await fingerprint();
+      S.fpRuns++;
+      if (!S.fpFirst) S.fpFirst = fp;
+      S.fp = fp;
+      renderFingerprint(fp);
+      $('#bt-fp-msg').textContent = fpMessage();
+    } catch (e) {
+      $('#bt-fp-msg').textContent = 'The fingerprint signals could not be read in this browser.';
+    }
+    fpBusy = false;
+  }
+
+  // ---------- 5. Report ----------
+  function rowsText(rows) { return rows.map(r => '  ' + r.label + ': ' + r.value); }
+  function reportText() {
+    const d = S.d || {};
+    const L = [];
+    L.push('Browser report from ' + location.origin + location.pathname);
+    L.push('Created: ' + new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC');
+    L.push('', 'SUMMARY', '  ' + (d.sentence || ''), '  Browser: ' + (d.browserText || ''), '  Rendering engine: ' + (d.engineText || ''),
+      '  Operating system: ' + (d.osText || ''), '  Device type: ' + (d.deviceText || ''));
+    L.push('', 'USER AGENT', '  ' + S.ua);
+    const ch = chRows();
+    L.push('', 'CLIENT HINTS');
+    if (ch.length) L.push.apply(L, rowsText(ch)); else L.push('  Not supported by this browser');
+    const yes = S.feats.filter(f => f.ok).length;
+    L.push('', 'FEATURE SUPPORT: ' + yes + ' of ' + S.feats.length);
+    GROUPS.forEach(g => {
+      const fs = S.feats.filter(f => f.group === g[0]);
+      const missing = fs.filter(f => f.done && !f.ok).map(f => f.name);
+      L.push('  ' + g[1] + ': ' + fs.filter(f => f.ok).length + ' of ' + fs.length + (missing.length ? ' (missing: ' + missing.join(', ') + ')' : ''));
+    });
+    L.push('', 'HARDWARE AND DISPLAY');
+    L.push.apply(L, rowsText(S.hw));
+    L.push('', 'PRIVACY AND SETTINGS');
+    L.push.apply(L, rowsText(S.pv));
+    return L.join('\n') + '\n';
+  }
+  function reportJSON() {
+    const d = S.d || {};
+    const obj = rows => { const o = {}; rows.forEach(r => { o[r.label] = r.value; }); return o; };
+    const fp = S.fp;
+    return {
+      generatedAt: new Date().toISOString(),
+      source: location.origin + location.pathname,
+      note: 'Created in the browser. Nothing was uploaded or stored.',
+      summary: { sentence: d.sentence, browser: d.name || null, browserVersion: d.version || null, engine: d.engine || null, engineVersion: d.engineVersion || null,
+        os: d.os || null, osVersion: d.osVersion || null, deviceType: d.device || null, model: d.model || null, notes: d.notes || [] },
+      userAgent: S.ua,
+      clientHints: S.low ? Object.assign({ brands: S.low.brands, mobile: S.low.mobile, platform: S.low.platform }, S.high || {}) : null,
+      features: {
+        supported: S.feats.filter(f => f.ok).length,
+        total: S.feats.length,
+        groups: GROUPS.map(g => ({ name: g[1], items: S.feats.filter(f => f.group === g[0]).map(f => ({ id: f.id, name: f.name, supported: f.done ? f.ok : null, detail: f.detail || undefined })) }))
+      },
+      hardware: obj(S.hw),
+      privacy: obj(S.pv),
+      fingerprint: fp ? { canvas: fp.canvas, webgl: fp.webgl, audio: fp.audio, fonts: fp.fontsChecked ? fp.fonts : null, fontsHash: fp.fontsHash, combined: fp.combined, runs: S.fpRuns } : null
+    };
+  }
+  function updateReport() { $('#bt-report-text').textContent = reportText(); }
+
+  // ---------- Wiring ----------
+  function guard(fn) { try { fn(); } catch (e) { /* one failing part must not stop the rest */ } }
+  $('#bt-only-no').addEventListener('change', e => {
+    $('#bt-groups').classList.toggle('bt-only-no', e.target.checked);
+    updateScore();
+  });
+  $('#bt-fp-again').addEventListener('click', async () => {
+    await runFingerprint();
+    TT.announce(fpMessage() || 'Fingerprint checked again.');
+    guard(updateReport);
+  });
+  $('#bt-copy').addEventListener('click', e => {
+    const text = safe(reportText, '');
+    if (text) TT.copy(text, e.currentTarget); else TT.flash(e.currentTarget, 'Report unavailable');
+  });
+  $('#bt-download').addEventListener('click', () => {
+    const json = safe(() => JSON.stringify(reportJSON(), null, 2), '');
+    if (!json) { TT.announce('The report could not be created in this browser.'); return; }
+    TT.download('browser-report.json', json + '\n', 'application/json');
+    TT.announce('Report downloaded.');
+  });
+
+  async function main() {
+    guard(buildFeatures);
+    // Started now and awaited later, so the waits overlap.
+    const quota = safe(() => (nav.storage && fn(nav.storage, 'estimate') ? settle(nav.storage.estimate(), 2000, false) : false), false);
+    // Client Hints (Chromium browsers on HTTPS only)
+    S.low = safe(() => nav.userAgentData || null, null);
+    const high = S.low && fn(S.low, 'getHighEntropyValues') ?
+      settle(safe(() => S.low.getHighEntropyValues(['architecture', 'bitness', 'formFactors', 'fullVersionList', 'model', 'platformVersion', 'uaFullVersion', 'wow64']), null), 2000, null) : null;
+    const brave = safe(() => !!nav.brave && fn(nav.brave, 'isBrave'), false) ? settle(safe(() => nav.brave.isBrave(), false), 1000, false) : false;
+    const answers = await Promise.all([high, brave]);
+    S.high = answers[0] && typeof answers[0] === 'object' ? answers[0] : null;
+    S.brave = answers[1] === true;
+    guard(() => {
+      const d = detect(S.ua, safe(() => nav.maxTouchPoints || 0, 0), S.low, S.high, S.brave);
+      S.d = d;
+      $('#bt-sentence').textContent = d.sentence;
+      $('#bt-browser').textContent = d.browserText;
+      $('#bt-engine').textContent = d.engineText;
+      $('#bt-os').textContent = d.osText;
+      $('#bt-device').textContent = d.deviceText;
+      const notes = $('#bt-notes');
+      notes.textContent = '';
+      d.notes.forEach(t => notes.appendChild(el('li', '', t)));
+      notes.hidden = !d.notes.length;
+    });
+    guard(renderUA);
+    // Some rows (device memory, Do Not Track in Firefox) depend on the browser detected above.
+    // The first Intl call can be slow, so the tables are filled in a task of their own.
+    await wait(0);
+    guard(() => { S.hw = hardwareRows(); fillRows($('#bt-hw-rows'), S.hw); });
+    guard(() => { S.pv = privacyRows(); fillRows($('#bt-pv-rows'), S.pv); });
+    root.dataset.tables = 'filled';
+    await wait(0);
+    try { await runFeatures(); } catch (e) { /* keep going */ }
+    // The GPU name comes from the WebGL and WebGPU probes above.
+    guard(() => { S.hw = hardwareRows(); fillRows($('#bt-hw-rows'), S.hw); });
+    S.quota = await quota;
+    guard(() => { S.pv = privacyRows(); fillRows($('#bt-pv-rows'), S.pv); });
+    await wait(0);
+    try { await runFingerprint(); } catch (e) { /* keep going */ }
+    S.done = true;
+    guard(updateReport);
+    root.dataset.state = 'done';
+    guard(() => {
+      const yes = S.feats.filter(f => f.ok).length;
+      $('#bt-status').textContent = 'Browser check finished. ' + (S.d ? S.d.sentence + ' ' : '') + yes + ' of ' + S.feats.length + ' features supported.';
+    });
+  }
+  main().catch(() => { root.dataset.state = 'done'; });
+})();
+</script>
