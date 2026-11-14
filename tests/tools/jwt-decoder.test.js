@@ -453,6 +453,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   }
   // The public key shown matches the private key; its JWK carries the header's kid.
   assert.equal((await text('#jb-pub')).trim(), rsa.publicKey.export({ type: 'spki', format: 'pem' }).trim());
+  // The focusable key box has a role, without which its label is not exposed.
+  assert.deepEqual(await page.$eval('#jb-pub', el => [el.getAttribute('role'), el.getAttribute('aria-label'), el.tabIndex]), ['group', 'Public key in PEM form', 0]);
   const pubJwk = JSON.parse(await text('#jb-pub-jwk'));
   assert.deepEqual([pubJwk.kty, pubJwk.n, pubJwk.e, pubJwk.kid, pubJwk.alg], ['RSA', rsa.publicKey.export({ format: 'jwk' }).n, 'AQAB', 'k1', 'RS256']);
   // Decode and verify it above: the decoder gets the token and the public JWK.

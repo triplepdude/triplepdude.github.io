@@ -28,18 +28,23 @@ policy. The realistic path:
    `https://triplepdude.github.io/sitemap.xml`. Google finds new sites mainly through links, so
    this can bring search traffic much sooner. For verification, uncomment
    `webmaster_verifications` in `_config.yml` and paste the code.
-3. **Once there's steady traffic, apply to [Google AdSense](https://adsense.google.com).** Choose
-   "I don't have a site yet" at signup, then add `triplepdude.github.io` under Sites. Paste your
-   `ca-pub-…` ID into `ads.adsense_client` in `_config.yml`, which adds the AdSense script and
-   `ads.txt`, and request review. When asked, pick Google's own consent message for EU/UK
+3. **Get a domain before applying for ads.** AdSense only accepts a site on a domain the owner
+   registered (`example.com`), not a `github.io` address or any other subdomain. Buy one at a
+   registrar that sells at cost (Cloudflare Registrar, Porkbun), point it at GitHub Pages with
+   the DNS records GitHub documents, add a `CNAME` file with the domain to this repo, set `url`
+   in `_config.yml` to the new address, and add the new domain as a property in Search Console.
+   GitHub redirects the old address to the new one.
+4. **Once there's steady traffic, apply to [Google AdSense](https://adsense.google.com).** Add
+   the domain under Sites. Paste your `ca-pub-…` ID into `ads.adsense_client` in `_config.yml`,
+   which adds the AdSense script and `ads.txt`, and request review. When asked, pick Google's own consent message for EU/UK
    visitors. Google also asks for a one-time ID check, a PIN sent by post once earnings reach
    $10, and tax/payment details. After that, payouts are automatic above $100. An AdSense
    account with no ad impressions for six months is deactivated, so apply when traffic exists,
    not before.
-4. **At about 50,000 page views a month:** [EthicalAds](https://www.ethicalads.io/publishers/)
+5. **At about 50,000 page views a month:** [EthicalAds](https://www.ethicalads.io/publishers/)
    is a privacy-friendly alternative that suits developer tools. Set
    `ads.ethicalads_publisher`; it replaces AdSense, because it must be the only ad on a page.
-5. **Any time:** set `support_url` to a GitHub Sponsors or Ko-fi page to show a small "Support
+6. **Any time:** set `support_url` to a GitHub Sponsors or Ko-fi page to show a small "Support
    this site" link in the footer.
 
 Expect modest income. Display ads on a tools site typically pay a few dollars per thousand page
@@ -65,7 +70,7 @@ tools automatically.
 
 Rules the test runner enforces: no requests to other hosts (third-party libraries are vendored in
 `assets/vendor/`), no JavaScript errors, a proper title and description, and no horizontal
-scrolling on phones.
+scrolling on phones or at 200% zoom.
 
 ```sh
 gem install jekyll -v '~> 3.10' jekyll-seo-tag jekyll-sitemap webrick

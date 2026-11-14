@@ -78,6 +78,10 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await text('#fg-if-out'), /That includes extra credit/);
   await page.fill('#fg-if', 'abc');
   assert.match(await text('#fg-if-out'), /Enter the score you might get/);
+  // The what-if box points at the line that holds its result or its error.
+  assert.equal(await page.getAttribute('#fg-if', 'aria-describedby'), 'fg-if-out');
+  await page.locator('#fg-if').press('Tab');
+  assert.equal(await page.getAttribute('#fg-if', 'aria-invalid'), 'true');
   await page.fill('#fg-if', '');
 
   // Errors: a weight of 0 or over 100, and text in a number box.
@@ -85,6 +89,8 @@ module.exports = async ({ page, open, assert }) => {
   await page.locator('#fg-weight').press('Tab');
   assert.match(await text('#fg-msg'), /more than 0% and at most 100%/);
   assert.equal(await page.getAttribute('#fg-weight', 'aria-invalid'), 'true');
+  // Every grade box points at the message, in percent and in points mode.
+  assert.deepEqual(await page.$$eval('#fg-current, #fg-weight, #fg-earned, #fg-possible, #fg-final-pts, #fg-target', els => els.map(el => el.getAttribute('aria-describedby'))), Array(6).fill('fg-msg'));
   assert.equal(await text('#fg-need'), '–');
   await page.fill('#fg-weight', '120');
   await page.locator('#fg-weight').press('Tab');

@@ -58,6 +58,16 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   };
   const labels = () => page.$$eval('.mpdf-src', l => l.map(e => e.textContent.replace(/\.pdf · p\. /, ' ')));
   const metas = () => page.$$eval('.mpdf-file-meta', l => l.map(e => e.textContent));
+  // The selection count is a live region, and the page list is redrawn several times for each file
+  // added and at every move or rotation: the count may be written only when it changes, because a
+  // screen reader reads it out at every write.
+  await page.evaluate(() => {
+    window.__selWrites = [];
+    const el = document.getElementById('mpdf-selinfo');
+    new MutationObserver(records => records.forEach(() => window.__selWrites.push(el.textContent)))
+      .observe(el, { childList: true, characterData: true, subtree: true });
+  });
+  const selWrites = () => page.evaluate(() => window.__selWrites.splice(0));
 
   // ---- Not a PDF, damaged, encrypted and ordinary files ----
   await page.setInputFiles('#mpdf-file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello, not a pdf') });
@@ -136,6 +146,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual((await labels()).slice(0, 3), ['bravo 1', 'bravo 2', 'alpha 2']);
 
   // Select pages 1 and 3 (checkbox, then a click on the thumbnail), rotate them left, save just those.
+  assert.equal(await page.textContent('#mpdf-selinfo'), 'No pages selected');
+  assert.deepEqual(await selWrites(), [], 'adding, moving and rotating pages did not write the unchanged selection count again');
   await page.check('.mpdf-page:nth-child(1) .mpdf-check');
   await page.click('.mpdf-page:nth-child(3) .mpdf-thumb', { position: { x: 60, y: 80 } });
   assert.equal(await page.textContent('#mpdf-selinfo'), '2 pages selected');
@@ -145,6 +157,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   pdf = await inspect(out.buf);
   assert.deepEqual(pdf.pages.map(p => p.text + '@' + p.rotate), ['Bravo 1@0', 'Alpha 2@270']);
   await page.click('#mpdf-selnone');
+  assert.deepEqual(await selWrites(), ['1 page selected', '2 pages selected', 'No pages selected'], 'the count is written once for each change');
   assert.equal(await page.isDisabled('#mpdf-extract'), true);
   await page.click('#mpdf-reverse');
   assert.deepEqual(await labels(), ['locked 1', 'restricted 1', 'alpha 3', 'alpha 1', 'alpha 2', 'bravo 2', 'bravo 1']);

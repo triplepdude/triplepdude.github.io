@@ -96,6 +96,26 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.equal(await inDoc('br', l => l.length), 1);
   await page.uncheck('#mdp-breaks');
 
+  // ---- Keyboard focus in the preview ----
+  // The preview is a tab stop so that it can be scrolled with the keyboard, and it has no links
+  // here, so the outline of the frame is the only sign of where the focus is.
+  const ring = () => page.evaluate(() => {
+    const f = document.getElementById('mdp-frame');
+    return (document.activeElement === f ? 'focused, outline ' : 'not focused, outline ') + getComputedStyle(f).outlineStyle;
+  });
+  // The outline follows the focus a moment later (the page sets it from a timer).
+  const ringIs = async (want, why) => {
+    for (let i = 0; i < 40 && await ring() !== want; i++) await page.waitForTimeout(50);
+    assert.equal(await ring(), want, why);
+  };
+  await page.focus('#mdp-input');
+  await ringIs('not focused, outline none');
+  await page.keyboard.press('Tab');
+  await ringIs('focused, outline solid', 'the preview shows that it has the focus');
+  await page.keyboard.press('Shift+Tab');
+  await ringIs('not focused, outline none', 'the outline goes when the focus leaves the preview');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'mdp-input');
+
   // ---- Math: $, $$, \( \), \[ \], ```math and environments; prices stay text. ----
   await setMd([
     'Costs $5 and $10, or \\$3.', '', 'Inline $x^2$ and \\(y_1\\).', '', '$$', '\\sum_{i=1}^n i', '$$', '',

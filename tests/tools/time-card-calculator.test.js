@@ -238,6 +238,9 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#tc-rate', 'twenty');
   await page.locator('#tc-rate').press('Tab');
   assert.match(await text('#tc-settings-msg'), /hourly rate/);
+  // The rate field is marked invalid and points at the message that says why.
+  assert.equal(await page.getAttribute('#tc-rate', 'aria-invalid'), 'true');
+  assert.equal(await page.getAttribute('#tc-rate', 'aria-describedby'), 'tc-settings-msg');
   assert.equal(await text('#tc-pay'), '–');
 
   // The status region gets one short summary after typing pauses.
@@ -266,6 +269,9 @@ module.exports = async ({ page, open, assert }) => {
   // The threshold message matches the rule (0 is not allowed).
   await page.fill('#tc-weekly', '0');
   assert.equal(await text('#tc-settings-msg'), 'Enter the weekly overtime threshold in hours, more than 0 and at most 168.');
+  // The multiplier and threshold fields share that message, so they point at it too.
+  assert.equal(await page.getAttribute('#tc-weekly', 'aria-invalid'), 'true');
+  assert.deepEqual(await page.$$eval('#tc-otm, #tc-dtm, #tc-weekly, #tc-daily, #tc-dt', els => els.map(el => el.getAttribute('aria-describedby'))), Array(5).fill('tc-settings-msg'));
   await page.fill('#tc-weekly', '40');
   assert.equal(await text('#tc-settings-msg'), '');
 

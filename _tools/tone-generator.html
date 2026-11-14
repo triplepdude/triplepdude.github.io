@@ -141,7 +141,7 @@ faq:
     <div class="tg-freq-row">
       <div class="field">
         <label for="tg-freq" id="tg-freq-label">Frequency (Hz)</label>
-        <input type="number" id="tg-freq" min="1" max="22000" step="any" value="440" inputmode="decimal">
+        <input type="number" id="tg-freq" min="1" max="22000" step="any" value="440" inputmode="decimal" aria-describedby="tg-freq-msg">
       </div>
       <div class="field tg-slider">
         <label for="tg-slider">Frequency slider (logarithmic)</label>
@@ -151,12 +151,12 @@ faq:
     </div>
     <p class="msg error" id="tg-freq-msg" aria-live="polite"></p>
     <div class="tg-steps">
-      <button class="btn secondary small" type="button" data-step="oct-" aria-label="Down one octave">÷2</button>
-      <button class="btn secondary small" type="button" data-step="semi-" aria-label="Down one semitone">−1 semitone</button>
-      <button class="btn secondary small" type="button" data-step="-" id="tg-minus" aria-label="Down 1 Hz">−1 Hz</button>
-      <button class="btn secondary small" type="button" data-step="+" id="tg-plus" aria-label="Up 1 Hz">+1 Hz</button>
-      <button class="btn secondary small" type="button" data-step="semi+" aria-label="Up one semitone">+1 semitone</button>
-      <button class="btn secondary small" type="button" data-step="oct+" aria-label="Up one octave">×2</button>
+      <button class="btn secondary small" type="button" data-step="oct-" aria-label="÷2, down one octave">÷2</button>
+      <button class="btn secondary small" type="button" data-step="semi-">−1 semitone</button>
+      <button class="btn secondary small" type="button" data-step="-" id="tg-minus">−1 Hz</button>
+      <button class="btn secondary small" type="button" data-step="+" id="tg-plus">+1 Hz</button>
+      <button class="btn secondary small" type="button" data-step="semi+">+1 semitone</button>
+      <button class="btn secondary small" type="button" data-step="oct+" aria-label="×2, up one octave">×2</button>
       <span class="tg-stepsel">
         <label class="tg-steplabel" for="tg-step">Step</label>
         <select id="tg-step">
@@ -452,22 +452,24 @@ faq:
     if (from !== 'slider') slider.value = String(sliderPos(f));
     slider.setAttribute('aria-valuetext', fmtHz(f));
     $('#tg-freq-msg').textContent = '';
+    freqIn.removeAttribute('aria-invalid');
     player.retune();
     renderInfo();
   }
 
-  const freqErr = TT.debounce(function () {
+  // An out-of-range value: the note says which tone is kept, and the field is marked invalid.
+  function checkFreq() {
     const v = num(freqIn);
-    if (!(v >= F_MIN && v <= F_MAX)) $('#tg-freq-msg').textContent = 'Enter a frequency from 1 to 22,000 Hz. The tone stays at ' + fmtHz(st.f) + '.';
-  }, 900);
+    if (v >= F_MIN && v <= F_MAX) return;
+    $('#tg-freq-msg').textContent = 'Enter a frequency from 1 to 22,000 Hz. The tone stays at ' + fmtHz(st.f) + '.';
+    freqIn.setAttribute('aria-invalid', 'true');
+  }
+  const freqErr = TT.debounce(checkFreq, 900);
   freqIn.addEventListener('input', function () {
     const v = num(freqIn);
     if (v >= F_MIN && v <= F_MAX) setFreq(v, 'input'); else freqErr();
   });
-  freqIn.addEventListener('change', function () {
-    const v = num(freqIn);
-    if (!(v >= F_MIN && v <= F_MAX)) $('#tg-freq-msg').textContent = 'Enter a frequency from 1 to 22,000 Hz. The tone stays at ' + fmtHz(st.f) + '.';
-  });
+  freqIn.addEventListener('change', checkFreq);
   slider.addEventListener('input', function () {
     setFreq(tidy(Math.exp(+slider.value / 10000 * LN_MAX)), 'slider');
   });
@@ -486,8 +488,8 @@ faq:
   $$('.tg-steps [data-step]').forEach(function (b) { b.addEventListener('click', function () { stepBy(b.dataset.step); }); });
   stepSel.addEventListener('change', function () {
     const s = stepSel.options[stepSel.selectedIndex].text;
-    $('#tg-minus').textContent = '−' + s; $('#tg-minus').setAttribute('aria-label', 'Down ' + s);
-    $('#tg-plus').textContent = '+' + s; $('#tg-plus').setAttribute('aria-label', 'Up ' + s);
+    $('#tg-minus').textContent = '−' + s;
+    $('#tg-plus').textContent = '+' + s;
   });
   $$('.tg-presets [data-f]').forEach(function (b) { b.addEventListener('click', function () { setFreq(+b.dataset.f); }); });
 

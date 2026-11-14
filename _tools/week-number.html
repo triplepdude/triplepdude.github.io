@@ -139,7 +139,7 @@ faq:
 <div class="row">
   <div class="field">
     <label for="wn-date">Date</label>
-    <input type="date" id="wn-date" min="0001-01-01" max="9999-12-31">
+    <input type="date" id="wn-date" min="0001-01-01" max="9999-12-31" aria-describedby="wn-date-msg">
   </div>
   <button class="btn secondary" type="button" id="wn-date-today">Today</button>
 </div>
@@ -162,11 +162,11 @@ faq:
 <div class="row wn-row-num">
   <div class="field">
     <label for="wn-find-year">Year</label>
-    <input type="number" id="wn-find-year" min="1" max="9999" step="1" inputmode="numeric">
+    <input type="number" id="wn-find-year" min="1" max="9999" step="1" inputmode="numeric" aria-describedby="wn-find-msg">
   </div>
   <div class="field">
     <label for="wn-find-week">ISO week</label>
-    <input type="number" id="wn-find-week" min="1" max="53" step="1" inputmode="numeric">
+    <input type="number" id="wn-find-week" min="1" max="53" step="1" inputmode="numeric" aria-describedby="wn-find-msg">
   </div>
 </div>
 <p class="msg error" id="wn-find-msg"></p>
@@ -178,7 +178,7 @@ faq:
 <div class="row wn-year-row">
   <div class="field">
     <label for="wn-year">Year</label>
-    <input type="number" id="wn-year" min="1" max="9999" step="1" inputmode="numeric">
+    <input type="number" id="wn-year" min="1" max="9999" step="1" inputmode="numeric" aria-describedby="wn-year-msg">
   </div>
   <div class="field">
     <label for="wn-system">Numbering</label>
@@ -305,6 +305,11 @@ faq:
     };
   }
   var sayDate = speaker($('#wn-date-status')), sayFind = speaker($('#wn-find-status')), sayYear = speaker($('#wn-year-status'));
+  // A field is marked invalid for as long as the message it points at
+  // (aria-describedby) is about its value.
+  function flag(el, bad) {
+    if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+  }
 
   // ----- Today -----
   function renderToday() {
@@ -329,12 +334,14 @@ faq:
     if (z === null) {
       // An empty field is not an error; only a bad value gets the red message.
       msg.textContent = dateInput.value ? 'Enter a valid date between the years 1 and 9999.' : '';
+      flag(dateInput, !!dateInput.value);
       ids.forEach(function (id) { $(id).textContent = '–'; });
       $('#wn-date-range').textContent = dateInput.value ? '' : 'Pick a date to see its week number.';
       say(msg.textContent);
       return;
     }
     msg.textContent = '';
+    flag(dateInput, false);
     var w = isoWeek(z), c = civil(z), mon = z - w.day + 1;
     $('#wn-date-week').textContent = w.week;
     $('#wn-date-iso').textContent = isoWeekStr(w.year, w.week) + '-' + w.day;
@@ -354,9 +361,12 @@ faq:
     var y = parseYear($('#wn-find-year').value);
     var wv = String($('#wn-find-week').value).trim();
     var w = /^\d{1,2}$/.test(wv) ? +wv : NaN;
+    var max = y === null ? 0 : weeksIn(y), weekOk = w >= 1 && w <= max;
+    // The week can only be judged once the year is valid.
+    flag($('#wn-find-year'), y === null);
+    flag($('#wn-find-week'), y !== null && !weekOk);
     if (y === null) { msg.textContent = 'Enter a year from 1 to 9999.'; out.textContent = ''; say(msg.textContent); return; }
-    var max = weeksIn(y);
-    if (!(w >= 1 && w <= max)) {
+    if (!weekOk) {
       msg.textContent = y + ' has ' + max + ' ISO weeks. Enter a week from 1 to ' + max + '.';
       out.textContent = '';
       say(msg.textContent);
@@ -396,6 +406,7 @@ faq:
     var msg = $('#wn-year-msg'), say = trigger ? function (t) { sayYear(t, trigger === 'click'); } : function () {};
     var y = parseYear(yearInput.value);
     var tbody = $('#wn-table tbody');
+    flag(yearInput, y === null);
     if (y === null) {
       msg.textContent = 'Enter a year from 1 to 9999.';
       tbody.textContent = '';

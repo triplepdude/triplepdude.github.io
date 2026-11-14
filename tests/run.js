@@ -12,11 +12,14 @@
  * has a fake camera and microphone, and clipboard/camera/mic permissions. On top of each tool's own
  * assertions the runner checks, for every page: no JS errors, no requests to
  * other hosts, a single <h1>, a meta description, no horizontal scroll at
- * phone width, nothing saved in cookies or browser storage, empty .msg live
- * regions still rendered, and valid JSON-LD with no blog-post markup.
+ * phone width or at 200% zoom, nothing saved in cookies or browser storage,
+ * empty .msg live regions still rendered, and valid JSON-LD with no blog-post
+ * markup.
  *
  * A full run (no slugs) also runs siteChecks: the homepage, About, Privacy and
- * 404 pages, the sitemap, related-tool links, and the shared colour tokens.
+ * 404 pages, the sitemap, related-tool links, the shared colour tokens, the
+ * icon and theme colours in the head, reduced motion, and keyboard scrolling
+ * of a guide table that is too wide for a phone.
  *
  * Needs `jekyll` (or $JEKYLL) and the `playwright` package on the module path.
  */
@@ -152,6 +155,35 @@ async function commonChecks(page, problems) {
   }
 }
 
+// No page may scroll sideways on a phone, in a 1280px wide window zoomed to
+// 200% (the second size: half of the 1280x900 viewport the tool tests run in),
+// or at 320px, the width down to which content has to reflow (WCAG 1.4.10).
+const NARROW = [{ width: 390, height: 844 }, { width: 640, height: 450 }, { width: 320, height: 568 }];
+
+async function sidewaysScroll(page, url, problems, prefix = '') {
+  for (const viewport of NARROW) {
+    await page.setViewportSize(viewport);
+    await page.goto(url, { waitUntil: 'load' });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (overflow > 1) problems.push(`${prefix}horizontal scroll at ${viewport.width}px wide (${overflow}px overflow)`);
+  }
+}
+
+// Tabs through a freshly loaded page from the top: true as soon as focus lands
+// on an element matching the selector, false once focus is back on <body>.
+async function tabReaches(page, selector) {
+  for (let i = 0; i < 300; i++) {
+    await page.keyboard.press('Tab');
+    const at = await page.evaluate(sel => {
+      const el = document.activeElement;
+      return !el || el === document.body ? 'top' : el.matches(sel) ? 'match' : 'other';
+    }, selector);
+    if (at === 'match') return true;
+    if (at === 'top') return false;
+  }
+  return false;
+}
+
 function frontMatter(file) {
   return fs.readFileSync(file, 'utf8').split(/^---\s*$/m)[1] || '';
 }
@@ -189,6 +221,50 @@ async function siteChecks(browser, base, problems) {
   // Old cached pages still link these.
   if (!/^\s*:root \{/.test(await get('/assets/css/style.css'))) problems.push('/assets/css/style.css does not serve the stylesheet');
   if (!/window\.TT = /.test(await get('/assets/js/common.js'))) problems.push('/assets/js/common.js does not serve the shared helpers');
+
+  // Every head names the home-screen icon and gives the browser's own bars the
+  // colour of the page background (--bg) in each colour scheme.
+  for (const p of ['/', '/case-converter/']) {
+    await page.goto(base + p, { waitUntil: 'load' });
+    const icons = await page.$$eval('link[rel="apple-touch-icon"]', links => links.map(l => l.getAttribute('href')));
+    if (icons.join() !== '/assets/apple-touch-icon.png') problems.push(`${p}: expected one apple-touch-icon link to /assets/apple-touch-icon.png, found [${icons.join(', ')}]`);
+    for (const colorScheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme });
+      const c = await page.evaluate(scheme => {
+        const probe = document.body.appendChild(document.createElement('div'));
+        const rgb = colour => { probe.style.color = colour; return getComputedStyle(probe).color; };
+        const metas = [...document.querySelectorAll('meta[name="theme-color"]')].filter(m => m.getAttribute('media') === `(prefers-color-scheme: ${scheme})`);
+        const out = { count: metas.length, theme: metas.length ? rgb(metas[0].content) : null, bg: rgb('var(--bg)') };
+        probe.remove();
+        return out;
+      }, colorScheme);
+      if (c.count !== 1) problems.push(`${p}: expected one theme-color meta tag for the ${colorScheme} colour scheme, found ${c.count}`);
+      else if (c.theme !== c.bg) problems.push(`${p}: the ${colorScheme} theme-color is ${c.theme}, but the page background (--bg) is ${c.bg}`);
+    }
+    await page.emulateMedia({ colorScheme: 'light' });
+  }
+  // The icon is a 180x180 PNG without transparency, which iOS would paint
+  // black. Width and height are at bytes 16 and 20 of a PNG, the colour type
+  // at byte 25 (4 and 6 have an alpha channel).
+  const icon = await page.request.get(base + '/assets/apple-touch-icon.png');
+  const png = icon.status() === 200 ? await icon.body() : Buffer.alloc(0);
+  if (icon.status() !== 200 || !/^image\/png/.test(icon.headers()['content-type'] || '') || png.length < 26 || png.toString('latin1', 0, 8) !== '\x89PNG\r\n\x1a\n') {
+    problems.push(`/assets/apple-touch-icon.png is not served as a PNG (status ${icon.status()})`);
+  } else {
+    const [w, h, type] = [png.readUInt32BE(16), png.readUInt32BE(20), png[25]];
+    if (w !== 180 || h !== 180) problems.push(`/assets/apple-touch-icon.png is ${w}x${h}, expected 180x180`);
+    if (type === 4 || type === 6 || png.includes('tRNS')) problems.push('/assets/apple-touch-icon.png has transparency, which iOS paints black');
+    if (png.length >= 20 * 1024) problems.push(`/assets/apple-touch-icon.png is ${png.length} bytes (keep it under 20 KB)`);
+  }
+
+  // Smooth scrolling is animation, so it is only for visitors who have not
+  // asked their system to reduce motion (WCAG 2.3.3).
+  for (const [reducedMotion, expected] of [['reduce', 'auto'], ['no-preference', 'smooth']]) {
+    await page.emulateMedia({ reducedMotion });
+    const behavior = await page.evaluate(() => getComputedStyle(document.documentElement).scrollBehavior);
+    if (behavior !== expected) problems.push(`with prefers-reduced-motion: ${reducedMotion} the page's scroll-behavior is ${behavior}, expected ${expected}`);
+  }
+  await page.emulateMedia({ reducedMotion: null });
 
   // Homepage search results are announced (WCAG 4.1.3).
   await page.goto(base + '/', { waitUntil: 'load' });
@@ -234,14 +310,38 @@ async function siteChecks(browser, base, problems) {
   }
   await page.emulateMedia({ colorScheme: 'light' });
 
-  // Phone width for the non-tool pages.
-  const mobile = await newPage(browser, base, { width: 390, height: 844 }, problems);
-  for (const p of ['/', '/about/', '/privacy/', '/404.html']) {
-    await mobile.page.goto(base + p, { waitUntil: 'load' });
-    const overflow = await mobile.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    if (overflow > 1) problems.push(`${p}: horizontal scroll at 390px wide (${overflow}px overflow)`);
+  // Phone width and 200% zoom for the non-tool pages.
+  const narrow = await newPage(browser, base, NARROW[0], problems);
+  for (const p of ['/', '/about/', '/privacy/', '/404.html']) await sidewaysScroll(narrow.page, base + p, problems, `${p}: `);
+
+  // A guide table too wide for a phone scrolls inside its own box, and what
+  // that hides must be reachable without a pointer (WCAG 2.1.1): the table is
+  // a tab stop that the arrow keys scroll. Chromium makes any scrolling box a
+  // tab stop, Safari only one with a tabindex, which common.js therefore sets
+  // and takes away again where the table fits.
+  const guideTables = p => p.$$eval('.prose table', tables => tables.map(t => ({ scrolls: t.scrollWidth > t.clientWidth + 1, tabindex: t.getAttribute('tabindex') })));
+  await narrow.page.setViewportSize(NARROW[0]);
+  await narrow.page.goto(base + '/case-converter/', { waitUntil: 'load' });
+  const onPhone = await guideTables(narrow.page);
+  if (!onPhone.some(t => t.scrolls)) {
+    problems.push('/case-converter/: no guide table is wider than a 390px screen, so keyboard scrolling of such a table is not being tested');
+  } else {
+    if (onPhone.some(t => t.scrolls !== (t.tabindex === '0'))) problems.push(`/case-converter/ at 390px: a guide table should have tabindex="0" exactly when it scrolls sideways: ${JSON.stringify(onPhone)}`);
+    if (!(await tabReaches(narrow.page, '.prose table'))) {
+      problems.push('/case-converter/ at 390px: Tab does not reach the guide table that scrolls sideways');
+    } else {
+      const focused = await narrow.page.evaluate(() => document.activeElement.scrollWidth > document.activeElement.clientWidth + 1 && document.activeElement.matches(':focus-visible') && getComputedStyle(document.activeElement).outlineStyle !== 'none');
+      if (!focused) problems.push('/case-converter/ at 390px: the guide table that Tab reaches is not the one that scrolls, or shows no focus outline');
+      await narrow.page.keyboard.press('ArrowRight');
+      const scrolled = await narrow.page.waitForFunction(() => document.activeElement.scrollLeft > 0, null, { timeout: 3000 }).then(() => true, () => false);
+      if (!scrolled) problems.push('/case-converter/ at 390px: the Right arrow key does not scroll the focused guide table');
+    }
   }
-  await mobile.context.close();
+  await narrow.context.close();
+  await page.goto(base + '/case-converter/', { waitUntil: 'load' });
+  const onDesktop = await guideTables(page);
+  if (onDesktop.some(t => t.scrolls || t.tabindex !== null)) problems.push(`/case-converter/ at 1280px: the guide tables should fit and have no tabindex: ${JSON.stringify(onDesktop)}`);
+  if (await tabReaches(page, '.prose table')) problems.push('/case-converter/ at 1280px: a guide table that fits is a tab stop');
 
   // About and Privacy agree on whether the site shows ads, and the ad-blocker
   // promise only appears when there are ads.
@@ -313,11 +413,9 @@ async function main() {
       await commonChecks(page, problems);
       await context.close();
 
-      const mobile = await newPage(browser, server.base, { width: 390, height: 844 }, problems);
-      await mobile.page.goto(url, { waitUntil: 'load' });
-      const overflow = await mobile.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-      if (overflow > 1) problems.push(`horizontal scroll at 390px wide (${overflow}px overflow)`);
-      await mobile.context.close();
+      const narrow = await newPage(browser, server.base, NARROW[0], problems);
+      await sidewaysScroll(narrow.page, url, problems);
+      await narrow.context.close();
     } catch (e) {
       problems.push(`test failed: ${e && e.stack ? e.stack.split('\n').slice(0, 4).join('\n') : e}`);
     }

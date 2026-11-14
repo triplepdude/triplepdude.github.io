@@ -434,7 +434,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await rowText(3), /trailing\.jpg PNG 60×40/);
   assert.doesNotMatch(await rowText(3), /cut off/, 'bytes after IEND are not a truncated file');
   assert.match(await rowText(4), /cut-big\.jpg PNG 160×120.*cut off/);
-  assert.match(await rowText(6), /foreign\.jpg SVG 100×50.*foreignObject/);
+  assert.match(await rowText(6), /foreign\.jpg SVG 100×50/);
+  assert.doesNotMatch(await rowText(6), /foreignObject/, 'HTML in a <foreignObject> is drawn, so nothing is reported as left out');
   near((await pixels((await download(1)).data, [[2, 2]]))[0], [255, 0, 0, 255], 8, 'cyclic TIFF decoded');
   near((await pixels((await download(2)).data, [[2, 2]]))[0], [0, 255, 0, 255], 8, 'TIFF with a bad tag decoded');
   px = await pixels((await download(3)).data, [[10, 20], [50, 20]]);

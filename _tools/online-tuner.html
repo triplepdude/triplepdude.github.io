@@ -170,7 +170,7 @@ faq:
     <label for="otn-a4">A4 calibration (Hz)</label>
     <div class="otn-step">
       <button class="btn secondary" type="button" id="otn-a4-down" aria-label="Lower A4 by 1 Hz">−</button>
-      <input type="number" id="otn-a4" min="430" max="450" step="0.1" value="440" inputmode="decimal">
+      <input type="number" id="otn-a4" min="430" max="450" step="0.1" value="440" inputmode="decimal" aria-describedby="otn-a4-msg">
       <button class="btn secondary" type="button" id="otn-a4-up" aria-label="Raise A4 by 1 Hz">+</button>
     </div>
   </div>
@@ -390,20 +390,26 @@ faq:
   namesSel.addEventListener('change', function () { fillRefNotes(); buildStrings(); refChanged(); render(true); });
 
   // ---------- A4 calibration ----------
-  const A4_ERR = function () { return 'Enter a calibration from 430 to 450 Hz. Still using A4 = ' + a4 + ' Hz.'; };
+  // An out-of-range value keeps the last calibration: the note says so, and the field is marked invalid.
+  function checkA4() {
+    if (a4Valid(a4In.value)) return;
+    a4Msg.textContent = 'Enter a calibration from 430 to 450 Hz. Still using A4 = ' + a4 + ' Hz.';
+    a4In.setAttribute('aria-invalid', 'true');
+  }
   function setA4(v) {
     a4Msg.textContent = '';
+    a4In.removeAttribute('aria-invalid');
     a4 = Math.round(v * 100) / 100;
     refChanged();
     render(true);
   }
   function a4Valid(s) { return /^\s*\d{3}(\.\d*)?\s*$/.test(s) && Number(s) >= 430 && Number(s) <= 450; }
   // While typing, a partial value such as "44" is not an error yet; the note appears after a pause.
-  const a4Later = TT.debounce(function () { if (!a4Valid(a4In.value)) a4Msg.textContent = A4_ERR(); }, 900);
+  const a4Later = TT.debounce(checkA4, 900);
   a4In.addEventListener('input', function () {
     if (a4Valid(a4In.value)) setA4(Number(a4In.value)); else a4Later();
   });
-  a4In.addEventListener('change', function () { if (!a4Valid(a4In.value)) a4Msg.textContent = A4_ERR(); });
+  a4In.addEventListener('change', checkA4);
   function nudge(dir) {
     const v = Math.max(430, Math.min(450, dir < 0 ? Math.ceil(a4) - 1 : Math.floor(a4) + 1));
     a4In.value = String(v);

@@ -51,7 +51,13 @@
    browser's own [hidden] rule. */
 [hidden] { display: none !important; }
 
-html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; }
+
+/* In-page jumps (breadcrumbs, category links) glide only when the visitor has
+   not asked the system to reduce motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
 
 body {
   margin: 0;
@@ -317,12 +323,15 @@ textarea.mono,
 input.mono,
 .mono { font-family: var(--mono); font-size: 14px; }
 
+/* The last two are tab stops while they scroll (see common.js). */
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 button:focus-visible,
 a:focus-visible,
-summary:focus-visible {
+summary:focus-visible,
+.table-wrap:focus-visible,
+.prose table:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -487,7 +496,12 @@ input[type="radio"] {
   color: var(--accent);
 }
 
+/* position: relative keeps absolutely positioned content of the table, such as
+   .visually-hidden text in a header cell, inside this scroll box. Without it
+   that content is placed against the page, past the right edge of a table
+   wider than the screen, and the whole page scrolls sideways. */
 .table-wrap {
+  position: relative;
   max-width: 100%;
   margin: 0 0 16px;
   overflow-x: auto;
@@ -548,6 +562,8 @@ table.data td.mono { word-break: break-all; }
 
 .prose th { color: var(--muted); font-weight: 600; }
 
+/* overflow-wrap: a long unbroken sample, such as a 38-character barcode string,
+   wraps inside the line instead of pushing a narrow page sideways. */
 .prose code,
 .faq code {
   padding: 1px 5px;
@@ -555,6 +571,7 @@ table.data td.mono { word-break: break-all; }
   border-radius: 4px;
   font-family: var(--mono);
   font-size: 0.9em;
+  overflow-wrap: break-word;
 }
 
 .faq { max-width: 72ch; }

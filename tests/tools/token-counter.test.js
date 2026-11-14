@@ -27,8 +27,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   const idsText = ids => '[' + ids.join(', ') + ']';
   const setView = v => page.check(`input[name="tc-view"][value="${v}"]`);
-  const expectIds = async (t, ids, label) => {
+  // A textarea may turn CR LF and a lone CR into LF, whichever way the text gets in (Chromium 153
+  // does: the HTML standard gives its value LF line endings), and the page then never sees the CR.
+  // Vectors with a CR carry a second answer, lfIds, for the text the box then holds.
+  const expectIds = async (t, ids, label, lfIds) => {
     await page.fill('#tc-input', t);
+    if (lfIds && await page.inputValue('#tc-input') === t.replace(/\r\n?/g, '\n')) ids = lfIds;
     await page.waitForFunction(exp => document.querySelector('#tc-ids-text').value === exp, idsText(ids), { timeout: 10000 })
       .catch(async () => assert.fail(`${label}: got ${await page.inputValue('#tc-ids-text')} expected ${idsText(ids)}`));
     assert.equal(await text('#tc-big'), fmt(ids.length), `${label} count`);
@@ -36,7 +40,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // Exact o200k_base IDs for every known-answer vector.
   await setView('ids');
-  for (const v of vectors.filter(x => x.o)) await expectIds(v.t, v.o, `o200k ${v.name}`);
+  for (const v of vectors.filter(x => x.o)) await expectIds(v.t, v.o, `o200k ${v.name}`, v.oLf);
 
   // Characters, words, bytes and ratio for a simple case.
   await page.fill('#tc-input', 'Hello world');
@@ -161,7 +165,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => /^\d/.test(document.querySelector('#tc-n-cl100k_base').textContent), null, { timeout: 15000 });
   assert.ok(requests.some(u => u.endsWith('/assets/data/token-counter/cl100k_base.bin.gz')));
   await page.selectOption('#tc-enc', 'cl100k_base');
-  for (const v of vectors.filter(x => x.c)) await expectIds(v.t, v.c, `cl100k ${v.name}`);
+  for (const v of vectors.filter(x => x.c)) await expectIds(v.t, v.c, `cl100k ${v.name}`, v.cLf);
   await expectIds('Hello world', [9906, 1917], 'cl100k hello'); // tiktoken cl100k_base
   assert.equal(await text('#tc-n-o200k_base'), '2');
   assert.equal(await text('#tc-n-cl100k_base'), '2');

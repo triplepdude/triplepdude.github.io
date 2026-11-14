@@ -50,12 +50,16 @@ module.exports = async ({ page, open, assert, url }) => {
   // Bad durations: a friendly message and nothing to copy.
   await page.fill('#dts-cd-h', '1.5');
   assert.match(await text('#dts-cd-msg'), /whole numbers/);
+  // All three fields point at the message; only the one at fault is marked invalid.
+  const cdMarks = () => page.$$eval('#dts-cd-d, #dts-cd-h, #dts-cd-m', els => els.map(el => el.getAttribute('aria-describedby') + ' ' + el.getAttribute('aria-invalid')));
+  assert.deepEqual(await cdMarks(), ['dts-cd-msg null', 'dts-cd-msg true', 'dts-cd-msg null']);
   assert.equal(await page.locator('#dts-cd-list button').first().isDisabled(), true);
   assert.equal(await page.isDisabled('#dts-cd-load'), true);
   // Rounding to the hour follows the generator's zone: in India (UTC+05:30),
   // 03:50:30 + 2 h rounds to 06:00 IST, which is 00:30 UTC.
   await page.fill('#dts-cd-d', '0');
   await page.fill('#dts-cd-h', '2');
+  assert.deepEqual(await cdMarks(), ['dts-cd-msg null', 'dts-cd-msg null', 'dts-cd-msg null']);
   await page.selectOption('#dts-zone', 'Asia/Kolkata');
   assert.equal(await page.locator('#dts-cd-list .dts-code').first().textContent(), '<t:1618965000:R>');
   assert.match(await text('#dts-cd-when'), /Asia\/Kolkata time is Wed 6:00 AM/);

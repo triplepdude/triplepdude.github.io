@@ -11,6 +11,10 @@ module.exports = async ({ page, open, assert }) => {
     await page.evaluate(() => document.activeElement && document.activeElement.blur());
     return page.textContent('#mg-error');
   };
+  // The message a field points at, and whether the field is marked invalid.
+  const link = sel => page.$eval(sel, el => [el.getAttribute('aria-describedby'), el.getAttribute('aria-invalid')]);
+  const UTM_FIELDS = '#mg-utm-line, #mg-zone, #mg-east, #mg-north';
+  const utmInvalid = () => page.$$eval(UTM_FIELDS, els => els.filter(el => el.getAttribute('aria-invalid') === 'true').map(el => el.id));
   const within = (actual, lat, lon, tol, what) => {
     const [a, b] = actual.split(',').map(Number);
     assert.ok(Math.abs(a - lat) <= tol && Math.abs(b - lon) <= tol, `${what}: got ${actual}, want ${lat}, ${lon}`);
@@ -140,12 +144,14 @@ module.exports = async ({ page, open, assert }) => {
     assert.match(await err(), re, s);
     assert.equal(await page.isVisible('#mg-out'), false);
   }
+  assert.deepEqual(await link('#mg-mgrs'), ['mg-error', 'true']);
 
   // Only the 100 km square: the result is its centre (pyproj: E 550000, N 4550000 in zone 18N).
   await page.fill('#mg-mgrs', '18TWL');
   within(await val('#mg-r-dd'), 41.099739709, -74.404583508, 1.5e-6, '18TWL');
   assert.match(await val('#mg-note'), /100 km square/);
   assert.equal(await err(), '');
+  assert.deepEqual(await link('#mg-mgrs'), ['mg-error', null]);
   await page.fill('#mg-mgrs', '18TWL8');
   assert.match(await err(), /You gave 1 digit\./);
 
@@ -167,11 +173,24 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await val('#mg-note'), /standard UTM zone 32/);
   await page.fill('#mg-zone', '61');
   assert.match(await err(), /zone must be a whole number from 1 to 60/);
+  // Every UTM field points at the message; the box it is about is the one marked invalid.
+  assert.deepEqual(await page.$$eval(UTM_FIELDS, els => els.map(el => el.getAttribute('aria-describedby'))), Array(4).fill('mg-error'));
+  assert.deepEqual(await utmInvalid(), ['mg-zone']);
   await page.fill('#mg-zone', '31');
   await page.fill('#mg-north', '9999999');
   assert.match(await err(), /north of 84/);
+  // A point in the polar region is not the fault of one box.
+  assert.deepEqual(await utmInvalid(), []);
   await page.fill('#mg-north', 'abc');
   assert.match(await err(), /northing must be a number/);
+  assert.deepEqual(await utmInvalid(), ['mg-north']);
+  await page.fill('#mg-north', '6697438');
+  await page.fill('#mg-east', '58');
+  assert.match(await err(), /eastings lie between/);
+  assert.deepEqual(await utmInvalid(), ['mg-east']);
+  await page.fill('#mg-east', '628077');
+  assert.equal(await err(), '');
+  assert.deepEqual(await utmInvalid(), []);
 
   // Switching modes carries the point over: lat/long -> UTM fields.
   await ll('40.748440, -73.985664');
@@ -200,8 +219,11 @@ module.exports = async ({ page, open, assert }) => {
     await ll(s);
     assert.match(await err(), re, s);
   }
+  // The field points at the message and is marked invalid for as long as it shows.
+  assert.deepEqual(await link('#mg-ll'), ['mg-error', 'true']);
   await ll('40.748440, -73.985664');
   assert.equal(await err(), '');
+  assert.deepEqual(await link('#mg-ll'), ['mg-error', null]);
 
   // Typing a coordinate key by key doesn't announce a format error on every keystroke; a
   // half-typed value only reports its error after a pause, in a polite status region.
@@ -232,8 +254,11 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await val('#mg-big'), /^30U XC \d{5} \d{5}$/);
   await page.locator('#mg-ll').pressSequentially('x');
   assert.equal(await page.textContent('#mg-error'), '');
+  // The field is marked invalid when the message appears, not before.
+  assert.deepEqual(await link('#mg-ll'), ['mg-error', null]);
   await page.waitForFunction(() => document.querySelector('#mg-error').textContent !== '', null, { timeout: 2000 });
   assert.equal((await page.evaluate(() => window.__mgErrors)).length, 1);
+  assert.deepEqual(await link('#mg-ll'), ['mg-error', 'true']);
   await ll('40.748440, -73.985664');
 
   // The focused segment of the "Convert from" control shows a visible ring whether or not it is
@@ -336,9 +361,12 @@ module.exports = async ({ page, open, assert }) => {
   for (const [s, re] of Object.entries(utmErrors)) {
     await utm(s);
     assert.match(await err(), re, s);
+    // A bad line marks the line itself, whichever part of it the message is about.
+    assert.deepEqual(await utmInvalid(), ['mg-utm-line'], s);
   }
   // Editing a field rewrites the line in its canonical form.
   await utm('18T 585628 4511322');
+  assert.deepEqual(await utmInvalid(), []);
   await page.fill('#mg-east', '585631');
   assert.equal(await page.inputValue('#mg-utm-line'), '18T 585631 4511322');
 
@@ -438,6 +466,8 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('#mg-locate');
   await page.waitForFunction(() => /denied|not available|could not/.test(document.querySelector('#mg-error').textContent));
   assert.match(await err(), /Location access was denied/);
+  // That message is not about the typed coordinates, so the field is not marked invalid.
+  assert.deepEqual(await link('#mg-ll'), ['mg-error', null]);
   const origin = new URL(page.url()).origin;
   await page.context().grantPermissions(['geolocation'], { origin });
   await page.context().setGeolocation({ latitude: -33.8568, longitude: 151.2153, accuracy: 12 });

@@ -90,18 +90,33 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(png.name, 'qr-code-example-com.png');
   assert.deepEqual(pngInfo(png.buf, assert), { width: 1024, height: 1024 });
 
+  // Keyboard order follows the layout: "Copy text" sits under the form, so Tab reaches
+  // it straight after the form (it used to come last, after the whole right-hand column).
+  await page.focus('#qg-url');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'qg-copy-text');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'qg-png');
+  // In one column (phones) the three blocks are stacked in that same order.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const tops = await page.evaluate(() => ['.qg-form', '.qg-text', '.qg-side'].map(sel => document.querySelector(sel).getBoundingClientRect().top));
+  assert.ok(tops[0] < tops[1] && tops[1] < tops[2], `form, text, preview from top to bottom: ${tops}`);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   // https:// is added when the scheme is missing; spaces are an error.
   await page.fill('#qg-url', 'example.org/path?x=1&y=ü');
   assert.equal(await payload(), 'https://example.org/path?x=1&y=ü');
   await page.fill('#qg-url', 'example.org/a b');
   assert.match(await err(), /cannot contain spaces/);
   assert.equal(await page.getAttribute('#qg-url', 'aria-invalid'), 'true');
+  assert.equal(await page.getAttribute('#qg-url', 'aria-describedby'), 'qg-error', 'the field is linked to its message');
   assert.match(await page.textContent('#qg-qr'), /cannot contain spaces/, 'the preview says what is wrong');
   assert.equal(await page.isDisabled('#qg-png'), true);
   assert.equal(await page.isDisabled('#qg-copy-text'), true, 'nothing to copy');
   await page.fill('#qg-url', '');
   assert.equal(await err(), '', 'an empty field is a prompt, not an error');
   assert.equal(await page.getAttribute('#qg-url', 'aria-invalid'), null);
+  assert.equal(await page.getAttribute('#qg-url', 'aria-describedby'), null, 'no message, no link');
   assert.match(await page.textContent('#qg-qr'), /Enter a web address/);
   await page.fill('#qg-url', 'mailto:someone@example.com');
   assert.equal(await payload(), 'mailto:someone@example.com', 'other schemes are kept');
@@ -141,7 +156,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await payload(), 'mailto:a%26b%3Dc@example.com?subject=Hi%20%26%20welcome&body=Line%201%0D%0ALine%202%20%C3%BC');
   await page.fill('#qg-email-to', 'not-an-address');
   assert.match(await err(), /"not-an-address" is not a valid email address/);
+  assert.deepEqual(await page.$eval('#qg-email-to', el => [el.getAttribute('aria-invalid'), el.getAttribute('aria-describedby')]), ['true', 'qg-error']);
+  assert.equal(await page.getAttribute('#qg-email-subject', 'aria-describedby'), null, 'only the invalid field is linked');
   await page.fill('#qg-email-to', 'ana@example.com');
+  assert.deepEqual(await page.$eval('#qg-email-to', el => [el.getAttribute('aria-invalid'), el.getAttribute('aria-describedby')]), [null, null]);
   await page.fill('#qg-email-subject', '');
   await page.fill('#qg-email-body', '');
   assert.equal(await payload(), 'mailto:ana@example.com');

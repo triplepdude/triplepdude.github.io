@@ -72,11 +72,14 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('#iv-pdf');
   assert.match(await text('#iv-error'), /due date is before the issue date/);
   assert.equal(await page.getAttribute('#iv-due', 'aria-invalid'), 'true');
+  assert.equal(await page.getAttribute('#iv-due', 'aria-describedby'), 'iv-error', 'the field is linked to its message');
+  assert.equal(await page.getAttribute('#iv-date', 'aria-describedby'), null, 'only the invalid field is linked');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'iv-due', 'Download PDF focuses the problem');
   assert.equal(await page.evaluate(() => window.__prints.length), 0, 'nothing printed with an error');
   await page.fill('#iv-date', '2026-09-24');
   await page.selectOption('#iv-terms', '30');
   assert.equal(await page.inputValue('#iv-due'), '2026-10-24');
+  assert.deepEqual(await page.$eval('#iv-due', el => [el.getAttribute('aria-invalid'), el.getAttribute('aria-describedby')]), [null, null], 'no message, no link');
 
   // ----- Parties -----
   await page.fill('#iv-from-name', 'Studio Ōkami 株式会社');
@@ -133,10 +136,12 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill(`${row(1)} .iv-qty`, '1,234.5');
   await page.waitForFunction(() => /Item 1: quantity must be a number/.test(document.querySelector('#iv-error').textContent));
   assert.equal(await page.getAttribute(`${row(1)} .iv-qty`, 'aria-invalid'), 'true');
+  assert.equal(await page.getAttribute(`${row(1)} .iv-qty`, 'aria-describedby'), 'iv-error');
   await page.fill(`${row(1)} .iv-qty`, '12,5');           // a decimal comma is fine: 12.5 x 19.99 = 249.875
   assert.equal((await lineMinors())[0], '24988');
   assert.equal(await text('#iv-error'), '');
   assert.equal(await page.getAttribute(`${row(1)} .iv-qty`, 'aria-invalid'), null);
+  assert.equal(await page.getAttribute(`${row(1)} .iv-qty`, 'aria-describedby'), null);
   await page.fill(`${row(1)} .iv-qty`, '3');
   // Regression: a rate of "1,234" (rates may have 6 decimals) was silently read as 1.234, so
   // 3 x "1,234" made $3.70 instead of $3,702.00. A number that could be either is refused, and
@@ -247,7 +252,9 @@ module.exports = async ({ page, open, assert }) => {
   const raw = pdf.toString('latin1');
   assert.ok(raw.startsWith('%PDF-'), 'PDF header');
   assert.equal((raw.match(/\/Type\s*\/Page\b/g) || []).length, 1, 'one page');
-  assert.ok(/\/ToUnicode/.test(raw) && /\/FontFile2|\/FontFile3/.test(raw), 'text is embedded as real, selectable text');
+  // A font with a ToUnicode map: an embedded font file, or Type 3 glyphs where the
+  // system font has no TrueType outlines.
+  assert.ok(/\/ToUnicode/.test(raw) && /\/FontFile2|\/FontFile3|\/Subtype\s*\/Type3/.test(raw), 'text is embedded as real, selectable text');
   // A long invoice flows onto a second page.
   for (let i = 4; i <= 40; i++) {
     await page.click('#iv-add-item');
