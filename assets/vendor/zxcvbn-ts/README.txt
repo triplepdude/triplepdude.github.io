@@ -29,7 +29,7 @@ language-en.min.js
             zxcvbnts["language-en"]: English words, names and Wikipedia terms,
             and the English feedback messages. Its word-frequency data comes
             from OpenSubtitles 2024 via OPUS under the ODC-BY licence; the
-            package's notice is kept in NOTICE-language-en.md.
+            package's notice is kept in NOTICE-language-en.txt.
 
-Licences: LICENSE (zxcvbn-ts, all three packages), LICENSE-fastest-levenshtein.md,
-LICENSE-dictionary-compression, NOTICE-language-en.md.
+Licences: LICENSE (zxcvbn-ts, all three packages), LICENSE-fastest-levenshtein.txt,
+LICENSE-dictionary-compression, NOTICE-language-en.txt.

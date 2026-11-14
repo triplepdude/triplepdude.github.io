@@ -365,6 +365,26 @@ async function siteChecks(browser, base, problems) {
       problems.push(`sitemap.xml: /${slug}/ ${dated ? 'has no <lastmod> although its front matter sets a date' : `has <lastmod> ${urls.get(`/${slug}/`)} but its front matter sets no date`}`);
     }
   }
+  for (const p of urls.keys()) {
+    if (!['/', '/about/', '/privacy/'].includes(p) && !slugs.includes(p.replace(/^\/|\/$/g, ''))) problems.push(`sitemap.xml lists ${p}, which is neither a tool nor a shared page`);
+  }
+  // GitHub Pages turns every Markdown file it publishes into a web page, with
+  // or without front matter, and the sitemap then lists it. This build does
+  // not, so the files are checked instead: outside the folders Jekyll skips
+  // (dot and underscore names, and `exclude` in _config.yml) only the About
+  // and Privacy pages may be Markdown. Licence notices are kept as .txt.
+  const excluded = new Set(((fs.readFileSync(path.join(ROOT, '_config.yml'), 'utf8').match(/^exclude:\n((?: +- .*\n)+)/m) || [])[1] || '')
+    .split('\n').map(l => l.replace(/^ +- /, '').trim()).filter(Boolean));
+  const strayMarkdown = [];
+  (function walk(dir) {
+    for (const entry of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+      const rel = path.posix.join(dir, entry.name);
+      if (/^[._#~]/.test(entry.name) || excluded.has(rel)) continue;
+      if (entry.isDirectory()) walk(rel);
+      else if (/\.(md|markdown|mkdown|mkdn|mkd)$/i.test(entry.name) && !['about.md', 'privacy.md'].includes(rel)) strayMarkdown.push(rel);
+    }
+  })('');
+  if (strayMarkdown.length) problems.push(`GitHub Pages would publish these Markdown files as web pages and list them in the sitemap; rename them to .txt: ${strayMarkdown.join(', ')}`);
   if (!/Sitemap: .*\/sitemap\.xml/.test(await get('/robots.txt'))) problems.push('robots.txt does not point to the sitemap');
 
   // "More free tools" rotates, so every tool is linked from several others
