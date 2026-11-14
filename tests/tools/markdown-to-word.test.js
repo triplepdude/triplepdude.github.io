@@ -142,6 +142,26 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(startOf(1, 0), '1 bullet');
   assert.equal(new Set([...numbering.matchAll(/<w:nsid w:val="(\w+)"\/>/g)].map(m => m[1])).size, 4, 'each list definition has its own id');
 
+  // ---- Keyboard focus in the preview ----
+  // The preview is a tab stop so that it can be scrolled with the keyboard, and it has no links
+  // here, so the outline of the frame is the only sign of where the focus is.
+  const ring = () => page.evaluate(() => {
+    const f = document.getElementById('mdw-frame');
+    return (document.activeElement === f ? 'focused, outline ' : 'not focused, outline ') + getComputedStyle(f).outlineStyle;
+  });
+  // The outline follows the focus a moment later (the page sets it from a timer).
+  const ringIs = async (want, why) => {
+    for (let i = 0; i < 40 && await ring() !== want; i++) await page.waitForTimeout(50);
+    assert.equal(await ring(), want, why);
+  };
+  await page.focus('#mdw-input');
+  await ringIs('not focused, outline none');
+  await page.keyboard.press('Tab');
+  await ringIs('focused, outline solid', 'the preview shows that it has the focus');
+  await page.keyboard.press('Shift+Tab');
+  await ringIs('not focused, outline none', 'the outline goes when the focus leaves the preview');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'mdw-input');
+
   // ---- Links, pictures, HTML tables, page breaks, TOC and options ----
   const img = png(40, 20);
   // A 40 x 20 JPEG from the browser with an EXIF block spliced in: Orientation 6 (turn 90 degrees clockwise).

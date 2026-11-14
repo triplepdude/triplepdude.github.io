@@ -396,6 +396,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     assert.ok((await text('#sc-r-info')).startsWith(`${r.cidrs.length.toLocaleString('en-US')} CIDR block${r.cidrs.length === 1 ? '' : 's'} cover ${BigInt(r.count).toLocaleString('en-US')} address`), await text('#sc-r-info'));
   }
   assert.match(await text('#sc-r-info'), /cover/);
+  // The focusable result boxes have a role, without which their label is not exposed, and
+  // the spoken name of "Copy blocks" starts with its visible text (WCAG 2.5.3).
+  for (const sel of ['#sc-r-out', '#sc-agg-out', '#sc-super-out']) {
+    assert.deepEqual(await page.$eval(sel, el => [el.getAttribute('role'), !!el.getAttribute('aria-label'), el.tabIndex]), ['group', true, 0], sel);
+  }
+  const [copyName, copyShown] = await page.$eval('button[data-copy-target="#sc-r-out"]', b => [b.getAttribute('aria-label'), b.textContent.trim()]);
+  assert.ok(copyName.startsWith(copyShown + ': '), `"${copyName}" starts with "${copyShown}"`);
   await page.fill('#sc-r-start', '192.168.1.200');
   await page.fill('#sc-r-end', '192.168.1.10');
   assert.match(await text('#sc-r-info'), /swapped/);

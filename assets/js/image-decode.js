@@ -92,9 +92,11 @@
  * TTImage.svg.render(text, width, height) -> Promise<canvas>
  *   Rasterises through an <img> loaded from a Blob URL, so scripts in the SVG
  *   never run and nothing referenced by URL is fetched; linked images are left
- *   out rather than drawn as broken-image icons. Where the browser would lock
- *   the canvas because of HTML inside <foreignObject> (Chrome does), that
- *   HTML is left out and canvas.dataset.omitted is 'foreignObject'.
+ *   out rather than drawn as broken-image icons. Chrome locks the canvas when
+ *   an SVG with HTML inside <foreignObject> comes from a Blob URL, so such an
+ *   SVG is loaded once more from a data: URL (still an <img>, with the same
+ *   limits). Where that locks the canvas too, the HTML is left out and
+ *   canvas.dataset.omitted is 'foreignObject'.
  */
 (function () {
   'use strict';
@@ -1497,10 +1499,11 @@
   }
 
   // ---------- Native decoding ----------
-  function loadImg(blob) {
+  // An <img> showing a Blob, or a URL given as a string (a data: URL); null if it does not load.
+  function loadImg(src) {
     return new Promise(function (resolve) {
-      var url = URL.createObjectURL(blob), img = new Image();
-      var done = function (ok) { setTimeout(function () { URL.revokeObjectURL(url); }, 0); resolve(ok && (img.naturalWidth || img.width) ? img : null); };
+      var own = typeof src !== 'string', url = own ? URL.createObjectURL(src) : src, img = new Image();
+      var done = function (ok) { if (own) setTimeout(function () { URL.revokeObjectURL(url); }, 0); resolve(ok && (img.naturalWidth || img.width) ? img : null); };
       img.onload = function () { if (img.decode) img.decode().then(function () { done(true); }, function () { done(true); }); else done(true); };
       img.onerror = function () { done(false); };
       img.src = url;
@@ -1654,9 +1657,10 @@
     if (!info.viewBox) root.setAttribute('viewBox', '0 0 ' + info.width + ' ' + info.height);
     root.setAttribute('width', String(w));
     root.setAttribute('height', String(h));
-    var draw = async function () {
-      var img = await loadImg(new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' }));
-      if (!img) throw fail('SVG_INVALID', 'The browser could not draw this SVG.');
+    var draw = async function (asData) {
+      var blob = new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' });
+      var src = asData ? await dataUrl(blob) : blob, img = src && await loadImg(src);
+      if (!img) { if (asData) return null; throw fail('SVG_INVALID', 'The browser could not draw this SVG.'); }
       // A one-pixel test drawing: would this picture lock the canvas against export?
       var probe = newCanvas(1, 1), pg = context(probe);
       pg.drawImage(img, 0, 0, 1, 1);
@@ -1667,9 +1671,12 @@
       return cv;
     };
     var c = await draw();
+    // Chrome refuses to export a canvas once an SVG holding HTML in <foreignObject> has
+    // been drawn on it from a Blob URL, but not when the same SVG comes from a data: URL.
+    // That is an <img> as well, so scripts still never run and nothing is fetched.
+    if (!c) c = await draw(true);
     if (!c) {
-      // Chrome (and other browsers that do the same) refuses to export a canvas once
-      // HTML inside <foreignObject> has been drawn on it. Draw the SVG again without that HTML.
+      // Other browsers refuse either way. Draw the SVG again without that HTML.
       var fo = doc.getElementsByTagName('foreignObject');
       while (fo.length) fo[0].parentNode.removeChild(fo[0]);
       c = await draw();
@@ -1677,6 +1684,15 @@
       c.dataset.omitted = 'foreignObject';
     }
     return c;
+  }
+  // A Blob as a data: URL (base64); null if it cannot be read.
+  function dataUrl(blob) {
+    return new Promise(function (resolve) {
+      var r = new FileReader();
+      r.onload = function () { resolve(typeof r.result === 'string' ? r.result : null); };
+      r.onerror = function () { resolve(null); };
+      r.readAsDataURL(blob);
+    });
   }
 
   // The text of an SVG file in its own encoding: UTF-16 with a byte order mark,

@@ -9,7 +9,9 @@ howto: |
   Paste SVG code into the box, or open or drop one or more .svg files. The
   preview updates as you type. Choose the output format and size, then
   download the image, copy it to the clipboard, or download every file at
-  once as a ZIP. The page starts with an example you can replace.
+  once as a ZIP. The page starts with an example you can replace. For other
+  output formats such as AVIF or ICO, or to convert raster images in bulk,
+  use the [image converter](/image-converter/), which also reads SVG.
 
   ## Choosing the size
 
@@ -62,10 +64,11 @@ howto: |
 
   Scripts and event handlers inside the SVG never run, which makes it safe to
   convert files from unknown sources. HTML embedded with a `<foreignObject>`
-  element is left out in browsers such as Chrome, which refuse to turn it into
-  pixels; the converter tells you when that happens. Animations are captured
-  in their first frame. Gradients, patterns, masks, clipping paths, filters and CSS styles
-  inside the file render as they do in the browser.
+  element is included where the browser allows it to be drawn; a browser that
+  refuses to turn such HTML into pixels gets the drawing without it, and the
+  converter tells you when that happens. Animations are captured in their
+  first frame. Gradients, patterns, masks, clipping paths, filters and CSS
+  styles inside the file render as they do in the browser.
 
   Copied from a web page, inline SVG often lacks the
   `xmlns="http://www.w3.org/2000/svg"` attribute that standalone SVG files
@@ -284,8 +287,10 @@ faq:
     };
   }
   // Output size for an SVG of intrinsic size iw x ih, or { error }.
+  // An error also names the fields it is about, which showSelected marks as invalid.
   function outSize(iw, ih, s) {
-    var w, h, bad = function (m) { return { error: m }; };
+    var w, h, own = { scale: [scaleIn], dpi: [dpiIn], width: [wIn], height: [hIn], both: [wIn, hIn] }[s.mode];
+    var bad = function (m, fields) { return { error: m, fields: fields || own }; };
     if (s.mode === 'scale') {
       if (!(s.scale > 0) || s.scale > 64) return bad('Enter a scale between 0.1 and 64.');
       w = iw * s.scale; h = ih * s.scale;
@@ -299,7 +304,7 @@ faq:
       if (!(s.h >= 1)) return bad('Enter a height of at least 1 pixel.');
       h = s.h; w = s.h * iw / ih;
     } else {
-      if (!(s.w >= 1) || !(s.h >= 1)) return bad('Enter a width and a height of at least 1 pixel.');
+      if (!(s.w >= 1) || !(s.h >= 1)) return bad('Enter a width and a height of at least 1 pixel.', (s.w >= 1 ? [] : [wIn]).concat(s.h >= 1 ? [] : [hIn]));
       w = s.w; h = s.h;
     }
     w = Math.max(1, Math.round(w));
@@ -333,10 +338,11 @@ faq:
     var info = TTImage.svg.info(it.text);
     it.info = info;
     it.error = null;
+    it.fields = null;
     if (it.readError) { it.error = it.readError; it.blob = null; return; }
-    if (info.error) { it.error = info.error; it.blob = null; return; }
+    if (info.error) { it.error = info.error; it.fields = [code]; it.blob = null; return; }
     var size = outSize(info.width, info.height, s);
-    if (size.error) { it.error = size.error; it.blob = null; return; }
+    if (size.error) { it.error = size.error; it.fields = size.fields; it.blob = null; return; }
     var canvas = await TTImage.svg.render(it.text, size.w, size.h), blob, thumb;
     it.omitted = canvas.dataset.omitted || null;
     try {
@@ -363,6 +369,13 @@ faq:
     var it = selected;
     var info = it && !it.readError ? it.info : null;
     errBox.textContent = it && it.error && (it.text.trim() || it.readError) ? it.error : '';
+    // The fields the message is about are marked invalid and name it as their
+    // description, so it is read again when one of them gets the focus.
+    var wrong = errBox.textContent && it.fields || [];
+    [code, scaleIn, wIn, hIn, dpiIn].forEach(function (el) {
+      if (wrong.indexOf(el) >= 0) { el.setAttribute('aria-invalid', 'true'); el.setAttribute('aria-describedby', 's2p-error'); }
+      else { el.removeAttribute('aria-invalid'); el.removeAttribute('aria-describedby'); }
+    });
     intr.textContent = info && !info.error ? 'Intrinsic size: ' + num(info.width) + ' × ' + num(info.height) + ' px, from the ' +
       (info.from === 'default' ? 'browser default' : info.from) + '.' : '';
     notesEl.textContent = '';

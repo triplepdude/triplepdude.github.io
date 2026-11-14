@@ -31,7 +31,13 @@ cases = [
 ]
 out = []
 for name, t in cases:
-    out.append({'name': name, 't': t, 'o': o.encode_ordinary(t), 'c': c.encode_ordinary(t)})
+    v = {'name': name, 't': t, 'o': o.encode_ordinary(t), 'c': c.encode_ordinary(t)}
+    # A textarea may turn CR LF and a lone CR into LF, whichever way the text gets in (Chromium
+    # 153 does), and the page then never sees the CR: oLf and cLf are the answers for that text.
+    if '\r' in t:
+        lf = t.replace('\r\n', '\n').replace('\r', '\n')
+        v['oLf'], v['cLf'] = o.encode_ordinary(lf), c.encode_ordinary(lf)
+    out.append(v)
 big = [('a20000', 'a' * 20000), ('dna', dna), ('digits', '9' * 5000 + ' ' + '12' * 2000)]
 for name, t in big:
     out.append({'name': name, 't': t, 'oCount': len(o.encode_ordinary(t)), 'cCount': len(c.encode_ordinary(t))})

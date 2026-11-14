@@ -70,7 +70,7 @@ tools automatically.
 
 Rules the test runner enforces: no requests to other hosts (third-party libraries are vendored in
 `assets/vendor/`), no JavaScript errors, a proper title and description, and no horizontal
-scrolling on phones.
+scrolling on phones or at 200% zoom.
 
 ```sh
 gem install jekyll -v '~> 3.10' jekyll-seo-tag jekyll-sitemap webrick

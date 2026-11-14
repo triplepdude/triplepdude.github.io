@@ -97,9 +97,13 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.fill('#hc-rate', 'abc');
   await page.locator('#hc-rate').press('Tab');
   assert.match(await text('#hc-msg'), /hourly rate/);
+  // The rate field is marked invalid and points at the message that says why.
+  assert.equal(await page.getAttribute('#hc-rate', 'aria-invalid'), 'true');
+  assert.equal(await page.getAttribute('#hc-rate', 'aria-describedby'), 'hc-msg');
   assert.equal(await text('#hc-pay'), '–');
   await page.fill('#hc-rate', '');
   assert.equal(await text('#hc-msg'), '');
+  assert.equal(await page.getAttribute('#hc-rate', 'aria-invalid'), null);
 
   // Rounding: 8:07 AM to 4:08 PM is 8:01 exact; the 7-minute rule counts 8:00 to 4:15.
   await cell(1, '.hc-start').fill('8:07 AM');

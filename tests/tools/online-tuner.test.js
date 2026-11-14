@@ -105,9 +105,13 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#otn-a4', '460');
   await page.waitForFunction(() => /430 to 450 Hz\. Still using A4 = 440 Hz/.test(document.getElementById('otn-a4-msg').textContent));
   assert.equal(await page.getAttribute('#otn-a4-msg', 'role'), null);
+  // The field points at the message and is marked invalid for as long as it shows.
+  assert.equal(await page.getAttribute('#otn-a4', 'aria-describedby'), 'otn-a4-msg');
+  assert.equal(await page.getAttribute('#otn-a4', 'aria-invalid'), 'true');
   assert.equal(await text('#otn-play'), 'Play A5 (880.00 Hz)');
   await page.fill('#otn-a4', '440');
   assert.equal(await text('#otn-a4-msg'), '');
+  assert.equal(await page.getAttribute('#otn-a4', 'aria-invalid'), null);
   // The typed calibration is used as shown (449.99 used to be rounded to 450):
   // A5 = 2 * 449.99 = 899.98 Hz.
   await page.fill('#otn-a4', '449.99');

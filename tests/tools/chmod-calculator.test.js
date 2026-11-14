@@ -299,6 +299,11 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await val('#cm-octal'), '640');
   assert.equal(await page.isChecked('#cm-dir'), false);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'cm-use-f', 'focus stays on the button');
+  // The spoken name starts with the visible text, so "click Use above" works by voice (WCAG 2.5.3).
+  for (const id of ['#cm-use-f', '#cm-use-d']) {
+    const [name, shown] = await page.$eval(id, b => [b.getAttribute('aria-label'), b.textContent.trim()]);
+    assert.ok(name.startsWith(shown + ': '), `${id}: "${name}" starts with "${shown}"`);
+  }
 
   // Confirm the umask answers with real bash: umask -S, and the modes touch and mkdir create.
   let bash = false;

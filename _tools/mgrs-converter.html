@@ -147,7 +147,7 @@ faq:
   <div class="row">
     <div class="field mg-grow">
       <label for="mg-ll">Latitude and longitude</label>
-      <input type="text" id="mg-ll" class="mono" value="40.748440, -73.985664" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="40.748440, -73.985664">
+      <input type="text" id="mg-ll" class="mono" value="40.748440, -73.985664" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="40.748440, -73.985664" aria-describedby="mg-error">
     </div>
     <button class="btn secondary mg-locate" type="button" id="mg-locate">Use my location</button>
   </div>
@@ -164,7 +164,7 @@ faq:
 <div class="mg-panel" id="mg-panel-mgrs" hidden>
   <div class="field">
     <label for="mg-mgrs">MGRS or USNG grid reference</label>
-    <input type="text" id="mg-mgrs" class="mono" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="18T WL 85631 11326">
+    <input type="text" id="mg-mgrs" class="mono" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="18T WL 85631 11326" aria-describedby="mg-error">
   </div>
   <p class="hint">Spaces are optional. After the two square letters, give 2 to 10 digits: half easting, half northing.</p>
 </div>
@@ -172,13 +172,13 @@ faq:
 <div class="mg-panel" id="mg-panel-utm" hidden>
   <div class="field">
     <label for="mg-utm-line">UTM coordinate</label>
-    <input type="text" id="mg-utm-line" class="mono" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="18T 585631 4511327">
+    <input type="text" id="mg-utm-line" class="mono" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="18T 585631 4511327" aria-describedby="mg-error">
   </div>
   <p class="hint mg-or">Zone and band (18T) or hemisphere (18N, 18 south), then easting and northing in metres. Or fill in the parts:</p>
   <div class="row">
     <div class="field mg-zone">
       <label for="mg-zone">Zone</label>
-      <input type="number" id="mg-zone" min="1" max="60" step="1" inputmode="numeric" placeholder="18">
+      <input type="number" id="mg-zone" min="1" max="60" step="1" inputmode="numeric" placeholder="18" aria-describedby="mg-error">
     </div>
     <div class="field mg-hemi">
       <label for="mg-hemi">Hemisphere</label>
@@ -189,11 +189,11 @@ faq:
     </div>
     <div class="field">
       <label for="mg-east">Easting (m)</label>
-      <input type="text" id="mg-east" class="mono" inputmode="decimal" autocomplete="off" placeholder="585631">
+      <input type="text" id="mg-east" class="mono" inputmode="decimal" autocomplete="off" placeholder="585631" aria-describedby="mg-error">
     </div>
     <div class="field">
       <label for="mg-north">Northing (m)</label>
-      <input type="text" id="mg-north" class="mono" inputmode="decimal" autocomplete="off" placeholder="4511327">
+      <input type="text" id="mg-north" class="mono" inputmode="decimal" autocomplete="off" placeholder="4511327" aria-describedby="mg-error">
     </div>
   </div>
 </div>
@@ -535,10 +535,18 @@ faq:
     return { lat: lat, lon: lon };
   }
 
+  // An error about one part of a UTM coordinate carries the part's name (zone, easting or
+  // northing), so the matching box can be marked when the parts are typed separately.
+  function partError(part, msg) {
+    var err = new Error(msg);
+    err.part = part;
+    return err;
+  }
+
   function parseMetres(v, name) {
     var s = String(v).trim().replace(/[\s,_]/g, '').replace(/m$/i, '');
-    if (!s) throw new Error('Enter the ' + name + ' in metres.');
-    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(s)) throw new Error('The ' + name + ' must be a number of metres, like 585631.');
+    if (!s) throw partError(name, 'Enter the ' + name + ' in metres.');
+    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(s)) throw partError(name, 'The ' + name + ' must be a number of metres, like 585631.');
     return parseFloat(s);
   }
 
@@ -603,8 +611,8 @@ faq:
 
   // A point from UTM parts, with notes when it lies outside the given zone or band.
   function fromUTM(u, notes) {
-    if (u.easting < 100000 || u.easting > 900000) throw new Error('UTM eastings lie between about 160,000 and 840,000 m (500,000 m is the zone\u2019s central meridian). Check the easting.');
-    if (u.northing < 0 || u.northing > 10000000) throw new Error('UTM northings run from 0 to 10,000,000 m. Check the northing.');
+    if (u.easting < 100000 || u.easting > 900000) throw partError('easting', 'UTM eastings lie between about 160,000 and 840,000 m (500,000 m is the zone\u2019s central meridian). Check the easting.');
+    if (u.northing < 0 || u.northing > 10000000) throw partError('northing', 'UTM northings run from 0 to 10,000,000 m. Check the northing.');
     var pt = tmInverse(u.easting, u.northing, u.zone, u.south);
     checkRange(pt.lat, EDGE);
     var std = zoneFor(pt.lat, pt.lon);
@@ -667,18 +675,26 @@ faq:
   var current = null, followInput = false;
   // While someone is typing, a half-finished coordinate is not an error yet: the message waits
   // for a pause (or for the field to lose focus) so screen readers aren't interrupted per key.
-  var pendingError = null, errorTimer = 0;
-  function setError(msg, wait) {
+  // The field a message is about points at it (aria-describedby) and is marked invalid while it shows.
+  var pendingError = null, pendingField = null, errorField = null, errorTimer = 0;
+  function showError(msg, field) {
+    if (errorField) errorField.removeAttribute('aria-invalid');
+    errorField = msg && field ? field : null;
+    if (errorField) errorField.setAttribute('aria-invalid', 'true');
+    errorBox.textContent = msg;
+  }
+  function setError(msg, wait, field) {
     clearTimeout(errorTimer);
     pendingError = null;
-    if (!wait || !msg) { errorBox.textContent = msg; return; }
-    errorBox.textContent = '';
+    if (!wait || !msg) { showError(msg, field); return; }
+    showError('');
     pendingError = msg;
+    pendingField = field;
     errorTimer = setTimeout(flushError, 800);
   }
   function flushError() {
     clearTimeout(errorTimer);
-    if (pendingError != null) errorBox.textContent = pendingError;
+    if (pendingError != null) showError(pendingError, pendingField);
     pendingError = null;
   }
 
@@ -734,6 +750,9 @@ faq:
     var m = mode();
     if (m === 'batch') { runBatch(); return; }
     setError('');
+    // The field an error is about: the one being converted or, for the separate UTM boxes, the
+    // one the error names (see partError).
+    var src = m === 'll' ? llInput : m === 'mgrs' ? mgrsInput : e && e.target === utmLine ? utmLine : null;
     try {
       var notes = [];
       if (m === 'll') {
@@ -758,7 +777,7 @@ faq:
           northInput.value = nm2(u.northing);
         } else {
           var zs = String(zoneInput.value).trim();
-          if (!/^\d{1,2}$/.test(zs) || +zs < 1 || +zs > 60) throw new Error('The UTM zone must be a whole number from 1 to 60.');
+          if (!/^\d{1,2}$/.test(zs) || +zs < 1 || +zs > 60) throw partError('zone', 'The UTM zone must be a whole number from 1 to 60.');
           u = { zone: +zs, south: hemiInput.value === 'S', easting: parseMetres(eastInput.value, 'easting'), northing: parseMetres(northInput.value, 'northing'), band: null };
         }
         var pt = fromUTM(u, notes);
@@ -766,7 +785,8 @@ faq:
         if (!(e && e.target === utmLine)) syncUtmLine();
       }
     } catch (err) {
-      setError(err && err.message ? err.message : String(err), typing);
+      if (m === 'utm' && !src) src = { zone: zoneInput, easting: eastInput, northing: northInput }[err && err.part] || null;
+      setError(err && err.message ? err.message : String(err), typing, src);
       noteBox.textContent = '';
       out.hidden = true;
       current = null;

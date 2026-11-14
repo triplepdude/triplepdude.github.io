@@ -67,8 +67,10 @@ module.exports = async ({ page, open, assert, base, url, fixtures }) => {
   assert.equal(await page.isVisible('#bt-ch-none'), false);
   assert.equal(await cell(page, 'bt-ch-rows', 'platform'), 'Linux');
   assert.equal(await cell(page, 'bt-ch-rows', 'mobile'), raw.mobile ? 'Yes' : 'No');
-  assert.equal(await cell(page, 'bt-ch-rows', 'platformVersion'), raw.he.platformVersion);
-  assert.match(await note(page, 'bt-ch-rows', 'platformVersion'), /kernel version/);
+  // Headless Chromium gives an empty platform version on some Linux systems, which the page shows as
+  // "Empty" without a note; the kernel note is checked with fixed hints in the detection matrix.
+  assert.equal(await cell(page, 'bt-ch-rows', 'platformVersion'), raw.he.platformVersion || 'Empty');
+  assert.match(await note(page, 'bt-ch-rows', 'platformVersion'), raw.he.platformVersion ? /kernel version/ : /^$/);
   assert.equal(await cell(page, 'bt-ch-rows', 'architecture'), raw.he.architecture);
   assert.equal(await cell(page, 'bt-ch-rows', 'bitness'), raw.he.bitness);
   assert.equal(await cell(page, 'bt-ch-rows', 'model'), 'Empty');
@@ -544,6 +546,10 @@ module.exports = async ({ page, open, assert, base, url, fixtures }) => {
       got[k] = await cell(p, tbody, key);
       assert.equal(got[k], v, `${cfg.name}: ${k}`);
     }
+    for (const [k, v] of Object.entries(cfg.rowNotes || {})) {
+      const [tbody, key] = k.split(':');
+      assert.match(await note(p, tbody, key), v, `${cfg.name}: note of ${k}`);
+    }
     await p.close();
     for (const [k, v] of Object.entries(cfg.expect)) assert.equal(got[k], v, `${cfg.name}: ${k}`);
     if (cfg.notes) assert.match(got.notes, cfg.notes, `${cfg.name}: notes`);
@@ -780,7 +786,7 @@ module.exports = async ({ page, open, assert, base, url, fixtures }) => {
 
     // Linux and ChromeOS
     { name: 'Chrome, Linux', ua: LINUX_CHROME_UA, touch: 0, uaData: ch('chrome', 'Linux', false, { platformVersion: '6.8.0' }), expect: { browser: 'Chrome 141.0.7390.108', os: 'Linux', device: 'Desktop' },
-      uaNotes: /"X11; Linux x86_64" is fixed in Chromium browsers/ },
+      uaNotes: /"X11; Linux x86_64" is fixed in Chromium browsers/, rows: { 'bt-ch-rows:platformVersion': '6.8.0' }, rowNotes: { 'bt-ch-rows:platformVersion': /^On Linux this is the kernel version\.$/ } },
     { name: 'Firefox, Ubuntu', ua: 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0', uaData: 'none', touch: 0, expect: { browser: 'Firefox 144.0', os: 'Ubuntu Linux' } },
     // Regression: the platform build number was shown as the ChromeOS version.
     { name: 'Chrome, ChromeOS', ua: 'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36', touch: 0,
@@ -1011,7 +1017,9 @@ module.exports = async ({ page, open, assert, base, url, fixtures }) => {
     assert.match(await p.locator('#bt-ch-none').textContent(), /did not answer the request for the detailed hints/);
   });
   // Device memory is rounded to the nearest power of two; slower connections are not capped.
-  await scenario({ name: 'Small device, slow network', ua: raw.ua, mem: 0.5, conn: { effectiveType: '3g', downlink: 1.45, rtt: 300, saveData: true }, expect: {} }, async p => {
+  // A fixed Chrome 141 identity: its range is 0.25 to 8 GB, so 512 MB is inside it whichever
+  // Chromium runs the test (from Chrome 147 the range starts at 2 GB).
+  await scenario({ name: 'Small device, slow network', ua: WIN_CHROME_UA, touch: 0, uaData: ch('chrome', 'Windows', false, WIN11), mem: 0.5, conn: { effectiveType: '3g', downlink: 1.45, rtt: 300, saveData: true }, expect: {} }, async p => {
     assert.equal(await cell(p, 'bt-hw-rows', 'memory'), 'About 512 MB');
     assert.equal(await cell(p, 'bt-hw-rows', 'network'), '3G-class connection, about 1.45 Mb/s, about 300 ms round trip, Data Saver on');
   });

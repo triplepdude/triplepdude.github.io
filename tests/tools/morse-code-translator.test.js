@@ -264,6 +264,11 @@ module.exports = async ({ page, open, assert }) => {
   }
   assert.ok(cells.some(([a, b]) => a === '!*' && b === '-.-.--'), 'non-ITU signs are marked');
   assert.ok(cells.some(([a, b]) => a === '<SOS>' && b === '...---...'));
+  // The spoken name of a prosign follows the visible order, sign then meaning (WCAG 2.5.3).
+  const named = await page.$$eval('#mc-charts .mc-pro .mc-cell', els => els.map(e => [e.getAttribute('aria-label'), e.querySelector('.mc-ch').firstChild.textContent, e.querySelector('.mc-lab').textContent]));
+  assert.equal(named.length, 8);
+  for (const [name, sign, meaning] of named) assert.ok(name.startsWith(`Play ${sign} ${meaning}: `), `"${name}" says ${sign} before ${meaning}`);
+  assert.equal(named[0][0], 'Play <SOS> Distress: dot dot dot dash dash dash dot dot dot');
   await page.fill('#mc-wpm', '60');
   await page.click('#mc-charts .mc-cell >> nth=0');
   assert.equal(await text('#mc-play'), 'Stop');

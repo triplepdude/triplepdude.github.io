@@ -152,15 +152,25 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#tg-freq', '0');
   await page.waitForFunction(() => /1 to 22,000 Hz\. The tone stays at 148\.3 Hz/.test(document.getElementById('tg-freq-msg').textContent));
   assert.equal(await page.getAttribute('#tg-freq-msg', 'role'), null);
+  // The field points at the note and is marked invalid for as long as it shows.
+  assert.equal(await page.getAttribute('#tg-freq', 'aria-describedby'), 'tg-freq-msg');
+  assert.equal(await page.getAttribute('#tg-freq', 'aria-invalid'), 'true');
   await page.fill('#tg-freq', '30000');
   assert.equal(await text('#tg-big'), '148.3 Hz');
   await page.fill('#tg-freq', '440');
   assert.equal(await text('#tg-freq-msg'), '');
+  assert.equal(await page.getAttribute('#tg-freq', 'aria-invalid'), null);
 
   await page.click('#tg-plus');
   assert.equal(await val('#tg-freq'), '441');
   await page.selectOption('#tg-step', '0.1');
   assert.equal(await text('#tg-plus'), '+0.1 Hz');
+  // Each step button's accessible name contains its visible text (WCAG 2.5.3):
+  // the two symbols are followed by words, the others are named by their text
+  // alone, also after the step size changes.
+  for (const name of ['÷2, down one octave', '−1 semitone', '−0.1 Hz', '+0.1 Hz', '+1 semitone', '×2, up one octave']) {
+    assert.equal(await page.locator('.tg-steps').getByRole('button', { name, exact: true }).count(), 1, `step button named "${name}"`);
+  }
   await page.click('#tg-plus');
   assert.equal(await val('#tg-freq'), '441.1');
   await page.click('[data-step="oct+"]');

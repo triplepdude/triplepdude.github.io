@@ -32,7 +32,7 @@ function readZip(b) {
   return out;
 }
 
-module.exports = async ({ page, open, assert, fixtures }) => {
+module.exports = async ({ page, open, assert, fixtures, base }) => {
   const fx = f => path.join(fixtures, f);
   const svg = f => fs.readFileSync(fx(f), 'utf8');
   await open();
@@ -55,6 +55,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   }, [buf.toString('base64'), pts]);
   const near = (got, want, tol, what) => want.forEach((v, i) => assert.ok(Math.abs(got[i] - v) <= tol, `${what}: got ${got} want ${want}`));
   const notes = () => page.$$eval('#s2p-notes li', l => l.map(x => x.textContent).join(' | '));
+  // A field the error message is about is marked invalid and described by the message.
+  const linked = sel => page.$eval(sel, el => [el.getAttribute('aria-invalid'), el.getAttribute('aria-describedby')]);
 
   // ---------- The example on load: 280 x 120 at 2x, transparent corners ----------
   await expectOut(/^Output: 560 × 240 px PNG, /);
@@ -107,11 +109,25 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForFunction(() => /at least 1 pixel/.test(document.querySelector('#s2p-error').textContent));
   assert.equal(await page.isDisabled('#s2p-download'), true);
   assert.equal(await page.getAttribute('#s2p-error', 'role'), null, 'typing errors are not assertive');
+  assert.deepEqual(await linked('#s2p-w'), ['true', 's2p-error'], 'the width is linked to its message');
+  assert.deepEqual(await linked('#s2p-h'), [null, null], 'the height is fine');
+  assert.deepEqual(await linked('#s2p-code'), [null, null], 'the code is fine');
+  await page.fill('#s2p-h', '');
+  await page.waitForFunction(() => document.querySelector('#s2p-h').getAttribute('aria-invalid') === 'true');
+  assert.deepEqual(await linked('#s2p-w'), ['true', 's2p-error']);
+  await page.fill('#s2p-h', '50');
 
   // ---------- Units and DPI ----------
   await page.selectOption('#s2p-mode', 'dpi');
   await setCode(svg('units-in.svg'));
   await expectOut(/^Output: 600 × 300 px PNG/);
+  assert.deepEqual(await linked('#s2p-w'), [null, null], 'no message, no link');
+  await page.fill('#s2p-dpi', '5');
+  await page.waitForFunction(() => /DPI between 10 and 2400/.test(document.querySelector('#s2p-error').textContent));
+  assert.deepEqual(await linked('#s2p-dpi'), ['true', 's2p-error']);
+  await page.fill('#s2p-dpi', '300');
+  await page.waitForFunction(() => !document.querySelector('#s2p-error').textContent);
+  assert.deepEqual(await linked('#s2p-dpi'), [null, null]);
   assert.equal(await page.textContent('#s2p-intr'), 'Intrinsic size: 192 × 96 px, from the width and height.');
   p = png((await download()).data);
   assert.deepEqual([p.w, p.h], [600, 300]);
@@ -182,18 +198,24 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // Invalid code.
   await setCode(svg('broken.svg'));
   await page.waitForFunction(() => /not valid SVG/.test(document.querySelector('#s2p-error').textContent));
-  assert.match(await page.textContent('#s2p-error'), /Opening and ending tag mismatch/);
+  // The browser's own parser message; its wording changed between Chrome versions.
+  assert.match(await page.textContent('#s2p-error'), /Opening and ending tag mismatch|Unexpected closing tag/);
+  assert.deepEqual(await linked('#s2p-code'), ['true', 's2p-error'], 'the code box is linked to its message');
+  assert.deepEqual(await linked('#s2p-scale'), [null, null]);
   assert.equal(await page.isDisabled('#s2p-download'), true);
   assert.equal(await page.isHidden('#s2p-preview'), true);
   await setCode('');
   await expectOut(/^Paste SVG code or open a file/);
   assert.equal(await page.textContent('#s2p-error'), '');
+  assert.deepEqual(await linked('#s2p-code'), [null, null]);
   // Too large.
   await setCode(svg('gradient.svg'));
   await page.fill('#s2p-scale', '64');
   await page.waitForFunction(() => /larger than browsers can draw/.test(document.querySelector('#s2p-error').textContent));
+  assert.deepEqual(await linked('#s2p-scale'), ['true', 's2p-error']);
   await page.click('[data-scale="2"]');
   await expectOut(/^Output: 400 × 200 px PNG/);
+  assert.deepEqual(await linked('#s2p-scale'), [null, null]);
   px = await pixels((await download()).data, [[2, 100], [200, 100], [397, 100]]);
   near(px[0], [254, 0, 1, 255], 4, 'gradient start');
   near(px[1], [128, 0, 127, 255], 4, 'gradient middle');
@@ -252,6 +274,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.selectOption('#s2p-format', 'jpeg');
   await expectOut(/^Output: 48 × 48 px JPG/);
   await page.evaluate(() => navigator.clipboard.writeText(''));
+  // The "Copied!" of the first copy must be gone, or the wait below could see that one.
+  await page.waitForFunction(() => document.querySelector('#s2p-copy').textContent === 'Copy image');
   await page.click('#s2p-copy');
   await page.waitForFunction(() => document.querySelector('#s2p-copy').textContent === 'Copied!');
   const clip2 = await page.evaluate(async () => {
@@ -277,12 +301,46 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await expectOut(/^Paste SVG code or open a file/);
   assert.equal(await page.evaluate(() => document.activeElement.id), 's2p-code');
 
-  // HTML in a <foreignObject> locks the canvas in Chrome: the SVG is drawn
-  // without it, and the page says so (it used to fail with no picture).
+  // HTML in a <foreignObject> is part of the picture. foreign.svg is a 100x50
+  // (0,170,0) rect with a 50x50 (0,0,255) HTML box over its left half. Chrome locks
+  // the canvas when such an SVG is drawn from a blob: URL, so it is drawn from a
+  // data: URL instead (the HTML used to be left out).
   await setCode(svg('foreign.svg'));
   await expectOut(/^Output: 200 × 100 px PNG/);
+  assert.doesNotMatch(await notes(), /foreignObject/);
+  px = await pixels((await download()).data, [[50, 50], [150, 50]]);
+  near(px[0], [0, 0, 255, 255], 2, 'the HTML box is drawn');
+  near(px[1], [0, 170, 0, 255], 2, 'the rest of the drawing');
+  // A browser that will not export such a canvas either way (here: one where the
+  // data: URL cannot be made): the SVG is drawn without the HTML, and the page says so.
+  await page.evaluate(() => {
+    window.__readAsDataURL = FileReader.prototype.readAsDataURL;
+    FileReader.prototype.readAsDataURL = function () { setTimeout(() => this.onerror(new ProgressEvent('error'))); };
+  });
+  await page.click('[data-scale="1"]');
+  await expectOut(/^Output: 100 × 50 px PNG/);
   assert.match(await notes(), /<foreignObject> element\) is left out/);
-  near((await pixels((await download()).data, [[100, 50]]))[0], [0, 170, 0, 255], 2, 'the rest of the drawing');
+  near((await pixels((await download()).data, [[25, 25]]))[0], [0, 170, 0, 255], 2, 'drawn without the HTML');
+  await page.evaluate(() => { FileReader.prototype.readAsDataURL = window.__readAsDataURL; delete window.__readAsDataURL; });
+  // Nothing in such HTML runs or is fetched. foreign-hostile.svg is a 120x60
+  // (0,170,0) rect; a foreignObject over its left half holds a (0,0,255) box, then
+  // scripts, event handlers and elements that load files from other hosts. Each
+  // script and handler tries to turn the rect red, set __svgPwned and retitle the page.
+  const elsewhere = [];
+  const onRequest = r => { if (!/^(data|blob):/.test(r.url()) && !r.url().startsWith(base)) elsewhere.push(r.url()); };
+  page.on('request', onRequest);
+  await setCode(svg('foreign-hostile.svg'));
+  await expectOut(/^Output: 120 × 60 px PNG/);
+  assert.match(await notes(), /Scripts and event handlers in the SVG are ignored/);
+  assert.doesNotMatch(await notes(), /left out/, 'drawn with its HTML');
+  px = await pixels((await download()).data, [[10, 10], [90, 30]]);
+  near(px[0], [0, 0, 255, 255], 2, 'the HTML is drawn');
+  near(px[1], [0, 170, 0, 255], 2, 'no script changed the drawing');
+  await page.waitForTimeout(500);
+  page.off('request', onRequest);
+  assert.equal(await page.evaluate(() => window.__svgPwned), undefined, 'no script ran');
+  assert.notEqual(await page.title(), 'pwned');
+  assert.deepEqual(elsewhere, [], 'nothing in the SVG is fetched');
 
   // An image embedded as a data: URI is drawn (only linked files are left out).
   // embedded-image.svg stretches a 2x1 PNG, red then transparent, over 4x2.

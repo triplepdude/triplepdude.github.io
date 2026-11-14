@@ -144,7 +144,7 @@ faq:
 .qg-text .field { margin-bottom: 0; }
 .qg-text .output { margin-bottom: 10px; max-height: 18rem; overflow: auto; }
 @media (max-width: 800px) {
-  .qg { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "form" "side" "text"; }
+  .qg { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "form" "text" "side"; }
   .qg-side { margin-bottom: 20px; }
 }
 </style>
@@ -305,6 +305,16 @@ faq:
     <div class="msg qg-warn" id="qg-warn"></div>
   </div>
 
+  <div class="qg-text">
+    <div class="field">
+      <span class="label" id="qg-payload-label">Text inside the QR code</span>
+      <div class="output" id="qg-payload" role="group" aria-labelledby="qg-payload-label"></div>
+    </div>
+    <div class="actions">
+      <button class="btn secondary small" type="button" id="qg-copy-text" data-copy-target="#qg-payload">Copy text</button>
+    </div>
+  </div>
+
   <div class="qg-side" id="qg-side">
     <div class="qg-qr" id="qg-qr"></div>
     <!-- Redrawn on every keystroke, so not a live region; #qg-status announces a summary once typing pauses. -->
@@ -376,16 +386,6 @@ faq:
       </div>
     </div>
   </div>
-
-  <div class="qg-text">
-    <div class="field">
-      <span class="label" id="qg-payload-label">Text inside the QR code</span>
-      <div class="output" id="qg-payload" role="group" aria-labelledby="qg-payload-label"></div>
-    </div>
-    <div class="actions">
-      <button class="btn secondary small" type="button" id="qg-copy-text" data-copy-target="#qg-payload">Copy text</button>
-    </div>
-  </div>
 </div>
 
 <script src="{{ '/assets/vendor/qrcode-generator/qrcode.min.js' | relative_url }}"></script>
@@ -451,7 +451,8 @@ faq:
     if (n.replace('+', '').length > 15) res.warnings.push(label + ' has more than 15 digits, the longest an international number can be (ITU-T E.164). Check it for typos.');
     return n;
   }
-  // An invalid value: its message, and the field marked with aria-invalid.
+  // An invalid value: its message, and the field marked with aria-invalid and linked to
+  // the message box (aria-describedby), so the message is read again in the field.
   function bad(r, id, msg) { r.errors.push(msg); r.bad.push(id); }
   function emailOk(s) { return /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/.test(s); }
 
@@ -823,8 +824,8 @@ faq:
     else if (eclEl.value !== userEcl) eclEl.value = userEcl;
     var ecl = eclEl.value;
 
-    $$('[aria-invalid]', form).forEach(function (el) { el.removeAttribute('aria-invalid'); });
-    r.bad.forEach(function (id) { var el = document.getElementById(id); if (el) el.setAttribute('aria-invalid', 'true'); });
+    $$('[aria-invalid]', form).forEach(function (el) { el.removeAttribute('aria-invalid'); el.removeAttribute('aria-describedby'); });
+    r.bad.forEach(function (id) { var el = document.getElementById(id); if (el) { el.setAttribute('aria-invalid', 'true'); el.setAttribute('aria-describedby', 'qg-error'); } });
 
     current = null;
     pngBtn.disabled = svgBtn.disabled = copyBtn.disabled = copyTextBtn.disabled = true;

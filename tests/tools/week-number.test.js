@@ -5,6 +5,8 @@ const fs = require('fs');
 
 module.exports = async ({ page, open, assert }) => {
   const text = sel => page.locator(sel).textContent();
+  // The message a field points at, and whether the field is marked invalid.
+  const link = sel => page.$eval(sel, el => [el.getAttribute('aria-describedby'), el.getAttribute('aria-invalid')]);
 
   // A fixed "now": Thursday 2026-09-24 (ISO 2026-W39-4, day 267, US week 39).
   await page.clock.install({ time: new Date('2026-09-24T10:00:00Z') });
@@ -55,10 +57,16 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await text('#wn-date-msg'), '');
   assert.match(await text('#wn-date-range'), /Pick a date/);
   assert.equal(await text('#wn-date-week'), '–');
+  assert.deepEqual(await link('#wn-date'), ['wn-date-msg', null]);
+  // A five-digit year is an error: the field is marked invalid and points at the message.
+  await page.fill('#wn-date', '10000-01-01');
+  assert.equal(await text('#wn-date-msg'), 'Enter a valid date between the years 1 and 9999.');
+  assert.deepEqual(await link('#wn-date'), ['wn-date-msg', 'true']);
   // Extremes of the supported range (Python: date(1,1,1).isocalendar() == (1, 1, 1),
   // date(9999,12,31).isocalendar() == (9999, 52, 5)).
   await page.fill('#wn-date', '0001-01-01');
   assert.equal(await text('#wn-date-iso'), '0001-W01-1');
+  assert.deepEqual(await link('#wn-date'), ['wn-date-msg', null]);
   await page.fill('#wn-date', '9999-12-31');
   assert.equal(await text('#wn-date-iso'), '9999-W52-5');
   assert.equal(await text('#wn-date-doy'), '365');
@@ -74,8 +82,14 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#wn-find-year', '2025');
   assert.match(await text('#wn-find-msg'), /2025 has 52 ISO weeks/);
   assert.equal(await text('#wn-find-out'), '');
+  // Both fields point at the message; only the one at fault is marked invalid.
+  assert.deepEqual([await link('#wn-find-year'), await link('#wn-find-week')], [['wn-find-msg', null], ['wn-find-msg', 'true']]);
+  await page.fill('#wn-find-year', '0');
+  assert.equal(await text('#wn-find-msg'), 'Enter a year from 1 to 9999.');
+  assert.deepEqual([await link('#wn-find-year'), await link('#wn-find-week')], [['wn-find-msg', 'true'], ['wn-find-msg', null]]);
   await page.fill('#wn-find-year', '2020');
   assert.ok((await text('#wn-find-out')).includes('Monday, December 28, 2020 to Sunday, January 3, 2021'));
+  assert.deepEqual([await link('#wn-find-year'), await link('#wn-find-week')], [['wn-find-msg', null], ['wn-find-msg', null]]);
 
   // Year table: defaults to the current week-year and highlights this week.
   const rows = page.locator('#wn-table tbody tr');
@@ -178,12 +192,14 @@ module.exports = async ({ page, open, assert }) => {
   // Bad year: friendly error, no rows, download disabled.
   await page.fill('#wn-year', '0');
   assert.ok((await text('#wn-year-msg')).length > 0);
+  assert.deepEqual(await link('#wn-year'), ['wn-year-msg', 'true']);
   assert.equal(await rows.count(), 0);
   assert.equal(await page.locator('#wn-csv').isDisabled(), true);
   assert.equal(await page.locator('#wn-ics').isDisabled(), true);
   await page.click('#wn-this');
   assert.equal(await page.inputValue('#wn-year'), '2026');
   assert.equal(await rows.count(), 53);
+  assert.deepEqual(await link('#wn-year'), ['wn-year-msg', null]);
 
   // Regression: the result blocks were live regions and errors were alerts, so
   // typing a year announced "2 has 52 ISO weeks", "20 has ..." and whole stat

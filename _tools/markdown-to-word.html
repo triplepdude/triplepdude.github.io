@@ -65,6 +65,8 @@ howto: |
     equations, better than pasting.
   - Copy as rich text keeps formulas as their LaTeX source, since Google Docs
     and most editors cannot paste equations. Use the .docx for real equations.
+  - For a PDF instead, the [Markdown to PDF converter](/markdown-to-pdf/)
+    renders the same Markdown with page sizes, margins and page numbers.
 faq:
   - q: Is my text uploaded anywhere?
     a: No. The Word file is assembled by JavaScript in your browser, on your device. Nothing you paste or open is sent to a server or stored.
@@ -86,7 +88,7 @@ faq:
 .mdw textarea#mdw-input.is-over { outline: 2px dashed var(--accent); outline-offset: 2px; }
 .mdw-edit .hint { margin-top: 6px; }
 .mdw-sheet { display: block; flex: 1 1 auto; width: 100%; height: 560px; min-height: 260px; background: #fff; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 1px 3px rgb(0 0 0 / 0.12); }
-.mdw-sheet:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mdw-sheet.is-focused { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mdw-drop { position: absolute; inset: 42px 0 0; display: none; align-items: center; justify-content: center; background: color-mix(in srgb, var(--accent-soft) 85%, transparent); border: 2px dashed var(--accent); border-radius: 8px; color: var(--accent); font-weight: 600; }
 .mdw.is-dragging .mdw-drop { display: flex; }
 .mdw-info { color: var(--muted); font-size: 13px; }
@@ -736,6 +738,14 @@ console.log(`Saved ${saved} tickets`);
   ['toc', 'color', 'math', 'breaks'].forEach(function (k) { opt[k].addEventListener('change', function () { render(); }); });
   nameInput.addEventListener('input', function () { nameEdited = nameInput.value.trim() !== ''; });
   if (window.ResizeObserver) new ResizeObserver(TT.debounce(layoutPreview, 50)).observe(frame);
+  // Focus ring for the preview, which takes the keyboard focus so that it can be scrolled. A frame
+  // never matches :focus-visible in the page around it and its element gets no focus events, but
+  // focus moving into it blurs this window and focus coming back focuses it.
+  function markFrameFocus() {
+    setTimeout(function () { frame.classList.toggle('is-focused', document.activeElement === frame); }, 0);
+  }
+  window.addEventListener('blur', markFrameFocus);
+  window.addEventListener('focus', markFrameFocus);
   function onFrameClick(e) {
     var a = e.target.closest && e.target.closest('a');
     if (!a) return;

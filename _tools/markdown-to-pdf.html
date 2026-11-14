@@ -72,12 +72,14 @@ howto: |
 
   **Download HTML** saves the same document as a single web page with its
   styles built in, handy for email or a website. Formulas in it are stored as
-  MathML, which current browsers display without extra files.
+  MathML, which current browsers display without extra files. For an editable
+  Word file with real headings, footnotes and equations, use the
+  [Markdown to Word converter](/markdown-to-word/).
 faq:
   - q: Is my Markdown uploaded to a server?
     a: No. Rendering, highlighting and the PDF all happen in your browser on your own device. Nothing you type or open is sent anywhere or stored.
   - q: Is the text in the PDF selectable?
-    a: Yes. The browser prints the document as real text with embedded fonts, not as a picture, so you can select, copy and search it, and links stay clickable in Chrome, Edge and Safari.
+    a: Yes. The browser prints the document as real text with embedded fonts, not as a picture, so you can select, copy and search it, and links stay clickable in Chrome, Edge, Firefox (version 90 and later) and Safari.
   - q: How do I remove the date and web address from the PDF pages?
     a: Those are the browser's own print headers. In the print window, open More settings (Chrome and Edge) or the print options (Firefox) and untick Headers and footers.
   - q: Why does my ChatGPT answer show dollar signs or brackets instead of formulas?
@@ -99,7 +101,7 @@ faq:
   display: block; flex: 1 1 auto; width: 100%; height: 560px; min-height: 260px;
   background: #fff; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
 }
-.mdp-sheet:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mdp-sheet.is-focused { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mdp-view { position: relative; }
 .mdp-drop { position: absolute; inset: 42px 0 0; display: none; align-items: center; justify-content: center; background: color-mix(in srgb, var(--accent-soft) 85%, transparent); border: 2px dashed var(--accent); border-radius: 8px; color: var(--accent); font-weight: 600; }
 .mdp.is-dragging .mdp-drop { display: flex; }
@@ -926,6 +928,15 @@ $$
   ['toc', 'breaks', 'math', 'remote'].forEach(function (k) { opt[k].addEventListener('change', function () { render(); }); });
   nameInput.addEventListener('input', function () { nameEdited = nameInput.value.trim() !== ''; if (fdoc) fdoc.title = fileBase(); });
   if (window.ResizeObserver) new ResizeObserver(TT.debounce(layoutPreview, 50)).observe(frame);
+
+  // Focus ring for the preview, which takes the keyboard focus so that it can be scrolled. A frame
+  // never matches :focus-visible in the page around it and its element gets no focus events, but
+  // focus moving into it blurs this window and focus coming back focuses it.
+  function markFrameFocus() {
+    setTimeout(function () { frame.classList.toggle('is-focused', document.activeElement === frame); }, 0);
+  }
+  window.addEventListener('blur', markFrameFocus);
+  window.addEventListener('focus', markFrameFocus);
 
   // Links in the preview: jump within the document, open web links in a new tab, never navigate the frame.
   function onFrameClick(e) {
