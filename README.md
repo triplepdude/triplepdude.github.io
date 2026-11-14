@@ -69,8 +69,9 @@ HTML and JavaScript. The homepage, related-tool links, structured data and sitem
 tools automatically.
 
 Rules the test runner enforces: no requests to other hosts (third-party libraries are vendored in
-`assets/vendor/`), no JavaScript errors, a proper title and description, and no horizontal
-scrolling on phones or at 200% zoom.
+`assets/vendor/`), no JavaScript errors, a proper title and description, no horizontal
+scrolling on phones or at 200% zoom, and text fields of at least 16 px on touch screens (smaller
+ones make iPhones zoom the page).
 
 ```sh
 gem install jekyll -v '~> 3.10' jekyll-seo-tag jekyll-sitemap webrick

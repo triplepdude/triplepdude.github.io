@@ -12,9 +12,9 @@
  * has a fake camera and microphone, and clipboard/camera/mic permissions. On top of each tool's own
  * assertions the runner checks, for every page: no JS errors, no requests to
  * other hosts, a single <h1>, a meta description, no horizontal scroll at
- * phone width or at 200% zoom, nothing saved in cookies or browser storage,
- * empty .msg live regions still rendered, and valid JSON-LD with no blog-post
- * markup.
+ * phone width or at 200% zoom, no text field under 16px on a touch screen,
+ * nothing saved in cookies or browser storage, empty .msg live regions still
+ * rendered, and valid JSON-LD with no blog-post markup.
  *
  * A full run (no slugs) also runs siteChecks: the homepage, About, Privacy and
  * 404 pages, the sitemap, related-tool links, the shared colour tokens, the
@@ -101,8 +101,8 @@ function serve(dir) {
   }));
 }
 
-async function newPage(browser, base, viewport, problems) {
-  const context = await browser.newContext({ viewport, acceptDownloads: true });
+async function newPage(browser, base, viewport, problems, options = {}) {
+  const context = await browser.newContext({ viewport, acceptDownloads: true, ...options });
   await context.grantPermissions(['clipboard-read', 'clipboard-write', 'camera', 'microphone'], { origin: base });
   const page = await context.newPage();
   await page.route('**/*', route => {
@@ -155,18 +155,47 @@ async function commonChecks(page, problems) {
   }
 }
 
-// No page may scroll sideways on a phone, in a 1280px wide window zoomed to
-// 200% (the second size: half of the 1280x900 viewport the tool tests run in),
-// or at 320px, the width down to which content has to reflow (WCAG 1.4.10).
-const NARROW = [{ width: 390, height: 844 }, { width: 640, height: 450 }, { width: 320, height: 568 }];
+// No page may scroll sideways on a phone, down to 320px, the width at which
+// content still has to reflow (WCAG 1.4.10), or in a 1280px wide window zoomed
+// to 200%: ZOOMED is half of the 1280x900 viewport the tool tests run in.
+// Phones are checked with a touch screen, so that `@media (pointer: coarse)`
+// rules apply as they do on a real one.
+const PHONES = [{ width: 390, height: 844 }, { width: 320, height: 568 }];
+const ZOOMED = { width: 640, height: 450 };
+const TOUCH = { hasTouch: true };
 
-async function sidewaysScroll(page, url, problems, prefix = '') {
-  for (const viewport of NARROW) {
-    await page.setViewportSize(viewport);
-    await page.goto(url, { waitUntil: 'load' });
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    if (overflow > 1) problems.push(`${prefix}horizontal scroll at ${viewport.width}px wide (${overflow}px overflow)`);
+// The overflow is measured against the viewport that was asked for, not
+// window.innerWidth, which grows with the content under mobile emulation.
+async function sidewaysScroll(page, viewport, url, problems, prefix) {
+  await page.setViewportSize(viewport);
+  await page.goto(url, { waitUntil: 'load' });
+  const overflow = await page.evaluate(width => document.documentElement.scrollWidth - width, viewport.width);
+  if (overflow > 1) problems.push(`${prefix}horizontal scroll at ${viewport.width}px wide (${overflow}px overflow)`);
+}
+
+// iOS Safari zooms the page, and leaves it zoomed, when a field whose text is
+// smaller than 16px gets the focus. Read-only fields are exempt.
+async function smallFields(page) {
+  return page.evaluate(() => {
+    const notText = ['checkbox', 'radio', 'range', 'color', 'file', 'button', 'submit', 'reset', 'image', 'hidden'];
+    const small = [];
+    for (const el of document.querySelectorAll('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) {
+      if ((el.tagName === 'INPUT' && notText.includes(el.type)) || el.readOnly) continue;
+      const size = parseFloat(getComputedStyle(el).fontSize);
+      if (size < 16) small.push(`${el.id ? '#' + el.id : el.tagName.toLowerCase()} (${size}px)`);
+    }
+    return small;
+  });
+}
+
+// `phone` is a page made with the TOUCH options, `desktop` one without.
+async function narrowChecks(phone, desktop, url, problems, prefix = '') {
+  for (const viewport of PHONES) {
+    await sidewaysScroll(phone, viewport, url, problems, prefix);
+    const small = await smallFields(phone);
+    if (small.length) problems.push(`${prefix}text fields under 16px on a touch screen ${viewport.width}px wide, where iOS zooms the page when one gets the focus: ${small.join(', ')}`);
   }
+  await sidewaysScroll(desktop, ZOOMED, url, problems, prefix);
 }
 
 // Tabs through a freshly loaded page from the top: true as soon as focus lands
@@ -310,9 +339,10 @@ async function siteChecks(browser, base, problems) {
   }
   await page.emulateMedia({ colorScheme: 'light' });
 
-  // Phone width and 200% zoom for the non-tool pages.
-  const narrow = await newPage(browser, base, NARROW[0], problems);
-  for (const p of ['/', '/about/', '/privacy/', '/404.html']) await sidewaysScroll(narrow.page, base + p, problems, `${p}: `);
+  // Phone widths and 200% zoom for the non-tool pages.
+  const narrow = await newPage(browser, base, PHONES[0], problems, TOUCH);
+  for (const p of ['/', '/about/', '/privacy/', '/404.html']) await narrowChecks(narrow.page, page, base + p, problems, `${p}: `);
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   // A guide table too wide for a phone scrolls inside its own box, and what
   // that hides must be reachable without a pointer (WCAG 2.1.1): the table is
@@ -320,7 +350,7 @@ async function siteChecks(browser, base, problems) {
   // tab stop, Safari only one with a tabindex, which common.js therefore sets
   // and takes away again where the table fits.
   const guideTables = p => p.$$eval('.prose table', tables => tables.map(t => ({ scrolls: t.scrollWidth > t.clientWidth + 1, tabindex: t.getAttribute('tabindex') })));
-  await narrow.page.setViewportSize(NARROW[0]);
+  await narrow.page.setViewportSize(PHONES[0]);
   await narrow.page.goto(base + '/case-converter/', { waitUntil: 'load' });
   const onPhone = await guideTables(narrow.page);
   if (!onPhone.some(t => t.scrolls)) {
@@ -433,9 +463,11 @@ async function main() {
       await commonChecks(page, problems);
       await context.close();
 
-      const narrow = await newPage(browser, server.base, NARROW[0], problems);
-      await sidewaysScroll(narrow.page, url, problems);
-      await narrow.context.close();
+      const phone = await newPage(browser, server.base, PHONES[0], problems, TOUCH);
+      const zoomed = await newPage(browser, server.base, ZOOMED, problems);
+      await narrowChecks(phone.page, zoomed.page, url, problems);
+      await phone.context.close();
+      await zoomed.context.close();
     } catch (e) {
       problems.push(`test failed: ${e && e.stack ? e.stack.split('\n').slice(0, 4).join('\n') : e}`);
     }
