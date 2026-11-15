@@ -12,7 +12,8 @@
  * has a fake camera and microphone, and clipboard/camera/mic permissions. On top of each tool's own
  * assertions the runner checks, for every page: no JS errors, no requests to
  * other hosts, a single <h1>, a meta description, no horizontal scroll at
- * phone width or at 200% zoom, no text field under 16px on a touch screen,
+ * phone width (on a fresh page and with the test's results on screen) or at
+ * 200% zoom, no text field under 16px on a touch screen,
  * nothing saved in cookies or browser storage, empty .msg live regions still
  * rendered, and valid JSON-LD with no blog-post markup.
  *
@@ -461,6 +462,15 @@ async function main() {
       };
       await require(t.file)({ page, open, assert, base: server.base, url, fixtures: path.join(__dirname, 'fixtures', t.slug) });
       await commonChecks(page, problems);
+      // With whatever the test left on screen (results, messages, tables) the
+      // page must still fit a phone. The pause lets scripts that follow the
+      // window size, such as a canvas being redrawn, catch up.
+      for (const viewport of PHONES) {
+        await page.setViewportSize(viewport);
+        await page.waitForTimeout(150);
+        const overflow = await page.evaluate(width => document.documentElement.scrollWidth - width, viewport.width);
+        if (overflow > 1) problems.push(`horizontal scroll at ${viewport.width}px wide with the test's results on screen (${overflow}px overflow)`);
+      }
       await context.close();
 
       const phone = await newPage(browser, server.base, PHONES[0], problems, TOUCH);
