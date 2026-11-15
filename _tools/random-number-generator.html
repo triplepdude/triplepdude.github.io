@@ -1,0 +1,578 @@
+---
+title: "Random Number Generator: 1 to 100, No Repeats"
+description: Generate one random number or a list in any range, with or without repeats, sorted, whole or decimal. Made in your browser by its secure random generator.
+category: Generators
+keywords: [random number generator, random number generator 1 to 100, random number generator no repeats, random number list generator, lottery number generator, unique random numbers, random number picker, dice roller, random number between 1 and 10]
+howto: |
+  ## How to generate random numbers
+
+  A number from 1 to 100 is drawn as soon as the page opens. Press
+  **Generate** for another one, or set your own range:
+
+  1. Type the lowest and the highest number you want. Both can come up.
+  2. Set **How many numbers** to get a list of up to 10,000.
+  3. Tick **No repeats** if each number may appear only once.
+  4. Under **Options**, choose whole numbers or decimals, the order and how
+     the list is written. Then copy the list or download it as a CSV file.
+
+  The presets fill the boxes in for a dice roll, a coin flip, 1 to 10, 1 to
+  100 and a lottery draw of 6 from 49. Your settings are kept in the page
+  address, so a bookmark or a shared link opens the same set-up. The numbers
+  themselves are never in it.
+
+  ## Lists without repeats
+
+  With **No repeats** the page works like a bag of numbered balls: a number
+  that has been drawn cannot come out again. That is what a lottery pick, a
+  raffle or a random running order needs. Ask for as many numbers as the
+  range holds and you get every number once, shuffled: 30 numbers from 1 to
+  30 puts a class of 30 in random order.
+
+  A draw of 6 from 49 has 13,983,816 possible combinations, so one ticket
+  matches all six about once in 14 million draws. No way of picking numbers
+  changes those odds.
+
+  Without the tick each number is drawn on its own, like rolling a dice
+  again and again, so the same number can come up twice.
+
+  ## Is it really random?
+
+  | Property | `Math.random()` | This page |
+  |---|---|---|
+  | Generator | xorshift128+ in Chrome's V8 engine | `crypto.getRandomValues` |
+  | Built for | Speed | Cryptography |
+  | Predictable? | Yes, from a few earlier results | Not in practice |
+
+  `Math.random()`, JavaScript's everyday generator, is built for speed. In
+  Chrome it is a formula with 128 bits of internal state, and the V8 team
+  describes it as not cryptographically secure: someone who sees a handful of
+  its results can work out the state and every number that follows. This page
+  never uses it. It asks the browser's cryptographically secure generator
+  instead, which browsers seed from the operating system's store of
+  unpredictable data. It is still an algorithm, so strictly its numbers are
+  pseudo-random, but there is no known way to predict the next one.
+
+  ## Every number equally likely
+
+  The usual shortcut, dividing a random 32-bit number by the size of the
+  range and keeping the remainder, favours the low numbers slightly, because
+  2³² is not a multiple of most range sizes. This page takes only as many
+  random bits as the range needs and draws again whenever the result falls
+  outside the range, so every number has exactly the same chance.
+
+  Decimals are drawn the same way from every value with the chosen number of
+  places: 0 to 1 with 2 places is one of the 101 values 0.00, 0.01, up to
+  1.00. Ranges are handled as exact whole numbers up to 1,000 digits long,
+  so a 50-digit minimum and maximum work, without the rounding that ordinary
+  JavaScript numbers show above 9,007,199,254,740,992 (2⁵³).
+
+  For passwords use the [passphrase generator](/passphrase-generator/), and
+  for random identifiers the [UUID generator](/uuid-generator/).
+faq:
+  - q: Is this random number generator truly random?
+    a: It uses your browser's cryptographically secure generator, an algorithm that is seeded with unpredictable data collected by your device. That is not "true" randomness measured from a physical process such as atmospheric noise, but its results cannot be predicted in practice, which is why the same kind of generator is used to create encryption keys.
+  - q: Can I use it to draw a raffle or giveaway winner fairly?
+    a: Yes. Number the entries from 1 upwards, set the maximum to the number of entries, set how many winners you need and tick No repeats. Every entry then has the same chance. The page keeps no record of a draw, so draw in front of the people taking part, or record your screen, if you may have to prove the result.
+  - q: What is the difference between pseudo-random and true random numbers?
+    a: A pseudo-random generator is a formula that turns a starting value, the seed, into a long stream of numbers, and the same seed always gives the same stream. A true random generator measures a physical process such as electronic or atmospheric noise. A cryptographically secure generator combines the two, a formula seeded with unpredictable data that the device gathers from physical events, so its output cannot be predicted by anyone who does not know the seed.
+  - q: Why did the same number come up twice?
+    a: With repeats allowed every draw is independent, so a number that has just come up is exactly as likely as any other the next time. On a dice that is 1 chance in 6 for every roll, and in seven rolls at least one number must repeat. Tick No repeats if every number has to be different.
+  - q: Are my numbers saved or sent anywhere?
+    a: No. The numbers are made on your device by your browser and are never uploaded, logged or stored, so they are gone when you close or reload the page. Only your settings are kept, in the page address.
+---
+<style>
+.rn-label { margin: 0 0 6px; }
+.rn-main > .field { flex: 1 1 110px; }
+.rn-main { margin-bottom: 8px; }
+.rn-unique { margin-bottom: 0; }
+/* A box with a mistake gets a thicker edge as well as the danger colour; the message names it. */
+.rn input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+.rn-out { min-height: 82px; max-height: 340px; margin-bottom: 12px; overflow-y: auto; font-size: 1.05rem; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.rn-out.rn-big { font-family: inherit; font-size: clamp(2.2rem, 9vw, 3.2rem); font-weight: 700; line-height: 1.5; }
+.rn-out.rn-none { color: var(--muted); font-family: inherit; font-size: 15px; }
+.rn-out:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rn-actions { margin-bottom: 10px; }
+.rn-info { margin: 0 0 18px; overflow-wrap: anywhere; }
+#rn-msg { margin: 8px 0 0; }
+.rn-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
+.rn-section h2 { margin: 0 0 12px; font-size: 1.05rem; }
+/* Wide enough for the longest option ("One number per line"), so the words are never cut off. */
+.rn-section .row > .field { flex: 1 1 210px; }
+.rn-section .actions, .rn-section .row { margin-bottom: 0; }
+.rn-coin { margin: 10px 0 0; }
+@media (pointer: coarse) {
+  .rn .btn.small, .rn .check { min-height: 44px; }
+}
+/* On a phone the three buttons do not fit on one line: Generate takes the first. */
+@media (max-width: 480px) {
+  .rn-actions #rn-generate { flex: 1 1 100%; }
+  .rn-actions .btn.secondary { flex: 1 1 auto; }
+}
+</style>
+
+<!-- The number comes first, so it is on the first screen of a phone; the boxes that
+     shape it follow. Enter in any box, or the Generate button, draws again. -->
+<form class="rn" id="rn-form" novalidate autocomplete="off">
+  <p class="label rn-label" id="rn-out-label">Your random number</p>
+  <div class="output rn-out rn-big" id="rn-out" role="group" aria-labelledby="rn-out-label"></div>
+  <div class="actions rn-actions">
+    <button class="btn" type="submit" id="rn-generate">Generate</button>
+    <button class="btn secondary" type="button" id="rn-copy">Copy</button>
+    <button class="btn secondary" type="button" id="rn-csv">Download CSV</button>
+  </div>
+  <p class="hint rn-info" id="rn-info"></p>
+  <p class="visually-hidden" id="rn-status" role="status"></p>
+
+  <div class="row rn-main">
+    <div class="field">
+      <label for="rn-min">Minimum</label>
+      <input type="text" id="rn-min" inputmode="decimal" autocomplete="off" spellcheck="false" value="1" aria-describedby="rn-msg">
+    </div>
+    <div class="field">
+      <label for="rn-max">Maximum</label>
+      <input type="text" id="rn-max" inputmode="decimal" autocomplete="off" spellcheck="false" value="100" aria-describedby="rn-msg">
+    </div>
+    <div class="field">
+      <label for="rn-count">How many numbers</label>
+      <input type="text" id="rn-count" inputmode="numeric" autocomplete="off" spellcheck="false" value="1" aria-describedby="rn-msg">
+    </div>
+  </div>
+  <div class="checks rn-unique">
+    <label class="check"><input type="checkbox" id="rn-unique" aria-describedby="rn-msg"> No repeats (every number different)</label>
+  </div>
+  <p class="msg error" id="rn-msg"></p>
+
+  <div class="rn-section" role="group" aria-labelledby="rn-presets-h">
+    <h2 id="rn-presets-h">Presets</h2>
+    <div class="actions">
+      <button class="btn secondary small" type="button" data-preset="ten">1 to 10</button>
+      <button class="btn secondary small" type="button" data-preset="hundred">1 to 100</button>
+      <button class="btn secondary small" type="button" data-preset="dice">Dice (1 to 6)</button>
+      <button class="btn secondary small" type="button" data-preset="coin">Coin flip</button>
+      <button class="btn secondary small" type="button" data-preset="lottery">Lottery (6 from 49)</button>
+    </div>
+    <p class="hint rn-coin" id="rn-coin-note" hidden>Coin flip: 1 is shown as Heads and 2 as Tails.</p>
+  </div>
+
+  <div class="rn-section" role="group" aria-labelledby="rn-options-h">
+    <h2 id="rn-options-h">Options</h2>
+    <div class="row">
+      <div class="field">
+        <label for="rn-type">Type of number</label>
+        <select id="rn-type">
+          <option value="int" selected>Whole numbers</option>
+          <option value="dec">Decimals</option>
+        </select>
+      </div>
+      <div class="field" id="rn-places-field" hidden>
+        <label for="rn-places">Decimal places</label>
+        <select id="rn-places">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="8">8</option>
+          <option value="10">10</option>
+          <option value="15">15</option>
+          <option value="20">20</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="rn-order">Order</label>
+        <select id="rn-order">
+          <option value="drawn" selected>As drawn</option>
+          <option value="asc">Lowest first</option>
+          <option value="desc">Highest first</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="rn-sep">Write the list with</label>
+        <select id="rn-sep">
+          <option value="comma" selected>Commas</option>
+          <option value="line">One number per line</option>
+          <option value="space">Spaces</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</form>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var MAX_COUNT = 10000, MAX_DIGITS = 1000, MAX_DEC = 20, MAX_CHARS = 1000000;
+  // The longest text a box can hold in the address: 1,000 digits with thousands separators, 20 decimals and a sign fit.
+  var MAX_TEXT = 1400;
+  var decComma = (1.5).toLocaleString().indexOf(',') !== -1;
+  var form = $('#rn-form'), minEl = $('#rn-min'), maxEl = $('#rn-max'), countEl = $('#rn-count'), uniqueEl = $('#rn-unique');
+  var typeEl = $('#rn-type'), placesEl = $('#rn-places'), orderEl = $('#rn-order'), sepEl = $('#rn-sep');
+  var msgEl = $('#rn-msg'), outEl = $('#rn-out'), labelEl = $('#rn-out-label'), infoEl = $('#rn-info'), statusEl = $('#rn-status');
+  var copyBtn = $('#rn-copy'), csvBtn = $('#rn-csv'), coinNote = $('#rn-coin-note');
+  var PRESETS = { ten: ['1', '10', '1', false, 'drawn'], hundred: ['1', '100', '1', false, 'drawn'], dice: ['1', '6', '1', false, 'drawn'],
+    coin: ['1', '2', '1', false, 'drawn'], lottery: ['1', '49', '6', true, 'asc'] };
+  var coin = false, draw = null, timer = null;
+
+  function pow10(k) { return 10n ** BigInt(k); }
+  function group(s) { return s.replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+  // Reads a typed or pasted number exactly, as { n, e } meaning n / 10^e:
+  // "1,000", "1.000,5", "1 000", "-50", "2.5" and "1e30" all work. Returns
+  // null for an empty box and { err } for anything that is not one number.
+  function parse(raw) {
+    raw = String(raw == null ? '' : raw);
+    // A raised or lowered digit, as in 10 squared, is not part of a number, and a tab sits between two pasted cells.
+    if (/[\u00B2\u00B3\u00B9\u2070-\u208E]/.test(raw) || /[\t\n\r\v\f]/.test(raw.trim())) return { err: 'nan' };
+    var s = raw.normalize('NFKC').replace(/[\u2212\u2012\u2013]/g, '-').replace(/\u066B/g, '.').replace(/\u066C/g, "'") // Arabic decimal and thousands separators
+      .replace(/[\u0660-\u0669\u06F0-\u06F9\u0966-\u096F\u09E6-\u09EF]/g, function (ch) { // Arabic, Persian, Devanagari and Bengali digits
+        var c = ch.charCodeAt(0);
+        return String(c - (c < 0x06F0 ? 0x0660 : c < 0x0966 ? 0x06F0 : c < 0x09E6 ? 0x0966 : 0x09E6));
+      }).trim();
+    if (!s) return null;
+    var m = /^([+-]?)\s*(.*)$/.exec(s), neg = m[1] === '-', ex = 0;
+    s = m[2].replace(/\s/g, ' ');
+    var e = /^(.*\d\.?)e([+-]?\d{1,4})$/i.exec(s);
+    if (e) { s = e[1]; ex = parseInt(e[2], 10); }
+    // Thousands are grouped in threes and the first group never starts with 0: "0,500" is a half, not 500.
+    if (/^[1-9]\d{0,2}(?:[ '\u2019]\d{3})+(?:[.,]\d+)?$/.test(s)) s = s.replace(/[ '\u2019]/g, '').replace(',', '.');
+    else if (/^[1-9]\d{0,2}(?:\.\d{3})+,\d+$/.test(s) || /^[1-9]\d{0,2}(?:\.\d{3}){2,}$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^\d*,\d+$/.test(s) && (decComma || !/^[1-9]\d{0,2},\d{3}$/.test(s))) s = s.replace(',', '.');
+    else if (/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d*)?$/.test(s)) s = s.replace(/,/g, '');
+    m = /^(\d*)(?:\.(\d*))?$/.exec(s);
+    if (!m || !(m[1] + (m[2] || ''))) return { err: 'nan' };
+    var ip = m[1].replace(/^0+/, ''), fp = m[2] || '';
+    if (ip.length + fp.length > MAX_DIGITS + 200 || Math.abs(ex) > MAX_DIGITS) return { err: 'long' };
+    var n = BigInt((ip + fp) || '0'), dec = fp.length - ex;
+    if (dec < 0) { n *= pow10(-dec); dec = 0; }
+    while (dec > 0 && n % 10n === 0n) { n /= 10n; dec--; }
+    if (String(n).length - dec > MAX_DIGITS || dec > MAX_DEC) return { err: 'long' };
+    return { n: neg ? -n : n, e: dec };
+  }
+  function cmp(a, b) { var x = a.n * pow10(b.e) - b.n * pow10(a.e); return x > 0n ? 1 : x < 0n ? -1 : 0; }
+  // The smallest and the largest whole number of 10^-p units inside a bound.
+  function unitsUp(v, p) {
+    if (v.e <= p) return v.n * pow10(p - v.e);
+    var d = pow10(v.e - p), q = v.n / d;
+    return v.n % d !== 0n && v.n > 0n ? q + 1n : q;
+  }
+  function unitsDown(v, p) {
+    if (v.e <= p) return v.n * pow10(p - v.e);
+    var d = pow10(v.e - p), q = v.n / d;
+    return v.n % d !== 0n && v.n < 0n ? q - 1n : q;
+  }
+  // v counts units of 10^-p: 250 with p = 2 is "2.50".
+  function write(v, p) {
+    var neg = v < 0n, a = neg ? -v : v, s = pow10(p);
+    return (neg ? '-' : '') + (a / s) + (p ? '.' + String(a % s).padStart(p, '0') : '');
+  }
+  // Long numbers are cut short in messages.
+  function brief(s) { return s.length > 28 ? s.slice(0, 12) + '…' + s.slice(-8) + ' (' + group(String(s.replace(/\D/g, '').length)) + ' digits)' : s; }
+  var SUP = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
+  function big(n) { // a count: in full up to 21 digits, then as a power of ten
+    var s = String(n);
+    if (s.length <= 21) return group(s);
+    return 'about ' + s.charAt(0) + '.' + s.slice(1, 3) + ' × 10' + String(s.length - 1).replace(/\d/g, function (c) { return SUP[c]; });
+  }
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+  // The ways to choose k of n when order does not matter, or null above 10^21.
+  function combinations(n, k) {
+    var K = BigInt(k);
+    if (K > n - K) K = n - K;
+    if (K > 5000n) return null;
+    var c = 1n, limit = pow10(21);
+    for (var i = 1n; i <= K; i++) {
+      c = c * (n - K + i) / i;
+      if (c > limit) return null;
+    }
+    return c;
+  }
+
+  // Everything a draw needs from the boxes, or { error, field }.
+  function config() {
+    var p = typeEl.value === 'dec' ? parseInt(placesEl.value, 10) || 2 : 0;
+    // "How many" has no decimals, so a comma or a point before three digits can only group thousands.
+    var lo = parse(minEl.value), hi = parse(maxEl.value), cnt = parse(countEl.value.replace(/^(\s*[1-9]\d{0,2})[.,](\d{3}\s*)$/, '$1$2'));
+    function fail(field, error) { return { error: error, field: field }; }
+    function bound(v, el, name, example) {
+      if (v === null) return fail(el, 'Enter the ' + name + ', such as ' + example + '.');
+      if (v.err === 'long') return fail(el, 'The ' + name + ' is too long. Use at most ' + group(String(MAX_DIGITS)) + ' digits before the decimal point and ' + MAX_DEC + ' after it.');
+      if (v.err) return fail(el, 'The ' + name + ' must be a number, such as ' + example + '.');
+      return null;
+    }
+    var bad = bound(lo, minEl, 'minimum', '1 or -50') || bound(hi, maxEl, 'maximum', '100');
+    if (bad) return bad;
+    if (cmp(lo, hi) > 0) return fail(maxEl, 'The maximum is less than the minimum. Swap them or change one.');
+    var a = unitsUp(lo, p), b = unitsDown(hi, p);
+    if (a > b) {
+      var between = ' between ' + brief(write(lo.n, lo.e)) + ' and ' + brief(write(hi.n, hi.e)) + '. ';
+      return fail(maxEl, p ? 'There is no number with ' + plural(p, 'decimal place') + between + 'Use more decimal places or a wider range.'
+        : 'There is no whole number' + between + 'Widen the range or switch to decimals.');
+    }
+    if (cnt === null) return fail(countEl, 'Enter how many numbers you want, from 1 to ' + group(String(MAX_COUNT)) + '.');
+    if (cnt.err || cnt.e !== 0 || cnt.n < 1n || cnt.n > BigInt(MAX_COUNT)) return fail(countEl, 'How many must be a whole number from 1 to ' + group(String(MAX_COUNT)) + '.');
+    var total = b - a + 1n, k = Number(cnt.n), unique = uniqueEl.checked;
+    if (unique && cnt.n > total) {
+      return fail(countEl, 'Only ' + big(total) + (total === 1n ? ' number is' : ' different numbers are') + ' possible in this range, so ' + group(String(k)) +
+        ' cannot be drawn without repeats. Ask for fewer, widen the range or untick “No repeats”.');
+    }
+    if (k * (Math.max(write(a, p).length, write(b, p).length) + 2) > MAX_CHARS) return fail(countEl, 'That is more than a million characters of numbers. Ask for fewer numbers or use a shorter range.');
+    return { a: a, b: b, p: p, total: total, k: k, unique: unique, coin: coin && p === 0 && a === 1n && b === 2n };
+  }
+
+  // ----- Randomness: only crypto.getRandomValues, never Math.random -----
+  // Hands out 32-bit random words, fetched 1,024 at a time, fresh for every draw.
+  function wordSource() {
+    var buf = null, at = 0;
+    return function () {
+      if (!buf || at === buf.length) { buf = new Uint32Array(1024); crypto.getRandomValues(buf); at = 0; }
+      return buf[at++];
+    };
+  }
+  // A whole number from 0 to n - 1, each equally likely. It takes just enough
+  // random bits to cover n and draws again when the value is n or more, so no
+  // value is favoured the way a plain remainder favours the low ones.
+  function below(n, next) {
+    if (n <= 1n) return 0n;
+    var bits = (n - 1n).toString(2).length;
+    if (bits <= 32) {
+      var limit = Number(n), v;
+      do { v = next() >>> (32 - bits); } while (v >= limit);
+      return BigInt(v);
+    }
+    var words = Math.ceil(bits / 32), spare = BigInt(words * 32 - bits);
+    for (;;) {
+      var hex = '';
+      for (var i = 0; i < words; i++) hex += next().toString(16).padStart(8, '0');
+      var x = BigInt('0x' + hex) >> spare;
+      if (x < n) return x;
+    }
+  }
+  function sample(c) {
+    var next = wordSource(), out = [], i;
+    if (!c.unique) {
+      for (i = 0; i < c.k; i++) out.push(c.a + below(c.total, next));
+      return out;
+    }
+    // No repeats: a shuffle (Fisher-Yates) of the whole range that stops after k
+    // numbers and only remembers the positions it has touched, so the range
+    // can be any size.
+    var moved = new Map();
+    for (i = 0; i < c.k; i++) {
+      var here = BigInt(i), j = here + below(c.total - here, next);
+      out.push(c.a + (moved.has(j) ? moved.get(j) : j));
+      moved.set(j, moved.has(here) ? moved.get(here) : here);
+    }
+    return out;
+  }
+
+  function describe(c) {
+    if (c.coin) return '';
+    var kind = c.p ? 'number' + (c.k === 1 ? '' : 's') + ' with ' + plural(c.p, 'decimal place') : 'whole number' + (c.k === 1 ? '' : 's');
+    var text = group(String(c.k)) + (c.unique && c.k > 1 ? ' different ' : ' ') + kind + ' from ' + brief(write(c.a, c.p)) + ' to ' + brief(write(c.b, c.p));
+    var values = big(c.total) + ' possible ' + (c.total === 1n ? 'value' : 'values');
+    values = values.charAt(0).toUpperCase() + values.slice(1);
+    var ways = c.unique && c.k > 1 ? combinations(c.total, c.k) : null;
+    if (ways === 1n) return text + ': every number once, in random order.';
+    if (ways) return text + '. ' + values + ' and ' + big(ways) + ' possible combinations.';
+    return text + (c.k > 1 && !c.unique ? ', repeats allowed. ' : '. ') + values + '.';
+  }
+
+  // Shows the current draw in the chosen order and list style. Sorting never draws again.
+  function show() {
+    if (!draw) return;
+    var vals = draw.values.slice();
+    if (orderEl.value === 'asc') vals.sort(function (x, y) { return x < y ? -1 : x > y ? 1 : 0; });
+    else if (orderEl.value === 'desc') vals.sort(function (x, y) { return x > y ? -1 : x < y ? 1 : 0; });
+    var texts = vals.map(function (v) { return draw.coin ? (v === 1n ? 'Heads' : 'Tails') : write(v, draw.p); });
+    var text = texts.join(sepEl.value === 'line' ? '\n' : sepEl.value === 'space' ? ' ' : ', ');
+    if (outEl.textContent !== text) outEl.textContent = text;
+    outEl.classList.remove('rn-none');
+    outEl.classList.toggle('rn-big', texts.length === 1 && text.length <= 10);
+    var k = texts.length, label = draw.coin ? (k === 1 ? 'Your coin flip' : 'Your ' + group(String(k)) + ' coin flips') : k === 1 ? 'Your random number' : 'Your ' + group(String(k)) + ' random numbers';
+    if (labelEl.textContent !== label) labelEl.textContent = label;
+    var info = draw.info;
+    if (draw.coin) {
+      var heads = draw.values.filter(function (v) { return v === 1n; }).length;
+      info = plural(k, 'coin flip') + (k > 1 ? ': ' + plural(heads, 'head') + ', ' + plural(k - heads, 'tail') + '.' : '.');
+    } else if (k > 1) info += ' Sum: ' + write(draw.values.reduce(function (s, v) { return s + v; }, 0n), draw.p) + '.';
+    if (infoEl.textContent !== info) infoEl.textContent = info;
+    draw.texts = texts;
+    draw.text = text;
+    draw.label = label;
+    reach();
+  }
+  // A list too long for its box scrolls, and then the box has to take keyboard focus.
+  function reach() {
+    if (outEl.scrollHeight > outEl.clientHeight + 1) outEl.setAttribute('tabindex', '0'); else outEl.removeAttribute('tabindex');
+  }
+
+  // One line for screen readers. It is emptied first, so that the same result
+  // drawn twice is read out twice, and filled after a pause while typing.
+  var saidTimer = null;
+  function announce(text, typing) {
+    clearTimeout(saidTimer);
+    statusEl.textContent = '';
+    saidTimer = setTimeout(function () { statusEl.textContent = text; }, typing ? 900 : 50);
+  }
+  // show is false while typing: a message that is already up is kept current or
+  // cleared, but a new one waits until typing pauses or Generate is pressed.
+  // A message that appears is also announced, unless the page is only opening.
+  function showError(c, show, quiet) {
+    var visible = !!c.error && (show || msgEl.textContent !== '');
+    [minEl, maxEl, countEl].forEach(function (el) {
+      if (visible && c.field === el) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+    });
+    var text = visible ? c.error : '';
+    if (msgEl.textContent !== text) {
+      msgEl.textContent = text;
+      if (text && !quiet) announce(text);
+    }
+    return visible;
+  }
+
+  // The settings live in the page address, so a reload, a bookmark or a shared
+  // link brings them back. The numbers are never put there.
+  function settings() {
+    var parts = [];
+    // Anything longer than a number can be, such as a pasted page of text, stays out of the address.
+    function put(key, value, normal) { if (value !== normal && value.length <= MAX_TEXT) parts.push(key + '=' + encodeURIComponent(value)); }
+    put('min', minEl.value.trim(), '1');
+    put('max', maxEl.value.trim(), '100');
+    put('n', countEl.value.trim(), '1');
+    put('unique', uniqueEl.checked ? '1' : '', '');
+    put('type', typeEl.value, 'int');
+    if (typeEl.value === 'dec') put('dp', placesEl.value, '2');
+    put('order', orderEl.value, 'drawn');
+    put('sep', sepEl.value, 'comma');
+    put('coin', coin ? '1' : '', '');
+    return parts.join('&');
+  }
+  // Anything else after the # is a link to a place on the page, such as a
+  // heading of the guide, and is left alone until a setting is changed.
+  function isSettings(hash) { return /(?:^|&)(?:min|max|n|unique|type|dp|order|sep|coin)=/.test(hash); }
+  function writeHash() {
+    var hash = settings(), current = location.hash.replace(/^#/, '');
+    if (current === hash || (!hash && !isSettings(current))) return;
+    try { history.replaceState(null, '', location.pathname + location.search + (hash ? '#' + hash : '')); } catch (e) { /* address stays as it is */ }
+  }
+  // An address with settings is the whole set-up: whatever it leaves out goes
+  // back to its default. Returns false when there is nothing to apply.
+  function readHash(always) {
+    var q = {}, hash = location.hash.replace(/^#/, '');
+    if (hash ? !isSettings(hash) : !always) return false;
+    if (hash === settings()) return false;
+    [minEl, maxEl, countEl].forEach(function (el) { el.value = el.defaultValue; });
+    uniqueEl.checked = uniqueEl.defaultChecked;
+    [typeEl, placesEl, orderEl, sepEl].forEach(function (el) {
+      $$('option', el).forEach(function (o) { o.selected = o.defaultSelected; });
+    });
+    hash.split('&').forEach(function (pair) {
+      var i = pair.indexOf('=');
+      if (i < 1) return;
+      try { q[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1)); } catch (e) { /* skip a broken value */ }
+    });
+    function text(el, v) { if (typeof v === 'string' && v.length <= MAX_TEXT) el.value = v; }
+    function pick(el, v) {
+      if (typeof v === 'string' && $$('option', el).some(function (o) { return o.value === v; })) el.value = v;
+    }
+    text(minEl, q.min); text(maxEl, q.max); text(countEl, q.n);
+    pick(typeEl, q.type); pick(placesEl, q.dp); pick(orderEl, q.order); pick(sepEl, q.sep);
+    if (q.unique === '1') uniqueEl.checked = true;
+    coin = q.coin === '1';
+    return true;
+  }
+
+  function syncType() { $('#rn-places-field').hidden = typeEl.value !== 'dec'; }
+  function reveal() {
+    var r = outEl.getBoundingClientRect();
+    if (r.top < 0 || r.bottom > window.innerHeight) outEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  // how: 'load' or 'link' (the page is opening: nothing is announced), 'typing'
+  // (new errors wait), 'option', or 'now' (Generate, Enter or a preset: the
+  // result is scrolled into view).
+  function generate(how) {
+    clearTimeout(timer);
+    var c = config();
+    if (!c.error && !c.coin) coin = false;
+    coinNote.hidden = !coin;
+    var opening = how === 'load' || how === 'link';
+    var failed = showError(c, how !== 'typing', opening);
+    writeHash();
+    if (c.error) {
+      // A link can open the page with settings that cannot be drawn from.
+      if (!draw) {
+        outEl.textContent = 'No numbers yet: see the message below.';
+        outEl.className = 'output rn-out rn-none';
+      }
+      if (failed && how === 'now') c.field.focus();
+      return;
+    }
+    draw = { values: sample(c), p: c.p, coin: c.coin, info: describe(c) };
+    show();
+    // Up to ten results are read out; a longer list is summed up (coin flips as heads and tails).
+    if (!opening) announce(draw.texts.length <= 10 ? draw.label + ': ' + draw.texts.join(', ') : draw.coin ? infoEl.textContent : group(String(draw.texts.length)) + ' numbers generated.', how === 'typing');
+    if (how === 'now') reveal();
+  }
+
+  if (!window.crypto || !crypto.getRandomValues) {
+    msgEl.textContent = 'This browser has no secure random number generator, so no numbers can be drawn here.';
+    $('#rn-generate').disabled = true;
+    return;
+  }
+
+  var lateErrors = TT.debounce(function () { showError(config(), true); }, 900);
+  [minEl, maxEl, countEl].forEach(function (el) {
+    el.addEventListener('input', function () {
+      // A message that is up is corrected or cleared at once; the draw waits for a pause.
+      showError(config(), false);
+      clearTimeout(timer);
+      timer = setTimeout(function () { generate('typing'); }, 300);
+      lateErrors();
+    });
+    el.addEventListener('change', function () { showError(config(), true); });
+  });
+  [typeEl, placesEl, uniqueEl].forEach(function (el) {
+    el.addEventListener('change', function () { syncType(); generate('option'); });
+  });
+  [orderEl, sepEl].forEach(function (el) {
+    el.addEventListener('change', function () { show(); writeHash(); });
+  });
+  form.addEventListener('submit', function (e) { e.preventDefault(); generate('now'); });
+  $$('[data-preset]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var p = PRESETS[btn.getAttribute('data-preset')], name = btn.getAttribute('data-preset');
+      // Pressed again on the same range, a preset only draws again and keeps "How many". A
+      // range that merely reads 1 to 49, with repeats allowed, is not yet a lottery draw.
+      var same = minEl.value.trim() === p[0] && maxEl.value.trim() === p[1] && typeEl.value === 'int' && (name === 'coin') === coin && (!p[3] || uniqueEl.checked);
+      minEl.value = p[0];
+      maxEl.value = p[1];
+      typeEl.value = 'int';
+      coin = name === 'coin';
+      if (!same) { countEl.value = p[2]; uniqueEl.checked = p[3]; orderEl.value = p[4]; }
+      syncType();
+      generate('now');
+    });
+  });
+  copyBtn.addEventListener('click', function () {
+    if (!draw) { TT.flash(copyBtn, 'Nothing to copy yet'); return; }
+    TT.copy(draw.text, copyBtn);
+  });
+  csvBtn.addEventListener('click', function () {
+    if (!draw) { TT.flash(csvBtn, 'Nothing to download yet'); return; }
+    TT.download('random-numbers.csv', [draw.coin ? 'flip' : 'number'].concat(draw.texts).join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
+  });
+  window.addEventListener('hashchange', function () {
+    if (readHash(true)) { syncType(); generate('option'); }
+  });
+  // A narrower window, a turned phone or a larger zoom can make a list scroll that fitted before.
+  window.addEventListener('resize', TT.debounce(reach, 150));
+
+  var fromLink = readHash(false);
+  syncType();
+  generate(fromLink ? 'link' : 'load');
+})();
+</script>

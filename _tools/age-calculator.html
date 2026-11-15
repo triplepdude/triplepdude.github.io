@@ -1,0 +1,651 @@
+---
+title: "Age Calculator: Years, Months and Days"
+description: How old am I? Enter a date of birth to see the exact age in years, months and days, in weeks, days and hours, and the next birthday. Runs in your browser.
+category: Date & Time
+keywords: [age calculator, how old am i, age calculator by date of birth, chronological age calculator, how old am i in days, exact age calculator, birthday calculator, leap year birthday age]
+howto: |
+  ## How to calculate age from a date of birth
+
+  Type the day, month and year of birth as numbers. The age appears at once,
+  counted up to today. To get the age on another day, such as a school cut-off
+  date, an exam date or a day in the past, change **Age on this date**. A time
+  of birth is optional: with it, the hours, minutes and seconds are counted to
+  the minute instead of in whole days. Under the age you will find the next
+  birthday, with its weekday and a countdown, and the weekday of the birth.
+
+  The calculator counts the way people do: full years since the birth, then
+  full months since the last birthday, then the days left over. A month is
+  complete on the same day number as the birth, or on the last day of a month
+  that is too short, so a baby born on 31 January is one month old on 28
+  February.
+
+  | Born | Age on | Age | Days |
+  |---|---|---|---|
+  | 15 May 1990 | 14 November 2026 | 36 years, 5 months, 30 days | 13,332 |
+  | 31 January 2024 | 1 March 2025 | 1 year, 1 month, 1 day | 395 |
+  | 29 February 2000 | 1 March 2025 | 25 years, 0 months, 0 days | 9,132 |
+
+  The boxes under the age give the same span in a single unit: months, weeks,
+  days, hours, minutes or seconds. To count the days between any two dates, or
+  working days only, use the [date calculator](/date-calculator/). To see
+  which week of the year a birthday falls in, use the
+  [week number](/week-number/) page.
+
+  ## Leap-day birthdays
+
+  29 February comes only in leap years, and 1900 and 2100 are not leap years
+  although they divide by four. In the years between, the law decides when a
+  leap-day baby is a year older, and it differs from place to place. The Age
+  of Legal Capacity (Scotland) Act 1991 and Hong Kong's Age of Majority
+  (Related Provisions) Ordinance both take the anniversary to be 1 March. New
+  Zealand's driver licensing rule deems it to be 28 February. The calculator
+  uses 1 March until you choose 28 February in the menu that appears for a
+  29 February birth.
+
+  ## Chronological age for test scoring
+
+  Chronological age is the time since birth, as opposed to a mental or
+  developmental age. Schools, speech therapists and psychologists score a test
+  against the child's chronological age on the test date, written in years,
+  months and days. Test manuals have their own way to get it: subtract the
+  birth date from the test date column by column, borrowing 12 months for a
+  year and always 30 days for a month, and never round up. In the words of
+  Pearson's Vineland manual, "all months are assumed to have 30 days". The
+  answer can differ from the calendar by a day or two: born 20 September 2003
+  and tested 18 September 2013 is 9 years, 11 months, 28 days by the manual
+  method and 29 days by the calendar. The big result is the calendar count and
+  the list under it has the manual method, so use the one your manual asks
+  for.
+
+  ## Why some countries count age differently
+
+  In the traditional East Asian count a baby is one year old at birth and
+  everyone gains a year on New Year's Day, not on the birthday. A child born
+  on 31 December was two the next morning. This "Korean age" is the current
+  year minus the birth year, plus one, which is one or two years more than
+  the international age shown here. South Korea made the international age
+  its legal standard on 28 June 2023, although a few rules, such as the age
+  for buying alcohol, still go by the year of birth.
+faq:
+  - q: How old am I in days?
+    a: The Days box under the result shows it. It counts every day from the date of birth to today, leap days included, but not the day of birth itself. As a guide, a 30th birthday falls on day 10,957 or 10,958, and day 10,000 comes at about 27 years and four and a half months.
+  - q: Do you reach an age on your birthday or the day before?
+    a: On the birthday itself in everyday use and in most modern law. In England and Wales the Family Law Reform Act 1969 fixed it at the start of the birthday. The older common-law rule, the day before, survives in places. The US Social Security Administration treats a person as reaching an age on the day before the birthday, so someone born on 1 January 1962 reaches 65 on 31 December 2026.
+  - q: What day of the week was I born on?
+    a: The list under the result names it. Dates are read in the Gregorian calendar used today. For a date before a country adopted it (1582 in much of Catholic Europe, September 1752 in Britain and its American colonies), convert the date first or the weekday will be wrong.
+  - q: How do I calculate age in Excel or Google Sheets?
+    a: With the date of birth in A2, `=DATEDIF(A2, TODAY(), "Y")` gives the full years, `"YM"` the months after them and `"MD"` the days after those. Microsoft advises against `"MD"` because of known limitations, so check a surprising result against this page.
+  - q: Is my date of birth sent or stored anywhere?
+    a: No. The age is worked out by JavaScript in your browser. Nothing is uploaded, saved or put in a cookie. The date goes into a link only when you press Copy link, so that you can bookmark or share a result.
+---
+<style>
+.ac-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 0 28px; }
+.ac-date { min-width: 0; margin: 0 0 16px; padding: 0; border: 0; }
+.ac-date legend { margin-bottom: 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.ac-line { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.ac-parts { display: flex; flex: 1 1 13rem; gap: 8px; min-width: 0; }
+.ac-part { display: grid; flex: 1 1 0; gap: 2px; min-width: 0; }
+.ac-part.ac-part-y { flex-grow: 1.5; }
+.ac-part label { color: var(--muted); font-size: 13px; }
+.ac-part input { font-variant-numeric: tabular-nums; }
+.ac-date .hint { display: block; margin-top: 6px; }
+.ac-date .msg, .ac-time .msg { margin: 8px 0 0; }
+.ac input[aria-invalid="true"] { border-color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
+.ac-time input, .ac-leap select { max-width: 22rem; }
+.ac-out { margin-top: 8px; padding-top: 20px; border-top: 1px solid var(--border); }
+.ac-out .label { margin: 0 0 4px; color: var(--muted); }
+.ac-out .result-big { margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.ac-born { margin: 0 0 16px; }
+.ac .stats { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+@media (min-width: 700px) { .ac .stats { grid-template-columns: repeat(3, 1fr); } }
+.ac .stat b { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.ac-exact { margin: 0 0 8px; }
+.ac-exact:empty { display: none; }
+.ac-note { margin: 0 0 20px; }
+.ac-h { margin: 0 0 8px; font-size: 1.1rem; }
+.ac-facts { margin: 0 0 16px; }
+.ac-fact { display: grid; grid-template-columns: minmax(0, 17rem) minmax(0, 1fr); gap: 2px 16px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 15px; }
+.ac-fact:last-child { border-bottom: 0; }
+.ac-fact dt { color: var(--muted); font-size: 14px; font-weight: 600; }
+.ac-fact dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .ac-fact { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="ac">
+  <div class="ac-cols">
+    <div>
+      <fieldset class="ac-date">
+        <legend>Date of birth</legend>
+        <div class="ac-line">
+          <div class="ac-parts" id="ac-dob">
+            <div class="ac-part" data-part="d">
+              <label for="ac-dob-d">Day</label>
+              <input type="text" id="ac-dob-d" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="bday-day" value="1" aria-describedby="ac-dob-msg">
+            </div>
+            <div class="ac-part" data-part="m">
+              <label for="ac-dob-m">Month</label>
+              <input type="text" id="ac-dob-m" inputmode="numeric" maxlength="9" autocomplete="bday-month" value="1" aria-describedby="ac-dob-msg">
+            </div>
+            <div class="ac-part ac-part-y" data-part="y">
+              <label for="ac-dob-y">Year</label>
+              <input type="text" id="ac-dob-y" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="bday-year" value="2000" aria-describedby="ac-dob-msg">
+            </div>
+          </div>
+        </div>
+        <span class="hint">In numbers, such as day 15, month 5, year 1990.</span>
+        <p class="msg error" id="ac-dob-msg"></p>
+      </fieldset>
+      <div class="field ac-time">
+        <label for="ac-time">Time of birth (optional)</label>
+        <input type="time" id="ac-time" aria-describedby="ac-time-hint ac-time-msg">
+        <span class="hint" id="ac-time-hint">Counts the hours and minutes exactly. The time is read in your device's time zone, so convert it first if the birth was in another zone.</span>
+        <p class="msg error" id="ac-time-msg"></p>
+      </div>
+    </div>
+    <div>
+      <fieldset class="ac-date">
+        <legend>Age on this date</legend>
+        <div class="ac-line">
+          <div class="ac-parts" id="ac-on">
+            <div class="ac-part" data-part="d">
+              <label for="ac-on-d">Day</label>
+              <input type="text" id="ac-on-d" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" aria-describedby="ac-on-msg">
+            </div>
+            <div class="ac-part" data-part="m">
+              <label for="ac-on-m">Month</label>
+              <input type="text" id="ac-on-m" inputmode="numeric" maxlength="9" autocomplete="off" aria-describedby="ac-on-msg">
+            </div>
+            <div class="ac-part ac-part-y" data-part="y">
+              <label for="ac-on-y">Year</label>
+              <input type="text" id="ac-on-y" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-describedby="ac-on-msg">
+            </div>
+          </div>
+          <button class="btn secondary" type="button" id="ac-today">Today</button>
+        </div>
+        <p class="msg error" id="ac-on-msg"></p>
+      </fieldset>
+      <input type="hidden" id="ac-follow" value="1">
+      <div class="field ac-leap" id="ac-leap-field" hidden>
+        <label for="ac-leap">Birthday in years without a 29 February</label>
+        <select id="ac-leap" aria-describedby="ac-leap-hint">
+          <option value="1" selected>1 March</option>
+          <option value="28">28 February</option>
+        </select>
+        <span class="hint" id="ac-leap-hint">The law differs: 1 March in Scotland and Hong Kong, 28 February for driver licences in New Zealand.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- The results update as you type, so they are not live regions; one short
+       summary is announced once typing pauses. -->
+  <p class="visually-hidden" id="ac-status" role="status"></p>
+
+  <div class="ac-out">
+    <p class="label" id="ac-head">Age</p>
+    <p class="result-big" id="ac-age">–</p>
+    <p class="ac-born" id="ac-born"></p>
+    <div class="stats">
+      <div class="stat"><b id="ac-months">–</b><span>Months<span id="ac-months-rest"></span></span></div>
+      <div class="stat"><b id="ac-weeks">–</b><span>Weeks<span id="ac-weeks-rest"></span></span></div>
+      <div class="stat"><b id="ac-days">–</b><span>Days</span></div>
+      <div class="stat"><b id="ac-hours">–</b><span>Hours</span></div>
+      <div class="stat"><b id="ac-minutes">–</b><span>Minutes</span></div>
+      <div class="stat"><b id="ac-seconds">–</b><span>Seconds</span></div>
+    </div>
+    <p class="ac-exact" id="ac-exact"></p>
+    <p class="hint ac-note" id="ac-note"></p>
+
+    <h2 class="ac-h" id="ac-more-h">Birthdays and other ways to count</h2>
+    <dl class="ac-facts">
+      <div class="ac-fact"><dt>Next birthday</dt><dd id="ac-next">–</dd></div>
+      <div class="ac-fact"><dt>Day of the week born</dt><dd id="ac-weekday">–</dd></div>
+      <div class="ac-fact" id="ac-leapdays-row" hidden><dt>29 February birthdays</dt><dd id="ac-leapdays">–</dd></div>
+      <div class="ac-fact"><dt>Next 1,000-day mark</dt><dd id="ac-mark">–</dd></div>
+      <div class="ac-fact"><dt>Age for test scoring (30-day months)</dt><dd id="ac-test">–</dd></div>
+      <div class="ac-fact"><dt>Korean age (traditional)</dt><dd id="ac-korean">–</dd></div>
+    </dl>
+    <div class="actions">
+      <button class="btn" type="button" id="ac-copy">Copy results</button>
+      <button class="btn secondary" type="button" id="ac-link">Copy link</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  function fdiv(a, b) { return Math.floor(a / b); }
+  function mod(a, b) { return ((a % b) + b) % b; }
+  function pad(n, w) { var s = String(n); while (s.length < w) s = '0' + s; return s; }
+
+  // Calendar math on plain day numbers (days since 1970-01-01, proleptic
+  // Gregorian). No Date objects, so time zones and DST cannot shift a date.
+  function dayNum(y, m, d) {
+    y -= m <= 2 ? 1 : 0;
+    var era = fdiv(y, 400), yoe = y - era * 400;
+    var doy = fdiv(153 * (m + (m > 2 ? -3 : 9)) + 2, 5) + d - 1;
+    return era * 146097 + yoe * 365 + fdiv(yoe, 4) - fdiv(yoe, 100) + doy - 719468;
+  }
+  function civil(z) {
+    z += 719468;
+    var era = fdiv(z, 146097), doe = z - era * 146097;
+    var yoe = fdiv(doe - fdiv(doe, 1460) + fdiv(doe, 36524) - fdiv(doe, 146096), 365);
+    var doy = doe - (365 * yoe + fdiv(yoe, 4) - fdiv(yoe, 100));
+    var mp = fdiv(5 * doy + 2, 153);
+    var d = doy - fdiv(153 * mp + 2, 5) + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    return { y: yoe + era * 400 + (m <= 2 ? 1 : 0), m: m, d: d };
+  }
+  function isLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
+  function dim(y, m) { return m === 2 ? (isLeap(y) ? 29 : 28) : (m === 4 || m === 6 || m === 9 || m === 11 ? 30 : 31); }
+  function weekday(z) { return DAYS[mod(z + 3, 7)]; }
+  function iso(z) { var c = civil(z); return pad(c.y, 4) + '-' + pad(c.m, 2) + '-' + pad(c.d, 2); }
+
+  // The same day number a whole count of months later, or the last day of a
+  // month that is too short (31 January + 1 month = 28 or 29 February).
+  function addMonths(c, n) {
+    var t = c.y * 12 + c.m - 1 + n, y = fdiv(t, 12), m = mod(t, 12) + 1;
+    return dayNum(y, m, Math.min(c.d, dim(y, m)));
+  }
+  // Full years and months from a to b (a <= b), then the days left over.
+  function diffYMD(a, b) {
+    var A = civil(a), B = civil(b);
+    var months = (B.y - A.y) * 12 + B.m - A.m, anchor = addMonths(A, months);
+    if (anchor > b) { months -= 1; anchor = addMonths(A, months); }
+    return { years: fdiv(months, 12), months: months % 12, days: b - anchor };
+  }
+  // The birthday in year y. A 29 February birthday falls on 1 March or on
+  // 28 February in other years, depending on the rule chosen.
+  function birthday(A, y, mar1) {
+    if (A.m === 2 && A.d === 29 && !isLeap(y)) return mar1 ? dayNum(y, 3, 1) : dayNum(y, 2, 28);
+    return dayNum(y, A.m, A.d);
+  }
+  function age(a, b, mar1) {
+    var A = civil(a);
+    if (!(mar1 && A.m === 2 && A.d === 29)) return diffYMD(a, b);
+    // Born on 29 February, birthday on 1 March in other years: count the
+    // birthdays first, then the 29th of each month since the last one.
+    var years = civil(b).y - A.y;
+    if (birthday(A, A.y + years, true) > b) years -= 1;
+    var months = 0, anchor = birthday(A, A.y + years, true);
+    for (var k = 1; k <= 11; k++) {
+      var z = dayNum(A.y + years + (k > 10 ? 1 : 0), k > 10 ? k - 10 : k + 2, 29);
+      if (z > b) break;
+      months = k;
+      anchor = z;
+    }
+    return { years: years, months: months, days: b - anchor };
+  }
+  // Test manuals subtract column by column and borrow 30 days for a month.
+  function testAge(A, B) {
+    var d = B.d - A.d, m = B.m - A.m, y = B.y - A.y;
+    if (d < 0) { d += 30; m -= 1; }
+    if (m < 0) { m += 12; y -= 1; }
+    return { years: y, months: m, days: d };
+  }
+
+  // Dates are written in English, in the order of the visitor's region:
+  // 14 November 2026, or November 14, 2026 where the month comes first.
+  var ORDER = (function () {
+    try {
+      var o = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'numeric', day: 'numeric' })
+        .formatToParts(new Date(2001, 1, 3))
+        .map(function (p) { return /^(day|month|year)$/.test(p.type) ? p.type.charAt(0) : ''; }).join('');
+      if (/^(dmy|mdy|ymd)$/.test(o)) return o;
+    } catch (e) { /* fall through */ }
+    return 'dmy';
+  })();
+  var H12 = (function () {
+    try { return !!new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12; } catch (e) { return false; }
+  })();
+  // The device's time zone by name: "Eastern Time", "India Standard Time".
+  var ZONE = (function () {
+    function name(style) {
+      try {
+        return new Intl.DateTimeFormat('en', { timeZoneName: style }).formatToParts(new Date())
+          .filter(function (p) { return p.type === 'timeZoneName'; })[0].value;
+      } catch (e) { return ''; }
+    }
+    var z = name('longGeneric');
+    if (!z || /^GMT/.test(z)) z = name('long') || z;
+    try { return z || new Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return z; }
+  })();
+  function fmtDate(z, withDay) {
+    var c = civil(z);
+    var s = ORDER === 'mdy' ? MONTHS[c.m - 1] + ' ' + c.d + ', ' + c.y : c.d + ' ' + MONTHS[c.m - 1] + ' ' + c.y;
+    return withDay === false ? s : weekday(z) + ', ' + s;
+  }
+  function fmtTime(min) {
+    var h = fdiv(min, 60), m = pad(min % 60, 2);
+    return H12 ? (mod(h + 11, 12) + 1) + ':' + m + (h < 12 ? ' AM' : ' PM') : pad(h, 2) + ':' + m;
+  }
+  function num(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function unit(n, word) { return num(n) + ' ' + word + (n === 1 ? '' : 's'); }
+  // "26 years, 10 months, 13 days"; units before the first one that counts are left out.
+  function ymd(o) {
+    var out = [];
+    if (o.years) out.push(unit(o.years, 'year'));
+    if (o.years || o.months) out.push(unit(o.months, 'month'));
+    out.push(unit(o.days, 'day'));
+    return out.join(', ');
+  }
+  // "1 month, 18 days": only the units that are not zero.
+  function span(o) {
+    var out = [];
+    if (o.years) out.push(unit(o.years, 'year'));
+    if (o.months) out.push(unit(o.months, 'month'));
+    if (o.days || !out.length) out.push(unit(o.days, 'day'));
+    return out.join(', ');
+  }
+  function ordinal(n) {
+    var t = n % 100, s = t >= 11 && t <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th';
+    return n + s;
+  }
+
+  // ----- Reading what was typed -----
+  // Full-width, Arabic-Indic, Persian, Devanagari and Bengali digits count as digits.
+  var ZEROS = [0xFF10, 0x0660, 0x06F0, 0x0966, 0x09E6];
+  function clean(s) {
+    return String(s == null ? '' : s).replace(/[０-９٠-٩۰-۹०-९০-৯]/g, function (ch) {
+      var c = ch.charCodeAt(0);
+      for (var i = 0; i < ZEROS.length; i++) if (c >= ZEROS[i] && c <= ZEROS[i] + 9) return String(c - ZEROS[i]);
+      return ch;
+    }).trim();
+  }
+  function parseMonth(s) {
+    s = s.toLowerCase().replace(/\.$/, '');
+    if (/^\d{1,2}$/.test(s)) return +s >= 1 && +s <= 12 ? +s : 0;
+    if (!/^[a-z]{3,9}$/.test(s)) return 0;
+    for (var i = 0; i < 12; i++) if (MONTHS[i].toLowerCase().indexOf(s) === 0) return i + 1;
+    return 0;
+  }
+  function valid(y, m, d) { return y >= 1 && y <= 9999 && m >= 1 && m <= 12 && d >= 1 && d <= dim(y, m) ? { y: y, m: m, d: d } : null; }
+  // A whole date pasted into one box: 1990-05-15, 15/05/1990, 15 May 1990, May 15, 1990.
+  function parseFull(text) {
+    var s = clean(text).replace(/^[a-z]+\.?,\s*/i, '').replace(/(\d)(st|nd|rd|th)\b/gi, '$1'), m;
+    if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s))) return valid(+m[1], +m[2], +m[3]);
+    if ((m = /^(\d{1,4})\s*[\/.\-\s]\s*(\d{1,2})\s*[\/.\-\s]\s*(\d{1,4})$/.exec(s))) {
+      if (m[1].length > 2) return valid(+m[1], +m[2], +m[3]);
+      if (m[3].length < 3) return null;
+      var first = +m[1], second = +m[2], monthFirst = ORDER === 'mdy';
+      if (first > 12 && second <= 12) monthFirst = false;
+      else if (second > 12 && first <= 12) monthFirst = true;
+      return monthFirst ? valid(+m[3], first, second) : valid(+m[3], second, first);
+    }
+    if ((m = /^(\d{1,2})[\s.\-\/]*([a-z]{3,9})\.?,?[\s.\-\/]*(\d{3,4})$/i.exec(s))) return valid(+m[3], parseMonth(m[2]), +m[1]);
+    if ((m = /^([a-z]{3,9})\.?\s*(\d{1,2}),?\s+(\d{3,4})$/i.exec(s))) return valid(+m[3], parseMonth(m[1]), +m[2]);
+    return null;
+  }
+
+  function group(id) {
+    var g = { box: $('#' + id), d: $('#' + id + '-d'), m: $('#' + id + '-m'), y: $('#' + id + '-y'), msg: $('#' + id + '-msg') };
+    g.els = [g.d, g.m, g.y];
+    // Day, month and year in the order of the visitor's region.
+    ORDER.split('').forEach(function (p) { g.box.appendChild(g[p].parentNode); });
+    return g;
+  }
+  // The year is written with four digits, as it is read (987 becomes 0987).
+  function setGroup(g, c) {
+    [['d', c.d], ['m', c.m], ['y', pad(c.y, 4)]].forEach(function (p) { if (g[p[0]].value !== String(p[1])) g[p[0]].value = String(p[1]); });
+  }
+  // state: empty, partial (a prompt, not an error), bad or ok.
+  function readGroup(g) {
+    var ds = clean(g.d.value), ms = clean(g.m.value), ys = clean(g.y.value);
+    if (!ds && !ms && !ys) return { state: 'empty' };
+    // A year takes all four digits. "90" may mean 1990, and a year that is
+    // still being typed is not the year 1, 19 or 199, so a shorter one is
+    // asked for in full instead of being counted from.
+    var shortYear = /^\d{1,3}$/.test(ys);
+    var day = /^\d{1,2}$/.test(ds) ? +ds : 0, month = parseMonth(ms), year = /^\d{4}$/.test(ys) ? +ys : 0;
+    var bad = [], msgs = [];
+    if (ds && !(day >= 1 && day <= 31)) { bad.push(g.d); msgs.push('The day must be a number from 1 to 31.'); }
+    if (ms && !month) { bad.push(g.m); msgs.push('The month must be a number from 1 to 12, or a name such as May.'); }
+    if (ys && !year && !shortYear) { bad.push(g.y); msgs.push('The year must be a number from 1 to 9999.'); }
+    if (bad.length) return { state: 'bad', bad: bad, msg: msgs.join(' ') };
+    if (!ds || !ms || !ys) return { state: 'partial' };
+    if (shortYear) return { state: 'partial', shortYear: true };
+    if (day > dim(year, month)) return { state: 'bad', bad: [g.d], msg: MONTHS[month - 1] + ' ' + year + ' has only ' + dim(year, month) + ' days.' };
+    return { state: 'ok', z: dayNum(year, month, day), c: { y: year, m: month, d: day } };
+  }
+  // A field is marked invalid for as long as the message it points at
+  // (aria-describedby) is about its value.
+  function mark(g, res) {
+    setText(g.msg, res.state === 'bad' ? res.msg : '');
+    g.els.forEach(function (el) {
+      if (res.state === 'bad' && res.bad.indexOf(el) >= 0) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid');
+    });
+  }
+  function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+  // A click or Tab into a box selects its content, ready to be typed over. A
+  // second click places the cursor as usual. No timer, so fast typing cannot
+  // overtake the selection.
+  function selectOnFocus(el) {
+    var fresh = false;
+    function all() { try { el.setSelectionRange(0, el.value.length); } catch (e) { el.select(); } }
+    el.addEventListener('focus', function () { fresh = true; all(); });
+    el.addEventListener('mouseup', function () { if (fresh && el.selectionStart === el.selectionEnd) all(); fresh = false; });
+    el.addEventListener('keyup', function () { fresh = false; });
+  }
+
+  // Screen readers hear one short summary: at once after a button, or once
+  // typing pauses (not every half-typed year).
+  var statusEl = $('#ac-status'), speakTimer = null;
+  function speak(text, now) {
+    clearTimeout(speakTimer);
+    if (now) { statusEl.textContent = ''; speakTimer = setTimeout(function () { statusEl.textContent = text; }, 50); }
+    else speakTimer = setTimeout(function () { if (statusEl.textContent !== text) statusEl.textContent = text; }, 700);
+  }
+
+  var dob = group('ac-dob'), on = group('ac-on');
+  var follow = $('#ac-follow'), timeIn = $('#ac-time'), leapSel = $('#ac-leap');
+  var result = null; // the last good result, for the copy buttons
+
+  // ms is the start of this minute as an instant. The clock time alone would
+  // not say which of the two 1:30s it is in the night the clocks go back.
+  function nowParts() {
+    var n = new Date();
+    return { z: dayNum(n.getFullYear(), n.getMonth() + 1, n.getDate()), min: n.getHours() * 60 + n.getMinutes(), ms: n.getTime() - n.getSeconds() * 1000 - n.getMilliseconds() };
+  }
+  // The instant of a local date and clock time on this device, in milliseconds.
+  function localMs(c, min) {
+    var d = new Date(c.y, c.m - 1, c.d, fdiv(min, 60), min % 60, 0, 0);
+    if (c.y < 100) d.setFullYear(c.y); // the constructor reads years 0 to 99 as 1900 to 1999
+    return d.getTime();
+  }
+
+  var IDS = ['#ac-age', '#ac-months', '#ac-weeks', '#ac-days', '#ac-hours', '#ac-minutes', '#ac-seconds', '#ac-next', '#ac-weekday', '#ac-mark', '#ac-test', '#ac-korean'];
+  function blank(prompt) {
+    IDS.forEach(function (id) { setText($(id), '–'); });
+    ['#ac-months-rest', '#ac-weeks-rest', '#ac-exact', '#ac-note'].forEach(function (id) { setText($(id), ''); });
+    setText($('#ac-head'), 'Age');
+    setText($('#ac-born'), prompt);
+    $('#ac-leapdays-row').hidden = true;
+    $('#ac-copy').disabled = true;
+    $('#ac-link').disabled = true;
+    result = null;
+  }
+
+  // trigger: 'type' or 'click' announces a summary; nothing stays quiet (the
+  // page refreshing itself as the clock moves on).
+  function render(trigger) {
+    var say = trigger ? function (t) { speak(t, trigger === 'click'); } : function () {};
+    var now = nowParts();
+    if (follow.value === '1') setGroup(on, civil(now.z));
+    var A = readGroup(dob), B = readGroup(on);
+    if (A.state === 'ok' && B.state === 'ok' && B.z < A.z) {
+      // With the age counted to today, the date of birth is the one at fault.
+      if (follow.value === '1') A = { state: 'bad', bad: dob.els, msg: 'This date is in the future. Enter a date of birth up to today, ' + fmtDate(now.z, false) + '.' };
+      else B = { state: 'bad', bad: on.els, msg: 'This date is before the date of birth. Enter ' + fmtDate(A.z, false) + ' or a later date.' };
+    }
+    mark(dob, A);
+    mark(on, B);
+    var leapling = A.state === 'ok' && A.c.m === 2 && A.c.d === 29;
+    if (A.state === 'ok') $('#ac-leap-field').hidden = !leapling;
+
+    // A time field shows HH:MM; where the browser has none it is a text box.
+    var typedTime = clean(timeIn.value), tm = /^([01]?\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/.exec(typedTime);
+    var timeMsg = typedTime && !tm ? 'Enter the time as hours and minutes on the 24-hour clock, such as 08:30.' : '';
+    if (A.state !== 'ok' || B.state !== 'ok') {
+      var prompt = A.state === 'empty' || A.state === 'partial' ? (A.shortYear ? 'Enter the year of birth with four digits, such as 1990.' : 'Enter the day, month and year of birth.')
+        : A.state === 'ok' && B.state !== 'bad' ? (B.shortYear ? 'Enter the year with four digits, such as ' + civil(now.z).y + '.' : 'Enter the day, month and year to count the age to, or press Today.') : '';
+      blank(prompt);
+      setText($('#ac-time-msg'), timeMsg);
+      if (timeMsg) timeIn.setAttribute('aria-invalid', 'true'); else timeIn.removeAttribute('aria-invalid');
+      say([A.msg, B.msg, timeMsg, prompt].filter(Boolean).join(' '));
+      return;
+    }
+
+    var mar1 = leapSel.value !== '28', a = A.z, b = B.z, days = b - a;
+    var g = age(a, b, leapling && mar1);
+    var hours = days * 24, minutes = days * 1440, seconds = days * 86400, exact = '', note;
+    if (tm) {
+      // Real time elapsed on this device's clock, daylight saving changes
+      // included: up to now when the age is counted to today, otherwise up to
+      // the same clock time as the birth.
+      var tb = +tm[1] * 60 + +tm[2], tt = b === now.z ? now.min : tb;
+      var from = localMs(A.c, tb), to = b === now.z ? now.ms : localMs(B.c, tt);
+      if (to < from) {
+        timeMsg = 'That time is in the future: it is ' + fmtTime(now.min) + ' now.';
+        tm = null;
+      } else {
+        // The last time the clock showed the time of birth: on that day if the
+        // moment has come, otherwise the day before (or two, should a clock
+        // change have removed that time from a day).
+        var ms = to - from, back = 0, rest = to - localMs(B.c, tb);
+        while (rest < 0 && back < 2) { back += 1; rest = to - localMs(civil(b - back), tb); }
+        hours = fdiv(ms, 3600000);
+        minutes = fdiv(ms, 60000);
+        seconds = fdiv(ms, 1000);
+        exact = 'Counted from the time of birth: ' + ymd(age(a, b - back, leapling && mar1)) + ', ' + unit(fdiv(rest, 3600000), 'hour') + ', ' + unit(fdiv(rest % 3600000, 60000), 'minute') + '.';
+        note = 'Hours, minutes and seconds run from ' + fmtTime(tb) + ' on ' + fmtDate(a, false) + ' to ' + fmtTime(tt) + ' on ' + fmtDate(b, false) +
+          (b === now.z ? ' (now)' : ' (the time of birth)') + (ZONE ? ', both read as ' + ZONE : ', both on this device\'s clock') + ', so clock changes are counted.';
+      }
+    }
+    if (!tm) note = 'Hours, minutes and seconds are whole days of 24 hours. Add a time of birth to count them to the minute.';
+    setText($('#ac-time-msg'), timeMsg);
+    if (timeMsg) timeIn.setAttribute('aria-invalid', 'true'); else timeIn.removeAttribute('aria-invalid');
+
+    var totalMonths = g.years * 12 + g.months;
+    setText($('#ac-head'), 'Age on ' + fmtDate(b));
+    setText($('#ac-age'), ymd(g));
+    setText($('#ac-born'), a === b ? 'Born on this day.' : 'Born on ' + fmtDate(a) + '.');
+    setText($('#ac-months'), num(totalMonths));
+    setText($('#ac-months-rest'), g.days ? ' and ' + unit(g.days, 'day') : '');
+    setText($('#ac-weeks'), num(fdiv(days, 7)));
+    setText($('#ac-weeks-rest'), days % 7 ? ' and ' + unit(days % 7, 'day') : '');
+    setText($('#ac-days'), num(days));
+    setText($('#ac-hours'), num(hours));
+    setText($('#ac-minutes'), num(minutes));
+    setText($('#ac-seconds'), num(seconds));
+    setText($('#ac-exact'), exact);
+    setText($('#ac-note'), note);
+
+    // Birthdays.
+    var thisYear = birthday(A.c, B.c.y, mar1), isBirthday = thisYear === b && B.c.y > A.c.y;
+    var next = thisYear > b ? thisYear : birthday(A.c, B.c.y + 1, mar1), turning = civil(next).y - A.c.y;
+    var until = next - b, gap = diffYMD(b, next);
+    var nextText = fmtDate(next) + ', in ' + span(gap) + (gap.years || gap.months ? ' (' + unit(until, 'day') + ')' : '') + '. Turning ' + turning + '.';
+    // "Today" only when the age is counted to today, not to another date.
+    var birthdayText = (b === now.z ? 'Today' : 'This date') + ' is the ' + ordinal(g.years) + ' birthday.';
+    if (isBirthday) nextText = birthdayText + ' The next one is ' + nextText;
+    setText($('#ac-next'), nextText);
+    setText($('#ac-weekday'), weekday(a));
+    $('#ac-leapdays-row').hidden = !leapling;
+    if (leapling) {
+      var had = 0, y = A.c.y + 4;
+      for (; dayNum(y, 2, isLeap(y) ? 29 : 28) <= b; y += 4) if (isLeap(y)) had += 1;
+      while (!isLeap(y)) y += 4;
+      setText($('#ac-leapdays'), (had ? had + ' so far' : 'None yet') + '. The next 29 February is ' + fmtDate(dayNum(y, 2, 29)) + '.');
+    }
+    var mark1000 = (fdiv(days, 1000) + 1) * 1000;
+    setText($('#ac-mark'), num(mark1000) + ' days old on ' + fmtDate(a + mark1000) + ', in ' + unit(a + mark1000 - b, 'day') + '.');
+    var t = testAge(A.c, B.c);
+    setText($('#ac-test'), unit(t.years, 'year') + ', ' + unit(t.months, 'month') + ', ' + unit(t.days, 'day'));
+    setText($('#ac-korean'), (B.c.y - A.c.y + 1) + ' (one at birth, plus one every 1 January)');
+
+    $('#ac-copy').disabled = false;
+    $('#ac-link').disabled = false;
+    result = {
+      text: ['Date of birth: ' + fmtDate(a) + (tm ? ', ' + fmtTime(+tm[1] * 60 + +tm[2]) : ''),
+        'Age on ' + fmtDate(b) + ': ' + ymd(g),
+        'In single units: ' + unit(totalMonths, 'month') + (g.days ? ' and ' + unit(g.days, 'day') : '') + '; ' + unit(fdiv(days, 7), 'week') + (days % 7 ? ' and ' + unit(days % 7, 'day') : '') +
+          '; ' + unit(days, 'day') + '; ' + unit(hours, 'hour') + '; ' + unit(minutes, 'minute') + '; ' + unit(seconds, 'second'),
+        'Next birthday: ' + fmtDate(next) + ', in ' + unit(until, 'day') + ', turning ' + turning].join('\n'),
+      link: '#dob=' + iso(a) + (follow.value === '1' ? '' : '&on=' + iso(b)) + (tm ? '&time=' + pad(+tm[1], 2) + ':' + tm[2] : '') + (leapling && !mar1 ? '&leap=28' : '')
+    };
+    say(timeMsg || ymd(g) + ' old on ' + fmtDate(b) + '. ' + (isBirthday ? birthdayText : 'Next birthday in ' + unit(until, 'day') + '.'));
+  }
+
+  // ----- A link that carries the dates: #dob=1990-05-15&on=2030-01-01&time=08:30&leap=28 -----
+  var linked = false;
+  function parseIso(s) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return m ? valid(+m[1], +m[2], +m[3]) : null; }
+  function readHash() {
+    var p;
+    try { p = new URLSearchParams(location.hash.replace(/^#/, '')); } catch (e) { return false; }
+    var d = parseIso(p.get('dob')), o = parseIso(p.get('on')), t = p.get('time') || '';
+    if (!d) return false;
+    setGroup(dob, d);
+    follow.value = o ? '0' : '1';
+    if (o) setGroup(on, o);
+    timeIn.value = /^([01]\d|2[0-3]):[0-5]\d$/.test(t) ? t : '';
+    leapSel.value = p.get('leap') === '28' ? '28' : '1';
+    linked = true;
+    return true;
+  }
+  // Once the visitor changes something, the address no longer describes the
+  // page, so the dates are taken out of it. Nothing is put back by itself.
+  function edited() {
+    if (!linked) return;
+    linked = false;
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* the address stays as it is */ }
+  }
+
+  // ----- Wiring -----
+  [dob, on].forEach(function (g) {
+    g.els.forEach(function (el) {
+      el.addEventListener('input', function () {
+        if (g === on) follow.value = '0';
+        edited();
+        render('type');
+      });
+      selectOnFocus(el);
+      el.addEventListener('paste', function (e) {
+        var raw = (e.clipboardData || window.clipboardData).getData('text'), c = parseFull(raw), text = clean(raw);
+        if (!c && text === raw && text.length <= el.maxLength) return; // a plain number or name goes in as usual
+        e.preventDefault();
+        if (c) setGroup(g, c);
+        // Anything else goes in whole, without the spaces around it. Cut to
+        // the length of the box, the first characters of a date that cannot
+        // be read (15/5/90) would pass for the day.
+        else el.setRangeText(text.slice(0, 40), el.selectionStart, el.selectionEnd, 'end');
+        if (g === on) follow.value = '0';
+        edited();
+        render('click');
+      });
+    });
+  });
+  $('#ac-today').addEventListener('click', function () { follow.value = '1'; edited(); render('click'); });
+  timeIn.addEventListener('input', function () { edited(); render('type'); });
+  timeIn.addEventListener('change', function () { edited(); render('type'); });
+  leapSel.addEventListener('change', function () { edited(); render('click'); });
+  $('#ac-copy').addEventListener('click', function () { if (result) TT.copy(result.text, this); });
+  $('#ac-link').addEventListener('click', function () { if (result) TT.copy(location.origin + location.pathname + result.link, this); });
+  window.addEventListener('hashchange', function () { if (readHash()) render('click'); });
+  // Browsers put typed values back after a reload or the Back button, some of
+  // them only once the page has loaded.
+  window.addEventListener('pageshow', function () { render(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) render(); });
+
+  readHash();
+  render();
+
+  // Keep "today" and "now" current while the page stays open: a fresh count at
+  // the start of every minute.
+  (function tick() {
+    setTimeout(function () { render(); tick(); }, 60000 - Date.now() % 60000 + 50);
+  })();
+})();
+</script>

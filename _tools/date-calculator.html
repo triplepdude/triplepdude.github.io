@@ -1,0 +1,871 @@
+---
+title: "Date Calculator: Days Between Two Dates"
+description: Count the days, weeks and working days between two dates, or add and subtract days, weeks, months and years from a date. Runs in your browser.
+category: Date & Time
+keywords: [date calculator, days between dates, days between two dates, add days to date, how many days until, business days calculator, working days between dates, days from today, date difference calculator]
+howto: |
+  ## How to count the days between two dates
+
+  Choose a start date and an end date. The answer appears at once as days,
+  as weeks and days, as years, months and days and as working days, with the
+  weekday of each date. The start is today until you change it, so the same
+  tab answers "how many days until" a date. The buttons under the dates fill
+  in the next [Christmas](#to=christmas), [New Year's Day](#to=new-year),
+  [Easter](#to=easter), [Halloween](#to=halloween) or US
+  [Thanksgiving](#to=thanksgiving).
+
+  To move a date instead, open **Add or subtract days**: pick a start date,
+  enter years, months, weeks or days, and read off the new date. Adding 45
+  days to 14 November 2026 gives 29 December 2026.
+
+  ## Is the end date included?
+
+  Normally not. From Monday to Friday of one week is four days, because you
+  count the nights in between. Ages, countdowns and hotel stays work this
+  way. Tick **Include the end date** when both days count, as for a holiday
+  from Monday to Friday, which is five days off work.
+
+  Legal deadlines usually leave out the first day and count the last. Rule 6
+  of the US Federal Rules of Civil Procedure says to "exclude the day of the
+  event that triggers the period" and to "include the last day". That is the
+  same as adding the days on the second tab. Under that rule a period that
+  would end on a Saturday, Sunday or legal holiday runs on to the next day
+  that is none of these.
+
+  ## Counting only working days
+
+  Working days leave out Saturdays, Sundays and the holidays you list. Open
+  **Working days and holidays** to change the weekend, for example to Friday
+  and Saturday, and to type holidays one per line. One button adds the US
+  federal holidays.
+
+  In Excel and Google Sheets, `=NETWORKDAYS(A1, B1)` counts both the start
+  and the end date, so tick **Include the end date** to match it.
+  `=WORKDAY(A1, 10)` does not count the start date, and neither does the
+  second tab with **Count only working days** ticked.
+
+  ## How many weeks is 90 days?
+
+  Divide by seven: the whole part is the weeks and the remainder is the days
+  left over.
+
+  | Days | Weeks and days |
+  |---|---|
+  | 30 | 4 weeks, 2 days |
+  | 45 | 6 weeks, 3 days |
+  | 60 | 8 weeks, 4 days |
+  | 90 | 12 weeks, 6 days |
+  | 180 | 25 weeks, 5 days |
+  | 365 | 52 weeks, 1 day |
+
+  ## Why months give different day counts
+
+  Months have 28 to 31 days, so "one month" is not a fixed number of days.
+  One month after 15 January is 15 February, 31 days later. One month after
+  15 February is 15 March, only 28 days later, or 29 in a leap year. When the
+  day does not exist in the new month, the calculator uses the last day of
+  that month: 31 January plus one month is 28 February, or 29 February in a
+  leap year. Years and months are added first, then weeks and days.
+
+  For an age in years, months and days, use the
+  [age calculator](/age-calculator/). The [week number](/week-number/) page
+  shows the week of the year for any date, and the
+  [hours calculator](/hours-calculator/) counts the time between two clock
+  times.
+faq:
+  - q: How many days are there until Christmas?
+    a: Press the Christmas button under the dates. The calculator then counts from today to the next 25 December. On 1 December the answer is 24 days. On 26 December it is 364 days, or 365 when a 29 February falls in between.
+  - q: What date is 90 days from today?
+    a: Open Add or subtract days and press the 90 days button. The start date is already today. Ninety days is 12 weeks and 6 days, which is close to three months but not always the same date. 90 days after 14 November 2026 is 12 February 2027, while three months after it is 14 February 2027.
+  - q: How many working days are there in a year?
+    a: A year has 260 to 262 weekdays, Monday to Friday, before public holidays are taken off. 2026 has 261, which leaves 250 working days after the eleven US federal holidays. To count any year, enter 1 January and 31 December and include the end date.
+  - q: How do I do this in Excel or Google Sheets?
+    a: Subtract the cells. `=B1-A1` gives the days between two dates without the end date, and `=DAYS(B1, A1)` does the same. `=A1+45` adds days. `=EDATE(A1, 3)` adds months and, like this page, stops at the last day of a shorter month.
+  - q: Are the dates I enter stored or sent anywhere?
+    a: No. Everything is calculated by JavaScript in your browser, and nothing is uploaded or saved. Your dates are kept only in the page address after the # sign, a part that browsers do not send to the server, so you can bookmark or share a calculation.
+---
+<style>
+.dc-tabs { display: flex; gap: 4px; margin: 0 0 20px; border-bottom: 1px solid var(--border); }
+.dc-tab { flex: 0 1 auto; min-height: 44px; margin-bottom: -1px; padding: 8px 16px; border: 0; border-bottom: 3px solid transparent; border-radius: 6px 6px 0 0; background: none; color: var(--muted); font: inherit; font-weight: 600; line-height: 1.25; cursor: pointer; }
+.dc-tab:hover { color: var(--text); }
+.dc-tab[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--text); }
+.dc-date { display: flex; gap: 8px; }
+.dc-date input { flex: 1 1 auto; min-width: 0; }
+.dc-date .btn { flex: none; }
+.dc-dates { align-items: stretch; }
+.dc-dates > .field { flex: 1 1 240px; grid-template-rows: auto 1fr; }
+.dc-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
+.dc-quick-label { color: var(--muted); font-size: 14px; font-weight: 600; }
+.dc-quick .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.dc-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin: 0 0 16px; }
+.dc-amounts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0 0 16px; }
+.dc-amounts > .field { margin: 0; }
+.dc-amounts input { font-variant-numeric: tabular-nums; }
+.dc input[aria-invalid="true"], .dc textarea[aria-invalid="true"] { border-color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
+.dc-work { margin: 0 0 16px; border: 1px solid var(--border); border-radius: 8px; }
+.dc-work > summary { min-height: 44px; padding: 10px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.dc-work > summary span { color: var(--muted); font-weight: 400; }
+.dc-work-body { padding: 4px 14px 0; }
+.dc-weekdays { display: flex; flex-wrap: wrap; gap: 0 18px; min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
+.dc-weekdays legend { margin-bottom: 2px; padding: 0; font-size: 14px; font-weight: 600; }
+.dc-work textarea { min-height: 110px; }
+.dc-out { padding-top: 20px; border-top: 1px solid var(--border); }
+.dc-out .label { margin: 0 0 4px; color: var(--muted); }
+.dc-out .result-big { margin-bottom: 6px; }
+.dc-line { margin: 0 0 16px; }
+.dc .stats { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+@media (min-width: 700px) { .dc .stats { grid-template-columns: repeat(4, 1fr); } }
+.dc .stat b { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.dc-note { margin: 0 0 16px; }
+.dc-note:empty { display: none; }
+@media (max-width: 480px) {
+  .dc-tab { flex: 1 1 0; padding: 8px 6px; }
+  .dc-amounts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+
+<div class="dc">
+  <div class="dc-tabs" role="tablist" aria-label="What to calculate">
+    <button class="dc-tab" type="button" role="tab" id="dc-tab-between" aria-controls="dc-between" aria-selected="true">Days between dates</button>
+    <button class="dc-tab" type="button" role="tab" id="dc-tab-add" aria-controls="dc-add" aria-selected="false" tabindex="-1">Add or subtract days</button>
+  </div>
+
+  <div role="tabpanel" id="dc-between" aria-labelledby="dc-tab-between">
+    <div class="row dc-dates">
+      <div class="field">
+        <label for="dc-from">Start date</label>
+        <div class="dc-date">
+          <input type="date" id="dc-from" min="0001-01-01" max="9999-12-31" aria-describedby="dc-between-msg">
+          <button class="btn secondary" type="button" id="dc-from-today" aria-label="Today as the start date">Today</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="dc-to">End date</label>
+        <div class="dc-date">
+          <input type="date" id="dc-to" min="0001-01-01" max="9999-12-31" aria-describedby="dc-between-msg">
+          <button class="btn secondary" type="button" id="dc-to-today" aria-label="Today as the end date">Today</button>
+        </div>
+      </div>
+    </div>
+    <div class="dc-quick" role="group" aria-labelledby="dc-until-label">
+      <span class="dc-quick-label" id="dc-until-label">Days until</span>
+      <button class="btn secondary small" type="button" data-preset="new-year" aria-pressed="false">New Year</button>
+      <button class="btn secondary small" type="button" data-preset="valentines-day" aria-pressed="false">Valentine's Day</button>
+      <button class="btn secondary small" type="button" data-preset="easter" aria-pressed="false">Easter</button>
+      <button class="btn secondary small" type="button" data-preset="halloween" aria-pressed="false">Halloween</button>
+      <button class="btn secondary small" type="button" data-preset="thanksgiving" aria-pressed="false">Thanksgiving</button>
+      <button class="btn secondary small" type="button" data-preset="christmas" aria-pressed="false">Christmas</button>
+    </div>
+    <div class="dc-opts">
+      <label class="check"><input type="checkbox" id="dc-incl"> Include the end date (adds 1 day)</label>
+      <button class="btn secondary small" type="button" id="dc-swap">Swap dates</button>
+    </div>
+    <div class="dc-slot"></div>
+    <p class="msg error" id="dc-between-msg"></p>
+
+    <div class="dc-out">
+      <p class="label" id="dc-b-head">Result</p>
+      <p class="result-big" id="dc-b-big">–</p>
+      <p class="dc-line" id="dc-b-line"></p>
+      <div class="stats">
+        <div class="stat"><b id="dc-b-ymd">–</b><span>Years, months, days</span></div>
+        <div class="stat"><b id="dc-b-weeks">–</b><span>Weeks and days</span></div>
+        <div class="stat"><b id="dc-b-work">–</b><span>Working days</span></div>
+        <div class="stat"><b id="dc-b-off">–</b><span id="dc-b-off-label">Days off</span></div>
+        <div class="stat"><b id="dc-b-hours">–</b><span>Hours</span></div>
+        <div class="stat"><b id="dc-b-minutes">–</b><span>Minutes</span></div>
+        <div class="stat"><b id="dc-b-seconds">–</b><span>Seconds</span></div>
+      </div>
+      <div class="actions">
+        <button class="btn" type="button" id="dc-b-copy">Copy result</button>
+      </div>
+    </div>
+  </div>
+
+  <div role="tabpanel" id="dc-add" aria-labelledby="dc-tab-add" hidden>
+    <div class="row dc-dates">
+      <div class="field">
+        <label for="dc-start">Start date</label>
+        <div class="dc-date">
+          <input type="date" id="dc-start" min="0001-01-01" max="9999-12-31" aria-describedby="dc-add-msg">
+          <button class="btn secondary" type="button" id="dc-start-today" aria-label="Today as the start date">Today</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="dc-op">Add or subtract</label>
+        <select id="dc-op">
+          <option value="add" selected>Add (a later date)</option>
+          <option value="sub">Subtract (an earlier date)</option>
+        </select>
+      </div>
+    </div>
+    <div class="dc-amounts">
+      <div class="field"><label for="dc-y">Years</label><input type="text" id="dc-y" inputmode="numeric" autocomplete="off" maxlength="12" value="0" aria-describedby="dc-add-msg"></div>
+      <div class="field"><label for="dc-m">Months</label><input type="text" id="dc-m" inputmode="numeric" autocomplete="off" maxlength="12" value="0" aria-describedby="dc-add-msg"></div>
+      <div class="field"><label for="dc-w">Weeks</label><input type="text" id="dc-w" inputmode="numeric" autocomplete="off" maxlength="12" value="0" aria-describedby="dc-add-msg"></div>
+      <div class="field"><label for="dc-d">Days</label><input type="text" id="dc-d" inputmode="numeric" autocomplete="off" maxlength="12" value="90" aria-describedby="dc-add-msg"></div>
+    </div>
+    <div class="dc-quick" role="group" aria-labelledby="dc-days-label">
+      <span class="dc-quick-label" id="dc-days-label">Quick picks</span>
+      <button class="btn secondary small" type="button" data-days="30">30 days</button>
+      <button class="btn secondary small" type="button" data-days="45">45 days</button>
+      <button class="btn secondary small" type="button" data-days="60">60 days</button>
+      <button class="btn secondary small" type="button" data-days="90">90 days</button>
+      <button class="btn secondary small" type="button" data-days="180">180 days</button>
+    </div>
+    <div class="dc-opts">
+      <label class="check"><input type="checkbox" id="dc-biz" aria-describedby="dc-add-msg"> Count only working days in the Days box</label>
+    </div>
+    <div class="dc-slot"></div>
+    <p class="msg error" id="dc-add-msg"></p>
+
+    <div class="dc-out">
+      <p class="label" id="dc-a-head">Result</p>
+      <p class="result-big" id="dc-a-big">–</p>
+      <p class="dc-line" id="dc-a-line"></p>
+      <div class="stats">
+        <div class="stat"><b id="dc-a-iso">–</b><span>ISO 8601 date</span></div>
+        <div class="stat"><b id="dc-a-days">–</b><span id="dc-a-days-label">From the start date</span></div>
+        <div class="stat"><b id="dc-a-today">–</b><span>From today</span></div>
+        <div class="stat"><b id="dc-a-week">–</b><span>ISO week number</span></div>
+      </div>
+      <p class="hint dc-note" id="dc-a-note"></p>
+      <div class="actions">
+        <button class="btn" type="button" id="dc-a-copy">Copy result</button>
+      </div>
+    </div>
+  </div>
+
+  <details class="dc-work" id="dc-work">
+    <summary>Working days and holidays <span id="dc-work-sum"></span></summary>
+    <div class="dc-work-body">
+      <fieldset class="dc-weekdays">
+        <legend>Days off every week</legend>
+        <label class="check"><input type="checkbox" id="dc-off-1"> Monday</label>
+        <label class="check"><input type="checkbox" id="dc-off-2"> Tuesday</label>
+        <label class="check"><input type="checkbox" id="dc-off-3"> Wednesday</label>
+        <label class="check"><input type="checkbox" id="dc-off-4"> Thursday</label>
+        <label class="check"><input type="checkbox" id="dc-off-5"> Friday</label>
+        <label class="check"><input type="checkbox" id="dc-off-6" checked> Saturday</label>
+        <label class="check"><input type="checkbox" id="dc-off-7" checked> Sunday</label>
+      </fieldset>
+      <div class="field">
+        <label for="dc-hol">Holidays, one date per line</label>
+        <textarea id="dc-hol" rows="4" spellcheck="false" autocomplete="off" placeholder="2026-12-25 Christmas Day" aria-describedby="dc-hol-hint dc-hol-msg dc-hol-long"></textarea>
+        <span class="hint" id="dc-hol-hint">Write dates like 2026-12-25, 25 Dec 2026 or Dec 25, 2026. Anything after the date is a note for you.</span>
+      </div>
+      <p class="msg error" id="dc-hol-msg"></p>
+      <div class="actions">
+        <button class="btn secondary small" type="button" id="dc-us">Add US federal holidays</button>
+        <button class="btn secondary small" type="button" id="dc-hol-clear">Clear holidays</button>
+      </div>
+      <p class="hint dc-note" id="dc-hol-note"></p>
+      <p class="hint dc-note" id="dc-hol-long"></p>
+    </div>
+  </details>
+
+  <!-- The results update as you type, so they are not live regions; one short
+       summary is announced once typing pauses. -->
+  <p class="visually-hidden" id="dc-status" role="status"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  function fdiv(a, b) { return Math.floor(a / b); }
+  function mod(a, b) { return ((a % b) + b) % b; }
+  function pad(n, w) { var s = String(n); while (s.length < w) s = '0' + s; return s; }
+
+  // Calendar math on plain day numbers (days since 1970-01-01, proleptic
+  // Gregorian). No Date objects, so time zones and DST cannot shift a date.
+  function dayNum(y, m, d) {
+    y -= m <= 2 ? 1 : 0;
+    var era = fdiv(y, 400), yoe = y - era * 400;
+    var doy = fdiv(153 * (m + (m > 2 ? -3 : 9)) + 2, 5) + d - 1;
+    return era * 146097 + yoe * 365 + fdiv(yoe, 4) - fdiv(yoe, 100) + doy - 719468;
+  }
+  function civil(z) {
+    z += 719468;
+    var era = fdiv(z, 146097), doe = z - era * 146097;
+    var yoe = fdiv(doe - fdiv(doe, 1460) + fdiv(doe, 36524) - fdiv(doe, 146096), 365);
+    var doy = doe - (365 * yoe + fdiv(yoe, 4) - fdiv(yoe, 100));
+    var mp = fdiv(5 * doy + 2, 153);
+    var d = doy - fdiv(153 * mp + 2, 5) + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    return { y: yoe + era * 400 + (m <= 2 ? 1 : 0), m: m, d: d };
+  }
+  function isLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
+  function dim(y, m) { return m === 2 ? (isLeap(y) ? 29 : 28) : (m === 4 || m === 6 || m === 9 || m === 11 ? 30 : 31); }
+  function dow(z) { return mod(z + 3, 7); } // 0 = Monday ... 6 = Sunday
+  function iso(z) { var c = civil(z); return pad(c.y, 4) + '-' + pad(c.m, 2) + '-' + pad(c.d, 2); }
+  function isoWeek(z) {
+    var thu = z - dow(z) + 3, y = civil(thu).y;
+    return { year: y, week: fdiv(thu - dayNum(y, 1, 1), 7) + 1 };
+  }
+  var MIN_Z = dayNum(1, 1, 1), MAX_Z = dayNum(9999, 12, 31);
+
+  // The same day number a whole count of months later, or the last day of a
+  // month that is too short (31 January + 1 month = 28 or 29 February).
+  function addMonths(c, n) {
+    var t = c.y * 12 + c.m - 1 + n, y = fdiv(t, 12), m = mod(t, 12) + 1;
+    return dayNum(y, m, Math.min(c.d, dim(y, m)));
+  }
+  // Full years and months from a to b (a <= b), then the days left over.
+  function diffYMD(a, b) {
+    var A = civil(a), B = civil(b);
+    var months = (B.y - A.y) * 12 + B.m - A.m, anchor = addMonths(A, months);
+    if (anchor > b) { months -= 1; anchor = addMonths(A, months); }
+    return { years: fdiv(months, 12), months: months % 12, days: b - anchor };
+  }
+
+  // Dates are written in English, in the order of the visitor's region:
+  // 14 November 2026, or November 14, 2026 where the month comes first.
+  var ORDER = (function () {
+    try {
+      var o = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'numeric', day: 'numeric' })
+        .formatToParts(new Date(2001, 1, 3))
+        .map(function (p) { return /^(day|month|year)$/.test(p.type) ? p.type.charAt(0) : ''; }).join('');
+      if (/^(dmy|mdy|ymd)$/.test(o)) return o;
+    } catch (e) { /* fall through */ }
+    return 'dmy';
+  })();
+  function fmtParts(y, m, d) { return ORDER === 'mdy' ? MONTHS[m - 1] + ' ' + d + ', ' + y : d + ' ' + MONTHS[m - 1] + ' ' + y; }
+  function fmtDate(z, withDay) {
+    var c = civil(z), s = fmtParts(c.y, c.m, c.d);
+    return withDay === false ? s : DAYS[dow(z)] + ', ' + s;
+  }
+  function num(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function unit(n, word) { return num(n) + ' ' + word + (n === 1 ? '' : 's'); }
+  // "1 year, 0 months, 3 days"; units before the first one that counts are left out.
+  function ymd(o) {
+    var out = [];
+    if (o.years) out.push(unit(o.years, 'year'));
+    if (o.years || o.months) out.push(unit(o.months, 'month'));
+    out.push(unit(o.days, 'day'));
+    return out.join(', ');
+  }
+  function weeksDays(n) {
+    if (n < 7) return unit(n, 'day');
+    return unit(fdiv(n, 7), 'week') + (n % 7 ? ', ' + unit(n % 7, 'day') : '');
+  }
+  function list(parts) { return parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts.join(''); }
+  function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+  // A click or Tab into a box selects its content, ready to be typed over. A
+  // second click places the cursor as usual. No timer, so fast typing cannot
+  // overtake the selection.
+  function selectOnFocus(el) {
+    var fresh = false;
+    function all() { try { el.setSelectionRange(0, el.value.length); } catch (e) { el.select(); } }
+    el.addEventListener('focus', function () { fresh = true; all(); });
+    el.addEventListener('mouseup', function () { if (fresh && el.selectionStart === el.selectionEnd) all(); fresh = false; });
+    el.addEventListener('keyup', function () { fresh = false; });
+  }
+  // A field is marked invalid for as long as the message it points at
+  // (aria-describedby) is about its value.
+  function flag(el, bad) { if (bad) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); }
+
+  // ----- Reading what was typed -----
+  // Full-width, Arabic-Indic, Persian, Devanagari and Bengali digits count as digits.
+  var ZEROS = [0xFF10, 0x0660, 0x06F0, 0x0966, 0x09E6];
+  function clean(s) {
+    return String(s == null ? '' : s).replace(/[０-９٠-٩۰-۹०-९০-৯]/g, function (ch) {
+      var c = ch.charCodeAt(0);
+      for (var i = 0; i < ZEROS.length; i++) if (c >= ZEROS[i] && c <= ZEROS[i] + 9) return String(c - ZEROS[i]);
+      return ch;
+    }).trim();
+  }
+  function parseMonth(s) {
+    s = s.toLowerCase();
+    for (var i = 0; i < 12; i++) if (MONTHS[i].toLowerCase().indexOf(s) === 0) return i + 1;
+    return 0;
+  }
+  function zOf(y, m, d) { return y >= 1 && y <= 9999 && m >= 1 && m <= 12 && d >= 1 && d <= dim(y, m) ? dayNum(y, m, d) : null; }
+  // 2026-12-25, 25/12/2026, 25 Dec 2026 or Dec 25, 2026, with an optional
+  // weekday in front and, when tail is set, a note after the date.
+  function parseLoose(text, tail) {
+    var s = clean(text).replace(/[\u2010-\u2015\u2212]/g, '-').replace(/^(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+/i, '').replace(/(\d)(st|nd|rd|th)\b/gi, '$1'), m;
+    var end = tail ? '(?=$|[\\s,;:(-])' : '$', endYear = tail ? '(?!\\d)' : '$';
+    if ((m = new RegExp('^(\\d{4})-(\\d{1,2})-(\\d{1,2})' + end).exec(s))) return zOf(+m[1], +m[2], +m[3]);
+    if ((m = new RegExp('^(\\d{1,4})[\\/.\\-](\\d{1,2})[\\/.\\-](\\d{1,4})' + end).exec(s))) {
+      if (m[1].length > 2) return zOf(+m[1], +m[2], +m[3]);
+      if (m[3].length < 3) return null;
+      var first = +m[1], second = +m[2], monthFirst = ORDER === 'mdy';
+      if (first > 12 && second <= 12) monthFirst = false;
+      else if (second > 12 && first <= 12) monthFirst = true;
+      return monthFirst ? zOf(+m[3], first, second) : zOf(+m[3], second, first);
+    }
+    if ((m = new RegExp('^(\\d{1,2})[\\s.\\-]*([a-z]{3,9})\\.?,?[\\s.\\-]*(\\d{4})' + endYear, 'i').exec(s))) return zOf(+m[3], parseMonth(m[2]), +m[1]);
+    if ((m = new RegExp('^([a-z]{3,9})\\.?\\s*(\\d{1,2}),?\\s+(\\d{4})' + endYear, 'i').exec(s))) return zOf(+m[3], parseMonth(m[1]), +m[2]);
+    return null;
+  }
+  // A date field: empty (a prompt, not an error), bad or ok.
+  function readDate(el) {
+    var v = el.value;
+    if (!v) return { state: 'empty' };
+    var m = /^(\d{4,})-(\d{2})-(\d{2})$/.exec(v);
+    var z = m ? (m[1].length === 4 ? zOf(+m[1], +m[2], +m[3]) : null) : parseLoose(v, false);
+    return z === null ? { state: 'bad' } : { state: 'ok', z: z };
+  }
+  // A whole number, with an optional minus sign; empty counts as 0.
+  function readAmount(el) {
+    var s = clean(el.value).replace(/[−‒–]/g, '-').replace(/[,   ](?=\d{3}(\D|$))/g, '');
+    if (s === '') return 0;
+    return /^[+-]?\d{1,9}$/.test(s) ? +s : null;
+  }
+  function todayZ() { var n = new Date(); return dayNum(n.getFullYear(), n.getMonth() + 1, n.getDate()); }
+
+  // ----- "Days until" presets -----
+  function fixed(m, d) { return function (y) { return dayNum(y, m, d); }; }
+  // Easter Sunday of the Western churches (Gregorian computus, anonymous algorithm).
+  function easter(y) {
+    var a = y % 19, b = fdiv(y, 100), c = y % 100, d = fdiv(b, 4), e = b % 4, f = fdiv(b + 8, 25), g = fdiv(b - f + 1, 3);
+    var h = (19 * a + b - d - g + 15) % 30, i = fdiv(c, 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
+    var m = fdiv(a + 11 * h + 22 * l, 451), n = h + l - 7 * m + 114;
+    return dayNum(y, fdiv(n, 31), n % 31 + 1);
+  }
+  // The nth given weekday of a month (wd: 0 = Monday), and the last one.
+  function nth(y, m, wd, n) { var first = dayNum(y, m, 1); return first + mod(wd - dow(first), 7) + (n - 1) * 7; }
+  function last(y, m, wd) { var end = dayNum(y, m, dim(y, m)); return end - mod(dow(end) - wd, 7); }
+  var PRESETS = {
+    'new-year': { name: 'New Year\'s Day', on: fixed(1, 1) },
+    'valentines-day': { name: 'Valentine\'s Day', on: fixed(2, 14) },
+    'easter': { name: 'Easter Sunday', on: easter },
+    'halloween': { name: 'Halloween', on: fixed(10, 31) },
+    'thanksgiving': { name: 'Thanksgiving in the US', on: function (y) { return nth(y, 11, 3, 4); } },
+    'christmas': { name: 'Christmas Day', on: fixed(12, 25) }
+  };
+  function nextOccurrence(key, z) {
+    var y = civil(z).y, d = PRESETS[key].on(y);
+    return d >= z || y >= 9999 ? d : PRESETS[key].on(y + 1);
+  }
+
+  // US federal holidays (5 U.S.C. 6103) as most federal employees get them:
+  // a holiday on a Saturday is taken on the Friday before, one on a Sunday on
+  // the Monday after. The list of eleven dates from 2021, when Juneteenth was added.
+  function usHolidays(y) {
+    function obs(m, d, name) {
+      var z = dayNum(y, m, d), w = dow(z);
+      return w === 5 ? [z - 1, name + ' (observed)'] : w === 6 ? [z + 1, name + ' (observed)'] : [z, name];
+    }
+    return [obs(1, 1, 'New Year\'s Day'), [nth(y, 1, 0, 3), 'Birthday of Martin Luther King, Jr.'], [nth(y, 2, 0, 3), 'Washington\'s Birthday'],
+      [last(y, 5, 0), 'Memorial Day'], obs(6, 19, 'Juneteenth National Independence Day'), obs(7, 4, 'Independence Day'),
+      [nth(y, 9, 0, 1), 'Labor Day'], [nth(y, 10, 0, 2), 'Columbus Day'], obs(11, 11, 'Veterans Day'),
+      [nth(y, 11, 3, 4), 'Thanksgiving Day'], obs(12, 25, 'Christmas Day')];
+  }
+
+  // ----- Controls and state -----
+  var fromIn = $('#dc-from'), toIn = $('#dc-to'), startIn = $('#dc-start'), incl = $('#dc-incl');
+  var opSel = $('#dc-op'), biz = $('#dc-biz'), holIn = $('#dc-hol'), work = $('#dc-work');
+  var amounts = [$('#dc-y'), $('#dc-m'), $('#dc-w'), $('#dc-d')];
+  var offBoxes = [1, 2, 3, 4, 5, 6, 7].map(function (n) { return $('#dc-off-' + n); });
+  var tabs = $$('.dc-tab'), presetBtns = $$('[data-preset]');
+  // Which dates follow the calendar instead of holding a fixed value.
+  var st = { tab: 'between', fromToday: true, toToday: false, toPreset: 'new-year', startToday: true };
+  var today = todayZ();
+  var off = [], holidays = [], holSet = {}, results = { between: null, add: null };
+
+  // Screen readers hear one short summary: at once after a button, or once
+  // typing pauses (not every half-typed number).
+  var statusEl = $('#dc-status'), speakTimer = null;
+  function speak(text, now) {
+    clearTimeout(speakTimer);
+    if (now) { statusEl.textContent = ''; speakTimer = setTimeout(function () { statusEl.textContent = text; }, 50); }
+    else speakTimer = setTimeout(function () { if (statusEl.textContent !== text) statusEl.textContent = text; }, 700);
+  }
+  function sayer(trigger) { return trigger ? function (t) { speak(t, trigger === 'click'); } : function () {}; }
+
+  function setDate(el, z) { var v = z >= MIN_Z && z <= MAX_Z ? iso(z) : ''; if (el.value !== v) el.value = v; }
+  // Puts today's date, and the next date of a preset, into the fields that follow them.
+  function syncDates() {
+    if (st.fromToday) setDate(fromIn, today);
+    if (st.startToday) setDate(startIn, today);
+    if (st.toToday) setDate(toIn, today);
+    if (st.toPreset) {
+      var a = readDate(fromIn);
+      setDate(toIn, nextOccurrence(st.toPreset, a.state === 'ok' ? a.z : today));
+    }
+    presetBtns.forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-preset') === st.toPreset ? 'true' : 'false'); });
+  }
+
+  // ----- Working days -----
+  // A longer holiday list would make the page address too long to pass on,
+  // so it is left out of it, and the page says so.
+  var HOL_MAX = 1500;
+  var HOL_LONG = 'This list is too long for the page address (over 1,500 characters). A reload or a link to this page will not bring it back, so keep a copy.';
+  function readWork() {
+    off = offBoxes.map(function (b) { return b.checked; });
+    holidays = [];
+    holSet = {};
+    var bad = [];
+    holIn.value.split('\n').forEach(function (line, i) {
+      line.split(';').forEach(function (piece) {
+        var s = piece.trim();
+        if (!s) return;
+        var z = parseLoose(s, true);
+        if (z === null) bad.push({ line: i + 1, text: s });
+        else if (!holSet[z]) { holSet[z] = true; holidays.push(z); }
+      });
+    });
+    var msg = '';
+    if (bad.length) {
+      var shown = bad[0].text.length > 30 ? bad[0].text.slice(0, 30) + '…' : bad[0].text;
+      msg = 'Line ' + bad[0].line + ' is not a date: “' + shown + '”' + (bad.length > 1 ? ', and ' + unit(bad.length - 1, 'more line') + ' cannot be read' : '') +
+        '. Write one date per line with its year, such as 2026-12-25 or 25 Dec 2026.';
+    }
+    setText($('#dc-hol-msg'), msg);
+    flag(holIn, !!msg);
+    setText($('#dc-hol-long'), holIn.value.length > HOL_MAX ? HOL_LONG : '');
+    setText($('#dc-work-sum'), '(' + workSummary() + ')');
+    return msg;
+  }
+  function workSummary() {
+    var on = [], i;
+    for (i = 0; i < 7; i++) if (!off[i]) on.push(i);
+    var week;
+    if (!on.length) week = 'no working days';
+    else if (on.length === 7) week = 'every day';
+    else {
+      // A run of working days, which may wrap around the week (Sunday to Thursday).
+      var startAt = 0;
+      for (i = 0; i < 7; i++) if (!off[i] && off[mod(i - 1, 7)]) startAt = i;
+      var run = 0;
+      while (run < 7 && !off[mod(startAt + run, 7)]) run++;
+      week = run === on.length ? (run === 1 ? DAYS[startAt] + ' only' : DAYS[startAt] + ' to ' + DAYS[mod(startAt + run - 1, 7)])
+        : on.map(function (d) { return DAYS[d].slice(0, 3); }).join(', ');
+    }
+    return week + ', ' + (holidays.length ? unit(holidays.length, 'holiday') + ' listed' : 'no holidays listed');
+  }
+  function isWork(z) { return !off[dow(z)] && !holSet[z]; }
+  // Working days, weekly days off and listed holidays in the days lo up to, not including, hi.
+  function countWork(lo, hi) {
+    var n = hi - lo, full = fdiv(n, 7), perWeek = off.filter(function (o) { return !o; }).length, open = full * perWeek;
+    for (var z = lo + full * 7; z < hi; z++) if (!off[dow(z)]) open++;
+    var hol = 0;
+    holidays.forEach(function (h) { if (h >= lo && h < hi && !off[dow(h)]) hol++; });
+    return { work: open - hol, weekly: n - open, hol: hol };
+  }
+  // The date n working days after z (before it when n is negative). The start
+  // day itself is never counted. null when it leaves the years 1 to 9999.
+  function stepWork(z, n) {
+    if (Math.abs(n) > MAX_Z - MIN_Z) return null;
+    var dir = n < 0 ? -1 : 1, left = Math.abs(n);
+    while (left > 0) {
+      z += dir;
+      if (z < MIN_Z || z > MAX_Z) return null;
+      if (isWork(z)) left--;
+    }
+    return z;
+  }
+
+  // ----- Days between two dates -----
+  // A date field can only be wrong by its year. Where the browser has no date
+  // field the box takes typed text, and the way to write a date needs saying.
+  function dateMsg(el) {
+    return el.type === 'date' ? 'Enter a date from the year 1 to the year 9999.' : 'Write the date like 2026-12-25 or 25 Dec 2026, with a year from 1 to 9999.';
+  }
+  function renderBetween(trigger) {
+    var say = sayer(trigger), A = readDate(fromIn), B = readDate(toIn);
+    var msg = A.state === 'bad' ? dateMsg(fromIn) : B.state === 'bad' ? dateMsg(toIn) : '';
+    flag(fromIn, A.state === 'bad');
+    flag(toIn, B.state === 'bad');
+    setText($('#dc-between-msg'), msg);
+    if (A.state !== 'ok' || B.state !== 'ok') {
+      var prompt = msg ? '' : 'Choose a start date and an end date.';
+      ['#dc-b-big', '#dc-b-ymd', '#dc-b-weeks', '#dc-b-work', '#dc-b-off', '#dc-b-hours', '#dc-b-minutes', '#dc-b-seconds'].forEach(function (id) { setText($(id), '–'); });
+      setText($('#dc-b-line'), prompt);
+      setText($('#dc-b-off-label'), 'Days off');
+      $('#dc-b-copy').disabled = true;
+      results.between = null;
+      say(msg || prompt);
+      return;
+    }
+    var lo = Math.min(A.z, B.z), hi = Math.max(A.z, B.z), end = hi + (incl.checked ? 1 : 0);
+    var days = end - lo, w = countWork(lo, end);
+    var name = st.toPreset && st.fromToday && !incl.checked && B.z >= A.z ? PRESETS[st.toPreset].name : '';
+    var big = name ? (days ? unit(days, 'day') + ' until ' + name : 'Today is ' + name) : unit(days, 'day');
+    var line = lo === hi ? 'The start and the end are the same day, ' + fmtDate(lo) + (incl.checked ? ', which counts as one day.' : '.')
+      : 'From ' + fmtDate(lo) + ' to ' + fmtDate(hi) + (incl.checked ? ', counting both the first and the last day.' : ', not counting the last day.') +
+        (B.z < A.z ? ' The end date is before the start date, so the two are taken in order.' : '');
+    setText($('#dc-b-big'), big);
+    setText($('#dc-b-line'), line);
+    setText($('#dc-b-ymd'), ymd(diffYMD(lo, end)));
+    setText($('#dc-b-weeks'), weeksDays(days));
+    setText($('#dc-b-work'), num(w.work));
+    setText($('#dc-b-off'), num(days - w.work));
+    setText($('#dc-b-off-label'), 'Days off: ' + num(w.weekly) + ' weekly, ' + unit(w.hol, 'holiday'));
+    setText($('#dc-b-hours'), num(days * 24));
+    setText($('#dc-b-minutes'), num(days * 1440));
+    setText($('#dc-b-seconds'), num(days * 86400));
+    $('#dc-b-copy').disabled = false;
+    results.between = big + '. ' + line + ' That is ' + ymd(diffYMD(lo, end)) + ', or ' + weeksDays(days) + ', with ' + unit(w.work, 'working day') + '.';
+    say(big + ', ' + unit(w.work, 'working day') + '. ' + line);
+  }
+
+  // ----- Add or subtract -----
+  function renderAdd(trigger) {
+    var say = sayer(trigger), S = readDate(startIn);
+    var vals = amounts.map(readAmount), badAmount = vals.indexOf(null) >= 0, msg = '', prompt = '';
+    var sign = opSel.value === 'sub' ? -1 : 1, r = null, clampNote = '';
+    amounts.forEach(function (el, i) { flag(el, vals[i] === null); });
+    flag(startIn, S.state === 'bad');
+    flag(biz, false);
+    if (S.state === 'bad') msg = dateMsg(startIn);
+    else if (badAmount) msg = 'Enter whole numbers only, such as 45 or -3, with up to 9 digits.';
+    else if (S.state === 'empty') prompt = 'Choose a start date.';
+    else {
+      var e = vals.map(function (v) { return v * sign; });
+      var c = civil(S.z), t = c.y * 12 + c.m - 1 + e[0] * 12 + e[1], y = fdiv(t, 12), m = mod(t, 12) + 1;
+      if (y >= 1 && y <= 9999) {
+        var d = Math.min(c.d, dim(y, m));
+        if (d !== c.d) clampNote = 'There is no ' + fmtParts(y, m, c.d) + ', so the years and months stop at the last day of that month, ' + fmtParts(y, m, d) + '.';
+        r = dayNum(y, m, d) + e[2] * 7;
+        if (!biz.checked) r += e[3];
+        else if (e[3] && off.every(Boolean)) {
+          r = null;
+          msg = 'Every day of the week is marked as a day off, so there are no working days to count. Untick a day under Working days and holidays.';
+          flag(biz, true);
+        } else if (r >= MIN_Z && r <= MAX_Z) r = stepWork(r, e[3]);
+        if (r !== null && (r < MIN_Z || r > MAX_Z)) r = null;
+      }
+      if (r === null && !msg) {
+        msg = 'The result is outside the years 1 to 9999. Enter smaller numbers.';
+        amounts.forEach(function (el, i) { flag(el, vals[i] !== 0); });
+      }
+    }
+    setText($('#dc-add-msg'), msg);
+    if (r === null) {
+      ['#dc-a-big', '#dc-a-iso', '#dc-a-days', '#dc-a-today', '#dc-a-week'].forEach(function (id) { setText($(id), '–'); });
+      setText($('#dc-a-days-label'), 'From the start date');
+      setText($('#dc-a-line'), prompt);
+      setText($('#dc-a-note'), '');
+      $('#dc-a-copy').disabled = true;
+      results.add = null;
+      say(msg || prompt);
+      return;
+    }
+    var words = ['year', 'month', 'week', biz.checked ? 'working day' : 'day'], parts = [], signs = {};
+    e.forEach(function (v, i) { if (v) { parts.push([v, unit(Math.abs(v), words[i])]); signs[v > 0] = true; } });
+    var line;
+    if (!parts.length) line = 'Nothing is added, so the result is the start date.';
+    else if (signs[true] && signs[false]) line = fmtDate(S.z) + parts.map(function (p) { return (p[0] > 0 ? ' plus ' : ' minus ') + p[1]; }).join(',') + '.';
+    else line = list(parts.map(function (p) { return p[1]; })) + (signs[true] ? ' after ' : ' before ') + fmtDate(S.z) + '.';
+    var diff = r - S.z, away = r - today, wk = isoWeek(r);
+    var note = clampNote + (biz.checked && e[3] ? (clampNote ? ' ' : '') + 'Working days: ' + workSummary() + '.' : '');
+    setText($('#dc-a-big'), fmtDate(r));
+    setText($('#dc-a-line'), line);
+    setText($('#dc-a-iso'), iso(r));
+    setText($('#dc-a-days'), diff ? unit(Math.abs(diff), 'day') + (diff > 0 ? ' later' : ' earlier') : 'The same day');
+    setText($('#dc-a-days-label'), 'From the start date' + (Math.abs(diff) >= 7 ? ': ' + weeksDays(Math.abs(diff)) : ''));
+    setText($('#dc-a-today'), away ? (away > 0 ? 'In ' + unit(away, 'day') : unit(-away, 'day') + ' ago') : 'Today');
+    setText($('#dc-a-week'), 'Week ' + wk.week + ' of ' + wk.year);
+    setText($('#dc-a-note'), note);
+    $('#dc-a-copy').disabled = false;
+    results.add = fmtDate(r) + ' (' + iso(r) + '). ' + line;
+    say(fmtDate(r) + '. ' + line);
+  }
+
+  function renderAll(trigger) {
+    readWork();
+    syncDates();
+    renderBetween(st.tab === 'between' ? trigger : null);
+    renderAdd(st.tab === 'add' ? trigger : null);
+  }
+
+  // ----- Tabs -----
+  function selectTab(name, focus) {
+    st.tab = name === 'add' ? 'add' : 'between';
+    tabs.forEach(function (t) {
+      var on = t.id === 'dc-tab-' + st.tab, panel = $('#' + t.getAttribute('aria-controls'));
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      panel.hidden = !on;
+      if (on) {
+        panel.querySelector('.dc-slot').appendChild(work); // the working-day settings belong to both tabs
+        if (focus) t.focus();
+      }
+    });
+  }
+
+  // ----- The page address carries the calculation -----
+  // #to=2026-12-25, #from=2001-09-11&to=today, #to=christmas, #tab=add&d=90.
+  // Only what differs from a freshly opened page is written.
+  var KEYS = ['tab', 'from', 'to', 'until', 'incl', 'start', 'op', 'y', 'm', 'w', 'd', 'biz', 'off', 'hol'];
+  // A date as the address takes it: 2026-12-25, also when it was typed as
+  // "25 Dec 2026" into the text box of a browser without a date field.
+  function hashValue(el) { var d = readDate(el); return d.state === 'ok' ? iso(d.z) : el.value; }
+  function buildHash() {
+    var p = [], enc = encodeURIComponent;
+    if (st.tab === 'add') p.push('tab=add');
+    if (!st.fromToday) p.push('from=' + enc(hashValue(fromIn)));
+    var to = st.toPreset || (st.toToday ? 'today' : hashValue(toIn));
+    if (to !== 'new-year') p.push('to=' + enc(to));
+    if (incl.checked) p.push('incl=1');
+    if (!st.startToday) p.push('start=' + enc(hashValue(startIn)));
+    if (opSel.value === 'sub') p.push('op=sub');
+    var typed = amounts.map(function (el) { return el.value.trim(); }), any = false;
+    if (!(/^0?$/.test(typed[0]) && /^0?$/.test(typed[1]) && /^0?$/.test(typed[2]) && typed[3] === '90')) {
+      ['y', 'm', 'w', 'd'].forEach(function (k, i) { if (!/^0?$/.test(typed[i])) { p.push(k + '=' + enc(typed[i])); any = true; } });
+      if (!any) p.push('d=0');
+    }
+    if (biz.checked) p.push('biz=1');
+    var offStr = off.map(function (o, i) { return o ? i + 1 : ''; }).join('');
+    if (offStr !== '67') p.push('off=' + (offStr || '0'));
+    if (holIn.value.trim() && holIn.value.length <= HOL_MAX) p.push('hol=' + enc(holIn.value));
+    return p.join('&');
+  }
+  var writeHash = TT.debounce(function () {
+    var h = buildHash();
+    try { history.replaceState(null, '', h ? '#' + h : location.pathname + location.search); } catch (e) { /* the address stays as it is */ }
+  }, 250);
+  function hashDate(v) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v); return m && zOf(+m[1], +m[2], +m[3]) !== null ? v : ''; }
+  // On opening the page, whatever the address leaves out is as on a fresh page.
+  // Later (merge: a link clicked on the page, an edited address) only what the
+  // address names is changed, so nothing typed elsewhere is lost.
+  function applyHash(merge) {
+    var p;
+    try { p = new URLSearchParams(location.hash.replace(/^#/, '')); } catch (e) { return false; }
+    if (!KEYS.some(function (k) { return p.has(k); })) return false;
+    var has = function (k) { return p.has(k); }, get = function (k) { return p.get(k) || ''; };
+    var set = function () { return !merge || Array.prototype.some.call(arguments, has); };
+    var from = get('from'), to = has('until') ? get('until') : get('to'), start = get('start');
+    if (set('from', 'until')) {
+      st.fromToday = has('until') || !has('from') || from === 'today';
+      if (!st.fromToday) fromIn.value = hashDate(from);
+    }
+    if (set('to', 'until')) {
+      st.toToday = to === 'today';
+      st.toPreset = has('to') || has('until') ? (PRESETS.hasOwnProperty(to) ? to : '') : 'new-year';
+      if (!st.toToday && !st.toPreset) toIn.value = hashDate(to);
+    }
+    if (set('incl')) incl.checked = get('incl') === '1';
+    if (set('start')) {
+      st.startToday = !has('start') || start === 'today';
+      if (!st.startToday) startIn.value = hashDate(start);
+    }
+    if (set('op')) opSel.value = get('op') === 'sub' ? 'sub' : 'add';
+    var anyAmount = ['y', 'm', 'w', 'd'].some(has);
+    if (set('y', 'm', 'w', 'd')) ['y', 'm', 'w', 'd'].forEach(function (k, i) { amounts[i].value = anyAmount ? (has(k) ? get(k).slice(0, 12) : '0') : (k === 'd' ? '90' : '0'); });
+    if (set('biz')) biz.checked = get('biz') === '1';
+    if (set('off')) {
+      var offStr = has('off') ? get('off') : '67';
+      offBoxes.forEach(function (b, i) { b.checked = offStr.indexOf(String(i + 1)) >= 0; });
+    }
+    if (set('hol')) holIn.value = get('hol').slice(0, HOL_MAX);
+    var between = has('from') || has('to') || has('until'), adding = anyAmount || has('start') || has('op') || has('biz');
+    if (has('tab')) selectTab(get('tab') === 'add' ? 'add' : 'between');
+    else if (between || adding) selectTab(between ? 'between' : 'add');
+    else if (!merge) selectTab('between');
+    return true;
+  }
+  // After anything the visitor changes: count again and keep the address in step.
+  function changed(trigger) { renderAll(trigger); writeHash(); }
+
+  // ----- Wiring -----
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { selectTab(i ? 'add' : 'between'); changed('click'); });
+    t.addEventListener('keydown', function (e) {
+      var to = e.key === 'ArrowRight' || e.key === 'ArrowLeft' ? 1 - i : e.key === 'Home' ? 0 : e.key === 'End' ? 1 : -1;
+      if (to < 0) return;
+      e.preventDefault();
+      selectTab(to ? 'add' : 'between', true);
+      changed('click');
+    });
+  });
+  function typed(el, fn) {
+    el.addEventListener('input', function () { fn(); changed('type'); });
+    el.addEventListener('change', function () { fn(); changed('type'); });
+  }
+  typed(fromIn, function () { st.fromToday = false; });
+  typed(toIn, function () { st.toToday = false; st.toPreset = ''; });
+  typed(startIn, function () { st.startToday = false; });
+  $('#dc-from-today').addEventListener('click', function () { st.fromToday = true; changed('click'); });
+  $('#dc-to-today').addEventListener('click', function () { st.toToday = true; st.toPreset = ''; changed('click'); });
+  $('#dc-start-today').addEventListener('click', function () { st.startToday = true; changed('click'); });
+  $('#dc-swap').addEventListener('click', function () {
+    var a = fromIn.value, b = toIn.value, fromWasToday = st.fromToday;
+    st.fromToday = st.toToday;
+    st.toToday = fromWasToday;
+    st.toPreset = '';
+    fromIn.value = b;
+    toIn.value = a;
+    changed('click');
+  });
+  presetBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      st.toPreset = b.getAttribute('data-preset');
+      st.toToday = false;
+      st.fromToday = true;
+      changed('click');
+    });
+  });
+  $$('[data-days]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      amounts.forEach(function (el, i) { el.value = i === 3 ? b.getAttribute('data-days') : '0'; });
+      changed('click');
+    });
+  });
+  amounts.forEach(function (el) {
+    el.addEventListener('input', function () { changed('type'); });
+    selectOnFocus(el);
+  });
+  [incl, opSel, biz].concat(offBoxes).forEach(function (el) { el.addEventListener('change', function () { changed('click'); }); });
+  holIn.addEventListener('input', function () {
+    setText($('#dc-hol-note'), '');
+    changed('type');
+    // While the list is being edited, a line that cannot be read is what needs saying.
+    if ($('#dc-hol-msg').textContent) speak($('#dc-hol-msg').textContent, false);
+  });
+  $('#dc-hol-clear').addEventListener('click', function () { holIn.value = ''; setText($('#dc-hol-note'), ''); changed('click'); });
+  $('#dc-us').addEventListener('click', function () {
+    // The years of the calculation on the open tab, or this year.
+    var a = st.tab === 'add' ? readDate(startIn) : readDate(fromIn), b = st.tab === 'add' ? null : readDate(toIn);
+    var zs = [a.state === 'ok' ? a.z : today];
+    if (b && b.state === 'ok') zs.push(b.z);
+    if (st.tab === 'add' && /^\d{4}-/.test($('#dc-a-iso').textContent)) zs.push(readDate({ value: $('#dc-a-iso').textContent }).z);
+    var y0 = Math.max(2021, civil(Math.min.apply(null, zs)).y), y1 = Math.min(civil(Math.max.apply(null, zs)).y, y0 + 24), lines = [], note;
+    if (y1 < y0) note = 'This button covers 2021 onwards, the years with the present list of eleven federal holidays.';
+    else {
+      for (var y = y0; y <= y1 + 1; y++) usHolidays(y).forEach(function (h) {
+        if (h[0] >= dayNum(y0, 1, 1) && h[0] <= dayNum(y1, 12, 31) && !holSet[h[0]]) { holSet[h[0]] = true; lines.push(iso(h[0]) + ' ' + h[1]); }
+      });
+      var years = y0 === y1 ? String(y0) : y0 + ' to ' + y1;
+      note = lines.length ? 'Added ' + unit(lines.length, 'US federal holiday') + ' for ' + years + ', as observed by federal offices.' : 'The US federal holidays for ' + years + ' are already on the list.';
+      if (lines.length) holIn.value = (holIn.value.trim() ? holIn.value.replace(/\s+$/, '') + '\n' : '') + lines.join('\n');
+    }
+    setText($('#dc-hol-note'), note);
+    changed();
+    speak(note + (holIn.value.length > HOL_MAX ? ' ' + HOL_LONG : ''), true);
+  });
+  $('#dc-b-copy').addEventListener('click', function () { if (results.between) TT.copy(results.between, this); });
+  $('#dc-a-copy').addEventListener('click', function () { if (results.add) TT.copy(results.add, this); });
+
+  window.addEventListener('hashchange', function () {
+    if (!applyHash(true)) return;
+    renderAll('click');
+    writeHash(); // the address then carries the whole calculation again
+    // A link further down the page changed the calculation: bring it into view.
+    var card = $('.dc'), box = card.getBoundingClientRect();
+    if (box.top < 0 || box.top > window.innerHeight * 0.6) card.scrollIntoView();
+    $('#dc-tab-' + st.tab).focus({ preventScroll: true });
+  });
+
+  selectTab('between');
+  applyHash();
+  renderAll();
+  // After the Back button, or when a tab is restored, browsers put the old
+  // values back into the fields, some of them only once the page has loaded
+  // and without an event. Count again from what the fields then hold.
+  window.addEventListener('pageshow', function () { today = todayZ(); renderAll(); });
+
+  // Roll over to the new day if the page stays open past midnight.
+  setInterval(function () {
+    var z = todayZ();
+    if (z === today) return;
+    today = z;
+    renderAll();
+  }, 30000);
+})();
+</script>
