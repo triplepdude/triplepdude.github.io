@@ -6,16 +6,18 @@ const fs = require('fs');
 const path = require('path');
 const { devices } = require('playwright');
 
-module.exports = async ({ page, open, assert, fixtures, url }) => {
+module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const data = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const text = sel => page.locator(sel).textContent();
   // The message a field points at, and whether the field is marked invalid.
   const link = sel => page.$eval(sel, el => [el.getAttribute('aria-describedby'), el.getAttribute('aria-invalid')]);
   const invalid = id => page.$$eval(`#${id} input`, els => els.filter(e => e.getAttribute('aria-invalid') === 'true').map(e => e.id.slice(-1)).sort().join(''));
+  // A year is typed with four digits (0987); a shorter one is asked for in full.
+  const year4 = y => typeof y === 'number' ? String(y).padStart(4, '0') : String(y);
   const setDate = async (id, [d, m, y]) => {
     await page.fill(`#${id}-d`, String(d));
     await page.fill(`#${id}-m`, String(m));
-    await page.fill(`#${id}-y`, String(y));
+    await page.fill(`#${id}-y`, year4(y));
   };
   const getDate = id => page.evaluate(i => ['d', 'm', 'y'].map(p => document.getElementById(`${i}-${p}`).value).join('/'), id);
   const read = () => page.evaluate(() => {
@@ -61,7 +63,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     }
     const nth = c.on[2] - c.dob[2];
     const ordinal = nth + (nth % 100 >= 11 && nth % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][nth % 10] || 'th');
-    assert.equal(r.next, (c.isBirthday ? `Today is the ${ordinal} birthday. The next one is ` : '') + c.next, `next birthday for ${label}`);
+    // "Today" only when the age is counted to today (14 November 2026 in this test).
+    const thisDay = c.on.join('-') === '14-11-2026' ? 'Today' : 'This date';
+    assert.equal(r.next, (c.isBirthday ? `${thisDay} is the ${ordinal} birthday. The next one is ` : '') + c.next, `next birthday for ${label}`);
     assert.equal(r.korean, `${c.korean} (one at birth, plus one every 1 January)`, `Korean age for ${label}`);
     if (c.mark) assert.equal(r.mark, c.mark, `1,000-day mark for ${label}`);
     assert.equal(r.exact, '');
@@ -76,6 +80,16 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.ok(guide.includes(want), `guide mentions ${want}`);
   }
   assert.equal(data.cases.filter(c => c.isBirthday).length, 6); // 50th, 24th, 25th (both rules), 4th and 8th
+  assert.equal(data.cases.filter(c => c.isBirthday && c.on.join('-') === '14-11-2026').length, 1); // one of them is today
+  // A birthday on a date that is not today is not called "today", on the page or in the summary read out.
+  await setDate('ac-dob', [15, 5, 1990]);
+  await setDate('ac-on', [15, 5, 2030]);
+  assert.equal(await text('#ac-next'), 'This date is the 40th birthday. The next one is Thursday, May 15, 2031, in 1 year (365 days). Turning 41.');
+  await page.waitForFunction(() => document.querySelector('#ac-status').textContent === '40 years, 0 months, 0 days old on Wednesday, May 15, 2030. This date is the 40th birthday.');
+  await setDate('ac-dob', [14, 11, 1976]);
+  await page.click('#ac-today');
+  assert.match(await text('#ac-next'), /^Today is the 50th birthday\. The next one is Sunday, November 14, 2027, /);
+  await page.waitForFunction(() => document.querySelector('#ac-status').textContent === '50 years, 0 months, 0 days old on Saturday, November 14, 2026. Today is the 50th birthday.');
   assert.ok(data.cases.some(c => c.age === '36 years, 5 months, 30 days' && c.days === '13,332'));
   assert.ok(data.cases.some(c => c.age === '25 years, 0 months, 0 days' && c.days === '9,132' && c.rule === 'mar1'));
 
@@ -126,7 +140,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#ac-dob-m', '13');
   assert.equal(await text('#ac-dob-msg'), 'The month must be a number from 1 to 12, or a name such as May.');
   assert.equal(await invalid('ac-dob'), 'm');
-  await page.fill('#ac-dob-y', '0');
+  await page.fill('#ac-dob-y', '0000'); // there is no year 0
   assert.equal(await text('#ac-dob-msg'), 'The month must be a number from 1 to 12, or a name such as May. The year must be a number from 1 to 9999.');
   assert.equal(await invalid('ac-dob'), 'my');
   await page.fill('#ac-dob-m', 'May');
@@ -141,6 +155,30 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await setDate('ac-dob', ['１５', '٥', '۱۹۹۰']);
   assert.equal(await text('#ac-age'), '36 years, 5 months, 30 days');
   assert.equal(await invalid('ac-dob'), '');
+  // A year needs all four digits: "90" is not taken for the year 90, and typing a year
+  // does not flash ages of two thousand years. It is a prompt, not an error.
+  await page.fill('#ac-dob-y', '90');
+  assert.equal(await text('#ac-born'), 'Enter the year of birth with four digits, such as 1990.');
+  assert.deepEqual([await text('#ac-age'), await text('#ac-days'), await text('#ac-dob-msg'), await invalid('ac-dob')], ['–', '–', '', '']);
+  assert.equal(await page.locator('#ac-copy').isDisabled(), true);
+  await page.fill('#ac-dob-y', '');
+  const typedYear = [];
+  for (const digit of '1990') {
+    await page.locator('#ac-dob-y').pressSequentially(digit);
+    typedYear.push(await text('#ac-age'));
+  }
+  assert.deepEqual(typedYear, ['–', '–', '–', '36 years, 5 months, 30 days']);
+  // Years before 1000 take leading zeros; a link or a pasted date writes them that way.
+  await page.fill('#ac-dob-y', '0090');
+  assert.deepEqual([await text('#ac-born'), await text('#ac-age')], ['Born on Monday, May 15, 90.', '1,936 years, 5 months, 30 days']);
+  await page.fill('#ac-dob-y', '0000');
+  assert.equal(await text('#ac-dob-msg'), 'The year must be a number from 1 to 9999.');
+  await page.fill('#ac-dob-y', '1990');
+  await page.fill('#ac-on-y', '30');
+  assert.equal(await text('#ac-born'), 'Enter the year with four digits, such as 2026.');
+  assert.deepEqual([await text('#ac-age'), await text('#ac-on-msg'), await invalid('ac-on')], ['–', '', '']);
+  await page.click('#ac-today');
+  assert.equal(await text('#ac-age'), '36 years, 5 months, 30 days');
   // A half-filled date is a prompt, not an error.
   await page.fill('#ac-dob-y', '');
   assert.equal(await text('#ac-dob-msg'), '');
@@ -191,11 +229,29 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await paste('#ac-on-y', '2030-01-01');
   assert.equal(await getDate('ac-on'), '1/1/2030');
   assert.equal(await text('#ac-head'), 'Age on Tuesday, January 1, 2030');
-  // Anything else is pasted as it is and reported.
+  // A date before the year 1000 is written with four digits, as the box asks for it.
+  await paste('#ac-dob-m', '5 June 987');
+  assert.equal(await getDate('ac-dob'), '5/6/0987');
+  assert.equal(await text('#ac-born'), 'Born on Tuesday, June 5, 987.');
+  // Spaces around a pasted number are dropped; they would use up the two characters of the box.
+  await setDate('ac-dob', [9, 9, 1909]);
+  await paste('#ac-dob-d', ' 15\n');
+  assert.equal(await page.inputValue('#ac-dob-d'), '15');
+  assert.equal(await text('#ac-born'), 'Born on Wednesday, September 15, 1909.');
+  await paste('#ac-dob-y', '\t１９９０ ');
+  assert.deepEqual([await page.inputValue('#ac-dob-y'), await text('#ac-born')], ['1990', 'Born on Saturday, September 15, 1990.']);
+  // Anything else is pasted whole and reported. Cut to the two characters of the box,
+  // the start of a date that cannot be read (15/5/90, 19900515) would pass for the day.
+  for (const junk of ['hello', '15/5/90', '19900515', '1990年5月15日']) {
+    await setDate('ac-dob', [9, 9, 1909]);
+    await paste('#ac-dob-d', junk);
+    assert.equal(await page.inputValue('#ac-dob-d'), junk);
+    assert.deepEqual([await text('#ac-dob-msg'), await invalid('ac-dob'), await text('#ac-age')], ['The day must be a number from 1 to 31.', 'd', '–'], `pasted ${junk}`);
+  }
+  // A megabyte of text does not end up in the box.
   await page.fill('#ac-dob-d', '');
-  await paste('#ac-dob-d', 'hello');
-  assert.equal(await page.inputValue('#ac-dob-d'), 'he');
-  assert.equal(await text('#ac-dob-msg'), 'The day must be a number from 1 to 31.');
+  await paste('#ac-dob-d', 'x'.repeat(1 << 20));
+  assert.equal((await page.inputValue('#ac-dob-d')).length, 40);
   await setDate('ac-dob', [15, 5, 1990]);
 
   // ---- Copy results and Copy link ----
@@ -232,6 +288,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.goto('about:blank');
   await page.goto(`${url}#dob=1990-05-15`, { waitUntil: 'load' });
   assert.deepEqual([await getDate('ac-dob'), await getDate('ac-on'), await text('#ac-age')], ['15/5/1990', '14/11/2026', '36 years, 5 months, 30 days']);
+  // A link to a year before 1000 fills the year box with four digits.
+  await page.goto('about:blank');
+  await page.goto(`${url}#dob=0987-06-05&on=1066-10-14`, { waitUntil: 'load' });
+  assert.deepEqual([await getDate('ac-dob'), await getDate('ac-on'), await text('#ac-age')], ['5/6/0987', '14/10/1066', '79 years, 4 months, 9 days']);
   // Dates that do not exist in a link are ignored.
   await page.goto('about:blank');
   await page.goto(`${url}#dob=1990-02-30&on=junk`, { waitUntil: 'load' });
@@ -321,6 +381,20 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.clock.runFor(60000);
   assert.equal(await text('#ac-seconds'), (Number(ny.seconds.replace(/,/g, '')) + 60).toLocaleString('en-US'));
   assert.match(await text('#ac-note'), /to 5:01 AM on November 14, 2026 \(now\)/);
+  // The 12-hour clock of a US browser: noon is 12:00 PM, a quarter past midnight 12:15 AM.
+  for (const [time, shown] of [['12:00', '12:00 PM'], ['00:15', '12:15 AM'], ['13:05', '1:05 PM'], ['23:59', '11:59 PM'], ['11:59', '11:59 AM']]) {
+    await page.fill('#ac-time', time);
+    const note = await text('#ac-note');
+    assert.ok(note.startsWith(`Hours, minutes and seconds run from ${shown} on May 15, 1990 to 5:01 AM on November 14, 2026 (now), `), `${time}: ${note}`);
+  }
+  // Years before 100 belong to the first century, also when the hours are counted
+  // (JavaScript's own date takes 99 for 1999): two years of 365 days.
+  await setDate('ac-dob', [15, 5, 99]);
+  await setDate('ac-on', [15, 5, 101]);
+  await page.fill('#ac-time', '08:30');
+  assert.deepEqual([await text('#ac-age'), await text('#ac-days'), await text('#ac-hours'), await text('#ac-time-msg')], ['2 years, 0 months, 0 days', '730', '17,520', '']);
+  await page.click('#ac-today');
+  await setDate('ac-dob', [15, 5, 1990]);
   // Without a time the hours are whole days again.
   await page.fill('#ac-time', '');
   assert.equal(await text('#ac-hours'), '319,968');
@@ -370,6 +444,18 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await getDate('ac-on'), '15/11/2026');
   await page.clock.setSystemTime(new Date(data.now));
 
+  // ---- Back from another page: the browser may put typed values back after the page
+  // has loaded, and the result then follows the boxes ----
+  await page.goto('about:blank');
+  await open();
+  await setDate('ac-dob', [15, 5, 1990]);
+  await page.goto(`${base}/about/`, { waitUntil: 'load' });
+  await page.goBack({ waitUntil: 'load' });
+  const restored = await getDate('ac-dob');
+  assert.ok(['15/5/1990', '1/1/2000'].includes(restored), restored);
+  assert.deepEqual([await text('#ac-born'), await text('#ac-age')], restored === '15/5/1990'
+    ? ['Born on Tuesday, May 15, 1990.', '36 years, 5 months, 30 days'] : ['Born on Saturday, January 1, 2000.', '26 years, 10 months, 13 days']);
+
   // ---- The FAQ covers privacy, and the page keeps its promise about the address ----
   const faqs = await page.locator('.faq summary').allTextContents();
   assert.ok(/sent or stored/i.test(faqs[faqs.length - 1]), faqs.join(' | '));
@@ -409,6 +495,23 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await p.locator('#ac-age').textContent(), '30 years, 5 months, 30 days');
   await p.tap('#ac-today');
   assert.equal(await p.locator('#ac-age').textContent(), '36 years, 5 months, 30 days');
+  // The leap-day menu shows its choice in full, also on the narrowest phone.
+  await p.fill('#ac-dob-d', '29');
+  await p.fill('#ac-dob-m', '2');
+  await p.fill('#ac-dob-y', '2000');
+  await p.setViewportSize({ width: 320, height: 640 });
+  for (const rule of ['1', '28']) {
+    await p.selectOption('#ac-leap', rule);
+    const [need, room] = await p.$eval('#ac-leap', s => {
+      const c = document.createElement('canvas').getContext('2d'), cs = getComputedStyle(s);
+      c.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      // 28 px are kept free for the arrow of the menu.
+      return [Math.ceil(c.measureText(s.selectedOptions[0].textContent).width), Math.floor(s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 28)];
+    });
+    assert.ok(need <= room, `the leap-day choice needs ${need}px and has ${room}px`);
+  }
+  assert.match(await p.locator('#ac-next').textContent(), /^Sunday, February 28, 2027, /);
+  await p.setViewportSize(devices['Pixel 7'].viewport);
   // Controls are at least 44 px tall, text boxes use 16 px type (no zoom on iOS), numeric keypad.
   const sizes = await p.$$eval('.ac input:not([type="hidden"]), .ac select, .ac button', els => els.filter(e => e.offsetParent).map(e => ({
     id: e.id, h: Math.round(e.getBoundingClientRect().height), font: parseFloat(getComputedStyle(e).fontSize), text: e.matches('input, select'), mode: e.getAttribute('inputmode'), type: e.type,

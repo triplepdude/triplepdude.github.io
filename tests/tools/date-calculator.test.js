@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { devices } = require('playwright');
 
-module.exports = async ({ page, open, assert, fixtures, url }) => {
+module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const data = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const text = sel => page.locator(sel).textContent();
   // The message a field points at, and whether the field is marked invalid.
@@ -120,6 +120,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.click('[data-preset="thanksgiving"]');
   assert.deepEqual([await page.inputValue('#dc-from'), await page.inputValue('#dc-to')], ['2026-11-14', '2026-11-26']);
   assert.equal(await text('#dc-b-big'), '12 days until Thanksgiving in the US');
+  // The fourth Thursday is not always the last one: November 2028 and 2029 have five.
+  await page.fill('#dc-from', '2028-01-01');
+  assert.equal(await page.inputValue('#dc-to'), '2028-11-23');
+  await page.fill('#dc-from', '2028-11-24');
+  assert.equal(await page.inputValue('#dc-to'), '2029-11-22');
   for (const [key, date, big] of [['halloween', '2027-10-31', '351 days until Halloween'], ['valentines-day', '2027-02-14', '92 days until Valentine\'s Day'], ['new-year', '2027-01-01', '48 days until New Year\'s Day']]) {
     await page.click(`[data-preset="${key}"]`);
     assert.deepEqual([await page.inputValue('#dc-to'), await text('#dc-b-big')], [date, big]);
@@ -147,6 +152,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#dc-b-big'), '9,195 days');
   assert.match(await text('#dc-b-line'), /^From Tuesday, September 11, 2001 to Saturday, November 14, 2026, not counting the last day\. The end date is before the start date/);
   await hashIs('#to=2001-09-11');
+  // Swapping lets go of a "days until" button: Christmas becomes the fixed start, today the end.
+  await page.click('[data-preset="christmas"]');
+  assert.deepEqual([await page.inputValue('#dc-from'), await page.inputValue('#dc-to'), await pressed()], ['2026-11-14', '2026-12-25', 'christmas']);
+  await page.click('#dc-swap');
+  assert.deepEqual([await page.inputValue('#dc-from'), await page.inputValue('#dc-to'), await pressed(), await text('#dc-b-big')], ['2026-12-25', '2026-11-14', '', '41 days']);
+  await hashIs('#from=2026-12-25&to=today');
 
   // ---- Working days: the weekend and the holiday list ----
   const summary = async off => { await setWork(off, []); return text('#dc-work-sum'); };
@@ -177,7 +188,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // A line that is not a date is reported; the good lines still count.
   await page.fill('#dc-hol', '2027-01-15\nnot a date\n2027-13-45\nFeb 15, 2027');
   assert.equal(await text('#dc-hol-msg'), 'Line 2 is not a date: “not a date”, and 1 more line cannot be read. Write one date per line with its year, such as 2026-12-25 or 25 Dec 2026.');
-  assert.deepEqual(await link('#dc-hol'), ['dc-hol-hint dc-hol-msg', 'true']);
+  assert.deepEqual(await link('#dc-hol'), ['dc-hol-hint dc-hol-msg dc-hol-long', 'true']);
   assert.equal(await text('#dc-b-off-label'), 'Days off: 18 weekly, 2 holidays');
   // 2100 is not a leap year, so it has no 29 February; 2096 has one.
   await page.fill('#dc-hol', '2096-02-29\n29 Feb 2100');
@@ -188,7 +199,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.click('#dc-hol-clear');
   assert.equal(await page.inputValue('#dc-hol'), '');
   assert.equal(await text('#dc-hol-msg'), '');
-  assert.deepEqual(await link('#dc-hol'), ['dc-hol-hint dc-hol-msg', null]);
+  assert.deepEqual(await link('#dc-hol'), ['dc-hol-hint dc-hol-msg dc-hol-long', null]);
 
   // US federal holidays as the Office of Personnel Management lists them for 2026 to 2028.
   // A holiday on a Saturday is taken on the Friday before (3 July 2026, 18 June and
@@ -217,6 +228,35 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(await text('#dc-hol-note'), /^This button covers 2021 onwards/);
   await page.click('#dc-hol-clear');
   await page.setChecked('#dc-incl', false);
+  // New Year's Day 2028 is a Saturday and is taken on Friday 31 December 2027, so 2027
+  // has twelve federal holidays and 2028 ten. The same happened with 2021 and 2022.
+  for (const [year, count, has] of [[2027, 12, '2027-12-31 New Year\'s Day (observed)'], [2028, 10, '2028-01-17 Birthday of Martin Luther King, Jr.'],
+    [2021, 12, '2021-12-31 New Year\'s Day (observed)'], [2022, 10, '2022-12-26 Christmas Day (observed)']]) {
+    await page.click('#dc-hol-clear');
+    await page.fill('#dc-from', `${year}-01-01`);
+    await page.fill('#dc-to', `${year}-12-31`);
+    await page.click('#dc-us');
+    const got = (await page.inputValue('#dc-hol')).split('\n');
+    assert.equal(await text('#dc-hol-note'), `Added ${count} US federal holidays for ${year}, as observed by federal offices.`);
+    assert.ok(got.length === count && got.includes(has) && got.every(l => l.startsWith(`${year}-`)), got.join(' | '));
+  }
+  // A list of more than 1,500 characters would make the address too long to pass on:
+  // it is left out, and the page says so (on screen, to the field and in the announcement).
+  const tooLong = 'This list is too long for the page address (over 1,500 characters). A reload or a link to this page will not bring it back, so keep a copy.';
+  assert.equal(await text('#dc-hol-long'), '');
+  await hashIs('#from=2022-01-01&to=2022-12-31&hol=' + (await page.inputValue('#dc-hol')));
+  await page.fill('#dc-to', '2026-12-31');
+  await page.click('#dc-us');
+  assert.ok((await page.inputValue('#dc-hol')).length > 1500);
+  assert.equal(await text('#dc-hol-note'), 'Added 44 US federal holidays for 2022 to 2026, as observed by federal offices.');
+  assert.equal(await text('#dc-hol-long'), tooLong);
+  await page.waitForFunction(t => document.querySelector('#dc-status').textContent === t, 'Added 44 US federal holidays for 2022 to 2026, as observed by federal offices. ' + tooLong);
+  await hashIs('#from=2022-01-01&to=2026-12-31');
+  assert.equal(await text('#dc-b-off-label'), 'Days off: 522 weekly, 54 holidays'); // the holidays still count
+  await page.fill('#dc-hol', '2026-12-25 Christmas Day');
+  assert.equal(await text('#dc-hol-long'), '');
+  await hashIs('#from=2022-01-01&to=2026-12-31&hol=2026-12-25 Christmas Day');
+  await page.click('#dc-hol-clear');
 
   // ---- Copy the result ----
   await page.click('[data-preset="new-year"]');
@@ -483,6 +523,41 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.clock.runFor(60000);
   assert.deepEqual([await page.inputValue('#dc-from'), await text('#dc-b-big'), await page.inputValue('#dc-start')], ['2026-11-15', '47 days until New Year\'s Day', '2026-11-14']);
   await page.clock.setSystemTime(new Date('2026-11-14T10:00:00Z'));
+
+  // ---- Back from another page on a later day: the browser may put the old values back
+  // into the fields after the page has loaded; the fields and the result still agree ----
+  await fresh('#to=christmas');
+  assert.equal(await page.inputValue('#dc-from'), '2026-11-14');
+  await page.goto(`${base}/about/`, { waitUntil: 'load' });
+  await page.clock.setSystemTime(new Date('2026-11-16T10:00:00Z'));
+  await page.goBack({ waitUntil: 'load' });
+  assert.deepEqual([await page.inputValue('#dc-from'), await page.inputValue('#dc-to'), await text('#dc-b-big'), await text('#dc-b-line')],
+    ['2026-11-16', '2026-12-25', '39 days until Christmas Day', 'From Monday, November 16, 2026 to Friday, December 25, 2026, not counting the last day.']);
+  await page.click('#dc-tab-add');
+  assert.deepEqual([await page.inputValue('#dc-start'), await text('#dc-a-line')], ['2026-11-16', '90 days after Monday, November 16, 2026.']);
+  await page.clock.setSystemTime(new Date('2026-11-14T10:00:00Z'));
+
+  // ---- A browser without a date field shows a text box: a typed date is read, and the
+  // address carries it in the form that opens again ----
+  await fresh();
+  await page.$$eval('#dc-from, #dc-to, #dc-start', els => els.forEach(el => { el.type = 'text'; }));
+  await page.fill('#dc-to', '25 Dec 2026');
+  assert.equal(await text('#dc-b-big'), '41 days');
+  await hashIs('#to=2026-12-25');
+  await page.fill('#dc-from', 'Nov 1, 2026');
+  await page.fill('#dc-to', '12/24/2026');
+  assert.equal(await text('#dc-b-big'), '53 days');
+  await hashIs('#from=2026-11-01&to=2026-12-24');
+  await page.fill('#dc-to', 'next week');
+  assert.equal(await text('#dc-between-msg'), 'Write the date like 2026-12-25 or 25 Dec 2026, with a year from 1 to 9999.');
+  assert.deepEqual([await link('#dc-to'), await text('#dc-b-big')], [['dc-between-msg', 'true'], '–']);
+  await page.click('#dc-tab-add');
+  await page.fill('#dc-start', '1 March 2027');
+  assert.equal(await text('#dc-a-iso'), '2027-05-30');
+  await hashIs('#tab=add&from=2026-11-01&to=next week&start=2027-03-01');
+  await page.fill('#dc-start', 'tomorrow');
+  assert.equal(await text('#dc-add-msg'), 'Write the date like 2026-12-25 or 25 Dec 2026, with a year from 1 to 9999.');
+  await fresh();
 
   // ---- The FAQ covers privacy ----
   const faqs = await page.locator('.faq summary').allTextContents();

@@ -122,6 +122,13 @@ CASES = [
     case('both ends', '0', '1', 2, places=2, source=[0x00000000, 0xC8000000]),
     # A coin: the top bit of each word. 0 is Heads (1), 1 is Tails (2).
     case('coin', '1', '2', 6, source=[0x00000000, 0x80000000, 0x7FFFFFFF, 0xFFFFFFFF, 0x80000001, 0x00000001]),
+    # Negative bounds with decimals: the whole numbers inside -10.2 to -1.5 are -10 to -2.
+    case('negative decimal bounds, whole numbers', '-10.2', '-1.5', 12),
+    # Words chosen by hand for a range of 2^32 + 1 values (33 bits from two words). The first
+    # pair gives exactly 2^32 + 1, one more than the largest value, and is thrown away; the
+    # second gives 2^32, the maximum itself; the third gives 0.
+    case('rejection above 32 bits', '0', str(2 ** 32), 2,
+         source=[0x80000000, 0x80000000, 0x80000000, 0x00000000, 0x00000000, 0x00000000]),
 ]
 
 if __name__ == '__main__':

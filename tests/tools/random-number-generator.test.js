@@ -76,6 +76,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // By hand, for 1 to 100 (seven bits per try): 127 and 100 are thrown away, 99 is 100, 0 is 1.
   assert.deepEqual(byName.rejections.numbers, ['100', '1']);
   assert.deepEqual(byName['both ends'].numbers, ['0.00', '1.00']);
+  // Above 32 bits a value one more than the maximum is thrown away as well: 2^32 + 1 is
+  // skipped, then come 2^32 (the maximum) and 0.
+  assert.deepEqual(byName['rejection above 32 bits'].numbers, ['4294967296', '0']);
+  // Negative bounds with decimals are rounded inwards too: -10.2 to -1.5 is -10 to -2.
+  assert.ok(byName['negative decimal bounds, whole numbers'].numbers.every(n => Number(n) >= -10 && Number(n) <= -2));
+  await setUp('-10.2', '-1.5', 500);
+  await page.click('#rn-generate');
+  assert.equal(new Set(await list()).size, 9);
+  assert.match(await text('#rn-info'), /^500 whole numbers from -10 to -2, repeats allowed\. 9 possible values\. Sum: -\d+\.$/);
   // A decimal minimum or maximum is honoured by whole numbers too: 1.5 to 10.2 is 2 to 10.
   await setUp('1.5', '10.2', 500);
   assert.ok(inRange(await list(), 2, 10));
@@ -167,6 +176,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await refuses('1', '9'.repeat(1001), 1, 'rn-max', 'The maximum is too long. Use at most 1,000 digits before the decimal point and 20 after it.');
   await refuses('0.' + '1'.repeat(21), '5', 1, 'rn-min', 'The minimum is too long. Use at most 1,000 digits before the decimal point and 20 after it.');
   await refuses('1', '9'.repeat(1000), 10000, 'rn-count', 'That is more than a million characters of numbers. Ask for fewer numbers or use a shorter range.');
+  // The limit is a million characters, counting two for each separator: 999 numbers of
+  // 1,000 digits are just over it (999 x 1,002) and 998 just under.
+  await refuses('1', '9'.repeat(1000), 999, 'rn-count', 'That is more than a million characters of numbers. Ask for fewer numbers or use a shorter range.');
+  await setUp('1', '9'.repeat(1000), 998);
+  await page.click('#rn-generate');
+  assert.equal(await text('#rn-msg'), '');
+  assert.equal((await list()).length, 998);
   // A thousand digits is allowed, and the number that comes out is exact.
   await setUp('1' + '0'.repeat(999), '9'.repeat(1000), 1);
   await page.click('#rn-generate');
@@ -222,6 +238,29 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(inRange(await list(), 1, 3));
   assert.equal(new Set(await list()).size, 3);
 
+  // A number that starts with "0," is a decimal, never thousands: 0,125 to 0,500 has 376 values.
+  await setUp('0,125', '0,500', 1, false, 3);
+  await page.click('#rn-generate');
+  assert.equal(await text('#rn-msg'), '');
+  assert.equal(await text('#rn-info'), '1 number with 3 decimal places from 0.125 to 0.500. 376 possible values.');
+  // A raised or lowered digit is not read as a digit (10 squared is not 102), a tab sits
+  // between two pasted cells, and a group of thousands cannot start with 0.
+  for (const junk of ['10\u00B2', '5\u00B3', '1\u2080', '1\t000', '0 500', '0.500.000']) await refuses('1', junk, 1, 'rn-max', 'The maximum must be a number, such as 100.');
+  // "How many" is a whole number, so a comma or a point before three digits groups thousands.
+  for (const [typed, n] of [['1,000', 1000], ['1.000', 1000], ['10.000', 10000]]) {
+    await setUp('1', '100', typed);
+    await page.click('#rn-generate');
+    assert.equal(await text('#rn-msg'), '', typed);
+    assert.equal((await list()).length, n, typed);
+  }
+  for (const bad of ['100,000', '0,500', '1,5']) await refuses('1', '100', bad, 'rn-count', 'How many must be a whole number from 1 to 10,000.');
+  // One short number is shown large; a longer one, or a list, in the ordinary size.
+  for (const [value, count, large] of [['-123456789', 1, true], ['12345678901', 1, false], ['7', 2, false]]) {
+    await setUp(value, value, count);
+    await page.click('#rn-generate');
+    assert.equal(await page.$eval('#rn-out', e => e.classList.contains('rn-big')), large, `${count} x ${value}`);
+  }
+
   // ---- Decimals: every value has the chosen number of places, and both ends are possible. ----
   await setUp('0', '1', 2000, false, 2);
   assert.equal(await page.isVisible('#rn-places-field'), true);
@@ -274,6 +313,19 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await hash(), '#max=49&n=6&unique=1&order=asc');
   await drawWith(byName.lottery.words);
   assert.equal(await out(), byName.lottery.ascending.join(', '));
+  // Pressed again, the preset keeps a changed "How many" and stays without repeats...
+  await page.fill('#rn-count', '7');
+  await page.click('[data-preset="lottery"]');
+  assert.deepEqual(await fields(), ['1', '49', '7', true, 'asc']);
+  assert.equal(new Set(await list()).size, 7);
+  // ...but a range that only reads 1 to 49, typed by hand or opened from a link, is not a
+  // lottery draw yet: the preset then sets all of it.
+  await setUp('1', '49', 1);
+  await page.selectOption('#rn-order', 'drawn');
+  await page.click('#rn-generate');
+  await page.click('[data-preset="lottery"]');
+  assert.deepEqual(await fields(), ['1', '49', '6', true, 'asc']);
+  assert.equal(new Set(await list()).size, 6);
   // Coin flip: the reference's 1 is Heads and 2 is Tails.
   await page.click('[data-preset="coin"]');
   assert.match(await out(), /^(Heads|Tails)$/);
@@ -288,6 +340,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#rn-info'), '6 coin flips: 3 heads, 3 tails.');
   assert.equal(await text('#rn-out-label'), 'Your 6 coin flips');
   await status('Your 6 coin flips: Heads, Tails, Heads, Tails, Tails, Heads');
+  // More than ten flips are summed up for screen readers as heads and tails, not as "numbers".
+  await page.fill('#rn-count', '12');
+  await page.click('#rn-generate');
+  await page.waitForFunction(() => /^12 coin flips: \d+ heads?, \d+ tails?\.$/.test(document.querySelector('#rn-status').textContent), null, { timeout: 3000 });
+  assert.equal(await text('#rn-status'), await text('#rn-info'));
   // Emptying a box on the way to a new number keeps the coin; a different range ends it.
   await page.fill('#rn-count', '');
   await page.fill('#rn-count', '3');
@@ -409,6 +466,26 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.check('#rn-unique');
   assert.equal(await hash(), '#max=6&unique=1');
 
+  // The longest number the boxes accept, 1,000 digits written with thousands separators
+  // (1,333 characters), is kept in the address and comes back after a reload...
+  const grouped = '1,' + Array(333).fill('000').join(',');
+  await page.setChecked('#rn-unique', false);
+  await page.fill('#rn-max', grouped);
+  await page.click('#rn-generate');
+  assert.equal(await text('#rn-msg'), '');
+  await page.reload({ waitUntil: 'load' });
+  assert.equal(await page.inputValue('#rn-max'), grouped);
+  assert.match(await out(), /^\d{1,1000}$/);
+  // ...but a pasted megabyte, which is no number at all, is not written into the address.
+  await page.evaluate(() => {
+    const el = document.querySelector('#rn-max');
+    el.value = '9'.repeat(1 << 20);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#rn-form').requestSubmit();
+  });
+  assert.match(await text('#rn-msg'), /^The maximum is too long\./);
+  assert.ok(page.url().length < 300, `the address is ${page.url().length} characters long`);
+
   // ---- Keyboard: Generate is the first stop; Enter on it draws again. Then type a
   // range, press Enter in a box, and Tab on to the other controls. ----
   await page.goto(url, { waitUntil: 'load' });
@@ -459,7 +536,43 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(await page.$eval('#rn-out', e => e.scrollHeight > e.clientHeight && e.clientHeight <= 342));
   assert.equal(await page.$eval('#rn-out', e => e.getAttribute('role') + ' ' + document.getElementById(e.getAttribute('aria-labelledby')).textContent), 'group Your 2,000 random numbers');
 
+  // A narrower window, or a larger zoom, can make a list scroll that fitted before: the box
+  // becomes a tab stop then too, and stops being one when the list fits again.
+  await setUp('1', '100000', 100);
+  await page.click('#rn-generate');
+  assert.equal(await attr('#rn-out', 'tabindex'), null);
+  const wide = page.viewportSize();
+  await page.setViewportSize({ width: 400, height: wide.height });
+  await page.waitForFunction(() => { const o = document.querySelector('#rn-out'); return o.scrollHeight > o.clientHeight + 1 && o.getAttribute('tabindex') === '0'; }, null, { timeout: 3000 });
+  await page.setViewportSize(wide);
+  await page.waitForFunction(() => document.querySelector('#rn-out').getAttribute('tabindex') === null, null, { timeout: 3000 });
+
   assert.equal(await page.evaluate(() => window.__mathRandom), undefined, 'Math.random was never called');
+
+  // ---- A locale that writes decimals with a comma. ----
+  const de = await page.context().browser().newContext({ locale: 'de-DE' });
+  const dePage = await de.newPage();
+  await dePage.goto(url, { waitUntil: 'load' });
+  // "How many" reads 1.000 and 1,000 as a thousand there as well, and 10,000 as the page writes it.
+  for (const [typed, n] of [['1.000', 1000], ['1,000', 1000], ['10,000', 10000]]) {
+    await dePage.fill('#rn-count', typed);
+    await dePage.click('#rn-generate');
+    assert.equal((await dePage.textContent('#rn-out')).split(', ').length, n, `de-DE ${typed}`);
+  }
+  // In a range a comma is a decimal comma there: 0,5 to 1,500 is 0.50 to 1.50.
+  await dePage.fill('#rn-count', '1');
+  await dePage.selectOption('#rn-type', 'dec');
+  await dePage.fill('#rn-min', '0,5');
+  await dePage.fill('#rn-max', '1,500');
+  await dePage.click('#rn-generate');
+  assert.equal(await dePage.textContent('#rn-info'), '1 number with 2 decimal places from 0.50 to 1.50. 101 possible values.');
+  // The Arabic thousands separator (U+066C) groups thousands; it is not a decimal comma.
+  await dePage.selectOption('#rn-type', 'int');
+  await dePage.fill('#rn-min', '1');
+  await dePage.fill('#rn-max', '\u0661\u066C\u0660\u0660\u0660');
+  await dePage.click('#rn-generate');
+  assert.equal(await dePage.textContent('#rn-info'), '1 whole number from 1 to 1000. 1,000 possible values.');
+  await de.close();
 
   // ---- A phone with a touch screen. ----
   const phone = await page.context().browser().newContext({ ...devices['iPhone 13'] });
@@ -491,6 +604,27 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   for (const s of sizes) {
     assert.ok(s.h >= 44, `${s.id} is ${s.h}px tall`);
     if (s.tag === 'INPUT' || s.tag === 'SELECT') assert.ok(s.font >= 16, `${s.id} has ${s.font}px text`);
+  }
+  // Every option of every select fits its box (text, padding, border and 22 px for the
+  // arrow), with and without the "Decimal places" box: "One number per line" used to be
+  // cut off from 390 to 900 px.
+  for (const width of [320, 360, 390, 412, 430, 480, 540, 700, 768, 820, 900, 1280]) {
+    await p.setViewportSize({ width, height: 700 });
+    for (const type of ['dec', 'int']) {
+      await p.selectOption('#rn-type', type);
+      const cut = await p.evaluate(() => {
+        const cv = document.createElement('canvas').getContext('2d'), out = [];
+        for (const e of document.querySelectorAll('.rn select')) {
+          if (!e.getClientRects().length) continue;
+          const cs = getComputedStyle(e);
+          cv.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+          const room = e.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 2 - 22;
+          for (const o of e.options) if (cv.measureText(o.textContent).width > room) out.push(`${e.id} "${o.textContent}"`);
+        }
+        return out;
+      });
+      assert.deepEqual(cut, [], `options cut off at ${width}px (${type})`);
+    }
   }
   // A 1,000-digit number and a long message wrap at 320 px instead of widening the page.
   await p.setViewportSize({ width: 320, height: 568 });

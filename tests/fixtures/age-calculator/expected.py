@@ -140,7 +140,10 @@ def timed(tz, now, born, clock, on=None, rule='mar1'):
     start = dt.datetime.combine(born, tb, tzinfo=zone)
     end = dt.datetime.combine(on_date, tt, tzinfo=zone)
     seconds = round(end.timestamp() - start.timestamp())
-    back = 1 if tt < tb else 0
+    # The last time the clock showed the time of birth: today if that moment has
+    # passed, otherwise yesterday. Comparing clock times alone is not enough when
+    # the clocks have just gone back and an hour is running for the second time.
+    back = 0
     while True:
         rest = round(end.timestamp() - dt.datetime.combine(on_date - back * DAY, tb, tzinfo=zone).timestamp())
         if rest >= 0:
@@ -202,5 +205,11 @@ print(json.dumps({
         timed('Asia/Kathmandu', NOW, (2026, 11, 13), (20, 0)),
         timed('Europe/Paris', NOW, (2000, 2, 29), (18, 0), on=(2025, 3, 1)),
         timed('Europe/Paris', '2025-03-01T09:00:00Z', (2000, 2, 29), (18, 0)),
+        # 3:10 AM on the day the clocks skip from 2:00 to 3:00: today has no 2:30,
+        # so the last full day ended at 2:30 yesterday, 23 hours and 40 minutes ago.
+        timed('America/New_York', '2026-03-08T07:10:00Z', (2000, 1, 15), (2, 30)),
+        # 1:30 AM for the second time in the night the clocks go back: 1:45 has
+        # already been once today, 45 minutes ago.
+        timed('America/New_York', '2026-11-01T06:30:00Z', (2000, 1, 15), (1, 45)),
     ],
 }, indent=1))

@@ -1,6 +1,6 @@
 ---
 title: "Age Calculator: Years, Months and Days"
-description: Enter a date of birth to get the exact age in years, months and days, the total in weeks, days and hours, and the next birthday. Runs in your browser.
+description: How old am I? Enter a date of birth to see the exact age in years, months and days, in weeks, days and hours, and the next birthday. Runs in your browser.
 category: Date & Time
 keywords: [age calculator, how old am i, age calculator by date of birth, chronological age calculator, how old am i in days, exact age calculator, birthday calculator, leap year birthday age]
 howto: |
@@ -72,7 +72,7 @@ faq:
   - q: Do you reach an age on your birthday or the day before?
     a: On the birthday itself in everyday use and in most modern law. In England and Wales the Family Law Reform Act 1969 fixed it at the start of the birthday. The older common-law rule, the day before, survives in places. The US Social Security Administration treats a person as reaching an age on the day before the birthday, so someone born on 1 January 1962 reaches 65 on 31 December 2026.
   - q: What day of the week was I born on?
-    a: The table under the result names it. Dates are read in the Gregorian calendar used today. For a date before a country adopted it (1582 in much of Catholic Europe, September 1752 in Britain and its American colonies), convert the date first or the weekday will be wrong.
+    a: The list under the result names it. Dates are read in the Gregorian calendar used today. For a date before a country adopted it (1582 in much of Catholic Europe, September 1752 in Britain and its American colonies), convert the date first or the weekday will be wrong.
   - q: How do I calculate age in Excel or Google Sheets?
     a: With the date of birth in A2, `=DATEDIF(A2, TODAY(), "Y")` gives the full years, `"YM"` the months after them and `"MD"` the days after those. Microsoft advises against `"MD"` because of known limitations, so check a surprising result against this page.
   - q: Is my date of birth sent or stored anywhere?
@@ -167,10 +167,11 @@ faq:
       <input type="hidden" id="ac-follow" value="1">
       <div class="field ac-leap" id="ac-leap-field" hidden>
         <label for="ac-leap">Birthday in years without a 29 February</label>
-        <select id="ac-leap">
-          <option value="1" selected>1 March (Scotland, Hong Kong)</option>
-          <option value="28">28 February (New Zealand driver licences)</option>
+        <select id="ac-leap" aria-describedby="ac-leap-hint">
+          <option value="1" selected>1 March</option>
+          <option value="28">28 February</option>
         </select>
+        <span class="hint" id="ac-leap-hint">The law differs: 1 March in Scotland and Hong Kong, 28 February for driver licences in New Zealand.</span>
       </div>
     </div>
   </div>
@@ -386,20 +387,26 @@ faq:
     ORDER.split('').forEach(function (p) { g.box.appendChild(g[p].parentNode); });
     return g;
   }
+  // The year is written with four digits, as it is read (987 becomes 0987).
   function setGroup(g, c) {
-    [['d', c.d], ['m', c.m], ['y', c.y]].forEach(function (p) { if (g[p[0]].value !== String(p[1])) g[p[0]].value = String(p[1]); });
+    [['d', c.d], ['m', c.m], ['y', pad(c.y, 4)]].forEach(function (p) { if (g[p[0]].value !== String(p[1])) g[p[0]].value = String(p[1]); });
   }
   // state: empty, partial (a prompt, not an error), bad or ok.
   function readGroup(g) {
     var ds = clean(g.d.value), ms = clean(g.m.value), ys = clean(g.y.value);
     if (!ds && !ms && !ys) return { state: 'empty' };
-    var day = /^\d{1,2}$/.test(ds) ? +ds : 0, month = parseMonth(ms), year = /^\d{1,4}$/.test(ys) ? +ys : 0;
+    // A year takes all four digits. "90" may mean 1990, and a year that is
+    // still being typed is not the year 1, 19 or 199, so a shorter one is
+    // asked for in full instead of being counted from.
+    var shortYear = /^\d{1,3}$/.test(ys);
+    var day = /^\d{1,2}$/.test(ds) ? +ds : 0, month = parseMonth(ms), year = /^\d{4}$/.test(ys) ? +ys : 0;
     var bad = [], msgs = [];
     if (ds && !(day >= 1 && day <= 31)) { bad.push(g.d); msgs.push('The day must be a number from 1 to 31.'); }
     if (ms && !month) { bad.push(g.m); msgs.push('The month must be a number from 1 to 12, or a name such as May.'); }
-    if (ys && !year) { bad.push(g.y); msgs.push('The year must be a number from 1 to 9999.'); }
+    if (ys && !year && !shortYear) { bad.push(g.y); msgs.push('The year must be a number from 1 to 9999.'); }
     if (bad.length) return { state: 'bad', bad: bad, msg: msgs.join(' ') };
     if (!ds || !ms || !ys) return { state: 'partial' };
+    if (shortYear) return { state: 'partial', shortYear: true };
     if (day > dim(year, month)) return { state: 'bad', bad: [g.d], msg: MONTHS[month - 1] + ' ' + year + ' has only ' + dim(year, month) + ' days.' };
     return { state: 'ok', z: dayNum(year, month, day), c: { y: year, m: month, d: day } };
   }
@@ -436,9 +443,11 @@ faq:
   var follow = $('#ac-follow'), timeIn = $('#ac-time'), leapSel = $('#ac-leap');
   var result = null; // the last good result, for the copy buttons
 
+  // ms is the start of this minute as an instant. The clock time alone would
+  // not say which of the two 1:30s it is in the night the clocks go back.
   function nowParts() {
     var n = new Date();
-    return { z: dayNum(n.getFullYear(), n.getMonth() + 1, n.getDate()), min: n.getHours() * 60 + n.getMinutes() };
+    return { z: dayNum(n.getFullYear(), n.getMonth() + 1, n.getDate()), min: n.getHours() * 60 + n.getMinutes(), ms: n.getTime() - n.getSeconds() * 1000 - n.getMilliseconds() };
   }
   // The instant of a local date and clock time on this device, in milliseconds.
   function localMs(c, min) {
@@ -480,8 +489,8 @@ faq:
     var typedTime = clean(timeIn.value), tm = /^([01]?\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/.exec(typedTime);
     var timeMsg = typedTime && !tm ? 'Enter the time as hours and minutes on the 24-hour clock, such as 08:30.' : '';
     if (A.state !== 'ok' || B.state !== 'ok') {
-      var prompt = A.state === 'empty' || A.state === 'partial' ? 'Enter the day, month and year of birth.'
-        : A.state === 'ok' && B.state !== 'bad' ? 'Enter the day, month and year to count the age to, or press Today.' : '';
+      var prompt = A.state === 'empty' || A.state === 'partial' ? (A.shortYear ? 'Enter the year of birth with four digits, such as 1990.' : 'Enter the day, month and year of birth.')
+        : A.state === 'ok' && B.state !== 'bad' ? (B.shortYear ? 'Enter the year with four digits, such as ' + civil(now.z).y + '.' : 'Enter the day, month and year to count the age to, or press Today.') : '';
       blank(prompt);
       setText($('#ac-time-msg'), timeMsg);
       if (timeMsg) timeIn.setAttribute('aria-invalid', 'true'); else timeIn.removeAttribute('aria-invalid');
@@ -497,13 +506,16 @@ faq:
       // included: up to now when the age is counted to today, otherwise up to
       // the same clock time as the birth.
       var tb = +tm[1] * 60 + +tm[2], tt = b === now.z ? now.min : tb;
-      var from = localMs(A.c, tb), to = localMs(B.c, tt);
+      var from = localMs(A.c, tb), to = b === now.z ? now.ms : localMs(B.c, tt);
       if (to < from) {
         timeMsg = 'That time is in the future: it is ' + fmtTime(now.min) + ' now.';
         tm = null;
       } else {
-        var ms = to - from, back = tt < tb ? 1 : 0, rest = to - localMs(civil(b - back), tb);
-        if (rest < 0) { back += 1; rest = to - localMs(civil(b - back), tb); }
+        // The last time the clock showed the time of birth: on that day if the
+        // moment has come, otherwise the day before (or two, should a clock
+        // change have removed that time from a day).
+        var ms = to - from, back = 0, rest = to - localMs(B.c, tb);
+        while (rest < 0 && back < 2) { back += 1; rest = to - localMs(civil(b - back), tb); }
         hours = fdiv(ms, 3600000);
         minutes = fdiv(ms, 60000);
         seconds = fdiv(ms, 1000);
@@ -536,7 +548,9 @@ faq:
     var next = thisYear > b ? thisYear : birthday(A.c, B.c.y + 1, mar1), turning = civil(next).y - A.c.y;
     var until = next - b, gap = diffYMD(b, next);
     var nextText = fmtDate(next) + ', in ' + span(gap) + (gap.years || gap.months ? ' (' + unit(until, 'day') + ')' : '') + '. Turning ' + turning + '.';
-    if (isBirthday) nextText = 'Today is the ' + ordinal(g.years) + ' birthday. The next one is ' + nextText;
+    // "Today" only when the age is counted to today, not to another date.
+    var birthdayText = (b === now.z ? 'Today' : 'This date') + ' is the ' + ordinal(g.years) + ' birthday.';
+    if (isBirthday) nextText = birthdayText + ' The next one is ' + nextText;
     setText($('#ac-next'), nextText);
     setText($('#ac-weekday'), weekday(a));
     $('#ac-leapdays-row').hidden = !leapling;
@@ -562,7 +576,7 @@ faq:
         'Next birthday: ' + fmtDate(next) + ', in ' + unit(until, 'day') + ', turning ' + turning].join('\n'),
       link: '#dob=' + iso(a) + (follow.value === '1' ? '' : '&on=' + iso(b)) + (tm ? '&time=' + pad(+tm[1], 2) + ':' + tm[2] : '') + (leapling && !mar1 ? '&leap=28' : '')
     };
-    say(timeMsg || ymd(g) + ' old on ' + fmtDate(b) + '. ' + (isBirthday ? 'Today is the ' + ordinal(g.years) + ' birthday.' : 'Next birthday in ' + unit(until, 'day') + '.'));
+    say(timeMsg || ymd(g) + ' old on ' + fmtDate(b) + '. ' + (isBirthday ? birthdayText : 'Next birthday in ' + unit(until, 'day') + '.'));
   }
 
   // ----- A link that carries the dates: #dob=1990-05-15&on=2030-01-01&time=08:30&leap=28 -----
@@ -599,10 +613,14 @@ faq:
       });
       selectOnFocus(el);
       el.addEventListener('paste', function (e) {
-        var c = parseFull((e.clipboardData || window.clipboardData).getData('text'));
-        if (!c) return;
+        var raw = (e.clipboardData || window.clipboardData).getData('text'), c = parseFull(raw), text = clean(raw);
+        if (!c && text === raw && text.length <= el.maxLength) return; // a plain number or name goes in as usual
         e.preventDefault();
-        setGroup(g, c);
+        if (c) setGroup(g, c);
+        // Anything else goes in whole, without the spaces around it. Cut to
+        // the length of the box, the first characters of a date that cannot
+        // be read (15/5/90) would pass for the day.
+        else el.setRangeText(text.slice(0, 40), el.selectionStart, el.selectionEnd, 'end');
         if (g === on) follow.value = '0';
         edited();
         render('click');

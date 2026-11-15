@@ -76,7 +76,7 @@ faq:
   - q: What is the difference between pseudo-random and true random numbers?
     a: A pseudo-random generator is a formula that turns a starting value, the seed, into a long stream of numbers, and the same seed always gives the same stream. A true random generator measures a physical process such as electronic or atmospheric noise. A cryptographically secure generator combines the two, a formula seeded with unpredictable data that the device gathers from physical events, so its output cannot be predicted by anyone who does not know the seed.
   - q: Why did the same number come up twice?
-    a: With repeats allowed every draw is independent, so a number that has just come up is exactly as likely as any other the next time. On a dice that is 1 chance in 6 for every roll, and in ten rolls at least one number must repeat. Tick No repeats if every number has to be different.
+    a: With repeats allowed every draw is independent, so a number that has just come up is exactly as likely as any other the next time. On a dice that is 1 chance in 6 for every roll, and in seven rolls at least one number must repeat. Tick No repeats if every number has to be different.
   - q: Are my numbers saved or sent anywhere?
     a: No. The numbers are made on your device by your browser and are never uploaded, logged or stored, so they are gone when you close or reload the page. Only your settings are kept, in the page address.
 ---
@@ -96,7 +96,8 @@ faq:
 #rn-msg { margin: 8px 0 0; }
 .rn-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
 .rn-section h2 { margin: 0 0 12px; font-size: 1.05rem; }
-.rn-section .row > .field { flex: 1 1 150px; }
+/* Wide enough for the longest option ("One number per line"), so the words are never cut off. */
+.rn-section .row > .field { flex: 1 1 210px; }
 .rn-section .actions, .rn-section .row { margin-bottom: 0; }
 .rn-coin { margin: 10px 0 0; }
 @media (pointer: coarse) {
@@ -203,6 +204,8 @@ faq:
   'use strict';
   var $ = TT.$, $$ = TT.$$;
   var MAX_COUNT = 10000, MAX_DIGITS = 1000, MAX_DEC = 20, MAX_CHARS = 1000000;
+  // The longest text a box can hold in the address: 1,000 digits with thousands separators, 20 decimals and a sign fit.
+  var MAX_TEXT = 1400;
   var decComma = (1.5).toLocaleString().indexOf(',') !== -1;
   var form = $('#rn-form'), minEl = $('#rn-min'), maxEl = $('#rn-max'), countEl = $('#rn-count'), uniqueEl = $('#rn-unique');
   var typeEl = $('#rn-type'), placesEl = $('#rn-places'), orderEl = $('#rn-order'), sepEl = $('#rn-sep');
@@ -219,7 +222,10 @@ faq:
   // "1,000", "1.000,5", "1 000", "-50", "2.5" and "1e30" all work. Returns
   // null for an empty box and { err } for anything that is not one number.
   function parse(raw) {
-    var s = String(raw == null ? '' : raw).normalize('NFKC').replace(/[\u2212\u2012\u2013]/g, '-').replace(/\u066B/g, '.').replace(/\u066C/g, ',')
+    raw = String(raw == null ? '' : raw);
+    // A raised or lowered digit, as in 10 squared, is not part of a number, and a tab sits between two pasted cells.
+    if (/[\u00B2\u00B3\u00B9\u2070-\u208E]/.test(raw) || /[\t\n\r\v\f]/.test(raw.trim())) return { err: 'nan' };
+    var s = raw.normalize('NFKC').replace(/[\u2212\u2012\u2013]/g, '-').replace(/\u066B/g, '.').replace(/\u066C/g, "'") // Arabic decimal and thousands separators
       .replace(/[\u0660-\u0669\u06F0-\u06F9\u0966-\u096F\u09E6-\u09EF]/g, function (ch) { // Arabic, Persian, Devanagari and Bengali digits
         var c = ch.charCodeAt(0);
         return String(c - (c < 0x06F0 ? 0x0660 : c < 0x0966 ? 0x06F0 : c < 0x09E6 ? 0x0966 : 0x09E6));
@@ -229,10 +235,11 @@ faq:
     s = m[2].replace(/\s/g, ' ');
     var e = /^(.*\d\.?)e([+-]?\d{1,4})$/i.exec(s);
     if (e) { s = e[1]; ex = parseInt(e[2], 10); }
-    if (/^\d{1,3}(?:[ '\u2019]\d{3})+(?:[.,]\d+)?$/.test(s)) s = s.replace(/[ '\u2019]/g, '').replace(',', '.');
-    else if (/^\d{1,3}(?:\.\d{3})+,\d+$/.test(s) || /^\d{1,3}(?:\.\d{3}){2,}$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
-    else if (/^\d*,\d+$/.test(s) && (decComma || !/^\d{1,3},\d{3}$/.test(s))) s = s.replace(',', '.');
-    else if (/^\d{1,3}(?:,\d{3})+(?:\.\d*)?$/.test(s)) s = s.replace(/,/g, '');
+    // Thousands are grouped in threes and the first group never starts with 0: "0,500" is a half, not 500.
+    if (/^[1-9]\d{0,2}(?:[ '\u2019]\d{3})+(?:[.,]\d+)?$/.test(s)) s = s.replace(/[ '\u2019]/g, '').replace(',', '.');
+    else if (/^[1-9]\d{0,2}(?:\.\d{3})+,\d+$/.test(s) || /^[1-9]\d{0,2}(?:\.\d{3}){2,}$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^\d*,\d+$/.test(s) && (decComma || !/^[1-9]\d{0,2},\d{3}$/.test(s))) s = s.replace(',', '.');
+    else if (/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d*)?$/.test(s)) s = s.replace(/,/g, '');
     m = /^(\d*)(?:\.(\d*))?$/.exec(s);
     if (!m || !(m[1] + (m[2] || ''))) return { err: 'nan' };
     var ip = m[1].replace(/^0+/, ''), fp = m[2] || '';
@@ -286,7 +293,8 @@ faq:
   // Everything a draw needs from the boxes, or { error, field }.
   function config() {
     var p = typeEl.value === 'dec' ? parseInt(placesEl.value, 10) || 2 : 0;
-    var lo = parse(minEl.value), hi = parse(maxEl.value), cnt = parse(countEl.value);
+    // "How many" has no decimals, so a comma or a point before three digits can only group thousands.
+    var lo = parse(minEl.value), hi = parse(maxEl.value), cnt = parse(countEl.value.replace(/^(\s*[1-9]\d{0,2})[.,](\d{3}\s*)$/, '$1$2'));
     function fail(field, error) { return { error: error, field: field }; }
     function bound(v, el, name, example) {
       if (v === null) return fail(el, 'Enter the ' + name + ', such as ' + example + '.');
@@ -394,7 +402,10 @@ faq:
     draw.texts = texts;
     draw.text = text;
     draw.label = label;
-    // A list too long for its box scrolls, and then the box has to take keyboard focus.
+    reach();
+  }
+  // A list too long for its box scrolls, and then the box has to take keyboard focus.
+  function reach() {
     if (outEl.scrollHeight > outEl.clientHeight + 1) outEl.setAttribute('tabindex', '0'); else outEl.removeAttribute('tabindex');
   }
 
@@ -426,7 +437,8 @@ faq:
   // link brings them back. The numbers are never put there.
   function settings() {
     var parts = [];
-    function put(key, value, normal) { if (value !== normal) parts.push(key + '=' + encodeURIComponent(value)); }
+    // Anything longer than a number can be, such as a pasted page of text, stays out of the address.
+    function put(key, value, normal) { if (value !== normal && value.length <= MAX_TEXT) parts.push(key + '=' + encodeURIComponent(value)); }
     put('min', minEl.value.trim(), '1');
     put('max', maxEl.value.trim(), '100');
     put('n', countEl.value.trim(), '1');
@@ -462,7 +474,7 @@ faq:
       if (i < 1) return;
       try { q[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1)); } catch (e) { /* skip a broken value */ }
     });
-    function text(el, v) { if (typeof v === 'string' && v.length <= 1300) el.value = v; }
+    function text(el, v) { if (typeof v === 'string' && v.length <= MAX_TEXT) el.value = v; }
     function pick(el, v) {
       if (typeof v === 'string' && $$('option', el).some(function (o) { return o.value === v; })) el.value = v;
     }
@@ -501,7 +513,8 @@ faq:
     }
     draw = { values: sample(c), p: c.p, coin: c.coin, info: describe(c) };
     show();
-    if (!opening) announce(draw.texts.length <= 10 ? draw.label + ': ' + draw.texts.join(', ') : group(String(draw.texts.length)) + ' numbers generated.', how === 'typing');
+    // Up to ten results are read out; a longer list is summed up (coin flips as heads and tails).
+    if (!opening) announce(draw.texts.length <= 10 ? draw.label + ': ' + draw.texts.join(', ') : draw.coin ? infoEl.textContent : group(String(draw.texts.length)) + ' numbers generated.', how === 'typing');
     if (how === 'now') reveal();
   }
 
@@ -532,8 +545,9 @@ faq:
   $$('[data-preset]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var p = PRESETS[btn.getAttribute('data-preset')], name = btn.getAttribute('data-preset');
-      // Pressed again on the same range, a preset only draws again and keeps "How many".
-      var same = minEl.value.trim() === p[0] && maxEl.value.trim() === p[1] && typeEl.value === 'int' && (name === 'coin') === coin;
+      // Pressed again on the same range, a preset only draws again and keeps "How many". A
+      // range that merely reads 1 to 49, with repeats allowed, is not yet a lottery draw.
+      var same = minEl.value.trim() === p[0] && maxEl.value.trim() === p[1] && typeEl.value === 'int' && (name === 'coin') === coin && (!p[3] || uniqueEl.checked);
       minEl.value = p[0];
       maxEl.value = p[1];
       typeEl.value = 'int';
@@ -554,6 +568,8 @@ faq:
   window.addEventListener('hashchange', function () {
     if (readHash(true)) { syncType(); generate('option'); }
   });
+  // A narrower window, a turned phone or a larger zoom can make a list scroll that fitted before.
+  window.addEventListener('resize', TT.debounce(reach, 150));
 
   var fromLink = readHash(false);
   syncType();

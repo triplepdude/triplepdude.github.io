@@ -191,6 +191,12 @@ CASES = [
     ('orig', '92', '15', 'inc', 'auto'), ('orig', '68', '15', 'dec', 'auto'), ('orig', '180', '20', 'inc', 'auto'),
     ('orig', '36', '20', 'dec', 'auto'), ('orig', '100', '7', 'inc', 'auto'), ('orig', '100', '7', 'inc', '2'),
     ('orig', '-20', '150', 'dec', 'auto'), ('orig', '59.99', '17.5', 'inc', '2'), ('orig', '0', '10', 'inc', 'auto'),
+    # The edge of "written in full": 1/4096 has 12 decimal places and 1/8192 has 13. A value
+    # carried into the next step gets two more: 1/16384 has 14 places and 1/32768 has 15.
+    ('whole', '1', '409600', '', 'auto'), ('whole', '1', '819200', '', 'auto'),
+    ('what', '1', '16384', '', 'auto'), ('what', '1', '32768', '', 'auto'),
+    # 1.25 / 5 = 0.25 is shown as 0.3, so the last step is marked as rounded although 1.25 - 0.25 = 1 exactly.
+    ('orig', '1.25', '400', 'inc', '1'),
 ]
 
 

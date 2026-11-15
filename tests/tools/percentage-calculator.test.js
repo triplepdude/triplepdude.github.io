@@ -102,13 +102,20 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     ['−3', '-3'], ['-3', '-3'], ['-$3', '-3'], ['$-3', '-3'], ['+7', '7'], ['１２．５', '12.5'], ['٣٫٥', '3.5'], ['۱۲', '12'],
     ['2.5e3', '2,500'], ['1E-3', '0.001'], ['.5', '0.5'], ['5.', '5'], ['007', '7'], ['-0', '0'], ['  42  ', '42'], ['0.50', '0.5'],
     ['999999999999999999999999999999', '999,999,999,999,999,999,999,999,999,999'], ['0.00000000000000000001', '0.00000000000000000001'],
+    // A thousands group never starts with 0, so "0,500" is a half and not five hundred.
+    ['0,500', '0.5'], ['0,125', '0.125'], ['-0,250', '-0.25'], ['0,5000', '0.5'],
+    // Arabic-Indic digits with their own thousands and decimal separators (U+066C, U+066B).
+    ['\u0661\u066C\u0662\u0663\u0664', '1,234'], ['\u0661\u066C\u0662\u0663\u0664\u066B\u0665', '1,234.5'],
   ];
   for (const [typed, read] of READS) {
     await page.fill('#pc-of-b', typed);
     assert.equal(await text('#pc-of-answer'), `100% of ${read} = ${read}`, JSON.stringify(typed));
   }
   // Things that are not one number are refused, and what was typed stays in the box.
-  for (const junk of ['abc', '1 2', '--5', '+-5', '5-', '1.2.3', '1,2,3', '$', '%', '-', '.', '12abc', 'NaN', 'Infinity', '0x10', '(5)', '1e', 'e3', '1/2', '5 5%5']) {
+  // A raised or lowered digit is not read as a digit (5 squared is not 52), a tab sits between
+  // two pasted spreadsheet cells, and a group of thousands cannot start with 0.
+  const ODD = ['5\u00B2', '10\u00B3', '1\u2082', '2\u2075', '1\t250', '0 500', '0.500.000', '0,500,000'];
+  for (const junk of ['abc', '1 2', '--5', '+-5', '5-', '1.2.3', '1,2,3', '$', '%', '-', '.', '12abc', 'NaN', 'Infinity', '0x10', '(5)', '1e', 'e3', '1/2', '5 5%5', ...ODD]) {
     await page.fill('#pc-of-b', junk);
     await leave('#pc-of-b');
     assert.equal(await text('#pc-of-msg'), 'Number (Y) must be a number, such as 12.5 or 1,250.', JSON.stringify(junk));
@@ -124,6 +131,19 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await leave('#pc-of-b');
     assert.equal(await text('#pc-of-msg'), 'Number (Y) is too long. Use at most 30 digits before the decimal point and 20 after it.', long.slice(0, 40));
     assert.equal(await attr('#pc-of-b', 'aria-invalid'), 'true');
+  }
+  // A huge paste is answered at once, whatever is in it: a long run of spaces between other
+  // characters used to keep the page busy for seconds.
+  for (const [pasted, message] of [['a' + ' '.repeat(40000) + 'a', 'must be a number'], ['1' + ' '.repeat(40000) + '1', 'is too long'], ['lorem ipsum '.repeat(90000), 'must be a number'], ['9'.repeat(1 << 20), 'is too long']]) {
+    const took = await page.evaluate(v => {
+      const el = document.querySelector('#pc-of-b'), t0 = performance.now();
+      el.value = v;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return performance.now() - t0;
+    }, pasted);
+    assert.ok((await text('#pc-of-msg')).includes(message), `${pasted.length} characters: ${await text('#pc-of-msg')}`);
+    assert.ok(took < 400, `a paste of ${pasted.length} characters took ${Math.round(took)} ms`);
   }
   // Putting it right clears the message at once.
   await page.fill('#pc-of-b', '80');
@@ -294,9 +314,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => document.querySelector('#pc-change-a').value === '80');
   assert.equal(await text('#pc-change-answer'), 'From 80 to 60: 25% decrease');
   // An example address opens directly; anything else after the # is ignored.
+  // (From a blank page, so that the address is loaded afresh and not just jumped to.)
+  await page.goto('about:blank');
   await page.goto(url + '#before-decrease=36,20', { waitUntil: 'load' });
   assert.equal(await text('#pc-orig-answer'), '36 is 20% less than 45');
   assert.equal(await page.inputValue('#pc-orig-op'), 'dec');
+  // It is the last calculator: the page has to be complete before it can be brought to the top.
+  await page.waitForFunction(() => { const t = document.querySelector('#pc-orig').getBoundingClientRect().top; return t >= 0 && t <= 20; }, null, { timeout: 3000 });
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'pc-orig-h');
   await page.goto(url + '#of=<b>1,2', { waitUntil: 'load' });
   await page.reload({ waitUntil: 'load' });
   assert.equal(await text('#pc-of-answer'), '15% of 80 = 12');
@@ -314,6 +339,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await dePage.textContent('#pc-of-answer'), '100% of 1.234 = 1.234');
   await dePage.fill('#pc-of-b', '1.234,5');
   assert.equal(await dePage.textContent('#pc-of-answer'), '100% of 1,234.5 = 1,234.5');
+  // The Arabic thousands separator groups thousands here too; it is not a decimal comma.
+  for (const [typed, read] of [['\u0661\u066C\u0662\u0663\u0664', '1,234'], ['\u0661\u066C\u0662\u0663\u0664\u066B\u0665', '1,234.5'], ['0,500', '0.5']]) {
+    await dePage.fill('#pc-of-b', typed);
+    assert.equal(await dePage.textContent('#pc-of-answer'), `100% of ${read} = ${read}`, JSON.stringify(typed));
+  }
   await de.close();
 
   // ---- A phone with a touch screen. ----
@@ -347,6 +377,23 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await p.fill('#pc-what-a', '0.000001');
   await p.fill('#pc-what-b', '999999999999');
   assert.ok(await p.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1, 'no sideways scroll with long numbers');
+  // Every option of every select fits its box (text, padding, border and 22 px for the
+  // arrow) at phone, tablet and desktop widths: "an increase of" used to be cut off at 360 px.
+  for (const width of [320, 340, 360, 375, 390, 412, 480, 540, 768, 1280]) {
+    await p.setViewportSize({ width, height: 700 });
+    const cut = await p.evaluate(() => {
+      const cv = document.createElement('canvas').getContext('2d'), out = [];
+      for (const e of document.querySelectorAll('.pc select')) {
+        const cs = getComputedStyle(e);
+        cv.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        const room = e.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 2 - 22;
+        for (const o of e.options) if (cv.measureText(o.textContent).width > room) out.push(`${e.id} "${o.textContent}"`);
+      }
+      return out;
+    });
+    assert.deepEqual(cut, [], `options cut off at ${width}px`);
+  }
+  await p.setViewportSize({ width: 320, height: 568 });
   // A tapped example link moves to its calculator without opening the keyboard on a box.
   await p.tap('.prose a[href="#of=18,64.5"]');
   await p.waitForFunction(() => document.activeElement.id === 'pc-of-h');

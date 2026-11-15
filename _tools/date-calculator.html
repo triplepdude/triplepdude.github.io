@@ -251,7 +251,7 @@ faq:
       </fieldset>
       <div class="field">
         <label for="dc-hol">Holidays, one date per line</label>
-        <textarea id="dc-hol" rows="4" spellcheck="false" autocomplete="off" placeholder="2026-12-25 Christmas Day" aria-describedby="dc-hol-hint dc-hol-msg"></textarea>
+        <textarea id="dc-hol" rows="4" spellcheck="false" autocomplete="off" placeholder="2026-12-25 Christmas Day" aria-describedby="dc-hol-hint dc-hol-msg dc-hol-long"></textarea>
         <span class="hint" id="dc-hol-hint">Write dates like 2026-12-25, 25 Dec 2026 or Dec 25, 2026. Anything after the date is a note for you.</span>
       </div>
       <p class="msg error" id="dc-hol-msg"></p>
@@ -260,6 +260,7 @@ faq:
         <button class="btn secondary small" type="button" id="dc-hol-clear">Clear holidays</button>
       </div>
       <p class="hint dc-note" id="dc-hol-note"></p>
+      <p class="hint dc-note" id="dc-hol-long"></p>
     </div>
   </details>
 
@@ -490,6 +491,10 @@ faq:
   }
 
   // ----- Working days -----
+  // A longer holiday list would make the page address too long to pass on,
+  // so it is left out of it, and the page says so.
+  var HOL_MAX = 1500;
+  var HOL_LONG = 'This list is too long for the page address (over 1,500 characters). A reload or a link to this page will not bring it back, so keep a copy.';
   function readWork() {
     off = offBoxes.map(function (b) { return b.checked; });
     holidays = [];
@@ -512,6 +517,7 @@ faq:
     }
     setText($('#dc-hol-msg'), msg);
     flag(holIn, !!msg);
+    setText($('#dc-hol-long'), holIn.value.length > HOL_MAX ? HOL_LONG : '');
     setText($('#dc-work-sum'), '(' + workSummary() + ')');
     return msg;
   }
@@ -555,10 +561,14 @@ faq:
   }
 
   // ----- Days between two dates -----
-  var RANGE = 'Enter a date from the year 1 to the year 9999.';
+  // A date field can only be wrong by its year. Where the browser has no date
+  // field the box takes typed text, and the way to write a date needs saying.
+  function dateMsg(el) {
+    return el.type === 'date' ? 'Enter a date from the year 1 to the year 9999.' : 'Write the date like 2026-12-25 or 25 Dec 2026, with a year from 1 to 9999.';
+  }
   function renderBetween(trigger) {
     var say = sayer(trigger), A = readDate(fromIn), B = readDate(toIn);
-    var msg = A.state === 'bad' || B.state === 'bad' ? RANGE : '';
+    var msg = A.state === 'bad' ? dateMsg(fromIn) : B.state === 'bad' ? dateMsg(toIn) : '';
     flag(fromIn, A.state === 'bad');
     flag(toIn, B.state === 'bad');
     setText($('#dc-between-msg'), msg);
@@ -602,7 +612,7 @@ faq:
     amounts.forEach(function (el, i) { flag(el, vals[i] === null); });
     flag(startIn, S.state === 'bad');
     flag(biz, false);
-    if (S.state === 'bad') msg = RANGE;
+    if (S.state === 'bad') msg = dateMsg(startIn);
     else if (badAmount) msg = 'Enter whole numbers only, such as 45 or -3, with up to 9 digits.';
     else if (S.state === 'empty') prompt = 'Choose a start date.';
     else {
@@ -683,14 +693,17 @@ faq:
   // #to=2026-12-25, #from=2001-09-11&to=today, #to=christmas, #tab=add&d=90.
   // Only what differs from a freshly opened page is written.
   var KEYS = ['tab', 'from', 'to', 'until', 'incl', 'start', 'op', 'y', 'm', 'w', 'd', 'biz', 'off', 'hol'];
+  // A date as the address takes it: 2026-12-25, also when it was typed as
+  // "25 Dec 2026" into the text box of a browser without a date field.
+  function hashValue(el) { var d = readDate(el); return d.state === 'ok' ? iso(d.z) : el.value; }
   function buildHash() {
     var p = [], enc = encodeURIComponent;
     if (st.tab === 'add') p.push('tab=add');
-    if (!st.fromToday) p.push('from=' + enc(fromIn.value));
-    var to = st.toPreset || (st.toToday ? 'today' : toIn.value);
+    if (!st.fromToday) p.push('from=' + enc(hashValue(fromIn)));
+    var to = st.toPreset || (st.toToday ? 'today' : hashValue(toIn));
     if (to !== 'new-year') p.push('to=' + enc(to));
     if (incl.checked) p.push('incl=1');
-    if (!st.startToday) p.push('start=' + enc(startIn.value));
+    if (!st.startToday) p.push('start=' + enc(hashValue(startIn)));
     if (opSel.value === 'sub') p.push('op=sub');
     var typed = amounts.map(function (el) { return el.value.trim(); }), any = false;
     if (!(/^0?$/.test(typed[0]) && /^0?$/.test(typed[1]) && /^0?$/.test(typed[2]) && typed[3] === '90')) {
@@ -700,7 +713,7 @@ faq:
     if (biz.checked) p.push('biz=1');
     var offStr = off.map(function (o, i) { return o ? i + 1 : ''; }).join('');
     if (offStr !== '67') p.push('off=' + (offStr || '0'));
-    if (holIn.value.trim() && holIn.value.length <= 1500) p.push('hol=' + enc(holIn.value));
+    if (holIn.value.trim() && holIn.value.length <= HOL_MAX) p.push('hol=' + enc(holIn.value));
     return p.join('&');
   }
   var writeHash = TT.debounce(function () {
@@ -740,7 +753,7 @@ faq:
       var offStr = has('off') ? get('off') : '67';
       offBoxes.forEach(function (b, i) { b.checked = offStr.indexOf(String(i + 1)) >= 0; });
     }
-    if (set('hol')) holIn.value = get('hol').slice(0, 1500);
+    if (set('hol')) holIn.value = get('hol').slice(0, HOL_MAX);
     var between = has('from') || has('to') || has('until'), adding = anyAmount || has('start') || has('op') || has('biz');
     if (has('tab')) selectTab(get('tab') === 'add' ? 'add' : 'between');
     else if (between || adding) selectTab(between ? 'between' : 'add');
@@ -824,7 +837,7 @@ faq:
     }
     setText($('#dc-hol-note'), note);
     changed();
-    speak(note, true);
+    speak(note + (holIn.value.length > HOL_MAX ? ' ' + HOL_LONG : ''), true);
   });
   $('#dc-b-copy').addEventListener('click', function () { if (results.between) TT.copy(results.between, this); });
   $('#dc-a-copy').addEventListener('click', function () { if (results.add) TT.copy(results.add, this); });
@@ -842,6 +855,10 @@ faq:
   selectTab('between');
   applyHash();
   renderAll();
+  // After the Back button, or when a tab is restored, browsers put the old
+  // values back into the fields, some of them only once the page has loaded
+  // and without an event. Count again from what the fields then hold.
+  window.addEventListener('pageshow', function () { today = todayZ(); renderAll(); });
 
   // Roll over to the new day if the page stays open past midnight.
   setInterval(function () {
