@@ -229,4 +229,40 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.inputValue('#tc-input'), '');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'tc-input');
   assert.equal(await text('#tc-n-claude'), '0');
+
+  // ----- Guide: minified JSON costs a quarter to half fewer tokens than the same JSON with
+  // 2-space indentation, so the tip links the JSON formatter. The counts are what tiktoken
+  // 0.14.0 gives for these texts with o200k_base (119 and 65, 124 and 89); a structured tool
+  // definition saves 45%, a wordy one 28%. Every link points at a tool page. -----
+  {
+    const guide = (await text('.prose')).replace(/\s+/g, ' ');
+    assert.match(guide, /in plain sentences\. Minifying JSON with the JSON formatter removes the spaces and line breaks outside strings and often saves a quarter to half of its tokens\./);
+    const structured = {
+      type: 'function', name: 'get_weather', description: 'Get the current weather for a city',
+      parameters: { type: 'object', properties: { city: { type: 'string', description: 'City name, such as London' }, unit: { type: 'string', enum: ['celsius', 'fahrenheit'] } }, required: ['city'] },
+    };
+    const wordy = {
+      name: 'search_docs',
+      description: 'Search the product documentation and return the five most relevant passages, each with its page title, URL and a short excerpt. Use it whenever the user asks how a feature works or where a setting is.',
+      parameters: { type: 'object', properties: { query: { type: 'string', description: "What to search for, in the user's own words; keep product names exactly as written." } }, required: ['query'] },
+    };
+    await page.selectOption('#tc-enc', 'o200k_base');
+    const count = async (t, n) => {
+      await page.fill('#tc-input', t);
+      await page.waitForFunction(e => document.querySelector('#tc-big').textContent === e, String(n), { timeout: 10000 })
+        .catch(async () => assert.fail(`expected ${n} tokens, got ${await text('#tc-big')}`));
+      return n;
+    };
+    for (const [o, pretty, min] of [[structured, 119, 65], [wordy, 124, 89]]) {
+      await count(JSON.stringify(o, null, 2), pretty);
+      await count(JSON.stringify(o), min);
+      const saved = 1 - min / pretty;
+      assert.ok(saved >= 0.25 && saved <= 0.5, `minifying saves ${Math.round(saved * 100)}% of the tokens`);
+    }
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/json-formatter/', '/word-counter/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+  }
 };

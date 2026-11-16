@@ -567,10 +567,16 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     assert.equal(await payload(), 'https://wa.me/447700900123');
     assert.equal(await err(), '');
     await decodesTo('#qg-png', 'https://wa.me/447700900123', 'a WhatsApp chat link');
+    // A link with a space is refused (tested above); the guide sends you to the URL encoder,
+    // whose Whole URL mode writes the space as %20, and that address is taken as it is.
+    assert.match(guide, /so a space becomes %20 and a line break %0D%0A\. A link cannot contain spaces; the URL encoder writes them as %20 in Whole URL mode\./);
+    await page.fill('#qg-url', 'example.org/my%20menu.pdf');
+    assert.equal(await payload(), 'https://example.org/my%20menu.pdf');
+    assert.equal(await err(), '');
     await pick('phone');   // back to what the test left on screen
     assert.match(await err(), /can only contain digits/);
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-    assert.deepEqual(links, ['/wifi-qr-code-generator/', '/barcode-generator/']);
+    assert.deepEqual(links, ['/url-encode-decode/', '/wifi-qr-code-generator/', '/barcode-generator/']);
     for (const href of links) {
       assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
     }
