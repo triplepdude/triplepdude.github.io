@@ -1,0 +1,1630 @@
+---
+title: "QR Code Scanner Online: Camera or Image"
+description: Scan a QR code with your camera or from an image or screenshot. See where a link goes before you open it. Wi-Fi, contacts and more are read in your browser.
+category: Image & PDF
+keywords: [qr code scanner, scan qr code, qr code reader, qr scanner, scan qr code from image, qr code scanner online, scan qr code from screenshot, scan qr code on laptop]
+howto: |
+  ## How to scan a QR code online
+
+  1. Press **Start camera** and allow camera access when the browser asks.
+     Phones use the back camera. Hold the code inside the frame until it is
+     read; the camera then turns off. Tick **Keep scanning** to read one code
+     after another.
+  2. Or scan a picture: press **Choose image**, drop an image on the box, or
+     paste a screenshot with **Ctrl+V** (**⌘V** on a Mac). PNG, JPEG, WebP,
+     GIF, HEIC and other formats work, and up to eight codes in one picture
+     are read.
+  3. Read the result. Nothing opens by itself: a link shows the website it
+     leads to first, and only **Open** takes you there.
+
+  To read a code on this computer's own screen, take a screenshot of it and
+  paste it here. **Win+Shift+S** on Windows and **Ctrl+Shift+⌘+4** on a Mac
+  copy the area you select.
+
+  ## What the result shows
+
+  | The code starts with | Shown as | What you can do |
+  |---|---|---|
+  | `https://` | Web link and its domain | Open or copy it |
+  | `WIFI:` | Wi-Fi network | Copy the password |
+  | `BEGIN:VCARD`, `MECARD:` | Contact | Save it as a .vcf file |
+  | `BEGIN:VEVENT` | Calendar event | Save it as an .ics file |
+  | `mailto:`, `tel:`, `SMSTO:`, `geo:` | Email, call, text, place | Open the matching app |
+  | `otpauth://` | Two-step sign-in key | See the account; the key stays hidden |
+  | `upi://`, `BCD`, `000201` | Payment | Check payee, amount and checksum |
+
+  SEPA codes (`BCD`) have their IBAN checked, and EMV merchant codes such as
+  Pix have their CRC checked, so a mistyped or altered code is flagged. Text
+  is read as UTF-8 or in the character set the code declares. Every scan is
+  listed under **History** while the page stays open.
+
+  ## Is it safe to scan a QR code?
+
+  Reading a code is harmless; the risk is where a link leads. In January 2022
+  the FBI warned that criminals replace real codes with their own, for
+  example with a sticker, and in December 2023 the US Federal Trade
+  Commission reported fake codes on parking meters and in texts and emails.
+  Before you press **Open**, check the domain. The page warns when a link:
+
+  - starts with `http://`, so it is not encrypted;
+  - is a short link (bit.ly, tinyurl.com and others), which hides where it
+    goes;
+  - has a name before an `@`, as in `paypal.com@203.0.113.9`, where only the
+    part after the `@` is the real site;
+  - uses an IP number, an unusual port or letters beyond a to z, such as a
+    Cyrillic а in `аpple.com`;
+  - downloads an app or program (.apk, .exe and others).
+
+  Never type a password or card number on a page a code opened unless you
+  are sure it is the real site. To make your own codes, use the
+  [QR code generator](/qr-code-generator/) or the
+  [Wi-Fi QR code generator](/wifi-qr-code-generator/).
+
+  ## If the camera does not start
+
+  - Allow the camera: click the icon at the left of the address bar. In
+    Safari on iPhone, open Website Settings from the page menu in the address
+    bar and set Camera to Allow.
+  - On iPhone and iPad the camera works in Safari, and in Chrome and Firefox
+    since iOS 14.3. Pages opened inside a social media or chat app often
+    cannot use it; open the page in your browser.
+  - Close other apps that use the camera, then press Start camera again. The
+    [webcam test](/webcam-test/) shows what the browser reports.
+
+  ## Barcodes
+
+  Chrome on Android, macOS and ChromeOS has a built-in barcode reader. There
+  the page also reads the codes it supports, such as EAN, UPC, Code 128, Data
+  Matrix, PDF417 and Aztec, and checks the check digit of product numbers.
+  Elsewhere, including Chrome on Windows and Linux, Firefox and Safari, it
+  reads QR codes only, with the jsQR library. The note below the box says
+  which applies to your browser.
+faq:
+  - q: Is my camera picture or image uploaded?
+    a: No. Camera frames and images are read by JavaScript in your browser, and nothing is sent to a server or stored. The history exists only in this tab and is gone when you close or reload it.
+  - q: Do I need an app to scan a QR code?
+    a: No. The Camera app on iPhone (since iOS 11) and on most Android phones reads QR codes, and so does Google Lens. This page helps on a computer, for screenshots and photos you already have, and when you want to see a link's domain before anything opens.
+  - q: Why won't my QR code scan?
+    a: Glare, dim light and holding the phone too close are the usual causes; move back until the whole code is sharp. The code also needs its white border and enough contrast. For a photo or screenshot, a sharper or closer picture of the code helps more than a bigger file.
+  - q: Can this page connect me to a Wi-Fi network?
+    a: No, a web page cannot join a network for you. It shows the network name and password so you can copy them. To join in one step, scan the code with your phone's Camera app, which offers to connect.
+---
+<style>
+.qs-bar { margin-bottom: 12px; }
+.qs-stage {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 260px; max-height: 70vh; margin: 0 0 12px; overflow: hidden;
+  background: var(--surface-2); border: 2px dashed var(--field-border); border-radius: 10px;
+}
+.qs-stage.is-live, .qs-stage.has-view { border-style: solid; border-color: var(--border); }
+.qs-stage.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.qs-stage video, .qs-stage .qs-view { display: block; width: 100%; height: 100%; object-fit: contain; }
+.qs-stage .qs-view { background: var(--surface-2); }
+.qs-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.qs-mirror { transform: scaleX(-1); }
+.qs-frame { position: absolute; inset: 18%; pointer-events: none; }
+.qs-frame svg { display: block; width: 100%; height: 100%; }
+.qs-frame path { fill: none; stroke-width: 5; stroke-linecap: round; }
+.qs-frame .qs-frame-back { stroke: rgb(0 0 0 / 0.55); stroke-width: 9; }
+.qs-frame .qs-frame-front { stroke: #fff; }
+.qs-placeholder { display: grid; justify-items: center; gap: 10px; padding: 16px; color: var(--muted); text-align: center; }
+.qs-placeholder p { margin: 0; max-width: 34em; }
+.qs-sample { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; }
+.qs-sample img { width: 74px; height: 74px; image-rendering: pixelated; border-radius: 4px; }
+.qs-opts { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 0 12px; }
+.qs-opts > .field { flex: 1 1 200px; max-width: 360px; margin: 0; }
+.qs-opts .qs-zoom-field { flex: 1 1 160px; }
+.qs-status { min-height: 1.6em; margin: 0 0 12px; font-weight: 600; overflow-wrap: anywhere; }
+.qs-engine { margin: -6px 0 16px; }
+.qs-h { margin: 24px 0 12px; font-size: 1.1rem; }
+.qs-card { margin: 0 0 16px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.qs-card h3 { margin: 0; font-size: 1.05rem; }
+.qs-meta { margin: 2px 0 10px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.qs-domain { margin: 0 0 12px; overflow-wrap: anywhere; }
+.qs-domain span { display: block; color: var(--muted); font-size: 13px; font-weight: 600; }
+.qs-domain strong { font-size: 1.35rem; line-height: 1.3; }
+.qs-warn { margin: 0 0 12px; padding: 0; list-style: none; }
+.qs-warn li { margin: 0 0 6px; padding: 8px 12px; border-left: 4px solid var(--danger); border-radius: 0 6px 6px 0; background: var(--danger-soft); font-size: 15px; overflow-wrap: anywhere; }
+.qs-warn li.qs-good { border-left-color: var(--accent); background: var(--accent-soft); }
+.qs-note { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.qs-fields { display: grid; grid-template-columns: minmax(6.5em, max-content) minmax(0, 1fr); gap: 4px 14px; margin: 0 0 12px; font-size: 15px; }
+.qs-fields dt { color: var(--muted); font-weight: 600; }
+.qs-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qs-raw { margin-bottom: 12px; }
+.qs-card .actions { margin-bottom: 0; }
+.qs-card .btn { max-width: 100%; overflow-wrap: anywhere; text-align: center; }
+.qs-card details { margin: 0 0 12px; }
+.qs-card summary { cursor: pointer; font-weight: 600; }
+/* Two columns, so a phone has room: the type and time of a scan, then its text with the buttons
+   under it. Only the scanned text may break inside a word. */
+.qs-hist .qs-hist-what { min-width: 5.5em; }
+.qs-hist-type { display: block; font-weight: 600; }
+.qs-hist-when { display: block; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.qs-hist-clip { display: block; overflow-wrap: anywhere; }
+.qs-hist .qs-hist-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.qs-hist .btn { white-space: nowrap; }
+@media (max-width: 480px) {
+  .qs-fields { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .qs-fields dd { margin-bottom: 8px; }
+  .qs-hist th, .qs-hist td { padding: 8px 6px; }
+}
+</style>
+
+<div class="qs">
+  <div class="actions qs-bar">
+    <button class="btn" type="button" id="qs-camera">Start camera</button>
+    <button class="btn secondary" type="button" id="qs-open">Choose image…</button>
+    <button class="btn secondary" type="button" id="qs-paste">Paste image</button>
+    <input type="file" id="qs-file" hidden multiple accept="image/*,.heic,.heif,.avif,.tif,.tiff,.ico,.bmp,.svg">
+  </div>
+  <p class="msg error" id="qs-error" role="alert"></p>
+
+  <div class="qs-stage" id="qs-stage">
+    <video id="qs-video" playsinline muted autoplay hidden aria-label="Camera preview"></video>
+    <canvas class="qs-view" id="qs-view" role="img" aria-label="Scanned picture" hidden></canvas>
+    <canvas class="qs-overlay" id="qs-overlay" aria-hidden="true" hidden></canvas>
+    <div class="qs-frame" id="qs-frame" aria-hidden="true" hidden>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" focusable="false">
+        <path class="qs-frame-back" d="M3 22V3h19M78 3h19v19M97 78v19H78M22 97H3V78"/>
+        <path class="qs-frame-front" d="M3 22V3h19M78 3h19v19M97 78v19H78M22 97H3V78"/>
+      </svg>
+    </div>
+    <div class="qs-placeholder" id="qs-placeholder">
+      <p>Point your camera at a QR code, or drop an image or screenshot here. You can also paste one with Ctrl+V.</p>
+      <div class="qs-sample">
+        <img alt="" width="37" height="37" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACUAAAAlAQAAAADt5R2uAAAAr0lEQVR42mP4DwQ/GDDJDzJPD1QwfL8kHF/B8CV0bSCQDCkGkfFpQPL73fdA8Q+ioQ4VDP8/u9f/AKr8MQOo18RoCZAt3a3+g+FHjl020BzJ5f4VDF+T645VMPyb8d7xB8O3nU+vAvWefPTzB8PnRB6XCobPfC8OA9U8sbMHynoeYgGa+dG1GKhXPiEQaNr9kLIfDF9i5ZiAtkefyAS5gb0BJG67EGiOwKpWbO4HkwCjboBoVZEDbQAAAABJRU5ErkJggg==">
+        <button class="btn secondary small" type="button" id="qs-sample">Scan this sample code</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="qs-opts" id="qs-cam-opts" hidden>
+    <div class="field" id="qs-device-field" hidden>
+      <label for="qs-device">Camera</label>
+      <select id="qs-device"><option value="">Default camera</option></select>
+    </div>
+    <div class="field qs-zoom-field" id="qs-zoom-field" hidden>
+      <label for="qs-zoom">Zoom</label>
+      <input type="range" id="qs-zoom" min="1" max="2" step="0.1" value="1">
+    </div>
+    <button class="btn secondary" type="button" id="qs-torch" aria-pressed="false" hidden>Torch</button>
+  </div>
+  <div class="checks">
+    <label class="check"><input type="checkbox" id="qs-continuous"> Keep scanning after a code is found</label>
+  </div>
+  <p class="qs-status" id="qs-status" role="status"></p>
+  <p class="hint qs-engine" id="qs-engine">Reads QR codes. Your browser is checked for a built-in barcode reader…</p>
+
+  <section id="qs-results" aria-labelledby="qs-results-h" hidden>
+    <h2 class="qs-h" id="qs-results-h">Result</h2>
+    <div id="qs-cards"></div>
+  </section>
+
+  <section id="qs-history" aria-labelledby="qs-history-h" hidden>
+    <h2 class="qs-h" id="qs-history-h">History</h2>
+    <p class="hint">Kept only while this page is open, newest first (up to 500 scans).</p>
+    <div class="table-wrap">
+      <table class="data qs-hist">
+        <thead><tr><th scope="col">Scan</th><th scope="col">Content</th></tr></thead>
+        <tbody id="qs-hist-body"></tbody>
+      </table>
+    </div>
+    <div class="actions">
+      <button class="btn secondary small" type="button" id="qs-copy-all">Copy all</button>
+      <button class="btn secondary small" type="button" id="qs-csv">Download .csv</button>
+      <button class="btn secondary small" type="button" id="qs-clear">Clear history</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const JSQR_URL = new URL({{ '/assets/vendor/jsqr/jsQR.min.js' | relative_url | jsonify }}, location.href).href;
+  const IMAGE_JS = {{ '/assets/js/image-decode.js' | relative_url | jsonify }};
+  const MAX_FILES = 20, MAX_HISTORY = 500, MAX_CODES = 8;
+
+  const camBtn = $('#qs-camera'), openBtn = $('#qs-open'), pasteBtn = $('#qs-paste'), fileIn = $('#qs-file');
+  const stage = $('#qs-stage'), video = $('#qs-video'), view = $('#qs-view'), overlay = $('#qs-overlay'), frame = $('#qs-frame');
+  const placeholder = $('#qs-placeholder'), errEl = $('#qs-error'), statusEl = $('#qs-status'), engineEl = $('#qs-engine');
+  const camOpts = $('#qs-cam-opts'), deviceSel = $('#qs-device'), torchBtn = $('#qs-torch'), zoomIn = $('#qs-zoom'), contIn = $('#qs-continuous');
+  const resultsEl = $('#qs-results'), cardsEl = $('#qs-cards'), histEl = $('#qs-history'), histBody = $('#qs-hist-body');
+
+  // ---------- Small helpers ----------
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  function say(t) { setText(statusEl, t || ''); }
+  function showError(t) { setText(errEl, t || ''); }
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  const graphemes = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  // Shortens text for display without splitting an emoji or an accented letter.
+  function clip(s, n) {
+    s = s.replace(/\s+/g, ' ').trim();
+    if (s.length <= n) return s;
+    let out = '';
+    const parts = graphemes ? Array.from(graphemes.segment(s), x => x.segment) : Array.from(s);
+    for (const p of parts) { if (out.length + p.length > n) break; out += p; }
+    return out + '…';
+  }
+  function dec(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many || one + 's'); }
+  const pad2 = n => String(n).padStart(2, '0');
+  function clock(d) { return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()); }
+  function stamp(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + clock(d); }
+  function crlf(s) { return s.replace(/\r\n|\r|\n/g, '\r\n'); }
+  function slug(s, fallback) {
+    const t = (s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    return t || fallback;
+  }
+
+  // ---------- Text from the bytes jsQR found ----------
+  // ECI numbers (ISO/IEC 18004 and AIM ECI) for the character sets browsers can decode.
+  const ECI = { 0: 'windows-1252', 1: 'iso-8859-1', 2: 'windows-1252', 3: 'iso-8859-1', 4: 'iso-8859-2', 5: 'iso-8859-3', 6: 'iso-8859-4',
+    7: 'iso-8859-5', 8: 'iso-8859-6', 9: 'iso-8859-7', 10: 'iso-8859-8', 11: 'windows-1254', 12: 'iso-8859-10', 13: 'windows-874',
+    15: 'iso-8859-13', 16: 'iso-8859-14', 17: 'iso-8859-15', 18: 'iso-8859-16', 20: 'shift_jis', 21: 'windows-1250', 22: 'windows-1251',
+    23: 'windows-1252', 24: 'windows-1256', 25: 'utf-16be', 26: 'utf-8', 27: 'windows-1252', 28: 'big5', 29: 'gb18030', 30: 'euc-kr', 170: 'windows-1252' };
+  function decodeBytes(bytes, eci) {
+    const u8 = Uint8Array.from(bytes);
+    if (eci != null && ECI[eci]) { try { return { text: new TextDecoder(ECI[eci]).decode(u8), legacy: false }; } catch (e) { /* unknown label */ } }
+    try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(u8), legacy: false }; } catch (e) { /* not UTF-8 */ }
+    // Not UTF-8 and no character set declared: the QR standard's default, ISO-8859-1, read as
+    // windows-1252 (as browsers do), so the euro sign and curly quotes of older generators survive.
+    return { text: new TextDecoder('windows-1252').decode(u8), legacy: true };
+  }
+  // jsQR drops a byte segment that is not valid UTF-8, so the text is rebuilt from its segments.
+  function textFromJsqr(c) {
+    let eci = null, text = '', legacy = false;
+    for (const ch of c.chunks || []) {
+      if (ch.type === 'eci') eci = ch.assignmentNumber;
+      else if (ch.type === 'byte') { const d = decodeBytes(ch.bytes, eci); text += d.text; legacy = legacy || d.legacy; }
+      else text += ch.text || '';
+    }
+    if (!c.chunks || !c.chunks.length) text = c.text || '';
+    const ctl = (text.match(/[\x00-\x08\x0e-\x1f\x7f-\x9f]/g) || []).length;
+    return { text, binary: legacy && ctl >= 2, bytes: c.bytes || [] };
+  }
+
+  // ---------- What the text means ----------
+  const SHORTENERS = new Set(('bit.ly bitly.com tinyurl.com t.co goo.gl ow.ly is.gd v.gd buff.ly rebrand.ly cutt.ly shorturl.at tiny.cc ' +
+    'rb.gy t.ly s.id lnkd.in qrco.de short.gy bl.ink tr.im x.co u.to clck.ru surl.li urlz.fr shorte.st adf.ly qr.net').split(' '));
+  const FORMATS = { qr_code: 'QR code', ean_13: 'EAN-13 barcode', ean_8: 'EAN-8 barcode', upc_a: 'UPC-A barcode', upc_e: 'UPC-E barcode',
+    code_128: 'Code 128 barcode', code_39: 'Code 39 barcode', code_93: 'Code 93 barcode', codabar: 'Codabar barcode', itf: 'ITF barcode',
+    data_matrix: 'Data Matrix code', aztec: 'Aztec code', pdf417: 'PDF417 code' };
+  const APP_SCHEMES = new Set(('market intent itms-apps itms-services whatsapp tg spotify zoommtg zoomus msteams slack skype viber line fb ' +
+    'instagram twitter snapchat sgnl facetime facetime-audio maps comgooglemaps waze uber lyft paypal venmo cashme ms-settings').split(' '));
+  const DANGER = { javascript: 'a script (javascript:), not a web address. Pasted into the address bar it would run on whatever page is open.',
+    vbscript: 'a script (vbscript:), not a web address.', data: 'a data: address, which can hold a whole page or file inside the code.',
+    file: 'a reference to a file on a device (file:).', 'itms-services': 'an app installer that bypasses the App Store. Only use it for apps from your employer or school.' };
+  const CURRENCY = { '986': 'BRL', '764': 'THB', '458': 'MYR', '702': 'SGD', '360': 'IDR', '356': 'INR', '840': 'USD', '978': 'EUR',
+    '826': 'GBP', '704': 'VND', '608': 'PHP', '344': 'HKD', '156': 'CNY', '392': 'JPY', '410': 'KRW', '036': 'AUD', '124': 'CAD', '484': 'MXN' };
+  const EMV_NETWORKS = { 'br.gov.bcb.pix': 'Pix (Brazil)', 'sg.paynow': 'PayNow (Singapore)' };
+
+  function base(kind, label) { return { kind, label, fields: [], warnings: [], goods: [], notes: [], actions: [], headline: null, secret: null }; }
+  function copyAct(text, value) { return { type: 'copy', text, value }; }
+
+  // Splits "K:value;K:value;;" (Wi-Fi, MECARD, MATMSG) on unescaped semicolons. A value written in
+  // unescaped double quotes has them removed; \; \: \, \" and \\ stand for the character itself.
+  function semiFields(body) {
+    const out = {}, list = [];
+    let raw = '', esc = false;
+    const push = () => {
+      const m = /^([A-Za-z0-9-]{1,10}):([\s\S]*)$/.exec(raw);
+      raw = '';
+      if (!m) return;
+      let v = m[2];
+      if (v.length >= 2 && v[0] === '"' && v[v.length - 1] === '"' && v[v.length - 2] !== '\\') v = v.slice(1, -1);
+      v = v.replace(/\\([\s\S])/g, '$1');
+      const k = m[1].toUpperCase();
+      list.push([k, v]);
+      if (!(k in out)) out[k] = v;
+    };
+    for (const ch of body) {
+      if (esc) { raw += '\\' + ch; esc = false; } else if (ch === '\\') esc = true; else if (ch === ';') push(); else raw += ch;
+    }
+    if (esc) raw += '\\';
+    push();
+    return { map: out, list };
+  }
+
+  function isIp(host) { return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || /^\[[0-9a-f:.]+\]$/i.test(host); }
+
+  function webLink(t, assumed) {
+    let u;
+    try { u = new URL(assumed ? 'https://' + t : t); } catch (e) { return null; }
+    if (!/^https?:$/.test(u.protocol) || !u.hostname) return null;
+    const host = u.hostname;
+    const r = base('url', assumed ? 'Web address' : 'Web link');
+    r.headline = { label: 'Goes to', value: host };
+    const authority = (/^[a-z][a-z0-9+.-]*:\/\/([^/?#\s]*)/i.exec(assumed ? 'https://' + t : t) || [, ''])[1];
+    const writtenHost = authority.replace(/^.*@/, '').replace(/:\d*$/, '');
+    if (/[^\x00-\x7f]/.test(writtenHost)) r.fields.push(['Written in the code as', writtenHost]);
+    r.fields.push(['Full address', u.href]);
+    if (assumed) r.notes.push('The code has no https:// in front. Phones open it as a website, so Open does the same.');
+    if (u.protocol === 'http:') r.warnings.push('Not encrypted: the address starts with http://, so what you type on that page can be read or changed on the way.');
+    if (u.username || u.password) r.warnings.push('The part before the @ (' + clip(dec(u.username), 40) + ') is not the website. This link goes to ' + host + '.');
+    if (isIp(host)) r.warnings.push('The address is an IP number, not a website name. Shops, banks and services almost never send you to one.');
+    if (/(^|\.)xn--/i.test(host)) {
+      const odd = writtenHost.replace(/[\x00-\x7f]/g, '');
+      const what = !odd ? 'letters beyond a to z' : /^[\p{Script=Latin}\p{M}]+$/u.test(odd) ? 'accented letters' : 'letters from another alphabet';
+      r.warnings.push('The name uses ' + what + ', shown here in its encoded form (xn--…). Such names can imitate a familiar site, so check the spelling.');
+    }
+    if (SHORTENERS.has(host.replace(/^www\./, ''))) r.warnings.push('This is a short link: where it really goes stays hidden until you open it.');
+    if (u.port) r.warnings.push('It uses an unusual port (:' + u.port + ').');
+    const ext = /\.(apk|exe|msi|dmg|pkg|scr|bat|cmd|ps1|vbs|jar|ipa|mobileconfig|appx|msix)$/i.exec(u.pathname);
+    if (ext) r.warnings.push('It downloads a program or app (.' + ext[1].toLowerCase() + '). Install apps only from your device\u2019s app store.');
+    r.actions.push({ type: 'link', text: 'Open ' + host, href: u.href, primary: true });
+    return r;
+  }
+
+  function query(s) {
+    const out = {};
+    (s || '').split('&').forEach(p => {
+      if (!p) return;
+      const i = p.indexOf('=');
+      const k = dec(i < 0 ? p : p.slice(0, i)).toLowerCase(), v = i < 0 ? '' : dec(p.slice(i + 1));
+      if (!(k in out)) out[k] = v;
+    });
+    return out;
+  }
+
+  function emailOf(t) {
+    let to = '', q = {}, m;
+    if ((m = /^mailto:([^?]*)(?:\?([\s\S]*))?$/i.exec(t))) { to = dec(m[1]); q = query(m[2]); }
+    else if (/^MATMSG:/i.test(t)) { const f = semiFields(t.slice(7)).map; to = f.TO || ''; q = { subject: f.SUB || '', body: f.BODY || '' }; }
+    else if (/^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[a-z]{2,}$/i.test(t)) to = t;
+    else return null;
+    const r = base('email', 'Email');
+    r.fields.push(['To', to || 'Not set']);
+    if (q.cc) r.fields.push(['Cc', q.cc]);
+    if (q.bcc) r.fields.push(['Bcc', q.bcc]);
+    if (q.subject) r.fields.push(['Subject', q.subject]);
+    if (q.body) r.fields.push(['Message', q.body]);
+    const href = 'mailto:' + to.split(',').map(a => encodeURIComponent(a.trim()).replace(/%40/g, '@')).join(',') +
+      (q.subject || q.body ? '?' + [q.subject ? 'subject=' + encodeURIComponent(q.subject) : '', q.body ? 'body=' + encodeURIComponent(q.body) : ''].filter(Boolean).join('&') : '');
+    r.actions.push({ type: 'link', text: 'Write email', href, primary: true });
+    if (to) r.actions.push(copyAct('Copy address', to));
+    return r;
+  }
+
+  function phoneOf(t) {
+    let n;
+    if (/^tel:/i.test(t)) n = dec(t.slice(4)).trim();
+    else if (/^\+[\d\s().-]{6,24}$/.test(t) && (t.match(/\d/g) || []).length >= 7) n = t;
+    else return null;
+    if (!/^[+\d\s().*#,;pw-]{2,40}$/i.test(n)) return null;
+    const r = base('phone', 'Phone number');
+    r.fields.push(['Number', n]);
+    r.actions.push({ type: 'link', text: 'Call ' + n, href: 'tel:' + n.replace(/[\s().-]/g, ''), primary: true });
+    r.actions.push(copyAct('Copy number', n));
+    return r;
+  }
+
+  function smsOf(t) {
+    let n, msg = '', m;
+    if ((m = /^(?:sms|mms)to:([^:]*):?([\s\S]*)$/i.exec(t))) { n = m[1].trim(); msg = m[2]; }
+    else if ((m = /^(?:sms|mms):([^?]*)(?:\?([\s\S]*))?$/i.exec(t))) { n = dec(m[1]).replace(/;$/, '').trim(); msg = query(m[2]).body || ''; }
+    else return null;
+    const r = base('sms', 'Text message');
+    r.fields.push(['To', n || 'Not set']);
+    if (msg) r.fields.push(['Message', msg]);
+    r.actions.push({ type: 'link', text: 'Write text message', href: 'sms:' + n.replace(/[^\d+,]/g, '') + (msg ? '?body=' + encodeURIComponent(msg) : ''), primary: true });
+    if (n) r.actions.push(copyAct('Copy number', n));
+    return r;
+  }
+
+  function geoOf(t) {
+    const m = /^geo:(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)(?:,(-?\d+(?:\.\d+)?))?([;?][\s\S]*)?$/i.exec(t);
+    if (!m) return null;
+    const lat = Number(m[1]), lon = Number(m[2]);
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    const q = m[4] ? query(m[4].replace(/^[^?]*\?/, '')).q || '' : '';
+    const r = base('geo', 'Location');
+    if (lat || lon || !q) {
+      r.fields.push(['Latitude', m[1]], ['Longitude', m[2]]);
+      if (m[3]) r.fields.push(['Altitude', m[3] + ' m']);
+    }
+    if (q) r.fields.push(['Place', q]);
+    const osm = lat || lon || !q
+      ? 'https://www.openstreetmap.org/?mlat=' + m[1] + '&mlon=' + m[2] + '#map=17/' + m[1] + '/' + m[2]
+      : 'https://www.openstreetmap.org/search?query=' + encodeURIComponent(q);
+    r.actions.push({ type: 'link', text: 'Open in OpenStreetMap', href: osm, primary: true });
+    if (lat || lon) r.actions.push(copyAct('Copy coordinates', m[1] + ', ' + m[2]));
+    return r;
+  }
+
+  function wifiOf(t) {
+    if (!/^WIFI:/i.test(t)) return null;
+    const f = semiFields(t.slice(5)).map;
+    if (!('S' in f)) return null;
+    const T = (f.T || '').toUpperCase();
+    const sec = !T || T === 'NOPASS' ? 'None (open network)' : T === 'WEP' ? 'WEP' : T === 'SAE' || T === 'WPA3' ? 'WPA3 Personal'
+      : /EAP/.test(T) ? 'WPA2 or WPA3 Enterprise' : /^WPA/.test(T) ? 'WPA, WPA2 or WPA3 Personal' : f.T;
+    const r = base('wifi', 'Wi-Fi network');
+    r.headline = { label: 'Network name', value: f.S || '(no name)' };
+    r.fields.push(['Password', f.P ? f.P : 'None'], ['Security', sec], ['Hidden network', /^true$/i.test(f.H || '') ? 'Yes' : 'No']);
+    if (f.E) r.fields.push(['Sign-in method', f.E + (f.PH2 ? ' / ' + f.PH2 : '')]);
+    if (f.I || f.A) r.fields.push(['Identity', f.I || f.A]);
+    if (T === 'WEP') r.warnings.push('WEP security is outdated and can be broken in minutes. If this is your network, switch the router to WPA2 or WPA3.');
+    if (sec.startsWith('None') && f.P) r.notes.push('The code gives a password but no security type.');
+    r.notes.push('A web page cannot join a Wi-Fi network for you. Copy the password and pick the network in your Wi-Fi settings, or scan the code with your phone\u2019s Camera app, which offers to join.');
+    if (f.P) r.actions.push(copyAct('Copy password', f.P));
+    r.actions.push(copyAct('Copy network name', f.S));
+    return r;
+  }
+
+  // vCard and iCalendar lines: unfolded, with \n \, \; \\ unescaped and quoted-printable decoded.
+  function contentLines(text) {
+    let s = text.replace(/\r\n|\r/g, '\n');
+    if (/ENCODING=QUOTED-PRINTABLE/i.test(s)) s = s.replace(/=\n/g, '');
+    s = s.replace(/\n[ \t]/g, '');
+    const out = [];
+    s.split('\n').forEach(line => {
+      const m = /^(?:[A-Za-z0-9-]+\.)?([A-Za-z0-9-]+)((?:;[^:]*)?):([\s\S]*)$/.exec(line);
+      if (!m) return;
+      const params = {};
+      m[2].split(';').slice(1).forEach(p => {
+        const i = p.indexOf('=');
+        if (i < 0) params.TYPE = (params.TYPE ? params.TYPE + ',' : '') + p; else params[p.slice(0, i).toUpperCase()] = p.slice(i + 1).replace(/^"|"$/g, '');
+      });
+      let v = m[3];
+      if (/^quoted-printable$/i.test(params.ENCODING || '')) {
+        const bytes = [];
+        for (let i = 0; i < v.length; i++) {
+          if (v[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(v.substr(i + 1, 2))) { bytes.push(parseInt(v.substr(i + 1, 2), 16)); i += 2; }
+          else bytes.push(v.charCodeAt(i) & 255);
+        }
+        try { v = new TextDecoder(params.CHARSET || 'utf-8').decode(Uint8Array.from(bytes)); } catch (e) { v = new TextDecoder('utf-8').decode(Uint8Array.from(bytes)); }
+      }
+      out.push({ name: m[1].toUpperCase(), params, value: v });
+    });
+    return out;
+  }
+  function unesc(v) { return v.replace(/\\([nN,;\\:])/g, (x, c) => (c === 'n' || c === 'N' ? '\n' : c)); }
+  function splitUnesc(v, sep) {
+    const out = [];
+    let cur = '';
+    for (let i = 0; i < v.length; i++) {
+      if (v[i] === '\\' && i + 1 < v.length) { cur += v[i] + v[i + 1]; i++; } else if (v[i] === sep) { out.push(unesc(cur)); cur = ''; } else cur += v[i];
+    }
+    out.push(unesc(cur));
+    return out;
+  }
+  const TEL_TYPES = { CELL: 'mobile', HOME: 'home', WORK: 'work', FAX: 'fax', PAGER: 'pager', MAIN: 'main' };
+  function typeNote(p) {
+    const words = (p.TYPE || '').split(',').map(x => TEL_TYPES[x.trim().toUpperCase()]).filter(Boolean);
+    return words.length ? ' (' + words.join(', ') + ')' : '';
+  }
+  function ymd(v) {
+    const m = /^(\d{4})-?(\d{2})-?(\d{2})$/.exec(v.trim());
+    if (!m) return v;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    if (d.getUTCMonth() !== +m[2] - 1) return v;
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  }
+
+  function vcardOf(t) {
+    if (!/^BEGIN:VCARD/i.test(t)) return null;
+    const lines = contentLines(t);
+    const get = n => lines.filter(l => l.name === n);
+    const r = base('contact', 'Contact');
+    const fn = get('FN')[0], n = get('N')[0];
+    let name = fn ? unesc(fn.value).trim() : '';
+    if (!name && n) { const p = splitUnesc(n.value, ';'); name = [p[3], p[1], p[2], p[0], p[4]].filter(Boolean).join(' '); }
+    r.headline = { label: 'Name', value: name || '(no name)' };
+    get('ORG').forEach(l => r.fields.push(['Organisation', splitUnesc(l.value, ';').filter(Boolean).join(', ')]));
+    get('TITLE').forEach(l => r.fields.push(['Job title', unesc(l.value)]));
+    get('TEL').forEach(l => r.fields.push(['Phone', unesc(l.value).replace(/^tel:/i, '') + typeNote(l.params)]));
+    get('EMAIL').forEach(l => r.fields.push(['Email', unesc(l.value)]));
+    get('URL').forEach(l => r.fields.push(['Website', unesc(l.value)]));
+    get('ADR').forEach(l => r.fields.push(['Address', splitUnesc(l.value, ';').map(x => x.trim()).filter(Boolean).join(', ')]));
+    get('BDAY').forEach(l => r.fields.push(['Birthday', ymd(l.value)]));
+    get('NOTE').forEach(l => r.fields.push(['Note', unesc(l.value)]));
+    if (!lines.length || (!name && r.fields.length === 0)) return null;
+    r.actions.push({ type: 'download', text: 'Save contact (.vcf)', name: slug(name, 'contact') + '.vcf', mime: 'text/vcard;charset=utf-8', content: crlf(t.trim()) + '\r\n', primary: true });
+    r.notes.push('Open the saved .vcf file to add the contact on your phone or computer.');
+    return r;
+  }
+
+  function vEsc(s) { return s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1'); }
+  function mecardOf(t) {
+    if (!/^MECARD:/i.test(t)) return null;
+    const { list } = semiFields(t.slice(7));
+    const all = k => list.filter(x => x[0] === k).map(x => x[1]);
+    const nm = all('N')[0] || '';
+    const parts = nm.split(',');
+    const name = parts.length > 1 ? (parts.slice(1).join(' ').trim() + ' ' + parts[0].trim()).trim() : nm.trim();
+    if (!name && !all('TEL').length && !all('EMAIL').length) return null;
+    const r = base('contact', 'Contact');
+    r.headline = { label: 'Name', value: name || '(no name)' };
+    all('ORG').forEach(v => r.fields.push(['Organisation', v]));
+    all('TEL').forEach(v => r.fields.push(['Phone', v]));
+    all('EMAIL').forEach(v => r.fields.push(['Email', v]));
+    all('URL').forEach(v => r.fields.push(['Website', v]));
+    all('ADR').forEach(v => r.fields.push(['Address', v]));
+    all('BDAY').forEach(v => r.fields.push(['Birthday', ymd(v)]));
+    all('NOTE').forEach(v => r.fields.push(['Note', v]));
+    const L = ['BEGIN:VCARD', 'VERSION:3.0', 'N:' + vEsc(parts[0] ? parts[0].trim() : '') + ';' + vEsc(parts.slice(1).join(' ').trim()) + ';;;', 'FN:' + vEsc(name)];
+    all('ORG').forEach(v => L.push('ORG:' + vEsc(v)));
+    all('TEL').forEach(v => L.push('TEL:' + vEsc(v)));
+    all('EMAIL').forEach(v => L.push('EMAIL:' + vEsc(v)));
+    all('URL').forEach(v => L.push('URL:' + vEsc(v)));
+    all('ADR').forEach(v => L.push('ADR:;;' + vEsc(v) + ';;;;'));
+    all('BDAY').forEach(v => L.push('BDAY:' + vEsc(v)));
+    all('NOTE').forEach(v => L.push('NOTE:' + vEsc(v)));
+    L.push('END:VCARD');
+    r.actions.push({ type: 'download', text: 'Save contact (.vcf)', name: slug(name, 'contact') + '.vcf', mime: 'text/vcard;charset=utf-8', content: L.join('\r\n') + '\r\n', primary: true });
+    r.notes.push('Open the saved .vcf file to add the contact on your phone or computer.');
+    return r;
+  }
+
+  const DT_UTC = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+  const DT_WALL = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' };
+  function icsTime(l) {
+    const v = l.value.trim();
+    const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/i.exec(v);
+    if (!m) return v;
+    const t = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+    const d = new Date(t);
+    if (d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3] || +(m[4] || 0) > 23 || +(m[5] || 0) > 59) return v;
+    if (!m[4]) return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) + ' (all day)';
+    if (m[7]) return d.toLocaleString(undefined, DT_UTC);
+    const wall = d.toLocaleString(undefined, DT_WALL);
+    return l.params.TZID ? wall + ' (' + l.params.TZID + ' time)' : wall + ' (local time wherever you are)';
+  }
+  // A date without a time (an all-day value), as midnight UTC, or null.
+  function icsDay(v) {
+    const m = /^(\d{4})(\d{2})(\d{2})$/.exec(v.trim());
+    if (!m) return null;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? d : null;
+  }
+  function dayText(d) { return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) + ' (all day)'; }
+  function eventOf(t) {
+    if (!/^BEGIN:(VEVENT|VCALENDAR)/i.test(t) || !/BEGIN:VEVENT/i.test(t)) return null;
+    const lines = contentLines(t.slice(t.search(/BEGIN:VEVENT/i)));
+    const get = n => lines.find(l => l.name === n);
+    const r = base('event', 'Calendar event');
+    const sum = get('SUMMARY');
+    r.headline = { label: 'Event', value: sum ? unesc(sum.value) : '(no title)' };
+    const start = get('DTSTART'), end = get('DTEND'), d0 = start && icsDay(start.value), d1 = end && icsDay(end.value);
+    if (d0) {
+      // An all-day event's DTEND is the day after its last day (RFC 5545), so the last day is shown.
+      const last = d1 ? new Date(d1.getTime() - 864e5) : null;
+      if (last && last > d0) r.fields.push(['First day', dayText(d0)], ['Last day', dayText(last)]);
+      else r.fields.push(['Date', dayText(d0)]);
+      if (end && !d1) r.fields.push(['Ends', icsTime(end)]);
+    } else {
+      if (start) r.fields.push(['Starts', icsTime(start)]);
+      if (end) r.fields.push(['Ends', icsTime(end)]);
+    }
+    if (get('LOCATION')) r.fields.push(['Place', unesc(get('LOCATION').value)]);
+    if (get('DESCRIPTION')) r.fields.push(['Details', unesc(get('DESCRIPTION').value)]);
+    if (get('URL')) r.fields.push(['Link', unesc(get('URL').value)]);
+    const body = /^BEGIN:VCALENDAR/i.test(t) ? t.trim()
+      : 'BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//TripleP Tools//QR Code Scanner//EN\n' + t.trim() + (/END:VEVENT\s*$/i.test(t) ? '' : '\nEND:VEVENT') + '\nEND:VCALENDAR';
+    r.actions.push({ type: 'download', text: 'Save event (.ics)', name: slug(sum && unesc(sum.value), 'event') + '.ics', mime: 'text/calendar;charset=utf-8', content: crlf(body) + '\r\n', primary: true });
+    r.notes.push('Open the saved .ics file to add the event to your calendar.');
+    return r;
+  }
+
+  function otpOf(t) {
+    if (/^otpauth-migration:/i.test(t)) {
+      const r = base('otp', 'Authenticator export');
+      r.warnings.push('This code holds the secret keys of one or more accounts, exported from an authenticator app such as Google Authenticator. Anyone who scans it can create your sign-in codes. Scan it only with your new authenticator app.');
+      r.secret = { label: 'Show the exported data', value: null };
+      return r;
+    }
+    if (!/^otpauth:\/\//i.test(t)) return null;
+    let u;
+    try { u = new URL(t); } catch (e) { return null; }
+    const type = u.hostname.toLowerCase();
+    const label = dec(u.pathname.replace(/^\//, ''));
+    const p = u.searchParams;
+    const i = label.indexOf(':');
+    const issuer = p.get('issuer') || (i > 0 ? label.slice(0, i).trim() : '');
+    const account = (i > 0 ? label.slice(i + 1) : label).trim();
+    const secret = (p.get('secret') || '').replace(/\s/g, '');
+    const r = base('otp', 'Two-step sign-in key');
+    r.headline = { label: 'Account', value: (issuer ? issuer + ': ' : '') + (account || '(not named)') };
+    if (issuer) r.fields.push(['Service', issuer]);
+    if (account) r.fields.push(['Account', account]);
+    const period = p.get('period') || '30';
+    r.fields.push(['Type', type === 'hotp' ? 'Counter-based (HOTP)' : 'Time-based (TOTP), a new code every ' + period + ' seconds'],
+      ['Digits', p.get('digits') || '6'], ['Algorithm', (p.get('algorithm') || 'SHA1').toUpperCase()]);
+    r.warnings.push('This code sets up two-step verification. It contains a secret key: anyone who sees it can create your sign-in codes. Scan it with your authenticator app, and do not share it or keep a screenshot of it.');
+    if (!/^[A-Z2-7]+=*$/i.test(secret)) r.warnings.push('The secret key is missing or is not valid Base32, so authenticator apps may refuse it.');
+    r.secret = { label: 'Show the secret key', value: secret };
+    return r;
+  }
+
+  function upiOf(t) {
+    if (!/^upi:\/\/pay\b/i.test(t)) return null;
+    let u;
+    try { u = new URL(t); } catch (e) { return null; }
+    const p = u.searchParams;
+    const r = base('payment', 'Payment request (UPI)');
+    r.headline = { label: 'Pay to', value: p.get('pn') || p.get('pa') || '(not named)' };
+    r.fields.push(['UPI ID', p.get('pa') || 'Missing']);
+    r.fields.push(['Amount', p.get('am') ? p.get('am') + ' ' + (p.get('cu') || 'INR') : 'Not set (you type it in your app)']);
+    if (p.get('tn')) r.fields.push(['Note', p.get('tn')]);
+    if (p.get('tr')) r.fields.push(['Reference', p.get('tr')]);
+    r.notes.push('Pay with your UPI app. Check the name and UPI ID it shows before you pay: you enter your UPI PIN only to send money, never to receive it.');
+    if (p.get('pa')) r.actions.push(copyAct('Copy UPI ID', p.get('pa')));
+    return r;
+  }
+
+  function cryptoOf(t) {
+    const m = /^(bitcoin|bitcoincash|litecoin|dogecoin|ethereum|monero|solana|tron|ripple|cardano|dash|zcash):(?:\/\/)?([^?\s]+)(?:\?([\s\S]*))?$/i.exec(t);
+    if (!m) return null;
+    const q = query(m[3]);
+    const r = base('payment', 'Crypto payment request');
+    r.headline = { label: m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() + ' address', value: m[2] };
+    if (q.amount || q.value) r.fields.push(['Amount', q.amount || q.value]);
+    if (q.label) r.fields.push(['Label', q.label]);
+    if (q.message) r.fields.push(['Message', q.message]);
+    r.warnings.push('Crypto payments cannot be undone. Compare the whole address with the one the recipient gave you, not just its first and last characters.');
+    r.actions.push(copyAct('Copy address', m[2]));
+    return r;
+  }
+
+  function ibanValid(iban) {
+    if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) return false;
+    let rem = 0;
+    for (const ch of iban.slice(4) + iban.slice(0, 4)) {
+      const v = parseInt(ch, 36);
+      rem = v > 9 ? (rem * 100 + v) % 97 : (rem * 10 + v) % 97;
+    }
+    return rem === 1;
+  }
+  function epcOf(t) {
+    const L = t.split(/\r\n|\n|\r/);
+    if (L[0] !== 'BCD' || !/^00[12]$/.test(L[1] || '') || !/^(SCT|INST)$/.test(L[3] || '')) return null;
+    const iban = (L[6] || '').replace(/\s/g, '').toUpperCase();
+    const r = base('payment', 'Bank transfer (SEPA)');
+    r.headline = { label: 'Pay to', value: L[5] || '(not named)' };
+    r.fields.push(['IBAN', iban.replace(/(.{4})(?=.)/g, '$1 ')]);
+    if (L[4]) r.fields.push(['BIC', L[4]]);
+    const am = /^([A-Z]{3})(\d+(?:\.\d{1,2})?)$/.exec(L[7] || '');
+    r.fields.push(['Amount', am ? am[2] + ' ' + am[1] : (L[7] || 'Not set')]);
+    if (L[9]) r.fields.push(['Reference', L[9]]);
+    if (L[10]) r.fields.push(['Message', L[10]]);
+    if (ibanValid(iban)) r.goods.push('IBAN checksum is correct.');
+    else r.warnings.push('The IBAN checksum does not match, so at least one character is wrong. Do not pay to it before checking with the recipient.');
+    r.notes.push('A SEPA payment code (EPC QR, also called GiroCode). Banking apps fill in a transfer from it when you scan it there.');
+    r.actions.push(copyAct('Copy IBAN', iban));
+    return r;
+  }
+
+  function tlv(s) {
+    const out = [];
+    for (let i = 0; i < s.length;) {
+      const tag = s.substr(i, 2), len = s.substr(i + 2, 2);
+      if (!/^\d\d$/.test(tag) || !/^\d\d$/.test(len)) return null;
+      const v = s.substr(i + 4, +len);
+      if (v.length !== +len) return null;
+      out.push({ tag, value: v });
+      i += 4 + +len;
+    }
+    return out;
+  }
+  function crc16(str) {
+    let c = 0xFFFF;
+    for (const b of new TextEncoder().encode(str)) {
+      c ^= b << 8;
+      for (let k = 0; k < 8; k++) c = c & 0x8000 ? ((c << 1) ^ 0x1021) & 0xFFFF : (c << 1) & 0xFFFF;
+    }
+    return c.toString(16).toUpperCase().padStart(4, '0');
+  }
+  function emvOf(t) {
+    if (!/^000201/.test(t)) return null;
+    const tags = tlv(t);
+    if (!tags || tags.length < 3) return null;
+    const get = k => (tags.find(x => x.tag === k) || {}).value;
+    const r = base('payment', 'Payment code (EMV QR)');
+    r.headline = { label: 'Pay to', value: get('59') || '(not named)' };
+    if (get('60')) r.fields.push(['City', get('60')]);
+    if (get('58')) r.fields.push(['Country', get('58')]);
+    const cur = get('53');
+    r.fields.push(['Amount', get('54') ? get('54') + ' ' + (CURRENCY[cur] || cur || '') : 'Not set (you type it in your app)']);
+    for (const x of tags) {
+      if (+x.tag < 26 || +x.tag > 51) continue;
+      const sub = tlv(x.value), guid = sub && (sub.find(y => y.tag === '00') || {}).value;
+      if (guid) { r.fields.push(['Payment network', EMV_NETWORKS[guid.toLowerCase()] || guid]); break; }
+    }
+    if (get('01')) r.fields.push(['Code type', get('01') === '12' ? 'For one payment' : 'Reusable']);
+    const add = get('62') && tlv(get('62'));
+    const ref = add && (add.find(y => y.tag === '05') || {}).value;
+    if (ref) r.fields.push(['Reference', ref]);
+    const last = tags[tags.length - 1];
+    if (last.tag === '63' && last.value.length === 4) {
+      if (crc16(t.slice(0, -4)) === last.value.toUpperCase()) r.goods.push('Checksum (CRC) is correct.');
+      else r.warnings.push('The checksum does not match: the code is damaged or was changed after it was made. Do not pay with it.');
+    } else r.warnings.push('The code has no checksum at the end, as EMV payment codes should.');
+    r.notes.push('A merchant payment code in the EMVCo format. Pay with the banking or payment app it is meant for, and check the name it shows.');
+    return r;
+  }
+
+  function fidoOf(t) {
+    if (!/^FIDO:\/\d+$/i.test(t)) return null;
+    const r = base('fido', 'Passkey sign-in code');
+    r.notes.push('A computer shows this code when you sign in with a passkey kept on your phone. Scan it with the phone\u2019s Camera app: the phone then connects to the computer over Bluetooth. A web page cannot use it.');
+    return r;
+  }
+
+  function productOf(t, format) {
+    if (!/^(ean_13|ean_8|upc_a|upc_e)$/.test(format) || !/^\d{6,14}$/.test(t)) return null;
+    const r = base('product', /^97[89]/.test(t) && t.length === 13 ? 'Book (ISBN)' : 'Product number');
+    r.headline = { label: t.length === 13 && /^97[89]/.test(t) ? 'ISBN' : 'Number', value: t };
+    if (format !== 'upc_e') {
+      let sum = 0;
+      for (let i = 0; i < t.length - 1; i++) sum += +t[i] * ((t.length - 1 - i) % 2 ? 3 : 1);
+      if ((10 - sum % 10) % 10 === +t[t.length - 1]) r.goods.push('Check digit is correct.');
+      else r.warnings.push('The check digit does not match: the number was misread or printed wrongly.');
+    }
+    r.actions.push(copyAct('Copy number', t));
+    return r;
+  }
+
+  function appOf(t) {
+    const m = /^([a-z][a-z0-9+.-]{1,31}):/i.exec(t);
+    if (!m) return null;
+    const scheme = m[1].toLowerCase();
+    // Text with spaces is not a link, except a script or data address, which may hold spaces. Text
+    // that only starts like one ("JavaScript: The Good Parts", "Data: 42 rows") has a space after the colon.
+    if (/\s/.test(t) && !(DANGER[scheme] && /^[^:]+:\S/.test(t))) return null;
+    if (!DANGER[scheme] && !APP_SCHEMES.has(scheme) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return null;
+    const r = base('app', DANGER[scheme] ? 'Not a web link' : 'Link for an app');
+    r.fields.push(['Type of link', scheme + ':']);
+    if (DANGER[scheme]) r.warnings.push('This is ' + DANGER[scheme]);
+    else r.notes.push('This link opens another app on a phone. The page does not open it; copy the text if you need it.');
+    return r;
+  }
+
+  function classify(text, format, binary) {
+    const t = text.trim();
+    if (binary) {
+      const r = base('binary', 'Binary data');
+      r.notes.push('The code holds bytes that are not text, so they are shown as hexadecimal.');
+      return r;
+    }
+    const r = productOf(t, format) || (/^https?:\/\//i.test(t) ? webLink(t) : null) || wifiOf(t) || vcardOf(t) || mecardOf(t) || eventOf(t) ||
+      emailOf(t) || phoneOf(t) || smsOf(t) || geoOf(t) || otpOf(t) || upiOf(t) || cryptoOf(t) || epcOf(t) || emvOf(t) || fidoOf(t) ||
+      (/^(?:www\.[^\s/]+|[a-z0-9-]+(?:\.[a-z0-9-]+)+\/\S*)$/i.test(t) && /^[^/]*\.[a-z]{2,63}(?::\d+)?(?:[/?#]|$)/i.test(t) ? webLink(t, true) : null) ||
+      appOf(t);
+    if (r) return r;
+    const out = base('text', 'Text');
+    const chars = graphemes ? Array.from(graphemes.segment(text)).length : Array.from(text).length;
+    out.fields.push(['Length', plural(chars, 'character')]);
+    const lines = text.split(/\r\n|\r|\n/).length;
+    if (lines > 1) out.fields.push(['Lines', String(lines)]);
+    return out;
+  }
+
+  // ---------- Readers: the browser's BarcodeDetector where it exists, jsQR otherwise ----------
+  let detectorP = null;
+  function getDetector() {
+    if (!detectorP) {
+      detectorP = (async () => {
+        if (!('BarcodeDetector' in window)) return null;
+        try {
+          const formats = await window.BarcodeDetector.getSupportedFormats();
+          if (!formats || !formats.includes('qr_code')) return null;
+          return { detector: new window.BarcodeDetector({ formats }), formats };
+        } catch (e) { return null; }
+      })();
+    }
+    return detectorP;
+  }
+  function fromDetector(list, k, dx, dy) {
+    return (list || []).filter(b => b && typeof b.rawValue === 'string' && b.rawValue !== '').map(b => {
+      const pts = b.cornerPoints && b.cornerPoints.length === 4 ? b.cornerPoints
+        : b.boundingBox ? [{ x: b.boundingBox.x, y: b.boundingBox.y }, { x: b.boundingBox.x + b.boundingBox.width, y: b.boundingBox.y },
+          { x: b.boundingBox.x + b.boundingBox.width, y: b.boundingBox.y + b.boundingBox.height }, { x: b.boundingBox.x, y: b.boundingBox.y + b.boundingBox.height }] : null;
+      return { text: b.rawValue, format: b.format || 'qr_code', corners: pts ? pts.map(p => ({ x: (p.x - (dx || 0)) / (k || 1), y: (p.y - (dy || 0)) / (k || 1) })) : null };
+    });
+  }
+
+  // Finds up to `max` codes: after each one, its area is painted white and the picture is read again.
+  // Runs in a Web Worker (built from this source) and, if workers are unavailable, on the page.
+  function jsqrMany(jsQR, data, width, height, max, invert) {
+    const out = [];
+    for (let n = 0; n < max; n++) {
+      const r = jsQR(data, width, height, { inversionAttempts: invert || 'attemptBoth' });
+      if (!r) break;
+      const L = r.location;
+      const pts = [L.topLeftCorner, L.topRightCorner, L.bottomRightCorner, L.bottomLeftCorner].map(p => ({ x: p.x, y: p.y }));
+      const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4, cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+      if (out.some(o => o.text === r.data && Math.abs(o.cx - cx) < 4 && Math.abs(o.cy - cy) < 4)) break;
+      out.push({ text: r.data, bytes: r.binaryData, chunks: r.chunks, version: r.version, corners: pts, cx, cy });
+      if (n + 1 >= max) break;
+      paintOut(data, width, height, pts);
+    }
+    return out;
+  }
+  // Paints a found code (its corners, widened by 30%) white, so the next read looks past it.
+  function paintOut(data, width, height, pts) {
+    const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4, cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+    const q = pts.map(p => ({ x: cx + (p.x - cx) * 1.3, y: cy + (p.y - cy) * 1.3 }));
+    const x0 = Math.max(0, Math.floor(Math.min(q[0].x, q[1].x, q[2].x, q[3].x))), x1 = Math.min(width - 1, Math.ceil(Math.max(q[0].x, q[1].x, q[2].x, q[3].x)));
+    const y0 = Math.max(0, Math.floor(Math.min(q[0].y, q[1].y, q[2].y, q[3].y))), y1 = Math.min(height - 1, Math.ceil(Math.max(q[0].y, q[1].y, q[2].y, q[3].y)));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        let pos = 0, neg = 0;
+        for (let i = 0; i < 4; i++) {
+          const a = q[i], b = q[(i + 1) % 4];
+          const c = (b.x - a.x) * (y + 0.5 - a.y) - (b.y - a.y) * (x + 0.5 - a.x);
+          if (c > 0) pos++; else if (c < 0) neg++;
+        }
+        if (!pos || !neg) { const k = (y * width + x) * 4; data[k] = data[k + 1] = data[k + 2] = 255; }
+      }
+    }
+  }
+  // Every code in a picture, up to `max`: the whole picture, then windows of it, then the whole
+  // picture again, each time with the codes found so far painted out, until a round finds nothing
+  // new. Side by side, codes hide one another: in a grid of six, the first two passes find four.
+  function jsqrAll(jsQR, data, width, height, max) {
+    const out = [];
+    const add = list => {
+      for (const c of list) {
+        if (out.length >= max) return;
+        const span = Math.hypot(c.corners[0].x - c.corners[2].x, c.corners[0].y - c.corners[2].y);
+        if (out.some(o => o.text === c.text && Math.hypot(o.cx - c.cx, o.cy - c.cy) < span / 2)) continue;
+        out.push(c);
+        paintOut(data, width, height, c.corners);
+      }
+    };
+    add(jsqrMany(jsQR, data, width, height, max));
+    for (let round = 0; round < 4 && out.length < max; round++) {
+      const n = out.length;
+      add(jsqrTiles(jsQR, data, width, height, max - out.length));
+      if (out.length > n && out.length < max) add(jsqrMany(jsQR, data, width, height, max - out.length));
+      if (out.length === n) break;
+    }
+    return out;
+  }
+  // With several codes in one picture jsQR can pair corner squares of different codes and find
+  // none. Then overlapping square windows (the picture's short side, then 60% and 40% of it) are
+  // read one by one; a code seen in two windows is kept once.
+  function windowStarts(total, size) {
+    if (size >= total) return [0];
+    const a = [];
+    for (let x = 0; x + size < total; x += Math.round(size / 2)) a.push(x);
+    a.push(total - size);
+    return a;
+  }
+  function jsqrTiles(jsQR, data, width, height, max) {
+    const out = [];
+    for (const f of [1, 0.6, 0.4]) {
+      const size = Math.round(Math.min(width, height) * f);
+      if (size < 120) continue;
+      for (const y0 of windowStarts(height, size)) {
+        for (const x0 of windowStarts(width, size)) {
+          const tile = new Uint8ClampedArray(size * size * 4);
+          for (let y = 0; y < size; y++) tile.set(data.subarray(((y0 + y) * width + x0) * 4, ((y0 + y) * width + x0 + size) * 4), y * size * 4);
+          for (const c of jsqrMany(jsQR, tile, size, size, max)) {
+            const corners = c.corners.map(p => ({ x: p.x + x0, y: p.y + y0 })), cx = c.cx + x0, cy = c.cy + y0;
+            const span = Math.hypot(corners[0].x - corners[2].x, corners[0].y - corners[2].y);
+            if (out.some(o => o.text === c.text && Math.hypot(o.cx - cx, o.cy - cy) < span / 2)) continue;
+            out.push(Object.assign(c, { corners, cx, cy }));
+            if (out.length >= max) return out;
+          }
+        }
+      }
+    }
+    return out;
+  }
+  function workerMain() {
+    let failed = '';
+    self.onmessage = function (e) {
+      const m = e.data;
+      if (m.type === 'init') {
+        try { importScripts(m.url); } catch (err) { failed = String(err && err.message || err); }
+        self.postMessage({ type: 'ready', failed });
+        return;
+      }
+      let codes = [];
+      try {
+        const data = new Uint8ClampedArray(m.buffer);
+        codes = m.all ? jsqrAll(self.jsQR, data, m.width, m.height, m.max) : jsqrMany(self.jsQR, data, m.width, m.height, m.max, m.invert);
+      } catch (err) { codes = []; }
+      self.postMessage({ type: 'result', id: m.id, codes });
+    };
+  }
+  let engineP = null;
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => { const e = new Error('The QR reader could not be loaded. Check your connection and try again.'); e.fatal = true; reject(e); };
+      document.head.appendChild(s);
+    });
+  }
+  function mainThreadEngine() {
+    return loadScript(JSQR_URL).then(() => ({
+      scan: (img, max, invert, all) => Promise.resolve(all ? jsqrAll(window.jsQR, img.data, img.width, img.height, max)
+        : jsqrMany(window.jsQR, img.data, img.width, img.height, max, invert))
+    }));
+  }
+  function getEngine() {
+    if (engineP) return engineP;
+    engineP = new Promise(resolve => {
+      let w;
+      try {
+        const src = [jsqrMany, paintOut, windowStarts, jsqrTiles, jsqrAll].map(f => f.toString()).join('\n') + '\n(' + workerMain.toString() + ')();';
+        w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      } catch (e) { resolve(mainThreadEngine()); return; }
+      const waiting = new Map();
+      let nextId = 1, ready = false, dead = false;
+      w.onmessage = e => {
+        const m = e.data;
+        if (m.type === 'ready') {
+          if (m.failed) { w.terminate(); resolve(mainThreadEngine()); return; }
+          ready = true;
+          resolve({
+            scan: (img, max, invert, all) => new Promise(done => {
+              if (dead) { done([]); return; }
+              const id = nextId++;
+              waiting.set(id, done);
+              w.postMessage({ type: 'scan', id, buffer: img.data.buffer, width: img.width, height: img.height, max, invert, all: !!all }, [img.data.buffer]);
+            })
+          });
+        } else if (m.type === 'result' && waiting.has(m.id)) { waiting.get(m.id)(m.codes); waiting.delete(m.id); }
+      };
+      // A worker that dies is replaced by a new one on the next scan (or by the page, if it never started).
+      w.onerror = e => {
+        if (e.preventDefault) e.preventDefault();
+        dead = true;
+        w.terminate();
+        waiting.forEach(done => done([]));
+        waiting.clear();
+        if (ready) engineP = null; else resolve(mainThreadEngine());
+      };
+      w.postMessage({ type: 'init', url: JSQR_URL });
+    });
+    engineP = engineP.catch(e => { engineP = null; throw e; });
+    return engineP;
+  }
+  function fromJsqr(list, k, dx, dy) {
+    return list.map(c => {
+      const d = textFromJsqr(c);
+      return { text: d.text, binary: d.binary, bytes: d.bytes, format: 'qr_code', corners: c.corners.map(p => ({ x: (p.x - dx) / k, y: (p.y - dy) / k })) };
+    });
+  }
+
+  // ---------- Pictures ----------
+  let decoderP = null;
+  function loadDecoder() {
+    if (!decoderP) decoderP = window.TTImage ? Promise.resolve() : loadScript(IMAGE_JS).catch(e => { decoderP = null; throw new Error('The image reader could not be loaded. Check your connection and try again.'); });
+    return decoderP;
+  }
+  // The picture at a size, on white (transparent PNGs), with a white margin added: codes cropped
+  // right to their edge have no quiet zone, which readers need to find the corner squares.
+  function prepared(src, size, smooth) {
+    const W = src.width, H = src.height, k = size / Math.max(W, H);
+    const w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k)), m = Math.max(8, Math.round(Math.max(w, h) * 0.04));
+    const c = document.createElement('canvas');
+    c.width = w + 2 * m; c.height = h + 2 * m;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, c.width, c.height);
+    g.imageSmoothingEnabled = smooth;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(src, m, m, w, h);
+    return { canvas: c, k: w / W, m };
+  }
+  // Codes in reading order: top to bottom, and left to right when they are side by side.
+  function readingOrder(codes) {
+    const box = c => {
+      const xs = c.corners.map(p => p.x), ys = c.corners.map(p => p.y);
+      return { cx: (Math.min(...xs) + Math.max(...xs)) / 2, cy: (Math.min(...ys) + Math.max(...ys)) / 2, h: Math.max(...ys) - Math.min(...ys) };
+    };
+    if (codes.length < 2 || codes.some(c => !c.corners)) return codes;
+    return codes.map(c => [c, box(c)]).sort((a, b) => (Math.abs(a[1].cy - b[1].cy) < (a[1].h + b[1].h) / 4 ? a[1].cx - b[1].cx : a[1].cy - b[1].cy)).map(x => x[0]);
+  }
+  async function scanPicture(src) {
+    return readingOrder(await findCodes(src));
+  }
+  async function findCodes(src) {
+    const L = Math.max(src.width, src.height);
+    const det = await getDetector();
+    if (det) {
+      try {
+        const p = prepared(src, Math.min(L, 2048), true);
+        const found = fromDetector(await det.detector.detect(p.canvas), p.k, p.m, p.m);
+        if (found.length) return found;
+      } catch (e) { /* fall back to jsQR */ }
+    }
+    const engine = await getEngine();
+    const sizes = [];
+    const add = (s, smooth) => { s = Math.round(s); if (s >= 16 && !sizes.some(x => x[0] === s)) sizes.push([s, smooth]); };
+    add(Math.min(L, 1200), true);
+    if (L > 1200) add(Math.min(L, 2400), true);
+    if (L > 600) add(600, true);
+    if (L > 2400) add(Math.min(L, 4096), true);
+    if (L < 400) add(L * Math.max(2, Math.floor(800 / L)), false);
+    const pixels = p => p.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, p.canvas.width, p.canvas.height);
+    for (const [s, smooth] of sizes) {
+      const p = prepared(src, s, smooth);
+      let found = await engine.scan(pixels(p), MAX_CODES, 'attemptBoth');
+      if (found.length) {
+        // A code was found at this size: windows of the picture are read too, for codes that the
+        // others hid (up to 2400 pixels, to keep it quick).
+        if (found.length < MAX_CODES && s <= 2400) {
+          const more = await engine.scan(pixels(p), MAX_CODES, 'attemptBoth', true);
+          if (more.length > found.length) found = more;
+        }
+        return fromJsqr(found, p.k, p.m, p.m);
+      }
+    }
+    const p = prepared(src, Math.min(L, 1600), true);
+    return fromJsqr(await engine.scan(pixels(p), MAX_CODES, 'attemptBoth', true), p.k, p.m, p.m);
+  }
+
+  function accentColour() { return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#1f6f4a'; }
+  function drawOutlines(g, codes, k) {
+    const lw = Math.max(3, Math.round(Math.max(g.canvas.width, g.canvas.height) / 220));
+    codes.forEach((c, i) => {
+      if (!c.corners) return;
+      g.beginPath();
+      c.corners.forEach((p, j) => (j ? g.lineTo(p.x * k, p.y * k) : g.moveTo(p.x * k, p.y * k)));
+      g.closePath();
+      g.lineJoin = 'round';
+      g.strokeStyle = '#fff'; g.lineWidth = lw + 4; g.stroke();
+      g.strokeStyle = accentColour(); g.lineWidth = lw; g.stroke();
+      if (codes.length > 1) {
+        const cx = c.corners.reduce((s, p) => s + p.x, 0) / 4 * k, cy = c.corners.reduce((s, p) => s + p.y, 0) / 4 * k, rad = lw * 5;
+        g.beginPath(); g.arc(cx, cy, rad, 0, Math.PI * 2); g.fillStyle = accentColour(); g.fill();
+        g.lineWidth = 2; g.strokeStyle = '#fff'; g.stroke();
+        g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent-text').trim() || '#fff';
+        g.font = '700 ' + Math.round(rad * 1.2) + 'px system-ui, sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(String(i + 1), cx, cy + 1);
+      }
+    });
+  }
+  function setStageShape(w, h) {
+    const ratio = Math.min(2.4, Math.max(0.5, w / h));
+    stage.style.aspectRatio = ratio.toFixed(4) + ' / 1';
+  }
+  function showView(src, codes, label, mirrored) {
+    const L = Math.max(src.width, src.height);
+    let k = Math.min(1, 1600 / L);
+    if (L * k < 320) k = Math.max(1, Math.floor(320 / L));
+    view.width = Math.max(1, Math.round(src.width * k));
+    view.height = Math.max(1, Math.round(src.height * k));
+    const g = view.getContext('2d');
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, view.width, view.height);
+    g.imageSmoothingEnabled = k < 1;
+    g.drawImage(src, 0, 0, view.width, view.height);
+    drawOutlines(g, codes, view.width / src.width);
+    view.classList.toggle('qs-mirror', !!mirrored);
+    view.setAttribute('aria-label', label);
+    setStageShape(src.width, src.height);
+    view.hidden = false;
+    video.hidden = true;
+    overlay.hidden = true;
+    frame.hidden = true;
+    placeholder.hidden = true;
+    stage.classList.add('has-view');
+    stage.classList.remove('is-live');
+  }
+
+  let scanGen = 0;
+  async function scanFiles(files, how) {
+    const list = Array.from(files || []).filter(f => f && f.size !== undefined);
+    if (!list.length) return;
+    const gen = ++scanGen;
+    if (cam.stream || cam.starting) stopCamera('');
+    showError('');
+    const errors = [], none = [], entries = [];
+    let lastShown = null, capped = false;
+    if (list.length > MAX_FILES) errors.push('Only the first ' + MAX_FILES + ' of ' + list.length + ' files were scanned.');
+    const todo = list.slice(0, MAX_FILES);
+    try { await loadDecoder(); } catch (e) { showError(e.message); say(''); return; }
+    for (let i = 0; i < todo.length; i++) {
+      const f = todo[i];
+      const name = how === 'paste' ? 'Pasted image' : how === 'sample' ? 'Sample code' : f.name || 'Image';
+      say('Reading ' + (todo.length > 1 ? (i + 1) + ' of ' + todo.length + ': ' : '') + name + '\u2026');
+      let res;
+      try {
+        res = await window.TTImage.decode(f, { maxPixels: 60e6 });
+      } catch (e) {
+        errors.push(name + ': ' + (e && e.code === 'UNSUPPORTED' ? 'this is not an image the page can read. Use a PNG, JPEG, WebP, GIF, HEIC, AVIF, BMP, TIFF or SVG file.' : (e && e.message) || 'it could not be read.'));
+        continue;
+      }
+      if (gen !== scanGen) return;
+      let codes = [];
+      try { codes = await scanPicture(res.canvas); } catch (e) { errors.push(name + ': ' + e.message); }
+      if (gen !== scanGen) return;
+      const found = codes.length;
+      if (found >= MAX_CODES) capped = true;
+      lastShown = { canvas: res.canvas, codes, label: name + ': ' + (found ? plural(found, 'code') + ' found and outlined' : 'no code found') };
+      if (!found) none.push(name);
+      codes.forEach((c, j) => entries.push(makeEntry(c, name + (found > 1 ? ', code ' + (j + 1) : ''))));
+    }
+    if (gen !== scanGen) return;
+    if (lastShown) showView(lastShown.canvas, lastShown.codes, lastShown.label, false);
+    if (none.length) {
+      const engine = (await getDetector()) ? 'QR code or barcode' : 'QR code';
+      errors.unshift('No ' + engine + ' found in ' + (none.length > 1 ? none.length + ' images: ' + none.map(n => clip(n, 40)).join(', ') : clip(none[0], 60)) +
+        '. Make sure the whole code and its white border are in the picture and sharp, or crop closer to the code.');
+    }
+    showError(errors.join(' '));
+    if (entries.length) {
+      showResults(entries);
+      say(summary(entries) + (todo.length > 1 ? ' in ' + plural(todo.length, 'image') : '') + '.' +
+        (capped ? ' At most ' + MAX_CODES + ' codes are read from one picture: crop it to read the others.' : ''));
+    } else say('');
+  }
+  function summary(entries) {
+    if (entries.length === 1) {
+      const e = entries[0];
+      return 'Found: ' + e.info.label + (e.info.headline ? ', ' + clip(e.info.headline.value, 60) : '');
+    }
+    return 'Found ' + plural(entries.length, 'code');
+  }
+
+  // ---------- Camera ----------
+  const cam = { stream: null, track: null, starting: false, gen: 0, scanning: false, busy: false, last: 0, n: 0, seen: new Set(), torch: false, mirrored: false, cb: 0, overlayTimer: 0, focusPending: false, didFind: false, found: 0 };
+  const grab = document.createElement('canvas');
+  function insecureReason() {
+    if (window.isSecureContext === false) return 'Camera access needs a secure connection. Open this page over https://; browsers turn cameras off on plain http pages.';
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') return 'This browser does not let web pages use the camera. Use an image instead, or try a current version of Chrome, Edge, Firefox or Safari.';
+    return '';
+  }
+  function explain(e) {
+    const name = (e && e.name) || '', msg = (e && e.message) || '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      if (/system/i.test(msg)) return 'Your device is blocking the camera for this browser. Allow the browser to use the camera in your system\u2019s privacy settings, then press Start camera again.';
+      return 'Camera access is blocked for this page. Allow the camera (the icon at the left of the address bar, or Website Settings in Safari on iPhone), then press Start camera again. You can also scan an image instead.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return 'No camera was found. Connect one, or scan an image or screenshot instead.';
+    if (name === 'NotReadableError' || name === 'TrackStartError') return 'The camera is in use by another app or could not be started. Close apps that may be using it, then press Start camera again.';
+    if (name === 'SecurityError') return 'The browser blocked the camera for this page. If the page is open inside another app, open it in your browser instead.';
+    if (name === 'AbortError') return 'The camera did not start. Press Start camera again; if it keeps happening, restart the browser.';
+    return 'The camera could not be started: ' + (msg || name || 'unknown error') + '.';
+  }
+  function updateCamUi() {
+    const live = !!cam.stream;
+    const f = document.activeElement;
+    camBtn.textContent = cam.starting ? 'Starting camera\u2026' : live ? 'Stop camera' : cam.didFind ? 'Scan another code' : 'Start camera';
+    camBtn.setAttribute('aria-disabled', String(cam.starting));
+    // The row holds the camera list (several cameras), torch and zoom (when the camera has them).
+    camOpts.hidden = !live || Array.from(camOpts.children).every(c => c.hidden);
+    if ((f && f !== document.body && f.closest && f.closest('[hidden]')) || (cam.focusPending && (!f || f === document.body))) { camBtn.focus(); cam.focusPending = false; }
+  }
+  async function refreshDevices() {
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return;
+    let devs = [];
+    try { devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput' && d.deviceId); } catch (e) { return; }
+    const want = deviceSel.value || '';
+    deviceSel.innerHTML = '';
+    deviceSel.add(new Option('Default camera', ''));
+    devs.forEach((d, i) => deviceSel.add(new Option(d.label || 'Camera ' + (i + 1), d.deviceId)));
+    deviceSel.value = Array.from(deviceSel.options).some(o => o.value === want) ? want : '';
+    $('#qs-device-field').hidden = devs.length < 2;
+    updateCamUi();
+  }
+  function releaseCamera() {
+    cam.gen++;
+    cam.scanning = false;
+    cam.busy = false;
+    if (cam.cb && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(cam.cb);
+    cancelAnimationFrame(cam.cb);
+    cam.cb = 0;
+    clearTimeout(cam.overlayTimer);
+    if (cam.stream) cam.stream.getTracks().forEach(t => { t.onended = null; t.stop(); });
+    cam.stream = null;
+    cam.track = null;
+    cam.torch = false;
+    video.srcObject = null;
+  }
+  function stopCamera(message) {
+    const wasLive = !!(cam.stream || cam.starting);
+    releaseCamera();
+    cam.starting = false;
+    video.hidden = true;
+    overlay.hidden = true;
+    frame.hidden = true;
+    stage.classList.remove('is-live');
+    // A frozen camera frame or a scanned picture stays on show; otherwise the empty box returns.
+    if (view.hidden) { placeholder.hidden = false; stage.style.aspectRatio = ''; }
+    torchBtn.hidden = true;
+    torchBtn.setAttribute('aria-pressed', 'false');
+    $('#qs-zoom-field').hidden = true;
+    if (wasLive && message !== undefined) say(message);
+    updateCamUi();
+  }
+  async function startCamera() {
+    const bad = insecureReason();
+    if (bad) { showError(bad); return; }
+    if (cam.starting) return;
+    ++scanGen;
+    showError('');
+    releaseCamera();
+    const gen = cam.gen;
+    cam.starting = true;
+    cam.didFind = false;
+    cam.seen = new Set();
+    cam.found = 0;
+    cam.focusPending = document.activeElement === camBtn;
+    updateCamUi();
+    say('Starting the camera\u2026');
+    getDetector();
+    const size = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    const video_c = deviceSel.value ? Object.assign({ deviceId: { exact: deviceSel.value } }, size) : Object.assign({ facingMode: { ideal: 'environment' } }, size);
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: video_c });
+    } catch (e) {
+      if (gen !== cam.gen) return;
+      cam.starting = false;
+      showError(explain(e));
+      say('');
+      updateCamUi();
+      return;
+    }
+    if (gen !== cam.gen) { stream.getTracks().forEach(t => t.stop()); return; }
+    const track = stream.getVideoTracks()[0];
+    if (!track) { stream.getTracks().forEach(t => t.stop()); cam.starting = false; showError('No camera was found. The browser returned no video.'); say(''); updateCamUi(); return; }
+    cam.starting = false;
+    cam.stream = stream;
+    cam.track = track;
+    track.onended = () => { stopCamera('Camera stopped.'); showError('The camera was disconnected or turned off by the system.'); };
+    const s = track.getSettings ? track.getSettings() : {};
+    cam.mirrored = s.facingMode === 'user' || (!s.facingMode && !/back|rear|environment/i.test(track.label || ''));
+    video.classList.toggle('qs-mirror', cam.mirrored);
+    overlay.classList.toggle('qs-mirror', cam.mirrored);
+    video.srcObject = stream;
+    view.hidden = true;
+    stage.classList.remove('has-view');
+    placeholder.hidden = true;
+    video.hidden = false;
+    frame.hidden = false;
+    stage.classList.add('is-live');
+    const p = video.play();
+    if (p && p.catch) p.catch(() => {});
+    setupTrackControls(track);
+    updateCamUi();
+    refreshDevices();
+    const ready = video.readyState >= 2 ? Promise.resolve() : new Promise(r => video.addEventListener('loadeddata', r, { once: true }));
+    await Promise.race([ready, new Promise(r => setTimeout(r, 4000))]);
+    if (gen !== cam.gen) return;
+    if (video.videoWidth) setStageShape(video.videoWidth, video.videoHeight);
+    say('Camera on. Hold a code inside the frame.');
+    cam.scanning = true;
+    cam.n = 0;
+    nextFrame();
+  }
+  function setupTrackControls(track) {
+    let caps = {};
+    try { caps = track.getCapabilities ? track.getCapabilities() || {} : {}; } catch (e) { caps = {}; }
+    torchBtn.hidden = caps.torch !== true;
+    torchBtn.setAttribute('aria-pressed', 'false');
+    const z = caps.zoom;
+    const zf = $('#qs-zoom-field');
+    if (z && typeof z.max === 'number' && z.max > (z.min || 1)) {
+      zoomIn.min = String(z.min || 1);
+      zoomIn.max = String(z.max);
+      zoomIn.step = String(z.step || 0.1);
+      const cur = track.getSettings && track.getSettings().zoom;
+      zoomIn.value = String(typeof cur === 'number' ? cur : z.min || 1);
+      zf.hidden = false;
+    } else zf.hidden = true;
+  }
+  function nextFrame() {
+    if (!cam.scanning) return;
+    if (typeof video.requestVideoFrameCallback === 'function') cam.cb = video.requestVideoFrameCallback(onFrame);
+    else cam.cb = requestAnimationFrame(onFrame);
+  }
+  async function onFrame() {
+    if (!cam.scanning) return;
+    const now = performance.now();
+    if (cam.busy || now - cam.last < 110 || !video.videoWidth || document.hidden) { nextFrame(); return; }
+    cam.last = now;
+    cam.busy = true;
+    const gen = cam.gen;
+    let codes = [];
+    try { codes = await detectFrame(); } catch (e) {
+      codes = [];
+      if (e && e.fatal && gen === cam.gen) { cam.busy = false; stopCamera(''); showError(e.message); return; }
+    }
+    cam.busy = false;
+    if (gen !== cam.gen || !cam.scanning) return;
+    if (codes.length) onCameraCodes(codes);
+    nextFrame();
+  }
+  async function detectFrame() {
+    const det = await getDetector();
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (det) return fromDetector(await det.detector.detect(video), 1, 0, 0);
+    const engine = await getEngine();
+    // Alternate between the whole frame (scaled down) and the square inside the frame marks at full
+    // resolution, which reads small or distant codes; one pass in four looks for light-on-dark codes.
+    const step = cam.n++ % 4;
+    let sx = 0, sy = 0, sw = vw, sh = vh;
+    if (step % 2 === 1) { const side = Math.round(Math.min(vw, vh) * 0.64); sx = Math.round((vw - side) / 2); sy = Math.round((vh - side) / 2); sw = sh = side; }
+    const k = Math.min(1, (step % 2 === 1 ? 720 : 800) / Math.max(sw, sh));
+    grab.width = Math.max(1, Math.round(sw * k));
+    grab.height = Math.max(1, Math.round(sh * k));
+    const g = grab.getContext('2d', { willReadFrequently: true });
+    g.drawImage(video, sx, sy, sw, sh, 0, 0, grab.width, grab.height);
+    const img = g.getImageData(0, 0, grab.width, grab.height);
+    const found = await engine.scan(img, 1, step === 2 ? 'onlyInvert' : 'dontInvert');
+    return fromJsqr(found, k, -sx * k, -sy * k);
+  }
+  function onCameraCodes(codes) {
+    const fresh = codes.filter(c => !cam.seen.has(c.text));
+    if (navigator.vibrate && fresh.length) { try { navigator.vibrate(80); } catch (e) { /* not allowed */ } }
+    if (!contIn.checked) {
+      const entries = codes.map((c, j) => makeEntry(c, 'Camera' + (codes.length > 1 ? ', code ' + (j + 1) : '')));
+      const shot = document.createElement('canvas');
+      shot.width = video.videoWidth; shot.height = video.videoHeight;
+      shot.getContext('2d').drawImage(video, 0, 0);
+      const mirrored = cam.mirrored;
+      cam.didFind = true;
+      cam.focusPending = !!(document.activeElement && (document.activeElement === camBtn || camOpts.contains(document.activeElement)));
+      stopCamera(undefined);
+      showView(shot, codes, 'Camera picture: ' + plural(codes.length, 'code') + ' found and outlined', mirrored);
+      showResults(entries);
+      say(summary(entries) + '. The camera is off; press Scan another code to read more.');
+      return;
+    }
+    // Keep scanning: each new code is added once, and its outline shows for a moment.
+    overlay.width = video.videoWidth; overlay.height = video.videoHeight;
+    const g = overlay.getContext('2d');
+    g.clearRect(0, 0, overlay.width, overlay.height);
+    drawOutlines(g, codes, 1);
+    overlay.hidden = false;
+    clearTimeout(cam.overlayTimer);
+    cam.overlayTimer = setTimeout(() => { g.clearRect(0, 0, overlay.width, overlay.height); }, 900);
+    if (!fresh.length) return;
+    fresh.forEach(c => cam.seen.add(c.text));
+    const entries = fresh.map(c => makeEntry(c, 'Camera'));
+    // The first code of a camera session replaces the results on show; later ones go on top.
+    showResults(entries, cam.found > 0);
+    cam.found += entries.length;
+    say(summary(entries) + '. ' + plural(cam.seen.size, 'code') + ' found so far; still scanning.');
+  }
+
+  // ---------- Results and history ----------
+  let history = [], nextNo = 1;
+  function makeEntry(c, source) {
+    const text = (c.text || '').replace(/^\uFEFF/, '');
+    const info = classify(text, c.format || 'qr_code', !!c.binary);
+    return { no: nextNo++, text, bytes: c.bytes || null, binary: !!c.binary, format: c.format || 'qr_code', source, time: new Date(), info };
+  }
+  function hex(bytes) { return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(' '); }
+  function shownText(e) { return e.binary ? hex(e.bytes) : e.text; }
+  // The history table stays on screen, so a two-step secret key (or an authenticator export) is
+  // left out of it; Copy still gives the whole text.
+  function listedText(e) { return e.info.secret ? e.text.replace(/([?&](?:secret|data)=)[^&#]*/gi, '$1[hidden]') : shownText(e); }
+  function renderCard(e, i, total) {
+    const r = e.info;
+    const card = el('article', 'qs-card');
+    card.id = 'qs-card-' + e.no;
+    const h = el('h3', null, (total > 1 ? (i + 1) + '. ' : '') + r.label);
+    h.id = 'qs-card-h-' + e.no;
+    card.setAttribute('aria-labelledby', h.id);
+    card.append(h, el('p', 'qs-meta', (FORMATS[e.format] || 'Code') + ' \u00b7 ' + e.source + ' \u00b7 ' + clock(e.time)));
+    if (r.headline) {
+      const p = el('p', 'qs-domain');
+      p.append(el('span', null, r.headline.label), el('strong', null, r.headline.value));
+      card.append(p);
+    }
+    if (r.warnings.length || r.goods.length) {
+      const ul = el('ul', 'qs-warn');
+      r.warnings.forEach(w => { const li = el('li'); li.append(el('strong', null, 'Warning: '), document.createTextNode(w)); ul.append(li); });
+      r.goods.forEach(w => { const li = el('li', 'qs-good'); li.append(el('strong', null, 'Checked: '), document.createTextNode(w)); ul.append(li); });
+      card.append(ul);
+    }
+    if (r.fields.length) {
+      const dl = el('dl', 'qs-fields');
+      r.fields.forEach(f => dl.append(el('dt', null, f[0]), el('dd', null, f[1])));
+      card.append(dl);
+    }
+    r.notes.forEach(n => card.append(el('p', 'qs-note', n)));
+    const rawWrap = document.createDocumentFragment();
+    rawWrap.append(el('div', 'label', e.binary ? 'Bytes in the code (' + plural(e.bytes.length, 'byte') + ', hexadecimal)' : 'Text in the code'), el('div', 'output qs-raw', shownText(e)));
+    if (r.secret) {
+      const d = el('details');
+      d.append(el('summary', null, r.secret.label));
+      if (r.secret.value) {
+        const dl = el('dl', 'qs-fields');
+        dl.append(el('dt', null, 'Secret key'), el('dd', null, r.secret.value));
+        d.append(dl);
+      }
+      d.append(rawWrap);
+      card.append(d);
+    } else card.append(rawWrap);
+    const acts = el('div', 'actions');
+    r.actions.forEach(a => {
+      if (a.type === 'link') {
+        const l = el('a', a.primary ? 'btn' : 'btn secondary', a.text);
+        l.href = a.href;
+        if (/^https?:/i.test(a.href)) { l.target = '_blank'; l.rel = 'noopener noreferrer'; }
+        acts.append(l);
+      } else {
+        const b = el('button', a.primary ? 'btn' : 'btn secondary', a.text);
+        b.type = 'button';
+        if (a.type === 'copy') b.addEventListener('click', () => TT.copy(a.value, b));
+        else b.addEventListener('click', () => TT.download(a.name, a.content, a.mime));
+        acts.append(b);
+      }
+    });
+    const copy = el('button', 'btn secondary', e.binary ? 'Copy as hex' : r.secret ? 'Copy the full text' : 'Copy text');
+    copy.type = 'button';
+    copy.addEventListener('click', () => TT.copy(shownText(e), copy));
+    acts.append(copy);
+    if (e.binary) {
+      const dl = el('button', 'btn secondary', 'Download .bin');
+      dl.type = 'button';
+      dl.addEventListener('click', () => TT.download('qr-data.bin', new Blob([Uint8Array.from(e.bytes)], { type: 'application/octet-stream' })));
+      acts.append(dl);
+    }
+    card.append(acts);
+    return card;
+  }
+  let shown = [];
+  function showResults(entries, prepend) {
+    entries.forEach(e => history.unshift(e));
+    if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+    shown = prepend ? entries.concat(shown).slice(0, 50) : entries.slice();
+    cardsEl.innerHTML = '';
+    shown.forEach((e, i) => cardsEl.append(renderCard(e, i, shown.length)));
+    setText($('#qs-results-h'), shown.length > 1 ? 'Results (' + shown.length + ')' : 'Result');
+    resultsEl.hidden = false;
+    renderHistory();
+    const first = cardsEl.firstElementChild;
+    if (first && first.scrollIntoView && !prepend) {
+      const r = first.getBoundingClientRect();
+      if (r.top > window.innerHeight - 80) first.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }
+  }
+  function renderHistory() {
+    histBody.innerHTML = '';
+    history.forEach(e => {
+      const tr = el('tr');
+      const btns = el('div', 'qs-hist-btns');
+      const c = el('button', 'btn secondary small', 'Copy');
+      c.type = 'button';
+      c.setAttribute('aria-label', 'Copy scan ' + e.no);
+      c.addEventListener('click', () => TT.copy(shownText(e), c));
+      const s = el('button', 'btn secondary small', 'Show');
+      s.type = 'button';
+      s.setAttribute('aria-label', 'Show scan ' + e.no);
+      s.addEventListener('click', () => {
+        shown = [e];
+        cardsEl.innerHTML = '';
+        cardsEl.append(renderCard(e, 0, 1));
+        setText($('#qs-results-h'), 'Result');
+        resultsEl.hidden = false;
+        const h = cardsEl.querySelector('h3');
+        h.tabIndex = -1;
+        h.focus();
+      });
+      btns.append(c, s);
+      const what = el('td', 'qs-hist-what'), when = el('span', 'qs-hist-when', '#' + e.no + ' · ' + clock(e.time));
+      when.title = stamp(e.time);
+      what.append(el('span', 'qs-hist-type', e.info.label), when);
+      const txt = el('td', 'qs-hist-text');
+      txt.append(el('span', 'qs-hist-clip', clip(listedText(e), 90)), btns);
+      tr.append(what, txt);
+      histBody.append(tr);
+    });
+    histEl.hidden = !history.length;
+  }
+  function csvCell(v) {
+    let s = String(v);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return /[",\r\n]/.test(s) || s !== s.trim() ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  // ---------- Wiring ----------
+  camBtn.addEventListener('click', () => {
+    if (cam.starting) return;
+    if (cam.stream) { stopCamera('Camera off.'); return; }
+    startCamera();
+  });
+  deviceSel.addEventListener('change', () => { if (cam.stream) startCamera(); });
+  torchBtn.addEventListener('click', () => {
+    const t = cam.track;
+    if (!t) return;
+    const on = !cam.torch;
+    t.applyConstraints({ advanced: [{ torch: on }] }).then(() => {
+      cam.torch = on;
+      torchBtn.setAttribute('aria-pressed', String(on));
+      say(on ? 'Torch on.' : 'Torch off.');
+    }, () => showError('The torch could not be switched ' + (on ? 'on' : 'off') + '.'));
+  });
+  zoomIn.addEventListener('input', () => {
+    if (cam.track) cam.track.applyConstraints({ advanced: [{ zoom: Number(zoomIn.value) }] }).catch(() => {});
+  });
+  contIn.addEventListener('change', () => { if (cam.stream) say(contIn.checked ? 'Keeps scanning after each code.' : 'Stops after the next code.'); });
+  openBtn.addEventListener('click', () => fileIn.click());
+  fileIn.addEventListener('change', () => { const f = Array.from(fileIn.files || []); fileIn.value = ''; scanFiles(f, 'file'); });
+  $('#qs-sample').addEventListener('click', () => {
+    const b64 = $('.qs-sample img').src.split(',')[1];
+    const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+    scanFiles([new File([bytes], 'sample.png', { type: 'image/png' })], 'sample');
+  });
+  function imagesIn(dt) {
+    const out = [];
+    if (!dt) return out;
+    Array.from(dt.files || []).forEach(f => out.push(f));
+    if (!out.length) Array.from(dt.items || []).forEach(it => { if (it.kind === 'file') { const f = it.getAsFile(); if (f) out.push(f); } });
+    return out;
+  }
+  // A paste into a text field stays there; from anywhere else (a button, the Keep scanning box)
+  // a picture on the clipboard is scanned.
+  document.addEventListener('paste', e => {
+    const t = e.target;
+    if (t && (t.isContentEditable || t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|url|email|tel|password|number)$/i.test(t.type)))) return;
+    const files = imagesIn(e.clipboardData);
+    if (files.length) { e.preventDefault(); scanFiles(files, 'paste'); return; }
+    if (e.clipboardData && e.clipboardData.types && e.clipboardData.types.length) {
+      e.preventDefault();
+      showError('The clipboard holds text, not a picture. Copy an image or take a screenshot, then paste again.');
+    }
+  });
+  pasteBtn.addEventListener('click', async () => {
+    showError('');
+    if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+      showError('This browser does not let the button read the clipboard. Press Ctrl+V (\u2318V on a Mac) on this page instead.');
+      return;
+    }
+    let items;
+    try { items = await navigator.clipboard.read(); } catch (e) {
+      showError('The browser did not allow reading the clipboard. Press Ctrl+V (\u2318V on a Mac) on this page instead.');
+      return;
+    }
+    for (const it of items) {
+      const type = it.types.find(x => /^image\//.test(x));
+      if (type) { const blob = await it.getType(type); scanFiles([new File([blob], 'pasted', { type })], 'paste'); return; }
+    }
+    showError('The clipboard holds no picture. Copy an image or take a screenshot, then press Paste image again.');
+  });
+  let dragDepth = 0;
+  document.addEventListener('dragenter', e => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) { dragDepth++; stage.classList.add('is-over'); } });
+  document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) stage.classList.remove('is-over'); });
+  document.addEventListener('dragover', e => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault(); });
+  document.addEventListener('drop', e => {
+    const files = imagesIn(e.dataTransfer);
+    dragDepth = 0;
+    stage.classList.remove('is-over');
+    if (!files.length) return;
+    e.preventDefault();
+    scanFiles(files, 'file');
+  });
+  $('#qs-copy-all').addEventListener('click', e => {
+    const texts = history.slice().reverse().map(shownText);
+    TT.copy(texts.join(texts.some(t => /[\r\n]/.test(t)) ? '\n\n' : '\n'), e.currentTarget);
+  });
+  $('#qs-csv').addEventListener('click', () => {
+    const rows = [['time', 'source', 'format', 'type', 'text']].concat(history.slice().reverse().map(e => [stamp(e.time), e.source, FORMATS[e.format] || e.format, e.info.label, shownText(e)]));
+    TT.download('qr-scan-history.csv', '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
+  });
+  $('#qs-clear').addEventListener('click', () => {
+    history = [];
+    renderHistory();
+    say('History cleared.');
+    camBtn.focus();
+  });
+  window.addEventListener('pagehide', () => { if (cam.stream || cam.starting) stopCamera(''); });
+  window.addEventListener('pageshow', e => { if (e.persisted) updateCamUi(); });
+
+  getDetector().then(det => {
+    const names = det ? det.formats.filter(f => f !== 'qr_code').map(f => (FORMATS[f] || f).replace(/ (barcode|code)$/, '')) : [];
+    engineEl.textContent = det
+      ? 'Reads QR codes with your browser\u2019s built-in reader, which also reads ' + (names.length ? names.join(', ') : 'other') + ' codes.'
+      : 'Reads QR codes. This browser has no built-in barcode reader, so EAN, UPC and other barcodes cannot be read here.';
+  });
+})();
+</script>
