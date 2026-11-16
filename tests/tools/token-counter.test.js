@@ -146,7 +146,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // Files: UTF-8, UTF-16 with BOM, Windows-1252 and a binary file.
   await page.setInputFiles('#tc-file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Hello world', 'utf8') });
   await page.waitForFunction(() => document.querySelector('#tc-input').value === 'Hello world');
-  assert.match(await text('#tc-note'), /^Opened notes\.txt \(11 characters\)\.$/);
+  assert.equal(await text('#tc-note'), 'Opened notes.txt.');
   await page.waitForFunction(() => document.querySelector('#tc-big').textContent === '2');
   const u16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('Größe 東京', 'utf16le')]);
   await page.setInputFiles('#tc-file', { name: 'u16.txt', mimeType: 'text/plain', buffer: u16 });
@@ -155,10 +155,22 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.setInputFiles('#tc-file', { name: 'latin.txt', mimeType: 'text/plain', buffer: Buffer.from([0x63, 0x61, 0x66, 0xe9]) });
   await page.waitForFunction(() => document.querySelector('#tc-input').value === 'café');
   assert.match(await text('#tc-note'), /read as Windows-1252/);
+  // Regression: a file's CR LF line endings became LF in the box without a word, so the count
+  // could differ from tiktoken on the raw file, and the note's character count (with the CRs, or
+  // an emoji as two) disagreed with the Characters figure; the note now leaves the count to it.
+  // tiktoken o200k_base: 'one\ntwo\n' -> [690, 198, 38397, 198]; 'one\r\ntwo\r\n' -> [690, 370, 38397, 370].
+  await setView('ids');
+  await page.setInputFiles('#tc-file', { name: 'crlf.txt', mimeType: 'text/plain', buffer: Buffer.from('one\r\ntwo\r\n', 'utf8') });
+  await page.waitForFunction(() => document.querySelector('#tc-ids-text').value === '[690, 198, 38397, 198]');
+  assert.equal(await text('#tc-note'), 'Opened crlf.txt. Its Windows line endings (CRLF) are counted as LF, the way a text box stores them, so tiktoken run on the raw file can give a slightly different count.');
+  assert.equal(await text('#tc-chars'), '8');
+  await page.setInputFiles('#tc-file', { name: 'mac.txt', mimeType: 'text/plain', buffer: Buffer.from('one\rtwo', 'utf8') });
+  await page.waitForFunction(() => document.querySelector('#tc-input').value === 'one\ntwo');
+  assert.match(await text('#tc-note'), /^Opened mac\.txt\. Its old Mac line endings \(CR\) are counted as LF/);
   await page.setInputFiles('#tc-file', { name: 'doc.pdf', mimeType: 'application/pdf', buffer: Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0x02]) });
   await page.waitForFunction(() => document.querySelector('#tc-msg').textContent.length > 0);
   assert.match(await text('#tc-msg'), /doc\.pdf is not a plain-text file/);
-  assert.equal(await page.inputValue('#tc-input'), 'café');
+  assert.equal(await page.inputValue('#tc-input'), 'one\ntwo');
 
   // cl100k_base loads on demand and matches tiktoken too.
   await page.click('#tc-n-cl100k_base button');

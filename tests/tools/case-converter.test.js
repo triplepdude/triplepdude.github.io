@@ -1,5 +1,5 @@
 // Title case expectations follow the published rules of each style guide
-// (Chicago 8.159-8.161, AP composition titles, APA 7 title case, MLA 9).
+// (Chicago 18th edition 8.160-8.162, AP composition titles, APA 7 title case, MLA 9).
 // Unicode expectations were computed with Python's str.upper/lower/title/swapcase.
 const fs = require('fs');
 
@@ -30,14 +30,37 @@ module.exports = async ({ page, open, assert }) => {
     'a guide to state-of-the-art tools for self-report measures': {
       chicago: 'A Guide to State-of-the-Art Tools for Self-Report Measures', ap: 'A Guide to State-of-the-Art Tools for Self-Report Measures',
       apa: 'A Guide to State-of-the-Art Tools for Self-Report Measures', mla: 'A Guide to State-of-the-Art Tools for Self-Report Measures' },
-    // Chicago keeps the part after a prefix lowercase unless typed as a proper noun.
+    // Chicago's 18th edition (8.162) capitalizes the part after a prefix too;
+    // the 17th kept it lowercase (Anti-inflammatory).
     'anti-inflammatory drugs for non-English speakers': {
-      chicago: 'Anti-inflammatory Drugs for Non-English Speakers', ap: 'Anti-Inflammatory Drugs for Non-English Speakers',
+      chicago: 'Anti-Inflammatory Drugs for Non-English Speakers', ap: 'Anti-Inflammatory Drugs for Non-English Speakers',
       apa: 'Anti-Inflammatory Drugs for Non-English Speakers', mla: 'Anti-Inflammatory Drugs for Non-English Speakers' },
-    // Long prepositions: lowercase in Chicago and MLA, capitalized in AP and APA.
+    // Long prepositions: lowercase in MLA; capitalized in AP and APA (four
+    // letters or more) and in Chicago since its 18th edition (five or more).
     'walking through the valley between two hills': {
-      chicago: 'Walking through the Valley between Two Hills', ap: 'Walking Through the Valley Between Two Hills',
+      chicago: 'Walking Through the Valley Between Two Hills', ap: 'Walking Through the Valley Between Two Hills',
       apa: 'Walking Through the Valley Between Two Hills', mla: 'Walking through the Valley between Two Hills' },
+    'a river runs through it': { chicago: 'A River Runs Through It', ap: 'A River Runs Through It', apa: 'A River Runs Through It', mla: 'A River Runs through It' },
+    'much ado about nothing': { chicago: 'Much Ado About Nothing', ap: 'Much Ado About Nothing', apa: 'Much Ado About Nothing', mla: 'Much Ado about Nothing' },
+    'once upon a time in the west': { chicago: 'Once upon a Time in the West', ap: 'Once Upon a Time in the West', apa: 'Once Upon a Time in the West', mla: 'Once upon a Time in the West' },
+    // Regression: abbreviations typed in lower case were copied as if they
+    // were file names (u.s. economy -> "u.s. Economy"). e.g., i.e., a.m. and
+    // p.m. stay lowercase inside a title; t.co and x.ai are web addresses.
+    'u.s. economy grows': { chicago: 'U.S. Economy Grows', ap: 'U.S. Economy Grows', apa: 'U.S. Economy Grows', mla: 'U.S. Economy Grows' },
+    'life in the u.k. and the e.u.': {
+      chicago: 'Life in the U.K. and the E.U.', ap: 'Life in the U.K. and the E.U.', apa: 'Life in the U.K. and the E.U.', mla: 'Life in the U.K. and the E.U.' },
+    'w.e.b. du bois: a biography': {
+      chicago: 'W.E.B. Du Bois: A Biography', ap: 'W.E.B. Du Bois: A Biography', apa: 'W.E.B. Du Bois: A Biography', mla: 'W.E.B. Du Bois: A Biography' },
+    'u.s.-based firms hire ph.d. students': {
+      chicago: 'U.S.-Based Firms Hire Ph.D. Students', ap: 'U.S.-Based Firms Hire Ph.D. Students',
+      apa: 'U.S.-Based Firms Hire Ph.D. Students', mla: 'U.S.-Based Firms Hire Ph.D. Students' },
+    'an ed.d. or m.ed. degree': { chicago: 'An Ed.D. or M.Ed. Degree', ap: 'An Ed.D. or M.Ed. Degree', apa: 'An Ed.D. or M.Ed. Degree', mla: 'An Ed.D. or M.Ed. Degree' },
+    // The possessive too (gave "The U.k.'s Plan").
+    "the u.k.'s plan for growth": {
+      chicago: "The U.K.'s Plan for Growth", ap: "The U.K.'s Plan for Growth", apa: "The U.K.'s Plan for Growth", mla: "The U.K.'s Plan for Growth" },
+    'the a.m. show at 5 p.m.': { chicago: 'The a.m. Show at 5 p.m.', ap: 'The a.m. Show at 5 p.m.', apa: 'The a.m. Show at 5 p.m.', mla: 'The a.m. Show at 5 p.m.' },
+    'e.g. links on t.co and x.ai': {
+      chicago: 'E.g. Links on t.co and x.ai', ap: 'E.g. Links on t.co and x.ai', apa: 'E.g. Links on t.co and x.ai', mla: 'E.g. Links on t.co and x.ai' },
     // Chicago lowercases only and, but, for, or, nor; AP, APA and MLA also yet and so.
     'small yet mighty, so what is it': {
       chicago: 'Small Yet Mighty, So What Is It', ap: 'Small yet Mighty, so What Is It',
@@ -47,13 +70,14 @@ module.exports = async ({ page, open, assert }) => {
     'part one - a new hope as told by an old man': {
       chicago: 'Part One - A New Hope as Told by an Old Man', ap: 'Part One - A New Hope as Told by an Old Man',
       apa: 'Part One - A New Hope as Told by an Old Man', mla: 'Part One - A New Hope as Told by an Old Man' },
-    // Regressions: "A" in A-list is a word, not a prefix like anti- (Chicago
-    // gave "A-list"); a number before a full stop is not an initial, so the
-    // next word starts a new phrase; versus is a preposition.
+    // Regressions: Chicago gave "A-list" when it still had a prefix rule; a
+    // number before a full stop is not an initial, so the next word starts a
+    // new phrase; versus is a preposition of six letters, so only MLA keeps it
+    // lowercase, while vs. stays lowercase in all four.
     'a-list celebrities': { chicago: 'A-List Celebrities', ap: 'A-List Celebrities', apa: 'A-List Celebrities', mla: 'A-List Celebrities' },
     'chapter 1. the beginning': { chicago: 'Chapter 1. The Beginning', ap: 'Chapter 1. The Beginning', apa: 'Chapter 1. The Beginning', mla: 'Chapter 1. The Beginning' },
     'batman vs. superman versus the world': {
-      chicago: 'Batman vs. Superman versus the World', ap: 'Batman vs. Superman Versus the World',
+      chicago: 'Batman vs. Superman Versus the World', ap: 'Batman vs. Superman Versus the World',
       apa: 'Batman vs. Superman Versus the World', mla: 'Batman vs. Superman versus the World' },
   };
   for (const [input, byStyle] of Object.entries(title)) {
@@ -89,6 +113,16 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await conv('visit example.com. then leave'), 'Visit example.com. Then leave');
   assert.equal(await conv('item 1. second thing. it costs 3.5. then more'), 'Item 1. Second thing. It costs 3.5. Then more');
   assert.equal(await conv('see e.g. this one, or ask j. smith'), 'See e.g. this one, or ask j. smith');
+  // Regression: an abbreviation typed in lower case kept its small letter at
+  // the start of a sentence ("u.s. economy grows").
+  assert.equal(await conv('u.s. economy grows. the u.k. too. e.g. this. ph.d. students'),
+    'U.S. economy grows. The u.k. too. E.g. this. Ph.D. students');
+  assert.equal(await conv('u.s.-based firms. at 5 p.m. we left'), 'U.S.-based firms. At 5 p.m. we left');
+  assert.equal(await conv("a.i. and j.k. rowling's ph.d. at 5 p.m.", 'capital'), "A.I. And J.K. Rowling's Ph.D. At 5 P.M.");
+  assert.equal(await conv('the U.S. and x.ai', 'capital'), 'The U.S. And x.ai');
+  // A possessive stays with its abbreviation (Capitalize Each Word gave "U.K.'S").
+  assert.equal(await conv("the u.k.’s plan", 'capital'), 'The U.K.’s Plan');
+  assert.equal(await conv("u.k.'s plan. the u.s.'s too", 'sentence'), "U.K.'s plan. The u.s.'s too");
   // Regression: a kept brand name at the start of a sentence or in
   // Capitalize Each Word was capitalized ("IPhone").
   assert.equal(await conv('iPhone sales rise. eBay falls', 'sentence'), 'iPhone sales rise. eBay falls');
@@ -156,7 +190,7 @@ module.exports = async ({ page, open, assert }) => {
       return performance.now() - a;
     });
   };
-  for (const t of ['!'.repeat(50000) + 'a', 'a' + '!'.repeat(50000) + 'a', 'a@' + '.'.repeat(50000) + '@']) {
+  for (const t of ['!'.repeat(50000) + 'a', 'a' + '!'.repeat(50000) + 'a', 'a@' + '.'.repeat(50000) + '@', 'a.'.repeat(25000) + 'b!c']) {
     for (const c of ['title', 'sentence', 'capital']) {
       const ms = await timed(t, c);
       assert.ok(ms < 250, `${c} on ${t.slice(0, 3)}…: ${Math.round(ms)} ms`);

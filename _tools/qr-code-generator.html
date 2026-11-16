@@ -488,6 +488,12 @@ faq:
     if (hits.length) return { utc: hits[0], exists: true, twice: hits[hits.length - 1] !== hits[0] };
     return { utc: wall - offs[0], exists: false, twice: false };
   }
+  // The clock time that tz shows at a UTC instant, with the date when it is not the typed
+  // day (Nuuk, for one, skips 23:00-23:59 on a Saturday).
+  function shownTime(utc, tz, typed) {
+    var w = wallClock(utc, tz), d = new Date(w), t = pad(d.getUTCHours(), 2) + ':' + pad(d.getUTCMinutes(), 2);
+    return Math.floor(w / 864e5) === Math.floor(typed / 864e5) ? t : t + ' on ' + d.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' });
+  }
   function icsDate(ms) { var d = new Date(ms); return pad(d.getUTCFullYear(), 4) + pad(d.getUTCMonth() + 1, 2) + pad(d.getUTCDate(), 2); }
   function icsTime(ms) { var d = new Date(ms); return icsDate(ms) + 'T' + pad(d.getUTCHours(), 2) + pad(d.getUTCMinutes(), 2) + pad(d.getUTCSeconds(), 2); }
   function parseDate(s) {
@@ -624,21 +630,24 @@ faq:
       } else {
         var st = parseTime($('#qg-ev-stime').value), et = parseTime($('#qg-ev-etime').value);
         if (st === null) { bad(r, 'qg-ev-stime', 'Enter the start time, or tick All-day event.'); return; }
-        var fmt, sWall = sd + st, eWall = ed !== null && et !== null ? ed + et : (ed === null && et !== null ? sd + et : null);
+        var sWall = sd + st, eWall = ed !== null && et !== null ? ed + et : (ed === null && et !== null ? sd + et : null);
         if (ed !== null && et === null) { bad(r, 'qg-ev-etime', 'Enter the end time, or clear the end date.'); return; }
-        if (tz === 'floating') {
-          fmt = function (w) { return icsTime(w); };
-        } else {
-          fmt = function (w, which) {
-            var z = zoneToUtc(w, tz);
-            if (!z.exists) r.warnings.push('The ' + which + ' time does not exist in ' + tz + ' because the clocks go forward that day, so phones will show ' + new Date(z.utc).toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' }) + '.');
-            if (z.twice) r.warnings.push('The ' + which + ' time happens twice in ' + tz + ' because the clocks go back that day. The first one is used.');
-            return icsTime(z.utc) + 'Z';
-          };
-        }
         if (eWall !== null && eWall < sWall) { bad(r, eWall - sWall > -864e5 && ed === sd ? 'qg-ev-etime' : 'qg-ev-edate', 'The event ends before it starts.'); return; }
-        L.push('DTSTART:' + fmt(sWall, 'start'));
-        if (eWall !== null) L.push('DTEND:' + fmt(eWall, 'end'));
+        // The instant of a typed time: floating times stay as they are, zoned ones become UTC.
+        var at = function (w, which) {
+          if (tz === 'floating') return { utc: w };
+          var z = zoneToUtc(w, tz);
+          if (!z.exists) r.warnings.push('The ' + which + ' time does not exist in ' + tz + ' because the clocks go forward that day, so phones will show ' + shownTime(z.utc, tz, w) + '.');
+          if (z.twice) r.warnings.push('The ' + which + ' time happens twice in ' + tz + ' because the clocks go back that day. The first one is used.');
+          return z;
+        };
+        var s = at(sWall, 'start'), e = eWall !== null ? at(eWall, 'end') : null, zulu = tz === 'floating' ? '' : 'Z';
+        // A start in the hour the clocks skip moves later and can reach or pass an end just
+        // after the gap (02:30-03:30 on the night the clocks go from 02:00 to 03:00 becomes
+        // 03:30-03:30), but DTEND must be later than DTSTART (RFC 5545 section 3.8.2.2).
+        if (e && eWall > sWall && e.utc <= s.utc) { bad(r, 'qg-ev-stime', 'The start time does not exist in ' + tz + ' because the clocks go forward that day. Phones would show it as ' + shownTime(s.utc, tz, sWall) + (e.utc < s.utc ? ', after the end time' : ', the same as the end time') + ', so change the start or end time.'); return; }
+        L.push('DTSTART:' + icsTime(s.utc) + zulu);
+        if (e) L.push('DTEND:' + icsTime(e.utc) + zulu);
       }
       // iCalendar dates have four-digit years (8 digits for the date; 9 means year 10000),
       // so nothing can end after 9999 in UTC, or on the day after an all-day event's last day.

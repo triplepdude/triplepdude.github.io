@@ -71,7 +71,8 @@ howto: |
 
   **Download .diff** saves a unified diff, the format of `diff -u` and
   `git diff`, with three lines of context. It is made from the exact texts,
-  even with an ignore option on, and keeps each file's line endings, so
+  even with an ignore option on, and keeps each file's line endings and byte
+  order mark, so for files saved as UTF-8
   `patch original.txt < text-compare.diff` turns the original into the changed
   file. In JSON mode it compares the formatted JSON instead. When texts differ
   almost everywhere, the search for the smallest patch stops after a few
@@ -635,7 +636,10 @@ faq:
       var blocks = [], cur = [], lines = 0, total = 0, cut = false;
       function flush() {
         if (!cur.length) return;
-        blocks.push('<pre class="tc-blk" style="contain-intrinsic-size:auto ' + Math.ceil(lines * lineHeight) + 'px">' + cur.join('') + '</pre>');
+        // The HTML parser drops a line break right after <pre>, so a block that
+        // starts with an empty line gets a second one to keep it.
+        var body = cur.join('');
+        blocks.push('<pre class="tc-blk" style="contain-intrinsic-size:auto ' + Math.ceil(lines * lineHeight) + 'px">' + (body.charAt(0) === '\n' ? '\n' : '') + body + '</pre>');
         cur = [];
         lines = 0;
       }
@@ -994,6 +998,10 @@ faq:
     return m.eol === 'CRLF' ? v.replace(/\n/g, '\r\n') : m.eol === 'CR' ? v.replace(/\n/g, '\r') : v;
   }
 
+  // A file saved as UTF-8 with a byte order mark starts with U+FEFF; the patch keeps it, so that
+  // its first line matches the file, while the comparison leaves it out.
+  function bom(side) { return meta[side] && meta[side].bom ? '\uFEFF' : ''; }
+
   function options() {
     var ignoreEOL = TT.$('#tc-eol').checked, json = TT.$('#tc-json').checked;
     var pa = exact('a'), pb = exact('b');
@@ -1001,8 +1009,9 @@ faq:
     return {
       a: ignoreEOL ? ta.value : pa,
       b: ignoreEOL ? tb.value : pb,
-      pa: pa,
-      pb: pb,
+      pa: bom('a') + pa,
+      pb: bom('b') + pb,
+      boms: [bom('a'), bom('b')],
       names: [meta.a ? meta.a.name : 'original' + ext, meta.b ? meta.b.name : 'changed' + ext],
       mode: radio('tc-mode'),
       view: radio('tc-view'),
@@ -1080,9 +1089,11 @@ faq:
   function identicalMessage(r, o) {
     if (r.sameText) {
       if (o.json && o.pa !== o.pb) return 'The JSON is equivalent: the texts differ only in formatting' + (o.sortKeys ? ' or key order.' : '.');
-      if (o.pa === o.pb) return 'The two texts are identical.';
-      if (o.ignoreEOL && o.pa.replace(/\r\n?/g, '\n') === o.pb.replace(/\r\n?/g, '\n')) return 'No differences, ignoring line endings.';
-      return 'The two texts are identical.';
+      // The exact texts can still differ in line endings, and in a byte order mark that only one
+      // file starts with; the .diff then changes those lines.
+      var ma = o.boms[0].length, mb = o.boms[1].length;
+      var msg = o.pa.slice(ma) === o.pb.slice(mb) ? 'The two texts are identical.' : 'No differences, ignoring line endings.';
+      return ma === mb ? msg : msg.slice(0, -1) + ', but only ' + o.names[ma ? 0 : 1] + ' starts with a byte order mark.';
     }
     if (o.ignoreWS || o.ignoreCase) return 'No differences, ignoring ' + (o.ignoreWS && o.ignoreCase ? 'whitespace and case' : o.ignoreWS ? 'whitespace' : 'case') + '.';
     return 'The texts are identical apart from a line break at the very end.';
@@ -1234,8 +1245,15 @@ faq:
       return;
     }
     TT.download('text-compare.diff', patch, 'text/x-diff;charset=utf-8');
-    if (coarse) okBox.textContent = 'These texts differ in very many places, so the patch lists some changes as whole removed and added blocks. It still applies correctly.';
+    var notes = [coarse ? 'These texts differ in very many places, so the patch lists some changes as whole removed and added blocks. It still applies correctly.' : '', encodingNote()];
+    if (coarse || notes[1]) okBox.textContent = notes.join(' ').trim();
   });
+  // patch matches bytes and the .diff is UTF-8, so it does not apply to a file saved in another encoding.
+  function encodingNote() {
+    if (meta.a && meta.a.notUtf8) return 'This patch is UTF-8 text, but ' + meta.a.name + ' is saved as ' + meta.a.notUtf8 + ', so save it as UTF-8 before running patch.';
+    if (meta.b && meta.b.notUtf8) return 'This patch is UTF-8 text, so the patched file will be UTF-8, while ' + meta.b.name + ' is saved as ' + meta.b.notUtf8 + '.';
+    return '';
+  }
 
   // ---------- HTML report: the comparison as shown, as one self-contained page ----------
   var TOKENS = ':root{--bg:#f7f7f5;--surface:#fff;--surface-2:#f1f2f0;--text:#16181d;--muted:#5b6270;--border:#dfe2e6;--accent:#1f6f4a;--accent-text:#fff;--danger:#b42318;' +
@@ -1263,13 +1281,15 @@ faq:
       items.push(['del', r.tokens.del, unit[0] + ' removed', unit[1] + ' removed']);
     }
     var title = 'Comparison of ' + o.names[0] + ' and ' + o.names[1];
+    // innerHTML leaves out the second line break that keeps an empty first line of a <pre> (see pane()).
+    var shown = out.innerHTML.replace(/(<pre\b[^>]*>)\n/g, '$1\n\n');
     var html = '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
       '<title>' + escHtml(title) + '</title>\n<style>\n' + TOKENS + '\n' + TT.$('#tc-style').textContent.trim() + '\n</style>\n</head>\n<body>\n<main class="tc">\n' +
       '<h1>' + escHtml(title) + '</h1>\n<p class="tc-meta">Compared by ' + mode + (o.json ? ' as JSON' + (o.sortKeys ? ' with sorted keys' : '') : '') +
       (ignored.length ? ', ignoring ' + ignored.join(', ') : '') + (o.hideSame ? ', unchanged lines folded' : '') + '. Saved ' + escHtml(new Date().toLocaleString()) + '.</p>\n' +
       '<ul class="tc-sum">' + items.map(function (it) { return '<li class="' + it[0] + '"><b>' + it[1].toLocaleString() + '</b> ' + (it[1] === 1 ? it[2] : it[3]) + '</li>'; }).join('') + '</ul>\n' +
       (okBox.textContent ? '<p class="tc-meta">' + escHtml(okBox.textContent) + '</p>\n' : '') +
-      '<div class="tc-out">' + out.innerHTML + '</div>\n</main>\n</body>\n</html>\n';
+      '<div class="tc-out">' + shown + '</div>\n</main>\n</body>\n</html>\n';
     TT.download('text-compare.html', html, 'text/html;charset=utf-8');
     if (btn) TT.flash(btn, 'Saved');
   }
@@ -1305,15 +1325,16 @@ faq:
     el.textContent = m.name + ' \u00B7 ' + m.enc + ' \u00B7 ' + EOL_NAMES[m.eol] + (box(side).value === m.norm ? '' : ' \u00B7 edited');
   }
 
+  // enc is shown under the box; notUtf8 names an encoding the UTF-8 .diff can't patch.
   function decode(bytes) {
-    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), enc: 'UTF-16 LE' };
-    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), enc: 'UTF-16 BE' };
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), enc: 'UTF-16 LE', notUtf8: 'UTF-16 LE' };
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), enc: 'UTF-16 BE', notUtf8: 'UTF-16 BE' };
     var bom = bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
     try {
-      return { text: new TextDecoder('utf-8', { fatal: true }).decode(bom ? bytes.subarray(3) : bytes), enc: bom ? 'UTF-8 with BOM' : 'UTF-8' };
+      return { text: new TextDecoder('utf-8', { fatal: true }).decode(bom ? bytes.subarray(3) : bytes), enc: bom ? 'UTF-8 with BOM' : 'UTF-8', bom: bom };
     } catch (e) {
       // Not valid UTF-8: most likely a Windows "ANSI" file.
-      return { text: new TextDecoder('windows-1252').decode(bytes), enc: 'Windows-1252 (not valid UTF-8)' };
+      return { text: new TextDecoder('windows-1252').decode(bytes), enc: 'Windows-1252 (not valid UTF-8)', notUtf8: 'Windows-1252' };
     }
   }
 
@@ -1331,7 +1352,7 @@ faq:
         return;
       }
       var norm = d.text.replace(/\r\n?/g, '\n');
-      meta[side] = { name: f.name, raw: d.text, norm: norm, eol: lineEndings(d.text), enc: d.enc };
+      meta[side] = { name: f.name, raw: d.text, norm: norm, eol: lineEndings(d.text), enc: d.enc, bom: !!d.bom, notUtf8: d.notUtf8 || '' };
       box(side).value = norm;
       showInfo(side);
       compare();

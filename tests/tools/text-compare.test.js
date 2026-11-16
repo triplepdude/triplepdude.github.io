@@ -165,7 +165,7 @@ module.exports = async ({ page, open, assert }) => {
   await page.setInputFiles('#tc-file-b', { name: 'b.txt', mimeType: 'text/plain', buffer: Buffer.from('one\ntwo\n', 'utf8') });
   await page.waitForFunction(() => document.querySelector('#tc-b').value === 'one\ntwo\n');
   await settle();
-  assert.equal(await page.textContent('#tc-ok'), 'No differences, ignoring line endings.');
+  assert.equal(await page.textContent('#tc-ok'), 'No differences, ignoring line endings, but only a.txt starts with a byte order mark.');
   assert.equal(await page.textContent('#tc-info-a'), 'a.txt · UTF-8 with BOM · Windows line endings (CRLF)');
   assert.equal(await page.textContent('#tc-info-b'), 'b.txt · UTF-8 · Unix line endings (LF)');
   // With line endings compared, both lines differ and each carriage return is shown as a label.
@@ -173,9 +173,11 @@ module.exports = async ({ page, open, assert }) => {
   assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 2, same: 0 });
   assert.deepEqual(await texts('.tc-split del .tc-inv'), ['CR', 'CR']);
   assert.equal(await page.locator('.tc-split ins').count(), 0);
-  // GNU diff -u of the two files (CRLF lines keep their CR, as diff writes them).
+  // GNU diff -u of the two files: CRLF lines keep their CR, and line 1 keeps a.txt's byte
+  // order mark (regression: without it, patch rejected the hunk).
   let [eolDl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
-  assert.equal(fs.readFileSync(await eolDl.path(), 'utf8'), '--- a.txt\n+++ b.txt\n@@ -1,2 +1,2 @@\n-one\r\n-two\r\n+one\n+two\n');
+  assert.equal(fs.readFileSync(await eolDl.path(), 'utf8'), '--- a.txt\n+++ b.txt\n@@ -1,2 +1,2 @@\n-\uFEFFone\r\n-two\r\n+one\n+two\n');
+  assert.equal(await page.textContent('#tc-ok'), '', 'no encoding note for UTF-8 files');
   await setOpt('#tc-eol', true);
   await page.setInputFiles('#tc-file-b', { name: 'bin.dat', mimeType: 'application/octet-stream', buffer: Buffer.from([0, 1, 2, 0, 255]) });
   await page.waitForFunction(() => /binary/.test(document.querySelector('#tc-error').textContent));
@@ -188,6 +190,10 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await page.textContent('#tc-info-a'), /^u16le\.txt \u00B7 UTF-16 LE \u00B7 Windows line endings/);
   await page.setInputFiles('#tc-file-a', { name: 'u16be.txt', mimeType: 'text/plain', buffer: Buffer.concat([Buffer.from([0xFE, 0xFF]), Buffer.from('caf\u00E9\n', 'utf16le').swap16()]) });
   await page.waitForFunction(() => document.querySelector('#tc-a').value === 'caf\u00E9\n');
+  // Regression: the .diff is UTF-8, so it did not apply to a UTF-16 original, without a word.
+  await settle();
+  [eolDl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
+  assert.equal(await page.textContent('#tc-ok'), 'This patch is UTF-8 text, but u16be.txt is saved as UTF-16 BE, so save it as UTF-8 before running patch.');
 
   // ---- 5,000 lines: 100 edited, 20 inserted, 20 deleted ----
   const big = [], changed = [];
@@ -333,6 +339,20 @@ module.exports = async ({ page, open, assert }) => {
   await page.setInputFiles('#tc-file-a', { name: 'ansi.txt', mimeType: 'text/plain', buffer: Buffer.from([0x63, 0x61, 0x66, 0xE9, 0x20, 0x80, 0x0A]) });
   await page.waitForFunction(() => document.querySelector('#tc-a').value === 'café €\n');
   assert.match(await page.textContent('#tc-info-a'), /^ansi\.txt · Windows-1252 \(not valid UTF-8\)/);
+  // The UTF-8 .diff does not apply to it, and the page says so; as the changed file, it
+  // becomes UTF-8 when patched.
+  await page.evaluate(() => {
+    const B = document.querySelector('#tc-b');
+    B.value = 'café €\nmore\n';
+    B.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  [dl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
+  assert.equal(await page.textContent('#tc-ok'), 'This patch is UTF-8 text, but ansi.txt is saved as Windows-1252, so save it as UTF-8 before running patch.');
+  await page.click('#tc-swap');
+  await settle();
+  [dl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
+  assert.equal(await page.textContent('#tc-ok'), 'This patch is UTF-8 text, so the patched file will be UTF-8, while ansi.txt is saved as Windows-1252.');
 
   // ---- CRLF files: the patch keeps their line endings, as `diff -u` does, so it applies to them.
   // Reference: GNU diff 3 on the same bytes. ----
@@ -353,6 +373,16 @@ module.exports = async ({ page, open, assert }) => {
   await settle();
   assert.match(await page.textContent('#tc-info-a'), /^b\.txt/);
   assert.match(await page.textContent('#tc-info-b'), /^a\.txt/);
+
+  // ---- Regression: for two UTF-8 files with a byte order mark and a changed first line, patch
+  // rejected the hunk, whose first line lacked the mark. Reference: GNU diff 3 on the same bytes. ----
+  await page.setInputFiles('#tc-file-a', { name: 'c.txt', mimeType: 'text/plain', buffer: Buffer.from('\uFEFFTitle\nsecond\nthird\n', 'utf8') });
+  await page.setInputFiles('#tc-file-b', { name: 'd.txt', mimeType: 'text/plain', buffer: Buffer.from('\uFEFFTitle changed\nsecond\nthird\n', 'utf8') });
+  await page.waitForFunction(() => document.querySelector('#tc-b').value === 'Title changed\nsecond\nthird\n');
+  await settle();
+  assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 1, same: 2 });
+  [dl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-download')]);
+  assert.equal(fs.readFileSync(await dl.path(), 'utf8'), '--- c.txt\n+++ d.txt\n@@ -1,3 +1,3 @@\n-\uFEFFTitle\n+\uFEFFTitle changed\n second\n third\n');
 
   // ---- Dropping a file on a box opens it there instead of leaving the page. ----
   const drop = (sel, files) => page.evaluate(([s, list]) => {
@@ -377,6 +407,30 @@ module.exports = async ({ page, open, assert }) => {
   await compare('zero\u200Bwidth \u202Eflip', 'zerowidth flip');
   assert.deepEqual(await texts('.tc-flow del'), ['ZWSP', 'RLO']);
   assert.equal(await page.getAttribute('.tc-flow del .tc-inv', 'title'), 'U+200B zero width space');
+
+  // ---- Regression: in word and character mode an empty first line of a 200-line block
+  // vanished, on the page and in the report (the HTML parser drops a line break right after
+  // <pre>): "\nTitle\n\nBody text.\n" showed 3 lines, a 601-line text 598. ----
+  const paneLines = (p, i) => p.evaluate(k => {
+    const c = document.querySelectorAll('.tc-pane')[k].cloneNode(true);
+    c.querySelectorAll('h2, .tc-nl').forEach(e => e.remove());
+    return c.textContent.split('\n').length - 1;
+  }, i);
+  for (const m of ['char', 'word']) {
+    await mode(m);
+    await compare('\nTitle\n\nBody text.\n', '\nTitle\n\nBody text changed.\n');
+    assert.deepEqual([await paneLines(page, 0), await paneLines(page, 1)], [4, 4], `${m} mode keeps the empty first line`);
+  }
+  const paras = ['Intro line'];
+  for (let i = 0; i < 300; i++) paras.push(`Paragraph ${i} has some words.`, '');
+  await compare(paras.join('\n') + '\n', paras.join('\n').replace('Paragraph 7 ', 'Paragraph seven ') + '\n');
+  assert.ok(await page.locator('.tc-pane').nth(0).locator('pre.tc-blk').count() >= 4);
+  assert.deepEqual([await paneLines(page, 0), await paneLines(page, 1)], [601, 601]);
+  const [bdl] = await Promise.all([page.waitForEvent('download'), page.click('#tc-html')]);
+  const blankView = await page.context().newPage();
+  await blankView.setContent(fs.readFileSync(await bdl.path(), 'utf8'));
+  assert.deepEqual([await paneLines(blankView, 0), await paneLines(blankView, 1)], [601, 601], 'the report keeps the empty lines');
+  await blankView.close();
   await mode('line');
 
   // ---- JSON: parsed, keys sorted and laid out the same way. Reference: Python json.dumps

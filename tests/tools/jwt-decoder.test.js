@@ -167,6 +167,32 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#jwt-token', makeToken({ alg: 'ES512' }, { sub: 'es' }, d => crypto.sign('sha512', d, { key: p521.privateKey, dsaEncoding: 'ieee-p1363' })));
   await page.fill('#jwt-key', p521.publicKey.export({ type: 'spki', format: 'pem' }));
   await verified('ES512 (P-521)');
+  // Regression: an EC JWK whose coordinate lost its leading zero bytes, as PyJWT 2.7's to_jwk
+  // writes it (RFC 7518 requires the full length), was refused: 'The JWK's "y" member defines an
+  // octet string of length 65 bytes but should be 66'. It now verifies, alone or in a JWKS, with a note.
+  const lead0 = s => Buffer.from(s, 'base64url')[0] === 0;
+  const unpad = s => { const b = Buffer.from(s, 'base64url'); return b64u(b.subarray(b.findIndex(x => x !== 0))); };
+  const ecWhere = (crv, ok) => { for (;;) { const k = crypto.generateKeyPairSync('ec', { namedCurve: crv }); if (ok(k.privateKey.export({ format: 'jwk' }))) return k; } };
+  const shortJwk = (k, members) => { const j = k.privateKey.export({ format: 'jwk' }); members.forEach(m => { j[m] = unpad(j[m]); }); return j; };
+  const short521 = ecWhere('P-521', j => lead0(j.y) && lead0(j.d) && !lead0(j.x));
+  const short256 = ecWhere('P-256', j => lead0(j.x) && !lead0(j.y));
+  for (const [alg, hash, k, crv, size, member] of [['ES512', 'sha512', short521, 'P-521', 66, 'y'], ['ES256', 'sha256', short256, 'P-256', 32, 'x']]) {
+    const pub = Object.assign(shortJwk(k, [member]), { kid: 'short' });
+    delete pub.d;
+    assert.ok(Buffer.from(pub[member], 'base64url').length < size);
+    await page.fill('#jwt-token', makeToken({ alg, kid: 'short' }, { sub: 'es' }, d => crypto.sign(hash, d, { key: k.privateKey, dsaEncoding: 'ieee-p1363' })));
+    await page.fill('#jwt-key', JSON.stringify(pub));
+    await verified(`${alg} JWK with a short "${member}"`);
+    assert.equal(await text('#jwt-key-note'), `This JWK's "${member}" is shorter than the ${size} bytes RFC 7518 requires for ${crv}, probably because the software that wrote it drops leading zero bytes. The page put them back; other software may refuse this key.`);
+    await page.fill('#jwt-key', JSON.stringify({ keys: [pub] }));
+    await verified(`${alg} JWKS with a short "${member}"`);
+  }
+  // A coordinate that is too long is still refused.
+  const longJwk = short256.publicKey.export({ format: 'jwk' });
+  longJwk.y = b64u(Buffer.concat([Buffer.from([0]), Buffer.from(longJwk.y, 'base64url')]));
+  await page.fill('#jwt-key', JSON.stringify(longJwk));
+  await expectVerify(/^The browser could not load this JWK/, 'a 33-byte coordinate');
+  assert.equal(await text('#jwt-key-note'), '');
 
   // EdDSA (Ed25519, RFC 8037).
   const ed = crypto.generateKeyPairSync('ed25519');
@@ -485,6 +511,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.equal(t.split('.')[2].length, { ES256: 86, ES384: 128, ES512: 176 }[alg], alg + ' raw R||S signature length');
     assert.equal(await verifyWithNode(alg, pair.publicKey), true, alg + ' verifies in Node (' + fmt + ' key)');
   }
+  // Regression: a private EC JWK with short coordinates could not sign. The token verifies in
+  // Node, and the public JWK shown has the full length.
+  const prevEs = await tokenOut();
+  await page.fill('#jb-key', JSON.stringify(shortJwk(short521, ['y', 'd'])));
+  await waitToken(prevEs);
+  assert.equal(await verifyWithNode('ES512', short521.publicKey), true, 'ES512 with a short private JWK verifies in Node');
+  assert.match(await text('#jb-note'), /^This JWK's "y" and "d" are shorter than the 66 bytes RFC 7518 requires for P-521/);
+  assert.equal(JSON.parse(await text('#jb-pub-jwk')).y, short521.publicKey.export({ format: 'jwk' }).y);
   // EdDSA is deterministic too.
   await page.selectOption('#jb-alg', 'EdDSA');
   await page.fill('#jb-key', ed.privateKey.export({ type: 'pkcs8', format: 'pem' }));

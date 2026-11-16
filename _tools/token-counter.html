@@ -34,9 +34,10 @@ howto: |
 
   Counts here match OpenAI's tiktoken library token for token. Like its
   `encode_ordinary`, special markers such as `<|endoftext|>` typed into the
-  text count as ordinary text. The open-weight gpt-oss models use
-  o200k_harmony, which only adds special tokens to o200k_base, so plain text
-  gives the same count.
+  text count as ordinary text. A text box stores line breaks as LF, so a file
+  with Windows (CRLF) line endings is counted as if it used LF. The open-weight
+  gpt-oss models use o200k_harmony, which only adds special tokens to
+  o200k_base, so plain text gives the same count.
 
   ## Claude and Gemini estimates
 
@@ -614,15 +615,16 @@ faq:
   }
 
   // ---------- Token views ----------
-  var WS_SYM = { ' ': '·', '\t': '→\t', '\n': '↵\n', '\r': '␍' };
+  // No CR: the text comes from the text box, which holds line breaks as LF only.
+  var WS_SYM = { ' ': '·', '\t': '→\t', '\n': '↵\n' };
   function appendText(el, str) {
     if (!wsBox.checked) { el.appendChild(document.createTextNode(str)); return; }
-    var re = /[ \t\r\n]+/g, last = 0, m;
+    var re = /[ \t\n]+/g, last = 0, m;
     while ((m = re.exec(str)) !== null) {
       if (m.index > last) el.appendChild(document.createTextNode(str.slice(last, m.index)));
       var w = document.createElement('span');
       w.className = 'tc-ws';
-      w.textContent = m[0].replace(/[ \t\r\n]/g, function (c) { return WS_SYM[c]; });
+      w.textContent = m[0].replace(/[ \t\n]/g, function (c) { return WS_SYM[c]; });
       el.appendChild(w);
       last = re.lastIndex;
     }
@@ -751,9 +753,14 @@ faq:
         msg.textContent = f.name + ' is not a plain-text file. For a PDF or Word document, copy its text and paste it here.';
         return;
       }
+      // A text box stores every line break as LF, so a CR never reaches the tokenizer.
       input.value = d.text;
+      var cr = d.text.indexOf('\r') < 0 ? '' : ' Its ' + (/\r\n/.test(d.text) ? 'Windows line endings (CRLF)' : 'old Mac line endings (CR)') +
+        ' are counted as LF, the way a text box stores them, so tiktoken run on the raw file can give a slightly different count.';
       var extra = files.length > 1 ? ' Only the first of the ' + files.length + ' files was opened.' : '';
-      note.textContent = 'Opened ' + f.name + ' (' + fmt(d.text.length) + ' characters' + (d.enc === 'UTF-8' ? '' : ', read as ' + d.enc) + ').' + extra;
+      // No character count here: the Characters figure counts what a reader sees as one
+      // character (an emoji with a skin tone is one), which a file's length does not.
+      note.textContent = 'Opened ' + f.name + (d.enc === 'UTF-8' ? '' : ' (read as ' + d.enc + ')') + '.' + cr + extra;
       onText();
     }, function () {
       msg.textContent = f.name + ' could not be read.';

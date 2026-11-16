@@ -19,28 +19,32 @@ howto: |
 
   | Style | Words kept lowercase | Last word |
   |---|---|---|
-  | Chicago | a, an, the; every preposition (of, in, on, with, from, into, between, without, versus and so on); and, but, for, or, nor; to and as | Always capitalized |
+  | Chicago (18th edition) | a, an, the; prepositions of four letters or fewer (of, in, on, with, from, into, over, upon); and, but, for, or, nor; to and as | Always capitalized |
   | AP | a, an, the; prepositions and conjunctions of three letters or fewer: and, as, at, but, by, for, if, in, nor, of, off, on, or, out, per, so, to, up, via, vs., yet | Always capitalized |
   | APA | The same short words as AP: articles, and conjunctions and prepositions of three letters or fewer | Not forced; a short final word such as *for* stays lowercase |
   | MLA | a, an, the; every preposition; and, but, for, nor, or, so, yet; to | Always capitalized |
 
   So *gone with the wind* becomes *Gone with the Wind* in Chicago and MLA, but
   *Gone With the Wind* in AP and APA, which capitalize words of four letters or
-  more. Short verbs and pronouns such as *Is*, *Be* and *It* are always
-  capitalized.
+  more. Only MLA keeps a long preposition such as *through* lowercase (*A River
+  Runs through It*). Short verbs and pronouns such as *Is*, *Be* and *It* are
+  always capitalized.
 
   Hyphenated compounds: the first part is always capitalized, and later parts
-  follow the same rules, as in *State-of-the-Art* or *Self-Report*. Chicago
-  keeps the part after a prefix such as anti-, pre- or non- lowercase
-  (*Anti-inflammatory*), unless you typed it with a capital (*Non-English*).
+  follow the same rules, as in *State-of-the-Art*, *Self-Report* and
+  *Anti-Inflammatory*. Chicago's 18th edition (2024) capitalizes long
+  prepositions and the part after a prefix; earlier editions kept both
+  lowercase.
 
   ## What the converter can't know
 
-  - A word like *up*, *down*, *off* or *out* right after a verb (*Look Up*)
-    works as an adverb, which Chicago and MLA capitalize. The tool treats it as
-    a preposition, so fix phrasal verbs by hand.
-  - *After*, *before*, *since* and *until* are treated as prepositions, even
-    when they start a clause.
+  - A word like *up*, *down*, *off* or *out* right after a verb (*Look Up*,
+    *Turn Off*) works as an adverb, which every style capitalizes. The tool
+    treats it as a preposition, so fix phrasal verbs by hand.
+  - AP capitalizes *to* in an infinitive (*What I Want To Be*). The tool can't
+    tell it from the preposition and keeps it lowercase.
+  - In MLA, *after*, *before*, *since* and *until* are treated as
+    prepositions, even when they start a clause.
   - Sentence case can't tell names from ordinary words, so capitalize proper
     nouns yourself. It does know the pronoun *I* and abbreviations like *e.g.*
   - Web addresses, email addresses and file names such as *example.com* are
@@ -140,7 +144,7 @@ faq:
   <div class="field" id="cc-style-field">
     <label for="cc-style">Title case style</label>
     <select id="cc-style">
-      <option value="chicago" selected>Chicago Manual of Style</option>
+      <option value="chicago" selected>Chicago Manual of Style (18th ed.)</option>
       <option value="ap">AP Stylebook</option>
       <option value="apa">APA Style</option>
       <option value="mla">MLA Handbook</option>
@@ -190,8 +194,11 @@ faq:
   function set(s) { var o = Object.create(null); s.split(' ').forEach(function (w) { o[w] = true; }); return o; }
   var PREPOSITIONS = 'aboard about above across after against along alongside amid amidst among amongst around as at atop before behind below beneath beside besides between beyond by despite down during except for from in inside into of off on onto out outside over per since through throughout till to toward towards under underneath until unto up upon versus via vs with within without';
   var MINOR = {
-    // Chicago Manual of Style: articles, all prepositions, and/but/for/or/nor, to, as.
-    chicago: set('a an the and but for or nor to as ' + PREPOSITIONS),
+    // Chicago Manual of Style, 18th edition (8.160): articles, prepositions of
+    // four letters or fewer, and/but/for/or/nor, to, as. Editions up to the
+    // 17th kept every preposition lowercase, and the part after a prefix such
+    // as anti- (8.162 now capitalizes it: Anti-Intellectual).
+    chicago: set('a an the and but for or nor to as ' + PREPOSITIONS.split(' ').filter(function (w) { return w.length <= 4; }).join(' ')),
     // AP: articles, and prepositions and conjunctions of three letters or fewer.
     ap: set('a an the and as at but by for if in nor of off on or out per so to up via vs yet'),
     // APA: minor words of three letters or fewer (conjunctions, articles, short prepositions).
@@ -200,8 +207,6 @@ faq:
     mla: set('a an the and but for nor or so yet to ' + PREPOSITIONS)
   };
   var LAST_WORD_RULE = { chicago: true, ap: true, apa: false, mla: true };
-  // Chicago 8.161: after a prefix that can't stand alone, the next part stays lowercase.
-  var PREFIXES = set('anti bi co counter de e extra hyper infra inter intra macro micro mid mini multi neo non post pre pro pseudo re semi sub super supra trans tri ultra un');
   var ABBREVIATIONS = set('mr mrs ms mx dr prof sr jr st mt ft vs cf al fig figs approx dept gen gov capt col lt sgt rev hon');
 
   // Title-case forms that are not simply the upper case (Unicode SpecialCasing).
@@ -263,9 +268,32 @@ faq:
     var e = edges(chunk), s = e[1];
     if (!s) return false;
     var path = /(?:\.{1,2}|~)?\/$/.exec(e[0]); // /usr, ./file, ~/docs
+    if (!path && hasDotted(s)) return false;
     return VERBATIM.test(path ? path[0] + s : s);
   }
-  // e.g, i.e, a.m, U.S, Ph.D: a full stop after these does not end a sentence.
+  // Abbreviations with full stops (u.s., j.k., w.e.b., ph.d.) are words, not file
+  // names: up to six single letters, or one of a few degrees. x.ai and t.co stay
+  // addresses. The bound keeps WORD linear on a long run of letters and dots.
+  var DOTTED = /^(?:ph\.d|ed\.d|[dm]\.phil|[bm]\.sc|[bm]\.ed|(?:\p{L}\.){1,5}\p{L})$/iu;
+  // These keep their small letters inside a title or sentence.
+  var LOWER_DOTTED = set('e.g i.e a.m p.m');
+  // A possessive after one: u.k.'s -> U.K.'s.
+  var POSSESSIVE = /\.?['’]s$/i;
+  // u.s. or u.s.-based: each part is a dotted abbreviation or a plain word.
+  function hasDotted(s) {
+    var found = false;
+    return s.split(/[-‐‑]/).every(function (p) {
+      var c = edges(p)[1];
+      if (DOTTED.test(c)) return (found = true);
+      return /^[\p{L}\p{M}\p{N}'’]*$/u.test(c);
+    }) && found;
+  }
+  // u.s -> U.S, ph.d -> Ph.D: a capital at the start of every part.
+  function dottedCap(w) {
+    return lower(w).replace(/(^|\.)(\p{L})/gu, function (m, dot, ch) { return dot + titleChar(ch); });
+  }
+  // A full stop after an abbreviation left as typed, such as LL.B, does not end a
+  // sentence (nor, as a side effect, after a short address such as t.co).
   var DOTTED_ABBR = /^(?:\p{L}{1,2}\.)+\p{L}{1,2}$/u;
   // A single letter before a full stop is an initial (J. Smith); I is a word.
   function isInitial(w) { return /^\p{L}$/u.test(w) && !/^[iI]$/.test(w); }
@@ -274,7 +302,7 @@ faq:
   // ---------- Title case ----------
   var lowered = [];
   function titleLine(line, style) {
-    var keepOn = opts.keep && lineHasLower(line), typed = lineHasLower(line);
+    var keepOn = opts.keep && lineHasLower(line);
     var items = [], pieces = [];
     function endPhrase() { if (items.length) items[items.length - 1].ends = true; }
     line.split(/(\s+)/).forEach(function (chunk) {
@@ -308,27 +336,29 @@ faq:
       if (it.verbatim) { it.out = it.text; return; }
       var first = i === 0 || items[i - 1].ends, last = i === items.length - 1 || it.ends;
       var core = it.core, low = lower(core).replace(/’/g, "'");
+      var dotted = DOTTED.test(core.replace(POSSESSIVE, '')) && !LOWER_DOTTED[low];
       var cap;
       if (first && it.pos === 0) cap = true;
       else if (it.compound.length > 1 && it.pos === 0) cap = true;
-      else if (style === 'chicago' && it.pos > 0 && PREFIXES[lower(it.compound[it.pos - 1].core)]) {
-        cap = typed && /^[\p{Lu}\p{Lt}]/u.test(core.slice(core.search(/\p{L}/u)));
-      } else if (last && LAST_WORD_RULE[style]) cap = true;
+      else if (LOWER_DOTTED[low]) cap = false;
+      else if (last && LAST_WORD_RULE[style]) cap = true;
       else if (first) cap = true;
       else cap = !minor[low];
       if (keepOn && isKept(core)) { it.out = core; return; }
-      it.out = cap ? capFirst(lower(core)) : lower(core);
+      it.out = !cap ? lower(core) : dotted ? dottedCap(core) : capFirst(lower(core));
       if (!cap && minor[low] && lowered.indexOf(low) < 0) lowered.push(low);
     });
     return pieces.map(function (p) { return typeof p === 'string' ? p : p.verbatim ? p.text : p.pre + p.out + p.post; }).join('');
   }
 
   // ---------- Sentence case and Capitalize Each Word ----------
-  var WORD = /[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*/gu;
+  // A word, or an abbreviation with full stops (u.s, ph.d: the alternatives of DOTTED) as one
+  // word, with its possessive (u.k.'s, not "U.K.'S" in Capitalize Each Word).
+  var WORD = /(?:ph\.d|ed\.d|[dm]\.phil|[bm]\.sc|[bm]\.ed|(?:\p{L}\.){1,5}\p{L})(?:\.?['’]s)?(?!\.?[\p{L}\p{M}\p{N}])|[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*/giu;
   function sentenceEnded(gap, prev) {
     if (!/[.!?…‽。！？]/.test(gap)) return false;
-    // "Dr. Smith", "e.g. this", "J. Smith": a period after an abbreviation or a single letter.
-    if (/^\.[\s"'”’)\]]*$/.test(gap) && prev && (ABBREVIATIONS[lower(prev)] || isInitial(prev))) return false;
+    // "Dr. Smith", "e.g. this", "J. Smith", "U.S.-based": a period after an abbreviation or a single letter.
+    if (/^\.[\s"'”’)\]‐‑-]*$/.test(gap) && prev && (ABBREVIATIONS[lower(prev)] || isInitial(prev) || prev.indexOf('.') >= 0)) return false;
     return true;
   }
   function wordsLine(line, mode) {
@@ -350,12 +380,13 @@ faq:
         out += between; gap += between;
         // A kept word (NASA, iPhone, eBay) is left exactly as typed, even at
         // the start of a sentence: capitalizing it gave "IPhone".
-        var kept = keepOn && isKept(w), nw = kept ? w : lower(w);
-        if (mode === 'capital') { if (!kept) nw = capFirst(nw); }
+        var kept = keepOn && isKept(w), nw = kept ? w : lower(w), dotted = w.indexOf('.') >= 0;
+        if (mode === 'capital') { if (!kept) nw = dotted ? dottedCap(nw) : capFirst(nw); }
         else {
           // The English pronoun I and its contractions.
           if (!tr() && /^i(?:['’](?:m|ve|ll|d))?$/.test(nw)) nw = 'I' + nw.slice(1);
-          if (!kept && (first || sentenceEnded(gap, prev))) nw = capFirst(nw);
+          // At the start of a sentence u.s. becomes U.S., but e.g. becomes E.g.
+          if (!kept && (first || sentenceEnded(gap, prev))) nw = dotted && !LOWER_DOTTED[nw] ? dottedCap(nw) : capFirst(nw);
         }
         out += nw;
         first = false; prev = w; gap = ''; last = idx + w.length;
