@@ -1,7 +1,7 @@
 // Expected values were computed independently with Python's fractions.Fraction:
 // needed = (target - current * (1 - w)) / w, rounded UP to hundredths, and
 // needed points = target * (points so far + final points) - points earned.
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, url }) => {
   await open();
   const text = sel => page.locator(sel).textContent();
   const table = () => page.$$eval('#fg-table tbody tr', trs => trs.map(tr => [...tr.children].filter(c => !c.hidden).map(c => c.textContent)));
@@ -115,6 +115,26 @@ module.exports = async ({ page, open, assert }) => {
   await set('88,5', '25', '90');
   assert.equal(await text('#fg-need'), '94.50%');
   assert.equal(await text('#fg-msg'), '');
+  // A group of thousands never starts with 0, so the comma in "0,500" is a
+  // decimal comma. A final worth 0.5% (it was read as 500% and refused):
+  // (88.05 - 88 x 0.995) / 0.005 = 98. A current grade of 0.5% (it was read
+  // as 500%): 0.5 x 0.75 = 0.375 -> 0.38% with nothing on the final.
+  await set('88', '0,500', '88.05');
+  assert.equal(await text('#fg-need'), '98.00%');
+  assert.equal(await text('#fg-msg'), '');
+  await set('0,500', '25', '90');
+  assert.equal(await text('#fg-worst'), '0.38%');
+  assert.equal(await text('#fg-need'), 'Not reachable');
+  // A zero-led number that is grouped any other way is not a number (the
+  // first two were read as 500.25%).
+  for (const v of ['0,500.25', '0.500,25', '0,500,000']) {
+    await page.fill('#fg-current', v);
+    await page.locator('#fg-current').press('Tab');
+    assert.equal(await text('#fg-need'), '–', v);
+    assert.equal(await text('#fg-msg'), 'Enter your current grade as a percentage, such as 88.', v);
+  }
+  // The guide links the percentage calculator and the grade calculator.
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/percentage-calculator/', '/grade-calculator/']);
   // A typed target is echoed exactly, not rounded to 90: (89.995 - 66) / 0.25 = 95.98.
   await set('88', '25', '89.995');
   assert.equal(await text('#fg-need'), '95.98%');
@@ -209,4 +229,19 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.locator('#fg-table tr.fg-target th').textContent(), 'A (your target)');
   const wrap = await page.$eval('#fg-table', t => { const w = t.parentElement; return { scroll: w.scrollWidth, client: w.clientWidth }; });
   assert.ok(wrap.scroll <= wrap.client + 1, JSON.stringify(wrap));
+
+  // In a locale that writes decimals with a comma (German) any single comma
+  // is a decimal comma, so "1,000" is 1% (0.75% with nothing on the final)
+  // and "0,500" is 0.5%, as before; a zero-led group is refused there too.
+  const de = await page.context().browser().newContext({ locale: 'de-DE' });
+  try {
+    const p2 = await de.newPage();
+    await p2.goto(url);
+    for (const [current, worst] of [['0,500', '0.38%'], ['1,000', '0.75%'], ['88,5', '66.38%'], ['0.500,25', '–'], ['0,500.25', '–']]) {
+      await p2.fill('#fg-current', current);
+      assert.equal(await p2.textContent('#fg-worst'), worst, `de-DE current grade ${current}`);
+    }
+  } finally {
+    await de.close();
+  }
 };

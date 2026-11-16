@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const zlib = require('zlib');
 
 // Expected module patterns below were produced independently with the
@@ -126,7 +127,7 @@ function svgModules(svg, X, q) {
   return Array.from(bits, b => b || '0').join('');
 }
 
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, base }) => {
   await open();
   const text = sel => page.textContent(sel);
   // Reads the preview SVG bars back into a module string ('1' = bar).
@@ -724,4 +725,29 @@ module.exports = async ({ page, open, assert }) => {
   await page.selectOption('#bc-type', 'code39');
   await page.selectOption('#bc-ratio', '2');
   assert.equal(await text('#bc-warn'), '');
+
+  // ---------- Title, guide links and homepage search ----------
+  {
+    // Nearly every competing result for "free barcode generator" has Free in its title.
+    // The tool needs no account and adds no watermark, so the title says so as well.
+    assert.equal(await text('h1'), 'Free Barcode Generator (EAN, UPC, Code 128)');
+    assert.match(await page.title(), /^Free Barcode Generator \(EAN, UPC, Code 128\) \| /);
+    // A linear barcode is not what a phone camera opens a link or a contact from: where
+    // the guide helps to choose a type, it sends that need to the QR code generator.
+    const guide = (await text('.prose')).replace(/\s+/g, ' ');
+    assert.match(guide, /sold in shops\. For a link or contact card that a phone camera can scan, use the QR code generator\./);
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/qr-code-generator/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+    // Homepage search (index.html): every typed word must be a substring of the tool's
+    // title, description and keywords.
+    const home = await (await page.request.get(base + '/')).text();
+    const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/barcode-generator\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+    assert.ok(hay, 'the homepage lists the barcode generator');
+    for (const q of ['free barcode', 'barcode maker', 'isbn', 'isbn barcode', 'gtin', 'ean-8', 'ean-13', 'ean13', 'code 128', 'code128', 'code 39', 'code39', 'upc-a', 'codabar']) {
+      assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+    }
+  }
 };

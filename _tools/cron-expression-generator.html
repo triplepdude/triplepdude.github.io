@@ -43,6 +43,12 @@ howto: |
   Mind the weekday numbers: `5` is Friday in crontab but Thursday in Quartz and
   AWS, so the page writes names when it converts.
 
+  In Spring the weekday `*` runs from Monday, so `*/2` there is Monday,
+  Wednesday, Friday and Sunday, but Sunday, Tuesday, Thursday and Saturday in
+  crontab and node-cron. Quartz, and AWS for hours, let a range wrap round, as
+  in `22-2` or `NOV-FEB`; Quartz ignores a step after a name, so write
+  `2-6/2`, not `MON-FRI/2`.
+
   In crontab, when both day fields are restricted the job runs on days that
   match **either**: `0 12 13 * 5` runs on every 13th and every Friday. In
   Vixie cron and cronie a field that starts with `*`, even `*/2`, counts as
@@ -329,13 +335,17 @@ faq:
   //  day: how the two day fields combine. vixie: both must match if either starts with *,
   //  else either; robfig (Kubernetes): the same, but only a plain * or ? counts as *;
   //  quartz: one of them must be ?; and: both must match (Spring, node-cron).
+  //  wrap: a range may run past the end of the field and on from its start (Quartz's 22-2).
+  //  sun7: Spring's weekday numbering, in which SUN is 7 and * starts at Monday (1-7).
+  //  nameStep: Quartz skips a step written after a month or weekday name.
+  //  lookAhead: Quartz gives up on a schedule more than 100 years ahead (its MAX_YEAR).
   var DIALECTS = {
     unix: { name: 'crontab', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, macros: true, reboot: true, command: true, day: 'vixie', single: 'warn', backwards: 'cronie', zone: 'local' },
     k8s: { name: 'Kubernetes', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, dowMax: 6, macros: true, qmark: true, day: 'robfig', zone: 'UTC' },
     github: { name: 'GitHub Actions', fields: ['min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, dow7: 'warn', day: 'vixie', zone: 'UTC' },
-    aws: { name: 'AWS EventBridge', fields: ['min', 'hour', 'dom', 'mon', 'dow', 'year'], dowBase: 1, qmark: 'one', specials: true, day: 'quartz', zone: 'UTC', yearMax: 2199 },
-    quartz: { name: 'Quartz', fields: ['sec', 'min', 'hour', 'dom', 'mon', 'dow', 'year'], optionalYear: true, dowBase: 1, qmark: 'one', specials: true, day: 'quartz', zone: 'local', yearMax: 2099 },
-    spring: { name: 'Spring', fields: ['sec', 'min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, macros: true, qmark: true, specials: true, day: 'and', zone: 'local', fiveOk: true }
+    aws: { name: 'AWS EventBridge', fields: ['min', 'hour', 'dom', 'mon', 'dow', 'year'], dowBase: 1, qmark: 'one', specials: true, day: 'quartz', zone: 'UTC', yearMax: 2199, wrap: true },
+    quartz: { name: 'Quartz', fields: ['sec', 'min', 'hour', 'dom', 'mon', 'dow', 'year'], optionalYear: true, dowBase: 1, qmark: 'one', specials: true, day: 'quartz', zone: 'local', yearMax: 2199, wrap: true, nameStep: 'ignore', lookAhead: 100 },
+    spring: { name: 'Spring', fields: ['sec', 'min', 'hour', 'dom', 'mon', 'dow'], dowBase: 0, sun7: true, macros: true, qmark: true, specials: true, day: 'and', zone: 'local', fiveOk: true }
   };
   var FIELD_NAMES = { sec: 'second', min: 'minute', hour: 'hour', dom: 'day of month', mon: 'month', dow: 'day of week', year: 'year' };
 
@@ -350,7 +360,7 @@ faq:
         ? { key: key, label: 'Day of week', min: 1, max: 7, allowed: '1–7 (1 is Sunday, 7 is Saturday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 1 }
         : dl.dowMax === 6
           ? { key: key, label: 'Day of week', min: 0, max: 6, allowed: '0–6 (0 is Sunday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 0 }
-          : { key: key, label: 'Day of week', min: 0, max: 7, allowed: '0–7 (0 and 7 are Sunday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 0 };
+          : { key: key, label: 'Day of week', min: 0, max: 7, allowed: '0–7 (0 and 7 are Sunday) or SUN–SAT', any: 'every day of the week', names: DAY3, base: 0, sun7: !!dl.sun7, starMin: dl.sun7 ? 1 : 0 };
       default: return { key: key, label: 'Year', min: 1970, max: dl.yearMax, allowed: '1970–' + dl.yearMax, any: 'every year' };
     }
   }
@@ -372,7 +382,7 @@ faq:
     }
     if (f.names && /^[A-Za-z]+$/.test(s)) {
       var up = s.toUpperCase(), i = f.names.indexOf(up);
-      if (i >= 0) return i + f.base;
+      if (i >= 0) return f.sun7 && i === 0 ? 7 : i + f.base; // Spring: SUN is 7, as in java.time
       var j = f.names.indexOf(up.slice(0, 3));
       if (j >= 0) throw failF(f, 'write the three-letter name ' + f.names[j] + ' instead of "' + s + '".');
     }
@@ -415,32 +425,37 @@ faq:
     return null;
   }
 
+  // One item of a day field in the L, W or # form: L, L-3, LW, 15W, FRIL, 5L, FRI#3, 6#3.
+  var SPECIAL_ITEM = /^(?:L|LW|L-\d+|\d+W|(?:[0-7]|[A-Za-z]{3})(?:L|#\d+))$/i;
+
   function parseField(tok, key, dl) {
-    var f = spec(key, dl), set = new Set(), warn = [], full = function () { for (var v = f.min; v <= f.max; v++) set.add(norm(f, v)); };
+    var f = spec(key, dl), set = new Set(), warn = [], note = [], full = function () { for (var v = f.min; v <= f.max; v++) set.add(norm(f, v)); };
     if (tok === '?') {
       if (key !== 'dom' && key !== 'dow') throw failF(f, '"?" is only allowed in the day-of-month and day-of-week fields.');
       if (!dl.qmark) throw failF(f, '"?" is a Quartz, Spring and AWS symbol that ' + dl.name + ' does not accept. Use * instead.');
       full();
       return { tok: tok, set: set, star: true, starB: true, any: true, warn: warn, f: f };
     }
-    if ((key === 'dom' || key === 'dow') && /[LW#]/i.test(tok) && !/^[A-Za-z]{3}(?:[-,][A-Za-z]{3})*$/.test(tok)) {
-      var sp = null;
+    var parts = tok.split(',');
+    // The items decide, not the letters: the W of WED does not make 1,WED a special value.
+    if ((key === 'dom' || key === 'dow') && parts.some(function (s) { return SPECIAL_ITEM.test(s); })) {
       if (dl.specials) {
-        if (tok.indexOf(',') >= 0) throw failF(f, '"' + tok + '": L, W and # values must stand alone in the field, without a list.');
-        sp = parseSpecial(tok, f, dl);
-      }
-      if (!sp && /^(L|LW|L-\d+|\d+W|[0-7A-Za-z]{1,3}L|[0-7A-Za-z]{1,3}#\d+)$/i.test(tok)) {
-        throw failF(f, '"' + tok + '" is a Quartz, Spring and AWS extension (L, W, #) that ' + (dl === DIALECTS.unix ? 'standard cron' : dl.name) + ' does not support.');
-      }
-      if (sp && sp.kind === 'set') return { tok: tok, set: sp.set, star: false, starB: false, warn: warn, f: f };
-      if (sp) {
+        if (parts.length > 1) throw failF(f, '"' + tok + '": L, W and # values must stand alone in the field, without a list.');
+        var sp = parseSpecial(tok, f, dl);
+        if (!sp) {
+          throw failF(f, key === 'dom'
+            ? '"' + tok + '" belongs in the day-of-week field. Here use L, L-3, LW or 15W.'
+            : '"' + tok + '" belongs in the day-of-month field. Here use FRIL, 5L or FRI#3.');
+        }
+        if (sp.kind === 'set') return { tok: tok, set: sp.set, star: false, starB: false, warn: warn, f: f };
         if (dl === DIALECTS.aws && sp.kind === 'last' && sp.off) warn.push('Day of month field: "' + tok + '" works in Quartz and Spring, but AWS documents only L, W and # without an offset. Check that EventBridge accepts it.');
         if (dl === DIALECTS.aws && sp.kind === 'lastWeekday') warn.push('Day of month field: "LW" works in Quartz and Spring, but AWS does not document it. Check that EventBridge accepts it.');
         return { tok: tok, set: new Set(), star: false, starB: false, special: sp, warn: warn, f: f };
       }
+      if (parts.length === 1) throw failF(f, '"' + tok + '" is a Quartz, Spring and AWS extension (L, W, #) that ' + (dl === DIALECTS.unix ? 'standard cron' : dl.name) + ' does not support.');
     }
-    if (tok === '?' || /\?/.test(tok)) throw failF(f, '"' + tok + '": "?" must stand alone in the field.');
-    var parts = tok.split(','), starB = false;
+    if (/\?/.test(tok)) throw failF(f, '"' + tok + '": "?" must stand alone in the field.');
+    var starB = false, starStep = '';
     for (var k = 0; k < parts.length; k++) {
       var part = parts[k];
       if (part === '') throw failF(f, parts.length > 1 ? 'the list "' + tok + '" has an empty item. Remove the extra comma.' : 'the value is empty.');
@@ -452,20 +467,53 @@ faq:
         step = parseInt(sl[1], 10);
         if (step === 0) throw failF(f, 'the step in "' + part + '" cannot be 0.');
       }
-      var lo, hi;
-      if (base === '*') { lo = f.min; hi = f.max; if (step <= 1) starB = true; }
+      var lo, hi, wrap = 0;
+      if (dl.nameStep === 'ignore' && sl.length === 2 && f.names && /^[A-Za-z]{3}(?:-[A-Za-z]{3})?$/.test(base)) {
+        // Quartz reads a name or a name range and skips the rest of the item, so MON/2 is
+        // Monday alone and MON-FRI/2 is every day from Monday to Friday.
+        var numeric = base.split('-').map(function (s) { return parseValue(s, f); }).join('-') + '/' + step;
+        warn.push(f.label + ' field: Quartz ignores a step that follows a name, so "' + part + '" runs as ' + base + '. To use the step, write it with numbers: ' + numeric + '.');
+        sl = [base];
+        step = 1;
+      }
+      if (base === '*') {
+        // Spring's * in the weekday field is 1-7, Monday first, so */2 starts on a Monday.
+        lo = f.starMin === undefined ? f.min : f.starMin;
+        hi = f.max;
+        if (step <= 1) starB = true;
+        else if (f.sun7 && !starStep) starStep = part;
+      }
       else if (base === '') throw failF(f, '"' + part + '" needs a value or * before the "/".');
       else if (base.indexOf('-') > 0) {
         var r = base.split('-');
         if (r.length !== 2 || r[1] === '') throw failF(f, '"' + base + '" is not a valid range. Write it as start-end, like ' + ({ sec: '0-29', min: '0-29', hour: '9-17', dom: '1-15', mon: '3-10', dow: dl.dowBase ? '2-6' : '1-5', year: '2027-2029' }[key]) + '.');
         lo = parseValue(r[0], f);
         hi = parseValue(r[1], f);
+        if (f.sun7 && lo === 7) {
+          // Spring reads 7 (SUN) at the start of a range as 0, so 7-3 is Sunday to Wednesday.
+          lo = 0;
+          if (hi === 7) warn.push('Day of week field: Spring reads "' + base + '" as 0-7, which is every day of the week. Write SUN for Sunday alone.');
+        }
         if (lo > hi && key === 'dow' && f.base === 0 && hi === 0 && sl.length === 1 && dl.backwards === 'cronie') {
           // cronie reads FRI-SUN (5-0) as 5-7; Debian's Vixie cron rejects it.
           hi = 7;
           warn.push('Day of week field: cronie reads "' + base + '" as ' + lo + '-7, but the Vixie cron in Debian and Ubuntu rejects a range that runs backwards. Write ' + lo + '-7 so it works everywhere.');
+        } else if (lo > hi && dl.wrap && key !== 'year') {
+          // Quartz adds the size of the field to the end of the range and takes each value
+          // modulo that size: 22-2 is 22, 23, 0, 1, 2 and NOV-FEB is 11, 12, 1, 2.
+          wrap = f.max - f.min + 1;
+          hi += wrap;
+          var names = /^[A-Za-z]/.test(r[0]) && f.names, turn = names ? f.names[f.max - f.base] + ' to ' + f.names[f.min - f.base] : f.max + ' to ' + f.min;
+          if (dl === DIALECTS.aws && key !== 'hour') {
+            warn.push(f.label + ' field: ' + base + ' wraps round from ' + turn + '. AWS documents such a range only for hours, as in 20-2, so check that EventBridge accepts it here.');
+          } else {
+            note.push(f.label + ' field: ' + base + ' wraps round from ' + turn + ', which ' + dl.name + ' allows.');
+            note.push('Crontab, Kubernetes and Spring reject a range that runs backwards.');
+          }
         } else if (lo > hi) {
-          throw failF(f, 'the range ' + base + ' runs backwards. Ranges cannot wrap around; split it into two, like ' + wrapHint(f, lo, hi) + '.');
+          throw failF(f, 'the range ' + base + ' runs backwards. ' + (key === 'year'
+            ? 'Write the earlier year first: ' + r[1] + '-' + r[0] + '.'
+            : 'Ranges cannot wrap around; split it into two, like ' + wrapHint(f, lo, hi) + '.'));
         }
       } else {
         lo = hi = parseValue(base, f);
@@ -479,9 +527,19 @@ faq:
       if (key === 'dow' && dl.dow7 && /(^|-)7$/.test(base) && warn.indexOf(DOW7_WARN) < 0) {
         warn.push(DOW7_WARN);
       }
-      for (var v = lo; v <= hi; v += step) set.add(norm(f, v));
+      for (var v = lo; v <= hi; v += step) set.add(norm(f, wrap ? (v - f.min) % wrap + f.min : v));
     }
-    return { tok: tok, set: set, star: tok.charAt(0) === '*', starB: starB, warn: warn, f: f };
+    if (starStep) {
+      // node-cron, the other library this format covers, starts the weekday step at Sunday.
+      var n = parseInt(starStep.split('/')[1], 10), springDays = [], nodeDays = [];
+      for (var a = 1; a <= 7; a += n) springDays.push(DAYS[a % 7]);
+      for (var b = 0; b <= 6; b += n) nodeDays.push(DAYS[b]);
+      warn.push('Day of week field: Spring counts ' + starStep + ' from Monday, so it means ' + joinList(springDays) + ', as shown. node-cron counts from Sunday: ' + joinList(nodeDays) + '. Write the days out, as in ' + compress(sorted(set), f, TARGET.spring) + ', so that both agree.');
+    }
+    if (dl === DIALECTS.aws && key === 'dow' && tok.indexOf('/') >= 0) {
+      warn.push('Day of week field: AWS documents , - * ? L and # for this field, but not /. Check that EventBridge accepts "' + tok + '", or write ' + compress(sorted(set), f, TARGET.aws) + ' instead.');
+    }
+    return { tok: tok, set: set, star: tok.charAt(0) === '*', starB: starB, warn: warn, note: note, f: f };
   }
 
   var DOW7_WARN = 'Day of week field: GitHub documents weekdays as 0–6, with 0 for Sunday. Write 0 or SUN instead of 7 to be safe.';
@@ -575,6 +633,7 @@ faq:
       try {
         parsed[keys[i]] = parseField(tokens[i], keys[i], dl);
         res.warnings = res.warnings.concat(parsed[keys[i]].warn);
+        (parsed[keys[i]].note || []).forEach(function (n) { if (res.notes.indexOf(n) < 0) res.notes.push(n); });
       } catch (e) {
         if (!(e instanceof CronError)) throw e;
         parsed[keys[i]] = null;
@@ -927,7 +986,7 @@ faq:
     var S = sorted(p.f.sec.set), H = sorted(p.f.hour.set), M = sorted(p.f.min.set);
     var years = p.f.year && !p.f.year.star ? p.f.year.set : null, maxYear = years ? Math.max.apply(null, Array.from(years)) : Infinity;
     var vixie = dk === 'unix', wild = p.f.min.star || p.f.hour.star, fixedZone = z.name === 'UTC';
-    var endYear = start.y + HORIZON_YEARS;
+    var endYear = start.y + (DIALECTS[dk].lookAhead || HORIZON_YEARS);
     for (var i = 0; out.length < count; i++) {
       var cy = start.y + Math.floor((start.mo + i) / 12), cm = (start.mo + i) % 12;
       if (cy > endYear || cy > maxYear) break;
@@ -1009,6 +1068,8 @@ faq:
 
   // ---------- Converting between formats ----------
   // Writes a set of values in cron syntax: *, */n, a-b, a-b/n or a list.
+  // dowList: no step in the weekday field. Spring starts */2 there at Monday, node-cron at
+  // Sunday, and AWS does not list / for that field, so the days are written out instead.
   function compress(vals, f, target, noStar) {
     var size = f.key === 'dow' ? 7 : f.max - f.min + 1, min = f.key === 'dow' ? 0 : f.min, max = f.key === 'dow' ? 6 : f.max;
     if (vals.length === size) return '*';
@@ -1019,7 +1080,7 @@ faq:
       return String(target.dowBase === 1 ? v + 1 : v);
     };
     var s = seq(vals, size);
-    if (vals.length >= 3 && s.step > 1) {
+    if (vals.length >= 3 && s.step > 1 && !(f.key === 'dow' && target.dowList)) {
       if (s.hi + s.step > max) {
         if (target.startStep || (vals[0] !== min && !names)) return (target.startStep ? show(vals[0]) : show(vals[0]) + '-' + show(max)) + '/' + s.step;
         if (vals[0] === min) return noStar ? show(min) + '-' + show(max) + '/' + s.step : '*/' + s.step;
@@ -1038,7 +1099,7 @@ faq:
   }
   var TARGET = {
     unix: { dowBase: 0 }, k8s: { dowBase: 0 }, github: { dowBase: 0 },
-    aws: { dowBase: 1, dowNames: true, startStep: true }, quartz: { dowBase: 1, dowNames: true }, spring: { dowBase: 0, dowNames: true }
+    aws: { dowBase: 1, dowNames: true, dowList: true, startStep: true }, quartz: { dowBase: 1, dowNames: true }, spring: { dowBase: 0, dowNames: true, dowList: true }
   };
   function specialText(fld, tk) {
     var s = fld.special;
@@ -1218,7 +1279,14 @@ faq:
     } else {
       list = nextRuns(current, now, 10, z);
     }
-    if (!list.length) { row('No date matches this schedule, so it never runs.'); return; }
+    // Quartz stops looking 100 years ahead (MAX_YEAR), even for years its year field accepts.
+    var ahead = DIALECTS[dk].lookAhead, lastYear = z.wall(now).y + (ahead || HORIZON_YEARS);
+    var years = current.f && current.f.year && !current.f.year.star ? sorted(current.f.year.set) : null;
+    var pastHorizon = !!(ahead && years && years[years.length - 1] > lastYear);
+    if (!list.length) {
+      row(pastHorizon ? DIALECTS[dk].name + ' looks at most ' + ahead + ' years ahead (up to ' + lastYear + '), so it finds no run for this schedule.' : 'No date matches this schedule, so it never runs.');
+      return;
+    }
     list.forEach(function (run) {
       var tr = document.createElement('tr');
       tr.appendChild(cell('td', fmtRun(run.ms, z, withSec), 'cr-when'));
@@ -1229,7 +1297,10 @@ faq:
     });
     if (current.rate) row('Counted from now, as if the rule were created at this moment: a rate runs every ' + current.rate.n + ' ' + current.rate.unit + (current.rate.n === 1 ? '' : 's') + ' from when the rule is created or updated.');
     else if (current.at) row('Runs once.');
-    else if (list.length < 10) row('No further runs ' + (current.f.year && !current.f.year.star ? 'in the chosen years.' : 'in the next ' + HORIZON_YEARS + ' years.'));
+    else if (list.length < 10) {
+      row(pastHorizon ? 'No further runs up to ' + lastYear + ', the furthest ' + DIALECTS[dk].name + ' looks ahead.'
+        : 'No further runs ' + (years ? 'in the chosen years.' : 'in the next ' + (ahead || HORIZON_YEARS) + ' years.'));
+    }
   }
 
   var TRANS = [
@@ -1323,7 +1394,7 @@ faq:
         notes.push('Spring and node-cron run only on days that match both the day of month and the day of week, unlike crontab, which runs when either matches.');
       }
       if ((dl.dowBase === 1) && /\d/.test(p.dow.tok.replace(/#\d+/, ''))) notes.push(dl.name + ' numbers weekdays from 1 (Sunday) to 7 (Saturday), not from 0 as crontab does.');
-      if (dk === 'spring' && (p.dom.special || p.dow.special || p.dom.any || p.dow.any)) notes.push('L, W, # and ? work in Spring but not in node-cron.');
+      if (dk === 'spring' && (p.dom.special || p.dow.special || p.dom.any || p.dow.any)) notes.push('L, W, # and ? work in Spring; node-cron handles all of them only from version 4.6.');
       if (dRestricted && !wRestricted && !p.dom.special && p.dom.tok.indexOf('/') < 0) {
         var Mo = sorted(p.mon.set), Dd = sorted(p.dom.set);
         var missing = Dd.filter(function (d) {

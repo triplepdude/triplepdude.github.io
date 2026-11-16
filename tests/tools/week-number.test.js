@@ -12,6 +12,14 @@ module.exports = async ({ page, open, assert }) => {
   await page.clock.install({ time: new Date('2026-09-24T10:00:00Z') });
   await open();
 
+  // The guide says that the calendar apps it names can show week numbers by
+  // themselves, and it links the date and age calculators for counting weeks.
+  const guide = (await text('.prose')).replace(/\s+/g, ' ');
+  // Their own week numbers follow each app's settings (Outlook's first week
+  // of the year can start on 1 January), so the guide does not promise ISO.
+  assert.match(guide, /All three can also show week numbers on their own: look for Show week numbers in the calendar settings\. Depending on the week start and other settings, these may not be ISO numbers, so use the file when you need ISO weeks for certain, the weeks as events, or a calendar you share\./);
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/date-calculator/', '/age-calculator/']);
+
   assert.equal(await text('#wn-today-week'), '39');
   assert.equal(await text('#wn-today-iso'), '2026-W39-4');
   assert.equal(await text('#wn-today-range'), 'Monday, September 21 to Sunday, September 27, 2026');

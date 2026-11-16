@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 // Independent PNG reader: checks the signature and every chunk CRC (ISO/IEC 15948).
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
@@ -30,6 +31,7 @@ function readPng(buf, assert) {
 }
 
 module.exports = async ({ page, open, assert }) => {
+  const toolsDir = path.join(__dirname, '..', '..', '_tools');
   await open();
   const text = s => page.locator(s).textContent();
   const waitText = (sel, re, timeout = 6000) => page.waitForFunction(
@@ -316,4 +318,14 @@ module.exports = async ({ page, open, assert }) => {
   await page.reload();
   assert.match(await text('#wct-error'), /secure connection/);
   assert.equal(await page.isDisabled('#wct-start'), true);
+
+  // ---- What the page says about itself ----
+  // A webcam is mostly tested before a call, where the microphone matters as
+  // much: the guide links the mic test, and every internal link in the guide
+  // and FAQ is a page of this site.
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.ok(links.includes('/mic-test/'), `guide links: ${links}`);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(toolsDir, href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
 };

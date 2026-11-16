@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const { execFileSync } = require('child_process');
 
 // Known answers (python3): slider position = round(10000 * ln(f) / ln(22000)):
@@ -68,7 +69,7 @@ function freqAt(x, rate, t, win = 0.02) {
 }
 const peak = x => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, base: site }) => {
   await page.addInitScript(() => {
     window.__oscs = [];
     const create = BaseAudioContext.prototype.createOscillator;
@@ -538,4 +539,42 @@ module.exports = async ({ page, open, assert }) => {
   await page.evaluate(() => { window.Blob = window.__Blob; });
   dl = await download();
   assert.equal(parseWav(dl.buf).frames, 8820);
+
+  // ---- What the page says about itself ----
+  // Matching the pitch of tinnitus is a main use of a tone generator: the FAQ
+  // answers it with controls the page has (sine wave, slider, octave buttons).
+  const faqAnswer = async q => {
+    const item = page.locator('.faq details', { hasText: q });
+    assert.equal(await item.count(), 1, `FAQ items about "${q}"`);
+    return item.locator('.faq-answer').textContent();
+  };
+  const tinnitus = await faqAnswer('tinnitus');
+  for (const step of ['oct-', 'oct+']) {
+    const label = (await text(`[data-step="${step}"]`)).trim();
+    assert.match(label, /^[÷×]2$/);
+    assert.ok(tinnitus.includes(label), `the tinnitus answer does not name the ${label} button: ${tinnitus}`);
+  }
+  assert.match(tinnitus, /sine wave/);
+  assert.match(tinnitus, /slider/);
+  assert.match(tinnitus, /not a diagnosis/);
+  // ÷2 then ×2 only returns to the start, so the answer asks for the octave
+  // below and the one above: clinics check both, because octave errors are
+  // common (about a quarter of matches in one web-based study), not the rule.
+  assert.match(tinnitus, /an octave below and above with ÷2 and ×2/);
+  assert.doesNotMatch(tinnitus, /commonest/);
+  // Homepage search (index.html): every typed word must be a substring of the
+  // tool's title, description and keywords.
+  const home = await (await page.request.get(site + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/tone-generator\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the tone generator');
+  for (const q of ['440', 'signal generator', 'function generator', 'tinnitus', 'hearing test', '1khz', '1000 hz', 'sine wave', 'binaural']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
+  // The FAQ names the tools for tuning and for channel wiring; every internal
+  // link in the guide and FAQ is a page of this site.
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.ok(links.includes('/online-tuner/') && links.includes('/speaker-test/'), `FAQ links: ${links}`);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the page but is not a tool page`);
+  }
 };

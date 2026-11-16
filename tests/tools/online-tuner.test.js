@@ -6,7 +6,10 @@
 //   E6 1318.5102, E3 164.8138, B-flat 4 466.1638; with A4 = 442: E2 82.7815.
 //   329.63 Hz is E4 +0.01 cents; 440 Hz against A4 = 432 is +31.77 cents;
 //   D3 - 20 cents = 145.1459 Hz; A4 + 15 cents = 443.8289 Hz; A4 - 30 cents = 432.4411 Hz.
-module.exports = async ({ page, open, assert }) => {
+const fs = require('fs');
+const path = require('path');
+
+module.exports = async ({ page, open, assert, base }) => {
   await page.addInitScript(() => {
     window.__gum = [];
     window.__oscs = [];
@@ -280,4 +283,57 @@ module.exports = async ({ page, open, assert }) => {
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
   assert.equal(await page.evaluate(() => window.__gen.stream.getTracks().every(t => t.readyState === 'ended')), true);
   assert.equal(await text('#otn-toggle'), 'Start tuner');
+
+  // ---- What the page says about itself ----
+  // Every instrument in the menu has a row in the guide's "Standard tunings"
+  // table, with the strings and frequencies the tuner itself uses at A4 = 440
+  // (read from the reference tone button after choosing each string).
+  const ROWS = {
+    guitar: 'Guitar', bass: 'Bass, double bass', 'double-bass': 'Bass, double bass', ukulele: 'Ukulele', violin: 'Violin',
+    viola: 'Viola', cello: 'Cello', mandolin: 'Mandolin', banjo: 'Banjo, open G',
+  };
+  const table = await page.$$eval('.prose table', ts => {
+    const t = ts.find(x => x.rows[0].cells[0].textContent.trim() === 'Instrument');
+    return [...t.rows].slice(1).map(r => [...r.cells].map(c => c.textContent.trim()));
+  });
+  assert.deepEqual(table.map(r => r[0]).sort(), [...new Set(Object.values(ROWS))].sort());
+  await page.fill('#otn-a4', '440');
+  await page.selectOption('#otn-names', 'sharp');
+  const groups = await page.$$eval('#otn-inst optgroup', gs => gs.map(g => g.label));
+  assert.deepEqual(groups, ['Guitar', 'Bass', 'Ukulele', 'Orchestral strings', 'Other'], 'a new instrument group needs a row in the guide table');
+  const stringBtns = '#otn-strings button[data-midi]:not([data-midi="auto"])';
+  for (const [id, label] of Object.entries(ROWS)) {
+    await page.selectOption('#otn-inst', id);
+    const strings = [];
+    for (let i = 0, n = await page.locator(stringBtns).count(); i < n; i++) {
+      await page.locator(stringBtns).nth(i).click();
+      const m = (await text('#otn-play')).match(/^Play (\S+) \(([\d.]+) Hz\)$/);
+      strings.push(m[1] + ' ' + m[2]);
+    }
+    const row = table.find(r => r[0] === label);
+    assert.equal(row[1].replace(/, in pairs$/, ''), strings.join(', ') + ' Hz', `the ${label} row against the ${id} tuning`);
+  }
+  // The description names only instruments the menu has.
+  const desc = await page.getAttribute('meta[name="description"]', 'content');
+  const options = (await page.locator('#otn-inst option').allTextContents()).join(' ').toLowerCase();
+  const menu = options + ' ' + groups.join(' ').toLowerCase();
+  for (const name of ['guitar', 'bass', 'ukulele', 'violin', 'cello', 'mandolin', 'banjo']) {
+    assert.ok(desc.includes(name), `the description does not name the ${name}`);
+    assert.ok(menu.includes(name), `the description names the ${name}, which the menu does not have`);
+  }
+  // Homepage search (index.html): every typed word must be a substring of the
+  // tool's title, description and keywords.
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/online-tuner\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the tuner');
+  for (const q of ['cello', 'viola', 'mandolin', 'banjo', 'double bass', 'ukulele tuner', 'pitch detector', 'drop d', 'reference tone']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
+  // A tone at any frequency and a microphone check are other pages; every
+  // internal link in the guide and FAQ is a page of this site.
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.ok(links.includes('/tone-generator/') && links.includes('/mic-test/'), `guide and FAQ links: ${links}`);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the page but is not a tool page`);
+  }
 };

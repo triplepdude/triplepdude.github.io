@@ -1,7 +1,10 @@
 // The Fullscreen and Wake Lock APIs are stubbed (headless Chromium has no real
 // full screen to enter). With ?nofs the Fullscreen API is removed entirely, as on
 // an iPhone, to exercise the fill-the-window fallback.
-module.exports = async ({ page, open, assert, url }) => {
+const fs = require('fs');
+const path = require('path');
+
+module.exports = async ({ page, open, assert, url, base }) => {
   await page.addInitScript(() => {
     window.__fs = [];
     window.__wake = [];
@@ -268,4 +271,41 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.waitForFunction(() => !document.getElementById('dpt-stage').classList.contains('is-active'));
   assert.deepEqual((await page.evaluate(() => window.__fs)).map(c => c[0]), ['request', 'exit'], 'Esc leaves the real full screen');
   assert.equal(await active(), 'dpt-start');
+
+  // ---- What the page says about itself ----
+  // Solid grey and primary colours are also how OLED burn-in is checked: the
+  // guide and FAQ say so, and name only patterns the page really has.
+  const patterns = await page.locator('#dpt-swatches .dpt-sw').allTextContents();
+  const faqAnswer = async q => {
+    const item = page.locator('.faq details', { hasText: q });
+    assert.equal(await item.count(), 1, `FAQ items about "${q}"`);
+    return item.locator('.faq-answer').textContent();
+  };
+  const burn = await faqAnswer('burn-in');
+  for (const name of ['Grey 50%', 'Red', 'Green', 'Blue']) {
+    assert.ok(patterns.includes(name), `no ${name} pattern: ${patterns}`);
+    assert.ok(burn.toLowerCase().includes(name.toLowerCase()), `the burn-in answer does not mention ${name}: ${burn}`);
+  }
+  assert.match(burn, /image retention/);
+  assert.match(await page.locator('.prose').textContent(), /burn-in/);
+  assert.match(await page.getAttribute('meta[name="description"]', 'content'), /OLED burn-in/);
+  // The pattern's own tip says what to look for.
+  await page.locator('#dpt-swatches .dpt-sw', { hasText: 'Grey 50%' }).click();
+  assert.equal(await text('#dpt-name'), 'Grey 50%');
+  assert.match(await text('#dpt-tip'), /one even grey.* On an OLED, a faint ghost of a logo or taskbar is image retention or burn-in\./);
+  // Homepage search (index.html): every typed word must be a substring of the
+  // tool's title, description and keywords.
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/dead-pixel-test\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the dead pixel test');
+  for (const q of ['lcd test', 'oled', 'burn-in', 'burn in', 'white screen', 'black screen', 'display test', 'stuck pixel', 'backlight bleed']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
+  // The pixel count in the fault policy section points to the page that shows
+  // the reader's own resolution; every internal link is a page of this site.
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.ok(links.includes('/screen-resolution/'), `guide links: ${links}`);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
 };

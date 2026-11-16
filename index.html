@@ -49,6 +49,15 @@ title: Free Online Tools
   var input = document.getElementById('tool-search');
   var items = TT.$$('#all-tools li[data-search]');
   var sections = TT.$$('#all-tools .category');
+  // A letter and a digit side by side are written in several ways: "ean13",
+  // "ean-13" and "ean 13", "100kb" and "100 KB". So a typed word also matches
+  // a copy of each tool's text in which any hyphen or space between a letter
+  // and a digit is taken out, once the same is done to the word.
+  var joined = function (s) { return s.replace(/([a-z])[-\s]+(?=\d)|(\d)[-\s]+(?=[a-z])/g, '$1$2'); };
+  var hays = items.map(function (li) {
+    var text = li.getAttribute('data-search');
+    return { text: text, joined: joined(text) };
+  });
   var none = document.getElementById('no-results');
   var status = document.getElementById('search-status');
   // Screen readers hear the result count once typing pauses, not per key.
@@ -59,10 +68,13 @@ title: Free Online Tools
   }, 400);
   input.addEventListener('input', function () {
     var terms = input.value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    var joinedTerms = terms.map(joined);
     var shown = 0;
-    items.forEach(function (li) {
-      var hay = li.getAttribute('data-search');
-      var match = terms.every(function (t) { return hay.indexOf(t) !== -1; });
+    items.forEach(function (li, i) {
+      var hay = hays[i];
+      var match = terms.every(function (t, j) {
+        return hay.text.indexOf(t) !== -1 || hay.joined.indexOf(joinedTerms[j]) !== -1;
+      });
       li.hidden = !match;
       if (match) shown++;
     });

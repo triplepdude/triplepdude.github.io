@@ -22,7 +22,7 @@ function pngInfo(b, assert) {
   return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
 }
 
-module.exports = async ({ page, open, assert, fixtures }) => {
+module.exports = async ({ page, open, assert, fixtures, base }) => {
   await open();
   // jsQR is an independent decoder, injected inline (test-only, no network).
   await page.addScriptTag({ content: fs.readFileSync(path.join(fixtures, 'jsQR.min.js'), 'utf8') });
@@ -456,4 +456,52 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     return (performance.now() - t) / 5;
   });
   assert.ok(ms < 60, `input handler ${ms} ms`);
+
+  // ----- Title, guide links and homepage search -----
+  {
+    // Every competing result is titled "WiFi QR Code Generator"; this page's title also
+    // names what the others lack, the cards tested above (the section has the same name).
+    assert.equal(await page.textContent('h1'), 'WiFi QR Code Generator with Printable Cards');
+    assert.match(await page.title(), /^WiFi QR Code Generator with Printable Cards \| /);
+    assert.equal(await page.textContent('#wq-card-h'), 'Printable cards');
+    const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/passphrase-generator/', '/qr-code-generator/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+    assert.match(guide, /choose a password that is strong but easy to type, such as five random words from the passphrase generator\./);
+    assert.doesNotMatch(guide, /four or five random words/, 'four words of a short list are only 41.4 bits');
+    // That tip holds for every list of the passphrase generator, including the short lists
+    // that are quicker to type on a TV remote: five words are at least 51.7 bits (5 x log2
+    // 1,296, as strong as four words of the long list), and with no separator or a
+    // one-character one they are always a valid WPA password (8 to 63 printable ASCII
+    // characters). Six words from short list 2 could be 65 characters long.
+    let longest = '';
+    for (const f of ['eff-large-wordlist.txt', 'eff-short-wordlist-1.txt', 'eff-short-wordlist-2.txt']) {
+      const words = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'data', 'passphrase-generator', f), 'utf8').trim().split('\n');
+      const lens = words.map(w => w.length);
+      const [min, max] = [Math.min(...lens), Math.max(...lens)];
+      assert.ok(5 * Math.log2(words.length) > 51.6, `${f}: five words are ${(5 * Math.log2(words.length)).toFixed(1)} bits`);
+      assert.ok(5 * min >= 8 && 5 * max + 4 <= 63, `${f}: five words are ${5 * min} to ${5 * max + 4} characters`);
+      assert.ok(words.every(w => /^[\x21-\x7e]+$/.test(w)), `${f}: printable ASCII`);
+      if (max > longest.length) longest = words.find(w => w.length === max);
+    }
+    assert.equal(await page.inputValue('#wq-sec'), 'WPA');
+    const passBefore = await page.inputValue('#wq-pass');
+    const five = Array(5).fill(longest).join('-');
+    await page.fill('#wq-pass', five);
+    assert.equal(await page.textContent('#wq-error'), '', `${five.length} characters`);
+    assert.ok((await payload()).includes(`P:${five};`), await payload());
+    await page.fill('#wq-pass', passBefore);
+    assert.match(guide, /For a code that opens a link, contact card or event instead, use the QR code generator\./);
+    // Homepage search (index.html): every typed word must be a substring of the tool's
+    // title, description and keywords.
+    const home = await (await page.request.get(base + '/')).text();
+    const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/wifi-qr-code-generator\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+    assert.ok(hay, 'the homepage lists the Wi-Fi QR code generator');
+    for (const q of ['printable cards', 'wifi card', 'guest wifi', 'wifi password', 'share wifi']) {
+      assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+    }
+  }
 };

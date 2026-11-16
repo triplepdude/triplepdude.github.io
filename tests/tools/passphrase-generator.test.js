@@ -411,4 +411,20 @@ module.exports = async ({ page, open, assert }) => {
     assert.equal(split, 0, 'no word is broken across lines at 390 px');
   }
   await page.setViewportSize({ width: 1280, height: 900 });
+
+  // ----- Guide links: the strength checker for passwords already in use, and the
+  // random number generator for numbers from the same secure source -----
+  {
+    const guide = (await text('.prose')).replace(/\s+/g, ' ');
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/random-number-generator/', '/password-strength-checker/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+    assert.match(guide, /To see how a password you already use holds up, try the password strength checker\./);
+    assert.match(guide, /so every word is exactly equally likely\. For numbers instead of words, the random number generator uses the same source\./);
+    // The licence credit stays in the guide and on the tool card.
+    assert.match(guide, /Electronic Frontier Foundation \(eff\.org\), published under the Creative Commons Attribution 3\.0 United States licence \(CC BY 3\.0 US\)/);
+    assert.match(await text('.pp-credit'), /Electronic Frontier Foundation, used under CC BY 3\.0 US/);
+  }
 };

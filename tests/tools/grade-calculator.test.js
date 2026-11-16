@@ -17,6 +17,13 @@ module.exports = async ({ page, open, assert }) => {
     }
   };
 
+  // The guide links the percentage calculator for checking one mark by hand,
+  // with the mark from its own table: 45 out of 50, which counts as 90%.
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/percentage-calculator/']);
+  const guide = (await text('.prose')).replace(/\s+/g, ' ');
+  assert.match(guide, /To check a single mark by hand, such as 45 out of 50, use the percentage calculator, which shows each step\./);
+  assert.match(guide, /45\/50 90%/);
+
   // Sample: 92 x 20 + (51/60 = 85) x 15 + 78 x 25 = 5,065 over 60 graded weight = 84.4166…
   assert.equal(await text('#gc-avg'), '84.42%');
   assert.equal(await text('#gc-letter'), 'B');

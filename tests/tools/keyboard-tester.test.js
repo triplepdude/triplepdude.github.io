@@ -1,7 +1,7 @@
 // Expected values come from the UI Events spec and the legacy keyCode table
 // (a = 65, Shift = 16, Enter = 13, Escape = 27) and from counting a standard
 // ANSI board: 104 keys full-size, 87 tenkeyless, 61 for a 60% board.
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, base }) => {
   await open();
   const text = sel => page.locator(sel).textContent();
   const hasClass = (code, cls) => page.locator(`.kbt-key[data-code="${code}"]`).evaluate((el, c) => el.classList.contains(c), cls);
@@ -410,4 +410,16 @@ module.exports = async ({ page, open, assert }) => {
   assert.ok(m.page <= 1, `page overflow ${m.page}`);
   assert.ok(m.inner > 0, 'keyboard should scroll inside its container');
   assert.equal(await page.locator('#kbt-swipe').isVisible(), true);
+
+  // ---- Homepage search ----
+  // Every typed word must be a substring of the tool's title, description and
+  // keywords (index.html): the page shows keyCode for every press and tests
+  // rollover and chatter, under the names people use for them.
+  assert.equal(await page.locator('#kbt-ev-keycode').count(), 1, 'the keyCode readout');
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/keyboard-tester\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the keyboard tester');
+  for (const q of ['nkro', 'double typing', 'keycode', 'key code', 'laptop keyboard', 'keyboard checker', 'ghosting', 'rollover', 'chatter']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
 };

@@ -1065,4 +1065,18 @@ module.exports = async ({ page, open, assert, base, url, fixtures }) => {
   assert.match(await q.textContent('noscript p.msg'), /^JavaScript is turned off/);
   assert.equal(await q.isVisible('#bt'), false, 'no endless "Checking…" placeholders without JavaScript');
   await noJs.close();
+
+  // ---- Homepage search ----
+  // Every typed word must be a substring of the tool's title, description and
+  // keywords (index.html). The checks people look for by name are on the page
+  // (tested above), so the homepage search has to find the page for them.
+  for (const id of ['webgl', 'webgl2', 'webgpu']) assert.equal(await page.locator(`.bt-feat[data-feature="${id}"]`).count(), 1, `${id} check`);
+  assert.ok(await cell(page, 'bt-pv-rows', 'cookies'), 'the Cookies row');
+  assert.ok(await cell(page, 'bt-pv-rows', 'javascript'), 'the JavaScript row');
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/browser-test\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the browser test');
+  for (const q of ['webgl', 'webgpu', 'cookies', 'javascript enabled', 'browser info', 'what os', 'user agent', 'fingerprint']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
 };

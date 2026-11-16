@@ -313,6 +313,34 @@ async function siteChecks(browser, base, problems) {
   await announced('image', `${matches} tools match.`);
   await announced('', `Showing all ${slugs.length} tools.`);
 
+  // A word with a letter and a digit side by side finds a tool however its
+  // text spells them: "code128" and "code-128" find "Code 128", "300dpi" finds
+  // "300 dpi". The examples come from the tools' own text: the first word of
+  // three or more letters next to a number, letters first and digits first,
+  // that the text writes with a hyphen or space and never joined up.
+  const spellings = await page.$$eval('#all-tools li[data-search]', lis => {
+    const out = [];
+    for (const order of [/(?<![a-z\d])([a-z]{3,})[- ](\d+)(?![a-z\d])/g, /(?<![a-z\d])(\d+)[- ]([a-z]{3,})(?![a-z\d])/g]) {
+      found: for (const li of lis) {
+        const text = li.getAttribute('data-search');
+        for (const m of text.matchAll(order)) {
+          if (text.includes(m[1] + m[2])) continue;
+          out.push({ said: m[0], href: li.querySelector('a').getAttribute('href'), words: [m[1] + m[2], `${m[1]}-${m[2]}`] });
+          break found;
+        }
+      }
+    }
+    return out;
+  });
+  if (spellings.length < 2) problems.push(`homepage search: found ${spellings.length} of the 2 kinds of tool text it needs (a word then a number, a number then a word) to test joined-up spellings`);
+  for (const s of spellings) {
+    for (const word of s.words) {
+      await page.fill('#tool-search', word);
+      if (await page.$eval(`#all-tools a[href="${s.href}"]`, a => a.closest('li').hidden)) problems.push(`homepage search "${word}" does not show ${s.href}, whose text says "${s.said}"`);
+    }
+  }
+  await page.fill('#tool-search', '');
+
   // Field outlines need 3:1 and placeholder text 4.5:1 against the surfaces
   // fields sit on, in both colour schemes (WCAG 1.4.11, 1.4.3).
   for (const colorScheme of ['light', 'dark']) {
