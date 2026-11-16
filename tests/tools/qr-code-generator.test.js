@@ -307,6 +307,35 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   await page.fill('#qg-ev-etime', '04:00');
   assert.match(await payload(), /DTSTART:20260308T073000Z\r\nDTEND:20260308T080000Z\r\n/);
   assert.match(await warn(), /start time does not exist in America\/New_York[\s\S]*03:30/);
+  // Regression: the skipped 02:30 moves to 03:30, past an end of 03:00, and gave
+  // DTEND:...T070000Z before DTSTART:...T073000Z, which RFC 5545 section 3.8.2.2 forbids.
+  await page.fill('#qg-ev-etime', '03:00');
+  assert.equal(await err(), 'The start time does not exist in America/New_York because the clocks go forward that day. Phones would show it as 03:30, after the end time, so change the start or end time.');
+  assert.equal(await page.getAttribute('#qg-ev-stime', 'aria-invalid'), 'true');
+  assert.equal(await payload(), '');
+  // An hour from 02:30, the length kept when the start moves, would have no length at all
+  // (DTSTART = DTEND = ...T073000Z).
+  await page.fill('#qg-ev-etime', '03:30');
+  assert.equal(await err(), 'The start time does not exist in America/New_York because the clocks go forward that day. Phones would show it as 03:30, the same as the end time, so change the start or end time.');
+  assert.equal(await payload(), '');
+  await page.fill('#qg-ev-etime', '03:31');
+  assert.match(await payload(), /DTSTART:20260308T073000Z\r\nDTEND:20260308T073100Z\r\n/);
+  await page.selectOption('#qg-ev-tz', 'Europe/London');
+  await page.fill('#qg-ev-sdate', '2026-03-29');
+  await page.fill('#qg-ev-stime', '01:15');
+  await page.fill('#qg-ev-edate', '2026-03-29');
+  await page.fill('#qg-ev-etime', '02:00');
+  assert.match(await err(), /^The start time does not exist in Europe\/London [\s\S]* 02:15, after the end time/);
+  // Nuuk skips 23:00-23:59 on a Saturday, so a start in it is shown on the Sunday.
+  await page.selectOption('#qg-ev-tz', 'America/Nuuk');
+  await page.fill('#qg-ev-sdate', '2026-03-28');
+  await page.fill('#qg-ev-stime', '23:30');
+  await page.fill('#qg-ev-edate', '2026-03-29');
+  await page.fill('#qg-ev-etime', '00:15');
+  assert.match(await err(), / Phones would show it as 00:30 on 29 March 2026, after the end time/);
+  await page.fill('#qg-ev-etime', '01:00');
+  assert.match(await payload(), /DTSTART:20260329T013000Z\r\nDTEND:20260329T020000Z\r\n/);
+  assert.match(await warn(), /start time does not exist in America\/Nuuk [\s\S]*phones will show 00:30 on 29 March 2026\./);
   await page.selectOption('#qg-ev-tz', 'Europe/Berlin');
   await page.fill('#qg-ev-sdate', '2026-10-25');
   await page.fill('#qg-ev-stime', '02:30');

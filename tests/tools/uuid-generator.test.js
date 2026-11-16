@@ -321,6 +321,23 @@ module.exports = async ({ page, open, assert }) => {
     await inspect(v);
     assert.match(await text('#uu-in-err'), re, v);
   }
+  // Regression: a ULID with a character missing or added got a UUID's error ('"R" is not a
+  // hexadecimal digit'), and "ß" passed as "SS", giving a 27-character standard form.
+  for (const [v, msg] of [
+    ['01ARZ3NDEKTSV4RRFFQ69G5FA', 'A ULID has 26 characters, but this has 25.'],
+    ['01arz3ndektsv4rrffq69g5favv', 'A ULID has 26 characters, but this has 27.'],
+    ['01ARZ3NDEKTSV4RRFFQ69G5FAV.', '"." can\'t appear in a ULID. ULIDs use Crockford\'s Base32: 0-9 and A-Z without I, L, O and U.'],
+    ['01ARZ3NDEKTSV4RRFFQ69G5Fau', '"u" can\'t appear in a ULID. ULIDs use Crockford\'s Base32: 0-9 and A-Z without I, L, O and U.'],
+    ['01ARZ3NDEKTSV4RRFFQ69G5FAß', '"ß" can\'t appear in a ULID. ULIDs use Crockford\'s Base32: 0-9 and A-Z without I, L, O and U.'],
+    ['01ARZ3NDEKTSV4RRFFQ69G5F😀', '"😀" can\'t appear in a ULID. ULIDs use Crockford\'s Base32: 0-9 and A-Z without I, L, O and U.'],
+    // Only hex digits, or a UUID's length: still read as a UUID.
+    ['017f22e279b07cc398c4dc0c0c07398', 'A UUID has 32 hex digits, but this has 31.'],
+    ['017f22e279b07cc398c4dc0c0c07398g', '"g" is not a hexadecimal digit. A UUID uses only 0-9 and a-f, plus hyphens.'],
+  ]) {
+    await inspect(v);
+    assert.equal(await text('#uu-in-err'), msg, v);
+    assert.equal(await page.locator('#uu-info tr').count(), 0, v);
+  }
   await inspect('6ba7b811-9dad-11d1-80b4-00c04fd430c8');
   assert.match(await text('#uu-row-namespace'), /standard URL namespace/);
 
@@ -362,6 +379,14 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await text('#uu-gen-err'), /Enter the namespace UUID/);
   await page.fill('#uu-ns-custom', 'not-a-uuid');
   assert.match(await text('#uu-gen-err'), /custom namespace must be a UUID/);
+  // This field takes only a UUID, so a name of ULID length gets the UUID's error, not a ULID's,
+  // also at exactly 26 characters ("o" got "can't appear in a ULID"); a real ULID is named.
+  await page.fill('#uu-ns-custom', 'mynamespaceforthisapp');
+  assert.equal(await text('#uu-gen-err'), 'The custom namespace must be a UUID. "m" is not a hexadecimal digit. A UUID uses only 0-9 and a-f, plus hyphens.');
+  await page.fill('#uu-ns-custom', 'mynamespaceforthisapp12345');
+  assert.equal(await text('#uu-gen-err'), 'The custom namespace must be a UUID. "m" is not a hexadecimal digit. A UUID uses only 0-9 and a-f, plus hyphens.');
+  await page.fill('#uu-ns-custom', '01arz3ndektsv4rrffq69g5fav');
+  assert.equal(await text('#uu-gen-err'), 'The custom namespace must be a UUID. This looks like a ULID; convert it with the decoder below.');
   await page.fill('#uu-ns-custom', '{' + CUSTOM.toUpperCase() + '}');
   await page.fill('#uu-names', names.join('\r\n') + '\n');
   for (const ver of [3, 5, 8]) {

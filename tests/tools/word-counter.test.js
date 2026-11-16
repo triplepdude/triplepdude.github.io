@@ -183,7 +183,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await openFiles(['trip.odt']);
   assert.equal(await val('#wc-words'), '16');
   assert.equal(await page.inputValue('#wc-input'), 'Trip plan\n\nWe leave   on Monday morning.\n\nPack boots\n\nBook the\thut\n\nDay one\n\nWeather permitting.');
-  // HTML: script, style, noscript and the title are not text.
+  // HTML: script, style, noscript and the title are not text, nor are inline SVG and MathML
+  // (regression: their lower-case tag names slipped past the skip list, so an icon's <title>,
+  // <desc> and <text> and a formula's annotation were counted: 23 words instead of 16).
   await openFiles(['page.html']);
   assert.equal(await page.inputValue('#wc-input'), 'Home About\n\nBig news\n\nFirst paragraph with a line wrap.\n\nOne item\n\nTwo items\n\nLast\nline.');
   assert.equal(await val('#wc-words'), '16');

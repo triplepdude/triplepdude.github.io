@@ -169,13 +169,16 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.equal(await page.evaluate(() => document.activeElement.id), 'pw-input');
 
   // A check that fails hides the previous result, so it is not mistaken for this password's,
-  // and the next password is checked by a fresh worker. The core is stubbed: its check throws
-  // for "boom" and returns a fixed result otherwise.
+  // and the next password is checked by a fresh worker. The core is stubbed: its check takes
+  // 800 ms for "slow…" passwords, then throws for "…boom", and gives 7 guesses plus 100 for
+  // each personal word.
   const time = { display: 'stub time', seconds: 1 };
   const stub = `self.zxcvbnts = self.zxcvbnts || {};
-    self.zxcvbnts.core = { ZxcvbnFactory: function () { this.check = function (p) {
-      if (p === 'boom') throw new Error('analysis failed');
-      return { score: 0, guesses: 7, guessesLog10: Math.log10(7), feedback: { warning: '', suggestions: [] }, sequence: [],
+    self.zxcvbnts.core = { ZxcvbnFactory: function () { this.check = function (p, u) {
+      if (/^slow/.test(p)) for (var end = Date.now() + 800; Date.now() < end;);
+      if (/boom$/.test(p)) throw new Error('analysis failed');
+      var g = 7 + 100 * (u ? u.length : 0);
+      return { score: 0, guesses: g, guessesLog10: Math.log10(g), feedback: { warning: '', suggestions: [] }, sequence: [],
         crackTimes: { onlineThrottlingXPerHour: ${JSON.stringify(time)}, onlineNoThrottlingXPerSecond: ${JSON.stringify(time)},
           offlineSlowHashingXPerSecond: ${JSON.stringify(time)}, offlineFastHashingXPerSecond: ${JSON.stringify(time)} } };
     }; } };`;
@@ -188,6 +191,70 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.equal(await page.isVisible('#pw-intro'), true);
   await check('fine again', '7');
   assert.equal(await text('#pw-error'), '');
+  // Regression: a check that ended after Clear was remembered as if shown, so the same
+  // password typed again showed nothing until one more character was added.
+  const resultShown = () => page.waitForFunction(() => !document.querySelector('#pw-result').hidden, null, { timeout: 5000 }).then(() => true, () => false);
+  await page.fill('#pw-input', 'slow one');
+  await page.click('#pw-clear');
+  await page.waitForTimeout(1500);
+  assert.equal(await page.isVisible('#pw-result'), false);
+  await page.fill('#pw-input', 'slow one');
+  assert.ok(await resultShown(), 'the same password typed again after Clear is checked again');
+  assert.equal(await text('#pw-length'), '8');
+  // Cleared and typed again while the check runs: its result is shown.
+  await page.fill('#pw-input', 'slow two');
+  await page.click('#pw-clear');
+  await page.fill('#pw-input', 'slow two');
+  assert.ok(await resultShown(), 'typed again during the check');
+  assert.equal(await text('#pw-length'), '8');
+  // "Checking…" appears 300 ms into a check and goes when it ends. This runs act() and waits
+  // until the check it starts has done both; a MutationObserver records the indicator, so even
+  // a short appearance is not missed. If it never shows (a starved machine can run the result
+  // before the 300 ms timer), the wait ends after 5 s instead, when the 800 ms check is over.
+  const throughCheck = async act => {
+    await page.evaluate(() => {
+      const busy = document.querySelector('#pw-busy');
+      if (window.__busyObserver) window.__busyObserver.disconnect();
+      window.__busySeen = false;
+      window.__busyObserver = new MutationObserver(() => { if (!busy.hidden) window.__busySeen = true; });
+      window.__busyObserver.observe(busy, { attributes: true, attributeFilter: ['hidden'] });
+    });
+    await act();
+    await page.waitForFunction(() => window.__busySeen && document.querySelector('#pw-busy').hidden, null, { timeout: 5000 }).catch(() => {});
+  };
+  // Regression: a personal word typed and deleted during a check got that check's result
+  // (107 guesses) drawn under a box that no longer held the word.
+  await page.click('.pw-personal summary');
+  await throughCheck(async () => {
+    await page.fill('#pw-user', 'a');
+    await page.fill('#pw-user', '');
+  });
+  assert.equal(await page.getAttribute('#pw-guesses', 'data-guesses'), '7', 'result for the words in the box');
+  assert.equal(await page.getAttribute('#pw-result', 'aria-busy'), null);
+  await page.fill('#pw-user', 'a');
+  await page.waitForFunction(() => document.querySelector('#pw-guesses').getAttribute('data-guesses') === '107', null, { timeout: 5000 });
+  // Regression: a check that failed after the box had gone back to the password on screen
+  // hid that password's result and showed the error meant for the other one.
+  await throughCheck(async () => {
+    await page.fill('#pw-input', 'slow boom');
+    await page.fill('#pw-input', 'slow two');
+  });
+  assert.equal(await page.isVisible('#pw-result'), true, 'a failed check of another password keeps the result');
+  assert.equal(await page.getAttribute('#pw-guesses', 'data-guesses'), '107');
+  assert.equal(await text('#pw-error'), '');
+  // One that failed after Clear showed its error under the empty box. (The failure restarted
+  // the worker, so a check comes first to load a new one.)
+  await page.fill('#pw-input', 'fine');
+  await page.waitForFunction(() => !document.querySelector('#pw-result').hidden && document.querySelector('#pw-length').textContent === '4', null, { timeout: 10000 });
+  await page.fill('#pw-input', 'slow boom');
+  await page.click('#pw-clear');
+  await page.waitForTimeout(1500);
+  assert.equal(await text('#pw-error'), '', 'no error for a password that was cleared');
+  assert.equal(await page.isVisible('#pw-intro'), true);
+  // The password itself still gets the error.
+  await page.fill('#pw-input', 'slow boom');
+  await page.waitForFunction(() => /could not be checked/.test(document.querySelector('#pw-error').textContent), null, { timeout: 10000 });
+  assert.equal(await page.isVisible('#pw-result'), false);
 
   // ----- The question people type: "how secure is my password" -----
   {

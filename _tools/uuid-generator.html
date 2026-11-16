@@ -504,7 +504,7 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
       } else if (k === 'name') {
         var ns = nsSel.value;
         if (ns === 'custom') {
-          var p = parse(nsCustom.value);
+          var p = parse(nsCustom.value, true);
           if (p.empty) return fail('Enter the namespace UUID, or pick a standard namespace.', nsCustom), sayGen(now);
           if (p.error || p.ulid) return fail('The custom namespace must be a UUID. ' + (p.error || 'This looks like a ULID; convert it with the decoder below.'), nsCustom), sayGen(now);
           ns = dashed(p.hex);
@@ -574,17 +574,24 @@ input.mono.uu-in { font-size: clamp(12px, 3.3vw, 15px); }
     '6ba7b8129dad11d180b400c04fd430c8': 'OID', '6ba7b8149dad11d180b400c04fd430c8': 'X.500'
   };
 
-  function parse(raw) {
+  // uuidOnly: for a field that takes only a UUID (the custom namespace).
+  function parse(raw, uuidOnly) {
     var s = raw.trim();
     // Pasted from code or JSON: drop matching quotes around the value.
     if (/^(["'`]).*\1$/.test(s) && s.length > 1) s = s.slice(1, -1).trim();
     if (s.charAt(0) === '{' && s.charAt(s.length - 1) === '}') s = s.slice(1, -1).trim();
     s = s.replace(/^urn:uuid:/i, '');
     if (!s) return { empty: true };
-    // A ULID: 26 characters of Crockford's Base32.
-    if (s.length === 26 && s.indexOf('-') < 0) {
-      var up = s.toUpperCase(), bad = /[^0-9A-Z]/.exec(up) || /[ILOU]/.exec(up);
+    // A ULID: 26 characters of Crockford's Base32. A value of 20 to 30 characters with no
+    // hyphen and a letter after F cannot be a UUID either, so it is taken as a ULID with a
+    // character missing or added. Characters are checked before upper-casing, which turns
+    // "ß" into "SS". In a field that takes only a UUID, only a valid ULID is taken as one,
+    // so anything else gets the UUID's errors.
+    if (uuidOnly ? /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i.test(s) : s.indexOf('-') < 0 && (s.length === 26 || s.length >= 20 && s.length <= 30 && /[g-z]/i.test(s))) {
+      var bad = /[^0-9A-Za-z]/u.exec(s) || /[ILOU]/i.exec(s);
       if (bad) return { error: '"' + bad[0] + '" can\'t appear in a ULID. ULIDs use Crockford\'s Base32: 0-9 and A-Z without I, L, O and U.' };
+      if (s.length !== 26) return { error: 'A ULID has 26 characters, but this has ' + s.length + '.' };
+      var up = s.toUpperCase();
       if (up.charAt(0) > '7') return { error: 'A ULID starts with 0 to 7; "' + s.charAt(0) + '" would need more than 128 bits.' };
       var v = 0n;
       for (var i = 0; i < 26; i++) v = (v << 5n) | BigInt(B32.indexOf(up.charAt(i)));

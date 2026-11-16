@@ -694,6 +694,31 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
     }
   }
 
+  // RFC 7518 (6.2.1.2) gives every EC coordinate the curve's full size, and browsers refuse a
+  // shorter one. Some libraries drop leading zero bytes (a P-521 coordinate starts with one about
+  // half the time, a P-256 one once in 256), so the zero bytes are put back, with a note.
+  const EC_SIZE = { 'P-256': 32, 'P-384': 48, 'P-521': 66 };
+  function padEcJwk(jwk, notes) {
+    const size = EC_SIZE[jwk.crv], out = Object.assign({}, jwk), short = [];
+    if (!size) return out;
+    ['x', 'y', 'd'].forEach(m => {
+      if (typeof out[m] !== 'string') return;
+      let bytes;
+      try { bytes = b64Bytes(out[m], 'JWK member'); } catch (e) { return; } // the browser reports it
+      if (!bytes.length || bytes.length >= size) return;
+      const full = new Uint8Array(size);
+      full.set(bytes, size - bytes.length);
+      out[m] = b64u(full);
+      short.push('"' + m + '"');
+    });
+    if (short.length) {
+      const names = short.length > 1 ? short.slice(0, -1).join(', ') + ' and ' + short[short.length - 1] : short[0];
+      notes.push('This JWK\'s ' + names + (short.length > 1 ? ' are' : ' is') + ' shorter than the ' + size + ' bytes RFC 7518 requires for ' + jwk.crv +
+        ', probably because the software that wrote it drops leading zero bytes. The page put them back; other software may refuse this key.');
+    }
+    return out;
+  }
+
   async function importJwk(jwk, spec, alg, notes) {
     if (!jwk || typeof jwk !== 'object' || Array.isArray(jwk)) throw new UserError('The JWK must be a JSON object.');
     if (!jwk.kty) throw new UserError('The JWK has no "kty" (key type) member.');
@@ -707,7 +732,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
     if (jwk.kty === 'RSA' && jwk.n && jwk.e) pub = { kty: 'RSA', n: jwk.n, e: jwk.e };
     else if (jwk.kty === 'EC' && jwk.x && jwk.y) {
       if (jwk.crv !== spec.crv) throw new UserError('This is an EC ' + jwk.crv + ' key, but ' + alg + ' needs ' + describeNeed(spec) + '.');
-      pub = { kty: 'EC', crv: jwk.crv, x: jwk.x, y: jwk.y };
+      pub = padEcJwk({ kty: 'EC', crv: jwk.crv, x: jwk.x, y: jwk.y }, notes);
     } else if (jwk.kty === 'OKP' && jwk.x) {
       if (jwk.crv !== spec.crv) throw new UserError('This is an ' + jwk.crv + ' key, but ' + alg + ' needs ' + describeNeed(spec) + '.');
       pub = { kty: 'OKP', crv: jwk.crv, x: jwk.x };
@@ -1019,7 +1044,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
     return info;
   }
 
-  async function importPrivateKey(text, spec, alg) {
+  async function importPrivateKey(text, spec, alg, notes) {
     const usage = ['sign'];
     const need = () => describeNeed(spec).replace('public', 'private');
     let key;
@@ -1030,7 +1055,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
       if (Array.isArray(jwk.keys)) throw new UserError('This is a key set (JWKS). Paste the single private JWK to sign with.');
       if (!jwk.d) throw new UserError('This JWK has no "d" member, so it is a public key. Signing needs the private key.');
       if (jwk.kty !== spec.kty || (spec.crv && jwk.crv !== spec.crv)) throw new UserError('This is ' + (jwk.kty === 'EC' || jwk.kty === 'OKP' ? 'an ' + jwk.crv : 'an ' + jwk.kty) + ' key, but ' + alg + ' needs ' + need() + '.');
-      const clean = Object.assign({}, jwk);
+      const clean = jwk.kty === 'EC' ? padEcJwk(jwk, notes) : Object.assign({}, jwk);
       delete clean.alg; delete clean.key_ops; delete clean.use; delete clean.ext;
       try { key = await subtle.importKey('jwk', clean, spec.imp, true, usage); } catch (e) {
         if (unsupported(e, spec)) throw new UserError(NO_ED25519.replace('checked', 'made'));
@@ -1127,7 +1152,7 @@ textarea.jb-token { min-height: 100px; background: var(--surface-2); }
       } else {
         const text = jbKey.value.trim();
         if (!text) throw new UserError('Paste a test private key, or press Generate a test key pair.');
-        const k = await importPrivateKey(text, spec, alg);
+        const k = await importPrivateKey(text, spec, alg, notes);
         const bits = k.algorithm && k.algorithm.modulusLength;
         if (spec.kty === 'RSA' && bits && bits < 2048) notes.push('This RSA key is only ' + bits + ' bits; RFC 7518 requires 2048 bits or more.');
         sig = await subtle.sign(spec.ver, k, utf8Bytes(input));
