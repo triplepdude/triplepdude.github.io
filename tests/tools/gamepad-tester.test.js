@@ -4,7 +4,7 @@
 // 7 = right trigger, axes 0/1 = left stick with up = -1) and were computed in
 // python3: right stick (-0.25, 1) is 1.031 from centre at 256 degrees; a stick
 // whose reach is 1 - 0.08 sin^2(2θ) averages a 4.0% circularity error.
-module.exports = async ({ page, open, assert, url }) => {
+module.exports = async ({ page, open, assert, url, base }) => {
   await page.addInitScript(() => {
     if (location.search.includes('nogp')) { delete Navigator.prototype.getGamepads; return; }
     window.__pads = [];
@@ -233,6 +233,15 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await text('#gpt-tested'), '1 of 18', 'the press that switched controllers counts');
   assert.equal(await svgText(437, 188), '✕');
   assert.equal(await page.isVisible('#gpt-svg text[x="300"][y="104"]'), true, 'touchpad drawn');
+  // The touchpad click arrives as button 17 and lights the touchpad, which is
+  // what the FAQ tells PS5 owners to expect.
+  assert.equal(await svgText(300, 104), 'Touchpad');
+  await page.evaluate(() => window.__press(1, 17, 1));
+  await until(() => document.querySelector('#gpt-svg text[x="300"][y="104"]').classList.contains('is-on'));
+  await until(() => document.querySelector('#gpt-buttons li:nth-child(18)').classList.contains('is-on'));
+  await page.evaluate(() => window.__press(1, 17, 0));
+  await until(() => !document.querySelector('#gpt-svg text[x="300"][y="104"]').classList.contains('is-on'));
+  assert.equal(await text('#gpt-tested'), '2 of 18');
   assert.equal(await page.isDisabled('#gpt-rumble'), true);
   assert.match(await text('#gpt-vib-msg'), /not available for this controller/);
   await page.evaluate(() => window.__press(1, 0, 0));
@@ -332,4 +341,42 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.goto(url + '?nogp');
   assert.match(await text('#gpt-error'), /does not support the Gamepad API/);
   assert.equal(await hidden('#gpt-empty'), true);
+
+  // ---- What the page says about itself ----
+  // The mapping table goes as far as the drawing does: button 17, which the
+  // page names Touchpad on a PlayStation controller (checked above) and which
+  // lies outside the standard layout, so not every browser reports it. The
+  // first cell stays short: a longer one made the table too wide for a
+  // 320px screen.
+  const rows = await page.$$eval('.prose table tr', trs => trs.map(tr => [...tr.cells].map(c => c.textContent.trim())));
+  assert.deepEqual(rows[0], ['Index', 'Xbox', 'PlayStation', 'Nintendo']);
+  const r17 = rows.find(r => /^17\b/.test(r[0]));
+  assert.ok(r17, `the mapping table stops before button 17: ${rows.map(r => r[0]).join(' | ')}`);
+  assert.equal(r17[2], 'Touchpad click');
+  assert.match((await text('.prose')).replace(/\s+/g, ' '), /Not every browser and system reports button 17, an extra outside the standard layout\./);
+  // What a browser test can and cannot see of a PS5 controller, and what to do
+  // about drift once it is measured.
+  const faqAnswer = async q => {
+    const item = page.locator('.faq details', { hasText: q });
+    assert.equal(await item.count(), 1, `FAQ items about "${q}"`);
+    return item.locator('.faq-answer').textContent();
+  };
+  const touch = await faqAnswer('touchpad, gyro or adaptive triggers');
+  // Only desktop browsers map the click: Chromium's Android mappings
+  // (GamepadMappings.java) and Safari (WebKit bug 266293) leave it out.
+  assert.match(touch, /Only the touchpad click\. Chrome, Edge and Firefox on a computer report it as button 17/);
+  assert.match(touch, /Safari and browsers on phones and tablets do not report it/);
+  assert.match(touch, /touch position, the motion sensors or the adaptive triggers/);
+  const drift = await faqAnswer('How do I know if my stick has drift?');
+  assert.match(drift, /press Measure drift/);
+  assert.match(drift, /recalibrating the sticks/);
+  assert.match(drift, /has to be replaced/);
+  // Homepage search (index.html): every typed word must be a substring of the
+  // tool's title, description and keywords.
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/gamepad-tester\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the gamepad tester');
+  for (const q of ['ps4', 'dualsense', 'dualshock', 'switch', 'joy-con', 'rumble', 'ps5', 'xbox', 'stick drift']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
 };

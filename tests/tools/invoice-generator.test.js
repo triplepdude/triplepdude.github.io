@@ -2,6 +2,7 @@
 // quantized to the currency's minor unit), not with the page. Currency strings
 // are compared with Node's own Intl.NumberFormat.
 const fs = require('fs');
+const path = require('path');
 const zlib = require('zlib');
 
 // A grey PNG of w x h pixels; a 7,000 x 7,000 one (49 megapixels) is only about 50 KB.
@@ -24,7 +25,7 @@ function bigPng(w, h) {
 // A 2x2 red PNG, used as a logo.
 const LOGO = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR4nGP8z8Dwn4GBgYGJAQoAAB3+AgN4ht6aAAAAAElFTkSuQmCC', 'base64');
 
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, base }) => {
   // Fixed "today" and a print() that only records what would be printed.
   await page.clock.install({ time: new Date('2026-09-24T10:00:00') });
   await page.addInitScript(() => {
@@ -402,4 +403,78 @@ module.exports = async ({ page, open, assert }) => {
   const heard = await page.waitForFunction(t => document.querySelector('#iv-status').textContent === t, spoken, { timeout: 3000 }).then(() => true, () => false);
   assert.ok(heard, `status says "${await text('#iv-status')}", expected "${spoken}"`);
   assert.equal(await page.getAttribute('#iv-sheet', 'aria-live'), null);
+
+  // ----- Currencies whose decimals the browser leaves out -----
+  // ISO 4217 gives the forint, rupiah, Colombian peso, Pakistani rupee and Serbian dinar 2
+  // decimals and the Iraqi dinar 3. The browser's currency data (Unicode CLDR) leaves out
+  // the decimals of currencies whose minor unit is no longer used, and which ones changes
+  // between releases (common/supplemental/supplementalData.xml at the release tags): up to
+  // CLDR 47 only IQD and RSD of these six had none, CLDR 48 took them from HUF, IDR, COP
+  // and PKR as well, 48.1 gave RSD 2 and 49 gives PKR 2 again. The page follows whatever
+  // this browser says, and the guide names all six so that a refused decimal is no
+  // surprise. They are examples ("currencies such as"): the Albanian lek and the Lebanese
+  // pound, 2 decimals in ISO 4217, have none in every CLDR release from 45 to 49.
+  const guide = (await text('.prose')).replace(/\s+/g, ' ');
+  const faq = (await text('.faq')).replace(/\s+/g, ' ');
+  await page.selectOption('#iv-locale', 'en-US');
+  const dropped = [];
+  for (const [code, name] of [['HUF', 'Hungarian forint'], ['IDR', 'Indonesian rupiah'], ['COP', 'Colombian peso'], ['PKR', 'Pakistani rupee'], ['IQD', 'Iraqi'], ['RSD', 'Serbian dinars']]) {
+    assert.ok(guide.includes(name), `the guide does not say that the ${name} can lose its decimals`);
+    const digits = await page.evaluate(c => new Intl.NumberFormat('en', { style: 'currency', currency: c }).resolvedOptions().maximumFractionDigits, code);
+    await page.selectOption('#iv-currency', code);
+    await page.fill('#iv-paid', '100.5');
+    await page.dispatchEvent('#iv-paid', 'change');   // shows a message at once, as leaving the field does
+    if (digits === 0) {
+      dropped.push(code);
+      assert.equal(await text('#iv-error'), `The amount paid must be a whole number (${code} has no decimal places).`);
+      assert.equal(await page.getAttribute('#iv-paid', 'aria-invalid'), 'true');
+      assert.doesNotMatch(await text('#iv-sheet .iv-tot tr[data-row="total"] td'), /[.,]\d{1,2}$/, `${code} total has no decimals`);
+    } else {
+      assert.equal(await text('#iv-error'), '', `${code} has ${digits} decimals in this browser, so 100.5 is accepted`);
+      const expected = await page.evaluate(([c, d]) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c, minimumFractionDigits: d, maximumFractionDigits: d }).format(-100.5), [code, digits]);
+      assert.equal(await text('#iv-sheet .iv-tot tr[data-row="paid"] td'), expected, `${code} amount paid`);
+    }
+  }
+  assert.ok(dropped.includes('IQD') || dropped.includes('HUF'), `this browser leaves the decimals out for: ${dropped.join(', ') || 'none of them'}`);
+  for (const code of ['ALL', 'LBP']) {
+    await page.selectOption('#iv-currency', code);
+    await page.fill('#iv-paid', '100.5');
+    await page.dispatchEvent('#iv-paid', 'change');
+    assert.equal(await text('#iv-error'), `The amount paid must be a whole number (${code} has no decimal places).`, `${code}: the six currencies the guide names are not the only ones`);
+  }
+  assert.match(guide, /built-in currency data, which follows ISO 4217 except where the minor unit has fallen out of use\. Depending on the browser version, currencies such as the Hungarian forint, Indonesian rupiah, Colombian peso, Pakistani rupee and the Iraqi and Serbian dinars get no decimals\./);
+  assert.doesNotMatch(guide, /such as the Iraqi and Serbian dinars, which get no decimals/, 'the old sentence named only the two dinars');
+  assert.match(faq, /Amounts get the number of decimals your browser assigns to the currency/);
+  assert.doesNotMatch(faq, /the right number of decimals/);
+  await page.selectOption('#iv-currency', 'EUR');
+  await page.selectOption('#iv-locale', 'de-DE');
+  await page.fill('#iv-paid', '100');
+  assert.equal(await text('#iv-error'), '');
+  assert.equal(await text('#iv-sheet .iv-tot tr[data-row="balance"] td'), nf('de-DE', 'EUR', 293.88), 'back to the invoice as it was');
+
+  // ----- The guide on PDF libraries -----
+  // pdf-lib 1.17.1 with @pdf-lib/fontkit 1.1.1 does shape text: it joins Arabic letters and
+  // forms Hindi conjuncts. What it gets wrong is direction and positioning: the digits of
+  // "123" inside an Arabic line are drawn as 321, and marks are placed without the font's
+  // positioning rules. The guide used to claim that it does no shaping at all.
+  assert.doesNotMatch(guide, /does no text shaping|would not join|garbled/);
+  assert.match(guide, /A JavaScript PDF library would need a font file embedded for every script, megabytes for Chinese alone, and pdf-lib, for example, writes a number inside an Arabic line backwards\./);
+
+  // ----- Links to the tools that prepare an invoice's numbers -----
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.deepEqual(links, ['/hours-calculator/', '/percentage-calculator/']);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
+  assert.match(guide, /Billing by the hour\? The hours calculator gives the decimal hours to enter as the quantity\./);
+  assert.match(guide, /Taxes are added on top, so enter prices without tax\. To take the tax off a price that includes it, use the percentage calculator\./);
+
+  // ----- Homepage search (index.html): every typed word must be a substring of the
+  // tool's title, description and keywords -----
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/invoice-generator\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the invoice generator');
+  for (const q of ['invoice creator', 'freelance invoice', 'gst invoice', 'sales tax invoice', 'vat invoice', 'quote', 'invoice template']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
 };

@@ -440,6 +440,18 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await pick('quartz', '0 0 0 1 1 ? 2030');
   assert.deepEqual(await runs(), ['Tue 2030-01-01 00:00:00']);
   assert.match(await text('#cr-runs'), /No further runs in the chosen years/);
+  // The same check against the real libraries (library-runs.json, Spring Framework 7.0.10 and
+  // Quartz 2.5.2): Spring's weekday numbering (SUN is 7, * starts at Monday, so */2 is Mon, Wed,
+  // Fri, Sun, and 7 at the start of a range is 0), Quartz's ranges that wrap round (22-2,
+  // NOV-FEB, FRI-MON), the step Quartz ignores after a name, lists such as 1,WED, and Quartz's
+  // 100-year look-ahead (2120-2140 stops at 2126).
+  const LIB = JSON.parse(fs.readFileSync(path.join(fixtures, 'library-runs.json'), 'utf8'));
+  for (const [key, want] of Object.entries(LIB.runs)) {
+    const [dialect, expr] = key.split('|');
+    await pick(dialect, expr);
+    assert.equal(await text('#cr-err'), '', key);
+    assert.deepEqual(await runs(), want, key);
+  }
 
   // Descriptions, notes and field breakdowns.
   const DESCS = [
@@ -465,12 +477,67 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     ['k8s', '0 0 */2 * 1', 'At 00:00 on every 2nd day of the month from the 1st through the 31st and every Monday.'],
     ['k8s', '@weekly', 'At 00:00 on Sunday.'],
     ['github', '17 */6 * * *', 'At 00:17, 06:17, 12:17 and 18:17 every day.'],
+    ['spring', '0 0 9 * * */2', 'At 09:00 on Monday, Wednesday, Friday and Sunday.'],
+    ['spring', '0 0 0 * * 7-3', 'At 00:00, Sunday through Wednesday.'],
+    ['spring', '0 0 0 * * 1,WED', 'At 00:00 on Monday and Wednesday.'],
+    ['quartz', '0 0 12 ? * 1,WED', 'At 12:00 on Wednesday and Sunday.'],
+    ['aws', 'cron(0 12 ? * 2,WED *)', 'At 12:00 on Monday and Wednesday.'],
+    ['quartz', '0 0 22-2 * * ?', 'At 00:00, 01:00, 02:00, 22:00 and 23:00 every day.'],
+    ['quartz', '0 0 0 * NOV-FEB ?', 'At 00:00 every day in January, February, November and December.'],
+    ['quartz', '0 0 9 ? * MON-FRI/2', 'At 09:00, Monday through Friday.'],
+    ['aws', 'cron(0/30 20-2 ? * MON-FRI *)', 'Every 30 minutes from 00:00 through 02:30 and from 20:00 through 23:30, Monday through Friday.'],
   ];
   for (const [d, e, want] of DESCS) {
     await pick(d, e);
     assert.equal(await text('#cr-err'), '', `${d} ${e}`);
     assert.equal(await text('#cr-desc'), want, `${d} ${e}`);
   }
+  // Spring counts */2 in the weekday field from Monday; node-cron, under the same menu entry,
+  // counts it from Sunday.
+  await pick('spring', '0 0 9 * * */2');
+  assert.equal(await text('#cr-warn'), 'Day of week field: Spring counts */2 from Monday, so it means Monday, Wednesday, Friday and Sunday, as shown. node-cron counts from Sunday: Sunday, Tuesday, Thursday and Saturday. Write the days out, as in SUN,MON,WED,FRI, so that both agree.');
+  await pick('spring', '0 0 9 * * SUN-SUN');
+  assert.match(await text('#cr-warn'), /Spring reads "SUN-SUN" as 0-7, which is every day of the week\. Write SUN for Sunday alone\./);
+  await pick('spring', '0 0 9 * * MON-FRI');
+  assert.equal(await text('#cr-warn'), '');
+  // node-cron reads L and # from 4.3 and 4.5, and W, LW, L-3 and ? only from 4.6 (4.5 drops the
+  // W of 15W), so the note names the version that handles all of them.
+  await pick('spring', '0 0 9 ? * FRIL');
+  assert.match(await text('#cr-note'), /L, W, # and \? work in Spring; node-cron handles all of them only from version 4\.6\./);
+  // Quartz lets a range wrap round; AWS documents it for hours (its own example is 20-2).
+  await pick('quartz', '0 0 22-2 * * ?');
+  assert.equal(await text('#cr-note'), 'Hour field: 22-2 wraps round from 23 to 0, which Quartz allows. Crontab, Kubernetes and Spring reject a range that runs backwards.');
+  await pick('quartz', '0 0 0 ? * FRI-MON');
+  assert.match(await text('#cr-note'), /^Day of week field: FRI-MON wraps round from SAT to SUN, which Quartz allows\./);
+  await pick('aws', 'cron(0/30 20-2 ? * MON-FRI *)');
+  assert.equal(await text('#cr-warn'), '');
+  assert.match(await text('#cr-note'), /Hour field: 20-2 wraps round from 23 to 0, which AWS EventBridge allows\./);
+  assert.deepEqual((await runs()).slice(0, 3), ['Thu 2026-09-24 20:00', 'Thu 2026-09-24 20:30', 'Thu 2026-09-24 21:00']);
+  await pick('aws', 'cron(0 0 ? NOV-FEB MON *)');
+  assert.equal(await text('#cr-err'), '');
+  assert.equal(await text('#cr-warn'), 'Month field: NOV-FEB wraps round from DEC to JAN. AWS documents such a range only for hours, as in 20-2, so check that EventBridge accepts it here.');
+  // Quartz skips a step written after a name (Spring replaces the name by its number first).
+  await pick('quartz', '0 0 9 ? * MON-FRI/2');
+  assert.equal(await text('#cr-warn'), 'Day of week field: Quartz ignores a step that follows a name, so "MON-FRI/2" runs as MON-FRI. To use the step, write it with numbers: 2-6/2.');
+  await pick('quartz', '0 0 0 1 JAN/3 ?');
+  assert.match(await text('#cr-warn'), /"JAN\/3" runs as JAN\. To use the step, write it with numbers: 1\/3\./);
+  await pick('spring', '0 0 0 1 JAN/3 *');
+  assert.equal(await text('#cr-warn'), '');
+  assert.equal(await text('#cr-desc'), 'At 00:00 on the 1st of January, April, July and October.');
+  // AWS lists , - * ? L and # for the weekday field, without /.
+  await pick('aws', 'cron(0 9 ? * 2/2 *)');
+  assert.equal(await text('#cr-desc'), 'At 09:00 on Monday, Wednesday and Friday.');
+  assert.equal(await text('#cr-warn'), 'Day of week field: AWS documents , - * ? L and # for this field, but not /. Check that EventBridge accepts "2/2", or write MON,WED,FRI instead.');
+  // Quartz's year field takes 1970-2199, but Quartz looks for run times at most 100 years
+  // ahead (MAX_YEAR). AWS has no such limit.
+  await pick('quartz', '0 0 0 1 1 ? 2150');
+  assert.equal(await text('#cr-err'), '');
+  assert.deepEqual(await runs(), []);
+  assert.match(await text('#cr-runs'), /Quartz looks at most 100 years ahead \(up to 2126\), so it finds no run for this schedule\./);
+  await pick('quartz', '0 0 0 1 1 ? 2120-2140');
+  assert.match(await text('#cr-runs'), /No further runs up to 2126, the furthest Quartz looks ahead\./);
+  await pick('aws', 'cron(0 0 1 1 ? 2150)');
+  assert.deepEqual(await runs(), ['Thu 2150-01-01 00:00']);
   await pick('quartz', '0 15 10 ? * 6#3');
   assert.match(await text('#cr-note'), /Quartz numbers weekdays from 1 \(Sunday\) to 7 \(Saturday\)/);
   assert.deepEqual(await page.$$eval('#cr-fields tr', trs => trs.map(tr => Array.from(tr.cells).map(c => c.textContent))), [
@@ -498,7 +565,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     ['quartz', '0 0 12 ? * FRI#6', /the number after # must be from 1 to 5/],
     ['quartz', '0 0 12 1,L * ?', /must stand alone in the field/],
     ['quartz', '0 12 * * ?', /^Expected 6 or 7 fields/],
-    ['quartz', '0 0 12 ? * MON 2100', /^Year field: 2100 is out of range\. Allowed: 1970–2099/],
+    ['quartz', '0 0 12 ? * MON 2200', /^Year field: 2200 is out of range\. Allowed: 1970–2199/],
+    ['quartz', '0 0 0 1 1 ? 2030-2028', /^Year field: the range 2030-2028 runs backwards\. Write the earlier year first: 2028-2030\.$/],
+    ['quartz', '0 0 12 ? * WED,6L', /^Day of week field: "WED,6L": L, W and # values must stand alone in the field/],
+    ['quartz', '0 0 12 ? * LW', /^Day of week field: "LW" belongs in the day-of-month field\. Here use FRIL, 5L or FRI#3\.$/],
+    ['quartz', '0 0 12 5#2 * ?', /^Day of month field: "5#2" belongs in the day-of-week field\. Here use L, L-3, LW or 15W\.$/],
+    ['spring', '0 0 22-2 * * *', /^Hour field: the range 22-2 runs backwards\. Ranges cannot wrap around/],
+    ['spring', '0 0 9 * * FRI-MON', /^Day of week field: the range FRI-MON runs backwards/],
     ['quartz', '0 0 12 ? * 2-6/?', /"\?" must stand alone/],
     ['spring', '0 0 9 * * L', /write the weekday instead of a bare "L"/],
     ['spring', '0 0 9 * * * *', /Found 7 fields, but Spring uses 6/],
@@ -596,13 +669,26 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await pick('quartz', '*/20 * * * * ?');
   tr = await trans();
   assert.deepEqual([tr.spring, tr.systemd, tr.unix], ['*/20 * * * * *', 'OnCalendar=*-*-* *:*:00/20 UTC', 'No seconds field.']);
+  // No weekday step for Spring, where */2 would start at Monday, or for AWS, which does not
+  // list / for that field. Quartz's */2 starts at 1, Sunday, so it is right there.
+  await pick('unix', '0 9 * * 0,2,4,6');
+  tr = await trans();
+  assert.deepEqual([tr.spring, tr.aws, tr.quartz, tr.k8s], ['0 0 9 * * SUN,TUE,THU,SAT', 'cron(0 9 ? * SUN,TUE,THU,SAT *)', '0 0 9 ? * */2', 'schedule: "0 9 * * */2"\ntimeZone: "Etc/UTC"']);
+  await setExpr('0 12 * * 1-5/2');
+  tr = await trans();
+  assert.deepEqual([tr.spring, tr.aws], ['0 0 12 * * MON,WED,FRI', 'cron(0 12 ? * MON,WED,FRI *)']);
+  await pick('quartz', '0 0 22-2 ? NOV-FEB FRI-MON');
+  tr = await trans();
+  assert.deepEqual([tr.unix, tr.spring, tr.aws], ['0 0-2,22,23 * 1,2,11,12 0,1,5,6', '0 0 0-2,22,23 * 1,2,11,12 SUN,MON,FRI,SAT', 'cron(0 0-2,22,23 ? 1,2,11,12 SUN,MON,FRI,SAT *)']);
 
   // Every translation runs at the same times as the original, checked by reading it back in
   // its own format (UTC). Crontab-style ones are also checked against systemd below.
   const cronOf = (target, t) => (target === 'github' ? t.match(/cron: '([^']+)'/)[1] : target === 'k8s' ? t.match(/schedule: "([^"]+)"/)[1] : t);
   const SOURCES = [['unix', '0 9 * * 1-5'], ['unix', '*/15 9-17 * * 1-5'], ['unix', '0 0 1,15 * *'], ['unix', '0 0 */2 * 1'], ['unix', '0 12 13 * 5'], ['unix', '5 */2 * 1-6 0,6'],
     ['quartz', '0 15 10 ? * 6#3'], ['quartz', '0 15 10 L-2 * ?'], ['quartz', '0 0 8 ? JAN-MAR 2#1 2027-2028'], ['spring', '0 0 0 13 * FRI'], ['spring', '*/10 * 9 * * *'],
-    ['aws', 'cron(0 10 L * ? *)'], ['k8s', '0 0 */2 * 1'], ['aws', 'cron(30 6 ? * 1,7 *)']];
+    ['aws', 'cron(0 10 L * ? *)'], ['k8s', '0 0 */2 * 1'], ['aws', 'cron(30 6 ? * 1,7 *)'],
+    ['unix', '0 9 * * 0,2,4,6'], ['unix', '0 12 * * 1-5/2'], ['spring', '0 0 9 * * */2'], ['spring', '0 0 0 * * 7-3'],
+    ['quartz', '0 0 22-2 ? NOV-FEB FRI-MON'], ['aws', 'cron(0/30 20-2 ? * MON-FRI *)']];
   let checked = 0;
   for (const [d, e] of SOURCES) {
     await pick(d, e);
@@ -625,7 +711,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   if (systemdOk) {
     const SD = [['unix', '0 9 * * 1-5'], ['unix', '*/15 9-17 * * 1-5'], ['unix', '0 12 13 * 5'], ['unix', '0 0 */2 * 1'], ['unix', '5 */2 * 1-6 0,6'], ['unix', '0 0 1 */3 *'],
       ['quartz', '0 15 10 ? * 6#3'], ['quartz', '0 15 10 ? * 6L'], ['quartz', '0 15 10 L * ?'], ['quartz', '0 15 10 L-2 * ?'], ['quartz', '*/20 * * * * ?'],
-      ['quartz', '0 0 8 ? JAN-MAR 2#1 2027-2028'], ['spring', '0 0 0 13 * FRI'], ['spring', '15 */5 * * * *'], ['aws', 'cron(0 18 ? * MON-FRI *)'], ['k8s', '0 0 */2 * 1']];
+      ['quartz', '0 0 8 ? JAN-MAR 2#1 2027-2028'], ['spring', '0 0 0 13 * FRI'], ['spring', '15 */5 * * * *'], ['aws', 'cron(0 18 ? * MON-FRI *)'], ['k8s', '0 0 */2 * 1'],
+      ['spring', '0 0 9 * * */2'], ['quartz', '0 0 22-2 ? NOV-FEB FRI-MON'], ['aws', 'cron(0/30 20-2 ? * MON-FRI *)']];
     for (const [d, e] of SD) {
       await pick(d, e);
       const lines = (await text('#cr-trans-systemd')).split('\n').map(l => l.replace(/^OnCalendar=/, ''));
@@ -673,6 +760,21 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.locator('#cr-b-type option[value="seconds"]').isDisabled(), true);
   await pick('spring', '0 0 9 1 1 *');
   assert.equal(await page.inputValue('#cr-b-type'), 'yearly');
+  // Chosen days are written out for Spring and AWS, never as a weekday step.
+  await page.selectOption('#cr-b-type', 'weekly');
+  await page.fill('#cr-b-time', '09:00');
+  for (const v of ['0', '2', '4', '6']) await page.check(`#cr-b-days input[value="${v}"]`);
+  for (const v of ['1', '3', '5']) await page.uncheck(`#cr-b-days input[value="${v}"]`);
+  assert.equal(await page.inputValue('#cr-expr'), '0 0 9 * * SUN,TUE,THU,SAT');
+  await pick('aws');
+  assert.equal(await page.inputValue('#cr-expr'), 'cron(0 9 ? * SUN,TUE,THU,SAT *)');
+  for (const v of ['1', '3', '5']) await page.check(`#cr-b-days input[value="${v}"]`);
+  for (const v of ['0', '2', '4', '6']) await page.uncheck(`#cr-b-days input[value="${v}"]`);
+  assert.equal(await page.inputValue('#cr-expr'), 'cron(0 9 ? * MON,WED,FRI *)');
+  assert.equal(await text('#cr-warn'), '');
+  await pick('unix', '0 9 * * 0,2,4,6');
+  await page.selectOption('#cr-dialect', 'spring');
+  assert.equal(await page.inputValue('#cr-expr'), '0 0 9 * * SUN,TUE,THU,SAT');
 
   // Daylight saving in other formats: the run is listed and flagged rather than guessed.
   await setNow('2027-03-27T12:00:00Z');

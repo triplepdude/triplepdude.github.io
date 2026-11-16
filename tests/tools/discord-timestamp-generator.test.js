@@ -14,6 +14,15 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.clock.install({ time: new Date('2021-04-20T22:20:30Z') });
   await open();
 
+  // The guide links the Unix timestamp converter where it introduces Unix
+  // time and the date calculator for counting the days to an event, and it
+  // names the ID format, a snowflake, that the decoder reads.
+  const guide = (await text('.prose')).replace(/\s+/g, ' ');
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/unix-timestamp-converter/', '/date-calculator/']);
+  assert.match(guide, /is <t:-14182940:F>\. The Unix timestamp converter turns any such number into a date\./);
+  assert.match(guide, /To count the days until the event, use the date calculator\./);
+  assert.match(guide, /stored in the ID itself, a “snowflake”: the top 42 bits are milliseconds since the start of 2015/);
+
   // Defaults: the current minute, in the visitor's own time zone.
   assert.equal(await page.inputValue('#dts-zone'), 'America/Chicago');
   assert.equal(await page.inputValue('#dts-date'), '2021-04-20');

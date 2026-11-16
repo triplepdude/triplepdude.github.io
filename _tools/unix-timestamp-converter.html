@@ -2,11 +2,9 @@
 title: Unix Timestamp Converter (Epoch Time)
 description: Convert Unix epoch timestamps to dates and back, plus Windows FILETIME, .NET ticks, Excel serial dates, GPS time, Julian Day and more formats.
 category: Date & Time
-keywords: [unix timestamp converter, epoch converter, unix time, timestamp to date, date to timestamp, filetime converter, excel serial date converter, gps time converter]
+keywords: [unix timestamp converter, epoch converter, epoch time converter, unix time, timestamp to date, date to timestamp, milliseconds to date, filetime converter, ldap timestamp converter, active directory timestamp, chrome webkit timestamp, excel serial date converter, gps time converter]
 howto: |
   ## How to use it
-
-  The clock at the top shows the current Unix time, ticking live.
 
   - **Timestamp to date:** paste a number. Unix time in seconds,
     milliseconds, microseconds or nanoseconds is detected from its size; for
@@ -20,6 +18,8 @@ howto: |
     `Sun, 09 Sep 2001 01:46:40 GMT`. A string without an offset is read in
     the selected zone. Text that is not ISO 8601, an RFC 2822 or HTTP date,
     or JavaScript's `Date.toString()` output is rejected rather than guessed.
+
+  The [date calculator](/date-calculator/) counts the days between two dates.
 
   ## What Unix time is
 
@@ -40,11 +40,14 @@ howto: |
   nanoseconds, which is right for any moment from March 1973 to the year 5138.
   Numbers are exact integers, so all 19 digits of a nanosecond value are kept.
 
+  Discord's `<t:1700000000:R>` codes hold Unix seconds; the
+  [Discord timestamp generator](/discord-timestamp-generator/) builds them.
+
   ## Other timestamp formats
 
   | Format | Counts | Since | Seen in |
   |---|---|---|---|
-  | Windows FILETIME | 100 ns | 1601-01-01 | NTFS, Active Directory, the registry |
+  | Windows FILETIME | 100 ns | 1601-01-01 | NTFS, Active Directory (LDAP), the registry |
   | .NET ticks | 100 ns | 0001-01-01 | C# `DateTime.Ticks` |
   | WebKit / Chrome | µs | 1601-01-01 | Chrome history and cookies |
   | Excel serial | days | 1899-12-30 or 1904-01-01 | spreadsheets |
@@ -54,31 +57,32 @@ howto: |
   | Julian Day | days | noon, 1 January 4713 BC (Julian calendar) | astronomy |
   | Modified Julian Day | days | 1858-11-17 | science and satellite data |
 
-  - **Excel's 1900 system** counts a February 29, 1900 that never existed,
-    copied from Lotus 1-2-3, so serial 60 is that day. From 1900-03-01 on its
-    serials match Google Sheets and LibreOffice; earlier ones differ by a day.
-    The 1904 system, the old Mac default, is 1,462 days lower.
+  - **Excel's 1900 system** counts a February 29, 1900 that never existed, so
+    serial 60 is that day. From 1900-03-01 on its serials match Google Sheets
+    and LibreOffice; earlier ones differ by a day. The 1904 system, the old
+    Mac default, is 1,462 days lower.
   - **Serial dates and Julian Days carry no time zone.** They are read and
     written as UTC, rounded to the millisecond.
   - **GPS time** does not skip leap seconds, so it runs ahead of UTC by every
     leap second added since 1980: 18 seconds since 1 January 2017. The
-    converter applies the IERS list for each date and 18 seconds after it; a
-    new leap second would shift later values by one. The GPS week and second
-    of the week are shown too.
+    converter applies the IERS list for each date. No more leap seconds are
+    expected: in October 2026 the General Conference on Weights and Measures
+    decided that UTC will run without them from 20 May 2027, and none is
+    scheduled before then. The GPS week and second of the week are also
+    shown.
   - FILETIME and .NET ticks have 18 digits and WebKit time 17, so auto-detect
     reads them as Unix time, then offers any format that gives a date between
     1980 and 2100 under **Could also be**. Cocoa, HFS+ and GPS values count
-    seconds like Unix time and cannot be told apart by size, so choose them
-    from the menu.
+    seconds like Unix time, so choose them from the menu.
 
   ## The year 2038 problem
 
   Many older systems store Unix time in a signed 32-bit integer, whose largest
   value is 2,147,483,647, or 2038-01-19T03:14:07Z. One second later the counter
-  wraps to 1901-12-13T20:45:52Z. Current 64-bit systems are not affected, but
-  embedded devices, old file formats and 32-bit database columns such as
-  MySQL's `TIMESTAMP` still are. The converter flags any Unix value outside
-  the 32-bit range.
+  wraps to 1901-12-13T20:45:52Z. 64-bit systems are not affected, but embedded
+  devices, old file formats and 32-bit database columns such as MySQL's
+  `TIMESTAMP` still are. The converter flags any Unix value outside the
+  32-bit range.
 faq:
   - q: What is the current Unix timestamp?
     a: It is the ticking number at the top of this page, taken from your device's clock. Unix time is the same in every time zone, so the value is identical for everyone at the same instant.
@@ -473,8 +477,9 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
       var u = REL_UNITS[i];
       if (a >= u[1] || u[0] === 'second') {
         var text = RTF.format(Math.trunc(diff / u[1]), u[0]);
-        var days = Math.floor(a / 86400);
-        return days >= 2 ? text + ' (' + days.toLocaleString('en-US') + ' days)' : text;
+        // Weeks, months and years get the day count too: "in 1 week (12 days)".
+        // With days as the unit it would only repeat the number.
+        return u[1] > 86400 ? text + ' (' + Math.floor(a / 86400).toLocaleString('en-US') + ' days)' : text;
       }
     }
     return '';
@@ -505,11 +510,12 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
   // Cleans a typed number: a Unicode minus or dash becomes "-", spaces,
   // underscores and apostrophes used as digit separators go, and commas are
   // thousands separators (1,700,000,000) or, if that pattern does not fit, a
-  // decimal comma (1700000000,5). Returns null for other comma patterns.
+  // decimal comma (1700000000,5). The first group never starts with 0, so
+  // "0,500" is half a second, not 500. Returns null for other comma patterns.
   function normalize(raw) {
     var s = String(raw).trim().replace(/^[−‒-―﹣－]/, '-').replace(/[\s_'’]/g, '');
     if (s.indexOf(',') < 0) return s;
-    if (/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?(?:e[+-]?\d+)?$/i.test(s)) return s.replace(/,/g, '');
+    if (/^[+-]?[1-9]\d{0,2}(?:,\d{3})+(?:\.\d*)?(?:e[+-]?\d+)?$/i.test(s)) return s.replace(/,/g, '');
     if (/^[+-]?\d*,\d+(?:e[+-]?\d+)?$/i.test(s)) return s.replace(',', '.');
     return null;
   }

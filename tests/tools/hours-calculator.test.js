@@ -205,7 +205,66 @@ module.exports = async ({ page, open, assert, url }) => {
     assert.equal(await text('#hc-pay'), pay, `rate ${rate}`);
     assert.equal(await text('#hc-pay-label'), `Gross pay at ${label} an hour`, `rate ${rate}`);
   }
+  // A group of thousands never starts with 0, so the comma in "0,500" is a
+  // decimal comma: 0.50 an hour (it was read as 500), and 465 minutes at
+  // 0.50 = 3.875 -> 3.88.
+  for (const rate of ['0,500', '00,500', '0,5']) {
+    await page.fill('#hc-rate', rate);
+    assert.equal(await text('#hc-pay'), '3.88', `rate ${rate}`);
+    assert.equal(await text('#hc-pay-label'), 'Gross pay at 0.50 an hour', `rate ${rate}`);
+  }
+  // A zero-led number that is grouped any other way is not a number (these
+  // were read as 500.25, 500.25 and 500,000). "1.000,50" still groups with dots.
+  for (const rate of ['0,500.25', '0.500,25', '0,500,000']) {
+    await page.fill('#hc-rate', rate);
+    await page.locator('#hc-rate').press('Tab');
+    assert.equal(await text('#hc-pay'), '–', `rate ${rate}`);
+    assert.equal(await text('#hc-msg'), 'Enter the hourly rate as a number, such as 18.50.', `rate ${rate}`);
+  }
+  await page.fill('#hc-rate', '1.000,50');
+  assert.equal(await text('#hc-pay'), '7,753.88');
+  assert.equal(await text('#hc-msg'), '');
   await page.fill('#hc-rate', '');
+
+  // One minute is singular in the explanation (it read "1 minutes ÷ 60").
+  await cell(1, '.hc-break').fill('');
+  await cell(1, '.hc-end').fill('5:01 PM');
+  assert.equal(await text('#hc-total'), '8:01');
+  assert.equal(await text('#hc-explain'), '1 minute ÷ 60 = 0.0166…, so 8:01 is 8.0166… hours, rounded to 8.02.');
+  await cell(1, '.hc-end').fill('5:02 PM');
+  assert.equal(await text('#hc-explain'), '2 minutes ÷ 60 = 0.0333…, so 8:02 is 8.0333… hours, rounded to 8.03.');
+  await cell(1, '.hc-end').fill('5:03 PM');
+  assert.equal(await text('#hc-explain'), '3 minutes ÷ 60 = 0.05, so 8:03 is exactly 8.05 hours.');
+
+  // The FAQ's shifts: 8 AM to 5 PM is 9:00 on the clock, 8:00 after an hour's
+  // lunch and 8:30 (8.50) after 30 minutes; 9 to 5 is 8:00, or 7:30 (7.50)
+  // after 30 minutes.
+  const setRow = async (s, e, brk) => {
+    await cell(1, '.hc-start').fill(s);
+    await cell(1, '.hc-end').fill(e);
+    await cell(1, '.hc-break').fill(brk);
+  };
+  for (const [s, e, brk, hm, dec] of [['8 AM', '5 PM', '', '9:00', '9.00'], ['8 AM', '5 PM', '60', '8:00', '8.00'], ['8 AM', '5 PM', '30', '8:30', '8.50'],
+    ['9 AM', '5 PM', '', '8:00', '8.00'], ['9 AM', '5 PM', '30', '7:30', '7.50']]) {
+    await setRow(s, e, brk);
+    assert.equal(await text('#hc-total'), hm, `${s} to ${e}, break ${brk}`);
+    assert.equal(await text('#hc-dec'), dec, `${s} to ${e}, break ${brk}`);
+  }
+  // The FAQ's spreadsheet formulas are on the page, and the last one,
+  // =MOD(B2-A2,1)*24-C2/60 with the times as fractions of a day, gives the
+  // decimal hours the calculator shows, for an overnight shift too.
+  const faq = await text('.faq');
+  for (const formula of ['=(B2-A2)*24', '=MOD(B2-A2,1)*24', '=MOD(B2-A2,1)*24-C2/60']) assert.ok(faq.includes(formula), formula);
+  const sheet = (a2, b2, c2) => ((((b2 - a2) % 1) + 1) % 1) * 24 - c2 / 60;
+  for (const [s, e, brk, a2, b2, dec] of [['9:00 AM', '5:15 PM', 30, 9 / 24, 17.25 / 24, '7.75'], ['10:00 PM', '6:30 AM', 30, 22 / 24, 6.5 / 24, '8.00'],
+    ['11:45 PM', '12:15 AM', 0, 23.75 / 24, 0.25 / 24, '0.50']]) {
+    await setRow(s, e, String(brk));
+    assert.equal(sheet(a2, b2, brk).toFixed(2), dec, `formula for ${s} to ${e}`);
+    assert.equal(await text('#hc-dec'), dec, `${s} to ${e}`);
+  }
+  // The guide links the two neighbouring tools it names.
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/time-card-calculator/', '/date-calculator/']);
+  await setRow('9:00 AM', '5:15 PM', '30');
   // An overnight row whose rounded ends meet is a full 24 hours, not 0:
   // 0:03 to 0:02 and 11:59 PM to 11:58 PM both count 12:00 AM to 12:00 AM.
   await page.selectOption('#hc-round', '15');
@@ -300,5 +359,26 @@ module.exports = async ({ page, open, assert, url }) => {
     assert.equal(shown[0].replace(/[^0-9]/g, ''), '1162500');
   } finally {
     await ctx.close();
+  }
+
+  // In a locale that writes decimals with a comma (German) any single comma
+  // is a decimal comma, so "1,000" is 1.00 an hour (465 minutes = 7.75) and
+  // "0,500" is 0.50, as before; "1.000,50" groups with dots, and a zero-led
+  // group is refused there too.
+  const de = await page.context().browser().newContext({ locale: 'de-DE' });
+  try {
+    const p3 = await de.newPage();
+    await p3.goto(url);
+    for (const [rate, pay, label] of [['0,500', '3,88', '0,50'], ['1,000', '7,75', '1,00'], ['1.000,50', '7.753,88', '1.000,50']]) {
+      await p3.fill('#hc-rate', rate);
+      assert.equal(await p3.textContent('#hc-pay'), pay, `de-DE rate ${rate}`);
+      assert.equal(await p3.textContent('#hc-pay-label'), `Gross pay at ${label} an hour`, `de-DE rate ${rate}`);
+    }
+    for (const rate of ['0.500,25', '0,500.25']) {
+      await p3.fill('#hc-rate', rate);
+      assert.equal(await p3.textContent('#hc-pay'), '–', `de-DE rate ${rate}`);
+    }
+  } finally {
+    await de.close();
   }
 };

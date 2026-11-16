@@ -23,7 +23,7 @@ const VECTORS = [
 ];
 const LABELS = ['Very weak', 'Weak', 'Fair', 'Strong', 'Very strong'];
 
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, base }) => {
   const requests = [];
   page.on('request', r => { if (/zxcvbn/.test(r.url())) requests.push(r.url()); });
   await open();
@@ -188,4 +188,29 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.isVisible('#pw-intro'), true);
   await check('fine again', '7');
   assert.equal(await text('#pw-error'), '');
+
+  // ----- The question people type: "how secure is my password" -----
+  {
+    // It is the title of the leading results for this need and was nowhere on the page.
+    const questions = await page.$$eval('.faq summary', els => els.map(e => e.textContent.trim()));
+    assert.equal(questions.length, 5);
+    assert.ok(questions.includes('How secure is my password?'), `FAQ questions: ${questions.join(' | ')}`);
+    const answer = (await page.locator('.faq details', { hasText: 'How secure is my password?' }).locator('.faq-answer').textContent()).replace(/\s+/g, ' ').trim();
+    // The answer names scores 3 and 4 with the verdicts the page shows for them (checked
+    // for every vector above), and says what a score cannot tell.
+    assert.ok(answer.includes(`A score of 3 (${LABELS[3]}) or 4 (${LABELS[4]}) means it is hard to guess`), answer);
+    assert.match(answer, /must also be used on one site only and must never have leaked, which a score cannot tell you\.$/);
+    // The guide links to the passphrase generator and not to the random number generator,
+    // whose own guide sends people who need a password to the passphrase generator.
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/passphrase-generator/']);
+    // Homepage search (index.html): every typed word must be a substring of the tool's
+    // title, description and keywords.
+    const home = await (await page.request.get(base + '/')).text();
+    const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/password-strength-checker\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+    assert.ok(hay, 'the homepage lists the password strength checker');
+    for (const q of ['how secure is my password', 'how strong is my password', 'secure', 'password tester', 'password meter', 'password strength meter', 'zxcvbn', 'entropy']) {
+      assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+    }
+  }
 };

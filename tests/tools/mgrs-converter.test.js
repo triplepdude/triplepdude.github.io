@@ -413,6 +413,74 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(copiedLines[0], 'id,zone,hemisphere,easting,northing,latitude,longitude,mgrs,utm_zone,utm_band,utm_hemisphere,utm_easting,utm_northing,note,error');
   assert.ok(copiedLines[1].startsWith('"\'=HYPERLINK(""x"")",56,S,'), copiedLines[1]);
   assert.ok(copiedLines[2].startsWith('Smith; J,18,N,585628,4511322,40.748396,-73.985705,18TWL8562811322'), copiedLines[2]);
+  // A column named hemisphere holds a hemisphere: its S is south and never latitude band S, also when
+  // the northing would fit that band (about 3,540,000 to 4,432,000 m: Tierra del Fuego, the
+  // Falklands, South Georgia), and it overrules a letter written after the zone number. Expected
+  // values from pyproj (EPSG:327xx for south, 326xx for north) and the mgrs package.
+  const SOUTH19 = ['-54.820466, -68.361901', '19FEV4100025000'], NORTH19 = ['35.467655, -68.548109', '19SEV4100025000'];
+  const hemiRows = [
+    ['19,S,541000,3925000', SOUTH19], ['19,s,541000,3925000', SOUTH19], ['19,South,541000,3925000', SOUTH19], ['19,SOUTHERN,541000,3925000', SOUTH19],
+    ['19S,S,541000,3925000', SOUTH19], ['Zone 19,S,541000,3925000', SOUTH19],
+    ['21,S,438000,4272000', ['-51.699522, -57.897139', '21FVC3800072000']], ['24,S,532000,3984000', ['-54.290904, -38.508384', '24FWE3200084000']],
+    ['56,S,334901,6252289', ['-33.856798, 151.215305', '56HLH3490152289']],
+    ['19,N,541000,3925000', NORTH19], ['19,north,541000,3925000', NORTH19], ['19S,N,541000,3925000', NORTH19],
+    ['21,N,438000,4272000', ['38.594323, -57.711952', '21SVC3800072000']],
+  ];
+  await batch('zone,hemisphere,easting,northing\n' + hemiRows.map(r => r[0]).join('\n'));
+  rowsNow = await batchRows();
+  assert.equal(rowsNow.length, hemiRows.length);
+  hemiRows.forEach(([line, [latlon, grid]], k) => {
+    within(rowsNow[k][2], +latlon.split(', ')[0], +latlon.split(', ')[1], 1e-6, 'hemisphere column, row ' + line);
+    assert.equal(rowsNow[k][3], grid, 'hemisphere column, row ' + line);
+    assert.equal(rowsNow[k][5], '', 'nothing was guessed for ' + line);
+  });
+  await page.click('#mg-batch-copy');
+  const hemiCsv = (await page.evaluate(() => navigator.clipboard.readText())).trim().split('\r\n');
+  assert.equal(hemiCsv[1], '19,S,541000,3925000,-54.820466,-68.361901,19FEV4100025000,19,F,S,541000.00,3925000.00,,');
+  // The page's own output columns read back the same way: the hemisphere column decides.
+  await batch('utm_zone,utm_band,utm_hemisphere,utm_easting,utm_northing\n19,F,S,541000.00,3925000.00\n19,S,N,541000.00,3925000.00\n21,F,S,438000.00,4272000.00');
+  rowsNow = await batchRows();
+  assert.deepEqual(rowsNow.map(r => [r[3], r[5]]), [['19FEV4100025000', ''], ['19SEV4100025000', ''], ['21FVC3800072000', '']]);
+  // Without a hemisphere column the letter comes from a band column, which the Python utm package
+  // calls zone_letter, and the zone is the column that is not the letter, wherever it stands. A
+  // band column's S is latitude band S (32°N to 40°N).
+  for (const head of ['easting,northing,zone_number,zone_letter', 'easting,northing,zone_letter,zone_number', 'easting,northing,zone,band']) {
+    const letterFirst = head.endsWith('zone_number');
+    await batch(head + '\n' + [['19', 'F', 541000, 3925000], ['19', 'S', 541000, 3925000], ['56', 'H', 334901, 6252289], ['18', 'T', 585628, 4511322]]
+      .map(([z, l, e, n]) => [e, n].concat(letterFirst ? [l, z] : [z, l]).join(',')).join('\n'));
+    rowsNow = await batchRows();
+    assert.deepEqual(rowsNow.map(r => r[3]), ['19FEV4100025000', '19SEV4100025000', '56HLH3490152289', '18TWL8562811322'], head);
+    assert.match(rowsNow[1][5], /19S is read as latitude band S/, head);
+  }
+  // One column for zone and band together still works, and a hemisphere cell that says neither
+  // north nor south is reported instead of being guessed at.
+  await batch('zone/band,easting,northing\n19F,541000,3925000\n56H,334901,6252289');
+  assert.deepEqual((await batchRows()).map(r => r[3]), ['19FEV4100025000', '56HLH3490152289']);
+  await batch('zone,hemisphere,easting,northing\n19,NA,541000,3925000\n19,,541000,3925000');
+  rowsNow = await batchRows();
+  assert.match(rowsNow[0][5], /"NA" is not a latitude band or hemisphere/);
+  assert.match(rowsNow[1][5], /No band or hemisphere was given, so the northern hemisphere is assumed/);
+  // A header that says N/S or North/South is a hemisphere column too: its S was ignored, and the
+  // point put in the northern hemisphere with only a note.
+  for (const head of ['zone,N/S,easting,northing', 'Zone,North / South,Easting,Northing', 'zone,n_s,easting,northing']) {
+    await batch(head + '\n19,S,541000,3925000\n19,N,541000,3925000');
+    rowsNow = await batchRows();
+    assert.deepEqual(rowsNow.map(r => [r[3], r[5]]), [['19FEV4100025000', ''], ['19SEV4100025000', '']], head);
+  }
+  // Beside lat and lon, N/S and E/W columns (NMEA-style logs, lat_dir and lon_dir) give the
+  // hemisphere of an unsigned value; such rows used to land north and east of the equator and
+  // Greenwich with no note. A value with its own sign keeps it. Expected MGRS from the mgrs package.
+  const LLH = [['33.8568', 'S', '151.2153', 'E', '56HLH3490052288'], ['40.748440', 'N', '73.985664', 'W', '18TWL8563111326'],
+    ['22.9519', 'South', '43.2105', 'west', '23KPQ8347660687'], ['-33.8568', 'S', '151.2153', 'E', '56HLH3490052288'],
+    ['33.8568', '', '151.2153', '', '56SLC3490047711']];
+  for (const [head, order] of [['lat,N/S,lon,E/W', r => [r[0], r[1], r[2], r[3]]], ['latitude,lat_dir,longitude,lon_dir', r => [r[0], r[1], r[2], r[3]]],
+    ['Latitude hemisphere,Latitude,Longitude hemisphere,Longitude', r => [r[1], r[0], r[3], r[2]]]]) {
+    await batch(head + '\n' + LLH.map(r => order(r).join(',')).join('\n'));
+    rowsNow = await batchRows();
+    assert.deepEqual(rowsNow.map(r => r[3]), LLH.map(r => r[4]), head);
+  }
+  await batch('lat,lon,hemisphere\n33.8568,151.2153,S\n40.748440,-73.985664,N');
+  assert.deepEqual((await batchRows()).map(r => r[3]), ['56HLH3490052288', '18TWL8563111326']);
   // Decimal commas in a semicolon-separated file (European spreadsheets).
   await batch('name;lat;lon\nESB;40,748440;-73,985664');
   assert.equal((await batchRows())[0][3], '18TWL8563111326');

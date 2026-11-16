@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const { execFileSync } = require('child_process');
 
 // Every test sound is rendered with an OfflineAudioContext and played as an
@@ -8,7 +9,7 @@ const { execFileSync } = require('child_process');
 // time: 39.91 Hz at 10%, 632.46 Hz at 50%, 10023.7 Hz at 90%; 20-200 Hz is at
 // 63.25 Hz halfway. The centre test sends 1/sqrt(2) = 0.7071 of the signal to
 // each channel. The downloadable track is 1 + 3 * 3.05 + 9 + 5 + 5 + 21 = 50.15 s.
-module.exports = async ({ page, open, assert, url }) => {
+module.exports = async ({ page, open, assert, url, base }) => {
   await page.addInitScript(() => {
     window.__played = [];
     const start = AudioBufferSourceNode.prototype.start;
@@ -358,4 +359,38 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.deepEqual(await page.locator('#spk-sur button').allTextContents(),
     ['1 Front left', '2 Front right', '3 Centre', '4 LFE (subwoofer)', '5 Back left', '6 Back right', '7 Side left', '8 Side right']);
   await page.click('#spk-stop');
+
+  // ---- What the page says about itself ----
+  // The description names what the page has (it used to end on "No voice
+  // clips", which reads as a missing feature in a search result).
+  const desc = await page.getAttribute('meta[name="description"]', 'content');
+  assert.doesNotMatch(desc, /\bno\b/i, `the description says what the page lacks: ${desc}`);
+  assert.match(desc, /5\.1 and 7\.1 channels/);
+  assert.match(desc, /WAV test track/);
+  // The page offers a WAV download, so "no audio files to download" in the
+  // privacy answer contradicted it: nothing is fetched, the track is built here.
+  const faqAnswer = async q => {
+    const item = page.locator('.faq details', { hasText: q });
+    assert.equal(await item.count(), 1, `FAQ items about "${q}"`);
+    return item.locator('.faq-answer').textContent();
+  };
+  const privacy = await faqAnswer('Is anything recorded or uploaded?');
+  assert.doesNotMatch(privacy, /no audio files to download/);
+  assert.match(privacy, /WAV test track is built on your device/);
+  assert.equal(await page.locator('#spk-dl').textContent(), 'Download test track (WAV)');
+  // Homepage search (index.html): every typed word must be a substring of the
+  // tool's title, description and keywords.
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/speaker-test\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the speaker test');
+  for (const q of ['subwoofer', 'earbuds', 'earphones', '5.1', '7.1', 'surround', 'left right', 'headphone test', 'bass test']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
+  // The sweep section sends readers who need one steady frequency to the tone
+  // generator; every internal link in the guide and FAQ is a page of this site.
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.ok(links.includes('/tone-generator/'), `guide links: ${links}`);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
 };

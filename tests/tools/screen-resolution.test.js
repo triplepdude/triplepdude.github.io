@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 // Expected values are worked out independently of the page:
 // - physical pixels: 1707 x 960 CSS px at DPR 1.5 is a 2560 x 1440 panel;
@@ -7,7 +8,7 @@ const fs = require('fs');
 //   one pixel subtends 1 arcminute: 1 / (PPI * tan(1/60 deg)) inches.
 //   python3: 1920x1080 @ 24in -> 91.79 PPI, 0.2767 mm, 20.92 x 11.77 in
 //   (53.1 x 29.9 cm), 95 cm (37.5 in); 2560x1440 @ 27in -> 108.79 PPI, 0.2335 mm.
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, base }) => {
   const text = s => page.locator(s).textContent();
   // Interval polling: Playwright's default polls with requestAnimationFrame,
   // which would share the fake display clock installed further down.
@@ -213,4 +214,34 @@ module.exports = async ({ page, open, assert }) => {
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#scr-download')]);
   assert.equal(dl.suggestedFilename(), 'screen-resolution.txt');
   assert.equal(fs.readFileSync(await dl.path(), 'utf8'), clip);
+
+  // ---- What the page says about itself ----
+  // The PPI calculator on the page is named in the description.
+  assert.equal(await page.locator('h2', { hasText: 'Pixel density (PPI) calculator' }).count(), 1);
+  assert.match(await page.getAttribute('meta[name="description"]', 'content'), /PPI calculator/);
+  // "What is my screen resolution" is also asked of the operating system: the
+  // FAQ says where the setting is on Windows and on a Mac.
+  const faqAnswer = async q => {
+    const item = page.locator('.faq details', { hasText: q });
+    assert.equal(await item.count(), 1, `FAQ items about "${q}"`);
+    return item.locator('.faq-answer').textContent();
+  };
+  const where = await faqAnswer('check or change my screen resolution');
+  assert.match(where, /On Windows, .*Display settings.*Display resolution.*Recommended/);
+  assert.match(where, /On a Mac, open System Settings, Displays/);
+  // Homepage search (index.html): every typed word must be a substring of the
+  // tool's title, description and keywords.
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/screen-resolution\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the screen resolution checker');
+  for (const q of ['ppi', 'pixel density', 'display resolution', 'hz', 'dpr', 'aspect ratio', 'refresh rate', 'hdr support']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
+  // The next check on a new monitor is the panel itself; every internal link
+  // in the guide and FAQ is a page of this site.
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.ok(links.includes('/dead-pixel-test/'), `guide links: ${links}`);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
 };

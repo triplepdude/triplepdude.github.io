@@ -39,7 +39,7 @@ function pngInfo(b, assert) {
   return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
 }
 
-module.exports = async ({ page, open, assert, fixtures }) => {
+module.exports = async ({ page, open, assert, fixtures, base }) => {
   await open();
   await page.addScriptTag({ content: fs.readFileSync(path.join(fixtures, 'jsQR.min.js'), 'utf8') });
 
@@ -441,8 +441,15 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForFunction(() => /too large/.test(document.querySelector('#qg-error').textContent));
   assert.equal(await err(), '"huge.png" is too large (7,000 × 7,000 pixels). Use an image under 40 megapixels.');
   assert.equal(await page.isHidden('#qg-logo-remove'), true, 'no logo was set');
-  await decodesTo('#qg-png', 'https://example.com/', 'PNG after the refused logo');
+  // The freeze is looked for while the page refuses the logo and makes the PNG, and before
+  // the PNG is decoded: jsQR, this test's own decoder, runs in the page and takes 100 to
+  // 150 ms for a 1,024 px image, and over 200 ms when the machine is busy.
+  const afterBomb = await download('#qg-png');
+  await page.waitForTimeout(150);   // long tasks are reported shortly after they end
   assert.deepEqual(await page.evaluate(() => window.__long.filter(d => d > 200)), [], 'no long freeze');
+  const afterBombCode = await decode(afterBomb.buf, 'image/png');
+  assert.ok(afterBombCode.bytes, 'PNG after the refused logo: decodes');
+  assert.equal(Buffer.from(afterBombCode.bytes).toString('utf8'), 'https://example.com/', 'PNG after the refused logo');
   // A large but reasonable logo (3,000 x 1,500) is shrunk to 1,024 px wide, so the SVG
   // stays small, and the code still decodes.
   const wide = await page.evaluate(async () => {
@@ -511,4 +518,41 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForTimeout(300);
   const heard = await page.evaluate(() => window.__live.filter(t => !t.startsWith(':')));
   assert.deepEqual(heard, ['qg-status:The phone number can only contain digits, spaces, brackets, dashes and a leading +.'], JSON.stringify(heard));
+
+  // ----- Guide: files, WhatsApp, links to the neighbouring tools, homepage search -----
+  {
+    const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
+    // "QR code for a PDF" is a common request, and a code cannot hold one: 2,953 bytes is
+    // the most that fits (tested above). The guide says what to do instead. Its WhatsApp
+    // example follows WhatsApp's click-to-chat help ("a full phone number in international
+    // format", without zeros, brackets or dashes): the UK number 07700 900123, from a range
+    // Ofcom keeps for drama, loses its leading 0 and gains 44. The link goes through the
+    // Link type like any other address.
+    assert.match(guide, /A code holds at most 2,953 bytes, far too little for most files\. To share a PDF, menu or photo, upload it to your website or a cloud drive and choose Link with its address\./);
+    assert.doesNotMatch(guide, /too little for a file|with its country code/, 'a vCard or an event is a file that fits; a country code alone leaves the 0 in');
+    const wa = guide.match(/WhatsApp chat links use the number in international format, digits only: https:\/\/wa\.me\/(\d+) for ([\d ]+) in the UK\./);
+    assert.ok(wa, 'the guide gives a WhatsApp example');
+    assert.equal(wa[1], '44' + wa[2].replace(/ /g, '').replace(/^0/, ''), 'the example drops the leading 0 and adds 44');
+    await pick('url');
+    await page.fill('#qg-url', 'wa.me/' + wa[1]);
+    assert.equal(await payload(), 'https://wa.me/447700900123');
+    assert.equal(await err(), '');
+    await decodesTo('#qg-png', 'https://wa.me/447700900123', 'a WhatsApp chat link');
+    await pick('phone');   // back to what the test left on screen
+    assert.match(await err(), /can only contain digits/);
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/wifi-qr-code-generator/', '/barcode-generator/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+    assert.match(guide, /For product and shelf barcodes such as EAN, UPC or Code 128, use the barcode generator\./);
+    // Homepage search (index.html): every typed word must be a substring of the tool's
+    // title, description and keywords.
+    const home = await (await page.request.get(base + '/')).text();
+    const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/qr-code-generator\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+    assert.ok(hay, 'the homepage lists the QR code generator');
+    for (const q of ['qr code maker', 'create qr code', 'business card', 'business card qr', 'calendar', 'calendar event', 'vcard', 'qr logo', 'svg qr']) {
+      assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+    }
+  }
 };

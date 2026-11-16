@@ -26,6 +26,16 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.ok(def >= 1790208000 && def < 1790208010, 'defaults to the current time');
   assert.match(await text('#ut-detected'), /seconds/);
 
+  // The guide: no leap second is pending for GPS time (CGPM Resolution 5 of
+  // 2026 and IERS Bulletin C 72), the LDAP timestamp is named with FILETIME,
+  // and the two neighbouring tools are linked.
+  const guide = (await text('.prose')).replace(/\s+/g, ' ');
+  assert.match(guide, /No more leap seconds are expected: in October 2026 the General Conference on Weights and Measures decided that UTC will run without them from 20 May 2027, and none is scheduled before then\./);
+  assert.ok(!/a new leap second would shift/.test(guide));
+  assert.match(guide, /Windows FILETIME 100 ns 1601-01-01 NTFS, Active Directory \(LDAP\), the registry/);
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/date-calculator/', '/discord-timestamp-generator/']);
+  assert.equal(await page.locator('.prose code', { hasText: '<t:1700000000:R>' }).count(), 1);
+
   // Epoch zero.
   await conv('0');
   assert.equal(await r('iso'), '1970-01-01T00:00:00Z');
@@ -130,6 +140,13 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await r('rel'), 'in 1 year (693 days)');
   await conv(String(nowS - 400 * 86400 - 60));
   assert.equal(await r('rel'), '1 year ago (400 days)');
+  // The day count in brackets is for weeks, months and years. With days as
+  // the unit it only repeated the number: "3 days ago (3 days)".
+  for (const [offset, want] of [[-3 * 86400 - 60, '3 days ago'], [2 * 86400 + 60, 'in 2 days'], [6 * 86400 + 60, 'in 6 days'], [-6 * 86400 - 82800, '6 days ago'],
+    [-7 * 86400 - 60, '1 week ago (7 days)'], [12 * 86400 + 60, 'in 1 week (12 days)'], [40 * 86400 + 60, 'in 1 month (40 days)']]) {
+    await conv(String(nowS + offset));
+    assert.equal(await r('rel'), want, `relative time for ${offset} s`);
+  }
 
   // Manual unit override.
   await conv('1700000000', 'ms');
@@ -161,6 +178,8 @@ module.exports = async ({ page, open, assert, url }) => {
     ['gps', '1167264016', '2016-12-31T23:59:59Z'],
     ['gps', '1167264018', '2017-01-01T00:00:00Z'],
     ['gps', '1400000000', '2024-05-17T16:53:02Z'],
+    // After 20 May 2027, when UTC runs without leap seconds, the offset is still 18 s.
+    ['gps', '1495843218', '2027-06-01T00:00:00Z'],
     ['jd', '2451545.0', '2000-01-01T12:00:00Z'],
     ['mjd', '51544.5', '2000-01-01T12:00:00Z'],
     ['jd', '0', '-004713-11-24T12:00:00Z'],
@@ -235,6 +254,9 @@ module.exports = async ({ page, open, assert, url }) => {
     ['Excel, 1900 system: 2001-09-09 01:46 UTC', 'Excel, 1904 system: 2005-09-10 01:46 UTC']);
   await conv('13344473600500000');
   assert.deepEqual(await page.locator('#ut-alt-list button').allTextContents(), ['WebKit / Chrome: 2023-11-14 22:13 UTC']);
+  // An 18-digit LDAP / Active Directory timestamp (pwdLastSet, lastLogonTimestamp) is a FILETIME.
+  await conv('133485408000000000');
+  assert.deepEqual(await page.locator('#ut-alt-list button').allTextContents(), ['Windows FILETIME: 2024-01-01 00:00 UTC']);
   await conv('2452161.574074074');
   assert.deepEqual(await page.locator('#ut-alt-list button').allTextContents(), ['Julian Day: 2001-09-09 01:46 UTC']);
   for (const v of ['1000000000', '1700000000000', '1700000000000000', '1700000000000000000']) {
@@ -272,6 +294,17 @@ module.exports = async ({ page, open, assert, url }) => {
   assert.equal(await r('iso'), '2023-11-14T22:13:20Z');
   await conv('17,00,0');
   assert.match(await text('#ut-ts-msg'), /not a number/);
+  // A group of thousands never starts with 0, as in the other calculators:
+  // "0,500" is half a second (it was read as 500 s, 00:08:20), and a zero-led
+  // number grouped any other way is not a number (it was 500,000 s).
+  await conv('0,500');
+  assert.equal(await r('iso'), '1970-01-01T00:00:00.500Z');
+  await conv('-0,500');
+  assert.equal(await r('iso'), '1969-12-31T23:59:59.500Z');
+  await conv('0,500,000');
+  assert.match(await text('#ut-ts-msg'), /not a number/);
+  await conv('1,000');
+  assert.equal(await r('iso'), '1970-01-01T00:16:40Z');
   // Regression: 0001-01-01T00:00Z seen from New York is still 1 BC, but the
   // era was only added for UTC years below 1.
   await page.selectOption('#ut-view-zone', 'America/New_York');

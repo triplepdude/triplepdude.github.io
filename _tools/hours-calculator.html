@@ -2,7 +2,7 @@
 title: "Hours Calculator: Work Hours Between Times"
 description: Calculate hours worked between two times, minus unpaid breaks, with overnight shifts. Get hours and minutes, decimal hours, a total of all rows and pay.
 category: Calculators
-keywords: [hours calculator, work hours calculator, time between two times, hours worked calculator, decimal hours calculator, overnight shift hours, hours and minutes to decimal]
+keywords: [hours calculator, work hours calculator, time between two times, hours worked calculator, decimal hours calculator, overnight shift hours, hours and minutes to decimal, time duration calculator, elapsed time calculator, payroll hours calculator]
 howto: |
   ## How to use the hours calculator
 
@@ -28,7 +28,8 @@ howto: |
   When the end time is earlier than the start time, the calculator assumes
   the shift ends the next day: 10:00 PM to 6:30 AM is 8 hours 30 minutes. A
   row with the same start and end counts as zero, so enter `24:00` as the end
-  for a full 24-hour shift. Split anything longer than 24 hours into two rows.
+  for a full 24-hour shift. Split anything longer than 24 hours into two rows,
+  or count whole days with the [date calculator](/date-calculator/).
 
   ## Converting minutes to decimal hours
 
@@ -67,14 +68,14 @@ howto: |
   minute. Check your employer's written policy and local law, and keep
   **No rounding** selected to see the time you actually worked.
 faq:
-  - q: How do I convert hours and minutes to decimal hours?
-    a: Divide the minutes by 60 and add the result to the hours. 7 hours 45 minutes is 7 + 45 ÷ 60 = 7.75 hours, and 6 hours 10 minutes is 6.1666…, which rounds to 6.17.
+  - q: How many hours is 8 AM to 5 PM?
+    a: Nine hours on the clock. With a one-hour unpaid lunch that is 8 hours worked, and with a 30-minute lunch 8 hours 30 minutes, or 8.5. In the same way 9 to 5 is 8 hours, or 7.5 after a 30-minute unpaid break.
   - q: How do I calculate hours for a night shift that ends after midnight?
     a: Enter the times as they appear on the clock, such as 10:00 PM to 6:30 AM. An end time earlier than the start is read as the next day, which gives 8 hours 30 minutes before breaks.
   - q: Should I subtract my lunch break?
     a: Subtract unpaid breaks only. A meal break of about 30 minutes or more, when you are fully relieved of duty, is usually unpaid; short rest breaks are usually paid, so leave them out.
-  - q: Why is my pay slightly different from decimal hours times my rate?
-    a: The rounded decimal loses a little. 8 hours 20 minutes is 8.3333… hours, so at 15.00 an hour the exact pay is 125.00, while 8.33 × 15 gives 124.95. Payroll systems can use either method.
+  - q: How do I calculate hours worked in Excel or Google Sheets?
+    a: "With the start time in A2 and the end time in B2, `=(B2-A2)*24` gives decimal hours once the cell is formatted as a number. `=MOD(B2-A2,1)*24` also works for a shift that ends after midnight, and `=MOD(B2-A2,1)*24-C2/60` takes off an unpaid break entered in minutes in C2."
   - q: Are my times uploaded or saved?
     a: No. Everything is calculated in your browser, nothing is sent to a server, and nothing is kept after you close the page.
 ---
@@ -255,12 +256,13 @@ faq:
 
   // Separators: "1,000" and "1,000.50" group thousands and "18,50" has a decimal
   // comma. In locales that write decimals with a comma, any single comma is
-  // a decimal comma and "1.000,50" groups with dots.
+  // a decimal comma and "1.000,50" groups with dots. The first group of
+  // thousands never starts with 0: "0,500" is a half everywhere, not 500.
   var decComma = (1.5).toLocaleString().indexOf(',') !== -1;
   function plainNumber(s) {
-    if (/^\d{1,3}(\.\d{3})+,\d+$/.test(s)) return s.replace(/\./g, '').replace(',', '.');
-    if (/^\d*,\d+$/.test(s) && (decComma || !/^\d{1,3},\d{3}$/.test(s))) return s.replace(',', '.');
-    if (/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s)) return s.replace(/,/g, '');
+    if (/^[1-9]\d{0,2}(\.\d{3})+,\d+$/.test(s)) return s.replace(/\./g, '').replace(',', '.');
+    if (/^\d*,\d+$/.test(s) && (decComma || !/^[1-9]\d{0,2},\d{3}$/.test(s))) return s.replace(',', '.');
+    if (/^[1-9]\d{0,2}(,\d{3})+(\.\d*)?$/.test(s)) return s.replace(/,/g, '');
     return s;
   }
   // Rate as an integer number of 1/10000 units, or null (empty) / NaN (bad).
@@ -440,10 +442,10 @@ faq:
     if (!r) return hm + ' is exactly ' + fmtDec(total) + ' hours.';
     if (r % 3 === 0) {
       var exact = fmtDec(r).slice(1);
-      return r + ' minutes ÷ 60 = 0' + exact + ', so ' + hm + ' is exactly ' + fmtDec(total) + ' hours.';
+      return plural(r, 'minute', 'minutes') + ' ÷ 60 = 0' + exact + ', so ' + hm + ' is exactly ' + fmtDec(total) + ' hours.';
     }
     var digits = String(Math.floor(r * 10000 / 60)).padStart(4, '0');
-    return r + ' minutes ÷ 60 = 0.' + digits + '…, so ' + hm + ' is ' + h + '.' + digits + '… hours, rounded to ' + fmtDec(total) + '.';
+    return plural(r, 'minute', 'minutes') + ' ÷ 60 = 0.' + digits + '…, so ' + hm + ' is ' + h + '.' + digits + '… hours, rounded to ' + fmtDec(total) + '.';
   }
 
   var status = $('#hc-status');

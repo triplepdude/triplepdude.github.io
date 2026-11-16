@@ -3,6 +3,7 @@
 // Python's uuid module (uuid3/uuid5 of www.example.com in the DNS namespace,
 // the 128-bit integers, the DNS namespace UUID's own v1 timestamp).
 const fs = require('fs');
+const path = require('path');
 const nodeCrypto = require('crypto');
 const { execFileSync } = require('child_process');
 
@@ -462,4 +463,15 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(new Set(fb).size, 500);
   assert.deepEqual(p2errors, []);
   await p3.close();
+
+  // ----- Guide link: random numbers rather than identifiers -----
+  {
+    const guide = (await text('.prose')).replace(/\s+/g, ' ');
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/random-number-generator/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+    assert.match(guide, /For random numbers in a range rather than IDs, such as a dice roll or a lottery pick, use the random number generator\./);
+  }
 };

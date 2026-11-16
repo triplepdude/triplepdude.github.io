@@ -2,7 +2,7 @@
 title: "MGRS Converter: Lat/Long to MGRS, UTM & USNG"
 description: Convert lat/long to MGRS, USNG and UTM or back, one point or a whole CSV at once. Reads DMS, DDM and UTM lines like 18T 585628 4511322. Runs in your browser.
 category: Maps & Coordinates
-keywords: [mgrs converter, lat long to mgrs, mgrs to lat long, utm converter, usng converter, utm to lat long, batch coordinate converter, military grid reference system]
+keywords: [mgrs converter, lat long to mgrs, mgrs to lat long, latitude longitude to mgrs, gps coordinates to mgrs, utm converter, usng converter, utm to lat long, dms to decimal degrees, batch coordinate converter, military grid reference system]
 howto: |
   ## How to use the MGRS converter
 
@@ -37,9 +37,11 @@ howto: |
   In **Batch** mode, paste one coordinate per line in any of the formats
   above, or open a CSV file with a header row. Columns named like lat and lon,
   mgrs, utm, or zone, easting and northing are read, and the other columns are
-  kept. **Download CSV** adds latitude, longitude, MGRS, UTM zone, band,
-  hemisphere, easting and northing to each row, and an error column explains
-  any row that could not be read.
+  kept. Beside a zone column, a hemisphere column takes N or S, where S always
+  means south, and a band column takes the band letter. Beside lat and lon,
+  N/S and E/W columns give the hemisphere of unsigned values. **Download CSV** adds
+  latitude, longitude, MGRS, UTM zone, band, hemisphere, easting and northing
+  to each row, and an error column explains any row that could not be read.
 
   ## How an MGRS grid reference is built
 
@@ -86,7 +88,7 @@ faq:
   - q: Why do my last digits differ from another app?
     a: MGRS digits are truncated to the square the point lies in, while UTM values are usually rounded, so they can differ by one in the last place. Apps that round MGRS, or use a datum other than WGS 84, can also give slightly different digits.
   - q: Does 18S mean band S or the southern hemisphere?
-    a: It depends on the writer. This converter reads S as band S (32°N to 40°N) when the northing fits that band and as the southern hemisphere otherwise, and tells you which it used. Write 18 south, or a band letter such as 18H, to avoid any doubt.
+    a: It depends on the writer. This converter reads S as band S (32°N to 40°N) when the northing fits that band and as the southern hemisphere otherwise, and tells you which it used. Write 18 south, or a band letter such as 18H, to avoid any doubt; in a CSV, a column named hemisphere does the same.
   - q: Can I convert coordinates near the North or South Pole?
     a: Not here. North of 84°N and south of 80°S, MGRS uses the Universal Polar Stereographic grid, which this converter does not handle. It tells you when a point falls in that area.
 ---
@@ -929,18 +931,29 @@ faq:
   // Which columns hold the coordinates, judged by their header names.
   function columns(head) {
     var h = head.map(function (x) { return String(x).trim().toLowerCase().replace(/[\s_\-.()]+/g, ' ').trim(); });
-    function find(re) { for (var k = 0; k < h.length; k++) if (re.test(h[k])) return k; return -1; }
+    function find(re, not) { for (var k = 0; k < h.length; k++) if (re.test(h[k]) && !(not && not.test(h[k]))) return k; return -1; }
+    var dir = /\b(?:hemi(?:sphere)?|dir(?:ection)?|ref)\b/;
     var c = {
-      lat: find(/^(?:lat|latitude|y|lat dd|latitude dd|lat deg|latitude deg|decimal latitude)$|\blat(?:itude)?\b/),
-      lon: find(/^(?:lon|lng|long|longitude|x|lon dd|longitude dd|lon deg|decimal longitude)$|\b(?:lon|lng|long|longitude)\b/),
+      lat: find(/^(?:lat|latitude|y|lat dd|latitude dd|lat deg|latitude deg|decimal latitude)$|\blat(?:itude)?\b/, dir),
+      lon: find(/^(?:lon|lng|long|longitude|x|lon dd|longitude dd|lon deg|decimal longitude)$|\b(?:lon|lng|long|longitude)\b/, dir),
+      // Separate hemisphere columns beside lat and lon: N/S and E/W as in NMEA logs, or names
+      // such as lat_dir, latitude hemisphere and lon_ref.
+      latHemi: find(/^(?:n ?\/ ?s|n s|north ?\/ ?south|north south)$|\blat(?:itude)? (?:hemi(?:sphere)?|dir(?:ection)?|ref)\b/),
+      lonHemi: find(/^(?:e ?\/ ?w|e w|east ?\/ ?west|east west)$|\b(?:lon|lng|long|longitude) (?:hemi(?:sphere)?|dir(?:ection)?|ref)\b/),
       mgrs: find(/\b(?:mgrs|usng)\b|^grid(?: ref(?:erence)?)?$/),
       utm: find(/^utm(?: coordinates?| ref(?:erence)?)?$/),
-      zone: find(/\bzone\b/),
+      // "zone_letter" beside "zone_number" is the band column, not the zone.
+      zone: find(/\bzone\b/, /\b(?:letter|band|hemi(?:sphere)?)\b/),
       east: find(/^(?:e|easting|eastings|east|utm easting|x utm)$|\beasting\b/),
       north: find(/^(?:n|northing|northings|north|utm northing|y utm)$|\bnorthing\b/),
-      hemi: find(/\b(?:hemisphere|hemi|band)\b/),
+      // A hemisphere column (hemisphere, hemi or N/S) holds N or S for north or south. A band
+      // column, also called zone letter, holds a latitude band, where S is the band from 32 to 40
+      // degrees north.
+      hemi: find(/\bhemi(?:sphere)?\b|^(?:n ?\/ ?s|n s|north ?\/ ?south|north south)$/),
+      band: find(/\b(?:band|letter)\b/),
       any: find(/^(?:coordinates?|coords?|position|location|point|lat ?lon|lat ?lng|latlong)$/)
     };
+    if (c.zone < 0) c.zone = find(/\bzone\b/);   // one column for both: "zone/band" with cells like 19F
     if (c.lat >= 0 && c.lon >= 0) c.kind = 'll';
     else if (c.mgrs >= 0) c.kind = 'mgrs';
     else if (c.utm >= 0) c.kind = 'utm';
@@ -955,13 +968,28 @@ faq:
       return /^[+-]?\d+,\d+$/.test(v) ? v.replace(',', '.') : v;
     }
     if (c.kind === 'll') {
-      if (!cell(c.lat) && !cell(c.lon)) return '';
-      return cell(c.lat) + ', ' + cell(c.lon);
+      var la = cell(c.lat), lo = cell(c.lon);
+      if (!la && !lo) return '';
+      // An N/S or E/W column gives the hemisphere of a value that has no sign or letter of its
+      // own. A plain hemisphere column counts for whichever of the two its letter belongs to.
+      var hn = cell(c.latHemi >= 0 ? c.latHemi : c.hemi), he = cell(c.lonHemi >= 0 ? c.lonHemi : c.hemi);
+      if (la && !/[-+a-z]/i.test(la) && /^(?:[ns]|north|south)$/i.test(hn)) la += ' ' + hn.charAt(0).toUpperCase();
+      if (lo && !/[-+a-z]/i.test(lo) && /^(?:[ew]|east|west)$/i.test(he)) lo += ' ' + he.charAt(0).toUpperCase();
+      return la + ', ' + lo;
     }
     if (c.kind === 'utm4') {
       var z = cell(c.zone);
       if (!z && !cell(c.east) && !cell(c.north)) return '';
-      if (/^\d{1,2}$/.test(z) && cell(c.hemi)) z += ' ' + cell(c.hemi);
+      // The hemisphere column says north or south outright: its S is never weighed up as latitude
+      // band S, and it overrules a letter written after the zone number. Without it the letter
+      // comes from the band column, or from a hemisphere cell that holds something else.
+      var hemi = cell(c.hemi), zm = /^(?:utm ?)?(?:zone ?)?(\d{1,2}) ?[a-z]?$/i.exec(z);
+      if (zm && /^(?:[ns]|(?:north|south)(?:ern)?)$/i.test(hemi)) {
+        z = zm[1] + (/^s/i.test(hemi) ? ' south' : ' north');
+      } else if (/^\d{1,2}$/.test(z)) {
+        var letter = (c.band !== c.zone && cell(c.band)) || hemi;
+        if (letter) z += ' ' + letter;
+      }
       return z + ' ' + cell(c.east) + ' ' + cell(c.north);
     }
     return cell(c[c.kind]);

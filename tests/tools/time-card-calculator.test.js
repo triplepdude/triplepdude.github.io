@@ -3,7 +3,7 @@
 // decimal.Decimal and ROUND_HALF_UP for pay. Not copied from the page.
 const fs = require('fs');
 
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, url }) => {
   // Thursday 2026-09-24: the default week is Monday 2026-09-21 to Sunday 2026-09-27.
   await page.clock.install({ time: new Date('2026-09-24T12:00:00Z') });
   await open();
@@ -266,6 +266,26 @@ module.exports = async ({ page, open, assert }) => {
   await page.fill('#tc-rate', '$18,50/hr');
   assert.equal(await text('#tc-pay'), '809.38');
   assert.equal(await text('#tc-settings-msg'), '');
+  // A group of thousands never starts with 0, so the comma in "0,500" is a
+  // decimal comma: 0.50 an hour (it was read as 500), and 40 h x 0.50 +
+  // 2.5 h x 0.75 = 21.875 -> 21.88. Proper groups still work, with commas
+  // (1,000.50) or with dots and a decimal comma (1.000,50): 40,020.00 +
+  // 2.5 h x 1,500.75 = 3,751.875 -> 3,751.88.
+  for (const [rate, pay] of [['0,500', '21.88'], ['00,500', '21.88'], ['0,5', '21.88'], ['1,000.50', '43,771.88'], ['1.000,50', '43,771.88']]) {
+    await page.fill('#tc-rate', rate);
+    assert.equal(await text('#tc-pay'), pay, `rate ${rate}`);
+    assert.equal(await text('#tc-settings-msg'), '', `rate ${rate}`);
+  }
+  // A zero-led number that is grouped any other way is not a number (these
+  // were read as 500.25, 500.25 and 500,000).
+  for (const rate of ['0,500.25', '0.500,25', '0,500,000']) {
+    await page.fill('#tc-rate', rate);
+    await page.locator('#tc-rate').press('Tab');
+    assert.equal(await text('#tc-pay'), '–', `rate ${rate}`);
+    assert.equal(await text('#tc-settings-msg'), 'Enter the hourly rate as a number, such as 18.50.', `rate ${rate}`);
+  }
+  await page.fill('#tc-rate', '20');
+  assert.equal(await text('#tc-settings-msg'), '');
   // The threshold message matches the rule (0 is not allowed).
   await page.fill('#tc-weekly', '0');
   assert.equal(await text('#tc-settings-msg'), 'Enter the weekly overtime threshold in hours, more than 0 and at most 168.');
@@ -320,6 +340,86 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await f(0, THU, 'in1').inputValue(), '9:00 AM');
   await f(0, THU, 'out1').fill('17:30:00'); await f(0, THU, 'out1').press('Tab');
   assert.equal(await f(0, THU, 'out1').inputValue(), '5:30 PM');
+
+  // The guide's advice for a night shift where daily overtime applies. One
+  // row, Monday 8:00 PM to 6:00 AM, counts all 10 hours on Monday: 2 hours of
+  // California daily overtime. With the hours after midnight on Tuesday's
+  // row, as the guide says to enter them when the workday is the calendar
+  // day, it is 4 + 6 hours and no overtime.
+  await page.selectOption('#tc-pairs', '1');
+  await page.click('#tc-clear');
+  await page.selectOption('#tc-preset', 'california');
+  await setDay(0, MON, '8:00 PM', '6:00 AM', '');
+  assert.equal(await day(0, MON).locator('.tc-hm').textContent(), '10:00');
+  assert.equal(await day(0, MON).locator('.tc-split').textContent(), 'OT 2:00 · ends next day');
+  await setDay(0, MON, '8:00 PM', '12:00 AM', '');
+  await setDay(0, TUE, '12:00 AM', '6:00 AM', '');
+  assert.equal(await day(0, MON).locator('.tc-hm').textContent(), '4:00');
+  assert.equal(await day(0, TUE).locator('.tc-hm').textContent(), '6:00');
+  assert.equal(await day(0, MON).locator('.tc-split').textContent(), '');
+  assert.equal(await day(0, TUE).locator('.tc-split').textContent(), '');
+  assert.equal(await text('#tc-ot'), '0:00');
+
+  // The guide's stand-in for the hospital 8 and 80 system (29 U.S.C. 207(j)):
+  // Custom, daily overtime after 8 hours, no weekly overtime. Four 10-hour
+  // days in each of two weeks are 80 hours with no overtime under the federal
+  // 40-hour rule, and 8 x 2 = 16 hours of daily overtime under 8 and 80.
+  await page.selectOption('#tc-preset', 'federal');
+  await page.selectOption('#tc-period', '2');
+  await page.click('#tc-clear');
+  for (const w of [0, 1]) for (const d of [MON, TUE, WED, THU]) await setDay(w, d, '7:00 AM', '5:00 PM', '');
+  assert.equal(await text('#tc-total'), '80:00');
+  assert.equal(await text('#tc-ot'), '0:00');
+  await page.uncheck('#tc-weekly-on');
+  await page.check('#tc-daily-on');
+  assert.equal(await page.inputValue('#tc-preset'), 'custom');
+  assert.equal(await page.inputValue('#tc-daily'), '8');
+  assert.equal(await text('#tc-reg'), '64:00');
+  assert.equal(await text('#tc-ot'), '16:00');
+  // The note under the custom rules no longer says that federal law has no
+  // daily overtime at all, nor that 8 and 80 is its only daily overtime
+  // (federal employees get it after 8 hours a day under 5 U.S.C. 5542).
+  assert.equal(await text('#tc-rule-note'), 'Custom rules. Daily overtime and double time mostly come from state law or contracts; federal law has daily overtime only in special cases, such as the 8 and 80 system for hospitals and care homes.');
+  await page.selectOption('#tc-preset', 'federal');
+  await page.selectOption('#tc-period', '1');
+
+  // The FAQ's time-and-a-half example is what the pay table shows: 45 hours
+  // at 20.00 are 40 x 20.00 + 5 x 30.00 = 950.00.
+  await page.click('#tc-clear');
+  await page.fill('#tc-rate', '20.00');
+  for (const d of [MON, TUE, WED, THU, FRI]) await setDay(0, d, '8:00 AM', '5:00 PM', '');
+  assert.deepEqual(await payRows(), [
+    ['Regular', '40:00', '40.00', '20.00', '800.00'],
+    ['Overtime (1.5×)', '5:00', '5.00', '30.00', '150.00'],
+  ]);
+  assert.equal(await text('#tc-pay'), '950.00');
+  assert.match(await text('.faq'), /a 45-hour week pays 40 × 20\.00 \+ 5 × 30\.00 = 950\.00 before tax/);
+  // The guide says how to enter a night shift when the workday is the calendar
+  // day, names the 8 and 80 exception and links the two tools it mentions.
+  assert.match((await text('.prose')).replace(/\s+/g, ' '), /in California the workday is the calendar day unless the employer has set another 24-hour period\. If that changes your overtime, enter the hours after 12:00 AM on the next day’s row\./);
+  assert.match((await text('.prose')).replace(/\s+/g, ' '), /The FLSA has no double time and, with few exceptions, no daily overtime\. The main one is the 8 and 80 system that hospitals and residential care homes may agree with their staff: overtime after 8 hours in a day or 80 hours in a 14-day period instead of 40 in a week \(29 U\.S\.C\. § 207\(j\)\)\./);
+  // The bi-weekly FAQ does not call 8 and 80 the only exception to the
+  // week-by-week rule: police and fire work periods (207(k)) are another.
+  const faqText = (await text('.faq')).replace(/\s+/g, ' ');
+  assert.match(faqText, /The main exceptions are the 8 and 80 system for hospitals and care homes, described above, and the work periods of up to 28 days that police and fire departments may use \(29 U\.S\.C\. § 207\(k\)\)\./);
+  assert.ok(!/one exception/.test(faqText + (await text('.prose'))), 'no "one exception" claim');
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/hours-calculator/', '/date-calculator/']);
+
+  // In a locale that writes decimals with a comma (German) any single comma
+  // is a decimal comma, so "1,000" is 1.00 an hour (40 + 2.5 h x 1.50 =
+  // 43.75) and "0,500" is 0.50 as before; "1.000,50" groups with dots, and a
+  // zero-led group is refused there too.
+  const de = await page.context().browser().newContext({ locale: 'de-DE' });
+  try {
+    const p2 = await de.newPage();
+    await p2.goto(url);
+    for (const [rate, pay] of [['0,500', '21,88'], ['1,000', '43,75'], ['1.000,50', '43.771,88'], ['0.500,25', '–'], ['0,500.25', '–']]) {
+      await p2.fill('#tc-rate', rate);
+      assert.equal(await p2.textContent('#tc-pay'), pay, `de-DE rate ${rate}`);
+    }
+  } finally {
+    await de.close();
+  }
 
   // At phone width the overtime rules select is wide enough for "Federal (FLSA)".
   await page.setViewportSize({ width: 390, height: 844 });

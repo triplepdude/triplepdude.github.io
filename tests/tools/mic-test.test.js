@@ -1,9 +1,33 @@
 const fs = require('fs');
+const path = require('path');
 
 // Uses Chromium's fake microphone ("Fake Default Audio Input", a full-scale
 // beep) and, for the known-answer check, a synthetic sine wave of amplitude
 // 0.5: peak = 20*log10(0.5) = -6.02 dBFS, RMS = 20*log10(0.5/sqrt(2)) = -9.03 dBFS.
-module.exports = async ({ page, open, assert }) => {
+module.exports = async ({ page, open, assert, base }) => {
+  // Every node that is connected to the speakers with its gain open, and a tap
+  // on the newest one. The page's own muted sink (gain 0) is not audible.
+  await page.addInitScript(() => {
+    const connect = AudioNode.prototype.connect, disconnect = AudioNode.prototype.disconnect;
+    window.__audible = new Set();
+    AudioNode.prototype.connect = function (dest, ...rest) {
+      if (dest instanceof AudioDestinationNode && !(this instanceof GainNode && this.gain.value === 0)) {
+        window.__audible.add(this);
+        window.__tap = new AnalyserNode(this.context, { fftSize: 2048 });
+        connect.call(this, window.__tap);
+      }
+      return connect.call(this, dest, ...rest);
+    };
+    AudioNode.prototype.disconnect = function (...a) {
+      if (!a.length || a[0] instanceof AudioDestinationNode) window.__audible.delete(this);
+      return disconnect.apply(this, a);
+    };
+    window.__tapPeak = () => {
+      const b = new Float32Array(2048);
+      window.__tap.getFloatTimeDomainData(b);
+      return b.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    };
+  });
   await open();
   const text = s => page.locator(s).textContent();
   const waitText = (sel, re, timeout = 6000) => page.waitForFunction(
@@ -86,9 +110,16 @@ module.exports = async ({ page, open, assert }) => {
     await page.waitForTimeout(80);
   }
 
-  // Hear-yourself toggle wires up without errors.
+  // Hear yourself, which the guide tells readers to tick to listen live: the
+  // microphone plays through the output while the box is ticked, and only
+  // then (the fake microphone's beep is near full scale).
+  assert.equal(await page.isChecked('#mict-monitor'), false);
+  assert.equal(await page.evaluate(() => window.__audible.size), 0, 'nothing is played back until Hear yourself is ticked');
   await page.check('#mict-monitor');
+  assert.equal(await page.evaluate(() => window.__audible.size), 1, 'ticking Hear yourself connects the microphone to the output');
+  await page.waitForFunction(() => window.__tapPeak() > 0.5, null, { timeout: 5000 });
   await page.uncheck('#mict-monitor');
+  assert.equal(await page.evaluate(() => window.__audible.size), 0, 'unticking Hear yourself disconnects it');
 
   // Switching echo cancellation off restarts with the new constraint and frees the old stream.
   await page.uncheck('#mict-ec');
@@ -284,4 +315,25 @@ module.exports = async ({ page, open, assert }) => {
   await page.reload();
   assert.match(await text('#mict-error'), /secure connection/);
   assert.equal(await page.isDisabled('#mict-start'), true);
+
+  // ---- What the page says about itself ----
+  // The live monitor is named in the guide and the description as on its checkbox.
+  assert.match(await text('label:has(#mict-monitor)'), /^\s*Hear yourself \(use headphones\)\s*$/);
+  assert.match((await text('.prose')).replace(/\s+/g, ' '), /Tick Hear yourself to listen live, with headphones on to avoid feedback\./);
+  assert.match(await page.getAttribute('meta[name="description"]', 'content'), /hear yourself live/);
+  // Homepage search (index.html): every typed word must be a substring of the
+  // tool's title, description and keywords.
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/mic-test\/"/) || [])[1] || '').replace(/&amp;/g, '&');
+  assert.ok(hay, 'the homepage lists the mic test');
+  for (const q of ['headset', 'hear myself', 'hear my own mic', 'playback', 'play back', 'mic check', 'sound check', 'audio input']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
+  // Silent playback is an output problem and calls need a camera too: the
+  // guide and FAQ link those tests, and every internal link is a page of this site.
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.ok(links.includes('/speaker-test/') && links.includes('/webcam-test/'), `guide and FAQ links: ${links}`);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the page but is not a tool page`);
+  }
 };

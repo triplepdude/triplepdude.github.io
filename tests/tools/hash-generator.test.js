@@ -124,6 +124,56 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await text('#hg-md5-hex'), '–');
   await page.fill('#hg-text', 'abc');
   assert.match(await text('#hg-msg'), /even number of digits/);
+  // A group of digits is a value of its own and is never paired up with digits from the next group:
+  // "0x1" is the byte 01, so a C-style list keeps its bytes. The expected hashes are Node's, over the
+  // bytes the input means.
+  const hexIs = async (input, bytes) => {
+    const buf = Buffer.from(bytes), label = 'hex input ' + JSON.stringify(input);
+    await page.fill('#hg-text', input);
+    await page.waitForFunction(v => document.querySelector('#hg-sha512-hex').textContent.toLowerCase() === v,
+      crypto.createHash('sha512').update(buf).digest('hex'), { timeout: 5000 }).catch(() => {});
+    assert.equal(await text('#hg-sha256-hex'), crypto.createHash('sha256').update(buf).digest('hex'), label);
+    assert.equal(await text('#hg-bytes'), buf.length + (buf.length === 1 ? ' byte' : ' bytes'), label);
+    assert.equal(await text('#hg-msg'), '', label);
+  };
+  const hexFails = async (input, re) => {
+    await page.fill('#hg-text', input);
+    assert.match(await text('#hg-msg'), re, 'hex input ' + JSON.stringify(input));
+    assert.equal(await text('#hg-md5-hex'), '–', 'no hash for ' + JSON.stringify(input));
+    assert.equal(await text('#hg-bytes'), '');
+  };
+  await hexIs('0x1, 0x2, 0xa, 0xb', [1, 2, 10, 11]); // was read as the two bytes 12 ab
+  await hexIs('0x1,0x2,0x3', [1, 2, 3]);
+  await hexIs('0X1 0x2\n0xA 0xff', [1, 2, 10, 255]);
+  await hexIs('0x1 de ad', [1, 0xde, 0xad]);
+  await hexIs('0xf', [15]);
+  for (const same of ['deadbeef', 'DE AD BE EF', 'de:ad:be:ef', 'de-ad-be-ef', 'dead beef', '0xdeadbeef', '0xDEADBEEF', '0xde, 0xad, 0xbe, 0xef',
+    '0xde 0xad\n0xbe 0xef', '0xdead_beef', '0x de ad be ef', ' \tde,ad,\nbe,ef, ']) await hexIs(same, [0xde, 0xad, 0xbe, 0xef]);
+  await hexIs('0x', []); // how Ethereum writes empty data
+  // One long string that was hard-wrapped at an odd width is still joined before it is paired.
+  await hexIs('abcde\nf0123', [0xab, 0xcd, 0xef, 0x01, 0x23]);
+  await hexIs('0xabcde\nf012\n3', [0xab, 0xcd, 0xef, 0x01, 0x23]);
+  // An "x" anywhere but in a leading 0x is not hex.
+  await hexFails('10x5', /"x" is not a hex digit \(0x may only start a value\)\. Hex input may contain 0-9, a-f, 0x prefixes/); // was read as the byte 15
+  await hexFails('ab0xcd', /"x" is not a hex digit/);
+  await hexFails('0x0x12', /"x" is not a hex digit/);
+  await hexFails('0x12 0x', /"0x" has no digits after it/);
+  // A bare single digit is a slip as often as a short value, so it is refused, not paired up or padded.
+  await hexFails('1, 2, a, b', /"1" is a single digit\. Write two digits for each byte \(01\), or put 0x before each value \(0x1\)\./);
+  await hexFails('de ad b ef', /"b" is a single digit/); // seven digits: used to be a parity error
+  await hexFails('de ad b e', /"b" is a single digit/); // eight digits: used to be read as de ad be
+  await hexFails('0x1, 2, 0xa', /"2" is a single digit/);
+  await hexFails('8:0:27:5:9a:b7', /"8" is a single digit/); // a MAC address without leading zeros
+  await hexFails('f', /"f" is a single digit/);
+  // A value with an odd number of digits above one is refused wherever the input is a list.
+  await hexFails('0x123, 0x4', /"0x123" has 3 digits\. Write two digits for each byte\./);
+  await hexFails('0x1, 0x2, abc, d', /"abc" has 3 digits/);
+  await hexFails('123, 456', /"123" has 3 digits/); // used to be read as 12 34 56
+  await hexFails('2001:db8::1', /"db8" has 3 digits/); // an IPv6 address is not a list of bytes
+  await hexFails('0x' + '1234567'.repeat(9) + ', 0x00', /"0x1234567123…" has 63 digits/);
+  await hexFails('0x123', /even number of digits \(two per byte\); it has 3/);
+  await hexFails('abc de', /even number of digits \(two per byte\); it has 5/);
+  await hexFails('{0x01, 0x02}', /"\{" is not a hex digit\. Hex input may contain 0-9, a-f, 0x prefixes, spaces, commas and colons\./);
   await page.selectOption('#hg-enc', 'base64');
   await page.fill('#hg-text', 'YWJj');
   await expectAll(V.abc, 'base64 input');
@@ -405,6 +455,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await settleAll({ sha256: 'b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7' });
   assert.equal(await hexOf('sha256'), 'b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7');
   assert.equal(await hexOf('sha512'), '87aa7cdea5ef619d4ff0b4241a1d6cb02379f4e2ce4ec2787ad0b30545e17cdedaa833b7d6b8a702038b274eaea3f4e4be9d914eeb61f1702e696c203a126854');
+  // A hex key goes through the same parser: "0x1,0x2" is the two-byte key 01 02, not the byte 12.
+  await page.fill('#hg-key', '0x1,0x2');
+  await settleAll({ sha256: hmac('sha256', Buffer.from([1, 2]), 'Hi There') });
+  assert.equal(await hexOf('sha256'), hmac('sha256', Buffer.from([1, 2]), 'Hi There'));
+  assert.match(await text('#hg-key-info'), /Key: 2 bytes/);
+  await page.fill('#hg-key', '10x5');
+  await page.waitForFunction(() => /"x" is not a hex digit \(0x may only start a value\)\. The key may contain/.test(document.querySelector('#hg-msg').textContent));
+  assert.equal(await page.getAttribute('#hg-key', 'aria-invalid'), 'true');
   await page.fill('#hg-key', 'aa'.repeat(131));
   await page.fill('#hg-text', 'Test Using Larger Than Block-Size Key - Hash Key First');
   await settleAll({ sha256: '60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54' });
@@ -575,4 +633,15 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(await page.textContent('#hg-compare'), /HMAC-SHA-224/);
   await page.fill('#hg-key', '');
   await page.fill('#hg-expected', '');
+
+  // ---------- Guide and FAQ ----------
+  // The HMAC section links the JWT decoder (HS256 is HMAC-SHA-256), and every link in the guide
+  // points at a tool that exists.
+  const guideLinks = await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.ok(guideLinks.includes('/jwt-decoder/'), 'the guide links the JWT decoder');
+  for (const h of guideLinks) assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', h.replace(/\//g, '') + '.html')), `the guide links ${h}, which is not a tool`);
+  // The FAQ gives the command that hashes a file on each system; the compare box reads what they
+  // print (the formats are tested above).
+  const faqText = await page.$eval('.faq', el => el.textContent);
+  for (const cmd of ['certutil -hashfile file.iso SHA256', 'Get-FileHash file.iso', 'shasum -a 256 file.iso', 'sha256sum file.iso']) assert.ok(faqText.includes(cmd), 'the FAQ gives ' + cmd);
 };

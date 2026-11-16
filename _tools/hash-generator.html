@@ -2,16 +2,17 @@
 title: "Hash Generator: SHA-256, SHA-3, BLAKE3, MD5"
 description: Hash text or files with MD5, SHA-1, SHA-2, SHA-3, Keccak-256, BLAKE2, BLAKE3, RIPEMD-160 or CRC-32, make HMACs, and check files against checksums.
 category: Security & Network
-keywords: [hash generator, sha256 hash generator, md5 hash generator, sha3 hash generator, blake3 hash, keccak256 online, hmac generator, file checksum calculator]
+keywords: [hash generator, hash calculator, sha256 hash generator, sha1 hash generator, sha512 hash generator, sha-512 checksum, sha384 hash, md5 hash generator, sha3 hash generator, blake3 hash, keccak256 online, crc32 calculator, hmac generator, file checksum calculator, verify file checksum]
 howto: |
   ## How to use the hash generator
 
   Type or paste text, or switch to **File** and choose or drop files. Tick
   the algorithms you want; each result shows in hexadecimal and in Base64.
   Text is hashed as UTF-8, so it matches `sha256sum` run on a UTF-8 file with
-  the same content. Set **Input is** to *Hex bytes* or *Base64* to hash raw
-  bytes instead. Files are read in 4 MB pieces in a background worker, so
-  large files keep the page responsive; nothing is uploaded.
+  the same content. Set **Input is** to *Hex bytes* (`deadbeef`,
+  `de ad be ef` or `0xde, 0xad`) or *Base64* to hash raw bytes instead.
+  Files are read in 4 MB pieces in a background worker, so large files keep
+  the page responsive; nothing is uploaded.
 
   Several files give a table and a checksum list in the `sha256sum` format
   (`hash  name`) to copy or download; `sha256sum -c` accepts it. Paste
@@ -58,7 +59,8 @@ howto: |
   keyed modes of BLAKE2 (key up to 64 or 32 bytes) and BLAKE3 (exactly 32
   bytes). The key can be text, hex or Base64. HMAC-SHA-256 is what webhooks
   from services like GitHub and Stripe sign with, so you can recompute a
-  signature by hand.
+  signature by hand. It is also the HS256 signature of a JSON Web Token,
+  which the [JWT decoder](/jwt-decoder/) verifies for you.
 
   ## Which hash to use
 
@@ -80,8 +82,8 @@ faq:
     a: No. The hashes are calculated in your browser, partly with the Web Crypto API and partly with JavaScript on this page. Your text, keys and files never leave your device, and nothing is stored.
   - q: Why does my SHA3-256 hash differ from the Keccak-256 in Ethereum?
     a: Ethereum uses the original Keccak submission, which pads the message differently from the final SHA-3 standard (FIPS 202). Both are shown here; pick Keccak-256 for Ethereum.
-  - q: Why is my hash different from the one my terminal prints?
-    a: Usually because `echo` adds a newline. `echo "hello" | md5sum` hashes six bytes, not five. Run `printf '%s' "hello" | md5sum` instead, or hash the file itself here.
+  - q: How do I get a file's SHA-256 on my own computer?
+    a: On Windows run `certutil -hashfile file.iso SHA256`, or `Get-FileHash file.iso` in PowerShell. On macOS run `shasum -a 256 file.iso` and on Linux `sha256sum file.iso`. To cross-check, hash the same file here and paste the command's output into the compare box, which reads all four formats.
   - q: How large a file can I hash?
     a: Hundreds of megabytes work on a typical computer. SHA-1, SHA-256, SHA-384 and SHA-512 need the whole file in memory for Web Crypto; the other algorithms read it piece by piece, so with only those ticked there is no size limit beyond your patience.
   - q: Can a hash be decrypted back to the original text?
@@ -1046,13 +1048,43 @@ textarea.hg-expected { min-height: 44px; height: auto; resize: vertical; white-s
     while (j > 0 && s.charCodeAt(j - 1) === 61) j--;
     return s.slice(0, j);
   }
+  // Hex input is groups of digits separated by spaces, commas, colons or dashes; an underscore
+  // inside a number is dropped. A group is a value of its own and is never paired up with digits
+  // from the next one: it needs two digits per byte, or a 0x prefix in front of a single digit
+  // ("0x1, 0x2, 0xa" is 01 02 0a, as in a C array). A bare single digit is refused rather than
+  // guessed at, because it is a typing slip as often as a short value. The one case where digits
+  // are joined across separators is a string that was hard-wrapped at an odd width: groups with an
+  // odd number of digits above one, nothing but white space between them, at most one 0x in front.
   function parseHexInput(s, what) {
-    const clean = s.replace(/0x/gi, '').replace(/[\s:,_-]/g, '');
-    if (/[^0-9a-f]/i.test(clean)) {
-      const bad = clean.match(/[^0-9a-f]/i)[0];
-      throw new Error('"' + bad + '" is not a hex digit. ' + what + ' may contain 0-9, a-f, spaces and colons.');
+    const groups = s.replace(/_/g, '').split(/[\s:,-]+/).filter(Boolean);
+    const show = g => (g.length > 14 ? g.slice(0, 12) + '…' : g);
+    let prefixes = 0, odd = '', single = '';
+    const digits = groups.map((g, i) => {
+      const pre = /^0x/i.test(g), d = pre ? g.slice(2) : g;
+      const bad = d.match(/[^0-9a-f]/i);
+      if (bad) {
+        throw new Error('"' + bad[0] + '" is not a hex digit' + (/x/i.test(bad[0]) ? ' (0x may only start a value)' : '') + '. ' +
+          what + ' may contain 0-9, a-f, 0x prefixes, spaces, commas and colons.');
+      }
+      if (pre) {
+        prefixes++;
+        if (!d && i) throw new Error(what + ': "' + g + '" has no digits after it.');
+      }
+      if (d.length % 2 && d.length > 1) odd = odd || g;
+      else if (d.length === 1 && !pre) single = single || d;
+      return d.length === 1 && pre ? '0' + d : d;
+    });
+    let clean;
+    if (odd && prefixes <= (/^0x/i.test(groups[0]) ? 1 : 0) && !/[:,-]/.test(s)) {
+      clean = groups.join('').replace(/^0x/i, '');
+      if (clean.length % 2) throw new Error(what + ' needs an even number of digits (two per byte); it has ' + clean.length + '.');
+    } else if (odd) {
+      throw new Error(what + ': "' + show(odd) + '" has ' + odd.replace(/^0x/i, '').length + ' digits. Write two digits for each byte.');
+    } else if (single) {
+      throw new Error(what + ': "' + single + '" is a single digit. Write two digits for each byte (0' + single + '), or put 0x before each value (0x' + single + ').');
+    } else {
+      clean = digits.join('');
     }
-    if (clean.length % 2) throw new Error(what + ' needs an even number of digits (two per byte); it has ' + clean.length + '.');
     const out = new Uint8Array(clean.length / 2);
     for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
     return out;

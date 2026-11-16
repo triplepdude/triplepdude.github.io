@@ -489,6 +489,23 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, 'no horizontal scroll at 320px');
   await page.setViewportSize(vp);
 
+  // The guide's subnet mask cheat sheet lists every prefix from /16 to /32, and each row says what
+  // the calculator says for that prefix (the calculator itself is checked against Python's
+  // ipaddress above).
+  const sheet = await page.$$eval('.prose table', tables => {
+    const t = tables.find(t => t.rows[0].cells[0].textContent.trim() === 'Prefix');
+    return t ? [...t.rows].map(r => [...r.cells].map(c => c.textContent.trim())) : null;
+  });
+  assert.ok(sheet, 'the guide has a table of prefixes');
+  assert.deepEqual(sheet[0], ['Prefix', 'Netmask', 'Usable hosts', 'Addresses']);
+  assert.deepEqual(sheet.slice(1).map(r => r[0]), Array.from({ length: 17 }, (_, i) => '/' + (16 + i)));
+  for (const [prefix, netmask, usable, total] of sheet.slice(1)) {
+    await page.fill('#sc-ip', '10.0.0.0' + prefix);
+    assert.deepEqual([await cell('netmask'), await cell('usable'), await cell('total')], [netmask, usable, total], 'cheat sheet row ' + prefix);
+  }
+  // 256 addresses less the five that AWS and Azure reserve in a subnet.
+  assert.match(await page.textContent('.prose'), /AWS and Azure reserve the first four addresses\s+and the last one of every subnet, so a \/24 there has 251 usable\./);
+
   // Regression: a pasted 100,000-digit subnet count is refused at once instead of
   // freezing the page in BigInt loops.
   await page.fill('#sc-ip', '10.0.0.0/8');
