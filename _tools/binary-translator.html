@@ -1,0 +1,771 @@
+---
+title: "Binary Translator: Text to Binary and Back"
+description: Translate binary code to text and text to binary with full UTF-8 support, and convert binary, decimal, hex and octal numbers. Runs in your browser.
+category: Developer
+keywords: [binary translator, binary to text, text to binary, binary code translator, binary converter, binary to decimal, decimal to binary, binary to hex, ascii table binary]
+howto: |
+  ## How to translate binary to text
+
+  Choose **Binary to text** and paste the code. The translator reads the 0s
+  and 1s in groups of eight (one byte), turns each byte into a number and
+  looks up the character with that number. Spaces, line breaks and
+  punctuation between the groups are ignored, a `0b` prefix is skipped, and a
+  group shorter than eight digits is filled with leading zeros, so
+  `1001111 1001011` works too.
+
+  For example, `01001111 01001011` is two bytes. 01001111 is
+  64 + 8 + 4 + 2 + 1 = 79, the code of **O**, and 01001011 is 75, the code of
+  **K**: the message is "OK".
+
+  For the other direction choose **Text to binary** and type. Every character
+  is written as its UTF-8 bytes, eight digits per byte, with or without a
+  space between the bytes. **Swap** turns the result into the input. The
+  table under the result lists each character with its Unicode code point and
+  its bytes in binary, hex and decimal.
+
+  ## Is every character 8 bits?
+
+  No. Only the 128 characters of ASCII fit in one byte. UTF-8, the encoding
+  of almost every web page, keeps those 128 bytes as they are and writes
+  every other character as two, three or four bytes:
+
+  | Code points | Bytes | Bit pattern |
+  |---|---|---|
+  | U+0000 to U+007F | 1 | 0xxxxxxx |
+  | U+0080 to U+07FF | 2 | 110xxxxx 10xxxxxx |
+  | U+0800 to U+FFFF | 3 | 1110xxxx 10xxxxxx 10xxxxxx |
+  | U+10000 to U+10FFFF | 4 | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx |
+
+  So **é** is `11000011 10101001`, **€** takes three bytes and most emoji take
+  four. Capital and small letters differ in a single bit: A is 01000001 and
+  a is 01100001.
+
+  Some tools write one number per character instead of UTF-8 bytes, such as
+  11101001 for é or 10000111111 for the Cyrillic п. When the groups are not
+  valid UTF-8, the translator reads each group as a Unicode code point, and
+  the line under the result says how the input was read.
+
+  ## How to convert binary to decimal by hand
+
+  Each binary digit is worth twice the one on its right: 1, 2, 4, 8, 16, 32,
+  64, 128, counted from the right. Add the values of the places that hold
+  a 1:
+
+  `1101000` = 64 + 32 + 8 = **104**
+
+  From decimal to binary, divide by 2 until you reach 0 and read the
+  remainders from the last to the first: 104 → 52 r 0, 26 r 0, 13 r 0, 6 r 1,
+  3 r 0, 1 r 1, 0 r 1, which reads 1101000.
+
+  ## Binary to hex and octal
+
+  One hex digit stands for four binary digits and one octal digit for three.
+  Group the digits from the right: `110 1000` is hex **68**, and `1 101 000`
+  is octal **150**.
+
+  | Decimal | Binary | Hex | Octal |
+  |---|---|---|---|
+  | 10 | 1010 | A | 12 |
+  | 104 | 1101000 | 68 | 150 |
+  | 255 | 11111111 | FF | 377 |
+  | 65,535 | 1111111111111111 | FFFF | 177777 |
+
+  The number converter works with exact whole numbers of any length, so
+  values above 2^53 (9,007,199,254,740,992), where ordinary JavaScript
+  numbers start to lose digits, stay correct. A negative number gets a minus
+  sign, and the note under the boxes adds its two's complement form.
+
+  Related tools: the [chmod calculator](/chmod-calculator/) for file
+  permissions in octal, the [hash generator](/hash-generator/) for
+  checksums in hex, and the
+  [Morse code translator](/morse-code-translator/) for dots and dashes.
+faq:
+  - q: What does 01101000 01101001 mean?
+    a: It says "hi". 01101000 is 104 in decimal, the ASCII code of a small h, and 01101001 is 105, the code of a small i. Paste any other binary message into the translator to read it the same way.
+  - q: Why does my binary have a leading 0?
+    a: ASCII is a 7-bit code, but computers store text in 8-bit bytes, so the first digit of every ASCII character is 0. In UTF-8 that leading 0 also marks a character that fits in a single byte. Leave the zeros in, because they keep every group eight digits long.
+  - q: How do I write my name in binary?
+    a: Choose Text to binary and type it. Every letter from A to Z becomes eight digits, capitals starting with 010 and small letters with 011, so Sam is 01010011 01100001 01101101. An accented letter takes 16 digits in UTF-8, so the ë of Zoë is 11000011 10101011.
+  - q: Does binary code need spaces between the groups?
+    a: No. Without spaces the digits are read eight at a time, so their number must be a multiple of 8. Spaces are only needed when groups are shorter or longer than eight digits.
+  - q: Is my text sent to a server?
+    a: No. The translation is done by JavaScript in your browser. Nothing you type or paste is uploaded or stored, and the page keeps working offline once it has loaded.
+---
+<style>
+{% raw %}
+.bn-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 16px; }
+.bn-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; max-width: 100%; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.bn-seg label { position: relative; display: block; flex: 1 1 auto; cursor: pointer; }
+.bn-seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.bn-seg span { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border-radius: 7px; color: var(--muted); font-size: 15px; font-weight: 600; white-space: nowrap; }
+.bn-seg input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--muted); }
+.bn-seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* On the narrowest phones both choices still share one row. */
+@media (max-width: 400px) {
+  .bn-seg { display: flex; }
+  .bn-seg span { padding: 0 8px; font-size: 14px; }
+}
+.bn textarea.bn-io { min-height: 120px; }
+.bn-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: -6px 0 16px; font-size: 14px; color: var(--text); }
+.bn-opts { margin: -6px 0 10px; }
+.bn-h { margin: 28px 0 12px; font-size: 1.15rem; }
+.bn-note { margin: -8px 0 16px; }
+.bn-note:empty { display: none; }
+/* Bytes wrap between groups of eight digits, never inside one. */
+.bn table.bn-chars td.mono { word-break: normal; overflow-wrap: normal; }
+.bn table.bn-chars td.bn-u { white-space: nowrap; }
+.bn-chars td.bn-c { font-size: 16px; min-width: 4em; }
+.bn-chars .bn-name { color: var(--muted); font-size: 13px; }
+.bn-chars .bn-flag { display: block; color: var(--muted); font-family: inherit; font-size: 12px; }
+@media (max-width: 560px) {
+  .bn table.bn-chars { font-size: 13px; }
+  .bn table.bn-chars th, .bn table.bn-chars td { padding: 8px 5px; }
+}
+.bn-nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 12px 16px; margin: 0 0 12px; }
+.bn-num { margin: 0; align-content: start; }
+.bn-num-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bn-num-head label { font-size: 14px; font-weight: 600; }
+.bn-num textarea { min-height: 44px; max-height: 240px; field-sizing: content; word-break: break-all; }
+.bn-num .msg { margin: 0; }
+.bn-info { margin: 0 0 16px; overflow-wrap: anywhere; }
+.bn-info:empty { display: none; }
+.bn-ascii { margin-top: 8px; border-top: 1px solid var(--border); }
+.bn-ascii summary { padding: 12px 0; font-weight: 600; cursor: pointer; }
+.bn-ascii-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 12px 20px; align-items: start; }
+.bn-ascii table.data { font-size: 13px; }
+.bn-ascii table.data caption { padding: 0 6px 4px; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; }
+.bn-ascii table.data th, .bn-ascii table.data td { padding: 4px 6px; }
+.bn-ascii table.data td.mono { font-size: 13px; word-break: normal; }
+.bn-ascii .bn-name { display: block; color: var(--muted); font-size: 12px; }
+{% endraw %}
+</style>
+
+<div class="bn">
+  <div class="bn-top">
+    <div class="bn-seg" role="radiogroup" aria-label="Direction">
+      <label><input type="radio" name="bn-dir" value="t2b" checked><span>Text to binary</span></label>
+      <label><input type="radio" name="bn-dir" value="b2t"><span>Binary to text</span></label>
+    </div>
+    <button class="btn secondary" type="button" id="bn-swap">Swap</button>
+  </div>
+
+  <div class="field">
+    <label for="bn-input" id="bn-input-label">Text</label>
+    <textarea id="bn-input" class="bn-io" rows="4" spellcheck="false" aria-describedby="bn-error" placeholder="Type or paste text…">Hi 👋</textarea>
+  </div>
+  <!-- Not an alert: the message can come and go while typing, so it is announced
+       through #bn-status once typing pauses. -->
+  <p class="msg error" id="bn-error"></p>
+  <p class="bn-suggest" id="bn-suggest" hidden>
+    <span id="bn-suggest-text">This looks like binary code.</span>
+    <button class="btn secondary small" type="button" id="bn-suggest-btn">Translate it to text</button>
+  </p>
+  <div class="bn-opts" id="bn-opts">
+    <label class="check"><input type="checkbox" id="bn-space" checked> Space between bytes</label>
+  </div>
+
+  <div class="field">
+    <label for="bn-output" id="bn-output-label">Binary code</label>
+    <textarea id="bn-output" class="bn-io mono" rows="4" readonly aria-describedby="bn-summary" placeholder="The translation appears here."></textarea>
+    <span class="hint" id="bn-summary"></span>
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" id="bn-copy">Copy result</button>
+    <button class="btn secondary" type="button" id="bn-download">Download .txt</button>
+    <button class="btn secondary" type="button" id="bn-clear">Clear</button>
+  </div>
+  <!-- The result changes on every keystroke, so a short summary is announced
+       here once typing pauses. -->
+  <p class="visually-hidden" id="bn-status" role="status"></p>
+
+  <h2 class="bn-h" id="bn-chars-h">Character by character</h2>
+  <div class="table-wrap">
+    <table class="data bn-chars" aria-labelledby="bn-chars-h">
+      <thead><tr><th scope="col">Character</th><th scope="col">Unicode</th><th scope="col" id="bn-col-bin">Binary (UTF-8 bytes)</th><th scope="col">Hex</th><th scope="col">Decimal</th></tr></thead>
+      <tbody id="bn-rows"></tbody>
+    </table>
+  </div>
+  <p class="hint bn-note" id="bn-rows-note"></p>
+
+  <h2 class="bn-h">Binary, decimal, hex and octal converter</h2>
+  <p class="hint bn-note" id="bn-num-hint">Type a whole number of any length in any box and the other three follow. In the decimal box thousands separators are fine (<span id="bn-ex-group">1,234,567</span>), but a <span id="bn-ex-point">decimal point</span> is not, because fractions cannot be converted here.</p>
+  <div class="bn-nums">
+    <div class="field bn-num">
+      <div class="bn-num-head"><label for="bn-dec">Decimal <span class="hint">base 10</span></label><button class="btn secondary small" type="button" data-copy-target="#bn-dec" aria-label="Copy decimal">Copy</button></div>
+      <textarea id="bn-dec" class="mono" rows="2" autocapitalize="off" spellcheck="false" aria-describedby="bn-dec-err">104</textarea>
+      <p class="msg error" id="bn-dec-err"></p>
+    </div>
+    <div class="field bn-num">
+      <div class="bn-num-head"><label for="bn-bin">Binary <span class="hint">base 2</span></label><button class="btn secondary small" type="button" data-copy-target="#bn-bin" aria-label="Copy binary">Copy</button></div>
+      <textarea id="bn-bin" class="mono" rows="2" autocapitalize="off" spellcheck="false" aria-describedby="bn-bin-err">1101000</textarea>
+      <p class="msg error" id="bn-bin-err"></p>
+    </div>
+    <div class="field bn-num">
+      <div class="bn-num-head"><label for="bn-hex">Hexadecimal <span class="hint">base 16</span></label><button class="btn secondary small" type="button" data-copy-target="#bn-hex" aria-label="Copy hexadecimal">Copy</button></div>
+      <textarea id="bn-hex" class="mono" rows="2" autocapitalize="off" spellcheck="false" aria-describedby="bn-hex-err">68</textarea>
+      <p class="msg error" id="bn-hex-err"></p>
+    </div>
+    <div class="field bn-num">
+      <div class="bn-num-head"><label for="bn-oct">Octal <span class="hint">base 8</span></label><button class="btn secondary small" type="button" data-copy-target="#bn-oct" aria-label="Copy octal">Copy</button></div>
+      <textarea id="bn-oct" class="mono" rows="2" autocapitalize="off" spellcheck="false" aria-describedby="bn-oct-err">150</textarea>
+      <p class="msg error" id="bn-oct-err"></p>
+    </div>
+  </div>
+  <p class="hint bn-info" id="bn-num-info"></p>
+
+  <details class="bn-ascii" id="bn-ascii">
+    <summary>ASCII table in binary, decimal and hex</summary>
+    <div class="bn-ascii-grid" id="bn-ascii-grid"></div>
+  </details>
+</div>
+
+<script>
+{% raw %}
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  // The longest input that is translated. A megabyte paste gets a message
+  // before anything reads it, not a frozen page.
+  var MAX_TEXT = 100000, MAX_BINARY = 1000000, MAX_ROWS = 100, MAX_NUMBER = 10000;
+
+  var input = $('#bn-input'), output = $('#bn-output'), errEl = $('#bn-error'), spaceBox = $('#bn-space');
+  var summaryEl = $('#bn-summary'), statusEl = $('#bn-status'), rowsEl = $('#bn-rows'), rowsNote = $('#bn-rows-note');
+  var suggestEl = $('#bn-suggest'), suggestBtn = $('#bn-suggest-btn');
+  var utf8 = new TextEncoder();
+
+  var BIN = [];
+  for (var n = 0; n < 256; n++) BIN.push((n + 256).toString(2).slice(1));
+
+  function fmt(n) { return n.toLocaleString('en-GB'); }
+  function count(n, one, many) { return fmt(n) + ' ' + (n === 1 ? one : many); }
+  function hex(n, width) { var s = n.toString(16).toUpperCase(); while (s.length < width) s = '0' + s; return s; }
+  function dir() { var r = $('input[name="bn-dir"]:checked'); return r ? r.value : 't2b'; }
+  function setDir(v) { $('input[name="bn-dir"][value="' + v + '"]').checked = true; }
+  function addCell(tr, text, cls) {
+    var td = document.createElement('td');
+    if (cls) td.className = cls;
+    td.textContent = text;
+    tr.appendChild(td);
+    return td;
+  }
+  function addSpan(parent, text, cls) {
+    var s = document.createElement('span');
+    s.className = cls;
+    s.textContent = text;
+    parent.appendChild(s);
+  }
+
+  // One live region for the whole tool, written once typing pauses and only
+  // when the sentence is a new one.
+  var pending = '';
+  var speak = TT.debounce(function () { if (statusEl.textContent !== pending) statusEl.textContent = pending; }, 700);
+  function say(text) { pending = text; speak(); }
+
+  // ---------- Characters ----------
+  var CTRL = 'NUL SOH STX ETX EOT ENQ ACK BEL BS HT LF VT FF CR SO SI DLE DC1 DC2 DC3 DC4 NAK SYN ETB CAN EM SUB ESC FS GS RS US'.split(' ');
+  var CTRL_NAMES = 'null|start of heading|start of text|end of text|end of transmission|enquiry|acknowledge|bell|backspace|horizontal tab|line feed|vertical tab|form feed|carriage return|shift out|shift in|data link escape|device control 1|device control 2|device control 3|device control 4|negative acknowledge|synchronous idle|end of transmission block|cancel|end of medium|substitute|escape|file separator|group separator|record separator|unit separator'.split('|');
+  var NAMED = { 32: 'Space', 127: 'DEL (delete)', 0xA0: 'No-break space', 0xAD: 'Soft hyphen', 0x200B: 'Zero width space', 0x200C: 'Zero width non-joiner', 0x200D: 'Zero width joiner', 0x2028: 'Line separator', 0x2029: 'Paragraph separator', 0xFE0F: 'Variation selector-16', 0xFEFF: 'Byte order mark' };
+
+  // The Character column shows the character, or its name when it cannot be seen.
+  function charCell(td, cp) {
+    var name = cp < 32 ? CTRL[cp] + ' (' + CTRL_NAMES[cp] + ')' : NAMED[cp], ch = String.fromCodePoint(cp);
+    if (!name && /^[\p{Cc}\p{Cf}\p{Z}]$/u.test(ch)) name = 'Not a visible character';
+    if (name) addSpan(td, name, 'bn-name');
+    else td.textContent = /^\p{M}$/u.test(ch) ? '\u25CC' + ch : ch;
+  }
+  // For a message: the character in quotes, or its code point when it cannot be seen.
+  function shown(cp) {
+    var ch = String.fromCodePoint(cp);
+    return /^[\p{C}\p{Z}\p{M}]$/u.test(ch) ? 'U+' + hex(cp, 4) : '“' + ch + '”';
+  }
+  function byteRow(cp, bytes, from, to, flag) {
+    var bin = [], hx = [], dec = [];
+    for (var i = from; i < to; i++) { bin.push(BIN[bytes[i]]); hx.push(hex(bytes[i], 2)); dec.push(bytes[i]); }
+    return { cp: cp, bin: bin.join(' '), hex: hx.join(' '), dec: dec.join(' '), flag: flag || '' };
+  }
+  function showRows(rows, total, code) {
+    $('#bn-col-bin').textContent = code ? 'Binary (code point)' : 'Binary (UTF-8 bytes)';
+    var frag = document.createDocumentFragment();
+    rows.forEach(function (r) {
+      var tr = document.createElement('tr'), td = document.createElement('td');
+      td.className = 'bn-c';
+      charCell(td, r.cp);
+      tr.appendChild(td);
+      addCell(tr, 'U+' + hex(r.cp, 4), 'mono bn-u');
+      td = addCell(tr, r.bin, 'mono');
+      if (r.flag) addSpan(td, r.flag, 'bn-flag');
+      addCell(tr, r.hex, 'mono');
+      addCell(tr, r.dec, 'mono');
+      frag.appendChild(tr);
+    });
+    rowsEl.textContent = '';
+    rowsEl.appendChild(frag);
+    rowsNote.textContent = !total ? 'Each character is listed here with its codes as soon as there is something to translate.'
+      : total > rows.length ? 'The first ' + fmt(rows.length) + ' of ' + fmt(total) + ' characters are listed.' : '';
+  }
+
+  // ---------- Text to binary ----------
+  function encode(text) {
+    var res = { out: '', rows: [], total: 0, code: false, summary: '', spoken: '', error: '', notBinary: false };
+    if (!text) return res;
+    if (text.length > MAX_TEXT) {
+      res.error = 'This text has ' + fmt(text.length) + ' characters. The most this page translates at once is ' + fmt(MAX_TEXT) + '.';
+      return res;
+    }
+    var bytes = utf8.encode(text), parts = new Array(bytes.length), halves = 0, i;
+    for (i = 0; i < bytes.length; i++) parts[i] = BIN[bytes[i]];
+    res.out = parts.join(spaceBox.checked ? ' ' : '');
+    for (i = 0; i < text.length; res.total++) {
+      var cp = text.codePointAt(i), len = cp > 0xFFFF ? 2 : 1, half = cp >= 0xD800 && cp <= 0xDFFF;
+      if (half) halves++;
+      if (res.rows.length < MAX_ROWS) {
+        var b = utf8.encode(half ? '\uFFFD' : text.substr(i, len));
+        res.rows.push(byteRow(half ? 0xFFFD : cp, b, 0, b.length, half ? 'Half of a surrogate pair is not a character, so U+FFFD is written' : ''));
+      }
+      i += len;
+    }
+    res.summary = count(res.total, 'character', 'characters') + ', ' + count(bytes.length, 'byte', 'bytes') + ', ' + count(bytes.length * 8, 'bit', 'bits') + '.' +
+      (halves ? ' ' + count(halves, 'half of a surrogate pair was', 'halves of surrogate pairs were') + ' written as \uFFFD.' : '');
+    res.spoken = count(res.total, 'character', 'characters') + ' translated to ' + count(bytes.length * 8, 'binary digit', 'binary digits') + '.';
+    return res;
+  }
+
+  // ---------- Binary to text ----------
+  // What may stand between groups: in ASCII anything that is not a letter or a
+  // digit; beyond it spaces, punctuation (curly quotes, dashes, the ellipsis) and
+  // the invisible marks that come along with a paste. Letters, digits, symbols
+  // and emoji may not. The answer is how many UTF-16 units the separator takes.
+  var OTHER_SEPARATOR = /^[\p{P}\p{Z}\p{Cc}\p{Cf}]$/u;
+  function separatorAt(text, i, c) {
+    if (c < 128) return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) ? 0 : 1;
+    var cp = text.codePointAt(i);
+    return OTHER_SEPARATOR.test(String.fromCodePoint(cp)) ? (cp > 0xFFFF ? 2 : 1) : 0;
+  }
+  // Control characters other than tab and line breaks. A reading that gives
+  // these is probably not the one that was meant.
+  function isStray(cp) { return (cp < 32 && cp !== 9 && cp !== 10 && cp !== 13) || (cp >= 127 && cp < 160); }
+  function toText(cps) {
+    var out = '';
+    for (var i = 0; i < cps.length; i += 8192) out += String.fromCodePoint.apply(null, cps.slice(i, i + 8192));
+    return out;
+  }
+  // UTF-8 as browsers decode it (WHATWG Encoding Standard): bytes that cannot
+  // start or continue a character become U+FFFD and decoding goes on after them.
+  function readUtf8(bytes) {
+    var cps = [], rows = [], bad = 0, stray = false, i = 0, len = bytes.length;
+    while (i < len) {
+      var start = i, b = bytes[i++], cp = b, need = 0, lo = 0x80, hi = 0xBF;
+      if (b >= 0x80) {
+        if (b >= 0xC2 && b <= 0xDF) { need = 1; cp = b & 0x1F; }
+        else if (b >= 0xE0 && b <= 0xEF) { need = 2; cp = b & 0x0F; if (b === 0xE0) lo = 0xA0; else if (b === 0xED) hi = 0x9F; }
+        else if (b >= 0xF0 && b <= 0xF4) { need = 3; cp = b & 0x07; if (b === 0xF0) lo = 0x90; else if (b === 0xF4) hi = 0x8F; }
+        else cp = -1;
+        for (; need > 0 && cp >= 0; need--) {
+          if (i < len && bytes[i] >= lo && bytes[i] <= hi) { cp = (cp << 6) | (bytes[i++] & 0x3F); lo = 0x80; hi = 0xBF; }
+          else cp = -1;
+        }
+      }
+      var valid = cp >= 0;
+      if (!valid) { cp = 0xFFFD; bad++; } else if (isStray(cp)) stray = true;
+      cps.push(cp);
+      if (rows.length < MAX_ROWS) rows.push(byteRow(cp, bytes, start, i, valid ? '' : 'Not valid UTF-8'));
+    }
+    return { cps: cps, rows: rows, bad: bad, clean: !bad && !stray, bytes: len, code: false, note: '' };
+  }
+  // One number per group: a Unicode code point, or a UTF-16 code unit (the two
+  // halves of a surrogate pair are joined). Null when a number is too large.
+  function readCodes(groups) {
+    var cps = [], rows = [], bad = 0, stray = false;
+    for (var i = 0; i < groups.length; i++) {
+      var v = parseInt(groups[i], 2), vals = [v], flag = '';
+      if (v > 0x10FFFF) return null;
+      if (v >= 0xD800 && v <= 0xDBFF && i + 1 < groups.length) {
+        var w = parseInt(groups[i + 1], 2);
+        if (w >= 0xDC00 && w <= 0xDFFF) { vals.push(w); v = 0x10000 + ((v - 0xD800) << 10) + (w - 0xDC00); i++; }
+      }
+      if (v >= 0xD800 && v <= 0xDFFF) { v = 0xFFFD; bad++; flag = 'Half of a surrogate pair'; }
+      else if (isStray(v)) stray = true;
+      cps.push(v);
+      if (rows.length < MAX_ROWS) {
+        rows.push({ cp: v, flag: flag, bin: vals.map(function (x) { return x.toString(2); }).join(' '),
+          hex: vals.map(function (x) { return hex(x, 2); }).join(' '), dec: vals.join(' ') });
+      }
+    }
+    return { cps: cps, rows: rows, bad: bad, clean: !bad && !stray, bytes: 0, code: true, note: '' };
+  }
+  function withNote(reading, note) { reading.note = note; return reading; }
+  function bytesOf(digits, howMany) {
+    var bytes = new Uint8Array(howMany);
+    for (var k = 0; k < howMany; k++) bytes[k] = parseInt(digits.substr(k * 8, 8), 2);
+    return bytes;
+  }
+
+  function decode(text) {
+    var res = { out: '', rows: [], total: 0, code: false, summary: '', spoken: '', error: '', notBinary: false };
+    if (!text) return res;
+    if (text.length > MAX_BINARY) {
+      res.error = 'This is ' + fmt(text.length) + ' characters long. The most this page translates at once is ' + fmt(MAX_BINARY) + '.';
+      return res;
+    }
+    // Split into groups of 0s and 1s. A loop, not a pattern, so that a long
+    // paste takes time in proportion to its length.
+    var groups = [], start = -1, len = text.length, digits = 0, longest = 0, short = false, eights = true, i, c, size, k, sep;
+    for (i = 0; i <= len; i++) {
+      c = i < len ? text.charCodeAt(i) : 32;
+      if (c === 48 || c === 49) { if (start < 0) start = i; continue; }
+      // 0b in front of a group is a prefix, not a digit.
+      if ((c === 98 || c === 66) && start === i - 1 && text.charCodeAt(start) === 48 && (text.charCodeAt(i + 1) === 48 || text.charCodeAt(i + 1) === 49)) { start = -1; continue; }
+      sep = separatorAt(text, i, c);
+      if (!sep) {
+        res.notBinary = true;
+        res.error = shown(text.codePointAt(i)) + ' is not a binary digit (character ' + fmt(i + 1) + '). Binary code uses only 0 and 1.';
+        return res;
+      }
+      if (start >= 0) {
+        size = i - start;
+        digits += size;
+        if (size > longest) longest = size;
+        if (size !== 8) eights = false;
+        if (size < 8) short = true;
+        groups.push(text.slice(start, i));
+        start = -1;
+      }
+      i += sep - 1;
+    }
+    if (!groups.length) return res;
+
+    // The possible readings, most usual first. The first one that gives clean
+    // text is taken: valid, and without stray control characters.
+    var readings = [], bytes;
+    if (longest <= 8) {
+      bytes = new Uint8Array(groups.length);
+      for (k = 0; k < groups.length; k++) bytes[k] = parseInt(groups[k], 2);
+      readings.push(withNote(readUtf8(bytes), short ? ' Groups shorter than 8 digits were filled with leading zeros.' : ''));
+    }
+    if (digits % 8 === 0 && !eights) {
+      readings.push(withNote(readUtf8(bytesOf(groups.join(''), digits / 8)), groups.length > 1 ? ' The digits were joined and read 8 at a time.' : ''));
+    }
+    if (groups.length > 1 && longest <= 32) {
+      var codes = readCodes(groups);
+      if (codes) readings.push(withNote(codes, ' Each group was read as the number of one character (its Unicode code point), because as UTF-8 bytes the digits do not give readable text.'));
+    }
+    // A group on its own can be the number of one character too, such as 11101001
+    // for é or 10000111111 for п. Of the longer runs only those that cannot be
+    // whole bytes and start with a 1 are taken so: 011010000 is a byte too long.
+    if (groups.length === 1 && (longest <= 8 || (longest <= 21 && digits % 8 && groups[0][0] === '1'))) {
+      var one = readCodes(groups);
+      if (one) readings.push(withNote(one, ' The group was read as the number of one character (its Unicode code point), because as UTF-8 it does not give readable text.'));
+    }
+    var pick = null, partial = false;
+    for (k = 0; k < readings.length && !pick; k++) if (readings[k].clean) pick = readings[k];
+    // Groups that are not bytes with a digit missing or too many (0100 1000 0110 100):
+    // the whole bytes of the joined digits, when they make text, and a message.
+    if (!pick && groups.length > 1 && digits % 8 && digits >= 8) {
+      var joined = readUtf8(bytesOf(groups.join(''), Math.floor(digits / 8)));
+      if (joined.clean) { pick = joined; partial = true; }
+    }
+    if (!pick) pick = readings[0] || null;
+    if (!pick) {
+      if (groups.length > 1) {
+        res.error = 'These groups cannot be read as characters: the longest has ' + fmt(longest) + ' digits, and the ' + fmt(digits) + ' digits together do not make whole 8-bit bytes.';
+        return res;
+      }
+      // One run that is not a whole number of bytes: the whole bytes are
+      // translated and the message says what was left over.
+      pick = readUtf8(bytesOf(groups[0], Math.floor(digits / 8)));
+      partial = true;
+    }
+    if (partial) {
+      res.error = fmt(digits) + ' binary digits do not make whole 8-bit bytes: the last ' + (digits % 8 === 1 ? 'digit was' : (digits % 8) + ' digits were') +
+        ' left out. A digit may be missing, or the groups need spaces between them.';
+    }
+    var chars = count(pick.cps.length, 'character', 'characters');
+    res.out = toText(pick.cps);
+    res.rows = pick.rows;
+    res.total = pick.cps.length;
+    res.code = pick.code;
+    res.summary = count(digits, 'binary digit', 'binary digits') + ', ' + (pick.code ? count(groups.length, 'group', 'groups') : count(pick.bytes, 'byte', 'bytes')) + ', ' + chars + '.' + pick.note +
+      (!pick.bad ? '' : pick.code ? ' Half a surrogate pair is not a character and is shown as \uFFFD.' : ' Not all bytes are valid UTF-8: the others are shown as \uFFFD.');
+    res.spoken = count(digits, 'binary digit', 'binary digits') + ' translated to ' + chars + '.';
+    return res;
+  }
+
+  // ---------- The translator ----------
+  function setError(msg) {
+    if (errEl.textContent !== msg) errEl.textContent = msg;
+    if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+  }
+  // Only 0s, 1s and white space, and at least one byte of them.
+  function looksBinary(text) {
+    var digits = 0;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      if (c === 48 || c === 49) digits++;
+      else if (c !== 32 && c !== 9 && c !== 10 && c !== 13) return false;
+    }
+    return digits >= 8;
+  }
+  // The whole result. A text box turns every line break into a line feed, so
+  // Copy, Download and Swap take the result from here, not from the box.
+  var result = '';
+  // What Swap put in the box, exactly: a carriage return in it is shown as a line
+  // feed, so the exact text is used until the box is edited.
+  var swapped = { shown: null, exact: '' };
+  // The example the page starts with follows the direction: until something is
+  // typed, choosing the other direction puts the translated example in the box,
+  // where the untouched "Hi" would only be reported as bad binary.
+  var untouched = input.value === input.defaultValue, rendered = input.value;
+  function render(silent) {
+    var toBinary = dir() === 't2b', text = input.value === swapped.shown ? swapped.exact : input.value;
+    rendered = input.value;
+    $('#bn-input-label').textContent = toBinary ? 'Text' : 'Binary code';
+    $('#bn-output-label').textContent = toBinary ? 'Binary code' : 'Text';
+    input.classList.toggle('mono', !toBinary);
+    output.classList.toggle('mono', toBinary);
+    input.placeholder = toBinary ? 'Type or paste text…' : 'Paste binary code, such as 01101000 01101001';
+    $('#bn-opts').hidden = !toBinary;
+    var res = toBinary ? encode(text) : decode(text);
+    result = res.out;
+    output.value = res.out;
+    setError(res.error);
+    if (summaryEl.textContent !== res.summary) summaryEl.textContent = res.summary;
+    showRows(res.rows, res.total, res.code);
+    var tip = toBinary && !res.error && looksBinary(text) ? ['This looks like binary code.', 'Translate it to text']
+      : res.notBinary ? ['Is this ordinary text?', 'Translate it to binary'] : null;
+    suggestEl.hidden = !tip;
+    if (tip) {
+      $('#bn-suggest-text').textContent = tip[0];
+      suggestBtn.textContent = tip[1];
+    }
+    $('#bn-copy').disabled = $('#bn-download').disabled = !res.out;
+    if (!silent) say((res.error || res.spoken) + (tip ? ' ' + tip[0] + ' The button after the box switches the direction.' : ''));
+  }
+
+  // Long input is translated after a short pause instead of on every keystroke.
+  var renderLater = TT.debounce(function () { render(); }, 150);
+  input.addEventListener('input', function () {
+    untouched = false;
+    if (input.value.length > 20000) renderLater(); else render();
+  });
+  $$('input[name="bn-dir"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (untouched && result) input.value = result;
+      render();
+    });
+  });
+  spaceBox.addEventListener('change', function () { render(); });
+  function flip() { setDir(dir() === 't2b' ? 'b2t' : 't2b'); }
+  suggestBtn.addEventListener('click', function () {
+    flip();
+    render();
+    input.focus();
+  });
+  $('#bn-swap').addEventListener('click', function () {
+    untouched = false;
+    if (result) {
+      input.value = result;
+      swapped = { shown: input.value, exact: result };
+    }
+    flip();
+    render();
+  });
+  $('#bn-copy').addEventListener('click', function () { if (result) TT.copy(result, this); });
+  $('#bn-download').addEventListener('click', function () {
+    if (result) TT.download(dir() === 't2b' ? 'binary.txt' : 'text.txt', result, 'text/plain;charset=utf-8');
+  });
+  $('#bn-clear').addEventListener('click', function () {
+    untouched = false;
+    input.value = '';
+    render();
+    input.focus();
+  });
+
+  // ---------- Number converter ----------
+  var KINDS = ['dec', 'bin', 'hex', 'oct'];
+  var NUM = {
+    dec: { base: 10, prefix: '', digit: 'a decimal digit', uses: 'Decimal uses 0 to 9.' },
+    bin: { base: 2, prefix: '0b', digit: 'a binary digit', uses: 'Binary uses only 0 and 1.' },
+    hex: { base: 16, prefix: '0x', digit: 'a hex digit', uses: 'Hex uses 0 to 9 and A to F.' },
+    oct: { base: 8, prefix: '0o', digit: 'an octal digit', uses: 'Octal uses 0 to 7.' }
+  };
+  var fields = {}, numInfo = $('#bn-num-info');
+  KINDS.forEach(function (k) {
+    fields[k] = { el: $('#bn-' + k), err: $('#bn-' + k + '-err'), copy: $('[data-copy-target="#bn-' + k + '"]') };
+  });
+
+  // Which of . and , is the decimal mark where the visitor lives. The other one
+  // may group thousands in the decimal box.
+  var POINT = '.';
+  try {
+    new Intl.NumberFormat().formatToParts(1.5).forEach(function (p) { if (p.type === 'decimal' && p.value === ',') POINT = ','; });
+  } catch (e) { /* keeps the point */ }
+  if (POINT === ',') {
+    $('#bn-ex-group').textContent = '1.234.567';
+    $('#bn-ex-point').textContent = 'decimal comma';
+  }
+
+  // Digits of other scripts (Arabic-Indic, Persian, Devanagari, full-width and
+  // so on) count as the digits 0 to 9. Each number is the code of a zero.
+  var ZEROS = [0x660, 0x6F0, 0x7C0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xBE6, 0xC66, 0xCE6, 0xD66, 0xE50, 0xED0, 0xF20, 0x1040, 0x17E0, 0x1810, 0xFF10];
+  function westernDigits(s) {
+    var out = '';
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i), d = -1;
+      if (c >= 0x660) for (var k = 0; k < ZEROS.length && d < 0; k++) if (c >= ZEROS[k] && c <= ZEROS[k] + 9) d = c - ZEROS[k];
+      out += d < 0 ? s[i] : d;
+    }
+    return out;
+  }
+  // What may stand between digits, and the kind each mark belongs to.
+  // U+066C is the Arabic thousands separator, U+066B the Arabic decimal separator.
+  var MARKS = { ' ': ' ', '\u00A0': ' ', '\u2009': ' ', '\u202F': ' ', "'": "'", '\u2019': "'", '_': '_', ',': ',', '.': '.', '\u066C': '\u066C', '\u066B': '\u066B' };
+  var MARK_NAMES = { ' ': 'A space', "'": 'An apostrophe', ',': 'A comma', '.': 'A dot', '\u066C': 'The separator \u066C' };
+  function fraction(mark) {
+    return 'Whole numbers only: “' + mark + '” is read as the decimal ' + (mark === ',' ? 'comma' : mark === '.' ? 'point' : 'separator') + ', and fractions cannot be converted here.';
+  }
+
+  function parseNumber(raw, kind) {
+    if (raw.length > MAX_NUMBER) return { error: 'This is ' + fmt(raw.length) + ' characters long. The converter reads numbers of up to ' + fmt(MAX_NUMBER) + ' characters.' };
+    var s = westernDigits(raw).trim(), info = NUM[kind], negative = false;
+    if (!s) return { empty: true };
+    if (s[0] === '+' || s[0] === '-' || s[0] === '\u2212') { negative = s[0] !== '+'; s = s.slice(1); }
+    if (info.prefix && s.slice(0, 2).toLowerCase() === info.prefix) s = s.slice(2);
+    var digits = '', mark = '', typed = '', marks = 0;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i], c = s.charCodeAt(i);
+      var v = c >= 48 && c <= 57 ? c - 48 : c >= 65 && c <= 70 ? c - 55 : c >= 97 && c <= 102 ? c - 87 : 99;
+      if (v < info.base) { digits += ch; continue; }
+      // Two cells pasted from a spreadsheet are two numbers, not one.
+      if (c === 9 || c === 10 || c === 13) return { error: 'Enter one number: a tab or line break separates two numbers here.' };
+      var m = MARKS[ch];
+      if (kind !== 'dec') {
+        if (m === ' ' || m === "'" || m === '_') continue;
+        return { error: shown(s.codePointAt(i)) + ' is not ' + info.digit + '. ' + info.uses };
+      }
+      if (m === '\u066B') return { error: fraction(ch) };
+      if (!m) return { error: shown(s.codePointAt(i)) + ' is not ' + info.digit + '. ' + info.uses };
+      if (mark && m !== mark) return { error: 'Whole numbers only: this has two kinds of separator, like a number with a fraction.' };
+      if (!mark) typed = ch;
+      mark = m;
+      marks++;
+    }
+    if (!digits) return { error: 'There are no digits to convert.' };
+    // In the decimal box a separator must group thousands (1,234,567, or
+    // 12,34,567 as written in India), so that 1,5 or 0,500 is never read as 15 or 500.
+    if (mark && mark !== '_') {
+      var groups = s.split(/[^0-9]/), first = groups[0], last = groups.length - 1;
+      var western = groups.every(function (g, j) { return j === 0 || g.length === 3; });
+      var indian = groups.every(function (g, j) { return j === 0 ? g.length <= 2 : g.length === (j === last ? 3 : 2); });
+      var grouped = first.length >= 1 && first.length <= 3 && first[0] !== '0' && (western || indian);
+      if (mark === POINT && (marks === 1 || !grouped)) return { error: fraction(mark) };
+      if (!grouped) {
+        return { error: first[0] === '0' ? 'Whole numbers only: a grouped number cannot start with 0, so this looks like a fraction.'
+          : MARK_NAMES[mark] + ' can only stand between groups of three digits, as in 1' + typed + '234' + typed + '567. Enter one whole number.' };
+      }
+    }
+    var value = BigInt(info.prefix + digits);
+    return { value: negative ? -value : value };
+  }
+
+  function formatNumber(v, kind) {
+    var s = v.toString(NUM[kind].base);
+    return kind === 'hex' ? s.toUpperCase() : s;
+  }
+  // A sentence about the number: its size in bits, padded and signed forms, and
+  // how the place values add up.
+  function describe(v) {
+    var zero = BigInt(0), one = BigInt(1), widths = [8, 16, 32, 64], w, i;
+    if (v === zero) return '0 is written 0 in every base.';
+    if (v < zero) {
+      var text = 'A negative number is written with a minus sign in front of the digits of the positive number.';
+      for (i = 0; i < 4 && !w; i++) if (v >= -(one << BigInt(widths[i] - 1))) w = widths[i];
+      if (w) {
+        var tc = BigInt.asUintN(w, v);
+        text += ' As a signed ' + w + '-bit value (two’s complement) it is ' + tc.toString(2) + ', hex ' + tc.toString(16).toUpperCase() + '.';
+      }
+      return text;
+    }
+    var bits = v.toString(2), len = bits.length;
+    var out = 'This number takes ' + count(len, 'bit', 'bits') + ' (' + count(Math.ceil(len / 8), 'byte', 'bytes') + ').';
+    for (i = 0; i < 4 && !w; i++) if (widths[i] >= len) w = widths[i];
+    if (w && w !== len) out += ' Padded to ' + w + ' bits it is ' + new Array(w - len + 1).join('0') + bits + '.';
+    if (len >= 2 && len <= 16) {
+      var places = [];
+      for (i = 0; i < len; i++) if (bits[i] === '1') places.push(fmt(Math.pow(2, len - 1 - i)));
+      out += places.length === 1 ? ' Its only 1 stands in the place worth ' + places[0] + '.'
+        : ' The place values of its 1s add up: ' + places.join(' + ') + ' = ' + fmt(Number(v)) + '.';
+    }
+    return out;
+  }
+  function spokenNumber(v) {
+    var d = v.toString();
+    if (d.length > 24) return 'Converted a number of ' + fmt(d.replace('-', '').length) + ' decimal digits.';
+    return 'Decimal ' + d + ', binary ' + v.toString(2) + ', hex ' + v.toString(16).toUpperCase() + ', octal ' + v.toString(8) + '.';
+  }
+  function showNumber(kind, res, rewrite) {
+    KINDS.forEach(function (k) {
+      var f = fields[k], msg = k === kind && res.error ? res.error : '';
+      if (f.err.textContent !== msg) f.err.textContent = msg;
+      if (msg) f.el.setAttribute('aria-invalid', 'true'); else f.el.removeAttribute('aria-invalid');
+      if (rewrite && k !== kind) f.el.value = res.value === undefined ? '' : formatNumber(res.value, k);
+      f.copy.disabled = !f.el.value;
+    });
+    var info = res.value === undefined ? '' : describe(res.value);
+    if (numInfo.textContent !== info) numInfo.textContent = info;
+  }
+  function convertFrom(kind) {
+    var res = parseNumber(fields[kind].el.value, kind);
+    showNumber(kind, res, true);
+    say(res.error || (res.value === undefined ? '' : spokenNumber(res.value)));
+  }
+  // On load, and when the browser has put typed values back (Back button,
+  // reload): the first box that holds a number decides, and the others are
+  // only rewritten when they disagree with it.
+  function syncNumbers() {
+    var parsed = KINDS.map(function (k) { return parseNumber(fields[k].el.value, k); }), source = -1, i;
+    for (i = 0; i < 4 && source < 0; i++) if (parsed[i].value !== undefined) source = i;
+    for (i = 0; i < 4 && source < 0; i++) if (!parsed[i].empty) source = i;
+    if (source < 0) source = 0;
+    var v = parsed[source].value;
+    showNumber(KINDS[source], parsed[source], !(v !== undefined && parsed.every(function (p) { return p.value === v; })));
+  }
+  KINDS.forEach(function (k) { fields[k].el.addEventListener('input', function () { convertFrom(k); }); });
+
+  // ---------- ASCII table ----------
+  (function () {
+    var grid = $('#bn-ascii-grid');
+    var captions = ['0 to 31: control codes', '32 to 63: punctuation and digits', '64 to 95: capital letters', '96 to 127: lower-case letters'];
+    for (var t = 0; t < 4; t++) {
+      var table = document.createElement('table'), head = table.createTHead().insertRow(), body = table.createTBody();
+      table.className = 'data';
+      table.createCaption().textContent = captions[t];
+      ['Dec', 'Hex', 'Binary', 'Character'].forEach(function (h) {
+        var th = document.createElement('th');
+        th.scope = 'col';
+        th.textContent = h;
+        head.appendChild(th);
+      });
+      for (var code = t * 32; code < t * 32 + 32; code++) {
+        var tr = body.insertRow();
+        addCell(tr, String(code));
+        addCell(tr, hex(code, 2));
+        addCell(tr, BIN[code], 'mono');
+        var td = addCell(tr, code < 32 ? CTRL[code] : code === 32 ? 'Space' : code === 127 ? 'DEL' : String.fromCharCode(code));
+        if (code < 32 || code === 127) addSpan(td, code === 127 ? 'delete' : CTRL_NAMES[code], 'bn-name');
+      }
+      grid.appendChild(table);
+    }
+  })();
+
+  // The browser may put typed values back after this script has run (Back
+  // button, reload), so everything is worked out again when the page is shown.
+  window.addEventListener('pageshow', function () {
+    if (input.value !== rendered) untouched = false;
+    render(true);
+    syncNumbers();
+  });
+  render(true);
+  syncNumbers();
+})();
+{% endraw %}
+</script>
