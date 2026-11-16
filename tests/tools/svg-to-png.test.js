@@ -400,6 +400,19 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   const ext = await page.evaluate(() => TTImage.svg.info('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><style>a{fill:url(#g)} b{fill:url( "data:x")} c{background:url( \'http://x/y.png\')} @import "z.css";</style></svg>').external);
   assert.equal(ext, 2, 'one url() and one @import are external; #id and data: are not');
 
+  // ----- Guide: linked images are left out, an image embedded as a data: URI is drawn (tested
+  // above), and the guide links the Base64 encoder, which makes such a URI from an image file.
+  // Every link points at a tool page. -----
+  {
+    const guide = (await page.textContent('.prose')).replace(/\s+/g, ' ');
+    assert.match(guide, /To include them, embed images as data: URIs and convert text to outlines in your drawing program, or use a font installed on your device\. The Base64 encoder makes the data: URI of an image file when you tick As a data URI\./);
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/image-converter/', '/base64-encode-decode/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+  }
+
   // A browser that cannot encode WebP (Safari): the option is disabled and explained.
   await page.addInitScript(() => {
     const toBlob = HTMLCanvasElement.prototype.toBlob;

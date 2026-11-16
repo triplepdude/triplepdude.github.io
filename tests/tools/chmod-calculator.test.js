@@ -486,4 +486,21 @@ module.exports = async ({ page, open, assert }) => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
+
+  // ----- Guide: each permission is one bit, and a mode written in decimal links the binary
+  // translator. JSON has no octal numbers (RFC 8259), and the Kubernetes API reference says
+  // "JSON requires decimal values for mode bits", so a defaultMode of 0644 is 420 there.
+  // Every link points at a tool page. -----
+  {
+    const guide = (await text('.prose')).replace(/\s+/g, ' ');
+    assert.match(guide, /Each permission is one bit: read is 4, write is 2 and execute is 1\. Add them up for each class/);
+    const k8s = guide.match(/sticky 1\. JSON has no octal numbers, so a Kubernetes defaultMode of (\d+) appears as (\d+); the binary translator converts between decimal, octal, binary and hex\./);
+    assert.ok(k8s, 'the guide explains modes written in decimal');
+    assert.equal(parseInt(k8s[1], 8), Number(k8s[2]), `${k8s[1]} in octal is ${k8s[2]} in decimal`);
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/binary-translator/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+  }
 };

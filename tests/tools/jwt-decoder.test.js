@@ -646,4 +646,27 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await put('#jwt-key', '-----BEGIN A-----\n'.repeat(30000));
   assert.ok(Date.now() - t0 < 1000, 'PEM scan took ' + (Date.now() - t0) + ' ms');
   await page.waitForFunction(() => /BEGIN and END lines must match/.test(document.querySelector('#jwt-verify').textContent));
+
+  // ----- Guide: a test token's header and payload must be strict JSON, so the guide links the
+  // JSON formatter, whose Fix repairs JavaScript-style objects; the payload is the middle part,
+  // readable with the Base64 decoder. Every link points at a tool page. -----
+  {
+    await open();
+    const guide = (await text('.prose')).replace(/\s+/g, ' ');
+    assert.match(guide, /and the signed token appears at once\. Both must be strict JSON: the JSON formatter repairs a JavaScript-style object with unquoted keys, single quotes or trailing commas\./);
+    assert.match(guide, /Base64url is an encoding, not encryption, so anyone holding the token can read the payload, for example by pasting the middle part into the Base64 decoder\./);
+    // Such an object is refused, and no token is made.
+    await page.fill('#jb-payload', "{sub: 'user-123', admin: true,}");
+    await page.waitForFunction(() => /^The payload is not valid JSON/.test(document.querySelector('#jb-msg').textContent));
+    assert.equal(await page.inputValue('#jb-token'), '');
+    // The middle part of a signed token is the payload as Base64url.
+    await page.fill('#jb-payload', '{"sub": "user-123", "admin": true}');
+    await page.waitForFunction(() => document.querySelector('#jb-token').value.split('.').length === 3);
+    assert.equal(Buffer.from((await page.inputValue('#jb-token')).split('.')[1], 'base64url').toString(), '{"sub":"user-123","admin":true}');
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/json-formatter/', '/base64-encode-decode/', '/unix-timestamp-converter/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+  }
 };
