@@ -1,5 +1,5 @@
-highlight.js, a syntax highlighter (used by the Markdown to PDF and Markdown to Word tools)
-===========================================================================================
+highlight.js, a syntax highlighter (used by the Markdown to PDF, Markdown to Word and JSON formatter tools)
+=========================================================================================================
 
 Package:  @highlightjs/cdn-assets 11.12.0, unmodified:
             highlight.min.js      core plus the 36 "common" languages (sets window.hljs)

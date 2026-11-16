@@ -1,0 +1,1544 @@
+---
+title: JSON Formatter, Validator and Viewer
+description: Format, validate and minify JSON, get the line and reason for an error, fix common mistakes and browse a tree view. Everything runs in your browser.
+category: Developer
+keywords: [json formatter, json validator, json beautifier, json viewer, json minify, json pretty print, json lint, fix json, json escape unescape]
+howto: |
+  ## How to format JSON
+
+  Paste JSON into the box, or open or drop a file. The result follows as you
+  type. **Format** puts every value on its own line, indented by 2 spaces, 4
+  spaces or a tab. **Minify** removes every space and line break outside
+  strings. **Tree view** shows objects and arrays that open and close.
+  **Sort keys** orders the keys of each object by Unicode code point, so
+  capitals come before lower case; arrays keep their order.
+
+  Only the white space changes. Strings and numbers are copied exactly as
+  written, so `1.0` stays `1.0` and `12345678901234567890` keeps every digit.
+  Keys keep their order, and a key that appears twice is kept twice, with a
+  warning.
+
+  ## Why is my JSON invalid?
+
+  The checker follows RFC 8259 and ECMA-404, the two standards that define
+  JSON, and gives the line, column and reason for the first problem. These
+  are the usual ones:
+
+  | Problem | Not JSON | JSON |
+  |---|---|---|
+  | Trailing comma | `[1, 2,]` | `[1, 2]` |
+  | Single quotes | `{'a': 'b'}` | `{"a": "b"}` |
+  | Unquoted key | `{a: 1}` | `{"a": 1}` |
+  | Comment | `{"a": 1} // note` | `{"a": 1}` |
+  | Python or JavaScript word | `True`, `None`, `NaN` | `true`, `null`, `null` |
+  | Line break inside a string | a real line break | `\n` |
+  | Number format | `.5`, `+1`, `0x1F` | `0.5`, `1`, `31` |
+
+  **Fix** repairs all of these in one step. It also straightens curly quotes
+  from a word processor, adds missing commas, closes brackets left open at the
+  end, and wraps several values in a row (JSON Lines) in one array. It lists
+  what it changed, and Undo brings your text back. What it cannot know is left
+  to you: `007` may be a number or a code that needs quotes.
+
+  ## JSON and JavaScript objects
+
+  JSON was derived from JavaScript's object syntax, but it is stricter, and it
+  is text, not an object in memory. Keys and strings need double quotes.
+  There are no comments, no trailing commas, no `undefined`, no functions and
+  no dates, and numbers are plain decimals. `JSON.stringify` turns a
+  JavaScript value into JSON text and `JSON.parse` reads it back.
+
+  Reading JSON into JavaScript can change it. Whole numbers beyond
+  9,007,199,254,740,991 (2^53 − 1) can be rounded, `1.0` becomes `1`, keys
+  that look like whole numbers move to the front, and of two equal keys only
+  the last survives. This page reads the text itself, so none of that happens
+  here, and it tells you when a number or a repeated key is at risk.
+
+  ## Escape and unescape
+
+  **Escape** turns any text into one JSON string: `"` becomes `\"`, a
+  backslash becomes `\\` and a line break becomes `\n`. Use it to put JSON
+  inside JSON, such as a request body in a config file. **Unescape** does the
+  reverse. That is how to read "stringified" JSON such as `"{\"id\": 1}"`
+  from a log: unescape it, then choose **Use as input** to format it.
+
+  ## Large files
+
+  Text longer than 100,000 characters is read in a background thread, so the
+  page stays responsive. Files up to 50 MB can be opened. A file or paste that
+  makes the text longer than a million characters is kept out of the text
+  box, only the start of a very long result is shown, and Copy and Download
+  give all of it. The tree builds only the rows you open, 100 at a time,
+  which makes it the practical way to look through a large file.
+
+  To compare two JSON documents, format both with sorted keys and paste them
+  into [Text compare](/text-compare/). The payload of a JSON Web Token can be
+  read with the [JWT decoder](/jwt-decoder/), and JSON carried in a query
+  string with the [URL encoder and decoder](/url-encode-decode/).
+faq:
+  - q: Is my JSON uploaded or stored anywhere?
+    a: No. The page reads, checks and formats your JSON with JavaScript in your own browser, and opening a file reads it from your device only. Nothing is sent to a server, and nothing is kept in cookies or browser storage.
+  - q: Can JSON have comments?
+    a: 'No. JSON has no comment syntax, so a strict parser stops at `//` or `/* */`. Some tools read a looser dialect: VS Code uses "JSON with Comments" for settings.json, and JSON5 allows comments too. Remove the comments before the text goes to a JSON parser; Fix does that here.'
+  - q: What does "Unexpected token &lt; in JSON" mean?
+    a: 'The text handed to the parser is not JSON at all. It starts with `<`, so it is almost always an HTML page, such as an error or login page, that a server returned where JSON was expected. Current Chrome words it as `Unexpected token ''<'', "<!DOCTYPE "... is not valid JSON`. "Unexpected end of JSON input" means the text was empty or cut off.'
+  - q: What is the difference between JSON and JSON Lines?
+    a: A JSON text holds exactly one value, usually an object or an array. JSON Lines (.jsonl, also called NDJSON) puts one complete JSON value on each line, which suits logs and exports because a program can read it one record at a time. A JSON parser rejects such a file as a whole. Here, Fix wraps the lines in one array so that you can format and browse them.
+---
+<style>
+.tool-card { --jf-num: #1d4ed8; }
+@media (prefers-color-scheme: dark) { .tool-card { --jf-num: #93c5fd; } }
+.jf-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; }
+.jf-head > label { font-size: 14px; font-weight: 600; }
+.jf-head-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.jf textarea { min-height: 200px; }
+.jf-in.is-over textarea, .jf-in.is-over .jf-held { outline: 2px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
+.jf-held { padding: 14px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--bg); font-size: 15px; }
+.jf-held p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.jf-snip { margin: -8px 0 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); font-family: var(--mono); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.jf-snip mark { padding: 1px 4px; border: 1px solid var(--danger); border-radius: 3px; background: var(--danger-soft); color: var(--danger); font-weight: 700; }
+.msg.jf-note { border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+.jf-modes { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
+.jf-modes legend { margin-bottom: 8px; padding: 0; font-size: 14px; font-weight: 600; }
+.jf-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.jf-chip { position: relative; display: inline-flex; }
+.jf-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.jf-chip span { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--field-border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 15px; white-space: nowrap; }
+.jf-chip input:hover + span { border-color: var(--accent); }
+.jf-chip input:checked + span { border-color: var(--accent); background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.jf-chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.jf-opts { margin-bottom: 8px; }
+.jf-opts > .field { flex: 0 1 180px; }
+.jf-opts .check { min-height: 44px; }
+.jf-mode-hint { display: block; margin: 0 0 16px; }
+.jf-mode-hint:empty { display: none; }
+.jf-out-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0 0 6px; }
+pre.jf-out, .jf-tree { max-height: 520px; margin-top: 0; overflow: auto; tab-size: 4; }
+pre.jf-out:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+pre.jf-out:empty::before { content: "The result appears here."; color: var(--muted); font-family: system-ui, sans-serif; }
+.jf-out .hljs-attr, .jf-key { color: var(--text); font-weight: 700; }
+.jf-out .hljs-string, .jf-s { color: var(--accent); }
+.jf-out .hljs-number, .jf-out .hljs-literal, .jf-n { color: var(--jf-num); }
+.jf-out .hljs-punctuation, .jf-meta, .jf-idx { color: var(--muted); }
+.jf-tree { margin-bottom: 16px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); font-family: var(--mono); font-size: 14px; line-height: 1.6; }
+.jf-tree ul { margin: 0 0 0 5px; padding: 0 0 0 16px; border-left: 1px solid var(--border); list-style: none; }
+.jf-tree > ul { margin: 0; padding: 0; border: 0; }
+.jf-tree li { overflow-wrap: anywhere; }
+.jf-tree summary { border-radius: 4px; cursor: pointer; }
+.jf-tree li.jf-leaf { padding-left: 17px; }
+.jf-tree li.jf-more { padding: 6px 0 6px 17px; font-family: system-ui, sans-serif; }
+.jf-out-note { display: block; margin: -8px 0 14px; }
+.jf-out-note:empty { display: none; }
+.jf-tree-acts { margin-top: -6px; }
+</style>
+
+<div class="jf">
+  <div class="field jf-in" id="jf-in">
+    <div class="jf-head">
+      <label for="jf-input">JSON input</label>
+      <span class="jf-head-btns">
+        <button class="btn secondary small" type="button" id="jf-open">Open file…</button>
+        <button class="btn secondary small" type="button" id="jf-example">Example</button>
+        <button class="btn secondary small" type="button" id="jf-clear">Clear</button>
+        <button class="btn secondary small" type="button" id="jf-undo" hidden>Undo</button>
+      </span>
+      <input type="file" id="jf-file" hidden accept=".json,.jsonl,.ndjson,.geojson,.har,.map,.webmanifest,.ipynb,.txt,.log,application/json,text/plain">
+    </div>
+    <textarea id="jf-input" class="mono" rows="8" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste JSON here…" aria-describedby="jf-hint jf-error">{"id":1042,"customer":{"name":"Ada Lovelace","email":"ada@example.com"},"items":[{"sku":"TEA-200","qty":2,"price":4.5},{"sku":"MUG-01","qty":1,"price":12}],"paid":true,"notes":null}</textarea>
+    <div class="jf-held" id="jf-held" hidden>
+      <p><strong id="jf-held-name"></strong> <span id="jf-held-size"></span> is open. It is too long to edit in the box, so only the result is shown.</p>
+      <button class="btn secondary small" type="button" id="jf-held-close">Close it</button>
+    </div>
+    <span class="hint" id="jf-hint">Paste or type JSON, or drop a file on the box. It is checked as you type, and nothing leaves your browser.</span>
+  </div>
+  <p class="msg ok" id="jf-done" aria-live="polite"></p>
+  <p class="msg error" id="jf-file-error" role="alert"></p>
+
+  <!-- Not alerts: these change with every edit, so a summary is announced through #jf-status
+       once typing pauses. -->
+  <p class="msg error" id="jf-error"></p>
+  <p class="jf-snip" id="jf-snip" hidden></p>
+  <div class="actions" id="jf-error-acts" hidden>
+    <button class="btn" type="button" id="jf-fix">Fix it</button>
+    <button class="btn secondary" type="button" id="jf-goto">Go to the error</button>
+  </div>
+  <p class="msg ok" id="jf-ok"></p>
+  <p class="msg jf-note" id="jf-note"></p>
+
+  <fieldset class="jf-modes">
+    <legend>What to do</legend>
+    <div class="jf-chips">
+      <label class="jf-chip"><input type="radio" name="jf-mode" value="format" checked><span>Format</span></label>
+      <label class="jf-chip"><input type="radio" name="jf-mode" value="minify"><span>Minify</span></label>
+      <label class="jf-chip"><input type="radio" name="jf-mode" value="tree"><span>Tree view</span></label>
+      <label class="jf-chip"><input type="radio" name="jf-mode" value="escape"><span>Escape</span></label>
+      <label class="jf-chip"><input type="radio" name="jf-mode" value="unescape"><span>Unescape</span></label>
+    </div>
+  </fieldset>
+  <div class="row jf-opts">
+    <div class="field" id="jf-indent-field">
+      <label for="jf-indent">Indent</label>
+      <select id="jf-indent">
+        <option value="2" selected>2 spaces</option>
+        <option value="4">4 spaces</option>
+        <option value="tab">Tab</option>
+      </select>
+    </div>
+    <label class="check" id="jf-sort-wrap"><input type="checkbox" id="jf-sort"> Sort keys A to Z</label>
+    <label class="check" id="jf-quotes-wrap" hidden><input type="checkbox" id="jf-quotes" checked> Put the result in double quotes</label>
+  </div>
+  <span class="hint jf-mode-hint" id="jf-mode-hint"></span>
+
+  <div id="jf-result">
+  <div class="jf-out-head">
+    <span class="label" id="jf-out-label">Result</span>
+    <span class="hint" id="jf-out-info"></span>
+  </div>
+  <pre class="output jf-out" id="jf-out" tabindex="0" role="group" aria-labelledby="jf-out-label"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1042</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;customer&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;name&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Ada Lovelace&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;email&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;ada@example.com&quot;</span>
+  <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;items&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+    <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;sku&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;TEA-200&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;qty&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">2</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;price&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">4.5</span>
+    <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;sku&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;MUG-01&quot;</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;qty&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span><span class="hljs-punctuation">,</span>
+      <span class="hljs-attr">&quot;price&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">12</span>
+    <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;paid&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;notes&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">null</span></span>
+<span class="hljs-punctuation">}</span></pre>
+  <div class="jf-tree" id="jf-tree" hidden></div>
+  <span class="hint jf-out-note" id="jf-out-note"></span>
+  </div>
+  <div class="actions jf-tree-acts" id="jf-tree-acts" hidden>
+    <button class="btn secondary small" type="button" id="jf-expand">Expand all</button>
+    <button class="btn secondary small" type="button" id="jf-collapse">Collapse all</button>
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" id="jf-copy">Copy result</button>
+    <button class="btn secondary" type="button" id="jf-download">Download</button>
+    <button class="btn secondary" type="button" id="jf-use">Use as input</button>
+  </div>
+  <p class="visually-hidden" id="jf-status" role="status"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var VENDOR = {{ '/assets/vendor/' | relative_url | jsonify }};
+{% raw %}
+  // The JSON engine is self-contained so that the same source also runs in a Web Worker for
+  // large documents. It reads the text itself instead of calling JSON.parse, which keeps every
+  // number and string exactly as written, keeps the order of keys, and knows where and why a
+  // text stops being JSON.
+  function jfEngine(scope) {
+    'use strict';
+    var MAX_DEPTH = 1000, MAX_OUT = 268435456;
+    var OBJ = 0, ARR = 1, STR = 2, NUM = 3;
+    var src = '', n = 0, doc = null, sorted = null, docGen = 0, kept = null;
+    // One entry per value, in document order: type, start and end in the text, start and end of
+    // its key, next sibling, first child and number of children.
+    var cap = 0, nn = 0, T, S, E, KS, KE, NX, FC, CT;
+
+    function reserve(size) {
+      var old = [T, S, E, KS, KE, NX, FC, CT];
+      T = new Uint8Array(size); S = new Int32Array(size); E = new Int32Array(size); KS = new Int32Array(size);
+      KE = new Int32Array(size); NX = new Int32Array(size); FC = new Int32Array(size); CT = new Int32Array(size);
+      if (nn) [T, S, E, KS, KE, NX, FC, CT].forEach(function (a, i) { a.set(old[i].subarray(0, nn)); });
+      cap = size;
+    }
+
+    function isDigit(c) { return c >= 48 && c <= 57; }
+    function isHex(c) { return (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102); }
+    function hex4(i) { return isHex(src.charCodeAt(i)) && isHex(src.charCodeAt(i + 1)) && isHex(src.charCodeAt(i + 2)) && isHex(src.charCodeAt(i + 3)); }
+    function isWordStart(c) { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 36; }
+    function isEscape(e) { return e === 34 || e === 92 || e === 47 || e === 98 || e === 102 || e === 110 || e === 114 || e === 116; }
+    // Characters that look like a space but are none to JSON (1), and those that cannot be seen at all (2).
+    function oddSpace(c) {
+      if (c === 11 || c === 12 || c === 0x85 || c === 0xA0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200A) || c === 0x2028 || c === 0x2029 || c === 0x202F || c === 0x205F || c === 0x3000) return 1;
+      if (c === 0x200B || c === 0x200C || c === 0x200D || c === 0x2060 || c === 0xFEFF) return 2;
+      return 0;
+    }
+    // Quotes that are not the straight double quote: single (1), curly single (2), curly double (3).
+    function quoteKind(c) {
+      if (c === 39) return 1;
+      if (c >= 0x2018 && c <= 0x201B) return 2;
+      if (c >= 0x201C && c <= 0x201F) return 3;
+      return 0;
+    }
+    function ctl(c) {
+      return c === 10 ? '\\n' : c === 13 ? '\\r' : c === 9 ? '\\t' : c === 8 ? '\\b' : c === 12 ? '\\f' : '\\u' + ('000' + c.toString(16)).slice(-4);
+    }
+    function delimiter(c) {
+      return c !== c || c === 32 || c === 10 || c === 13 || c === 9 || c === 44 || c === 93 || c === 125 || c === 58 || c === 47 || oddSpace(c) > 0;
+    }
+    function wordEnd(j) {
+      var c;
+      while (j < n && ((c = src.charCodeAt(j)) === 95 || c === 36 || isDigit(c) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122))) j++;
+      return j;
+    }
+    // What a bare word stands for: itself (true, false, null), its repair, '' for a number that
+    // is not finite, or null when it means nothing.
+    function wordValue(w) {
+      if (w === 'true' || w === 'false' || w === 'null') return w;
+      var l = w.toLowerCase();
+      if (l === 'true' || l === 'false' || l === 'null') return l;
+      if (w === 'None' || w === 'nil' || w === 'undefined') return 'null';
+      return w === 'NaN' || w === 'Infinity' ? '' : null;
+    }
+    // An unquoted key: a run of characters up to a space, a colon, a quote or a bracket.
+    function bareEnd(j) {
+      var c;
+      while (j < n && (c = src.charCodeAt(j)) > 32 && c !== 58 && c !== 44 && c !== 123 && c !== 125 && c !== 91 && c !== 93 &&
+        c !== 34 && c !== 47 && c !== 92 && c !== 61 && !quoteKind(c) && !oddSpace(c)) j++;
+      return j;
+    }
+    function colonAfter(j) {
+      var c;
+      while ((c = src.charCodeAt(j)) === 32 || c === 9 || c === 10 || c === 13) j++;
+      return c === 58 || c === 61;
+    }
+    function startsValue(j) {
+      var c = src.charCodeAt(j);
+      return c === 34 || c === 123 || c === 91 || c === 45 || isDigit(c) || quoteKind(c) > 0 || (isWordStart(c) && wordValue(src.slice(j, wordEnd(j))) !== null);
+    }
+
+    // ---------- Reading ----------
+    // Reads the text leniently: whatever strict JSON forbids but has one obvious meaning is noted
+    // as a problem, together with the edit that repairs it, and reading goes on. The text is
+    // valid JSON exactly when no problem was noted and nothing fatal was met.
+    function parse(text) {
+      src = text; n = src.length; nn = 0; sorted = null;
+      if (!cap || cap > 65536) reserve(1024);
+      var i = 0, c = 0, cur = -1, last = -1, depth = 0, maxDepth = 0, stack = [];
+      var ks = -1, ke = -1, commaPos = -1, prevEnd = 0, afterColon = false;
+      var roots = 0, firstRoot = -1, lastTop = -1, topComma = -1, multi = false;
+      var edits = [], kinds = {}, total = 0, first = null, fatal = null, width;
+      var dupes = { n: 0, p: -1, key: '' }, big = { n: 0, p: -1, text: '' };
+      // States: a value is needed; first value or ]; first key or }; key; colon; comma or closer; after the root value.
+      var V = 0, AV = 1, OK = 2, K = 3, C = 4, SEP = 5, END = 6, st = V;
+
+      function issue(k, p, len, a, q) {
+        kinds[k] = (kinds[k] || 0) + 1;
+        total++;
+        if (!first || p < first.p) first = { k: k, p: p, len: len, a: a, q: q };
+      }
+      function edit(s, e, r) { edits.push([s, e, r]); }
+      function fail(k, p, len, a, q) { fatal = { k: k, p: p, len: len, a: a, q: q }; return -1; }
+
+      function add(t, s, e) {
+        if (nn === cap) reserve(cap * 2);
+        var id = nn++;
+        T[id] = t; S[id] = s; E[id] = e; KS[id] = ks; KE[id] = ke; NX[id] = -1; FC[id] = -1; CT[id] = 0;
+        if (cur >= 0) {
+          if (last >= 0) NX[last] = id; else FC[cur] = id;
+          CT[cur]++;
+        }
+        last = id;
+        ks = ke = -1;
+        return id;
+      }
+
+      // Skips spaces, tabs and line breaks. Comments and other kinds of space are problems.
+      function skip(j) {
+        for (;;) {
+          var ch = src.charCodeAt(j), end, odd;
+          if (ch === 32 || ch === 10 || ch === 13 || ch === 9) { j++; continue; }
+          if (ch === 47) {
+            if (src.charCodeAt(j + 1) === 47) {
+              end = j + 2;
+              while (end < n && src.charCodeAt(end) !== 10 && src.charCodeAt(end) !== 13) end++;
+            } else if (src.charCodeAt(j + 1) === 42) {
+              end = src.indexOf('*/', j + 2);
+              if (end < 0) { fail('comment-open', j, 2); return n; }
+              end += 2;
+            } else return j;
+            issue('comment', j, end - j);
+            edit(j, end, '');
+            j = end;
+            continue;
+          }
+          if ((ch > 127 || ch === 11 || ch === 12) && (odd = oddSpace(ch))) {
+            issue('space', j, 1, ch);
+            edit(j, j + 1, odd === 1 ? ' ' : '');
+            j++;
+            continue;
+          }
+          return j;
+        }
+      }
+
+      // A string in double quotes that starts at j0. Returns the index after it.
+      function str(j0) {
+        var j = j0 + 1, ch, e;
+        for (;;) {
+          while (j < n && (ch = src.charCodeAt(j)) !== 34 && ch !== 92 && ch >= 32) j++;
+          if (j >= n) return fail('string-open', j0, 1);
+          if (ch === 34) return j + 1;
+          if (ch === 92) {
+            e = src.charCodeAt(j + 1);
+            if (e === 117) {
+              if (!hex4(j + 2)) return fail('unicode', j, 2);
+              j += 6;
+            } else if (isEscape(e)) {
+              j += 2;
+            } else if (j + 1 >= n) {
+              return fail('string-open', j0, 1);
+            } else {
+              issue('escape', j, 2, e < 32 ? '\\' : '\\' + String.fromCodePoint(src.codePointAt(j + 1)));
+              if (e === 39) { edit(j, j + 1, ''); j += 2; }
+              else if (e === 120 && isHex(src.charCodeAt(j + 2)) && isHex(src.charCodeAt(j + 3))) { edit(j, j + 2, '\\u00'); j += 4; }
+              else { edit(j, j + 1, '\\\\'); j += e < 32 ? 1 : 2; }
+            }
+          } else {
+            issue('control', j, 1, ch);
+            edit(j, j + 1, ctl(ch));
+            j++;
+          }
+        }
+      }
+
+      // A string in single or curly quotes: one problem, repaired by rewriting it in double quotes.
+      function quoted(j0, kind) {
+        var j = j0 + 1, out = '"', run = j, ch, e;
+        for (;;) {
+          if (j >= n) return fail('string-open', j0, 1, kind);
+          ch = src.charCodeAt(j);
+          if (quoteKind(ch) === kind) break;
+          if (ch === 92) {
+            e = src.charCodeAt(j + 1);
+            out += src.slice(run, j);
+            if (e === 39) { out += "'"; j += 2; }
+            else if (e === 117 && hex4(j + 2)) { out += src.substr(j, 6); j += 6; }
+            else if (isEscape(e)) { out += src.substr(j, 2); j += 2; }
+            else if (e === 120 && isHex(src.charCodeAt(j + 2)) && isHex(src.charCodeAt(j + 3))) { out += '\\u00' + src.substr(j + 2, 2); j += 4; }
+            else { out += '\\\\'; j++; }
+            run = j;
+          } else if (ch === 34 || ch < 32) {
+            out += src.slice(run, j) + (ch === 34 ? '\\"' : ctl(ch));
+            run = ++j;
+          } else j++;
+        }
+        out += src.slice(run, j) + '"';
+        issue(kind === 1 ? 'single' : 'curly', j0, j + 1 - j0);
+        edit(j0, j + 1, out);
+        return j + 1;
+      }
+
+      // A number that starts at j0. Returns the index after it.
+      function num(j0) {
+        var j = j0, ch = src.charCodeAt(j), plus = ch === 43, d0, k, whole = true;
+        if (plus || ch === 45) j++;
+        ch = src.charCodeAt(j);
+        if ((ch === 73 && src.substr(j, 8) === 'Infinity') || (ch === 78 && src.substr(j, 3) === 'NaN')) {
+          k = j + (ch === 73 ? 8 : 3);
+          if (delimiter(src.charCodeAt(k))) { issue('nonfinite', j0, k - j0, src.slice(j0, k)); edit(j0, k, 'null'); return k; }
+        }
+        if (ch === 48 && (src.charCodeAt(j + 1) | 32) === 120 && isHex(src.charCodeAt(j + 2))) {
+          k = j + 2;
+          while (isHex(src.charCodeAt(k))) k++;
+          if (!delimiter(src.charCodeAt(k))) return fail('junk', k, 1, src.slice(j0, k));
+          issue('hex', j0, k - j0);
+          edit(j0, k, (src.charCodeAt(j0) === 45 ? '-' : '') + BigInt(src.slice(j, k)).toString());
+          return k;
+        }
+        d0 = j;
+        while (isDigit(src.charCodeAt(j))) j++;
+        if (j === d0 && !(src.charCodeAt(j) === 46 && isDigit(src.charCodeAt(j + 1)))) return fail('sign', j0, 1, src.charAt(j0));
+        if (j - d0 > 1 && src.charCodeAt(d0) === 48) return fail('zero', d0, j - d0);
+        if (plus) { issue('plus', j0, 1); edit(j0, j0 + 1, ''); }
+        if (j === d0) { issue('dot', j, 1); edit(j, j + 1, '0.'); }
+        if (src.charCodeAt(j) === 46) {
+          whole = false;
+          k = ++j;
+          while (isDigit(src.charCodeAt(j))) j++;
+          if (j === k) { issue('dot', j - 1, 1); edit(j - 1, j, '.0'); }
+        }
+        ch = src.charCodeAt(j);
+        if (ch === 101 || ch === 69) {
+          whole = false;
+          k = j + 1;
+          ch = src.charCodeAt(k);
+          if (ch === 43 || ch === 45) k++;
+          if (!isDigit(src.charCodeAt(k))) return fail('exponent', j, 1);
+          while (isDigit(src.charCodeAt(k))) k++;
+          j = k;
+        }
+        if (!delimiter(src.charCodeAt(j))) return fail('junk', j, 1, src.slice(j0, j));
+        // Noted for the reader: a whole number a double cannot hold exactly, or one beyond its range.
+        // Beyond the range there is nothing to compare with: BigInt refuses Infinity.
+        k = Number(src.slice(d0, j));
+        if (!isFinite(k) || (whole && j - d0 > 15 && BigInt(src.slice(d0, j)) !== BigInt(k))) {
+          if (!big.n++) { big.p = j0; big.text = src.slice(j0, j); }
+        }
+        return j;
+      }
+
+      // Notes a key that an object holds more than once.
+      function keysOf(obj) {
+        var seen = new Set(), k = FC[obj], key;
+        while (k >= 0) {
+          key = src.slice(KS[k], KE[k]);
+          if (key.indexOf('\\') >= 0) { try { key = JSON.stringify(JSON.parse(key)); } catch (e) { /* compared as written */ } }
+          if (seen.has(key)) { if (!dupes.n++) { dupes.p = KS[k]; dupes.key = key; } } else seen.add(key);
+          k = NX[k];
+        }
+      }
+
+      // A value is complete, and `last` is its entry.
+      function done() {
+        prevEnd = i;
+        if (cur >= 0) { st = SEP; return; }
+        roots++;
+        if (roots === 1) firstRoot = last;
+        else {
+          // A second value at the top: the repair wraps them all in one array.
+          if (!multi) { multi = true; issue('multi', S[last], 1); edit(S[firstRoot], S[firstRoot], '['); }
+          if (topComma < 0) edit(E[lastTop], E[lastTop], ',');
+        }
+        lastTop = last;
+        topComma = -1;
+        st = END;
+      }
+
+      function close() {
+        if (c !== (T[cur] === OBJ ? 125 : 93)) return fail('mismatch', i, 1, T[cur] === OBJ ? '}' : ']', S[cur]);
+        E[cur] = ++i;
+        if (T[cur] === OBJ && CT[cur] > 1) keysOf(cur);
+        last = cur;
+        cur = stack.pop();
+        depth--;
+        done();
+        return 0;
+      }
+
+      function value() {
+        var e, w, r;
+        if (c === 123 || c === 91) {
+          if (depth >= MAX_DEPTH) return fail('deep', i, 1);
+          e = add(c === 123 ? OBJ : ARR, i, i + 1);
+          stack.push(cur);
+          cur = e; last = -1;
+          if (++depth > maxDepth) maxDepth = depth;
+          st = c === 123 ? OK : AV;
+          i++;
+          return 0;
+        }
+        if (c === 34) {
+          if ((e = str(i)) < 0) return -1;
+          add(STR, i, e);
+        } else if (c === 45 || c === 43 || c === 46 || isDigit(c)) {
+          if ((e = num(i)) < 0) return -1;
+          add(NUM, i, e);
+        } else if (isWordStart(c)) {
+          e = wordEnd(i);
+          w = src.slice(i, e);
+          r = wordValue(w);
+          if (r === null) return fail('word', i, e - i, w);
+          if (!delimiter(src.charCodeAt(e))) return fail('junk', e, 1, w);
+          if (r === '') { issue('nonfinite', i, e - i, w); edit(i, e, 'null'); r = 'null'; }
+          else if (r !== w) { issue('literal', i, e - i, w); edit(i, e, r); }
+          add(r === 'true' ? 4 : r === 'false' ? 5 : 6, i, e);
+        } else if (quoteKind(c)) {
+          if ((e = quoted(i, quoteKind(c))) < 0) return -1;
+          add(STR, i, e);
+        } else if (afterColon && (c === 44 || c === 125 || c === 93)) {
+          return fail('no-value', i, 1);
+        } else if ((c === 125 || c === 93) && cur >= 0) {
+          // A closer where a value should be: it does not match the bracket that is open here.
+          return fail('mismatch', i, 1, T[cur] === OBJ ? '}' : ']', S[cur]);
+        } else {
+          return fail(c === 125 || c === 93 ? 'stray-close' : 'value', i, 1);
+        }
+        i = e;
+        done();
+        return 0;
+      }
+
+      function key() {
+        var e;
+        if (c === 34) {
+          if ((e = str(i)) < 0) return -1;
+        } else if (quoteKind(c)) {
+          if ((e = quoted(i, quoteKind(c))) < 0) return -1;
+        } else {
+          e = bareEnd(i);
+          if (e === i) return fail('need-key', i, 1);
+          issue('key', i, e - i);
+          edit(i, e, JSON.stringify(src.slice(i, e)));
+        }
+        ks = i; ke = e;
+        i = e;
+        st = C;
+        return 0;
+      }
+
+      while (!fatal) {
+        i = skip(i);
+        if (fatal || i >= n) break;
+        c = src.charCodeAt(i);
+        if (st === SEP) {
+          if (c === 44) { commaPos = i++; st = T[cur] === OBJ ? K : V; }
+          else if (c === 125 || c === 93) close();
+          // No comma, but a value or a key clearly starts here: the comma was left out.
+          else if (T[cur] === OBJ ? c === 34 || quoteKind(c) > 0 || (bareEnd(i) > i && colonAfter(bareEnd(i))) : startsValue(i)) {
+            issue('comma', prevEnd, 1);
+            edit(prevEnd, prevEnd, ',');
+            st = T[cur] === OBJ ? K : V;
+          } else if (T[last] === STR) fail('after-string', i, isWordStart(c) || c > 127 ? Math.max(1, bareEnd(i) - i) : 1, T[cur] === OBJ ? '}' : ']');
+          else fail('sep', i, 1, T[cur] === OBJ ? '}' : ']');
+        } else if (st === C) {
+          if (c === 58) i++;
+          else if (c === 61) { width = src.charCodeAt(i + 1) === 62 ? 2 : 1; issue('colon', i, width, src.substr(i, width)); edit(i, i + width, ':'); i += width; }
+          else { fail('need-colon', i, 1); break; }
+          st = V; afterColon = true;
+        } else if (st === END) {
+          if (c === 44 && topComma < 0) { topComma = i++; st = V; }
+          else if (topComma < 0 && startsValue(i)) st = V;
+          else fail(c === 125 || c === 93 ? 'stray-close' : 'after-end', i, 1);
+        } else if (st === V) {
+          if (cur >= 0 && T[cur] === ARR && c === 93) { issue('trailing', commaPos, 1); edit(commaPos, commaPos + 1, ''); close(); }
+          else if (cur >= 0 && T[cur] === ARR && c === 44) { issue('extra', i, 1); edit(i, i + 1, ''); i++; }
+          else { value(); afterColon = false; }
+        } else if (st === AV) {
+          if (c === 93) close();
+          else if (c === 44) { issue('extra', i, 1); edit(i, i + 1, ''); i++; }
+          else value();
+        } else {
+          if (c === 125) {
+            if (st === K) { issue('trailing', commaPos, 1); edit(commaPos, commaPos + 1, ''); }
+            close();
+          } else if (c === 44) { issue('extra', i, 1); edit(i, i + 1, ''); i++; }
+          else key();
+        }
+      }
+
+      // The end of the text.
+      if (!fatal) {
+        if (cur >= 0) {
+          if (st === C || (st === V && afterColon)) fail('cut', n, 0, st === C ? 'a key' : 'a colon');
+          else {
+            // Inside open brackets, but after a complete value: they can simply be closed.
+            if (st === K || st === V) { issue('trailing', commaPos, 1); edit(commaPos, commaPos + 1, ''); }
+            var closers = '', at = st === AV || st === OK ? S[cur] + 1 : prevEnd, innermost = S[cur];
+            while (cur >= 0) { closers += T[cur] === OBJ ? '}' : ']'; E[cur] = n; last = cur; cur = stack.pop(); }
+            issue('unclosed', n, 0, closers.length, innermost);
+            edit(at, at, closers);
+            i = n;
+            done();
+          }
+        } else if (st === V) {
+          if (topComma >= 0) { issue('extra', topComma, 1); edit(topComma, topComma + 1, ''); }
+          else fail('nothing', n, 0);
+        }
+        if (!fatal && multi) edit(E[lastTop], E[lastTop], ']');
+      }
+
+      doc = {
+        ok: !fatal && !total, edits: edits, kinds: kinds, total: total, first: first, fatal: fatal,
+        depth: maxDepth, dupes: dupes, big: big, roots: roots
+      };
+      return doc;
+    }
+
+    // ---------- Where and why ----------
+    function lineCol(p) {
+      var line = 1, start = 0, c;
+      for (var j = 0; j < p; j++) {
+        c = src.charCodeAt(j);
+        if (c === 10 || (c === 13 && src.charCodeAt(j + 1) !== 10)) { line++; start = j + 1; }
+      }
+      return { line: line, col: p - start + 1 };
+    }
+    function shown(p) {
+      if (p >= n) return 'the end of the text';
+      var cp = src.codePointAt(p);
+      if (cp < 33 || cp === 127 || oddSpace(cp)) return cp === 32 ? 'a space' : cp === 10 || cp === 13 ? 'a line break' : cp === 9 ? 'a tab' : 'U+' + ('000' + cp.toString(16).toUpperCase()).slice(-4);
+      return String.fromCodePoint(cp);
+    }
+    // The start of a text, never ending in half of a character that takes two code units.
+    function head(s, max) { return s.length > max ? s.slice(0, (s.charCodeAt(max - 1) & 0xFC00) === 0xD800 ? max - 1 : max) : s; }
+    function clip(s) { return s.length > 24 ? head(s, 24) + '\u2026' : s; }
+    function opener(q) {
+      var at = lineCol(q);
+      return src.charAt(q) + ' opened on line ' + at.line.toLocaleString('en-GB') + ', column ' + at.col.toLocaleString('en-GB');
+    }
+
+    // The reason for a problem in plain words.
+    function reason(x) {
+      var a = x.a;
+      switch (x.k) {
+        case 'trailing': return 'Trailing comma: JSON does not allow a comma before a closing } or ]. Remove it.';
+        case 'extra': return 'Extra comma: there is no value before this comma. Remove it.';
+        case 'single': return 'Single quotes: JSON strings and keys must be in double quotes (").';
+        case 'curly': return 'Curly quotes: JSON needs straight double quotes ("), not the curved ones a word processor makes.';
+        case 'key': return 'Unquoted key: an object key must be a string in double quotes, as in "name".';
+        case 'comment': return 'Comment: JSON has no comments. Remove it.';
+        case 'literal': return a + ' is not JSON: true, false and null are written in lower case' + (/^(None|nil|undefined)$/.test(a) ? ', and the empty value is null.' : '.');
+        case 'nonfinite': return a + ' is not JSON: a number must be finite. null is the usual replacement.';
+        case 'comma': return 'Missing comma: add a comma after this value.';
+        case 'colon': return a + ' is not JSON: a key and its value are separated by a colon (:).';
+        case 'control': return a === 10 || a === 13 ? 'Line break inside a string: either the closing quote is missing, or the line break must be written as \\n.'
+          : a === 9 ? 'Tab inside a string: write it as \\t.' : 'Control character U+' + ('000' + a.toString(16).toUpperCase()).slice(-4) + ' inside a string: write it as ' + ctl(a) + '.';
+        case 'escape': return a + ' is not a JSON escape. The escapes are \\" \\\\ \\/ \\b \\f \\n \\r \\t and \\uXXXX; a backslash itself is written \\\\.';
+        case 'plus': return 'Leading plus sign: a JSON number cannot start with +.';
+        case 'dot': return 'A number needs a digit on both sides of the decimal point: 0.5, not .5, and 5.0, not 5.';
+        case 'hex': return 'Hexadecimal number: JSON numbers are decimal only.';
+        case 'space': return (oddSpace(a) === 2 ? 'Invisible character' : 'Unusual space') + ' (U+' + ('000' + a.toString(16).toUpperCase()).slice(-4) + (a === 0xA0 ? ', a no-break space' : a === 0xFEFF ? ', a byte order mark' : '') +
+          '): between values JSON allows only spaces, tabs and line breaks.';
+        case 'multi': return 'More than one JSON value: a JSON text holds exactly one value, and a second one starts here (as in JSON Lines, or a piece copied out of a list).';
+        case 'unclosed': return 'Unexpected end: ' + (a === 1 ? 'a bracket is' : a.toLocaleString('en-GB') + ' brackets are') + ' never closed. The ' + opener(x.q) + ' still needs its ' + (src.charAt(x.q) === '{' ? '}' : ']') + '.';
+        case 'string-open': return 'This string never ends: its closing ' + (a ? 'quote' : 'double quote (")') + ' is missing.';
+        case 'unicode': return '\\u must be followed by four hexadecimal digits, as in \\u00e9.';
+        case 'zero': return 'Leading zero: a number cannot start with 0 and go on with more digits. Remove the zeros, or put the value in double quotes if they matter, as in a postcode.';
+        case 'sign': return 'A ' + (a === '-' ? 'minus' : a === '+' ? 'plus' : 'decimal') + ' ' + (a === '.' ? 'point' : 'sign') + ' on its own is not a number: a digit must follow.';
+        case 'exponent': return 'The exponent has no digits: write 1e5, not 1e.';
+        case 'junk': return 'Unexpected ' + shown(x.p) + ' right after ' + clip(a) + '. If this is a date, a version or other text, put it in double quotes.';
+        case 'word': return 'Unexpected ' + clip(a) + ': text must be in double quotes. The only bare words in JSON are true, false and null.';
+        case 'after-string': return 'Unexpected ' + clip(src.substr(x.p, x.len)) + ' after a string. If the double quote before it belongs to the text, write it as \\" \u2014 otherwise a comma is missing.';
+        case 'value': return 'Expected a value here (a string, number, object, array, true, false or null) but found ' + shown(x.p) + '.';
+        case 'no-value': return 'The key has no value: something must follow the colon.';
+        case 'need-key': return 'Expected a key in double quotes but found ' + shown(x.p) + '.';
+        case 'need-colon': return 'Expected a colon (:) after the key but found ' + shown(x.p) + '.';
+        case 'sep': return 'Expected a comma or ' + a + ' but found ' + shown(x.p) + '.';
+        case 'mismatch': return shown(x.p) + ' does not match: the ' + opener(x.q) + ' must be closed with ' + a + ' first.';
+        case 'stray-close': return 'Unexpected ' + shown(x.p) + ': there is no open ' + (src.charAt(x.p) === '}' ? '{' : '[') + ' for it to close.';
+        case 'after-end': return 'Unexpected ' + shown(x.p) + ' after the end of the JSON value.';
+        case 'comment-open': return 'This comment never ends (and JSON has no comments).';
+        case 'cut': return 'Unexpected end: the text stops after ' + a + ', where a value is expected. It looks cut off.';
+        case 'lone-backslash': return 'A backslash at the very end has nothing to escape.';
+        case 'deep': return 'Nested more than 1,000 levels deep. That is still JSON, but deeper than this page reads.';
+        default: return 'There is no JSON value here.';
+      }
+    }
+    // The repairs that were made, as a sentence part.
+    var FIXES = {
+      trailing: 'removed %n trailing comma#', extra: 'removed %n extra comma#', single: 'changed %n single-quoted string# to double quotes',
+      curly: 'straightened the quotes of %n string#', key: 'put %n key# in double quotes', comment: 'removed %n comment#',
+      literal: 'rewrote %n word# as true, false or null', nonfinite: 'replaced %n NaN or Infinity value# with null', comma: 'added %n missing comma#',
+      colon: 'changed %n = sign# to a colon', control: 'escaped %n control character# inside strings', escape: 'repaired %n invalid escape#',
+      plus: 'removed %n leading plus sign#', dot: 'completed %n number# such as .5', hex: 'converted %n hexadecimal number# to decimal',
+      space: 'replaced %n unusual space# or invisible character#', multi: 'wrapped the values in one array', unclosed: 'closed the brackets left open at the end'
+    };
+    function fixList(kinds) {
+      return Object.keys(FIXES).filter(function (k) { return kinds[k]; }).map(function (k) {
+        return FIXES[k].replace('%n', kinds[k].toLocaleString('en-GB')).replace(/#/g, kinds[k] === 1 ? '' : 's');
+      });
+    }
+    function where(x) {
+      var at = lineCol(x.p), cut = Math.max(0, x.p - 48), from = cut, to = Math.min(n, x.p + Math.max(x.len, 1) + 32), ch;
+      // The line around the problem, for the page to show.
+      while (from < x.p && ((ch = src.charCodeAt(from)), from > 0 && ch >= 0xDC00 && ch <= 0xDFFF)) from++;
+      var before = src.slice(from, x.p), nl = Math.max(before.lastIndexOf('\n'), before.lastIndexOf('\r'));
+      if (nl >= 0) { from += nl + 1; before = before.slice(nl + 1); }
+      var mark = src.substr(x.p, Math.min(Math.max(x.len, x.p < n ? 1 : 0), 24)), after = src.slice(x.p + mark.length, to), end = after.search(/[\r\n]/);
+      if (/[\r\n]/.test(mark)) { mark = mark.slice(0, Math.max(1, mark.search(/[\r\n]/))); after = ''; }
+      else if (end >= 0) after = after.slice(0, end);
+      return { msg: reason(x), line: at.line, col: at.col, pos: x.p, len: x.len, before: (from > 0 && nl < 0 ? '\u2026' : '') + before, mark: mark, after: after };
+    }
+
+    // ---------- Writing ----------
+    // Code point order, as Python's sort_keys and jq --sort-keys give: in UTF-16 the surrogates
+    // of characters beyond U+FFFF would otherwise sort before U+E000 to U+FFFF.
+    function compare(a, b) {
+      var m = Math.min(a.length, b.length), x, y;
+      for (var j = 0; j < m; j++) {
+        x = a.charCodeAt(j); y = b.charCodeAt(j);
+        if (x !== y) {
+          if (x >= 0xD800 && y >= 0xD800) { x += x < 0xE000 ? 0x2000 : -0x800; y += y < 0xE000 ? 0x2000 : -0x800; }
+          return x - y;
+        }
+      }
+      return a.length - b.length;
+    }
+    function keyText(id) {
+      var raw = src.slice(KS[id], KE[id]);
+      return raw.indexOf('\\') < 0 ? raw.slice(1, -1) : JSON.parse(raw);
+    }
+    // The members of an object in key order; members with the same key stay in their order.
+    function sortedKids(obj) {
+      if (!sorted) sorted = new Map();
+      var list = sorted.get(obj);
+      if (list) return list;
+      var ids = [], keys = [], k = FC[obj];
+      while (k >= 0) { ids.push(k); keys.push(keyText(k)); k = NX[k]; }
+      var order = ids.map(function (_, j) { return j; }).sort(function (a, b) { return compare(keys[a], keys[b]) || a - b; });
+      list = new Int32Array(order.length);
+      for (k = 0; k < order.length; k++) list[k] = ids[order[k]];
+      sorted.set(obj, list);
+      return list;
+    }
+
+    // The document as text: indent '' gives the smallest form, anything else one value per line.
+    // Characters are copied into a buffer and turned into strings a block at a time, which is
+    // several times faster than joining millions of small pieces.
+    function write(indent, sortKeys) {
+      var parts = [], buf = new Uint16Array(8192), o = 0, size = 0, pretty = indent !== '', pads = ['\n'];
+      function flush() {
+        size += o;
+        if (size > MAX_OUT) throw new Error('too-large');
+        parts.push(String.fromCharCode.apply(null, o === 8192 ? buf : buf.subarray(0, o)));
+        o = 0;
+      }
+      function put(s) {
+        for (var j = 0; j < s.length; j++) {
+          if (o === 8192) flush();
+          buf[o++] = s.charCodeAt(j);
+        }
+      }
+      function copy(from, to) {
+        if (to - from > 4096) { flush(); size += to - from; parts.push(src.slice(from, to)); return; }
+        if (o + to - from > 8192) flush();
+        while (from < to) buf[o++] = src.charCodeAt(from++);
+      }
+      function pad(d) {
+        while (pads.length <= d) pads.push(pads[pads.length - 1] + indent);
+        return pads[d];
+      }
+      function one(id, d) {
+        var t = T[id];
+        if (t > ARR) { copy(S[id], E[id]); return; }
+        if (!CT[id]) { put(t === OBJ ? '{}' : '[]'); return; }
+        put(t === OBJ ? '{' : '[');
+        var list = sortKeys && t === OBJ ? sortedKids(id) : null, k = list ? list[0] : FC[id], j = 0;
+        while (k >= 0) {
+          if (j) put(',');
+          if (pretty) put(pad(d + 1));
+          if (t === OBJ) { copy(KS[k], KE[k]); put(pretty ? ': ' : ':'); }
+          one(k, d + 1);
+          j++;
+          k = list ? (j < list.length ? list[j] : -1) : NX[k];
+        }
+        if (pretty) put(pad(d));
+        put(t === OBJ ? '}' : ']');
+      }
+      one(0, 0);
+      flush();
+      return parts.join('');
+    }
+
+    function utf8Length(s) {
+      var bytes = 0, c;
+      for (var j = 0; j < s.length; j++) {
+        c = s.charCodeAt(j);
+        if (c < 0x80) bytes++;
+        else if (c < 0x800) bytes += 2;
+        else if (c >= 0xD800 && c <= 0xDBFF && (s.charCodeAt(j + 1) & 0xFC00) === 0xDC00) { bytes += 4; j++; }
+        else bytes += 3;
+      }
+      return bytes;
+    }
+
+    function counts() {
+      var out = { objects: 0, arrays: 0, strings: 0, numbers: 0, booleans: 0, nulls: 0, keys: 0, depth: doc.depth };
+      for (var j = 0; j < nn; j++) {
+        var t = T[j];
+        if (t === OBJ) out.objects++; else if (t === ARR) out.arrays++; else if (t === STR) out.strings++;
+        else if (t === NUM) out.numbers++; else if (t === 6) out.nulls++; else out.booleans++;
+        if (KS[j] >= 0) out.keys++;
+      }
+      return out;
+    }
+
+    // ---------- Tree ----------
+    function row(id, name) {
+      var t = T[id], text = t > ARR ? head(src.slice(S[id], Math.min(E[id], S[id] + 241)), 240) : '';
+      return { id: id, t: t, k: name, v: text, cut: t > ARR && E[id] - S[id] > 240, c: CT[id] };
+    }
+    // Rows `from` to `from + count` of the children of a value, in key order when asked.
+    function kids(id, from, count, sortKeys, gen) {
+      if (gen !== docGen || !doc || !doc.ok) return { stale: true };
+      var rows = [], obj = T[id] === OBJ, list = sortKeys && obj ? sortedKids(id) : null, j = 0, k = FC[id], name;
+      if (list) {
+        for (j = from; j < Math.min(list.length, from + count); j++) rows.push(row(list[j], clip240(keyText(list[j]))));
+      } else {
+        while (k >= 0 && j < from + count) {
+          if (j >= from) rows.push(row(k, obj ? clip240(keyText(k)) : j));
+          j++;
+          k = NX[k];
+        }
+      }
+      return { id: id, from: from, total: CT[id], rows: rows };
+    }
+    function clip240(s) { return s.length > 240 ? head(s, 240) + '\u2026' : s; }
+
+    // ---------- Escaping ----------
+    function unescape(text) {
+      var t = text.trim(), out = '', j = 0, at, e, map = { 34: '"', 92: '\\', 47: '/', 98: '\b', 102: '\f', 110: '\n', 114: '\r', 116: '\t' };
+      if (t.charAt(0) === '"') {
+        // A complete string in quotes is read strictly.
+        try { e = JSON.parse(t); if (typeof e === 'string') return { out: e }; } catch (err) { /* read as loose text below */ }
+      }
+      src = text; n = text.length;
+      while ((at = text.indexOf('\\', j)) >= 0) {
+        out += text.slice(j, at);
+        e = text.charCodeAt(at + 1);
+        if (e === 117 && hex4(at + 2)) { out += String.fromCharCode(parseInt(text.substr(at + 2, 4), 16)); j = at + 6; }
+        else if (map[e]) { out += map[e]; j = at + 2; }
+        else {
+          return { err: where({ k: e === 117 ? 'unicode' : at + 1 >= text.length ? 'lone-backslash' : 'escape', p: at, len: Math.min(2, text.length - at),
+            a: at + 1 < text.length ? '\\' + String.fromCodePoint(text.codePointAt(at + 1)) : '\\' }) };
+        }
+      }
+      return { out: out + text.slice(j) };
+    }
+    function escapeCount(text) {
+      var count = 0, c;
+      for (var j = 0; j < text.length; j++) { c = text.charCodeAt(j); if (c < 32 || c === 34 || c === 92) count++; }
+      return count;
+    }
+
+    // ---------- One request ----------
+    // mode: format, minify, tree, escape or unescape. indent: the indent text.
+    function run(req) {
+      // `same` asks for the text of the last request again, which then need not be sent twice.
+      var text = req.same && kept !== null ? kept : req.src, out = { mode: req.mode, chars: text.length }, d, res;
+      kept = text;
+      docGen = req.gen;
+      // White space alone is nothing to read, but it is something to escape.
+      if (req.mode === 'escape' ? !text : !/\S/.test(text)) { doc = null; out.empty = true; return out; }
+      if (req.mode === 'escape') {
+        doc = null;
+        res = JSON.stringify(text);
+        out.text = req.quotes ? res : res.slice(1, -1);
+        out.escaped = escapeCount(text);
+        out.bytes = utf8Length(out.text);
+        return out;
+      }
+      if (req.mode === 'unescape') {
+        res = unescape(text);
+        if (res.err) { out.err = res.err; return out; }
+        out.text = res.out;
+        out.changed = res.out !== text;
+        out.bytes = utf8Length(res.out);
+        out.nested = /\S/.test(res.out) && parse(res.out).ok;
+        doc = null;
+        return out;
+      }
+      // Only an option changed: what was read from this text is still there.
+      d = doc && src === text ? doc : parse(text);
+      out.ok = d.ok;
+      if (!d.ok) {
+        // The first problem in the text, and the fatal one when it comes later.
+        var firstIsFatal = d.fatal && (!d.first || d.fatal.p <= d.first.p);
+        out.err = where(firstIsFatal ? d.fatal : d.first);
+        if (d.fatal && !firstIsFatal) out.then = where(d.fatal);
+        out.fixable = d.fatal ? 0 : d.total;
+        out.problems = d.total;
+        out.fixes = d.fatal ? [] : fixList(d.kinds);
+        return out;
+      }
+      out.stats = counts();
+      out.inBytes = utf8Length(text);
+      if (d.dupes.n) { res = lineCol(d.dupes.p); out.dupes = { n: d.dupes.n, key: clip(d.dupes.key), line: res.line, col: res.col }; }
+      if (d.big.n) { res = lineCol(d.big.p); out.big = { n: d.big.n, text: clip(d.big.text), line: res.line, col: res.col }; }
+      out.root = row(0, null);
+      try {
+        out.text = write(req.mode === 'minify' ? '' : req.indent, req.sort);
+        out.bytes = utf8Length(out.text);
+      } catch (err) {
+        out.tooLarge = true;
+      }
+      return out;
+    }
+
+    // The text with every repair made.
+    function fix() {
+      if (!doc || doc.fatal || !doc.total) return { crash: 'nothing to fix' };
+      // In text order; where two start at the same place, what is added comes before what is replaced.
+      var edits = doc.edits.slice().sort(function (a, b) { return a[0] - b[0] || (a[1] > a[0]) - (b[1] > b[0]); }), parts = [], pos = 0;
+      for (var j = 0; j < edits.length; j++) {
+        if (edits[j][0] > pos) parts.push(src.slice(pos, edits[j][0]));
+        parts.push(edits[j][2]);
+        if (edits[j][1] > pos) pos = edits[j][1];
+      }
+      parts.push(src.slice(pos));
+      return { text: parts.join(''), fixes: fixList(doc.kinds), total: doc.total };
+    }
+
+    if (scope) {
+      scope.onmessage = function (e) {
+        var m = e.data, r;
+        try { r = m.op === 'run' ? run(m) : m.op === 'fix' ? fix() : kids(m.id, m.from, m.count, m.sort, m.gen); }
+        catch (err) { r = { crash: String(err && err.message || err) }; }
+        scope.postMessage({ seq: m.seq, r: r });
+      };
+    }
+    return { run: run, fix: fix, kids: kids, parse: parse, write: write, utf8Length: utf8Length };
+  }
+
+  // ---------- Page ----------
+  var $ = TT.$;
+  var input = $('#jf-input'), inBox = $('#jf-in'), outBox = $('#jf-out'), tree = $('#jf-tree'), status = $('#jf-status');
+  var errorBox = $('#jf-error'), okBox = $('#jf-ok'), noteBox = $('#jf-note'), doneBox = $('#jf-done'), fileError = $('#jf-file-error');
+  var snip = $('#jf-snip'), errorActs = $('#jf-error-acts'), gotoBtn = $('#jf-goto'), fixBtn = $('#jf-fix');
+  var indentSel = $('#jf-indent'), sortBox = $('#jf-sort'), quotesBox = $('#jf-quotes'), outInfo = $('#jf-out-info'), outNote = $('#jf-out-note');
+  var resultBox = $('#jf-result'), copyBtn = $('#jf-copy'), dlBtn = $('#jf-download'), useBtn = $('#jf-use'), undoBtn = $('#jf-undo'), heldBox = $('#jf-held'), fileInput = $('#jf-file');
+  // The example and its result are part of the page, the result already coloured, so that
+  // nothing has to be loaded before a visitor brings their own JSON.
+  var EXAMPLE = input.defaultValue, EXAMPLE_TEXT = outBox.textContent, EXAMPLE_HTML = outBox.innerHTML;
+  // Lengths in characters: read on this thread up to SYNC_MAX and in a worker above it; coloured
+  // up to COLOUR_MAX; shown up to SHOW_MAX, or LONG_MAX when a line is longer than LINE_MAX; kept
+  // beside the box from HOLD_MIN. FILE_MAX is bytes.
+  var SYNC_MAX = 100000, COLOUR_MAX = 50000, SHOW_MAX = 400000, LINE_MAX = 20000, LONG_MAX = 100000, HOLD_MIN = 1000000, FILE_MAX = 50000000, PAGE = 100, EXPAND_MAX = 2000;
+
+  function fmt(n) { return n.toLocaleString('en-GB'); }
+  function plural(n, one, many) { return fmt(n) + ' ' + (n === 1 ? one : many || one + 's'); }
+  function size(b) {
+    // Switched where the rounded figure would reach the next step, so never "100.0 KB" or "1000 KB".
+    return b < 1000 ? plural(b, 'byte') : b < 999500 ? (b / 1000).toFixed(b < 99950 ? 1 : 0) + ' KB' : (b / 1e6).toFixed(b < 99950000 ? 1 : 0) + ' MB';
+  }
+  // Live regions and messages are written only when their text changes.
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  // ---------- The engine, here or in a worker ----------
+  var local = jfEngine(null), worker = null, workerBroken = false, seq = 0, waiting = {}, docIn = local;
+
+  function getWorker() {
+    if (worker || workerBroken) return worker;
+    try {
+      worker = new Worker(URL.createObjectURL(new Blob(['(' + jfEngine.toString() + ')(self);'], { type: 'text/javascript' })));
+      worker.onmessage = function (e) {
+        var cb = waiting[e.data.seq];
+        delete waiting[e.data.seq];
+        if (cb) cb(e.data.r);
+      };
+      worker.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        workerBroken = true;
+        worker.terminate();
+        worker = null;
+        // Whatever is still waiting is done on this thread instead.
+        Object.keys(waiting).forEach(function (id) { var cb = waiting[id]; delete waiting[id]; cb(null); });
+      };
+    } catch (e) {
+      workerBroken = true;
+      worker = null;
+    }
+    return worker;
+  }
+  function call(engine, msg) {
+    if (engine === local) {
+      var r;
+      try { r = msg.op === 'run' ? local.run(msg) : msg.op === 'fix' ? local.fix() : local.kids(msg.id, msg.from, msg.count, msg.sort, msg.gen); }
+      catch (e) { r = { crash: String(e && e.message || e) }; }
+      return Promise.resolve(r);
+    }
+    return new Promise(function (resolve) {
+      msg.seq = ++seq;
+      waiting[msg.seq] = resolve;
+      engine.postMessage(msg);
+    });
+  }
+  var sent = null;
+  function run(msg) {
+    var text = msg.src, target = (text.length > SYNC_MAX && getWorker()) || local;
+    // The worker keeps the last text it was sent: when only an option changed, it is not sent again.
+    if (target !== local && target === docIn && text === sent) { msg.src = ''; msg.same = true; }
+    docIn = target;
+    sent = text;
+    return call(target, msg).then(function (r) {
+      if (r) return r;
+      docIn = local;
+      sent = null;
+      msg.src = text;
+      msg.same = false;
+      return call(local, msg);
+    });
+  }
+
+  // ---------- State ----------
+  // `held` is a document too long for the box. `full` is the whole result, of which the page
+  // may show only the start.
+  var held = null, fileName = '', undo = null, lastText = null, lastKey = '', lastMsg = null, last = null, full = '', gen = 0;
+  var running = false, quiet = true;
+
+  function source() { return held ? held.text : input.value; }
+  function mode() { var r = $('input[name="jf-mode"]:checked'); return r ? r.value : 'format'; }
+  function isJsonMode(m) { return m === 'format' || m === 'minify' || m === 'tree'; }
+
+  var HINTS = {
+    tree: 'Open and close objects and arrays with their triangles. Copy and Download give the formatted text.',
+    escape: 'Turns the whole text into one JSON string: double quotes, backslashes and line breaks get a backslash.',
+    unescape: 'Reads the text as a JSON string and turns \\" \\\\ \\n \\uXXXX and the other escapes back into characters.'
+  };
+  function syncOptions() {
+    var m = mode();
+    $('#jf-indent-field').hidden = m !== 'format';
+    $('#jf-sort-wrap').hidden = !isJsonMode(m);
+    $('#jf-quotes-wrap').hidden = m !== 'escape';
+    setText($('#jf-mode-hint'), HINTS[m] || '');
+  }
+
+  function optionsKey() { return [mode(), indentSel.value, sortBox.checked, quotesBox.checked].join('|'); }
+  // A button that acts on the result waits until the result belongs to the text and options on
+  // screen: a long text is read again only once typing pauses, so for a moment the result shown
+  // is that of the text before the last edit, and Fix would undo that edit.
+  var whenDone = [];
+  function whenCurrent(fn) {
+    whenDone.push(fn);
+    update();
+  }
+  // One request at a time; when the text or an option changed meanwhile, it is read again.
+  function update() {
+    if (running) return;
+    var text = source(), m = mode(), key = optionsKey(), fns;
+    if (text === lastText && key === lastKey) {
+      resultBox.setAttribute('aria-busy', 'false');
+      fns = whenDone;
+      whenDone = [];
+      fns.forEach(function (fn) { fn(); });
+      return;
+    }
+    running = true;
+    var busy = text.length > SYNC_MAX ? setTimeout(function () { setText(outInfo, 'Working…'); }, 250) : 0;
+    lastMsg = { op: 'run', src: text, mode: m, indent: indentSel.value === 'tab' ? '\t' : indentSel.value === '4' ? '    ' : '  ', sort: sortBox.checked, quotes: quotesBox.checked, gen: ++gen };
+    run(lastMsg).then(function (r) {
+      clearTimeout(busy);
+      running = false;
+      lastText = text;
+      lastKey = key;
+      last = r;
+      render(r, m);
+      update();
+    });
+  }
+  var updateSoon = TT.debounce(update, 200);
+  // Something changed: the result is marked as out of date until it has been worked out again.
+  function changed(soon) {
+    quiet = false;
+    resultBox.setAttribute('aria-busy', 'true');
+    if (soon) updateSoon(); else update();
+  }
+
+  // ---------- Showing a result ----------
+  var hl = { ready: false, loading: false, failed: false }, painted = null;
+
+  function wantHighlighter() {
+    if (hl.loading || hl.failed) return;
+    hl.loading = true;
+    var s = document.createElement('script');
+    s.src = VENDOR + 'highlight.js/highlight.min.js';
+    s.async = true;
+    s.onload = function () {
+      hl.ready = !!window.hljs;
+      hl.failed = !hl.ready;
+      if (hl.ready && painted && painted.colour) paint(painted.text, true);
+    };
+    s.onerror = function () { hl.failed = true; s.remove(); };
+    document.head.appendChild(s);
+  }
+  // Colours come from highlight.js, which is loaded the first time something other than the
+  // example needs colouring.
+  function paint(text, colour) {
+    var html = null;
+    painted = { text: text, colour: colour };
+    if (colour && text) {
+      if (hl.ready) { try { html = window.hljs.highlight(text, { language: 'json' }).value; } catch (e) { html = null; } }
+      else if (text === EXAMPLE_TEXT) html = EXAMPLE_HTML;
+      else wantHighlighter();
+    }
+    if (html === null) outBox.textContent = text; else outBox.innerHTML = html;
+  }
+  // A browser lays out one very long line far more slowly than the same text in short lines
+  // (seconds for a few hundred thousand characters in mixed scripts), so less of it is shown.
+  function showLimit(text) {
+    var upto = Math.min(text.length, SHOW_MAX), from = 0, at;
+    while (from < upto) {
+      at = text.indexOf('\n', from);
+      if (at < 0 || at > upto) at = upto;
+      if (at - from > LINE_MAX) return LONG_MAX;
+      from = at + 1;
+    }
+    return SHOW_MAX;
+  }
+  function showOut(text, json, asTree) {
+    var shown = text, notes = [], cut, limit;
+    full = text;
+    copyBtn.disabled = dlBtn.disabled = useBtn.disabled = !text;
+    if (asTree) { paint('', false); setText(outNote, ''); return; }
+    limit = showLimit(text);
+    if (text.length > limit) {
+      cut = text.lastIndexOf('\n', limit);
+      if (cut < limit - 2000) cut = limit;
+      if ((text.charCodeAt(cut - 1) & 0xFC00) === 0xD800) cut--;
+      shown = text.slice(0, cut);
+      notes.push('Showing the first ' + fmt(cut) + ' of ' + fmt(text.length) + ' characters. Copy and Download give all of it.');
+    } else if (json && text.length > COLOUR_MAX) {
+      notes.push('Colours are switched off above ' + fmt(COLOUR_MAX) + ' characters to keep the page quick.');
+    }
+    paint(shown, json && shown.length <= COLOUR_MAX);
+    setText(outNote, notes.join(' '));
+  }
+
+  // The text that is marked, with spaces and characters that cannot be seen made visible.
+  function visible(s) {
+    var out = '', c, blank = !/[^ ]/.test(s);
+    if (!s) return 'end of text';
+    for (var j = 0; j < s.length; j++) {
+      c = s.charCodeAt(j);
+      out += c === 32 ? (blank ? '␣' : ' ') : c === 10 || c === 13 ? '↵' : c === 9 ? '⇥'
+        : c < 32 || (c >= 127 && c <= 160) || c === 0x1680 || (c >= 0x2000 && c <= 0x200D) || c === 0x2028 || c === 0x2029 || c === 0x202F || c === 0x205F || c === 0x2060 || c === 0x3000 || c === 0xFEFF
+          ? 'U+' + ('000' + c.toString(16).toUpperCase()).slice(-4) : s.charAt(j);
+    }
+    return out;
+  }
+  function place(e) { return 'ine ' + fmt(e.line) + ', column ' + fmt(e.col); }
+  function showError(r) {
+    var e = r.err, t = 'L' + place(e) + '. ' + e.msg;
+    if (r.then) t += ' Further on, l' + place(r.then) + ': ' + r.then.msg + ' That one has to be corrected by hand; after that the rest can be fixed for you.';
+    else if (r.fixable > 1) t += ' In all, ' + fmt(r.fixable) + ' problems can be fixed for you.';
+    setText(errorBox, t);
+    input.setAttribute('aria-invalid', 'true');
+    snip.textContent = '';
+    snip.appendChild(document.createTextNode(e.before));
+    snip.appendChild(el('mark', '', visible(e.mark)));
+    snip.appendChild(document.createTextNode(e.after));
+    snip.hidden = false;
+    fixBtn.hidden = !r.fixable;
+    setText(fixBtn, r.fixable > 1 ? 'Fix ' + fmt(r.fixable) + ' problems' : 'Fix it');
+    gotoBtn.hidden = !!held;
+    errorActs.hidden = fixBtn.hidden && gotoBtn.hidden;
+  }
+
+  function render(r, m) {
+    var json = isJsonMode(m), s = r.stats, parts = [], notes = [], saved;
+    setText(errorBox, '');
+    input.setAttribute('aria-invalid', 'false');
+    snip.hidden = errorActs.hidden = true;
+    tree.hidden = $('#jf-tree-acts').hidden = true;
+    outBox.hidden = false;
+    setText(outInfo, '');
+    if (r.crash || r.empty || r.err || r.tooLarge) {
+      setText(okBox, r.tooLarge ? 'Valid JSON.' : '');
+      setText(noteBox, r.crash ? 'This text could not be read (' + r.crash + ').'
+        : r.tooLarge ? 'The formatted result would be longer than 256 million characters, more than a browser can hold as one text. Choose Minify instead.' : '');
+      if (r.err) showError(r);
+      showOut('', false);
+    } else if (!json) {
+      setText(noteBox, '');
+      setText(okBox, m === 'escape' ? (r.escaped ? 'Escaped: ' + plural(r.escaped, 'character') + ' needed a backslash.' : 'Escaped: no character needed a backslash.')
+        : !r.changed ? 'Nothing to unescape: the text has no backslash escapes.'
+        : 'Unescaped.' + (r.nested ? ' The result is valid JSON: choose Use as input to format it.' : ''));
+      setText(outInfo, size(r.bytes));
+      showOut(r.text, m === 'escape' ? quotesBox.checked : !!r.nested);
+    } else {
+      if (s.objects) parts.push(plural(s.objects, 'object'));
+      if (s.arrays) parts.push(plural(s.arrays, 'array'));
+      if (s.keys) parts.push(plural(s.keys, 'key'));
+      parts.push(plural(s.strings + s.numbers + s.booleans + s.nulls, 'value'));
+      if (s.depth) parts.push(plural(s.depth, 'level') + ' deep');
+      setText(okBox, 'Valid JSON. ' + parts.join(', ') + '.');
+      if (r.dupes) {
+        notes.push('Duplicate key: ' + r.dupes.key + ' appears more than once in the same object (l' + place(r.dupes) + ')' +
+          (r.dupes.n > 1 ? ', and ' + plural(r.dupes.n - 1, 'more duplicate') + ' follow' + (r.dupes.n === 2 ? 's' : '') : '') +
+          '. That is still valid JSON, but many parsers keep only the last value and some refuse the text.');
+      }
+      if (r.big) {
+        notes.push('Large number: ' + r.big.text + ' (l' + place(r.big) + ')' + (r.big.n > 1 ? ' and ' + plural(r.big.n - 1, 'more number') : '') +
+          ' cannot be held exactly by a double-precision number, which is what JavaScript and many other JSON parsers use. Every digit is kept here; put such values in a string if other programs must read them exactly.');
+      }
+      setText(noteBox, notes.join(' '));
+      saved = (1 - r.bytes / r.inBytes) * 100;
+      setText(outInfo, size(r.bytes) + (m === 'minify' ? ' minified' : ' formatted') + ', ' + size(r.inBytes) + ' as entered' +
+        (m === 'minify' && saved > 0 ? ' (' + (saved >= 10 ? Math.round(saved) : saved.toFixed(1)) + '% smaller)' : ''));
+      showOut(r.text, true, m === 'tree');
+      if (m === 'tree') showTree(r.root);
+    }
+    if (!quiet) announce();
+  }
+
+  // Screen readers hear one summary once typing pauses, not every state in between.
+  var announce = TT.debounce(function () {
+    var t = errorBox.textContent ? (isJsonMode(mode()) ? 'Not valid JSON. ' : '') + errorBox.textContent : [okBox.textContent, noteBox.textContent].filter(Boolean).join(' ');
+    setText(status, t);
+  }, 800);
+
+  // ---------- Tree ----------
+  function label(parent, row) {
+    if (row.k === null) return;
+    var index = typeof row.k === 'number';
+    parent.appendChild(el('span', index ? 'jf-idx' : 'jf-key', index ? String(row.k) : row.k === '' ? '""' : row.k));
+    parent.appendChild(document.createTextNode(': '));
+  }
+  function node(row) {
+    var li = el('li'), d, s, hide;
+    if (row.t > 1 || !row.c) {
+      li.className = 'jf-leaf';
+      label(li, row);
+      li.appendChild(el('span', row.t === 2 ? 'jf-s' : row.t > 2 ? 'jf-n' : 'jf-meta', row.t === 0 ? '{}' : row.t === 1 ? '[]' : row.v + (row.cut ? '…' : '')));
+      return li;
+    }
+    d = el('details');
+    s = el('summary');
+    d._id = row.id; d._count = row.c; d._loaded = 0;
+    label(s, row);
+    hide = el('span', 'jf-meta', row.t === 0 ? '{…} ' : '[…] ');
+    hide.setAttribute('aria-hidden', 'true');
+    s.appendChild(hide);
+    s.appendChild(el('span', 'visually-hidden', row.t === 0 ? 'object, ' : 'array, '));
+    s.appendChild(el('span', 'jf-meta', plural(row.c, row.t === 0 ? 'key' : 'item')));
+    d.appendChild(s);
+    d.appendChild(list());
+    li.appendChild(d);
+    return li;
+  }
+  function list() {
+    var ul = el('ul');
+    ul.setAttribute('role', 'list');
+    return ul;
+  }
+  // Adds the next rows of an open object or array, a page at a time.
+  function loadKids(d, focus) {
+    if (d._busy || d._loaded >= d._count) return Promise.resolve();
+    d._busy = true;
+    var mine = gen;
+    return call(docIn, { op: 'kids', id: d._id, from: d._loaded, count: PAGE, sort: sortBox.checked, gen: gen }).then(function (res) {
+      d._busy = false;
+      if (!res || !res.rows || mine !== gen) return;
+      var ul = d.lastElementChild, more = ul.lastElementChild, first = null, rest, btn;
+      if (more && more.className === 'jf-more') more.remove();
+      res.rows.forEach(function (row) { var li = ul.appendChild(node(row)); first = first || li; });
+      d._loaded += res.rows.length;
+      rest = d._count - d._loaded;
+      if (rest > 0 && res.rows.length) {
+        more = el('li', 'jf-more');
+        btn = more.appendChild(el('button', 'btn secondary small', 'Show ' + fmt(Math.min(PAGE, rest)) + ' more'));
+        btn.type = 'button';
+        more.appendChild(el('span', 'hint', ' ' + fmt(rest) + ' not shown'));
+        ul.appendChild(more);
+      }
+      if (focus && first) {
+        // The button that was pressed is gone: focus moves to the first row it brought.
+        first = first.querySelector('summary') || first;
+        if (first.tagName === 'LI') first.tabIndex = -1;
+        first.focus();
+      }
+    });
+  }
+  function showTree(root) {
+    var ul = list(), d;
+    tree.textContent = '';
+    ul.appendChild(node(root));
+    tree.appendChild(ul);
+    outBox.hidden = true;
+    tree.hidden = false;
+    d = tree.querySelector('details');
+    $('#jf-tree-acts').hidden = !d;
+    if (d) { d.open = true; loadKids(d); }
+  }
+  // The toggle event does not bubble, so it is caught on its way down.
+  tree.addEventListener('toggle', function (e) {
+    if (e.target.open && e.target._count && !e.target._loaded) loadKids(e.target);
+  }, true);
+  tree.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('.jf-more button') : null;
+    if (btn) loadKids(btn.closest('details'), true);
+  });
+  $('#jf-expand').addEventListener('click', function () {
+    var mine = gen;
+    (function step() {
+      if (mine !== gen) return;
+      var next = tree.querySelector('details:not([open])');
+      if (!next) { setText(outNote, ''); return; }
+      if (tree.querySelectorAll('li').length >= EXPAND_MAX) {
+        setText(outNote, 'Opened the first ' + fmt(EXPAND_MAX) + ' rows. Open the rest where you need them.');
+        return;
+      }
+      next.open = true;
+      loadKids(next).then(step);
+    })();
+  });
+  $('#jf-collapse').addEventListener('click', function () {
+    TT.$$('details details[open]', tree).forEach(function (d) { d.open = false; });
+    setText(outNote, '');
+  });
+
+  // ---------- Changing the input ----------
+  function clearDone() {
+    setText(doneBox, '');
+    setText(fileError, '');
+  }
+  // Puts a text in the box, or beside it when it is too long for a text field to stay quick.
+  function replaceInput(text, name, isUndo) {
+    undo = isUndo ? null : { text: source(), name: fileName };
+    undoBtn.hidden = !!isUndo;
+    fileName = name || '';
+    held = text.length > HOLD_MIN ? { text: text } : null;
+    input.hidden = !!held;
+    heldBox.hidden = !held;
+    input.value = held ? '' : text;
+    if (held) {
+      setText($('#jf-held-name'), name || 'This text');
+      setText($('#jf-held-size'), '(' + fmt(text.length) + ' characters)');
+    }
+    changed();
+  }
+
+  input.addEventListener('input', function () {
+    undo = null;
+    undoBtn.hidden = true;
+    clearDone();
+    changed(input.value.length > 20000);
+  });
+  // A paste that would make the text very long never enters the box.
+  input.addEventListener('paste', function (e) {
+    var t = e.clipboardData ? e.clipboardData.getData('text/plain') : '', v = input.value, a = input.selectionStart, b = input.selectionEnd, all = a === 0 && b === v.length;
+    if (v.length - (b - a) + t.length <= HOLD_MIN) return;
+    e.preventDefault();
+    clearDone();
+    replaceInput(v.slice(0, a) + t.replace(/\r\n?/g, '\n') + v.slice(b), all ? '' : fileName);
+    setText(doneBox, 'Pasted ' + fmt(t.length) + ' characters.');
+  });
+  TT.$$('input[name="jf-mode"]').forEach(function (r) {
+    r.addEventListener('change', function () { syncOptions(); changed(); });
+  });
+  [indentSel, sortBox, quotesBox].forEach(function (c) {
+    c.addEventListener('change', function () { changed(); });
+  });
+
+  function swap(text, said) {
+    var had = /\S/.test(source());
+    clearDone();
+    replaceInput(text, '');
+    setText(doneBox, said + (had ? ' Undo brings your text back.' : ''));
+    input.focus();
+  }
+  $('#jf-example').addEventListener('click', function () { swap(EXAMPLE, 'The example is loaded.'); });
+  $('#jf-clear').addEventListener('click', function () { swap('', 'The box is empty.'); });
+  $('#jf-held-close').addEventListener('click', function () { swap('', 'The box is empty.'); });
+  undoBtn.addEventListener('click', function () {
+    if (!undo) return;
+    clearDone();
+    replaceInput(undo.text, undo.name, true);
+    (held ? $('#jf-held-close') : input).focus();
+  });
+  useBtn.addEventListener('click', function () { whenCurrent(function () {
+    if (!full) return;
+    var m = mode();
+    clearDone();
+    if (!isJsonMode(m)) { $('input[name="jf-mode"][value="format"]').checked = true; syncOptions(); }
+    replaceInput(full, fileName);
+    setText(doneBox, 'The result is now the input.');
+    (held ? $('#jf-held-close') : input).focus();
+  }); });
+  fixBtn.addEventListener('click', function () { whenCurrent(function () {
+    // The text as it is now may have nothing left to fix.
+    if (errorActs.hidden || fixBtn.hidden) return;
+    call(docIn, { op: 'fix' }).then(function (r) {
+      // The worker stopped working: the text is read again on this thread.
+      if (!r) { lastMsg.src = lastText; lastMsg.same = false; local.run(lastMsg); r = local.fix(); }
+      if (r.crash) return;
+      clearDone();
+      replaceInput(r.text, fileName);
+      setText(doneBox, 'Fixed ' + plural(r.total, 'problem') + ': ' + r.fixes.join(', ') + '.');
+      (held ? $('#jf-held-close') : input).focus();
+    });
+  }); });
+  gotoBtn.addEventListener('click', function () { whenCurrent(goTo); });
+  function goTo() {
+    var e = last && last.err, m, y;
+    if (!e || held) return;
+    input.focus();
+    input.setSelectionRange(e.pos, Math.min(input.value.length, e.pos + Math.max(e.len, 1)));
+    // A copy of the box holding the text before the error is as tall as the error is far down.
+    m = input.cloneNode(false);
+    m.removeAttribute('id');
+    m.removeAttribute('aria-describedby');
+    m.setAttribute('aria-hidden', 'true');
+    m.tabIndex = -1;
+    m.value = input.value.slice(0, e.pos);
+    m.style.cssText = 'position:absolute;visibility:hidden;height:0;min-height:0;overflow-y:' + (input.scrollHeight > input.clientHeight ? 'scroll' : 'hidden') + ';width:' + input.offsetWidth + 'px';
+    inBox.appendChild(m);
+    y = m.scrollHeight;
+    m.remove();
+    input.scrollTop = Math.max(0, y - input.clientHeight / 2);
+  }
+
+  copyBtn.addEventListener('click', function () { whenCurrent(function () { if (full) TT.copy(full, copyBtn); }); });
+  dlBtn.addEventListener('click', function () { whenCurrent(saveFile); });
+  function saveFile() {
+    if (!full) return;
+    var m = mode(), base = fileName.replace(/\.[^.]*$/, '').replace(/[\\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 80), name;
+    if (m === 'escape') name = (base || 'json') + '.escaped.txt';
+    else if (m === 'unescape') name = (base || 'json') + '.unescaped.' + (last && last.nested ? 'json' : 'txt');
+    else name = base ? base + (m === 'minify' ? '.min.json' : '.formatted.json') : m === 'minify' ? 'minified.json' : 'formatted.json';
+    TT.download(name, full, /\.json$/.test(name) ? 'application/json' : 'text/plain;charset=utf-8');
+    TT.flash(dlBtn, 'Downloaded');
+  }
+
+  // ---------- Files ----------
+  // JSON is UTF-8, but files written by older Windows tools are UTF-16, with or without a
+  // byte order mark: the first character of a JSON text is ASCII, so a zero byte gives it away.
+  function decode(buf) {
+    var b = new Uint8Array(buf), enc = 'utf-8';
+    if ((b[0] === 0xFF && b[1] === 0xFE) || (b.length > 3 && b[0] && !b[1] && b[2] && !b[3])) enc = 'utf-16le';
+    else if ((b[0] === 0xFE && b[1] === 0xFF) || (b.length > 3 && !b[0] && b[1] && !b[2] && b[3])) enc = 'utf-16be';
+    try { return { text: new TextDecoder(enc, { fatal: true }).decode(b), note: enc === 'utf-8' ? '' : ' It was read as UTF-16.' }; }
+    catch (e) { return { text: new TextDecoder(enc === 'utf-8' ? 'windows-1252' : enc).decode(b), note: enc === 'utf-8' ? ' It is not valid UTF-8 and was read as Windows-1252.' : ' It was read as UTF-16.' }; }
+  }
+  function openFiles(files) {
+    var file = files && files[0], extra = files && files.length > 1 ? ' Only the first of the ' + files.length + ' files was opened.' : '';
+    if (!file) return;
+    clearDone();
+    if (file.size > FILE_MAX) {
+      setText(fileError, file.name + ' is larger than 50 MB, the largest file this page opens.');
+      return;
+    }
+    setText(doneBox, 'Reading ' + file.name + '…');
+    file.arrayBuffer().then(function (buf) {
+      var d = decode(buf);
+      replaceInput(d.text, file.name);
+      setText(doneBox, 'Opened ' + file.name + ' (' + size(file.size) + ').' + d.note + extra);
+    }, function () {
+      setText(doneBox, '');
+      setText(fileError, file.name + ' could not be read.');
+    });
+  }
+  $('#jf-open').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    openFiles(fileInput.files);
+    fileInput.value = '';
+  });
+  function hasFiles(e) {
+    return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
+  }
+  inBox.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    inBox.classList.add('is-over');
+  });
+  inBox.addEventListener('dragleave', function () { inBox.classList.remove('is-over'); });
+  inBox.addEventListener('drop', function (e) {
+    inBox.classList.remove('is-over');
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    openFiles(e.dataTransfer.files);
+  });
+  // A file dropped beside the box would otherwise replace the page.
+  document.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener('drop', function (e) { if (hasFiles(e)) e.preventDefault(); });
+
+  // The browser puts back what was in the fields after Back or a reload, and does so after
+  // this script has run: read them again once the page is shown.
+  window.addEventListener('pageshow', function () { syncOptions(); update(); });
+  syncOptions();
+  update();
+{% endraw %}
+})();
+</script>

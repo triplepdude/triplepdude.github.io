@@ -1,0 +1,751 @@
+---
+title: URL Encoder and Decoder (Percent-Encoding)
+description: Encode or decode URLs and query strings with percent-encoding, see each character that changed, and choose how plus signs are read. Runs in your browser.
+category: Developer
+keywords: [url encoder, url decoder, url encode decode, percent encoding, encodeuricomponent, url decode online, urlencode, query string decoder]
+howto: |
+  ## How to encode or decode a URL
+
+  Type or paste text into the box and choose **Encode** or **Decode**. The
+  result follows as you type, with every part that changed marked, and the
+  table under it lists each character next to its code. Copy the result,
+  download it, or press **Swap** to send it back the other way.
+
+  Percent-encoding writes a character as `%` and the two hexadecimal digits of
+  each of its bytes in UTF-8. A space is byte 20 in hexadecimal, so it becomes
+  `%20`. The pound sign £ takes two bytes and becomes `%C2%A3`, an emoji such
+  as 😀 takes four, and the percent sign itself becomes `%25`.
+
+  ## Which mode to use
+
+  | Mode | Leaves as they are | Use it for |
+  |---|---|---|
+  | Component | A–Z a–z 0–9 `- _ . ! ~ * ' ( )` | one query value or path segment, like `encodeURIComponent` |
+  | Whole URL | the same and `; / ? : @ & = + $ , #` | a complete address, like `encodeURI` |
+  | Form data | A–Z a–z 0–9 `* - . _`, space as `+` | form posts and query strings, like `URLSearchParams` and Java's `URLEncoder` |
+  | RFC 3986 | A–Z a–z 0–9 `- . _ ~` | strict encoders such as PHP's `rawurlencode` and Python's `quote(s, safe='')` |
+
+  Encode a value before you put it into a URL. In `?q=fish & chips` the `&`
+  would end the value, so the value has to become `fish%20%26%20chips`.
+  **Whole URL** leaves `&`, `=`, `?` and `/` alone, because in a full address
+  they are structure. For the same reason it cannot protect a value that
+  contains them.
+
+  ## Why a space is sometimes + and sometimes %20
+
+  HTML forms have written a space as `+` since HTML 2.0 in 1995, and browsers
+  still send form data that way, in the query string or the body of the
+  request; the format is called `application/x-www-form-urlencoded`.
+  Everywhere else in a URL only `%20` means a space, and a `+` in a path is a
+  plus sign. So Decode reads `+` as a space in the query string, after the
+  `?`, and in a line that does not start with a scheme such as `https:` or
+  with a `/`, which it takes for form data. Elsewhere it keeps the `+`. The
+  **Plus signs** setting overrides this. A real plus sign in form data is
+  written `%2B`.
+
+  ## Reserved and unreserved characters
+
+  RFC 3986, the Internet standard for URL syntax, calls A–Z a–z 0–9 `- . _ ~`
+  *unreserved*: they never need encoding. The *reserved* characters
+  `: / ? # [ ] @ ! $ & ' ( ) * + , ; =` separate the parts of a URL, and must
+  be encoded when they are data and not separators. Everything else is always
+  encoded: spaces, double quotes, `< > \ ^ { | }` and every character outside
+  ASCII. The table in the tool shows each character in each mode.
+
+  ## When decoding goes wrong
+
+  - **Still full of %25?** The text was encoded twice: `%2520` is an encoded
+    `%20`. Decode it again; the page offers to.
+  - **A � in the result** means the bytes are not valid UTF-8. Older sites
+    used other character sets, in which `%E9` alone is é. Try Windows-1252 or
+    another set from the list.
+  - **A % without two hexadecimal digits after it** is left as it is and
+    reported with its line and column.
+
+  To read JSON or a token carried in a query string, decode it here and pass
+  it to the [JSON formatter](/json-formatter/) or the
+  [JWT decoder](/jwt-decoder/). To turn a link into a code for print, use the
+  [QR code generator](/qr-code-generator/).
+faq:
+  - q: Is the text I encode or decode sent anywhere?
+    a: No. Encoding and decoding are done by JavaScript in your browser, and the page makes no request with your text. Nothing is saved, and the text is not put into the address of this page, so a URL with a token or password in it stays on your device.
+  - q: What do %20, %2F, %3A and %3F mean?
+    a: '%20 is a space, %2F a slash (/), %3A a colon (:) and %3F a question mark (?). Others you will meet are %3D for an equals sign, %26 for an ampersand, %23 for a hash and %25 for the percent sign itself. Each one is the ASCII code of the character in hexadecimal.'
+  - q: What is the difference between encodeURI and encodeURIComponent?
+    a: 'encodeURIComponent encodes everything except A–Z a–z 0–9 and `- _ . ! ~ * '' ( )`, so a `/`, `?`, `&`, `=` or `#` inside a value becomes `%2F`, `%3F`, `%26`, `%3D` or `%23` and cannot break the URL. Use it for each query value or path segment. encodeURI also leaves `; , / ? : @ & = + $ #` alone, so that a complete address keeps its structure, which means it cannot protect a value that contains them. Neither writes a space as `+`; URLSearchParams does, for form data.'
+  - q: Does URL encoding hide or encrypt data?
+    a: No. Percent-encoding is only another way of writing characters, and anyone can turn it back without a key, as this page does. It makes text safe to carry in a URL, not secret. A password or token in a URL is still readable in browser history and server logs.
+  - q: Why does decodeURIComponent throw "URI malformed"?
+    a: 'JavaScript throws a URIError when a % is not followed by two hexadecimal digits, or when the decoded bytes are not valid UTF-8, such as %E9 from a system that used Latin-1. Chrome and Node.js word it as "URI malformed". This page decodes what it can and tells you where the problem is; in your own code, catch the error or fix the encoding where the URL is made.'
+---
+<style>
+.ue-set { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
+.ue-set legend { margin-bottom: 8px; padding: 0; font-size: 14px; font-weight: 600; }
+.ue-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ue-chip { position: relative; display: inline-flex; }
+.ue-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ue-chip span { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--field-border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 15px; white-space: nowrap; }
+.ue-chip input:hover + span { border-color: var(--accent); }
+.ue-chip input:checked + span { border-color: var(--accent); background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.ue-chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ue-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; }
+.ue-head > label { font-size: 14px; font-weight: 600; }
+.ue-head-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.ue textarea { min-height: 120px; }
+.ue-mode-hint { display: block; margin: -4px 0 16px; }
+.ue-opts { margin-bottom: 8px; }
+.ue-opts > .field { flex: 0 1 250px; }
+.ue-opts .check { min-height: 44px; }
+.msg.ue-note { border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+.ue-note .btn { margin: 8px 0 0; }
+.ue-note p { margin: 0; }
+.ue-out-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0 0 6px; }
+pre.ue-out { max-height: 420px; margin-top: 0; overflow: auto; }
+pre.ue-out:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+pre.ue-out:empty::before { content: "The result appears here."; color: var(--muted); font-family: system-ui, sans-serif; }
+.ue-out mark, .ue-key mark { padding: 1px 0; border-bottom: 2px solid var(--accent); border-radius: 2px 2px 0 0; background: var(--accent-soft); color: var(--text); }
+.ue-out-note { display: block; margin: -8px 0 14px; }
+.ue-out-note:empty { display: none; }
+.ue-h { margin: 28px 0 10px; font-size: 1.15rem; }
+.ue table.data td, .ue table.data th { font-family: var(--mono); white-space: nowrap; }
+.ue table.data thead th, .ue table.data td.ue-kind, .ue table.data td.ue-name { font-family: inherit; }
+.ue table.data td.ue-wrap { white-space: normal; overflow-wrap: anywhere; min-width: 9em; }
+.ue table.data td.num, .ue table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ue table.data th[scope="row"] { color: var(--text); white-space: normal; }
+.ue-ref th, .ue-ref td { padding-top: 5px; padding-bottom: 5px; }
+.ue-ref-note { margin: -6px 0 0; }
+@media (max-width: 560px) {
+  .ue table.data { font-size: 13px; }
+  .ue table.data th, .ue table.data td { padding: 7px 6px; }
+}
+</style>
+
+<div class="ue">
+  <fieldset class="ue-set">
+    <legend>Direction</legend>
+    <div class="ue-chips">
+      <label class="ue-chip"><input type="radio" name="ue-dir" value="encode" checked><span>Encode</span></label>
+      <label class="ue-chip"><input type="radio" name="ue-dir" value="decode"><span>Decode</span></label>
+    </div>
+  </fieldset>
+
+  <div class="field">
+    <div class="ue-head">
+      <label for="ue-input" id="ue-input-label">Text or URL to encode</label>
+      <span class="ue-head-btns">
+        <button class="btn secondary small" type="button" id="ue-example">Example</button>
+        <button class="btn secondary small" type="button" id="ue-clear">Clear</button>
+        <button class="btn secondary small" type="button" id="ue-undo" hidden>Undo</button>
+      </span>
+    </div>
+    <textarea id="ue-input" class="mono" rows="4" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Type or paste text here…" aria-describedby="ue-error">Fish &amp; chips: £5.50 (2 for £10?)</textarea>
+  </div>
+  <!-- Not an alert: it changes as the text is edited, and is announced through #ue-status once typing pauses. -->
+  <p class="msg error" id="ue-error"></p>
+  <div class="msg ue-note" id="ue-tip" hidden>
+    <p id="ue-tip-text"></p>
+    <button class="btn secondary small" type="button" id="ue-tip-btn"></button>
+  </div>
+
+  <fieldset class="ue-set" id="ue-mode-set">
+    <legend>Encode as</legend>
+    <div class="ue-chips">
+      <label class="ue-chip"><input type="radio" name="ue-mode" value="component" checked><span>Component</span></label>
+      <label class="ue-chip"><input type="radio" name="ue-mode" value="url"><span>Whole URL</span></label>
+      <label class="ue-chip"><input type="radio" name="ue-mode" value="form"><span>Form data</span></label>
+      <label class="ue-chip"><input type="radio" name="ue-mode" value="rfc3986"><span>RFC 3986</span></label>
+    </div>
+  </fieldset>
+  <span class="hint ue-mode-hint" id="ue-mode-hint"></span>
+  <div class="row ue-opts">
+    <label class="check" id="ue-lines-wrap"><input type="checkbox" id="ue-lines"> Each line on its own</label>
+    <div class="field" id="ue-eol-field">
+      <label for="ue-eol">Line breaks become</label>
+      <select id="ue-eol">
+        <option value="lf" selected>%0A (LF)</option>
+        <option value="crlf">%0D%0A (CR LF)</option>
+      </select>
+    </div>
+    <div class="field" id="ue-plus-field" hidden>
+      <label for="ue-plus">Plus signs (+)</label>
+      <select id="ue-plus">
+        <option value="auto" selected>Spaces in a query string</option>
+        <option value="space">Always spaces</option>
+        <option value="keep">Always plus signs</option>
+      </select>
+    </div>
+    <div class="field" id="ue-charset-field" hidden>
+      <label for="ue-charset">Character set</label>
+      <select id="ue-charset">
+        <option value="utf-8" selected>UTF-8</option>
+        <optgroup label="Western European">
+          <option value="windows-1252">Windows-1252</option>
+        </optgroup>
+        <optgroup label="Central European">
+          <option value="windows-1250">Windows-1250</option>
+          <option value="iso-8859-2">ISO-8859-2</option>
+        </optgroup>
+        <optgroup label="Cyrillic">
+          <option value="windows-1251">Windows-1251</option>
+          <option value="koi8-r">KOI8-R</option>
+        </optgroup>
+        <optgroup label="Japanese">
+          <option value="shift_jis">Shift_JIS</option>
+          <option value="euc-jp">EUC-JP</option>
+        </optgroup>
+        <optgroup label="Chinese">
+          <option value="gbk">GBK</option>
+          <option value="big5">Big5</option>
+        </optgroup>
+        <optgroup label="Korean">
+          <option value="euc-kr">EUC-KR</option>
+        </optgroup>
+      </select>
+    </div>
+  </div>
+
+  <div id="ue-result">
+    <div class="ue-out-head">
+      <span class="label" id="ue-out-label">Result</span>
+      <span class="hint" id="ue-out-info"></span>
+    </div>
+    <pre class="output ue-out" id="ue-out" tabindex="0" role="group" aria-labelledby="ue-out-label"></pre>
+    <span class="hint ue-out-note" id="ue-out-note"></span>
+  </div>
+  <p class="msg ue-note" id="ue-note"></p>
+  <p class="msg ok" id="ue-done" aria-live="polite"></p>
+  <div class="actions">
+    <button class="btn" type="button" id="ue-copy">Copy result</button>
+    <button class="btn secondary" type="button" id="ue-download">Download</button>
+    <button class="btn secondary" type="button" id="ue-swap">Swap</button>
+  </div>
+  <p class="visually-hidden" id="ue-status" role="status"></p>
+
+  <h2 class="ue-h" id="ue-changes-h">What changed</h2>
+  <p class="hint ue-key" id="ue-changes-key">In the result, <mark>marked</mark> text is what was encoded or decoded.</p>
+  <div class="table-wrap">
+    <table class="data" aria-labelledby="ue-changes-h">
+      <thead><tr><th scope="col">Character</th><th scope="col">Code point</th><th scope="col">Percent-encoded</th><th scope="col" class="num">Times</th></tr></thead>
+      <tbody id="ue-changes"></tbody>
+    </table>
+  </div>
+  <p class="hint" id="ue-changes-note"></p>
+
+  <h2 class="ue-h" id="ue-ref-h">Which characters each mode encodes</h2>
+  <div class="table-wrap">
+    <table class="data ue-ref" id="ue-ref" aria-labelledby="ue-ref-h">
+      <thead><tr><th scope="col">Character</th><th scope="col">Component</th><th scope="col">Whole URL</th><th scope="col">Form data</th><th scope="col">RFC 3986</th><th scope="col">Class in RFC 3986</th></tr></thead>
+      <tbody>
+      <tr><th scope="row">A–Z a–z 0–9</th><td>kept</td><td>kept</td><td>kept</td><td>kept</td><td class="ue-kind">unreserved</td></tr>
+      <tr><th scope="row">space</th><td>%20</td><td>%20</td><td>+</td><td>%20</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>!</code></th><td>!</td><td>!</td><td>%21</td><td>%21</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>&quot;</code></th><td>%22</td><td>%22</td><td>%22</td><td>%22</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>#</code></th><td>%23</td><td>#</td><td>%23</td><td>%23</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>$</code></th><td>%24</td><td>$</td><td>%24</td><td>%24</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>%</code></th><td>%25</td><td>%25</td><td>%25</td><td>%25</td><td class="ue-kind">the escape character</td></tr>
+      <tr><th scope="row"><code>&amp;</code></th><td>%26</td><td>&amp;</td><td>%26</td><td>%26</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>&#x27;</code></th><td>&#x27;</td><td>&#x27;</td><td>%27</td><td>%27</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>(</code></th><td>(</td><td>(</td><td>%28</td><td>%28</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>)</code></th><td>)</td><td>)</td><td>%29</td><td>%29</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>*</code></th><td>*</td><td>*</td><td>*</td><td>%2A</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>+</code></th><td>%2B</td><td>+</td><td>%2B</td><td>%2B</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>,</code></th><td>%2C</td><td>,</td><td>%2C</td><td>%2C</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>-</code></th><td>-</td><td>-</td><td>-</td><td>-</td><td class="ue-kind">unreserved</td></tr>
+      <tr><th scope="row"><code>.</code></th><td>.</td><td>.</td><td>.</td><td>.</td><td class="ue-kind">unreserved</td></tr>
+      <tr><th scope="row"><code>/</code></th><td>%2F</td><td>/</td><td>%2F</td><td>%2F</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>:</code></th><td>%3A</td><td>:</td><td>%3A</td><td>%3A</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>;</code></th><td>%3B</td><td>;</td><td>%3B</td><td>%3B</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>&lt;</code></th><td>%3C</td><td>%3C</td><td>%3C</td><td>%3C</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>=</code></th><td>%3D</td><td>=</td><td>%3D</td><td>%3D</td><td class="ue-kind">reserved (sub-delim)</td></tr>
+      <tr><th scope="row"><code>&gt;</code></th><td>%3E</td><td>%3E</td><td>%3E</td><td>%3E</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>?</code></th><td>%3F</td><td>?</td><td>%3F</td><td>%3F</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>@</code></th><td>%40</td><td>@</td><td>%40</td><td>%40</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>[</code></th><td>%5B</td><td>%5B</td><td>%5B</td><td>%5B</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>\</code></th><td>%5C</td><td>%5C</td><td>%5C</td><td>%5C</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>]</code></th><td>%5D</td><td>%5D</td><td>%5D</td><td>%5D</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>^</code></th><td>%5E</td><td>%5E</td><td>%5E</td><td>%5E</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>_</code></th><td>_</td><td>_</td><td>_</td><td>_</td><td class="ue-kind">unreserved</td></tr>
+      <tr><th scope="row"><code>`</code></th><td>%60</td><td>%60</td><td>%60</td><td>%60</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>{</code></th><td>%7B</td><td>%7B</td><td>%7B</td><td>%7B</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>|</code></th><td>%7C</td><td>%7C</td><td>%7C</td><td>%7C</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>}</code></th><td>%7D</td><td>%7D</td><td>%7D</td><td>%7D</td><td class="ue-kind">must be encoded</td></tr>
+      <tr><th scope="row"><code>~</code></th><td>~</td><td>~</td><td>%7E</td><td>~</td><td class="ue-kind">unreserved</td></tr>
+      <tr><th scope="row">é 日 😀</th><td colspan="4" class="ue-kind ue-wrap">UTF-8 bytes, each written as %XX: %C3%A9, %E6%97%A5, %F0%9F%98%80</td><td class="ue-kind">not ASCII</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="hint ue-ref-note">A cell that shows the character itself means the mode leaves it as it is.</p>
+</div>
+
+<script>
+{% raw %}
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var input = $('#ue-input'), outBox = $('#ue-out'), errorBox = $('#ue-error'), noteBox = $('#ue-note'), doneBox = $('#ue-done'), status = $('#ue-status');
+  var tip = $('#ue-tip'), tipBtn = $('#ue-tip-btn'), outInfo = $('#ue-out-info'), outNote = $('#ue-out-note'), resultBox = $('#ue-result');
+  var linesBox = $('#ue-lines'), eolSel = $('#ue-eol'), plusSel = $('#ue-plus'), charsetSel = $('#ue-charset'), undoBtn = $('#ue-undo');
+  var copyBtn = $('#ue-copy'), dlBtn = $('#ue-download'), swapBtn = $('#ue-swap'), rowsBox = $('#ue-changes');
+  // Lengths in characters: nothing longer than MAX is worked on; the page shows up to SHOW_MAX, or
+  // LONG_MAX when a line is longer than LINE_MAX. Marks are drawn for up to SEG_MAX pieces, and
+  // the table lists ROWS_MAX rows.
+  var MAX = 2000000, SEG_MAX = 5000, SHOW_MAX = 400000, LINE_MAX = 20000, LONG_MAX = 100000, ROWS_MAX = 100;
+  var EXAMPLES = { encode: input.defaultValue, decode: 'https://example.com/search?q=fish+%26+chips&price=%C2%A35.50#top' };
+  var REPLACEMENT = String.fromCharCode(0xFFFD);
+
+  function fmt(n) { return n.toLocaleString('en-GB'); }
+  function plural(n, one, many) { return fmt(n) + ' ' + (n === 1 ? one : many || one + 's'); }
+  // Live regions and messages are written only when their text changes.
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function lineCol(text, pos) {
+    var line = 1, start = 0, j = -1;
+    while ((j = text.indexOf('\n', j + 1)) >= 0 && j < pos) { line++; start = j + 1; }
+    return 'line ' + fmt(line) + ', column ' + fmt(pos - start + 1);
+  }
+
+  // Where the one problem is, or the first of several.
+  function where(count, text, pos) { return ' (' + (count === 1 ? '' : 'the first on ') + lineCol(text, pos) + ')'; }
+
+  // ---------- Encoding ----------
+  var HEX = [];
+  for (var h = 0; h < 256; h++) HEX.push('%' + (h < 16 ? '0' : '') + h.toString(16).toUpperCase());
+  function keepSet(extra) {
+    var a = new Uint8Array(128), s = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' + extra;
+    for (var i = 0; i < s.length; i++) a[s.charCodeAt(i)] = 1;
+    return a;
+  }
+  // What each mode leaves as it is: encodeURIComponent, encodeURI, the form-urlencoded set of
+  // the URL Standard (which also writes a space as +), and the unreserved set of RFC 3986.
+  var KEEP = { component: keepSet("-_.!~*'()"), url: keepSet("-_.!~*'();/?:@&=+$,#"), form: keepSet('*-._'), rfc3986: keepSet('-._~') };
+
+  // One row of the table for each character and the way it is written.
+  function tally(map, ch, enc, why) {
+    var key = ch + '\n' + enc, row = map.get(key);
+    if (row) row.n++; else map.set(key, { ch: ch, enc: enc, n: 1, why: why });
+  }
+
+  // Every character outside the mode's set becomes the %XX of its UTF-8 bytes. The result is
+  // a list of pieces, each followed by 1 when it was changed and 0 when not.
+  function encode(text, mode, perLine, crlf) {
+    var keep = KEEP[mode], plus = mode === 'form', segs = [], changes = new Map(), n = text.length, i = 0;
+    var start, c, d, cp, len, run, enc, chars = 0, changed = 0, lone = 0, loneAt = -1;
+    function kept() { return ((c = text.charCodeAt(i)) < 128 && keep[c]) || (perLine && c === 10); }
+    while (i < n) {
+      start = i;
+      while (i < n && kept()) i++;
+      if (i > start) { segs.push(text.slice(start, i), 0); chars += i - start; }
+      if (i >= n) break;
+      run = '';
+      while (i < n && !kept()) {
+        cp = c; len = 1;
+        if (c >= 0xD800 && c <= 0xDFFF) {
+          d = text.charCodeAt(i + 1);
+          if (c <= 0xDBFF && d >= 0xDC00 && d <= 0xDFFF) { cp = (c - 0xD800 << 10) + d - 0xDC00 + 0x10000; len = 2; }
+          else { cp = 0xFFFD; if (!lone++) loneAt = i; }
+        }
+        enc = cp === 10 && crlf ? '%0D%0A' : cp === 32 && plus ? '+' : cp < 0x80 ? HEX[cp]
+          : cp < 0x800 ? HEX[0xC0 | cp >> 6] + HEX[0x80 | cp & 63]
+          : cp < 0x10000 ? HEX[0xE0 | cp >> 12] + HEX[0x80 | cp >> 6 & 63] + HEX[0x80 | cp & 63]
+          : HEX[0xF0 | cp >> 18] + HEX[0x80 | cp >> 12 & 63] + HEX[0x80 | cp >> 6 & 63] + HEX[0x80 | cp & 63];
+        run += enc;
+        tally(changes, text.substr(i, len), enc, cp === 0xFFFD && len === 1 && c !== 0xFFFD ? 'unpaired surrogate' : '');
+        i += len;
+        chars++;
+        changed++;
+      }
+      segs.push(run, 1);
+    }
+    return { segs: segs, changes: changes, chars: chars, changed: changed, lone: lone, loneAt: loneAt };
+  }
+
+  // ---------- Decoding ----------
+  // UTF-8 as the Encoding Standard reads it: a sequence that breaks off becomes one U+FFFD,
+  // and the byte that broke it is read again as the start of the next.
+  function utf8(bytes, emit) {
+    var i = 0, n = bytes.length, b, need, lo, hi, cp, j;
+    while (i < n) {
+      b = bytes[i];
+      lo = 0x80; hi = 0xBF;
+      if (b < 0x80) { emit(i, i + 1, b, true); i++; continue; }
+      if (b >= 0xC2 && b <= 0xDF) { need = 1; cp = b & 0x1F; }
+      else if (b >= 0xE0 && b <= 0xEF) { need = 2; cp = b & 0x0F; if (b === 0xE0) lo = 0xA0; if (b === 0xED) hi = 0x9F; }
+      else if (b >= 0xF0 && b <= 0xF4) { need = 3; cp = b & 0x07; if (b === 0xF0) lo = 0x90; if (b === 0xF4) hi = 0x8F; }
+      else { emit(i, i + 1, 0xFFFD, false); i++; continue; }
+      j = i + 1;
+      while (need && j < n && bytes[j] >= lo && bytes[j] <= hi) { cp = cp << 6 | bytes[j] & 0x3F; lo = 0x80; hi = 0xBF; need--; j++; }
+      emit(i, j, need ? 0xFFFD : cp, !need);
+      i = j;
+    }
+  }
+
+  var SEQ = /((?:%[0-9A-Fa-f]{2})+)|((?:%[uU][0-9A-Fa-f]{4})+)|\+/g;
+  // plusMode: 'space', 'keep' or 'auto', which reads a + as a space where form data is: in the
+  // query string of a line, or anywhere in a line that is not a URL or a path.
+  function decode(text, plusMode, charset) {
+    var segs = [], changes = new Map(), n = text.length, last = 0, m, i, k, piece, run, bytes, unit, next;
+    var changed = 0, bad = 0, badAt = -1, oldForm = 0, plusRead = 0, plusKept = 0, lineEnd = -1, from = 0, to = 0, line, q, hash;
+    var legacy = charset === 'utf-8' ? null : new TextDecoder(charset), wide = /^(shift_jis|gbk|big5|euc-kr)$/.test(charset), more = /(?:%[0-9A-Fa-f]{2})+/y;
+    var ends, flags, from0, pending, c;
+    // In another character set bytes are read one at a time, so that every character is known
+    // by the bytes it came from: a letter typed as itself can be the second byte of a character
+    // in Shift_JIS, GBK, Big5 and EUC-KR (%83e is one katakana).
+    function other() {
+      var end = i + run.length, list = [], out, b, t;
+      ends = []; flags = [];
+      for (;;) {
+        for (k = 0; k < run.length; k += 3) { list.push(parseInt(run.substr(k + 1, 2), 16)); flags.push(1); ends.push(end - run.length + k + 3); }
+        if (wide && list[list.length - 1] >= 0x80 && (c = text.charCodeAt(end)) >= 0x30 && c <= 0x7E) { list.push(c); flags.push(0); ends.push(++end); }
+        more.lastIndex = end;
+        t = more.exec(text);
+        if (!t) break;
+        run = t[0];
+        end += run.length;
+      }
+      bytes = Uint8Array.from(list);
+      from0 = i; pending = 0;
+      for (k = 0; k <= bytes.length; k++) {
+        if (k < bytes.length) { out = legacy.decode(bytes.subarray(k, k + 1), { stream: true }); pending |= flags[k]; b = ends[k]; }
+        else {
+          // The end of the run is not the end of the text. A space, which continues no character,
+          // makes the decoder give back what it was holding as it would mid-text, where the end
+          // of the text would swallow it: a digit after a GBK lead byte (%8A9) stays a digit.
+          out = legacy.decode(Uint8Array.of(32), { stream: true }).slice(0, -1);
+          legacy.decode();
+        }
+        if (!out) continue;
+        if (pending) {
+          t = out.split(REPLACEMENT).length - 1;
+          if (t && !bad) badAt = from0;
+          bad += t;
+          changed += Array.from(out).length;
+          tally(changes, out, text.slice(from0, b), t ? 'not valid in this character set' : '');
+        }
+        if (from0 > last) segs.push(text.slice(last, from0), 0);
+        segs.push(out, pending ? 1 : 0);
+        last = from0 = b;
+        pending = 0;
+      }
+      return end;
+    }
+    function one(a, b, cp, ok) {
+      var ch = String.fromCodePoint(cp);
+      piece += ch;
+      changed++;
+      if (!ok && !bad++) badAt = i + a * 3;
+      tally(changes, ok ? ch : run.slice(a * 3, b * 3).toUpperCase(), run.slice(a * 3, b * 3).toUpperCase(), ok ? '' : 'not valid UTF-8');
+    }
+    SEQ.lastIndex = 0;
+    while ((m = SEQ.exec(text))) {
+      i = m.index;
+      piece = '';
+      if (m[1]) {
+        run = m[1];
+        if (legacy) { SEQ.lastIndex = other(); continue; }
+        bytes = new Uint8Array(run.length / 3);
+        for (k = 0; k < bytes.length; k++) bytes[k] = parseInt(run.substr(k * 3 + 1, 2), 16);
+        utf8(bytes, one);
+      } else if (m[2]) {
+        run = m[2];
+        for (k = 0; k < run.length; k += 6) {
+          unit = parseInt(run.substr(k + 2, 4), 16);
+          next = k + 6 < run.length ? parseInt(run.substr(k + 8, 4), 16) : 0;
+          // Two halves of one character stay together.
+          if (unit >= 0xD800 && unit <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) { unit = String.fromCharCode(unit, next); k += 6; }
+          else unit = String.fromCharCode(unit);
+          piece += unit;
+          oldForm++;
+          changed++;
+          tally(changes, unit, run.substr(k - (unit.length - 1) * 6, unit.length * 6), '');
+        }
+      } else {
+        if (plusMode === 'auto' && i >= lineEnd) {
+          // A new line: find where its query string is.
+          from = text.lastIndexOf('\n', i) + 1;
+          lineEnd = text.indexOf('\n', i);
+          if (lineEnd < 0) lineEnd = n;
+          line = text.slice(from, lineEnd);
+          hash = line.indexOf('#');
+          if (hash >= 0) line = line.slice(0, hash);
+          q = line.indexOf('?');
+          to = from + line.length;
+          if (q >= 0) from += q;
+          else if (/^\s*(?:[A-Za-z][A-Za-z0-9+.\-]*:|\/)/.test(line)) to = from;
+        }
+        if (plusMode === 'keep' || (plusMode === 'auto' && (i < from || i >= to))) { plusKept++; continue; }
+        piece = ' ';
+        plusRead++;
+        changed++;
+        tally(changes, ' ', '+', '');
+      }
+      if (i > last) segs.push(text.slice(last, i), 0);
+      segs.push(piece, 1);
+      last = SEQ.lastIndex;
+    }
+    if (last < n) segs.push(text.slice(last), 0);
+    // A % that starts nothing.
+    var stray = 0, strayAt = -1, re = /%(?![0-9A-Fa-f]{2}|[uU][0-9A-Fa-f]{4})/g;
+    while ((m = re.exec(text))) { if (!stray++) strayAt = m.index; }
+    return { segs: segs, changes: changes, changed: changed, bad: bad, badAt: badAt, oldForm: oldForm, plusRead: plusRead, plusKept: plusKept, stray: stray, strayAt: strayAt };
+  }
+
+  // ---------- Page ----------
+  var full = '', lastKey = null, undo = null, quiet = true;
+
+  function dir() { var r = $('input[name="ue-dir"]:checked'); return r ? r.value : 'encode'; }
+  function mode() { var r = $('input[name="ue-mode"]:checked'); return r ? r.value : 'component'; }
+
+  var HINTS = {
+    component: 'For one value or one part of a path. Keeps A–Z a–z 0–9 - _ . ! ~ * \' ( ) and encodes everything else, like encodeURIComponent in JavaScript.',
+    url: 'For a complete address. Also keeps the characters that give a URL its structure, ; / ? : @ & = + $ , #, like encodeURI in JavaScript. A % is encoded as well, so text that is already encoded is encoded twice.',
+    form: 'For form data and query strings (application/x-www-form-urlencoded). A space becomes +, and only A–Z a–z 0–9 * - . _ are kept, as URLSearchParams and HTML forms do.',
+    rfc3986: 'Keeps only the unreserved characters of RFC 3986, A–Z a–z 0–9 - . _ ~, so ! * \' ( ) are encoded too. PHP calls this rawurlencode.'
+  };
+  var NAMES = { 9: 'tab', 10: 'line break', 13: 'carriage return', 32: 'space', 160: 'no-break space', 0xFFFD: REPLACEMENT + ' (replacement character)' };
+  function shown(ch) {
+    var cp = ch.codePointAt(0);
+    if (NAMES[cp]) return NAMES[cp];
+    if (cp < 32 || (cp >= 127 && cp < 160)) return 'control character';
+    if ((cp >= 0x200B && cp <= 0x200F) || cp === 0x2028 || cp === 0x2029 || cp === 0x2060 || cp === 0xFEFF) return 'invisible character';
+    return ch;
+  }
+  function codePoints(s) {
+    var list = Array.from(s);
+    if (list.length > 4) return '';
+    return list.map(function (ch) { return 'U+' + ('000' + ch.codePointAt(0).toString(16).toUpperCase()).slice(-Math.max(4, ch.codePointAt(0).toString(16).length)); }).join(' ');
+  }
+  function clip(s, max) { return s.length > max ? s.slice(0, max) + '…' : s; }
+
+  function syncOptions(text) {
+    var encoding = dir() === 'encode';
+    setText($('#ue-input-label'), encoding ? 'Text or URL to encode' : 'Text or URL to decode');
+    $('#ue-mode-set').hidden = $('#ue-lines-wrap').hidden = !encoding;
+    $('#ue-mode-hint').hidden = !encoding;
+    setText($('#ue-mode-hint'), HINTS[mode()]);
+    $('#ue-eol-field').hidden = !encoding || linesBox.checked || text.indexOf('\n') < 0;
+    $('#ue-plus-field').hidden = $('#ue-charset-field').hidden = encoding;
+  }
+
+  function showTip(text, button) {
+    tip.hidden = !text;
+    setText($('#ue-tip-text'), text);
+    setText(tipBtn, button || '');
+  }
+
+  // A browser lays out one very long line far more slowly than the same text in short lines
+  // (seconds for a few hundred thousand characters in mixed scripts), so less of it is shown.
+  function showLimit(text) {
+    var upto = Math.min(text.length, SHOW_MAX), from = 0, at;
+    while (from < upto) {
+      at = text.indexOf('\n', from);
+      if (at < 0 || at > upto) at = upto;
+      if (at - from > LINE_MAX) return LONG_MAX;
+      from = at + 1;
+    }
+    return SHOW_MAX;
+  }
+  function showOut(segs, plain) {
+    var shownText = full, cut = showLimit(full), notes = [], j, frag;
+    if (full.length > cut) {
+      if ((full.charCodeAt(cut - 1) & 0xFC00) === 0xD800) cut--;
+      shownText = full.slice(0, cut);
+      notes.push('Showing the first ' + fmt(cut) + ' of ' + fmt(full.length) + ' characters. Copy and Download give all of it.');
+    }
+    if (plain || shownText !== full || segs.length > SEG_MAX * 2) {
+      outBox.textContent = shownText;
+      if (!plain && shownText === full) notes.push('There are too many changes to mark each one in the result.');
+    } else {
+      frag = document.createDocumentFragment();
+      for (j = 0; j < segs.length; j += 2) frag.appendChild(segs[j + 1] ? el('mark', '', segs[j]) : document.createTextNode(segs[j]));
+      outBox.textContent = '';
+      outBox.appendChild(frag);
+    }
+    setText(outNote, notes.join(' '));
+    copyBtn.disabled = dlBtn.disabled = swapBtn.disabled = !full;
+  }
+
+  function showChanges(changes, encoding) {
+    var count = 0;
+    rowsBox.textContent = '';
+    changes.forEach(function (row) {
+      if (++count > ROWS_MAX) return;
+      var tr = el('tr'), key = row.ch, lone = row.why === 'unpaired surrogate';
+      var name = lone ? row.why : row.why === 'not valid UTF-8' ? REPLACEMENT : Array.from(key).length === 1 ? shown(key) : clip(key, 24);
+      tr.appendChild(el('td', name !== key ? 'ue-name' : '', name + (row.why && !lone ? ' (' + row.why + ')' : '')));
+      tr.appendChild(el('td', '', row.why ? '' : codePoints(key)));
+      tr.appendChild(el('td', 'ue-wrap', clip(row.enc, 60)));
+      tr.appendChild(el('td', 'num', fmt(row.n)));
+      rowsBox.appendChild(tr);
+    });
+    setText($('#ue-changes-note'), !input.value ? '' : !count ? (encoding ? 'Nothing needed encoding.' : 'Nothing was decoded.')
+      : count > ROWS_MAX ? 'The first ' + ROWS_MAX + ' of ' + fmt(count) + ' different characters are listed.' : '');
+  }
+
+  function update() {
+    var text = input.value, d = dir(), encoding = d === 'encode', key = [d, mode(), linesBox.checked, eolSel.value, plusSel.value, charsetSel.value].join('|') + '|' + text;
+    syncOptions(text);
+    resultBox.setAttribute('aria-busy', 'false');
+    if (key === lastKey) return;
+    lastKey = key;
+    var errors = [], notes = [], r, m;
+    showTip('');
+    if (text.length > MAX) {
+      full = '';
+      showOut([], true);
+      showChanges(new Map(), encoding);
+      setText(outInfo, '');
+      errors.push('This text has ' + fmt(text.length) + ' characters. The page works on up to ' + fmt(MAX) + '.');
+    } else if (encoding) {
+      r = encode(text, mode(), linesBox.checked, eolSel.value === 'crlf' && !linesBox.checked);
+      full = r.segs.filter(function (_, j) { return j % 2 === 0; }).join('');
+      showOut(r.segs);
+      showChanges(r.changes, true);
+      setText(outInfo, text ? plural(r.changed, 'character') + ' of ' + fmt(r.chars) + ' encoded' : '');
+      if (r.lone) {
+        errors.push(plural(r.lone, 'unpaired surrogate') + where(r.lone, text, r.loneAt) + ', half of a character that takes two code units, cannot be encoded and ' +
+          (r.lone === 1 ? 'was' : 'were') + ' written as %EF%BF%BD, the replacement character.');
+      }
+      m = /%[0-9A-Fa-f]{2}/.exec(text);
+      if (m) showTip('This text already has percent-encoded sequences, such as ' + m[0] + '. Encoding it again turns every % into %25.', 'Switch to Decode');
+    } else {
+      r = decode(text, plusSel.value, charsetSel.value);
+      full = r.segs.filter(function (_, j) { return j % 2 === 0; }).join('');
+      showOut(r.segs);
+      showChanges(r.changes, false);
+      setText(outInfo, text ? plural(r.changed, 'character') + ' decoded' : '');
+      if (r.bad) {
+        errors.push(plural(r.bad, 'byte sequence') + where(r.bad, text, r.badAt) + (r.bad === 1 ? ' is' : ' are') + ' not valid ' + charsetSel.options[charsetSel.selectedIndex].text +
+          ' and ' + (r.bad === 1 ? 'is' : 'are') + ' shown as ' + REPLACEMENT + '. If the text comes from an older site, try another character set.');
+      }
+      if (r.stray) {
+        errors.push(plural(r.stray, 'percent sign') + where(r.stray, text, r.strayAt) + (r.stray === 1 ? ' is' : ' are') + ' not followed by two hexadecimal digits and ' +
+          (r.stray === 1 ? 'was left as it is' : 'were left as they are') + '. A percent sign of its own is written %25.');
+      }
+      if (r.plusRead) notes.push(plural(r.plusRead, 'plus sign') + (r.plusRead === 1 ? ' was' : ' were') + ' read as ' + (r.plusRead === 1 ? 'a space' : 'spaces') + ', which is what + means in form data and query strings.');
+      if (r.plusKept && plusSel.value === 'auto') notes.push(plural(r.plusKept, 'plus sign') + ' outside a query string ' + (r.plusKept === 1 ? 'was' : 'were') + ' kept.');
+      if (r.oldForm) notes.push(plural(r.oldForm, 'character') + ' in the %uXXXX form of JavaScript’s old escape function, which is not standard, ' + (r.oldForm === 1 ? 'was' : 'were') + ' decoded as well.');
+      if (text && !r.changed && !r.stray) notes.push('Nothing to decode: the text has no percent-encoded sequences.');
+      m = /%[0-9A-Fa-f]{2}/.exec(full);
+      if (m && r.changed) showTip('The result still has percent-encoded sequences, such as ' + m[0] + ': the text was encoded more than once.', 'Decode again');
+    }
+    setText(errorBox, errors.join(' '));
+    input.setAttribute('aria-invalid', errors.length ? 'true' : 'false');
+    setText(noteBox, notes.join(' '));
+    if (!quiet) announce();
+  }
+  var updateSoon = TT.debounce(update, 200);
+  function changed(soon) {
+    quiet = false;
+    if (soon) { resultBox.setAttribute('aria-busy', 'true'); updateSoon(); } else update();
+  }
+  // Screen readers hear one summary once typing pauses.
+  var announce = TT.debounce(function () {
+    var encoding = dir() === 'encode';
+    setText(status, !input.value ? '' : [errorBox.textContent, outInfo.textContent ? (encoding ? 'Encoded: ' : 'Decoded: ') + outInfo.textContent + '.' : '', noteBox.textContent,
+      tip.hidden ? '' : $('#ue-tip-text').textContent].filter(Boolean).join(' '));
+  }, 800);
+
+  function replaceInput(text, isUndo) {
+    undo = isUndo ? null : { text: input.value, dir: dir() };
+    undoBtn.hidden = !!isUndo;
+    input.value = text;
+    changed();
+  }
+  function setDir(d) {
+    $('input[name="ue-dir"][value="' + d + '"]').checked = true;
+  }
+
+  input.addEventListener('input', function () {
+    undo = null;
+    undoBtn.hidden = true;
+    setText(doneBox, '');
+    changed(input.value.length > 20000);
+  });
+  var shownDir = dir();
+  TT.$$('input[name="ue-dir"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      // An example nobody touched follows the direction.
+      if (input.value === EXAMPLES[shownDir]) input.value = EXAMPLES[dir()];
+      shownDir = dir();
+      setText(doneBox, '');
+      changed();
+    });
+  });
+  TT.$$('input[name="ue-mode"]').concat([linesBox, eolSel, plusSel, charsetSel]).forEach(function (c) {
+    c.addEventListener('change', function () { changed(); });
+  });
+  $('#ue-example').addEventListener('click', function () {
+    var had = !!input.value && input.value !== EXAMPLES.encode && input.value !== EXAMPLES.decode;
+    replaceInput(EXAMPLES[dir()]);
+    setText(doneBox, 'The example is loaded.' + (had ? ' Undo brings your text back.' : ''));
+    input.focus();
+  });
+  $('#ue-clear').addEventListener('click', function () {
+    var had = !!input.value;
+    replaceInput('');
+    setText(doneBox, had ? 'The box is empty. Undo brings your text back.' : '');
+    input.focus();
+  });
+  undoBtn.addEventListener('click', function () {
+    if (!undo) return;
+    setDir(undo.dir);
+    shownDir = undo.dir;
+    replaceInput(undo.text, true);
+    setText(doneBox, '');
+    input.focus();
+  });
+  // A long text is worked on only once typing pauses: a button pressed before then acts on the
+  // text as it is now, not on the result of the text before the last edit.
+  swapBtn.addEventListener('click', function () {
+    update();
+    if (!full) return;
+    var to = dir() === 'encode' ? 'decode' : 'encode', text = full;
+    undo = { text: input.value, dir: dir() };
+    setDir(to);
+    shownDir = to;
+    input.value = text;
+    undoBtn.hidden = false;
+    changed();
+    setText(doneBox, 'The result is now the text to ' + to + '.');
+  });
+  tipBtn.addEventListener('click', function () {
+    update();
+    if (tip.hidden) return;
+    if (dir() === 'encode') {
+      setDir('decode');
+      shownDir = 'decode';
+      changed();
+      setText(doneBox, 'Switched to Decode.');
+      $('input[name="ue-dir"]:checked').focus();
+    } else {
+      replaceInput(full);
+      setText(doneBox, 'Decoded once more.');
+      input.focus();
+    }
+  });
+  copyBtn.addEventListener('click', function () { update(); if (full) TT.copy(full, copyBtn); });
+  dlBtn.addEventListener('click', function () {
+    update();
+    if (!full) return;
+    TT.download(dir() === 'encode' ? 'encoded.txt' : 'decoded.txt', full, 'text/plain;charset=utf-8');
+    TT.flash(dlBtn, 'Downloaded');
+  });
+
+  // The browser puts back what was in the fields after Back or a reload, and does so after
+  // this script has run: read them again once the page is shown.
+  // The browser puts back the direction but not the text, as autocomplete is off: an
+  // example left in the box follows the direction.
+  window.addEventListener('pageshow', function () {
+    if (input.value === EXAMPLES.encode || input.value === EXAMPLES.decode) input.value = EXAMPLES[dir()];
+    shownDir = dir();
+    update();
+  });
+  update();
+})();
+{% endraw %}
+</script>

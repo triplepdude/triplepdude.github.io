@@ -1,0 +1,983 @@
+---
+title: "Base64 Encode and Decode: Text, Files, Images"
+description: Encode text, files and images to Base64, or decode Base64 back to text or a file, with URL-safe, MIME and data URI options. Runs in your browser.
+category: Developer
+keywords: [base64 decode, base64 encode, base64 decoder, base64 encoder, base64 to image, image to base64, base64 to text, base64 to file, data uri generator]
+howto: |
+  ## How to encode or decode Base64
+
+  Type or paste into the box. On **Auto** the page decodes what is clearly
+  Base64 and encodes everything else. A word such as `test` is made of
+  Base64 characters too, so the line under the buttons says what was done,
+  and **Encode** or **Decode** settles it when you want the other. To
+  convert a file, press **Open file**, drop the file on the box or paste a
+  copied image. The result can be copied, downloaded or used as the next
+  input.
+
+  ## What is Base64?
+
+  Base64 writes binary data with 64 harmless characters: A to Z, a to z,
+  0 to 9, `+` and `/`. It exists for channels that carry only text, such as
+  email, JSON, XML and URLs. The rules are in RFC 4648: every 3 bytes
+  (24 bits) are cut into four 6-bit numbers, and each number picks one
+  character. When the last group has only 1 or 2 bytes, `==` or `=` fills
+  it up to four characters.
+
+  | Text | Bytes (hex) | Base64 |
+  |---|---|---|
+  | `Man` | 4D 61 6E | `TWFu` |
+  | `Ma` | 4D 61 | `TWE=` |
+  | `M` | 4D | `TQ==` |
+
+  Four characters for every three bytes is why Base64 is **33% larger**
+  than the data. Padding and line breaks add a little more.
+
+  ## Options
+
+  - **URL-safe** swaps `+` and `/` for `-` and `_`, which need no escaping
+    in URLs and file names. JSON Web Tokens use this alphabet without
+    padding.
+  - **No = padding** leaves out the `=` at the end. A decoder can work out
+    the length without it.
+  - **Line length** breaks the output every 76 characters, the limit MIME
+    sets for email (RFC 2045), or every 64, as in the PEM files of
+    certificates and keys (RFC 7468).
+  - **Strict** decoding accepts one alphabet, complete padding and line
+    breaks, and nothing else. Without it the decoder skips white space and
+    stray characters, reads both alphabets, forgives missing padding,
+    undoes URL encoding such as `%3D`, takes the `\n` of a JSON string for
+    a line break and drops the BEGIN and END lines of a PEM block.
+
+  ## Why does decoded text show strange characters?
+
+  Base64 stores bytes, not letters. To show text, the bytes must be read
+  with the encoding they were written in. Most text today is UTF-8, but é
+  is the two bytes C3 A9 in UTF-8 and the single byte E9 in Windows-1252,
+  so `6Q==` reads as é only when **Text encoding** is set to Windows-1252.
+  If � appears, try another encoding. When the data is a file and no text
+  at all, download it; the **hex dump** shows its first bytes.
+
+  ## Images and data URIs
+
+  A data URI puts a whole file inside a URL (RFC 2397):
+  `data:image/png;base64,iVBORw0KGgo…`. The part before the comma names
+  the media type and says that Base64 follows. Paste a data URI or bare
+  Base64 and the page recognises PNG, JPEG, GIF, WebP, SVG, PDF, ZIP and
+  other formats by their first bytes, shows images, and offers the file
+  as a download with the right extension. To make a data URI, open an
+  image and tick **As a data URI**; the result works in an `<img src>`
+  attribute or a CSS `url()`.
+
+  Related tools: the [JWT decoder](/jwt-decoder/) reads the Base64url parts
+  of a token, the [hash generator](/hash-generator/) gives digests in hex
+  and Base64, and [compress image](/compress-image/) shrinks a picture
+  before you embed it.
+faq:
+  - q: Is Base64 encryption?
+    a: No. Base64 is an encoding without a key, so anyone can turn it back, as this page does. It makes data safe to carry through text-only channels and hides nothing, so never use it to protect a password or a secret.
+  - q: How do I decode a Base64 image?
+    a: Paste the Base64 string into the box, with or without its `data:image/...;base64,` prefix. The page shows the picture with its size in pixels, and the Download button saves it as a PNG, JPEG, GIF, WebP or SVG file.
+  - q: Why does btoa() fail on emoji and other Unicode text?
+    a: The browser's `btoa()` only takes characters with code points below 256 and throws an InvalidCharacterError for anything else, such as "✓", "€" or an emoji. Text has to be turned into bytes first, normally UTF-8, and the bytes are then encoded. This page does that, so "✓" becomes `4pyT`.
+  - q: How large a file can I convert?
+    a: Up to 50 MB. A long result is shown only in part, its first 500,000 characters, while Copy and Download always give all of it. Text typed or pasted into the box can be up to 10 million characters long.
+  - q: Is my text or file uploaded?
+    a: No. Encoding and decoding are done by JavaScript in your browser. Nothing you type, paste or open is sent to a server or stored, and the page keeps working offline once it has loaded.
+---
+<style>
+{% raw %}
+.b64-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin: 0 0 6px; }
+.b64-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; max-width: 100%; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.b64-seg label { position: relative; display: block; flex: 1 1 auto; cursor: pointer; }
+.b64-seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.b64-seg span { display: flex; align-items: center; justify-content: center; min-width: 72px; min-height: 44px; padding: 0 16px; border-radius: 7px; color: var(--muted); font-size: 15px; font-weight: 600; white-space: nowrap; }
+.b64-seg input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--muted); }
+.b64-seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* On the narrowest phones the three choices still share one row. */
+@media (max-width: 400px) {
+  .b64-seg { display: flex; }
+  .b64-seg label { flex: 1 1 0; }
+  .b64-seg span { min-width: 0; padding: 0 8px; }
+}
+.b64-pick { position: relative; display: inline-flex; }
+.b64-pick input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.b64-pick input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 1px; }
+.b64-auto { min-height: 21px; margin: 0 0 12px; }
+.b64 textarea.b64-io { min-height: 130px; word-break: break-all; }
+.b64.is-over textarea.b64-io, .b64.is-over .b64-filebox { outline: 2px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
+.b64-filebox { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.b64-filebox p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.b64-filebox .label { display: block; }
+.b64-opts { display: flex; flex-wrap: wrap; align-items: stretch; gap: 12px; margin: 0 0 16px; }
+.b64-set { flex: 1 1 240px; min-width: 0; margin: 0; padding: 8px 14px 10px; border: 1px solid var(--border); border-radius: 10px; }
+#b64-enc-set { flex: 2 1 320px; }
+.b64-cs { margin-top: 11px; padding-top: 12px; }
+.b64-cs .field { margin: 0; }
+.b64-set legend { padding: 0 6px; font-size: 14px; font-weight: 600; }
+.b64-set .checks { gap: 0 18px; margin: 0; }
+.b64-set .field { margin: 6px 0 0; }
+.b64-set select { max-width: 300px; }
+.b64-set .hint { display: block; margin-top: 6px; }
+.b64-set .hint:empty { display: none; }
+.b64-set:disabled { opacity: 0.6; }
+.b64-stats { margin: -8px 0 12px; }
+.b64-stats:empty { display: none; }
+.b64 .msg.b64-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.b64-preview { margin: 0 0 16px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); text-align: center; }
+.b64-preview img { display: block; max-width: 100%; max-height: 320px; margin: 0 auto 8px; }
+/* An icon of a few pixels is shown enlarged, with its pixels kept sharp. */
+.b64-preview img.is-small { image-rendering: pixelated; }
+.b64-preview figcaption { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.b64-hex { border-top: 1px solid var(--border); }
+.b64-hex summary { padding: 12px 0; font-weight: 600; cursor: pointer; }
+.b64-hex .table-wrap { margin: 0 0 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.b64-hex pre { margin: 0; font-family: var(--mono); font-size: 13px; line-height: 1.5; white-space: pre; }
+.b64-hex .hint { margin: 0 0 4px; }
+.b64-hex .hint:empty { display: none; }
+@media (max-width: 560px) {
+  .b64-hex .table-wrap { padding: 10px; }
+  .b64-hex pre { font-size: 12px; }
+}
+{% endraw %}
+</style>
+
+<div class="b64" id="b64">
+  <div class="b64-top">
+    <div class="b64-seg" role="radiogroup" aria-label="Direction">
+      <label><input type="radio" name="b64-mode" value="auto" checked><span>Auto</span></label>
+      <label><input type="radio" name="b64-mode" value="encode"><span>Encode</span></label>
+      <label><input type="radio" name="b64-mode" value="decode"><span>Decode</span></label>
+    </div>
+    <span class="b64-pick">
+      <input type="file" id="b64-file" aria-describedby="b64-file-error">
+      <label class="btn secondary" for="b64-file">Open file…</label>
+    </span>
+  </div>
+  <p class="hint b64-auto" id="b64-auto"></p>
+  <p class="msg error" id="b64-file-error" role="alert"></p>
+
+  <div class="field" id="b64-text-pane">
+    <label for="b64-input">Text or Base64</label>
+    <textarea id="b64-input" class="b64-io mono" rows="5" spellcheck="false" autocapitalize="off" aria-describedby="b64-error b64-drop-hint" placeholder="Type or paste text to encode, or Base64 to decode…">Hello, World!</textarea>
+    <span class="hint" id="b64-drop-hint">To encode a file or an image, open it, drop it on this box or paste it.</span>
+  </div>
+  <div class="b64-filebox" id="b64-file-pane" hidden>
+    <p><span class="label">File</span> <strong id="b64-file-name"></strong> <span class="hint" id="b64-file-info"></span></p>
+    <button class="btn secondary small" type="button" id="b64-file-remove">Remove file</button>
+  </div>
+  <!-- Not an alert: the message can come and go while typing, so it is announced
+       through #b64-status once typing pauses. -->
+  <p class="msg error" id="b64-error"></p>
+
+  <div class="b64-opts">
+    <fieldset class="b64-set" id="b64-enc-set">
+      <legend>When encoding</legend>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="b64-url"> URL-safe (- and _)</label>
+        <label class="check"><input type="checkbox" id="b64-nopad"> No = padding</label>
+        <label class="check"><input type="checkbox" id="b64-datauri"> As a data URI</label>
+      </div>
+      <div class="field">
+        <label for="b64-wrap">Line length</label>
+        <select id="b64-wrap">
+          <option value="0" selected>No line breaks</option>
+          <option value="76">76 characters (MIME)</option>
+          <option value="64">64 characters (PEM)</option>
+        </select>
+      </div>
+      <span class="hint" id="b64-datauri-hint"></span>
+    </fieldset>
+    <fieldset class="b64-set" id="b64-dec-set">
+      <legend>When decoding</legend>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="b64-strict"> Strict: refuse anything malformed</label>
+      </div>
+    </fieldset>
+    <div class="b64-set b64-cs">
+      <div class="field">
+        <label for="b64-charset">Text encoding</label>
+        <select id="b64-charset" aria-describedby="b64-charset-hint b64-charset-error">
+          <optgroup label="Unicode">
+            <option value="utf-8" selected>UTF-8</option>
+            <option value="utf-16le">UTF-16 LE</option>
+            <option value="utf-16be">UTF-16 BE</option>
+          </optgroup>
+          <optgroup label="Western Europe (Latin-1)">
+            <option value="windows-1252">Windows-1252</option>
+          </optgroup>
+          <optgroup label="Central Europe">
+            <option value="windows-1250">Windows-1250</option>
+          </optgroup>
+          <optgroup label="Cyrillic">
+            <option value="windows-1251">Windows-1251</option>
+          </optgroup>
+          <optgroup label="East Asia (decode only)">
+            <option value="shift_jis">Shift_JIS</option>
+            <option value="gb18030">GBK, GB18030</option>
+            <option value="big5">Big5</option>
+            <option value="euc-kr">EUC-KR</option>
+          </optgroup>
+        </select>
+      </div>
+      <span class="hint" id="b64-charset-hint">How text is turned into bytes and back.</span>
+    </div>
+  </div>
+  <p class="msg error" id="b64-charset-error"></p>
+
+  <div class="field" id="b64-out-pane">
+    <label for="b64-output" id="b64-output-label">Base64</label>
+    <textarea id="b64-output" class="b64-io mono" rows="5" readonly aria-describedby="b64-stats" placeholder="The result appears here."></textarea>
+  </div>
+  <figure class="b64-preview" id="b64-preview" hidden>
+    <img id="b64-img" alt="Preview of the image">
+    <figcaption id="b64-img-info"></figcaption>
+  </figure>
+  <p class="hint b64-stats" id="b64-stats"></p>
+  <p class="msg b64-note" id="b64-note"></p>
+  <div class="actions">
+    <button class="btn" type="button" id="b64-copy">Copy result</button>
+    <button class="btn secondary" type="button" id="b64-download">Download .txt</button>
+    <button class="btn secondary" type="button" id="b64-swap">Use result as input</button>
+    <button class="btn secondary" type="button" id="b64-clear">Clear</button>
+  </div>
+
+  <details class="b64-hex" id="b64-hex">
+    <summary id="b64-hex-summary">Hex dump</summary>
+    <div class="table-wrap" role="group" aria-labelledby="b64-hex-summary"><pre id="b64-dump"></pre></div>
+    <p class="hint" id="b64-hex-note"></p>
+  </details>
+  <!-- The result changes on every keystroke, so a short summary is announced
+       here once typing pauses. -->
+  <p class="visually-hidden" id="b64-status" role="status"></p>
+</div>
+
+<script>
+{% raw %}
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  // Limits: text in the box, a file, what the result box shows, and the hex dump.
+  var MAX_TEXT = 10000000, MAX_FILE = 50 * 1024 * 1024, SHOW_MAX = 500000, DUMP_MAX = 4096;
+
+  var root = $('#b64'), input = $('#b64-input'), output = $('#b64-output'), errEl = $('#b64-error');
+  var fileEl = $('#b64-file'), fileErr = $('#b64-file-error'), charsetEl = $('#b64-charset'), charsetErr = $('#b64-charset-error');
+  var urlBox = $('#b64-url'), nopadBox = $('#b64-nopad'), dataUriBox = $('#b64-datauri'), wrapEl = $('#b64-wrap'), strictBox = $('#b64-strict');
+  var statusEl = $('#b64-status'), noteEl = $('#b64-note'), statsEl = $('#b64-stats'), autoEl = $('#b64-auto');
+  var figure = $('#b64-preview'), img = $('#b64-img'), caption = $('#b64-img-info'), hexEl = $('#b64-hex'), dumpEl = $('#b64-dump');
+  // file: { name, type, bytes, text (is it text?) }; res: what is on screen now.
+  var state = { file: null, fileError: '', res: null, url: '', pictured: null, reading: 0 };
+
+  function fmt(n) { return n.toLocaleString('en-GB'); }
+  function count(n, one, many) { return fmt(n) + ' ' + (n === 1 ? one : many); }
+  function mode() { var r = $('input[name="b64-mode"]:checked'); return r ? r.value : 'auto'; }
+  function setMode(v) { $('input[name="b64-mode"][value="' + v + '"]').checked = true; }
+  // For a message: the character in quotes, or its code point when it cannot be seen.
+  function shown(cp) {
+    var ch = String.fromCodePoint(cp), h = cp.toString(16).toUpperCase();
+    while (h.length < 4) h = '0' + h;
+    return /^[\p{C}\p{Z}\p{M}]$/u.test(ch) ? 'U+' + h : '“' + ch + '”';
+  }
+  function setMsg(el, field, msg) {
+    if (el.textContent !== msg) el.textContent = msg;
+    if (msg) field.setAttribute('aria-invalid', 'true'); else field.removeAttribute('aria-invalid');
+  }
+  // One live region, written once typing pauses and only when the sentence is new.
+  var pending = '';
+  var speak = TT.debounce(function () { if (statusEl.textContent !== pending) statusEl.textContent = pending; }, 700);
+  function say(text) { pending = text; speak(); }
+
+  // ---------- Base64 ----------
+  var STD = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  var URLSAFE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  // What an ASCII character is to the decoder: 0 to 63 its value, 64 the = sign,
+  // 65 white space, 66 anything else.
+  var KIND = new Uint8Array(128), HEXVAL = new Int8Array(128);
+  (function () {
+    var i;
+    for (i = 0; i < 128; i++) { KIND[i] = 66; HEXVAL[i] = -1; }
+    for (i = 0; i < 64; i++) { KIND[STD.charCodeAt(i)] = i; KIND[URLSAFE.charCodeAt(i)] = i; }
+    KIND[61] = 64;
+    [9, 10, 11, 12, 13, 32].forEach(function (c) { KIND[c] = 65; });
+    for (i = 0; i < 16; i++) { HEXVAL['0123456789abcdef'.charCodeAt(i)] = i; HEXVAL['0123456789ABCDEF'.charCodeAt(i)] = i; }
+  })();
+  var asciiDecoder = new TextDecoder();
+
+  // RFC 4648: three bytes become four characters; = fills the last group.
+  function encodeBase64(bytes, urlSafe, pad, wrap) {
+    var abc = urlSafe ? URLSAFE : STD, A = new Uint8Array(64), i;
+    for (i = 0; i < 64; i++) A[i] = abc.charCodeAt(i);
+    var n = bytes.length, rem = n % 3, len = (n - rem) / 3 * 4 + (rem ? (pad ? 4 : rem + 1) : 0);
+    var out = new Uint8Array(len + (wrap && len ? Math.ceil(len / wrap) - 1 : 0)), o = 0, col = 0, a, b, c;
+    function put(code) {
+      if (wrap && col === wrap) { out[o++] = 10; col = 0; }
+      out[o++] = code;
+      col++;
+    }
+    for (i = 0; i + 2 < n; i += 3) {
+      a = bytes[i]; b = bytes[i + 1]; c = bytes[i + 2];
+      if (wrap) { put(A[a >> 2]); put(A[((a & 3) << 4) | (b >> 4)]); put(A[((b & 15) << 2) | (c >> 6)]); put(A[c & 63]); }
+      else { out[o++] = A[a >> 2]; out[o++] = A[((a & 3) << 4) | (b >> 4)]; out[o++] = A[((b & 15) << 2) | (c >> 6)]; out[o++] = A[c & 63]; }
+    }
+    if (rem === 1) {
+      a = bytes[n - 1];
+      put(A[a >> 2]); put(A[(a & 3) << 4]);
+      if (pad) { put(61); put(61); }
+    } else if (rem === 2) {
+      a = bytes[n - 2]; b = bytes[n - 1];
+      put(A[a >> 2]); put(A[((a & 3) << 4) | (b >> 4)]); put(A[(b & 15) << 2]);
+      if (pad) put(61);
+    }
+    return asciiDecoder.decode(out);
+  }
+
+  function codePoint(codes, i) {
+    var c = codes[i], d = codes[i + 1];
+    return c >= 0xD800 && c <= 0xDBFF && d >= 0xDC00 && d <= 0xDFFF ? 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00) : c;
+  }
+  function head(codes, from, to, max) {
+    return String.fromCharCode.apply(null, codes.subarray(from, Math.min(to, from + max)));
+  }
+  function isSpace(c) { return c < 128 && KIND[c] === 65; }
+
+  // codes: the characters as numbers (a text) or the bytes of a file.
+  // Lenient: white space, characters outside the alphabet, PEM armour lines and
+  // URL encoding are skipped, both alphabets count, padding may be missing.
+  // Strict: one alphabet, complete padding, no stray characters or bits.
+  function decodeBase64(codes, from, to, strict) {
+    var out = new Uint8Array(Math.floor((to - from) * 3 / 4) + 3), o = 0, acc = 0, n = 0;
+    var data = 0, pads = 0, skipped = 0, sample = [], dropped = 0, std = false, url = false, last = 0, i, c, k, e;
+    // lineStart: nothing but spaces and tabs since the last line break.
+    var lineStart = true;
+    if (strict) {
+      while (from < to && isSpace(codes[from])) from++;
+      while (to > from && isSpace(codes[to - 1])) to--;
+      if (head(codes, from, to, 11) === '-----BEGIN ') return { error: 'A PEM block has BEGIN and END lines that are not Base64. Turn Strict off to skip them.' };
+    }
+    for (i = from; i < to; i++) {
+      c = codes[i];
+      if (!strict) {
+        // Copied out of a JSON string: \n and \r are line breaks, \t is a tab and \/ a slash.
+        if (c === 92 && i + 1 < to) {
+          e = codes[i + 1];
+          if (e === 110 || e === 114) { i++; lineStart = true; continue; }
+          if (e === 116) { i++; continue; }
+          if (e === 47) continue;
+        }
+        // -----BEGIN ...----- is not data, although - is in the URL-safe alphabet.
+        // The line may be indented, as in a YAML file.
+        if (c === 45 && lineStart && codes[i + 1] === 45 && codes[i + 2] === 45 && codes[i + 3] === 45 && codes[i + 4] === 45) {
+          while (i < to && codes[i] !== 10 && codes[i] !== 13 && !(codes[i] === 92 && (codes[i + 1] === 110 || codes[i + 1] === 114))) i++;
+          if (codes[i] === 92) i++;
+          continue;
+        }
+        if (c === 10 || c === 13) lineStart = true;
+        else if (c !== 32 && c !== 9) lineStart = false;
+        // %3D, %2B, %2F: Base64 that went through URL encoding.
+        if (c === 37 && i + 2 < to && HEXVAL[codes[i + 1]] >= 0 && HEXVAL[codes[i + 2]] >= 0) {
+          c = HEXVAL[codes[i + 1]] * 16 + HEXVAL[codes[i + 2]];
+          i += 2;
+        }
+      }
+      k = c < 128 ? KIND[c] : 66;
+      if (k < 64) {
+        if (strict) {
+          if (pads) return { error: 'Character ' + fmt(i + 1) + ' comes after the = padding, which must be the end of the data.' };
+          if (c === 43 || c === 47) std = true; else if (c === 45 || c === 95) url = true;
+          if (std && url) return { error: 'Character ' + fmt(i + 1) + ' mixes two alphabets: + and / belong to standard Base64, - and _ to the URL-safe kind.' };
+        }
+        acc = (acc << 6) | k;
+        n++; data++; last = c;
+        if (n === 4) { out[o++] = acc >> 16; out[o++] = (acc >> 8) & 255; out[o++] = acc & 255; acc = 0; n = 0; }
+      } else if (k === 64) {
+        pads++;
+        if (strict) continue;
+        // The end of one piece of Base64; another may follow.
+        if (n === 2) out[o++] = acc >> 4;
+        else if (n === 3) { out[o++] = acc >> 10; out[o++] = (acc >> 2) & 255; }
+        else if (n === 1) dropped++;
+        acc = 0; n = 0;
+      } else if (k === 65) {
+        if (strict && c !== 10 && c !== 13) return { error: 'There is a ' + (c === 32 ? 'space' : c === 9 ? 'tab' : c === 11 ? 'vertical tab' : 'form feed') + ' at character ' + fmt(i + 1) + '. Strict Base64 has line breaks at most, no other white space.' };
+      } else {
+        if (strict) {
+          return { error: shown(codePoint(codes, i)) + ' (character ' + fmt(i + 1) + ') is not in the Base64 alphabet.' + (c === 37 ? ' Turn Strict off to read URL-encoded data.' : '') };
+        }
+        c = codePoint(codes, i);
+        if (c > 0xFFFF) i++;
+        skipped++;
+        if (sample.length < 4 && sample.indexOf(c) < 0) sample.push(c);
+      }
+    }
+    if (strict) {
+      var rem = data % 4, need = rem ? new Array(5 - rem).join('=') : '';
+      if (rem === 1) return { error: 'The length is wrong: ' + count(data, 'character leaves', 'characters leave') + ' one over after the groups of four, and a single character holds only 6 bits of a byte.' };
+      if (pads && pads !== need.length) return { error: 'The padding is wrong: this data ' + (need ? 'needs ' + need : 'needs no =') + ' at the end and has ' + (pads > 4 ? count(pads, '= sign', '= signs') : new Array(pads + 1).join('=')) + '.' };
+      if (!pads && rem) return { error: 'The padding is missing: strict Base64 ends with ' + need + ' here. Add it, or turn Strict off.' };
+      if ((rem === 2 && (acc & 15)) || (rem === 3 && (acc & 3))) {
+        return { error: 'The last character, “' + String.fromCharCode(last) + '”, has bits set that no byte uses. A careful encoder writes “' + (url ? URLSAFE : STD)[KIND[last] & (rem === 2 ? 48 : 60)] + '” there.' };
+      }
+    }
+    if (n === 2) out[o++] = acc >> 4;
+    else if (n === 3) { out[o++] = acc >> 10; out[o++] = (acc >> 2) & 255; }
+    else if (n === 1) dropped++;
+    return { bytes: out.subarray(0, o), data: data, chars: data + pads, skipped: skipped, sample: sample, dropped: dropped };
+  }
+
+  // data:[media type][;base64],data (RFC 2397). Null when the input is no data URI.
+  function dataUri(codes, from, to) {
+    var h = head(codes, from, to, 1024);
+    if (h.slice(0, 5).toLowerCase() !== 'data:') return null;
+    var comma = h.indexOf(',');
+    if (comma < 0) return { error: 'This data URI has no comma, so it has no data to decode.' };
+    var meta = h.slice(5, comma).trim();
+    if (meta.slice(-7).toLowerCase() !== ';base64') return { error: 'This data URI is not Base64: there is no “;base64” before the comma, so its data is plain text.' };
+    return { mime: meta.slice(0, -7).trim().toLowerCase(), start: from + comma + 1 };
+  }
+
+  // ---------- Kinds of data ----------
+  function has(bytes, at, sig) {
+    if (bytes.length < at + sig.length) return false;
+    for (var i = 0; i < sig.length; i++) if (bytes[at + i] !== sig.charCodeAt(i)) return false;
+    return true;
+  }
+  function kind(mime, ext, label, article, image) { return { mime: mime, ext: ext, label: label, article: article, image: !!image, binary: true }; }
+  // A signature made of letters can begin a text too ("OTTO is my name"). A real
+  // file of that kind has bytes that no readable text has within its first few.
+  function word(b, sig) { return has(b, 0, sig) && !cleanUtf8(b.subarray(0, 4096), b.length > 4096); }
+  // Files that start with a signature. Null for anything else.
+  function sniffBinary(b) {
+    if (has(b, 0, '\x89PNG\r\n\x1a\n')) return kind('image/png', 'png', 'PNG image', 'a', true);
+    if (has(b, 0, '\xff\xd8\xff')) return kind('image/jpeg', 'jpg', 'JPEG image', 'a', true);
+    if (word(b, 'GIF87a') || word(b, 'GIF89a')) return kind('image/gif', 'gif', 'GIF image', 'a', true);
+    if (has(b, 0, 'RIFF') && has(b, 8, 'WEBP')) return kind('image/webp', 'webp', 'WebP image', 'a', true);
+    if (has(b, 0, 'RIFF') && has(b, 8, 'WAVE')) return kind('audio/wav', 'wav', 'WAV audio file', 'a');
+    if (has(b, 0, 'BM') && b.length >= 26 && !b[6] && !b[7] && !b[8] && !b[9]) return kind('image/bmp', 'bmp', 'BMP image', 'a', true);
+    if (has(b, 0, '\0\0\x01\0') && b.length >= 22 && b[4] > 0 && !b[5]) return kind('image/x-icon', 'ico', 'ICO icon', 'an', true);
+    if (has(b, 0, 'II*\0') || has(b, 0, 'MM\0*')) return kind('image/tiff', 'tif', 'TIFF image', 'a', true);
+    if (has(b, 4, 'ftyp')) {
+      var brand = String.fromCharCode(b[8], b[9], b[10], b[11]);
+      if (brand === 'avif' || brand === 'avis') return kind('image/avif', 'avif', 'AVIF image', 'an', true);
+      if (/^(heic|heix|hevc|hevx|mif1|msf1)$/.test(brand)) return kind('image/heic', 'heic', 'HEIC image', 'a', true);
+      if (brand === 'qt  ') return kind('video/quicktime', 'mov', 'QuickTime video', 'a');
+      if (brand === 'M4A ') return kind('audio/mp4', 'm4a', 'M4A audio file', 'an');
+      return kind('video/mp4', 'mp4', 'MP4 video', 'an');
+    }
+    if (has(b, 0, '%PDF-')) return kind('application/pdf', 'pdf', 'PDF document', 'a');
+    if (has(b, 0, 'PK\x03\x04') || has(b, 0, 'PK\x05\x06')) return kind('application/zip', 'zip', 'ZIP archive (the container of .docx, .xlsx and .jar files too)', 'a');
+    if (has(b, 0, '\x1f\x8b\x08')) return kind('application/gzip', 'gz', 'gzip file', 'a');
+    if (word(b, 'BZh')) return kind('application/x-bzip2', 'bz2', 'bzip2 file', 'a');
+    if (has(b, 0, '\xfd7zXZ\0')) return kind('application/x-xz', 'xz', 'XZ file', 'an');
+    if (has(b, 0, '\x28\xb5\x2f\xfd')) return kind('application/zstd', 'zst', 'Zstandard file', 'a');
+    if (has(b, 0, '7z\xbc\xaf\x27\x1c')) return kind('application/x-7z-compressed', '7z', '7z archive', 'a');
+    if (has(b, 0, 'Rar!\x1a\x07')) return kind('application/vnd.rar', 'rar', 'RAR archive', 'a');
+    if (word(b, 'wOFF')) return kind('font/woff', 'woff', 'WOFF font', 'a');
+    if (word(b, 'wOF2')) return kind('font/woff2', 'woff2', 'WOFF2 font', 'a');
+    if (word(b, 'OTTO')) return kind('font/otf', 'otf', 'OpenType font', 'an');
+    if (word(b, 'ID3') || has(b, 0, '\xff\xfb')) return kind('audio/mpeg', 'mp3', 'MP3 audio file', 'an');
+    if (word(b, 'OggS')) return kind('audio/ogg', 'ogg', 'Ogg file', 'an');
+    if (word(b, 'fLaC')) return kind('audio/flac', 'flac', 'FLAC audio file', 'a');
+    if (word(b, 'MThd')) return kind('audio/midi', 'mid', 'MIDI file', 'a');
+    if (has(b, 0, '\x1a\x45\xdf\xa3')) return kind('video/webm', 'webm', 'WebM or Matroska video', 'a');
+    if (has(b, 0, '\0asm')) return kind('application/wasm', 'wasm', 'WebAssembly module', 'a');
+    if (has(b, 0, 'SQLite format 3\0')) return kind('application/vnd.sqlite3', 'sqlite', 'SQLite database', 'an');
+    // ASN.1 DER: a sequence whose length field covers the rest of the data.
+    if (b.length > 4 && b[0] === 0x30 && b[1] === 0x82 && ((b[2] << 8) | b[3]) === b.length - 4) return kind('application/octet-stream', 'der', 'DER file (the binary form of a certificate or key)', 'a');
+    return null;
+  }
+  // Text that is also a kind of file.
+  function sniffText(text) {
+    var h = text.slice(0, 1024).replace('\uFEFF', '').trimStart().toLowerCase(), k;
+    if (h.indexOf('<svg') === 0 || ((h.indexOf('<?xml') === 0 || h.indexOf('<!--') === 0 || h.indexOf('<!doctype svg') === 0) && h.indexOf('<svg') > 0)) k = kind('image/svg+xml', 'svg', 'SVG image', 'an', true);
+    else if (h.indexOf('<!doctype html') === 0 || h.indexOf('<html') === 0) k = kind('text/html', 'html', 'HTML', '');
+    else if (h.indexOf('<?xml') === 0) k = kind('application/xml', 'xml', 'XML', '');
+    else if ((h[0] === '{' || h[0] === '[') && text.length <= 1000000) {
+      try { JSON.parse(text); k = kind('application/json', 'json', 'JSON', ''); } catch (e) { k = null; }
+    }
+    if (!k) k = kind('text/plain', 'txt', 'text', '');
+    k.binary = false;
+    return k;
+  }
+  var MIME_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'image/avif': 'avif', 'image/bmp': 'bmp', 'image/x-icon': 'ico',
+    'image/vnd.microsoft.icon': 'ico', 'application/pdf': 'pdf', 'application/json': 'json', 'text/html': 'html', 'text/css': 'css', 'text/javascript': 'js', 'text/csv': 'csv',
+    'text/plain': 'txt', 'text/xml': 'xml', 'application/octet-stream': 'bin', 'application/xml': 'xml', 'application/zip': 'zip', 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/ogg': 'ogg', 'video/mp4': 'mp4', 'video/webm': 'webm', 'font/woff': 'woff', 'font/woff2': 'woff2', 'font/ttf': 'ttf' };
+
+  // ---------- Text and bytes ----------
+  var CHARSETS = {
+    'utf-8': { name: 'UTF-8' }, 'utf-16le': { name: 'UTF-16 LE' }, 'utf-16be': { name: 'UTF-16 BE' },
+    'windows-1252': { name: 'Windows-1252', single: true }, 'windows-1250': { name: 'Windows-1250', single: true }, 'windows-1251': { name: 'Windows-1251', single: true },
+    'shift_jis': { name: 'Shift_JIS', decodeOnly: true }, 'gb18030': { name: 'GB18030', decodeOnly: true }, 'big5': { name: 'Big5', decodeOnly: true }, 'euc-kr': { name: 'EUC-KR', decodeOnly: true }
+  };
+  // A one-byte encoding is turned round by decoding all 256 bytes once.
+  function byteMap(id) {
+    var cs = CHARSETS[id];
+    if (!cs.map) {
+      var all = new Uint8Array(256), i;
+      for (i = 0; i < 256; i++) all[i] = i;
+      var chars = new TextDecoder(id).decode(all);
+      cs.map = {};
+      for (i = 255; i >= 0; i--) if (chars.charCodeAt(i) !== 0xFFFD) cs.map[chars.charCodeAt(i)] = i;
+    }
+    return cs.map;
+  }
+  function textToBytes(text, id) {
+    var cs = CHARSETS[id], bytes, i, c;
+    if (cs.decodeOnly) return { error: cs.name + ' text can only be decoded on this page. To encode, choose UTF-8 or another encoding from the list.' };
+    if (id === 'utf-8') {
+      return { bytes: new TextEncoder().encode(text), note: text.isWellFormed && !text.isWellFormed() ? 'Half of a surrogate pair is not a character, so it was encoded as U+FFFD (\uFFFD).' : '' };
+    }
+    if (!cs.single) {
+      bytes = new Uint8Array(text.length * 2);
+      for (i = 0; i < text.length; i++) {
+        c = text.charCodeAt(i);
+        bytes[2 * i + (id === 'utf-16le' ? 0 : 1)] = c & 255;
+        bytes[2 * i + (id === 'utf-16le' ? 1 : 0)] = c >> 8;
+      }
+      return { bytes: bytes };
+    }
+    var map = byteMap(id);
+    bytes = new Uint8Array(text.length);
+    for (i = 0; i < text.length; i++) {
+      c = map[text.charCodeAt(i)];
+      if (c === undefined) return { error: cs.name + ' has no code for ' + shown(text.codePointAt(i)) + ' (character ' + fmt(i + 1) + '). Choose UTF-8 to encode any text.' };
+      bytes[i] = c;
+    }
+    return { bytes: bytes };
+  }
+  // The text encoding that a media type names (text/plain;charset=...), as one of
+  // the choices of the menu, or ''.
+  function charsetOf(mediaType) {
+    var m = /;\s*charset=\s*"?([^";\s]+)/.exec(mediaType), id = '';
+    if (!m) return '';
+    try { id = new TextDecoder(m[1]).encoding; } catch (e) { return ''; }
+    if (id === 'gbk') id = 'gb18030';
+    return CHARSETS[id] ? id : '';
+  }
+  function bytesToText(bytes, id) {
+    try { return { text: new TextDecoder(id, { fatal: true }).decode(bytes), valid: true }; }
+    catch (e) { return { text: new TextDecoder(id).decode(bytes), valid: false }; }
+  }
+  // Readable text: valid UTF-8 without control characters other than tab and line breaks.
+  function cleanUtf8(bytes, partial) {
+    var text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes, { stream: !!partial }); } catch (e) { return false; }
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      if ((c < 32 && c !== 9 && c !== 10 && c !== 13) || (c >= 127 && c < 160)) return false;
+    }
+    return text.length > 0;
+  }
+  function toCodes(text) {
+    var codes = new Uint16Array(text.length);
+    for (var i = 0; i < text.length; i++) codes[i] = text.charCodeAt(i);
+    return codes;
+  }
+  // The characters of a file that could hold Base64: ASCII text, after the byte
+  // order mark of UTF-8 (as Notepad saves) or of UTF-16 (as PowerShell does).
+  // Null for any other file.
+  function fileCodes(file) {
+    if (file.codes === undefined) {
+      var b = file.bytes, codes = b, i;
+      if (b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) codes = b.subarray(3);
+      else if (b.length % 2 === 0 && ((b[0] === 0xFF && b[1] === 0xFE) || (b[0] === 0xFE && b[1] === 0xFF))) {
+        codes = new Uint16Array(b.length / 2 - 1);
+        for (i = 0; i < codes.length; i++) codes[i] = b[0] === 0xFF ? b[2 * i + 2] | (b[2 * i + 3] << 8) : (b[2 * i + 2] << 8) | b[2 * i + 3];
+      }
+      for (i = 0; codes && i < codes.length; i++) if (codes[i] > 126 || (codes[i] < 32 && KIND[codes[i]] !== 65)) codes = null;
+      file.codes = codes;
+    }
+    return file.codes;
+  }
+
+  // Auto: only what is surely Base64 is decoded. It must be well formed, and it
+  // must turn into readable UTF-8 text or a known kind of file, or be padded or
+  // long and mixed enough that it cannot be ordinary words or numbers.
+  function looksEncoded(codes, from, to) {
+    while (from < to && isSpace(codes[from])) from++;
+    while (to > from && isSpace(codes[to - 1])) to--;
+    if (from === to) return false;
+    var h = head(codes, from, to, 300).toLowerCase();
+    if (h.indexOf('data:') === 0) return h.indexOf(',') > 0 && h.slice(0, h.indexOf(',')).trim().slice(-7) === ';base64';
+    if (h.indexOf('-----begin ') === 0) return true;
+    var upper = false, lower = false, digit = false, std = false, url = false, capital = true, pads = 0, data = 0, i, c;
+    for (i = from; i < to; i++) {
+      c = codes[i];
+      if (c === 10 || c === 13) continue;
+      if (c === 61) { pads++; continue; }
+      if (pads || c > 127 || KIND[c] > 63) return false;
+      if (c >= 97) lower = true;
+      else if (c >= 65 && c <= 90) { upper = true; if (data) capital = false; }
+      else if (c >= 48 && c <= 57) digit = true;
+      else if (c === 43 || c === 47) std = true;
+      else url = true;
+      data++;
+    }
+    var rem = data % 4;
+    if ((std && url) || rem === 1 || (pads && (!rem || pads !== 4 - rem)) || (data < 4 && !pads)) return false;
+    if (!pads && !std && !url) {
+      // Words and numbers are made of Base64 characters too: CAPITALS, words with no
+      // capital after the first letter (lower case, Capitalised), and digits alone.
+      if (!digit && (!lower || capital)) return false;
+      if (digit && !upper && !lower) return false;
+    }
+    // Look at what it decodes to; for a long input the first part tells enough.
+    var whole = to - from <= 8192;
+    var bytes = decodeBase64(codes, from, whole ? to : from + 8192, false).bytes;
+    if (!whole) bytes = bytes.subarray(0, bytes.length - 3);
+    if (sniffBinary(bytes) || cleanUtf8(bytes, !whole)) return true;
+    return pads ? data + pads >= 8 : data >= 20 && upper && lower && digit;
+  }
+
+  // ---------- Hex dump ----------
+  var HEX = [];
+  for (var hx = 0; hx < 256; hx++) HEX.push((hx + 256).toString(16).slice(1));
+  // The layout of hexdump -C: offset, the bytes in hex in two halves, the same bytes as ASCII.
+  function hexDump(bytes, perLine) {
+    var n = Math.min(bytes.length, DUMP_MAX), lines = [];
+    for (var off = 0; off < n; off += perLine) {
+      var h = '', a = '';
+      for (var j = 0; j < perLine; j++) {
+        if (j === perLine / 2) h += ' ';
+        if (off + j < n) {
+          var b = bytes[off + j];
+          h += HEX[b] + ' ';
+          a += b >= 32 && b < 127 ? String.fromCharCode(b) : '.';
+        } else h += '   ';
+      }
+      lines.push(('0000000' + off.toString(16)).slice(-8) + '  ' + h + ' |' + a + '|');
+    }
+    return lines.join('\n');
+  }
+  var narrow = window.matchMedia('(max-width: 640px)');
+  function showDump() {
+    var res = state.res, bytes = res && res.bytes && !res.error ? res.bytes : null;
+    $('#b64-hex-summary').textContent = !bytes ? 'Hex dump' : 'Hex dump of the ' + (res.dir === 'encode' ? 'input' : 'decoded data') + ' (' + count(bytes.length, 'byte', 'bytes') + ')';
+    if (!hexEl.open) return;
+    dumpEl.textContent = bytes && bytes.length ? hexDump(bytes, narrow.matches ? 8 : 16) : '';
+    $('#b64-hex-note').textContent = !bytes || !bytes.length ? 'There are no bytes to show yet.'
+      : bytes.length > DUMP_MAX ? 'The first ' + fmt(DUMP_MAX) + ' of ' + fmt(bytes.length) + ' bytes are shown.' : '';
+  }
+  hexEl.addEventListener('toggle', showDump);
+  if (narrow.addEventListener) narrow.addEventListener('change', showDump);
+
+  // ---------- Working it out ----------
+  function work() {
+    var m = mode(), file = state.file, text = file ? '' : boxText(), codes = null;
+    var res = { dir: m === 'decode' ? 'decode' : 'encode', error: '', csError: '', full: '', bytes: null, notes: [], auto: '', stats: '', spoken: '', kind: null, hideText: false, picture: null, ext: 'txt', mime: '' };
+    if (!file && text.length > MAX_TEXT) {
+      res.error = 'This is ' + fmt(text.length) + ' characters long. The box takes up to ' + fmt(MAX_TEXT) + '; open longer data as a file.';
+      return res;
+    }
+    if (m === 'auto' || m === 'decode') codes = file ? fileCodes(file) : toCodes(text);
+    if (m === 'auto') {
+      var encoded = !!codes && looksEncoded(codes, 0, codes.length);
+      res.dir = encoded ? 'decode' : 'encode';
+      if (file || text.trim()) res.auto = encoded ? 'Auto: this is Base64, so it is decoded.' : 'Auto: this is not Base64, so it is encoded.';
+    }
+    return res.dir === 'encode' ? workEncode(res, file, text) : workDecode(res, file, codes);
+  }
+
+  function workEncode(res, file, text) {
+    var bytes, id = charsetEl.value;
+    if (file) bytes = file.bytes;
+    else {
+      var made = textToBytes(text, id);
+      if (made.error) { res.csError = made.error; return res; }
+      bytes = made.bytes;
+      if (made.note) res.notes.push(made.note);
+    }
+    res.bytes = bytes;
+    var asUri = dataUriBox.checked;
+    if (asUri) {
+      // A file with no media type, or only the generic one, takes the type its first bytes name.
+      var sniffed = file ? sniffBinary(bytes) : null, given = file && file.type !== 'application/octet-stream' ? file.type : '';
+      var type = file ? (given || (sniffed && sniffed.mime) || 'application/octet-stream') : 'text/plain;charset=' + id;
+      res.full = 'data:' + type + ';base64,' + encodeBase64(bytes, false, true, 0);
+    } else {
+      res.full = encodeBase64(bytes, urlBox.checked, !nopadBox.checked, +wrapEl.value);
+    }
+    res.uri = asUri;
+    if (file) {
+      var k = sniffBinary(bytes);
+      if (!k && /^image\/svg/.test(file.type)) k = kind('image/svg+xml', 'svg', 'SVG image', 'an', true);
+      if (k && k.image) res.picture = { bytes: bytes, mime: k.mime, label: k.label };
+    }
+    var larger = bytes.length ? Math.round((res.full.length - bytes.length) / bytes.length * 100) : 0;
+    res.stats = !bytes.length && !file ? '' : count(bytes.length, 'byte', 'bytes') + ' in, ' + count(res.full.length, 'character', 'characters') + ' out' + (bytes.length ? ' (' + fmt(larger) + '% larger)' : '') + '.';
+    res.spoken = !bytes.length && !file ? '' : 'Encoded ' + count(bytes.length, 'byte', 'bytes') + ' to ' + count(res.full.length, 'character', 'characters') + (asUri ? ' as a data URI.' : ' of Base64.');
+    return res;
+  }
+
+  function workDecode(res, file, codes) {
+    if (!codes) {
+      res.error = '“' + file.name + '” is not Base64 text, so there is nothing to decode. Choose Encode to turn the file into Base64.';
+      return res;
+    }
+    var from = 0, to = codes.length, id = charsetEl.value, declared = '';
+    while (from < to && isSpace(codes[from])) from++;
+    while (to > from && isSpace(codes[to - 1])) to--;
+    if (from === to) return res;
+    var uri = dataUri(codes, from, to);
+    if (uri) {
+      if (uri.error) { res.error = uri.error; return res; }
+      from = uri.start;
+      declared = uri.mime;
+    }
+    var dec = decodeBase64(codes, from, to, strictBox.checked);
+    if (dec.error) { res.error = dec.error; return res; }
+    if (!dec.data) {
+      res.error = 'There is nothing to decode: no character here is in the Base64 alphabet.';
+      return res;
+    }
+    var bytes = res.bytes = dec.bytes;
+    if (dec.skipped) res.notes.push(count(dec.skipped, 'character that is not Base64 was', 'characters that are not Base64 were') + ' skipped (' + dec.sample.slice(0, 3).map(shown).join(', ') + (dec.sample.length > 3 ? ' and others' : '') + ').');
+    if (dec.dropped) res.notes.push('A character that stood alone at the end of a group was left out: one character holds only 6 bits, less than a byte.');
+
+    res.stats = count(dec.chars, 'Base64 character', 'Base64 characters') + ' in, ' + count(bytes.length, 'byte', 'bytes') + ' out';
+    if (!bytes.length) {
+      res.stats += '.';
+      res.spoken = 'Decoded 0 bytes.';
+      return res;
+    }
+    var k = sniffBinary(bytes), decoded = null;
+    if (!k) {
+      decoded = bytesToText(bytes, id);
+      if (decoded.valid) k = sniffText(decoded.text);
+    }
+    var what;
+    if (k && k.binary) {
+      res.hideText = true;
+      what = (k.article ? k.article + ' ' : '') + k.label;
+    } else {
+      res.full = decoded.text;
+      if (decoded.valid) {
+        what = (k.ext === 'txt' ? 'text' : k.label) + ' in ' + CHARSETS[id].name;
+        var hidden = 0;
+        for (var i = 0; i < decoded.text.length; i++) { var c = decoded.text.charCodeAt(i); if ((c < 32 && c !== 9 && c !== 10 && c !== 13) || c === 127) hidden++; }
+        if (hidden) res.notes.push(count(hidden, 'control character', 'control characters') + ' in this text cannot be seen in the box. The hex dump shows every byte.');
+      } else {
+        what = 'not ' + CHARSETS[id].name + ' text';
+        var uriCharset = charsetOf(declared);
+        res.notes.push('These bytes are not valid ' + CHARSETS[id].name + ', so the characters shown as \uFFFD are wrong. ' +
+          (uriCharset && uriCharset !== id ? 'The data URI says they are ' + CHARSETS[uriCharset].name + ': choose it as the text encoding.'
+            : id === 'utf-8' && bytes.length > 1 && ((bytes[0] === 0xFF && bytes[1] === 0xFE) || (bytes[0] === 0xFE && bytes[1] === 0xFF))
+            ? 'They start with a UTF-16 byte order mark: choose UTF-16 ' + (bytes[0] === 0xFF ? 'LE' : 'BE') + ' as the text encoding.'
+            : 'If this is text, try another text encoding. If it is a file, download it.'));
+      }
+    }
+    // What the bytes say comes first. Plain text and unknown bytes take the media
+    // type that a data URI names for them, if it names one.
+    var sure = k && (k.binary || k.ext !== 'txt'), named = declared.split(';')[0];
+    res.kind = k;
+    res.ext = sure ? k.ext : MIME_EXT[named] || (k ? 'txt' : 'bin');
+    res.mime = sure ? k.mime : named || (k ? 'text/plain' : 'application/octet-stream');
+    if (k && k.image) res.picture = { bytes: bytes, mime: k.mime, label: k.label };
+    else if (!sure && /^image\//.test(named)) res.picture = { bytes: bytes, mime: named, label: 'Image' };
+    res.stats += ': ' + what + '.';
+    res.spoken = 'Decoded ' + count(bytes.length, 'byte', 'bytes') + ': ' + what + '.';
+    return res;
+  }
+
+  // ---------- Showing it ----------
+  function showPicture(pic) {
+    if (pic && state.pictured === pic.bytes) return;
+    if (state.url) URL.revokeObjectURL(state.url);
+    state.url = '';
+    state.pictured = pic ? pic.bytes : null;
+    figure.hidden = !pic;
+    if (!pic) { img.removeAttribute('src'); return; }
+    var size = count(pic.bytes.length, 'byte', 'bytes');
+    img.onload = function () {
+      if (state.pictured !== pic.bytes) return;
+      var w = img.naturalWidth, h = img.naturalHeight, small = w > 0 && h > 0 && w <= 64 && h <= 64;
+      img.classList.toggle('is-small', small);
+      img.style.width = small ? w * Math.floor(128 / Math.max(w, h)) + 'px' : '';
+      caption.textContent = pic.label + ', ' + (img.naturalWidth ? fmt(img.naturalWidth) + ' × ' + fmt(img.naturalHeight) + ' pixels, ' : '') + size + '.';
+    };
+    img.onerror = function () {
+      if (state.pictured !== pic.bytes) return;
+      img.hidden = true;
+      caption.textContent = pic.label + ', ' + size + '. This browser cannot show it.';
+    };
+    img.hidden = false;
+    img.classList.remove('is-small');
+    img.style.width = '';
+    caption.textContent = pic.label + ', ' + size + '.';
+    state.url = URL.createObjectURL(new Blob([pic.bytes], { type: pic.mime }));
+    img.src = state.url;
+  }
+
+  function show(res, silent) {
+    state.res = res;
+    var file = state.file, encode = res.dir === 'encode', m = mode();
+    setMsg(errEl, input, file ? '' : res.error);
+    setMsg(fileErr, fileEl, state.fileError || (file ? res.error : ''));
+    setMsg(charsetErr, charsetEl, res.csError);
+    $('#b64-text-pane').hidden = !!file;
+    $('#b64-file-pane').hidden = !file;
+    if (file) {
+      $('#b64-file-name').textContent = file.name;
+      $('#b64-file-info').textContent = count(file.bytes.length, 'byte', 'bytes') + (file.type ? ', ' + file.type : '');
+    }
+    if (autoEl.textContent !== res.auto) autoEl.textContent = res.auto;
+
+    $('#b64-output-label').textContent = encode ? (res.uri ? 'Data URI' : 'Base64') : 'Decoded text';
+    var cut = res.full.length > SHOW_MAX;
+    output.value = cut ? res.full.slice(0, SHOW_MAX) : res.full;
+    $('#b64-out-pane').hidden = res.hideText;
+    var notes = res.notes.slice();
+    if (cut) notes.push('The box shows the first ' + fmt(SHOW_MAX) + ' of ' + fmt(res.full.length) + ' characters. Copy and Download give all of them.');
+    var note = notes.join(' ');
+    if (noteEl.textContent !== note) noteEl.textContent = note;
+    if (statsEl.textContent !== res.stats) statsEl.textContent = res.stats;
+    showPicture(res.picture);
+
+    var hasBytes = !!(res.bytes && res.bytes.length) && !res.error;
+    $('#b64-copy').disabled = !res.full;
+    $('#b64-swap').disabled = !res.full || res.full.length > MAX_TEXT;
+    $('#b64-download').disabled = encode ? !res.full : !hasBytes;
+    $('#b64-download').textContent = encode ? 'Download .txt' : 'Download .' + res.ext;
+    // Options that cannot apply are greyed out.
+    $('#b64-enc-set').disabled = m === 'decode';
+    $('#b64-dec-set').disabled = m === 'encode';
+    urlBox.disabled = nopadBox.disabled = wrapEl.disabled = dataUriBox.checked;
+    $('#b64-datauri-hint').textContent = dataUriBox.checked ? 'A data URI always uses the standard alphabet, with padding and without line breaks.' : '';
+    showDump();
+    if (!silent && !(file && res.error)) say(res.error || res.csError || [res.auto, res.spoken, note].filter(Boolean).join(' '));
+  }
+  function update(silent) { show(work(), silent); }
+
+  // ---------- Files ----------
+  function takeFile(f) {
+    if (!f) return;
+    var job = ++state.reading;
+    if (f.size > MAX_FILE) {
+      state.fileError = '“' + f.name + '” has ' + fmt(f.size) + ' bytes. The largest file this page takes is ' + fmt(MAX_FILE) + ' bytes (50 MB).';
+      update();
+      return;
+    }
+    f.arrayBuffer().then(function (buf) {
+      if (job !== state.reading) return;
+      state.fileError = '';
+      state.file = { name: f.name, type: f.type || '', bytes: new Uint8Array(buf) };
+      update();
+    }, function () {
+      if (job !== state.reading) return;
+      state.fileError = '“' + f.name + '” could not be read.';
+      update();
+    });
+  }
+  fileEl.addEventListener('change', function () {
+    takeFile(fileEl.files && fileEl.files[0]);
+    fileEl.value = '';
+  });
+  $('#b64-file-remove').addEventListener('click', function () {
+    state.reading++;
+    state.file = null;
+    state.fileError = '';
+    update();
+    input.focus();
+  });
+  // A file dropped anywhere on the tool, or an image pasted into the box.
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+  ['dragenter', 'dragover'].forEach(function (t) {
+    root.addEventListener(t, function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      root.classList.add('is-over');
+    });
+  });
+  ['dragleave', 'dragend'].forEach(function (t) {
+    root.addEventListener(t, function (e) { if (!root.contains(e.relatedTarget)) root.classList.remove('is-over'); });
+  });
+  root.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    root.classList.remove('is-over');
+    takeFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+  });
+  input.addEventListener('paste', function (e) {
+    var data = e.clipboardData, files = data && data.files;
+    if (!files || !files.length) return;
+    // Cells copied from a spreadsheet, or text from a word processor, come with a
+    // picture of themselves. That is a paste of text, not of a file.
+    var types = Array.prototype.slice.call(data.types || []);
+    if (types.indexOf('text/plain') >= 0 && (types.indexOf('text/html') >= 0 || types.indexOf('text/rtf') >= 0)) return;
+    e.preventDefault();
+    takeFile(files[0]);
+  });
+
+  // ---------- Controls ----------
+  // Long input is worked out after a short pause instead of on every keystroke.
+  var updateLater = TT.debounce(function () { update(); }, 150);
+  // The example the page starts with follows the direction: until something is
+  // typed, choosing Decode puts the example in as Base64, where the untouched
+  // "Hello, World!" would be decoded into nonsense.
+  // What "Use result as input" put in the box, exactly: a carriage return in it is
+  // shown as a line feed, so the exact text counts until the box is edited.
+  var swapped = { shown: null, exact: '' };
+  function boxText() { return input.value === swapped.shown ? swapped.exact : input.value; }
+  var EXAMPLE = input.defaultValue, EXAMPLE_ENCODED = encodeBase64(new TextEncoder().encode(EXAMPLE), false, true, 0);
+  var untouched = input.value === EXAMPLE;
+  input.addEventListener('input', function () {
+    untouched = false;
+    state.fileError = '';
+    if (input.value.length > 20000) updateLater(); else update();
+  });
+  // A message about a file that was refused has been read by the next choice.
+  $$('input[name="b64-mode"]').forEach(function (el) {
+    el.addEventListener('change', function () {
+      if (untouched && !state.file) input.value = mode() === 'decode' ? EXAMPLE_ENCODED : EXAMPLE;
+      state.fileError = '';
+      update();
+    });
+  });
+  [urlBox, nopadBox, dataUriBox, wrapEl, strictBox, charsetEl].forEach(function (el) {
+    el.addEventListener('change', function () {
+      state.fileError = '';
+      update();
+    });
+  });
+  $('#b64-copy').addEventListener('click', function () {
+    if (state.res && state.res.full) TT.copy(state.res.full, this);
+  });
+  $('#b64-download').addEventListener('click', function () {
+    var res = state.res, file = state.file;
+    if (!res || res.error) return;
+    if (res.dir === 'encode') {
+      if (res.full) TT.download((file ? file.name + '.' : '') + 'base64.txt', res.full, 'text/plain;charset=utf-8');
+    } else if (res.bytes && res.bytes.length) {
+      TT.download('decoded.' + res.ext, new Blob([res.bytes], { type: res.mime }));
+    }
+  });
+  $('#b64-swap').addEventListener('click', function () {
+    var res = state.res;
+    if (!res || !res.full || res.full.length > MAX_TEXT) return;
+    untouched = false;
+    state.reading++;
+    state.file = null;
+    state.fileError = '';
+    input.value = res.full;
+    swapped = { shown: input.value, exact: res.full };
+    if (mode() !== 'auto') setMode(res.dir === 'encode' ? 'decode' : 'encode');
+    update();
+  });
+  $('#b64-clear').addEventListener('click', function () {
+    untouched = false;
+    state.reading++;
+    state.file = null;
+    state.fileError = '';
+    input.value = '';
+    update();
+    input.focus();
+  });
+
+  // The browser may put typed text and chosen options back after this script
+  // has run (Back button, reload), so the result is worked out again then.
+  window.addEventListener('pageshow', function () {
+    if (input.value !== EXAMPLE && input.value !== EXAMPLE_ENCODED) untouched = false;
+    update(true);
+  });
+  update(true);
+})();
+{% endraw %}
+</script>
