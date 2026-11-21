@@ -13,8 +13,9 @@ howto: |
      page downloads the OCR engine and the language data from this site:
      about 4.5 MB for English, and 0.7 to 3 MB for each other language.
   3. The text appears in the box. Correct it if you need to, then press
-     **Copy text** or **Download .txt**. **Join lines into paragraphs**
-     removes the line break at the end of each printed line.
+     **Copy text** or **Download .txt**. **Join lines into paragraphs** puts
+     each paragraph on one line; a hyphen at the end of a line is kept, and
+     the next line follows it without a space.
 
   The reading is done by Tesseract, the open-source OCR engine first written
   at Hewlett-Packard and developed by Google from 2006 to 2017, here compiled
@@ -33,8 +34,9 @@ howto: |
   | Blurred letters | Take the photo again in even light, closer, with the camera parallel to the page. |
 
   **Black and white** turns every pixel black or white at the level that best
-  separates text from paper (Otsu's method). It can help with faint print,
-  and it shows in the preview exactly what is read.
+  separates text from paper (Otsu's method), which can help with faint print.
+  Tick **Show it as it is read** to see the picture exactly as the OCR engine
+  gets it, after these changes.
 
   ## Confidence for each line
 
@@ -48,7 +50,7 @@ howto: |
 
   Each page of a PDF is read on its own, up to 100 pages per file. With **Use
   the text stored in PDFs** ticked, a page that already holds text, such as a
-  PDF saved from Word, is copied exactly from the file; scanned pages are
+  PDF saved from Word, has its text copied from the file; scanned pages are
   drawn at up to 300 dpi and read as pictures. A PDF that is locked with a
   password asks for it, and the password stays on your device. To read a few
   pages of a long PDF, take them out first with [Split PDF](/split-pdf/).
@@ -60,7 +62,7 @@ faq:
   - q: How do I copy text from a screenshot?
     a: Take the screenshot to the clipboard, then press Ctrl+V (⌘V on a Mac) on this page. On Windows, Windows logo key + Shift + S copies the area you select; on a Mac, hold Control as well when you press Shift-Command-4.
   - q: Can it read handwriting?
-    a: Not well. Tesseract is designed for printed text, so joined-up handwriting usually comes out as nonsense. Neat capital letters written apart are read more often, but check every word.
+    a: Not well. Tesseract is designed for printed text, so joined-up handwriting usually comes out as nonsense. Neat printed capitals sometimes work, but check every word.
   - q: Which languages can it read?
     a: English, Arabic, Chinese (Simplified and Traditional), Dutch, French, German, Hindi, Indonesian, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish, Ukrainian and Vietnamese. For text that mixes another language with English, tick **The text also has English words**. Vertical Chinese, Japanese and Korean text needs separate data that this page does not load.
   - q: Is my image uploaded to a server?
@@ -97,6 +99,10 @@ faq:
 .i2t-notes { margin: 0 0 12px; padding: 0; list-style: none; font-size: 14px; }
 .i2t-notes li { margin: 0 0 6px; padding: 6px 12px; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; background: var(--surface-2); overflow-wrap: anywhere; }
 .i2t-size { margin: -6px 0 14px; }
+/* Wide enough that the longest choice (Chinese (Traditional), One block of text) is never cut:
+   the fields share a row only where each still gets this width. */
+.i2t-set > .field { flex: 1 1 190px; }
+.i2t-set > .i2t-lang-field { flex: 2 1 220px; }
 .i2t-progress { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; }
 .i2t-progress progress { flex: 1 1 auto; min-width: 0; height: 12px; accent-color: var(--accent); }
 .i2t-status { min-height: 1.6em; margin: 0 0 12px; font-weight: 600; overflow-wrap: anywhere; }
@@ -168,11 +174,12 @@ faq:
     </div>
     <button class="btn secondary small" type="button" id="i2t-rotate">Rotate page</button>
     <button class="btn secondary small" type="button" id="i2t-remove">Remove page</button>
+    <label class="check"><input type="checkbox" id="i2t-asread"> Show it as it is read</label>
   </div>
   <ul class="i2t-notes" id="i2t-notes" hidden></ul>
 
-  <div class="row">
-    <div class="field">
+  <div class="row i2t-set">
+    <div class="field i2t-lang-field">
       <label for="i2t-lang">Language of the text</label>
       <select id="i2t-lang">
         <option value="eng" selected>English</option>
@@ -237,7 +244,7 @@ faq:
       <label for="i2t-text" id="i2t-text-label">Text found</label>
       <span class="hint" id="i2t-count"></span>
     </div>
-    <textarea id="i2t-text" rows="10" dir="auto" spellcheck="false" autocomplete="off"></textarea>
+    <textarea id="i2t-text" rows="10" dir="ltr" spellcheck="false" autocomplete="off"></textarea>
     <div class="checks">
       <label class="check"><input type="checkbox" id="i2t-join"> Join lines into paragraphs</label>
       <label class="check" id="i2t-heads-row" hidden><input type="checkbox" id="i2t-heads" checked> A heading for each page</label>
@@ -294,6 +301,7 @@ faq:
   const stage = $('#i2t-stage'), video = $('#i2t-video'), fig = $('#i2t-fig'), img = $('#i2t-img'), svg = $('#i2t-boxes');
   const waitEl = $('#i2t-wait'), placeholder = $('#i2t-placeholder'), camBar = $('#i2t-cam-bar');
   const pageBar = $('#i2t-page-bar'), pageField = $('#i2t-page-field'), pageSel = $('#i2t-page'), notesEl = $('#i2t-notes');
+  const asReadIn = $('#i2t-asread');
   const langSel = $('#i2t-lang'), layoutSel = $('#i2t-layout'), enlargeSel = $('#i2t-enlarge');
   const alsoRow = $('#i2t-also-row'), alsoIn = $('#i2t-also'), cleanIn = $('#i2t-clean'), bwIn = $('#i2t-bw'), pdfTextIn = $('#i2t-pdftext');
   const sizeEl = $('#i2t-size'), progressRow = $('#i2t-progress'), bar = $('#i2t-bar'), stopBtn = $('#i2t-stop');
@@ -312,7 +320,7 @@ faq:
   function plural(n, one, many) { return NUM.format(n) + ' ' + (n === 1 ? one : many || one + 's'); }
   function mb(bytes) { return (Math.round(bytes / 1e5) / 10).toFixed(1) + ' MB'; }
   // Cut by code points, so an emoji is never split in half.
-  function clip(s, n) { const cps = Array.from(String(s)); return cps.length > n ? cps.slice(0, n - 1).join('') + '…' : String(s); }
+  function clip(s, n) { const cps = Array.from(String(s)); return cps.length > n ? cps.slice(0, n - 1).join('') + '\u2026' : String(s); }
   function listText(items) { return items.length < 2 ? items.join('') : items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1]; }
   function median(a) { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
   function friendly(message, extra) { const e = new Error(message); e.friendly = true; return Object.assign(e, extra || {}); }
@@ -339,7 +347,7 @@ faq:
       const head = 'P6\n' + w + ' ' + h + '\n255\n', out = new Uint8Array(head.length + n * 3);
       for (i = 0; i < head.length; i++) out[i] = head.charCodeAt(i);
       for (i = 0, j = head.length; i < n * 4; i += 4) { out[j++] = rgba[i]; out[j++] = rgba[i + 1]; out[j++] = rgba[i + 2]; }
-      return { buf: out.buffer, inverted: false };
+      return { buf: out.buffer, inverted: false, view: viewOf(out, head.length, 3, w, h) };
     }
     const head = 'P5\n' + w + ' ' + h + '\n255\n', out = new Uint8Array(head.length + n);
     for (i = 0; i < head.length; i++) out[i] = head.charCodeAt(i);
@@ -359,7 +367,32 @@ faq:
       const t = otsuLevel(g);
       for (i = 0; i < n; i++) g[i] = g[i] > t ? 255 : 0;
     }
-    return { buf: out.buffer, inverted };
+    return { buf: out.buffer, inverted, view: viewOf(out, head.length, 1, w, h) };
+  }
+  // A small copy of the picture as Tesseract gets it (RGBA, at most 1400 pixels a side),
+  // each pixel the average of the block it covers.
+  function viewOf(src, off, ch, w, h) {
+    const k = Math.min(1, 1400 / Math.max(w, h)), tw = Math.max(1, Math.round(w * k)), th = Math.max(1, Math.round(h * k));
+    const sum = new Float64Array(tw * th * 3), cnt = new Uint32Array(tw * th);
+    for (let y = 0; y < h; y++) {
+      const row = Math.min(th - 1, Math.floor(y * k)) * tw;
+      for (let x = 0; x < w; x++) {
+        const t = row + Math.min(tw - 1, Math.floor(x * k)), i = off + (y * w + x) * ch;
+        sum[t * 3] += src[i];
+        sum[t * 3 + 1] += src[i + (ch === 3 ? 1 : 0)];
+        sum[t * 3 + 2] += src[i + (ch === 3 ? 2 : 0)];
+        cnt[t]++;
+      }
+    }
+    const px = new Uint8ClampedArray(tw * th * 4);
+    for (let t = 0; t < tw * th; t++) {
+      const c = cnt[t] || 1;
+      px[t * 4] = sum[t * 3] / c;
+      px[t * 4 + 1] = sum[t * 3 + 1] / c;
+      px[t * 4 + 2] = sum[t * 3 + 2] / c;
+      px[t * 4 + 3] = 255;
+    }
+    return { w: tw, h: th, px };
   }
   function levelAt(hist, count, q) {
     const want = count * q;
@@ -457,7 +490,7 @@ faq:
       const m = e.data;
       try {
         const r = prepPixels(new Uint8ClampedArray(m.buf), m.w, m.h, m.o);
-        self.postMessage({ id: m.id, buf: r.buf, inverted: r.inverted }, [r.buf]);
+        self.postMessage({ id: m.id, buf: r.buf, inverted: r.inverted, view: r.view }, [r.buf, r.view.px.buffer]);
       } catch (err) { self.postMessage({ id: m.id, error: String(err && err.message || err) }); }
     };
   }
@@ -466,7 +499,7 @@ faq:
   function prepRun(buf, w, h, o) {
     if (prepWorker === null) {
       try {
-        const src = [prepPixels, levelAt, evenLight, otsuLevel].map(f => f.toString()).join('\n') + '\n(' + prepWorkerMain.toString() + ')();';
+        const src = [prepPixels, viewOf, levelAt, evenLight, otsuLevel].map(f => f.toString()).join('\n') + '\n(' + prepWorkerMain.toString() + ')();';
         const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
         prepWorker = new Worker(url);
         URL.revokeObjectURL(url);
@@ -499,7 +532,7 @@ faq:
   let pages = [], selected = null, nextId = 1, photoN = 0, pasteN = 0;
   let generated = '', edited = false, stash = null;
   let running = false, stopRequested = false, cancelRun = null, cancelP = null, readingNow = false;
-  let noteErrors = [];
+  let noteErrors = [], focusAfterStop = false;
 
   function settings() {
     const lang = Object.prototype.hasOwnProperty.call(LANGS, langSel.value) ? langSel.value : 'eng';
@@ -525,7 +558,7 @@ faq:
     const s = settings(), need = [];
     if (!loaded.has('core')) need.push(['the OCR engine', ENGINE_BYTES]);
     s.langs.forEach(l => { if (!loaded.has(l)) need.push([LANGS[l][0] + ' data', LANGS[l][1]]); });
-    if (!need.length) return 'The OCR engine and ' + listText(s.langs.map(l => LANGS[l][0])) + ' data are loaded. Nothing is uploaded.';
+    if (!need.length) return 'The OCR engine is loaded, with ' + listText(s.langs.map(l => LANGS[l][0])) + ' data. Nothing is uploaded.';
     const total = need.reduce((a, x) => a + x[1], 0);
     return 'Before reading, the page downloads about ' + mb(total) + ' from this site: ' +
       listText(need.map(x => x[0] + ' (' + mb(x[1]) + ')')) + '. Nothing is uploaded.';
@@ -537,35 +570,58 @@ faq:
     const p = typeof m.progress === 'number' ? m.progress : 0;
     if (m.status === 'recognizing text') { if (readingNow) setBar(15 + 85 * p); return; }
     if (p >= 1) return;
-    if (m.status === 'loading tesseract core') { setBar(5); say('Downloading the OCR engine (' + mb(ENGINE_BYTES) + ')…'); }
+    if (m.status === 'loading tesseract core') { setBar(5); say('Downloading the OCR engine (' + mb(ENGINE_BYTES) + ')\u2026'); }
     else if (m.status === 'loading language traineddata' && loadingLangs.length) {
       setBar(30);
-      say('Downloading ' + listText(loadingLangs.map(l => LANGS[l][0])) + ' data (' + mb(loadingLangs.reduce((a, l) => a + LANGS[l][1], 0)) + ')…');
-    } else if (m.status === 'initializing api') { setBar(80); say('Starting the OCR engine…'); }
+      say('Downloading ' + listText(loadingLangs.map(l => LANGS[l][0])) + ' data (' + mb(loadingLangs.reduce((a, l) => a + LANGS[l][1], 0)) + ')\u2026');
+    } else if (m.status === 'initializing api') { setBar(80); say('Starting the OCR engine\u2026'); }
   }
   function engineFailure() {
     return friendly('The OCR engine could not be loaded. Check your connection and try again.', { engine: true });
   }
   function guard(p) { return cancelP ? Promise.race([p, cancelP]) : p; }
+  // tesseract.js hands over its worker only once it is ready, and never answers at all when a
+  // language file fails to download. The Worker it creates (synchronously, at the start of
+  // createWorker) is caught here, so a start that fails or is stopped is ended at once.
+  let starting = null;
   function createEngine(langs) {
+    const job = { dropped: false, raw: null };
+    starting = job;
     return new Promise((resolve, reject) => {
       let settled = false;
-      const fail = () => { if (!settled) { settled = true; reject(engineFailure()); } };
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        if (job.raw) job.raw.terminate();
+        reject(engineFailure());
+      };
       let made;
+      const Native = window.Worker;
       try {
+        window.Worker = function (src, opts) { job.raw = new Native(src, opts); return job.raw; };
+        window.Worker.prototype = Native.prototype;
         made = window.Tesseract.createWorker(langs, 1, {
           workerPath: VENDOR + 'worker.min.js', corePath: VENDOR + 'core', langPath: VENDOR + 'lang',
           cacheMethod: 'none', workerBlobURL: false, gzip: true, logger: onLog, errorHandler: fail
         });
-      } catch (e) { fail(); return; }
+      } catch (e) { window.Worker = Native; fail(); return; }
+      window.Worker = Native;
       made.then(w => {
-        if (settled) { try { w.terminate(); } catch (e) { /* already gone */ } return; }
+        if (settled || job.dropped) {
+          try { w.terminate(); } catch (e) { /* already gone */ }
+          if (!settled) { settled = true; reject(stopError()); }
+          return;
+        }
         settled = true;
         resolve(w);
       }, fail);
-    });
+    }).finally(() => { if (starting === job) starting = null; });
   }
   function dropEngine() {
+    if (starting) {
+      starting.dropped = true;
+      if (starting.raw) starting.raw.terminate();
+    }
     if (engine) { try { engine.worker.terminate(); } catch (e) { /* already gone */ } }
     engine = null;
     loaded.clear();
@@ -578,7 +634,7 @@ faq:
     try {
       if (!window.Tesseract) {
         setBar(2);
-        say('Downloading the OCR engine (' + mb(ENGINE_BYTES) + ')…');
+        say('Downloading the OCR engine (' + mb(ENGINE_BYTES) + ')\u2026');
         await guard(loadScript(VENDOR + 'tesseract.min.js').catch(() => { throw engineFailure(); }));
       }
       if (!engine) {
@@ -613,7 +669,7 @@ faq:
   }
   function decodeNotes(d) {
     const n = [], w = d.warnings || [];
-    if (d.orientation > 1) n.push('Turned upright using the photo’s orientation tag.');
+    if (d.orientation > 1) n.push('Turned upright using the photo\u2019s orientation tag.');
     if (d.animated) n.push('Animated image: only the first frame is read.');
     if (d.format === 'heic' && d.images > 1) n.push('This HEIC file holds ' + d.images + ' images; the main one is read.');
     if (d.format === 'tiff' && d.images > 1) n.push('This TIFF has ' + d.images + ' pages; only the first is read.');
@@ -623,18 +679,41 @@ faq:
     if (w.indexOf('hdr-mapped') >= 0) n.push('This is an HDR image. The browser mapped it into standard range before it was read.');
     return n;
   }
+  // The pixels stay in the decoder's worker until they are on the page at the size that is
+  // read: a 24-megapixel phone photo is made smaller there, as Safari cannot hold a canvas of
+  // more than 16.7 megapixels.
   async function decodeImage(pg) {
     await loadDecoder();
+    const T = window.TTImage;
     let d;
     try {
-      d = await window.TTImage.decode(pg.file, { maxPixels: 100e6 });
+      d = await T.decode(pg.file, { maxPixels: 100e6, canvas: false });
     } catch (e) {
       if (e && e.code === 'LOAD_FAILED') throw friendly(e.message || 'The image reader could not be loaded. Check your connection and try again.', { engine: true });
       throw friendly(e && e.code === 'UNSUPPORTED'
         ? 'this is not a picture or PDF the page can read. Use a JPG, PNG, WebP, HEIC, AVIF, GIF, BMP, TIFF, SVG or PDF file.'
         : (e && e.friendly && e.message) || 'it could not be read.');
     }
-    return { canvas: d.canvas, notes: decodeNotes(d) };
+    const notes = decodeNotes(d), W = d.width, H = d.height;
+    const k = Math.min(1, Math.sqrt(MAX_PX / (W * H)), MAX_SIDE / Math.max(W, H));
+    try {
+      const w = Math.max(1, Math.floor(W * k)), h = Math.max(1, Math.floor(H * k));
+      // (Copied, because release() below empties the decoder's own canvas.)
+      const from = k >= 1 ? await T.toCanvas(d) : await createImageBitmap(await T.encode(d, 'jpeg', { width: w, height: h, quality: 0.95 }));
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, w, h);
+      g.drawImage(from, 0, 0, w, h);
+      if (from.close) from.close();
+      if (k >= 1) return { canvas: c, notes };
+      notes.push('Reduced from ' + W + ' \u00d7 ' + H + ' to ' + w + ' \u00d7 ' + h + ' pixels to keep reading quick.');
+      return { canvas: c, notes };
+    } catch (e) {
+      throw friendly((e && e.friendly && e.message) || 'it is too large for this browser to read.');
+    } finally { T.release(d); }
   }
 
   let pdfjsP = null, pdfWorker = null;
@@ -716,12 +795,13 @@ faq:
     let pdf = null, password = '';
     for (;;) {
       try {
-        say('Opening ' + clip(name, 60) + '…');
+        say('Opening ' + clip(name, 60) + '\u2026');
         pdf = await openPdf(file, password);
         break;
       } catch (err) {
         if (err && err.name === 'PasswordException') {
           password = await askPassword(name, !!password);
+          if (password === undefined) { hidePassword(); return null; }
           if (password === null) { hidePassword(); say(''); errors.push(clip(name, 60) + ' was skipped: it needs a password.'); return null; }
           continue;
         }
@@ -743,21 +823,20 @@ faq:
     return first;
   }
   function addPage(p) {
-    const pg = Object.assign({ id: nextId++, rotation: 0, key: null, result: null, hasText: null, notes: [], thumb: null, tw: 0, th: 0 }, p);
+    const pg = Object.assign({ id: nextId++, rotation: 0, key: null, result: null, hasText: null, notes: [], thumb: null, seen: null, tw: 0, th: 0 }, p);
     pages.push(pg);
     return pg;
   }
   function labelFor(file, how) {
     if (how === 'paste') { pasteN++; return 'Pasted image ' + pasteN; }
     if (how === 'photo') return file.name.replace(/\.jpe?g$/i, '');
-    if (how === 'sample') return 'Sample picture';
     return file.name || 'Image';
   }
   let adding = Promise.resolve();
   function addFiles(list, how) {
     const files = Array.from(list || []).filter(f => f && typeof f.size === 'number');
     if (!files.length) return adding;
-    adding = adding.then(() => addNow(files, how));
+    adding = adding.then(() => addNow(files, how)).catch(() => { hidePassword(); showError('The files could not be opened.'); });
     return adding;
   }
   async function addNow(files, how) {
@@ -773,8 +852,11 @@ faq:
       if (f.size > MAX_FILE_BYTES) { errors.push(name + ' is larger than 500 MB.'); continue; }
       let head;
       try { head = new Uint8Array(await f.slice(0, 1024).arrayBuffer()); } catch (e) { errors.push(name + ' could not be read.'); continue; }
-      let pg = null;
-      if (isPdf(head)) pg = await addPdf(f, errors);
+      let pg = null, picture = false;
+      // A picture can hold the letters %PDF- in its first bytes (in its metadata, say): its own
+      // signature is checked first.
+      try { await loadDecoder(); picture = !!window.TTImage.sniffBytes(head); } catch (e) { /* read as a PDF or an image below */ }
+      if (!picture && isPdf(head)) pg = await addPdf(f, errors);
       else pg = addPage({ kind: 'image', file: f, label: labelFor(f, how) });
       if (pg && !first) first = pg;
     }
@@ -786,7 +868,7 @@ faq:
       showSelected();
       updateText();
       pump();
-    } else if (!running) say('');
+    } else if (!running && statusEl.textContent !== 'Cleared.') say('');
   }
 
   // ---------- Pictures of a page ----------
@@ -819,6 +901,16 @@ faq:
     pg.th = c.height;
     release(c);
   }
+  async function keepView(pg, v) {
+    const c = document.createElement('canvas');
+    c.width = v.w;
+    c.height = v.h;
+    c.getContext('2d').putImageData(new ImageData(v.px, v.w, v.h), 0, 0);
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    release(c);
+    if (pg.seen) URL.revokeObjectURL(pg.seen);
+    pg.seen = blob ? URL.createObjectURL(blob) : null;
+  }
   async function renderPdf(page, maxPx) {
     const base = page.getViewport({ scale: 1 });
     const scale = Math.min(PDF_DPI / 72, Math.sqrt(maxPx / (base.width * base.height)), MAX_SIDE / Math.max(base.width, base.height));
@@ -840,9 +932,9 @@ faq:
       out += it.str;
       if (it.hasEOL) out += '\n';
     }
-    out = out.replace(/\r\n?/g, '\n').replace(/[ \t ]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    out = out.replace(/\r\n?/g, '\n').replace(/[ \t\u00a0]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
     const good = out.replace(/[^\p{L}\p{N}]/gu, '').length;
-    const bad = out.replace(/[^�-\u0000-\u0008\u000e-\u001f]/g, '').length;
+    const bad = out.replace(/[^\ufffd\ue000-\uf8ff\u0000-\u0008\u000e-\u001f]/g, '').length;
     return good >= 3 && bad * 10 <= good ? out : '';
   }
 
@@ -861,41 +953,70 @@ faq:
     const data = g.getImageData(0, 0, w, h);
     release(c);
     const r = await prepRun(data.data.buffer, w, h, { clean: s.clean, bw: s.bw });
-    return { blob: new Blob([r.buf]), w, h, inverted: r.inverted };
+    return { blob: new Blob([r.buf]), w, h, inverted: r.inverted, view: r.view };
   }
   // Tesseract straightens a tilted page by rotateRadians about its centre, and gives boxes in
   // that straightened picture; each corner is turned back, as a fraction of the picture's size.
   function ocrResult(d, p) {
     const rot = d.rotateRadians || 0, cx = p.w / 2, cy = p.h / 2, c = Math.cos(-rot), sn = Math.sin(-rot);
     const at = (x, y) => [(cx + (x - cx) * c - (y - cy) * sn) / p.w, (cy + (x - cx) * sn + (y - cy) * c) / p.h];
-    const lines = [], paras = [];
-    (d.blocks || []).forEach(b => (b.paragraphs || []).forEach(par => {
-      const para = [];
-      (par.lines || []).forEach(l => {
-        const text = tidy(l.text);
-        if (!text) return;
-        const bb = l.bbox;
-        lines.push({ text, conf: Math.max(0, Math.min(100, Math.round(l.confidence))), poly: [at(bb.x0, bb.y0), at(bb.x1, bb.y0), at(bb.x1, bb.y1), at(bb.x0, bb.y1)] });
-        para.push(text);
-      });
-      if (para.length) paras.push(para);
-    }));
+    const lines = [];
+    (d.blocks || []).forEach(b => (b.paragraphs || []).forEach(par => (par.lines || []).forEach(l => {
+      const text = tidy(l.text), bb = l.bbox;
+      if (!text || !bb) return;
+      lines.push({ text, b: bb, conf: Math.max(0, Math.min(100, Math.round(l.confidence))), poly: [at(bb.x0, bb.y0), at(bb.x1, bb.y0), at(bb.x1, bb.y1), at(bb.x0, bb.y1)] });
+    })));
     const conf = lines.length ? Math.round(lines.reduce((a, l) => a + l.conf * l.text.length, 0) / lines.reduce((a, l) => a + l.text.length, 0)) : null;
-    return { method: 'ocr', lines, paras, conf, rot };
+    const blocks = layout(lines).map(bl => bl.map(par => par.map(i => lines[i].text)));
+    lines.forEach(l => { delete l.b; });
+    return { method: 'ocr', lines, blocks, conf, rot };
+  }
+  // The lines, in Tesseract's reading order, grouped as they look on the page. A block ends
+  // where the picture has a gap of about a blank line or a new column starts; it is a blank
+  // line in the text. Inside a block, a paragraph ends where a line stops well short of the
+  // others or the next line is indented; Join lines into paragraphs joins only within one.
+  const RTL = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/;
+  function layout(ls) {
+    if (!ls.length) return [];
+    const h = median(ls.map(l => l.b.y1 - l.b.y0)) || 1;
+    const newColumn = (a, b) => b.y0 < a.y0 - h / 4 || Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) < 0.3 * Math.min(a.x1 - a.x0, b.x1 - b.x0);
+    const gaps = [];
+    for (let i = 1; i < ls.length; i++) if (!newColumn(ls[i - 1].b, ls[i].b)) gaps.push(Math.max(0, ls[i].b.y0 - ls[i - 1].b.y1));
+    const big = Math.max(0.8 * h, 1.8 * (gaps.length ? Math.min.apply(null, gaps) : 0));
+    const blocks = [];
+    let cur = [0];
+    for (let i = 1; i < ls.length; i++) {
+      const a = ls[i - 1].b, b = ls[i].b;
+      if (newColumn(a, b) || b.y0 - a.y1 > big) { blocks.push(cur); cur = [i]; } else cur.push(i);
+    }
+    blocks.push(cur);
+    return blocks.map(idx => {
+      const left = Math.min.apply(null, idx.map(i => ls[i].b.x0)), right = Math.max.apply(null, idx.map(i => ls[i].b.x1));
+      const width = right - left, rtl = idx.some(i => RTL.test(ls[i].text)), paras = [];
+      let par = [idx[0]];
+      for (let k = 1; k < idx.length; k++) {
+        const a = ls[idx[k - 1]].b, b = ls[idx[k]].b;
+        const short = idx.length > 2 && (rtl ? a.x0 > left + width / 4 : a.x1 < right - width / 4);
+        const indent = rtl ? b.x1 < a.x1 - 0.8 * h : b.x0 > a.x0 + 0.8 * h;
+        if (short || indent) { paras.push(par); par = [idx[k]]; } else par.push(idx[k]);
+      }
+      paras.push(par);
+      return paras;
+    });
   }
   // Tesseract puts spaces between Chinese and Japanese characters; they do not belong there.
   const CJK = '[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\u3000-\\u303f\\uff00-\\uffef]';
-  const CJK_GAP = new RegExp('(' + CJK + ') +(?=' + CJK + ')', 'gu');
+  const CJK_GAP = new RegExp('(' + CJK + ') +(?=' + CJK + ')', 'gu'), CJK_ONE = new RegExp(CJK, 'u');
   function tidy(t) { return String(t || '').replace(/[\r\n]+/g, ' ').trim().replace(CJK_GAP, '$1'); }
   function textResult(t) {
-    const paras = t.split(/\n{2,}/).map(p => p.split('\n').map(l => l.trim()).filter(Boolean)).filter(p => p.length);
-    return { method: 'pdf', lines: [], paras, conf: null, rot: 0 };
+    const blocks = t.split(/\n{2,}/).map(p => p.split('\n').map(l => l.trim()).filter(Boolean)).filter(p => p.length).map(p => [p]);
+    return { method: 'pdf', lines: [], blocks, conf: null, rot: 0 };
   }
 
   async function readPage(pg, s, n, total) {
     const key = keyOf(s, pg), notes = [];
-    const what = (total > 1 ? 'page ' + n + ' of ' + total + ', ' : '') + clip(pg.label, 60);
-    say('Reading ' + what + '…');
+    const what = (total > 1 ? n + ' of ' + total + ': ' : '') + clip(pg.label, 60);
+    say('Reading ' + what + '\u2026');
     setBar(0);
     let src, page = null;
     if (pg.kind === 'pdf') {
@@ -906,6 +1027,7 @@ faq:
         if (t) {
           if (!pg.thumb) { const c = await guard(renderPdf(page, THUMB * THUMB)); await makeThumb(pg, c); release(c); }
           page.cleanup();
+          if (pg.seen) { URL.revokeObjectURL(pg.seen); pg.seen = null; }
           finishPage(pg, 'text', textResult(t), ['The text was copied from the PDF file, not read from the picture.']);
           return;
         }
@@ -921,32 +1043,33 @@ faq:
     const turned = rotated(src, pg.rotation);
     if (turned !== src) release(src);
     src = turned;
-    if (pg.rotation) notes.push('Turned ' + pg.rotation + '° clockwise.');
+    if (pg.rotation) notes.push('Turned ' + pg.rotation + '\u00b0 clockwise.');
     await makeThumb(pg, src);
     if (pg === selected) showSelected();
     setBar(4);
     const worker = await getEngine(s.langs);
-    say('Reading ' + what + '…');
+    say('Reading ' + what + '\u2026');
     setBar(8);
     const W = src.width, H = src.height;
     const base = Math.min(1, Math.sqrt(MAX_PX / (W * H)), MAX_SIDE / Math.max(W, H));
-    if (base < 1) notes.push('Reduced to ' + Math.round(W * base) + ' × ' + Math.round(H * base) + ' pixels to keep reading quick.');
+    if (base < 1) notes.push('Reduced from ' + W + ' \u00d7 ' + H + ' to ' + Math.round(W * base) + ' \u00d7 ' + Math.round(H * base) + ' pixels to keep reading quick.');
     let prep = await guard(prepare(src, base, s));
-    let factor = 1;
+    let factor = 1, why = '';
     if (s.enlarge === 'auto') {
       readingNow = false;
       const r = await guard(worker.recognize(prep.blob, { tessedit_pageseg_mode: s.psm }, { text: false, layoutBlocks: true }));
       const heights = [];
       (r.data.layoutBlocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l => { if (l.bbox) heights.push(l.bbox.y1 - l.bbox.y0); })));
       const lh = median(heights);
-      if (lh && lh < 22) factor = Math.min(4, Math.max(2, Math.round(36 / lh)));
-      else if (!heights.length && W * H * base * base < 2e6) factor = 2;
+      if (lh && lh < 22) { factor = Math.min(4, Math.max(2, Math.round(36 / lh))); why = 'small'; }
+      else if (!heights.length && W * H * base * base < 2e6) { factor = 2; why = 'none'; }
     } else factor = Number(s.enlarge) || 1;
     const room = Math.min(Math.sqrt(MAX_PX / (W * H * base * base)), MAX_SIDE / (Math.max(W, H) * base));
     if (factor > room) factor = room >= 1.5 ? Math.floor(room * 10) / 10 : 1;
+    let enlarged = '';
     if (factor > 1) {
       prep = await guard(prepare(src, base * factor, s));
-      notes.push(s.enlarge === 'auto' ? 'Enlarged ' + NUM.format(factor) + '× because the text is small.' : 'Enlarged ' + NUM.format(factor) + '×.');
+      enlarged = 'Enlarged ' + NUM.format(factor) + '\u00d7' + (why === 'small' ? ' because the text is small.' : why === 'none' ? ' because no text was found at its own size.' : '.');
     }
     release(src);
     setBar(15);
@@ -959,9 +1082,12 @@ faq:
       dropEngine();
       throw friendly('the OCR engine stopped while reading it (the picture may be too large for this device).');
     } finally { readingNow = false; }
+    if (!pages.includes(pg)) return;
     const result = ocrResult(r.data, prep);
+    await keepView(pg, prep.view);
+    if (enlarged && (why !== 'none' || result.lines.length)) notes.push(enlarged);
     if (prep.inverted) notes.push('Light text on a dark background: the picture was inverted before reading.');
-    if (Math.abs(result.rot) >= 0.005) notes.push('Straightened by ' + NUM.format(Math.round(Math.abs(result.rot) * 1800 / Math.PI) / 10) + '°.');
+    if (Math.abs(result.rot) >= 0.005) notes.push('Straightened by ' + NUM.format(Math.round(Math.abs(result.rot) * 1800 / Math.PI) / 10) + '\u00b0.');
     finishPage(pg, key, result, notes);
   }
   function finishPage(pg, key, result, notes) {
@@ -996,6 +1122,8 @@ faq:
           if (e && e.engine) { errors.push(e.message); fatal = true; break; }
           errors.push(clip(pg.label, 60) + ': ' + (e && e.friendly ? e.message : 'it could not be read.'));
           removePage(pg);
+          showSelected();
+          updateText();
         }
       }
     } finally {
@@ -1008,12 +1136,18 @@ faq:
     noteErrors = noteErrors.concat(errors);
     showError(noteErrors.join(' '));
     summarise(stopRequested || fatal);
+    // Stop has gone with the progress bar: keep the keyboard focus nearby.
+    if (document.activeElement === stopBtn || document.activeElement === document.body && focusAfterStop) {
+      (continueRow.hidden ? (outEl.hidden ? openBtn : textEl) : continueBtn).focus();
+    }
+    focusAfterStop = false;
     if (pages.length && !stopRequested && !fatal && pages.some(p => stale(settings(), p))) pump();
   }
   function summarise(halted) {
     const s = settings(), done = pages.filter(p => !stale(s, p)), left = pages.length - done.length;
     continueRow.hidden = !(halted && left);
-    if (!pages.length) { say(''); return; }
+    // (After Clear all, its own message stays.)
+    if (!pages.length) { if (statusEl.textContent !== 'Cleared.') say(''); return; }
     if (halted) {
       say((stopRequested ? 'Stopped. ' : '') + plural(done.length, 'page') + ' of ' + NUM.format(pages.length) + ' read with the current settings.');
       return;
@@ -1023,7 +1157,7 @@ faq:
       if (!r) { say(''); return; }
       if (r.method === 'pdf') { say('Copied ' + plural(lineCount(r), 'line') + ' of text from ' + clip(pg.label, 60) + '.'); return; }
       if (!r.lines.length) {
-        say('No text found in ' + clip(pg.label, 60) + '. If it has text, try Enlarge small text at 3×, another Layout, or turn the picture upright.');
+        say('No text found in ' + clip(pg.label, 60) + '. If it has text, try Enlarge small text at 3\u00d7, another Layout, or turn the picture upright.');
         return;
       }
       say('Read ' + plural(r.lines.length, 'line') + ' from ' + clip(pg.label, 60) + ', average confidence ' + r.conf + '%' + (r.lines.some(l => l.conf < LOW) ? '; ' + plural(r.lines.filter(l => l.conf < LOW).length, 'line') + ' to check.' : '.'));
@@ -1036,7 +1170,7 @@ faq:
     say('Read ' + plural(pages.length, 'page') + ': ' + plural(pages.reduce((a, p) => a + (p.result ? lineCount(p.result) : 0), 0), 'line') +
       (conf !== null && lines ? ', average confidence ' + conf + '%' : '') + (empty ? '. No text found on ' + plural(empty, 'page') : '') + '.');
   }
-  function lineCount(r) { return r.paras.reduce((a, p) => a + p.length, 0); }
+  function lineCount(r) { return r.blocks.reduce((a, bl) => a + bl.reduce((b, p) => b + p.length, 0), 0); }
   function setBusy(b) {
     progressRow.hidden = !b;
     textEl.readOnly = b;
@@ -1049,17 +1183,20 @@ faq:
     if (cancelRun) cancelRun();
     // A page can only be stopped mid-way by ending the engine; it starts again on the next read.
     dropEngine();
-    continueBtn.focus();
+    focusAfterStop = document.activeElement === stopBtn;
   });
   continueBtn.addEventListener('click', () => { continueRow.hidden = true; noteErrors = []; showError(''); pump(); });
 
   // ---------- The text ----------
+  // A line that ends in a hyphen after a letter runs on into the next without a space (the
+  // hyphen stays: it may belong to a word such as well-known); Chinese and Japanese lines join
+  // without a space too.
   function joinPara(lines) {
     let out = '';
     for (const l of lines) {
       if (!out) { out = l; continue; }
-      const a = out.slice(-1), b = l.charAt(0);
-      if (/-$/.test(out) || (new RegExp(CJK, 'u').test(a) && new RegExp(CJK, 'u').test(b))) out += l;
+      const a = Array.from(out.slice(-2)).pop(), b = Array.from(l.slice(0, 2))[0];
+      if (/[\p{L}\p{N}]-$/u.test(out) || (CJK_ONE.test(a) && CJK_ONE.test(b))) out += l;
       else out += ' ' + l;
     }
     return out;
@@ -1068,7 +1205,7 @@ faq:
     const join = joinIn.checked, heads = pages.length > 1 && headsIn.checked, parts = [];
     for (const pg of pages) {
       if (!pg.result) continue;
-      const body = pg.result.paras.map(p => (join ? joinPara(p) : p.join('\n'))).join('\n\n');
+      const body = pg.result.blocks.map(bl => bl.map(p => (join ? joinPara(p) : p.join('\n'))).join('\n')).join('\n\n');
       if (heads) parts.push('--- ' + pg.label + ' ---' + (body ? '\n' + body : ''));
       else if (body) parts.push(body);
     }
@@ -1085,6 +1222,10 @@ faq:
         restoreBox.hidden = false;
       }
       textEl.value = t;
+      // Right to left for Arabic text. Set here rather than with dir="auto", which makes Chrome
+      // take seconds over a long paste into the box.
+      const head = t.slice(0, 5000), rtl = (head.match(/[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/g) || []).length;
+      textEl.dir = rtl * 2 > (head.match(/\p{L}/gu) || []).length ? 'rtl' : 'ltr';
     }
     generated = t;
     edited = false;
@@ -1094,7 +1235,7 @@ faq:
     const t = textEl.value;
     if (!t) { setText(countEl, ''); return; }
     const lines = t.split('\n').filter(l => l.trim()).length;
-    const words = (t.match(/[\p{L}\p{N}]+(?:['’.,-][\p{L}\p{N}]+)*/gu) || []).length;
+    const words = (t.match(/[\p{L}\p{N}]+(?:['\u2019.,-][\p{L}\p{N}]+)*/gu) || []).length;
     setText(countEl, plural(lines, 'line') + ', ' + plural(words, 'word'));
   }
   textEl.addEventListener('input', () => {
@@ -1137,6 +1278,8 @@ faq:
   });
   clearBtn.addEventListener('click', () => {
     if (running) { stopRequested = true; if (cancelRun) cancelRun(); dropEngine(); }
+    // A PDF still waiting for its password is dropped quietly.
+    if (pwWait) { const done = pwWait; pwWait = null; done(undefined); }
     pages.slice().forEach(pg => removePage(pg));
     selected = null;
     stash = null;
@@ -1160,13 +1303,33 @@ faq:
     if (i < 0) return;
     pages.splice(i, 1);
     if (pg.thumb) URL.revokeObjectURL(pg.thumb);
+    if (pg.seen) URL.revokeObjectURL(pg.seen);
     if (pg.kind === 'pdf' && --pg.doc.left === 0) { try { pg.doc.pdf.loadingTask.destroy(); } catch (e) { /* closed */ } }
     if (selected === pg) selected = pages[Math.min(i, pages.length - 1)] || null;
+  }
+  // A long file name is shortened in the middle to fit the list box, so that the end of the
+  // name and the page number stay visible on a phone.
+  let measure = null;
+  function fitLabel(text, px) {
+    if (!measure) measure = document.createElement('canvas').getContext('2d');
+    const cs = getComputedStyle(pageSel);
+    measure.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+    if (px <= 0 || measure.measureText(text).width <= px) return text;
+    const cps = Array.from(text);
+    let lo = 1, hi = cps.length - 1, best = cps[0] + '\u2026';
+    while (lo <= hi) {
+      const keep = (lo + hi) >> 1, head = Math.ceil(keep * 0.6), tail = keep - head;
+      const t = cps.slice(0, head).join('') + '\u2026' + (tail ? cps.slice(cps.length - tail).join('') : '');
+      if (measure.measureText(t).width <= px) { best = t; lo = keep + 1; } else hi = keep - 1;
+    }
+    return best;
   }
   function refreshPages() {
     pageBar.hidden = !pages.length;
     pageField.hidden = pages.length < 2;
-    const opts = pages.map((p, i) => [String(p.id), (i + 1) + '. ' + clip(p.label, 48)]);
+    const cs = getComputedStyle(pageSel);
+    const room = pageField.hidden ? 0 : pageSel.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 28;
+    const opts = pages.map((p, i) => [String(p.id), fitLabel((i + 1) + '. ' + p.label, room)]);
     const same = pageSel.options.length === opts.length && opts.every((o, i) => pageSel.options[i].value === o[0] && pageSel.options[i].text === o[1]);
     if (!same) {
       pageSel.textContent = '';
@@ -1174,6 +1337,7 @@ faq:
     }
     if (selected) pageSel.value = String(selected.id);
   }
+  asReadIn.addEventListener('change', showSelected);
   pageSel.addEventListener('change', () => {
     selected = pages.find(p => String(p.id) === pageSel.value) || selected;
     showSelected();
@@ -1182,7 +1346,7 @@ faq:
     if (!selected) return;
     selected.rotation = (selected.rotation + 90) % 360;
     if (selected.thumb) { URL.revokeObjectURL(selected.thumb); selected.thumb = null; }
-    say('Turned ' + clip(selected.label, 60) + ' to ' + selected.rotation + '°; reading it again.');
+    say('Turned ' + clip(selected.label, 60) + ' to ' + selected.rotation + '\u00b0; reading it again.');
     showSelected();
     pump();
   });
@@ -1212,7 +1376,7 @@ faq:
     const pg = selected, live = !!cam.stream;
     placeholder.hidden = !!pg || live;
     stage.classList.toggle('has-view', !!pg && !live);
-    if (pg) refreshPages();
+    refreshPages();
     if (!pg || live) {
       fig.hidden = true;
       waitEl.hidden = true;
@@ -1223,9 +1387,13 @@ faq:
     if (pg.thumb) {
       fig.hidden = false;
       waitEl.hidden = true;
-      if (img.getAttribute('src') !== pg.thumb) img.src = pg.thumb;
+      const asRead = asReadIn.checked && pg.seen && pg.result && pg.result.method === 'ocr';
+      const want = asRead ? pg.seen : pg.thumb;
+      if (img.getAttribute('src') !== want) img.src = want;
+      // A small picture is shown larger, so its outlines and numbers can be told apart.
+      img.style.width = pg.tw < 360 ? Math.round(Math.min(3, 360 / pg.tw) * pg.tw) + 'px' : '';
       const r = pg.result, n = r && r.method === 'ocr' ? r.lines.length : 0, low = n ? r.lines.filter(l => l.conf < LOW).length : 0;
-      img.alt = pg.label + (r && r.method === 'ocr' && pg.key !== null ? ': ' + plural(n, 'line') + ' of text outlined' + (low ? ', ' + plural(low, 'line') + ' to check' : '') : '');
+      img.alt = pg.label + (asRead ? ', as it is read' : '') + (r && r.method === 'ocr' && pg.key !== null ? ': ' + plural(n, 'line') + ' of text outlined' + (low ? ', ' + plural(low, 'line') + ' to check' : '') : '');
       drawBoxes(pg);
     } else {
       fig.hidden = true;
@@ -1262,7 +1430,7 @@ faq:
     });
   }
   img.addEventListener('load', () => { if (selected) drawBoxes(selected); });
-  window.addEventListener('resize', TT.debounce(() => { if (selected && !fig.hidden) drawBoxes(selected); }, 200));
+  window.addEventListener('resize', TT.debounce(() => { refreshPages(); if (selected && !fig.hidden) drawBoxes(selected); }, 200));
   function renderLines(pg) {
     linesBody.textContent = '';
     const many = pages.length > 1;
@@ -1270,7 +1438,7 @@ faq:
     let note = '';
     if (!pg) note = '';
     else if (!pg.result) note = 'Not read yet.';
-    else if (pg.result.method === 'pdf') note = 'This page’s text was copied from the PDF file, so there are no confidence scores.';
+    else if (pg.result.method === 'pdf') note = 'This page\u2019s text was copied from the PDF file, so there are no confidence scores.';
     else if (!pg.result.lines.length) note = 'No text was found on this page.';
     setText(linesNote, note);
     linesNote.hidden = !note;
@@ -1325,7 +1493,7 @@ faq:
   function cameraProblem(e) {
     const name = (e && e.name) || '', msg = (e && e.message) || '';
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-      if (/system/i.test(msg)) return 'Your device is blocking the camera for this browser. Allow it in your system’s privacy settings, then press Take photo again.';
+      if (/system/i.test(msg)) return 'Your device is blocking the camera for this browser. Allow it in your system\u2019s privacy settings, then press Take photo again.';
       return 'Camera access is blocked for this page. Allow the camera (the icon at the left of the address bar, or Website Settings in Safari on iPhone), then press Take photo again. You can also choose a photo instead.';
     }
     if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return 'No camera was found. Choose a picture instead.';
@@ -1334,7 +1502,7 @@ faq:
   }
   function camUi() {
     const live = !!cam.stream;
-    camBtn.textContent = cam.starting ? 'Starting camera…' : 'Take photo';
+    camBtn.textContent = cam.starting ? 'Starting camera\u2026' : 'Take photo';
     video.hidden = !live;
     camBar.hidden = !live;
     stage.classList.toggle('is-live', live);
@@ -1354,7 +1522,7 @@ faq:
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') { showError('This browser does not let web pages use the camera. Choose a photo instead.'); return; }
     cam.starting = true;
     camUi();
-    say('Starting the camera…');
+    say('Starting the camera\u2026');
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } } });
@@ -1423,12 +1591,12 @@ faq:
   pasteBtn.addEventListener('click', async () => {
     showError('');
     if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
-      showError('This browser does not let the button read the clipboard. Press Ctrl+V (⌘V on a Mac) on this page instead.');
+      showError('This browser does not let the button read the clipboard. Press Ctrl+V (\u2318V on a Mac) on this page instead.');
       return;
     }
     let items;
     try { items = await navigator.clipboard.read(); } catch (e) {
-      showError('The browser did not allow reading the clipboard. Press Ctrl+V (⌘V on a Mac) on this page instead.');
+      showError('The browser did not allow reading the clipboard. Press Ctrl+V (\u2318V on a Mac) on this page instead.');
       return;
     }
     for (const it of items) {

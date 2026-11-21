@@ -649,10 +649,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // cut.jpg (120x90, top half (40,90,200), bottom half (230,180,40)) stops 40% into its image
   // data: the browser draws the top and leaves the rest blank, so it is resized with a note, in
   // its row as well as the preview, so it stands out in a batch. The decoder refuses early.jpg
-  // (cut before anything can be drawn), cut.webp (drawn wholly blank), cut.avif (ends before its
-  // image data) and damaged.avif (AV1 data overwritten): the message gives each one's reason in
-  // the decoder's words, and the other files load. pq.avif is an HDR (PQ) AVIF that the browser
-  // maps to standard range; hdr-pq.heic an HDR HEIC that libheif decodes without tone mapping.
+  // (cut before anything can be drawn), cut.webp (drawn wholly blank), cut.avif (ends a third of
+  // the way into its image data) and damaged.avif (AV1 data overwritten): the message gives each
+  // one's reason in the decoder's words, and the other files load. pq.avif is an HDR (PQ) AVIF
+  // that the browser maps to standard range; hdr-pq.heic an HDR HEIC that libheif decodes without
+  // tone mapping.
   const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
   await page.click('#ri-clear');
   await page.selectOption('#ri-format', 'image/jpeg');

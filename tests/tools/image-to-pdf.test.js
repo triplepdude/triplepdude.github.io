@@ -713,8 +713,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // page is drawn from the decoded pixels, as its card is: copied as it is, its data would stop
   // part-way, and PDF readers fill in the rest their own way (pdf.js and Poppler paint it grey).
   // The decoder refuses early.jpg (cut before anything can be drawn), cut.webp (drawn wholly
-  // blank), cut.avif (ends before its image data) and damaged.avif (AV1 data overwritten): the
-  // message gives each one's reason in the decoder's words, and the other files are added.
+  // blank), cut.avif (ends a third of the way into its image data) and damaged.avif (AV1 data
+  // overwritten): the message gives each one's reason in the decoder's words, and the other files
+  // are added.
   // pq.avif is an HDR (PQ) AVIF that the browser maps to standard range; hdr-pq.heic an HDR HEIC
   // that libheif decodes without tone mapping.
   await page.click('#itp-clear');

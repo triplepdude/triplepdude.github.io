@@ -239,6 +239,9 @@ faq:
 
   var doc = null;      // the open PDF: { id, file, name, size, pdf, n, password, encrypted, sizes }
   var pending = null;  // a PDF that is being opened
+  // Convert does nothing while a chosen file is checked or opened: that PDF replaces the one on screen,
+  // and a page drawn from the old one would be saved under the new name.
+  var checking = 0, opening = null;
   var cards = [];      // per page: { el, img, cb, info, dl, thumb, queued, last }
   var selected = [];   // per page, always read from the page field
   var done = [];       // per page: { key, blob, w, h, dpi } made with the settings in key
@@ -456,16 +459,20 @@ faq:
     setError('');
     if (file.size > MAX_FILE) { setError(file.name + ' is larger than 1 GB.'); return Promise.resolve(); }
     if (!file.size) { setError(file.name + ' is empty.'); return Promise.resolve(); }
+    checking++;
     return file.slice(0, 1024).arrayBuffer().then(function (head) {
+      checking--;
       if (!isPdf(head)) { setError(file.name + ' is not a PDF file.'); return; }
       var d = { id: nextId++, file: file, name: file.name, size: file.size, password: '' };
       pending = d;
       hideUnlock();
       say('Opening ' + file.name + '…');
       return tryOpen(d, '').then(function () { if (note && doc === d) setError(note); });
-    }, function () { setError(file.name + ' could not be read.'); });
+    }, function () { checking--; setError(file.name + ' could not be read.'); });
   }
   function tryOpen(d, password) {
+    opening = d;
+    function settled() { if (opening === d) opening = null; }
     return openPdf(d, password).then(function (pdf) {
       if (pending !== d) { pdf.loadingTask.destroy(); return; }
       var info = {};
@@ -490,7 +497,7 @@ faq:
       say('');
       setError(err && /Invalid PDF|FormatError|Invalid XRef|InvalidPDF/i.test((err.name || '') + ' ' + (err.message || '')) ?
         d.name + ' is damaged or is not a valid PDF.' : d.name + ' could not be opened: ' + (err && err.message || err));
-    });
+    }).then(settled, function (err) { settled(); throw err; });
   }
   function showUnlock(d, wrong) {
     unlockBox.hidden = false;
@@ -828,7 +835,7 @@ faq:
     return baseName(doc.name) + '-page-' + s + '.' + st.format;
   }
   function convert() {
-    if (busy || !doc) return;
+    if (busy || !doc || checking || opening) return;
     setError('');
     var s = refresh(true);
     if (!s) return;

@@ -360,6 +360,16 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#spl-every', '15');
   assert.equal(await plan(), '1 PDF with all 10 pages, as the PDF has no more pages than that.');
   assert.equal(await text('#spl-split'), 'Save 1 PDF');
+  // A file of every page: the pages in order with their sizes and turns, the links between them
+  // (direct, through a named destination, through a /GoTo action), the web link, the note, and
+  // each picture once.
+  out = await save();
+  assert.equal(out.name, 'ten-pages-01-10.pdf');
+  pdf = await inspect(out.buf);
+  assert.deepEqual(pdf.pages.map(p => `${p.mark} ${p.size} ${p.rotate}`), expected.map(p => `${p.mark.slice(-2)} ${p.size} ${p.rotate}`));
+  assert.deepEqual(pdf.pages.map(p => p.anns.join()), ['Link ->10', 'Link https://example.com/split', 'Text "Note on page 3"', '', 'Link ->6', '', 'Link ->8', '', '', '']);
+  const allTen = expected.map((p, i) => i + 1);
+  assert.ok(out.buf.length > pictures(allTen) && out.buf.length < pictures(allTen) + 20000, `all 10 pages hold each picture once (${out.buf.length} bytes)`);
   for (const [value, message] of [['0', 'Each PDF needs at least 1 page.'], ['2.5', 'Enter a whole number of pages, such as 2.'], ['-2', 'Enter a whole number of pages, such as 2.'], ['2²', 'Enter a whole number of pages, such as 2.']]) {
     await page.fill('#spl-every', value);
     await page.waitForFunction(() => document.getElementById('spl-every-error').textContent !== '');
@@ -577,6 +587,25 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   out = await save();
   assert.ok(allText(out.buf).includes('SHARED-SECRET-2'), 'a file with page 2 has its field');
   assert.ok(out.buf.length > picture[0] + picture[1] && out.buf.length < picture[0] + picture[1] + 6000, `pages 1-2 hold two pictures (${out.buf.length} bytes)`);
+  // A file of every page leaves no page out, so its pages keep the one resource dictionary they
+  // share (trimming it would read the content of every page to drop at most what no page uses),
+  // and both fields.
+  await page.fill('#spl-ranges', '1-end');
+  out = await save();
+  assert.deepEqual(await marks(out.buf), ['SHARED-MARK-1', 'SHARED-MARK-2', 'SHARED-MARK-3']);
+  const wholeText = allText(out.buf), resRefs = [...wholeText.matchAll(/\/Resources (\d+) 0 R/g)].map(m => m[1]);
+  assert.ok(resRefs.length === 3 && new Set(resRefs).size === 1, `the 3 pages share one resource dictionary, as in the original (${JSON.stringify(resRefs)})`);
+  assert.ok(wholeText.includes('Alice Example') && wholeText.includes('SHARED-SECRET-2'), 'a file of every page has both fields');
+  const sum = picture[0] + picture[1] + picture[2];
+  assert.ok(out.buf.length > sum && out.buf.length < sum + 6000, `all 3 pages hold each picture once (${out.buf.length} bytes)`);
+  // As many pages as the PDF has, but not every page (page 2 twice, no page 3): trimmed, so page
+  // 3's picture stays out.
+  await page.fill('#spl-ranges', '1-2, 2');
+  await page.check('#spl-merge');
+  out = await save();
+  assert.deepEqual(await marks(out.buf), ['SHARED-MARK-1', 'SHARED-MARK-2', 'SHARED-MARK-2']);
+  assert.ok(out.buf.length > picture[0] + picture[1] && out.buf.length < picture[0] + picture[1] + 6000, `pages 1, 2 and 2 hold two pictures (${out.buf.length} bytes)`);
+  await page.uncheck('#spl-merge');
   await page.click('.spl-seg label:has(input[value="each"])');
 
   // ---- The sample PDF, offered while no PDF is open; the drop area hides once one is ----

@@ -631,10 +631,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // cut.jpg (120x90, top half (40,90,200), bottom half (230,180,40)) stops 40% into its image
   // data: the browser draws the top and leaves the rest blank, so it is compressed with a note,
   // in its row as well as its preview, so it stands out in a batch. The decoder refuses
-  // early.jpg (cut before anything can be drawn), cut.webp (drawn wholly blank), cut.avif (ends
-  // before its image data) and damaged.avif (AV1 data overwritten): each row gives the decoder's
-  // own message and the batch carries on. pq.avif is an HDR (PQ) AVIF that the browser maps to
-  // standard range; hdr-pq.heic an HDR HEIC that libheif decodes without tone mapping.
+  // early.jpg (cut before anything can be drawn), cut.webp (drawn wholly blank), cut.avif (ends a
+  // third of the way into its image data) and damaged.avif (AV1 data overwritten): each row gives
+  // the decoder's own message and the batch carries on. pq.avif is an HDR (PQ) AVIF that the
+  // browser maps to standard range; hdr-pq.heic an HDR HEIC that libheif decodes without tone
+  // mapping.
   const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
   await open();
   await page.setInputFiles('#cmpi-file', ['cut.jpg', 'early.jpg', 'cut.webp', 'cut.avif', 'damaged.avif', 'pq.avif', 'hdr-pq.heic', 'green.bmp'].map(F));
@@ -653,7 +654,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.isVisible('.cmpi-item:nth-child(2) .cmpi-item-note'), false, 'an empty row note takes no space');
   await page.waitForFunction(() => / 4 could not be compressed\.$/.test(document.querySelector('#cmpi-live').textContent));
   assert.equal(await page.getAttribute('.cmpi-item:nth-child(1)', 'aria-current'), 'true');
-  assert.ok((await text('#cmpi-note')).startsWith(CUT + ' '), await text('#cmpi-note'));
+  assert.ok((await text('#cmpi-note')).startsWith(CUT), await text('#cmpi-note'));
   img = await decode((await download('.cmpi-item:nth-child(1) [data-act="dl"]')).buf, [[60, 10]]);
   assert.deepEqual([img.w, img.h], [120, 90]);
   assert.ok(near(img.px[0], [40, 90, 200], 10), `the part before the cut: ${img.px[0]}`);

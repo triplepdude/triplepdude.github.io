@@ -364,7 +364,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---------- WebP and AVIF through the shared decoder ----------
   // rotated.webp is stored 120 x 80 with a (220,30,30) band along the top 20 rows, (235,235,235)
-  // elsewhere, and EXIF Orientation 6, which browsers ignore in a WebP. Upright it is 80 x 120
+  // elsewhere, and EXIF Orientation 6, which Chrome ignores in a WebP. Upright it is 80 x 120
   // with the band down the right-hand side: at 100% its width spans the circle, so the band
   // (x 60-79) lands at output x 96-127. Unturned, the band would cross the top instead.
   const GREY = [235, 235, 235, 255], BAND = [220, 30, 30, 255];

@@ -1,0 +1,1163 @@
+---
+title: "Text to Speech: Read Text Aloud Online Free"
+description: Paste text or open a .txt file and hear it read aloud by the voices in your browser, with word highlighting and speed, pitch and volume controls.
+category: Audio
+keywords: [text to speech, text to speech free, tts online, read aloud, read text out loud, text reader, text to voice, speech synthesis]
+howto: |
+  ## How to read text aloud
+
+  Type or paste text into the box, or open a .txt file, then press **Play**.
+  The sentence being read is highlighted, and so is each word when the voice
+  reports its position. Click any word to read on from there, or use
+  **Previous** and **Next** to move one sentence at a time. Select part of
+  the text before pressing Play to hear only that part. **Pause** stops at
+  the current word and **Resume** carries on from it. A new voice, speed,
+  pitch or volume takes effect straight away.
+
+  ## Why the voices differ between devices
+
+  The voices are not part of this page. Your browser offers the voices of
+  your operating system, and some browsers add their own, which is why a
+  phone and a laptop, or Chrome and Safari, list different ones.
+
+  | Device | Where the voices come from | Adding voices |
+  |---|---|---|
+  | Windows | Windows; Chrome adds Google voices and Edge adds Microsoft's natural voices, both online | Settings > Time & language > Speech > Manage voices > Add voices |
+  | Mac | macOS; Safari does not offer Siri voices, and often not downloaded ones, to web pages | System Settings > Accessibility > Read & Speak (Spoken Content in older versions), then the info button next to System voice |
+  | iPhone, iPad | iOS | Settings > Accessibility > Read & Speak or Spoken Content > Voices |
+  | Android | The phone's text-to-speech engine | Settings > Accessibility > Text-to-speech output, then Install voice data in the engine's settings |
+
+  Restart the browser after adding a voice. The list is grouped by language:
+  type a name, a language or a code such as *fr* into **Find a voice** to
+  narrow it. Pick a voice in the language of your text, because an English
+  voice usually reads French words with English sounds and may skip a
+  script it cannot read.
+
+  ## Online voices
+
+  A voice marked **Online** runs on a company's servers, not on your device.
+  Google's voices in Chrome and the "Online (Natural)" voices in Edge are the
+  common ones. To use one, your browser sends the text to Google or Microsoft
+  over the internet, so it needs a connection. The page starts with a voice
+  on your device and shows a notice whenever an online voice is chosen.
+  Voices without the label keep working offline once the page has loaded.
+
+  Chrome's Google voices stop after about 15 seconds of speech, so for online
+  voices the page sends shorter pieces, splitting long sentences at commas.
+
+  ## Saving the speech as MP3
+
+  The browser plays the speech straight to your speakers and gives web pages
+  no access to the sound, so a page that uses your browser's voices cannot
+  save it as a file. To keep a copy, record your computer's sound output
+  while the page reads. On Windows, Audacity can do that with its Windows
+  WASAPI host and the loopback input of your speakers.
+
+  ## How long the text can be
+
+  The page reads up to 1,000,000 characters at a time, about 160,000 words of
+  English. For a longer text, select a part of it and press Play. The Web
+  Speech standard lets a browser limit one piece of speech to 32,767
+  characters; this page sends one sentence at a time, so that limit never
+  applies. Nothing is kept: reload the page and it starts afresh.
+
+  To read a photo or a scan aloud, take the text out with
+  [image to text](/image-to-text/) first. If you hear nothing at all, check
+  your output with the [speaker test](/speaker-test/).
+faq:
+  - q: Is my text uploaded or saved anywhere?
+    a: This page sends nothing and stores nothing; the text stays in your browser tab and is gone when you close it. The one exception is a voice marked Online, for which your browser itself sends the text to Google or Microsoft to be spoken. For private text, keep to voices without that label.
+  - q: Why does a voice stop after a sentence or two?
+    a: This happens most often with Chrome's Google voices, which sometimes stop without telling the page that they have. When an online voice has been silent for 20 seconds, the page says so. Press Next to carry on, or choose a voice without the Online label.
+  - q: Why are no words highlighted with some voices?
+    a: The word highlight follows position reports that the voice sends while it speaks, and some voices, including Google's voices in Chrome, send none. With those voices the whole sentence is highlighted instead, and Pause and Resume carry on from the start of the sentence.
+  - q: Why does a voice mispronounce names or read numbers oddly?
+    a: Pronunciation comes from the voice, not from this page, so another voice may do better. You can also spell an unusual name the way it sounds, and write out dates, sums of money or abbreviations as you want them read.
+---
+<style>
+.tts-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.tts-head > label { font-size: 14px; font-weight: 600; }
+.tts textarea { min-height: 200px; }
+.tts textarea.is-over { outline: 2px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
+.tts-view { min-height: 120px; overflow-y: auto; padding: 10px 12px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--bg); color: var(--text); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; }
+.tts-view:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+::highlight(tts-sentence) { background-color: var(--accent-soft); color: var(--text); }
+::highlight(tts-word) { background-color: var(--accent); color: var(--accent-text); text-decoration: underline; }
+.tts-view .tts-cur { background: var(--accent-soft); }
+.tts-view mark { background: var(--accent); color: var(--accent-text); text-decoration: underline; }
+.tts-under { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+.tts-under .hint { font-variant-numeric: tabular-nums; }
+.tts-player { margin-bottom: 8px; }
+.tts-player .btn { min-width: 6.5em; }
+.tts #tts-play { min-width: 7.5em; }
+.tts .btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.tts-status { min-height: 1.6em; margin: 0 0 6px; }
+#tts-state { font-weight: 600; }
+#tts-prog { color: var(--muted); font-variant-numeric: tabular-nums; }
+.tts-bar { height: 6px; margin: 0 0 16px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.tts-bar > div { width: 0; height: 100%; background: var(--accent); }
+@media (prefers-reduced-motion: no-preference) { .tts-bar > div { transition: width 0.3s linear; } }
+.tts .msg.tts-note { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+.tts-vbox { min-width: 0; margin: 24px 0 16px; padding: 0; border: 0; }
+.tts-vbox > legend { margin: 0 0 10px; padding: 0; font-size: 1.15rem; font-weight: 700; }
+.tts-vbox .field { margin-bottom: 8px; }
+.tts-vcount { margin: 0 0 8px; }
+.tts-vlist { position: relative; max-height: 320px; margin: 0 0 8px; overflow-y: auto; scroll-padding-top: 36px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--bg); }
+.tts-group + .tts-group { border-top: 1px solid var(--border); }
+.tts-glabel { position: sticky; top: 0; z-index: 1; margin: 0; padding: 6px 12px; background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 700; }
+.tts-voice { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 12px; font-size: 15px; line-height: 1.35; cursor: pointer; }
+.tts-voice:hover { background: var(--surface-2); }
+.tts-voice:has(input:checked) { background: var(--accent-soft); }
+.tts-voice input { flex: none; margin: 0; }
+.tts-vname { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.tts-badge { flex: none; padding: 0 8px; border: 1px solid var(--field-border); border-radius: 999px; color: var(--text); font-size: 12px; font-weight: 600; line-height: 1.6; }
+.tts-chosen { margin: 0 0 8px; font-size: 14px; overflow-wrap: anywhere; }
+.tts-sliders { align-items: flex-start; margin-bottom: 8px; }
+.tts-sliders > .field { flex: 1 1 180px; }
+.tts-sl { display: flex; align-items: center; gap: 10px; }
+.tts-sl input { flex: 1 1 auto; min-width: 0; }
+.tts-sl output { min-width: 4.5ch; text-align: right; font-variant-numeric: tabular-nums; }
+.tts-foot { margin: 0; }
+@media (pointer: coarse) { .tts-voice { min-height: 44px; } }
+</style>
+
+<div class="tts">
+  <div class="field">
+    <div class="tts-head">
+      <label for="tts-text">Text to read</label>
+      <button class="btn secondary small" type="button" id="tts-open" aria-describedby="tts-file-err">Open .txt file…</button>
+      <input type="file" id="tts-file" hidden accept=".txt,.text,.md,.markdown,.csv,.log,.srt,.vtt,text/plain,text/markdown">
+    </div>
+    <textarea id="tts-text" rows="8" aria-describedby="tts-count tts-text-err">Paste or type your own text here, then press Play to hear it read aloud. You can follow along as each sentence is highlighted. Choose a voice below and set the speed, pitch and volume to suit you.</textarea>
+    <div class="tts-view" id="tts-view" role="region" aria-label="Text being read" tabindex="0" hidden></div>
+    <div class="tts-under">
+      <span class="hint" id="tts-count">0 characters</span>
+      <button class="btn secondary small" type="button" id="tts-clear">Clear</button>
+    </div>
+  </div>
+  <p class="msg error" id="tts-text-err" role="alert"></p>
+  <p class="msg ok" id="tts-file-ok" aria-live="polite"></p>
+  <p class="msg error" id="tts-file-err" role="alert"></p>
+
+  <div class="actions tts-player">
+    <button class="btn" type="button" id="tts-play" aria-describedby="tts-online">Play</button>
+    <button class="btn secondary" type="button" id="tts-stop" aria-disabled="true">Stop</button>
+    <button class="btn secondary" type="button" id="tts-prev" aria-label="Previous sentence" aria-disabled="true">Previous</button>
+    <button class="btn secondary" type="button" id="tts-next" aria-label="Next sentence" aria-disabled="true">Next</button>
+  </div>
+  <p class="tts-status"><span id="tts-state" role="status"></span> <span id="tts-prog"></span></p>
+  <div class="tts-bar" id="tts-bar" aria-hidden="true" hidden><div id="tts-bar-fill"></div></div>
+  <p class="msg tts-note" id="tts-online"></p>
+  <p class="msg tts-note" id="tts-script" aria-live="polite"></p>
+  <p class="msg tts-note" id="tts-stall" aria-live="polite"></p>
+  <p class="msg error" id="tts-error" role="alert"></p>
+
+  <fieldset class="tts-vbox">
+    <legend>Voice</legend>
+    <p class="msg error" id="tts-novoice" role="alert"></p>
+    <div id="tts-vpick">
+      <div class="field">
+        <label for="tts-find">Find a voice</label>
+        <input type="search" id="tts-find" maxlength="100" autocomplete="off" spellcheck="false" placeholder="e.g. British, Deutsch, fr" aria-describedby="tts-vcount">
+      </div>
+      <p class="hint tts-vcount" id="tts-vcount" role="status"></p>
+      <div class="tts-vlist" id="tts-vlist"></div>
+      <p class="tts-chosen" id="tts-chosen"></p>
+      <p class="hint">Voices marked Online run on a company's servers, such as Google's or Microsoft's, so your browser sends them the text. The others run on this device.</p>
+    </div>
+  </fieldset>
+
+  <div class="row tts-sliders">
+    <div class="field">
+      <label for="tts-rate">Speed</label>
+      <div class="tts-sl">
+        <input type="range" id="tts-rate" min="0.5" max="2" step="0.1" value="1">
+        <output id="tts-rate-out" for="tts-rate">1.0×</output>
+      </div>
+    </div>
+    <div class="field">
+      <label for="tts-pitch">Pitch</label>
+      <div class="tts-sl">
+        <input type="range" id="tts-pitch" min="0" max="2" step="0.1" value="1">
+        <output id="tts-pitch-out" for="tts-pitch">1.0</output>
+      </div>
+    </div>
+    <div class="field">
+      <label for="tts-vol">Volume</label>
+      <div class="tts-sl">
+        <input type="range" id="tts-vol" min="0" max="100" step="5" value="100">
+        <output id="tts-vol-out" for="tts-vol">100%</output>
+      </div>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn secondary small" type="button" id="tts-reset" aria-label="Reset speed, pitch and volume">Reset</button>
+  </div>
+  <p class="hint tts-foot">The voices come from your browser and device, so they differ from one device to another, and not every voice follows every setting. The speech plays through your speakers and cannot be saved as a file.</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var LIMIT = 1000000;          // characters read at a time
+  var LOCAL_CAP = 300;          // longest piece sent to a voice on this device
+  var ONLINE_CAP = 140;         // longest piece at 1x for an online voice (Chrome cuts them off after ~15 s)
+  var STALL_MS = 20000;
+  var synth = 'speechSynthesis' in window ? window.speechSynthesis : null;
+  var Utt = window.SpeechSynthesisUtterance;
+  var canSpeak = !!(synth && typeof synth.speak === 'function' && typeof Utt === 'function');
+  var HL = typeof CSS !== 'undefined' && !!CSS.highlights && typeof Highlight === 'function';
+
+  var ta = $('#tts-text'), view = $('#tts-view'), countEl = $('#tts-count'), textErr = $('#tts-text-err');
+  var fileIn = $('#tts-file'), fileOk = $('#tts-file-ok'), fileErr = $('#tts-file-err');
+  var playBtn = $('#tts-play'), stopBtn = $('#tts-stop'), prevBtn = $('#tts-prev'), nextBtn = $('#tts-next');
+  var stateEl = $('#tts-state'), progEl = $('#tts-prog'), barEl = $('#tts-bar-fill');
+  var noteEl = $('#tts-online'), stallEl = $('#tts-stall'), errEl = $('#tts-error');
+  var noVoiceEl = $('#tts-novoice'), pickEl = $('#tts-vpick'), findIn = $('#tts-find'), listEl = $('#tts-vlist');
+  var vcountEl = $('#tts-vcount'), chosenEl = $('#tts-chosen');
+  var rateIn = $('#tts-rate'), pitchIn = $('#tts-pitch'), volIn = $('#tts-vol');
+
+  function fmt(n) { return n.toLocaleString('en-GB'); }
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+
+  // Characters as people count them: a surrogate pair (most emoji) is one.
+  function cpCount(s) {
+    var n = s.length;
+    for (var i = 0; i < s.length - 1; i++) {
+      var c = s.charCodeAt(i);
+      if (c >= 0xD800 && c <= 0xDBFF) {
+        var d = s.charCodeAt(i + 1);
+        if (d >= 0xDC00 && d <= 0xDFFF) { n--; i++; }
+      }
+    }
+    return n;
+  }
+
+  // ---------- Splitting text into sentences and pieces ----------
+  var RE_ENDS = /[.!?\u2026\u203C\u2047-\u2049\u061F\u06D4\u0964\u0965\u3002\uFF01\uFF1F\uFF61]+|\n/g;
+  var RE_CJK_END = /[\u3002\uFF01\uFF1F\uFF61]/;
+  var RE_NOT_DOT = /[^.]/;
+  var RE_CLOSER = /["'\u2019\u201D\u00BB\u203A)\]}\u300D\u300F\u3011\u3009\u300B\uFF09]/;
+  var RE_SPACE = /\s/;
+  var RE_LOWER = /\p{Ll}/u;
+  var RE_UPPER1 = /^\p{Lu}$/u;
+  var RE_TOKEN = /[\p{L}\p{N}.]/u;
+  var RE_DIGIT = /\p{N}/u;
+  var RE_READABLE = /[\p{L}\p{N}\p{So}\p{Sc}]/u;
+  var RE_SOFT = /[,;:\u2013\u2014\u3001\uFF0C\uFF1B\uFF1A\u060C]/;
+  // A full stop after these is rarely the end of a sentence ("Dr. Jones"), and after
+  // these only when a number follows is it part of the sentence ("see No. 5").
+  var ABBR = new Set('mr mrs ms mx dr prof rev hon st mt sr jr capt col gen lt sgt cmdr gov sen rep pres fr e.g i.e cf vs viz'.split(' '));
+  var ABBR_NUM = new Set('no nos vol vols fig figs ch pp p art sec'.split(' '));
+
+  // Where the sentence ending at this run of marks really ends, or -1 if it goes on.
+  function endAfter(t, i, m, lim) {
+    var j = i + m.length;
+    while (j < lim && RE_CLOSER.test(t[j])) j++;
+    if (RE_CJK_END.test(m)) return j;
+    if (j < lim && !RE_SPACE.test(t[j])) return -1;            // 3.5, example.com, "?!x"
+    var k = j;
+    while (k < lim && (t[k] === ' ' || t[k] === '\t' || t[k] === '\u00A0')) k++;
+    if (k < lim && RE_LOWER.test(t[k])) return -1;             // e.g. this, Wait... what
+    if (RE_NOT_DOT.test(m)) return j;                          // ? ! \u2026 end it
+    if (m === '.') {
+      var a = i;
+      while (a > 0 && i - a < 24 && RE_TOKEN.test(t[a - 1])) a--;
+      var tok = t.slice(a, i), last = tok.slice(tok.lastIndexOf('.') + 1), low = tok.toLowerCase();
+      if (ABBR.has(low) || ABBR.has(last.toLowerCase())) return -1;
+      if (RE_UPPER1.test(last) || (last.length === 1 && RE_LOWER.test(last))) return -1;   // J. Smith, U.S. Army
+      if (ABBR_NUM.has(low) && k < lim && RE_DIGIT.test(t[k])) return -1;
+      if (/^\d+$/.test(tok)) {                                 // "1. First item" at the start of a line
+        var b = a;
+        while (b > 0 && (t[b - 1] === ' ' || t[b - 1] === '\t')) b--;
+        if (b === 0 || t[b - 1] === '\n') return -1;
+      }
+    }
+    return j;
+  }
+
+  // A cut that never falls inside a character or before a combining mark.
+  var graphemes = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  function safeCut(t, s, p) {
+    if (graphemes) {
+      var from = Math.max(s, p - 32), best = from > s ? -1 : s;
+      for (var seg of graphemes.segment(t.slice(from, p + 8))) {
+        var at = from + seg.index;
+        if (at > p) break;
+        if (at > s) best = at;
+      }
+      if (best > s) return best;
+    }
+    var c = t.charCodeAt(p);
+    if (c >= 0xDC00 && c <= 0xDFFF && p - 1 > s) p--;
+    return p;
+  }
+
+  // Sentences of t[from, to) as {s, e, sent}, each trimmed, the long ones cut into
+  // pieces of at most `cap` characters at a comma or a space where there is one.
+  function split(t, from, to, cap) {
+    var out = [], sent = 0, start = from;
+    function piece(s, e) {
+      while (s < e && RE_SPACE.test(t[s])) s++;
+      while (e > s && RE_SPACE.test(t[e - 1])) e--;
+      if (e > s && RE_READABLE.test(t.slice(s, e))) out.push({ s: s, e: e, sent: sent });
+    }
+    function sentence(s, e) {
+      var n = out.length;
+      while (s < e && RE_SPACE.test(t[s])) s++;
+      while (e - s > cap) {
+        var lim = s + cap, low = s + Math.floor(cap / 3), p = -1, k;
+        for (k = lim; k > low; k--) {
+          if (RE_SOFT.test(t[k - 1]) && (RE_SPACE.test(t[k]) || t.charCodeAt(k - 1) > 0x2FFF)) { p = k; break; }
+        }
+        if (p < 0) for (k = lim; k > low; k--) if (RE_SPACE.test(t[k])) { p = k; break; }
+        if (p < 0) p = safeCut(t, s, lim);
+        piece(s, p);
+        s = p;
+        while (s < e && RE_SPACE.test(t[s])) s++;
+      }
+      piece(s, e);
+      if (out.length > n) sent++;
+    }
+    RE_ENDS.lastIndex = from;
+    var m;
+    while ((m = RE_ENDS.exec(t)) && m.index < to) {
+      var i = m.index, end;
+      if (m[0] === '\n') {
+        // A blank line always ends a sentence; a single line break does unless the next
+        // line carries on in lower case (text wrapped by hand).
+        var k = i + 1;
+        while (k < to && (t[k] === ' ' || t[k] === '\t')) k++;
+        end = k < to && t[k] !== '\n' && RE_LOWER.test(t[k]) ? -1 : i;
+      } else {
+        end = endAfter(t, i, m[0], to);
+      }
+      if (end >= 0) {
+        sentence(start, end);
+        start = end;
+        if (RE_ENDS.lastIndex < end) RE_ENDS.lastIndex = end;
+      }
+    }
+    if (start < to) sentence(start, to);
+    out.sentences = sent;
+    return out;
+  }
+
+  // ---------- Voices ----------
+  var voices = [], cur = null, voiceTimer = 0, voiceTries = 0;
+  var NOVELTY = new Set(['Albert', 'Bad News', 'Bahh', 'Bells', 'Boing', 'Bubbles', 'Cellos', 'Good News', 'Jester', 'Organ',
+    'Superstar', 'Trinoids', 'Whisper', 'Wobble', 'Zarvox', 'Fred', 'Junior', 'Kathy', 'Ralph', 'Eddy', 'Flo', 'Grandma',
+    'Grandpa', 'Reed', 'Rocko', 'Sandy', 'Shelley']);
+  var names = null;
+  try { names = new Intl.DisplayNames(['en'], { type: 'language', languageDisplay: 'standard' }); } catch (e) { names = null; }
+
+  function canon(tag) {
+    try {
+      var c = Intl.getCanonicalLocales(tag)[0];
+      if (typeof Intl.Locale === 'function') {
+        var l = new Intl.Locale(c);
+        return [l.language, l.script, l.region].filter(Boolean).join('-');
+      }
+      return c.split(/-[a-wyz]-|-x-/i)[0];
+    } catch (e) { return null; }
+  }
+  // Voice languages as BCP 47 tags: Android writes en_US or en_us, Firefox on Android eng-US-f000.
+  function normLang(raw) {
+    var s = String(raw || '').trim().replace(/_/g, '-');
+    if (!s) return '';
+    var c = canon(s);
+    if (c) return c;
+    var p = s.split('-');
+    if (!/^[a-z]{2,3}$/i.test(p[0])) return '';
+    var region = p.slice(1).filter(function (x) { return /^(?:[a-z]{2}|\d{3})$/i.test(x); })[0];
+    return canon(p[0] + (region ? '-' + region : '')) || '';
+  }
+  var labelCache = new Map();
+  function langLabel(tag) {
+    if (!tag) return { en: 'Other', own: '' };
+    if (!labelCache.has(tag)) {
+      var en = tag, own = '';
+      try { en = (names && names.of(tag)) || tag; } catch (e) { en = tag; }
+      try { own = new Intl.DisplayNames([tag], { type: 'language' }).of(tag) || ''; } catch (e) { own = ''; }
+      labelCache.set(tag, { en: en, own: own });
+    }
+    return labelCache.get(tag);
+  }
+  function fold(s) { return String(s).normalize('NFD').replace(/[\u0300-\u036F]/g, '').toLowerCase(); }
+
+  var prefs = (navigator.languages && navigator.languages.length ? Array.prototype.slice.call(navigator.languages) : [navigator.language || 'en'])
+    .map(normLang).filter(Boolean);
+  function langRank(tag) {
+    var best = 0, t = tag.toLowerCase(), base = t.split('-')[0];
+    prefs.forEach(function (p, i) {
+      var q = p.toLowerCase();
+      if (t === q) best = Math.max(best, 200 - i);
+      else if (base && base === q.split('-')[0]) best = Math.max(best, 100 - i);
+    });
+    return best;
+  }
+
+  function readVoices() {
+    var list = [];
+    try { list = Array.prototype.slice.call(synth.getVoices() || []); } catch (e) { list = []; }
+    // Safari marks every voice as the default one, which then tells nothing.
+    var defaults = list.filter(function (v) { return v.default; }).length;
+    return list.map(function (v, i) {
+      var tag = normLang(v.lang), online = v.localService === false, lab = langLabel(tag);
+      var name = String(v.name || 'Unnamed voice');
+      return {
+        v: v, i: i, name: name, tag: tag, label: lab.en, online: online,
+        company: online ? (/^google\b/i.test(name) ? 'Google' : /^microsoft\b/i.test(name) ? 'Microsoft' : '') : '',
+        isDefault: !!v.default && defaults < list.length,
+        key: [v.voiceURI, name, v.lang].join('\u0001'),
+        hay: fold([name, v.lang, tag, lab.en, lab.own, online ? 'online' : 'offline local device'].join(' '))
+      };
+    });
+  }
+
+  // A voice on this device in the visitor's language, the system default among equals,
+  // never Apple's novelty voices (Bubbles, Zarvox) while a normal one is there.
+  function pickDefault(list) {
+    var best = null, top = -Infinity;
+    list.forEach(function (r) {
+      var score = (r.online ? 0 : 1000) + langRank(r.tag) + (r.isDefault ? 5 : 0) - (NOVELTY.has(r.name) ? 50 : 0) - r.i / 1e4;
+      if (score > top) { top = score; best = r; }
+    });
+    return best;
+  }
+
+  var voiceSig = null;
+  function renderVoices(keepKey) {
+    var next = readVoices(), sig = next.map(function (r) { return r.key + (r.online ? '1' : '0'); }).join('\n');
+    if (sig === voiceSig && keepKey) return;
+    voiceSig = sig;
+    var hadFocus = listEl.contains(document.activeElement), top = listEl.scrollTop;
+    voices = next;
+    listEl.textContent = '';
+    if (!voices.length) {
+      cur = null;
+      pickEl.hidden = true;
+      showNote();
+      return;
+    }
+    pickEl.hidden = false;
+    setText(noVoiceEl, '');
+    var groups = new Map();
+    voices.forEach(function (r) {
+      var g = groups.get(r.tag);
+      if (!g) groups.set(r.tag, g = { label: r.label, rank: r.tag ? langRank(r.tag) : -1, list: [] });
+      g.list.push(r);
+    });
+    var frag = document.createDocumentFragment();
+    Array.from(groups.values()).sort(function (a, b) {
+      return b.rank - a.rank || a.label.localeCompare(b.label, 'en');
+    }).forEach(function (g, gi) {
+      g.list.sort(function (a, b) { return (a.online - b.online) || a.name.localeCompare(b.name, 'en'); });
+      var box = document.createElement('div'), head = document.createElement('p');
+      box.className = 'tts-group';
+      box.setAttribute('role', 'group');
+      head.className = 'tts-glabel';
+      head.id = 'tts-g' + gi;
+      head.textContent = g.label;
+      box.setAttribute('aria-labelledby', head.id);
+      box.appendChild(head);
+      g.list.forEach(function (r) {
+        var row = document.createElement('label'), input = document.createElement('input'), name = document.createElement('span');
+        row.className = 'tts-voice';
+        input.type = 'radio';
+        input.name = 'tts-voice';
+        input.value = String(r.i);
+        name.className = 'tts-vname';
+        name.textContent = r.name;
+        row.appendChild(input);
+        row.appendChild(name);
+        if (r.online) {
+          var badge = document.createElement('span');
+          badge.className = 'tts-badge';
+          badge.textContent = 'Online';
+          row.appendChild(badge);
+        }
+        r.row = row;
+        r.input = input;
+        box.appendChild(row);
+      });
+      frag.appendChild(box);
+    });
+    listEl.appendChild(frag);
+    var keep = keepKey ? voices.filter(function (r) { return r.key === keepKey; })[0] : null;
+    choose(keep || pickDefault(voices), !keep);
+    if (keep) listEl.scrollTop = top;
+    if (hadFocus) cur.input.focus({ preventScroll: true });
+    filterVoices();
+  }
+
+  function choose(r, scroll) {
+    cur = r;
+    r.input.checked = true;
+    setText(chosenEl, 'Selected: ' + r.name + ' \u00B7 ' + (r.tag ? r.label : 'language not given') + ' \u00B7 ' +
+      (r.online ? 'online' + (r.company ? ' (' + r.company + ')' : '') : 'on this device'));
+    if (scroll) listEl.scrollTop = Math.max(0, r.row.offsetTop - 36);
+    showNote();
+  }
+
+  function showNote() {
+    var msg = '';
+    if (cur && cur.online) {
+      msg = 'Online voice: your browser sends the text ' + (cur.company ? 'to ' + cur.company : 'over the internet') +
+        ' to be spoken. ' + (voices.some(function (r) { return !r.online; })
+          ? 'Choose a voice without the Online label to keep it on this device.'
+          : 'This browser offers no voice that runs on this device.');
+    }
+    setText(noteEl, msg);
+  }
+
+  function countVoices(list) {
+    var langs = new Set(list.map(function (r) { return r.tag.split('-')[0] || '?'; }));
+    var online = list.filter(function (r) { return r.online; }).length;
+    return fmt(list.length) + (list.length === 1 ? ' voice' : ' voices') + ' in ' + fmt(langs.size) + (langs.size === 1 ? ' language' : ' languages') +
+      (online ? ', ' + fmt(online) + ' of them online' : '');
+  }
+
+  function filterVoices() {
+    var words = fold(findIn.value.slice(0, 100)).split(/\s+/).filter(Boolean), shown = [];
+    voices.forEach(function (r) {
+      var ok = words.every(function (w) { return r.hay.indexOf(w) >= 0; });
+      r.row.hidden = !ok;
+      if (ok) shown.push(r);
+    });
+    $$('.tts-group', listEl).forEach(function (g) { g.hidden = !g.querySelector('.tts-voice:not([hidden])'); });
+    setText(vcountEl, !words.length ? countVoices(voices)
+      : !shown.length ? 'No voice matches your search. Try a language name, such as Spanish.'
+      : fmt(shown.length) + ' of ' + fmt(voices.length) + (shown.length === 1 ? ' voices matches.' : ' voices match.'));
+  }
+  var filterLater = TT.debounce(filterVoices, 200);
+
+  function voicesChanged() {
+    clearTimeout(voiceTimer);
+    voiceTimer = setTimeout(function () { renderVoices(cur && cur.key); }, 60);
+  }
+
+  function initVoices() {
+    if (!canSpeak) {
+      pickEl.hidden = true;
+      setText(noVoiceEl, 'This browser cannot read text aloud: it has no speech synthesis (the Web Speech API). Try a current version of Chrome, Edge, Safari or Firefox.');
+      return;
+    }
+    if (synth.addEventListener) synth.addEventListener('voiceschanged', voicesChanged);
+    else synth.onvoiceschanged = voicesChanged;
+    renderVoices();
+    // Chrome lists its voices a moment after the page loads; some browsers never say when.
+    (function wait() {
+      if (voices.length) return;
+      if (++voiceTries <= 12) { setTimeout(function () { if (!voices.length) renderVoices(); wait(); }, 250); return; }
+      setText(noVoiceEl, 'Your browser lists no voices, so the page cannot tell which voice it will use or whether that voice is online. Press Play to try the browser\u2019s own voice, or add a voice in your system\u2019s speech settings (on Linux, speech-dispatcher with espeak-ng) and restart the browser.');
+    })();
+  }
+
+  // ---------- Does the voice read the text's script? ----------
+  var SCRIPT_OF = { ja: 'Han Kana', zh: 'Han', yue: 'Han', ko: 'Hangul Han', ru: 'Cyrillic', uk: 'Cyrillic', bg: 'Cyrillic', be: 'Cyrillic',
+    sr: 'Cyrillic Latin', mk: 'Cyrillic', kk: 'Cyrillic', ky: 'Cyrillic', mn: 'Cyrillic', tg: 'Cyrillic', el: 'Greek', ar: 'Arabic', fa: 'Arabic',
+    ur: 'Arabic', ps: 'Arabic', he: 'Hebrew', yi: 'Hebrew', hi: 'Devanagari', mr: 'Devanagari', ne: 'Devanagari', bn: 'Bengali', as: 'Bengali',
+    ta: 'Tamil', te: 'Telugu', kn: 'Kannada', ml: 'Malayalam', gu: 'Gujarati', pa: 'Gurmukhi', or: 'Oriya', si: 'Sinhala', th: 'Thai',
+    lo: 'Lao', km: 'Khmer', my: 'Myanmar', ka: 'Georgian', hy: 'Armenian', am: 'Ethiopic' };
+  var SCRIPTS = ['Latin', 'Cyrillic', 'Greek', 'Arabic', 'Hebrew', 'Han', 'Hiragana', 'Katakana', 'Hangul', 'Devanagari', 'Bengali', 'Tamil',
+    'Telugu', 'Kannada', 'Malayalam', 'Gujarati', 'Gurmukhi', 'Oriya', 'Sinhala', 'Thai', 'Lao', 'Khmer', 'Myanmar', 'Georgian', 'Armenian', 'Ethiopic'];
+  var SCRIPT_NAME = { Latin: 'the Latin alphabet', Han: 'Chinese characters', Kana: 'Japanese', Hangul: 'Korean' };
+  var RE_SCRIPT = null;
+  try { RE_SCRIPT = new RegExp(SCRIPTS.map(function (n) { return '(\\p{Script=' + n + '})'; }).join('|'), 'gu'); } catch (e) { RE_SCRIPT = null; }
+  function scriptsOf(r) { return r && r.tag ? (SCRIPT_OF[r.tag.split('-')[0]] || 'Latin').split(' ') : null; }
+  // The script of most letters in the first 2,000; Japanese once a tenth of them are kana.
+  function textScript(t) {
+    if (!RE_SCRIPT) return null;
+    var counts = {}, total = 0, m, best = null;
+    RE_SCRIPT.lastIndex = 0;
+    while (total < 2000 && (m = RE_SCRIPT.exec(t))) {
+      for (var g = 1; g < m.length; g++) {
+        if (!m[g]) continue;
+        var n = SCRIPTS[g - 1] === 'Hiragana' || SCRIPTS[g - 1] === 'Katakana' ? 'Kana' : SCRIPTS[g - 1];
+        counts[n] = (counts[n] || 0) + 1;
+        total++;
+        break;
+      }
+    }
+    if (counts.Kana >= total / 10) return 'Kana';
+    Object.keys(counts).forEach(function (k) { if (!best || counts[k] > counts[best]) best = k; });
+    return best && counts[best] >= total / 2 ? best : null;
+  }
+  function scriptHint() {
+    var sc = textScript(S.text.slice(S.from, Math.min(S.to, S.from + 8000))), own = scriptsOf(cur);
+    if (!sc || !own || own.indexOf(sc) >= 0) return '';
+    var fit = voices.filter(function (r) { return (scriptsOf(r) || []).indexOf(sc) >= 0; }).sort(function (a, b) {
+      return (a.online - b.online) || langRank(b.tag) - langRank(a.tag) || a.i - b.i;
+    }).slice(0, 3);
+    return 'This text is mostly in ' + (SCRIPT_NAME[sc] || sc + ' script') + ', which ' + cur.name + ' may skip or read badly. ' +
+      (fit.length ? 'Voices for it: ' + fit.map(function (r) { return r.name + (r.online ? ' (online)' : ''); }).join(', ') + '.' : 'This browser has no voice for it.');
+  }
+
+  // ---------- Settings ----------
+  function rate() { return clamp(+rateIn.value || 1, 0.5, 2); }
+  function pitch() { var p = +pitchIn.value; return clamp(isFinite(p) ? p : 1, 0, 2); }
+  function volume() { var v = +volIn.value; return clamp(isFinite(v) ? v : 100, 0, 100) / 100; }
+  function renderSliders() {
+    var r = rate().toFixed(1) + '\u00D7', p = pitch().toFixed(1), v = Math.round(volume() * 100) + '%';
+    setText($('#tts-rate-out'), r);
+    setText($('#tts-pitch-out'), p);
+    setText($('#tts-vol-out'), v);
+    rateIn.setAttribute('aria-valuetext', r);
+    pitchIn.setAttribute('aria-valuetext', p);
+    volIn.setAttribute('aria-valuetext', v);
+  }
+
+  // ---------- Reading ----------
+  var S = { state: 'idle', text: '', from: 0, to: 0, chunks: [], idx: 0, pos: 0, cur: null, keep: [], sel: false, cap: 0, seg: null };
+  var stallTimer = 0, userScroll = 0, rSent = null, rWord = null, fb = null;
+
+  function capFor(r) { return r && r.online ? clamp(Math.round(ONLINE_CAP * rate()), 60, 280) : LOCAL_CAP; }
+  function wordSegmenter(r) {
+    try { return Intl.Segmenter ? new Intl.Segmenter(r && r.tag ? r.tag : undefined, { granularity: 'word' }) : null; } catch (e) { return null; }
+  }
+  function readingMessage() {
+    return (S.sel ? 'Reading the selected text' : 'Reading') + ' with ' + (cur ? cur.name : 'the browser\u2019s own voice') + '.';
+  }
+
+  function setState(st, msg) {
+    S.state = st;
+    setText(playBtn, st === 'reading' ? 'Pause' : st === 'paused' ? 'Resume' : 'Play');
+    [stopBtn, prevBtn, nextBtn].forEach(function (b) { b.setAttribute('aria-disabled', st === 'idle' ? 'true' : 'false'); });
+    if (msg != null) setText(stateEl, msg);
+    $('#tts-bar').hidden = st === 'idle';
+    setText($('#tts-script'), st === 'idle' ? '' : scriptHint());
+    if (st === 'idle') {
+      setText(progEl, '');
+      barEl.style.width = '0';
+    }
+  }
+
+  function showTextError(msg) {
+    setText(textErr, msg);
+    if (msg) ta.setAttribute('aria-invalid', 'true');
+    else ta.removeAttribute('aria-invalid');
+  }
+  function tooLong(n) {
+    return 'This text has ' + fmt(n) + ' characters, more than the 1,000,000 this page reads at a time. Select a part of it and press Play, or shorten it.';
+  }
+  function updateCount() {
+    var n = cpCount(ta.value);
+    setText(countEl, fmt(n) + (n === 1 ? ' character' : ' characters'));
+    showTextError(n > LIMIT ? tooLong(n) : '');
+  }
+  var countLater = TT.debounce(updateCount, 250);
+
+  // The first piece that ends after pos.
+  function chunkAt(pos) {
+    var c = S.chunks, lo = 0, hi = c.length - 1, ans = -1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (c[mid].e > pos) { ans = mid; hi = mid - 1; } else lo = mid + 1;
+    }
+    return ans;
+  }
+
+  function stopSpeech() {
+    if (S.cur) clearTimeout(S.cur.startTimer);
+    S.cur = null;
+    clearTimeout(stallTimer);
+    setText(stallEl, '');
+    if (!canSpeak) return;
+    try {
+      if (synth.speaking || synth.pending || synth.paused) synth.cancel();
+      if (synth.paused) synth.resume();
+    } catch (e) { /* nothing to cancel */ }
+  }
+
+  function armStall(me) {
+    clearTimeout(stallTimer);
+    if (me.voice && me.voice.online) stallTimer = setTimeout(function () { stalled(me); }, STALL_MS);
+  }
+  function stalled(me) {
+    if (S.cur !== me || S.state !== 'reading') return;
+    setText(stallEl, me.voice && me.voice.online
+      ? 'Nothing has been heard for 20 seconds. Online voices sometimes stop without warning: press Next to carry on, or Stop and choose a voice without the Online label.'
+      : 'The voice has not started yet. If nothing happens, press Stop and choose another voice.');
+  }
+  function heard(me) {
+    if (stallEl.textContent) setText(stallEl, '');
+    armStall(me);
+  }
+
+  function speakFrom(pos) {
+    stopSpeech();
+    var k = chunkAt(pos);
+    if (k < 0) { finish(); return; }
+    speakChunk(k, Math.max(pos, S.chunks[k].s), false);
+  }
+
+  function speakChunk(k, pos, retried) {
+    var c = S.chunks[k], u = new Utt(S.text.slice(pos, c.e)), r = cur;
+    if (r) {
+      u.voice = r.v;
+      if (r.tag) u.lang = r.tag;
+    }
+    u.rate = rate();
+    u.pitch = pitch();
+    u.volume = volume();
+    var me = { u: u, k: k, off: pos, voice: r, started: false, startTimer: 0 };
+    S.cur = me;
+    S.idx = k;
+    S.pos = pos;
+    // Chrome can drop an utterance that nothing refers to before it ends.
+    S.keep.push(u);
+    if (S.keep.length > 6) S.keep.shift();
+    u.onstart = function () {
+      if (S.cur !== me) return;
+      me.started = true;
+      clearTimeout(me.startTimer);
+      heard(me);
+    };
+    u.onboundary = function (e) {
+      if (S.cur !== me) return;
+      heard(me);
+      if (e.name === 'sentence') return;
+      var a = me.off + (e.charIndex | 0);
+      if (a < c.s || a >= c.e) return;
+      var w = wordAt(c, a, e.charLength | 0);
+      if (!w) return;
+      S.pos = w[0];
+      paint(k, w[0], w[1]);
+    };
+    u.onend = function () {
+      if (S.cur !== me) return;
+      clearTimeout(me.startTimer);
+      if (k + 1 < S.chunks.length) speakChunk(k + 1, S.chunks[k + 1].s, false);
+      else finish();
+    };
+    u.onerror = function (e) {
+      if (S.cur !== me) return;
+      failed(e && e.error);
+    };
+    paint(k, -1, -1);
+    progress(k);
+    try {
+      synth.speak(u);
+    } catch (err) {
+      failed('synthesis-failed');
+      return;
+    }
+    armStall(me);
+    // Some voices let an utterance go silently after a cancel; ask once more.
+    me.startTimer = setTimeout(function () {
+      if (S.cur !== me || me.started) return;
+      if (retried) { stalled(me); return; }
+      stopSpeech();
+      speakChunk(k, pos, true);
+    }, r && r.online ? 8000 : 2500);
+  }
+
+  var ERRORS = {
+    'not-allowed': 'The browser did not let the page speak. Press Resume to try again.',
+    'network': 'The online voice could not reach its server. Check your connection, or choose a voice without the Online label, then press Resume.',
+    'synthesis-unavailable': 'No speech engine is available. Check your device\u2019s speech settings, then reload the page.',
+    'synthesis-failed': 'The voice could not speak this text. Choose another voice and press Resume.',
+    'audio-busy': 'The sound output is busy. Close other apps that are playing sound, then press Resume.',
+    'audio-hardware': 'No sound output was found. Check your speakers or headphones, then press Resume.',
+    'language-unavailable': 'No voice is available for this language. Choose another voice and press Resume.',
+    'voice-unavailable': 'This voice is not available right now. Choose another voice and press Resume.',
+    'text-too-long': 'The voice could not take this much text at once. Choose another voice and press Resume.',
+    'invalid-argument': 'The voice did not accept these settings. Press Reset, then Resume.'
+  };
+  function failed(code) {
+    stopSpeech();
+    if (code === 'interrupted' || code === 'canceled') {
+      setState('paused', 'Paused: something else interrupted the speech.');
+      return;
+    }
+    setState('paused', 'Paused.');
+    if (!voices.length && code !== 'not-allowed') {
+      setText(errEl, 'The browser could not speak: it has no working voice. Add a voice in your system\u2019s speech settings and restart the browser.');
+      return;
+    }
+    setText(errEl, ERRORS[code] || 'The voice stopped with an error (' + String(code || 'unknown').slice(0, 40) + '). Choose another voice and press Resume.');
+  }
+
+  function wordAt(c, a, len) {
+    if (len > 0) return [a, Math.min(c.e, a + len)];
+    var t = S.text;
+    if (S.seg) {
+      var segs = c.segs || (c.segs = S.seg.segment(t.slice(c.s, c.e))), seg = segs.containing(a - c.s), guard = 0;
+      while (seg && !seg.isWordLike && guard++ < 6) seg = segs.containing(seg.index + seg.segment.length);
+      return seg && seg.isWordLike ? [c.s + seg.index, c.s + seg.index + seg.segment.length] : null;
+    }
+    var re = /[\p{L}\p{N}\p{M}'\u2019-]+/uy;
+    re.lastIndex = a;
+    var m = re.exec(t);
+    return m ? [a, a + m[0].length] : null;
+  }
+  function wordStart(c, p) {
+    if (S.seg) {
+      var segs = c.segs || (c.segs = S.seg.segment(S.text.slice(c.s, c.e))), seg = segs.containing(p - c.s);
+      return seg ? c.s + seg.index : p;
+    }
+    var q = p;
+    while (q > c.s && p - q < 60 && /[\p{L}\p{N}\p{M}'\u2019-]/u.test(S.text[q - 1])) q--;
+    return q;
+  }
+
+  // ---------- The text while it is read ----------
+  function showView() {
+    view.style.height = Math.max(120, ta.offsetHeight) + 'px';
+    var top = ta.scrollTop;
+    view.textContent = S.text;
+    fb = null;
+    if (HL) {
+      rSent = new Range();
+      rWord = new Range();
+      CSS.highlights.set('tts-sentence', new Highlight(rSent));
+      CSS.highlights.set('tts-word', new Highlight(rWord));
+    }
+    ta.hidden = true;
+    view.hidden = false;
+    view.scrollTop = top;
+  }
+  function hideView() {
+    if (HL) {
+      CSS.highlights.delete('tts-sentence');
+      CSS.highlights.delete('tts-word');
+    }
+    var focused = view.contains(document.activeElement);
+    view.hidden = true;
+    view.textContent = '';
+    fb = null;
+    ta.hidden = false;
+    if (focused) ta.focus({ preventScroll: true });
+  }
+
+  // Highlights piece k, and the word [ws, we) inside it when ws >= 0.
+  function paint(k, ws, we) {
+    if (view.hidden) return;
+    var c = S.chunks[k], t = S.text;
+    if (HL) {
+      var node = view.firstChild;
+      if (!node) return;
+      rSent.setStart(node, c.s);
+      rSent.setEnd(node, c.e);
+      rWord.setStart(node, ws >= 0 ? ws : c.s);
+      rWord.setEnd(node, ws >= 0 ? we : c.s);
+      follow(ws >= 0 ? rWord : rSent);
+      return;
+    }
+    // Without the Highlight API: the piece in a span, the word in a <mark>.
+    if (!fb || fb.k !== k) {
+      var span = document.createElement('span');
+      span.className = 'tts-cur';
+      view.replaceChildren(document.createTextNode(t.slice(0, c.s)), span, document.createTextNode(t.slice(c.e)));
+      fb = { k: k, span: span };
+    }
+    if (ws >= 0) {
+      var mk = document.createElement('mark');
+      mk.textContent = t.slice(ws, we);
+      fb.span.replaceChildren(document.createTextNode(t.slice(c.s, ws)), mk, document.createTextNode(t.slice(we, c.e)));
+      follow(mk);
+    } else {
+      fb.span.textContent = t.slice(c.s, c.e);
+      follow(fb.span);
+    }
+  }
+
+  // Keeps the highlight in sight inside the box, unless the visitor is scrolling it.
+  function follow(target) {
+    if (Date.now() < userScroll) return;
+    var r = target.getBoundingClientRect(), v = view.getBoundingClientRect();
+    if (!r.width && !r.height) return;
+    if (r.top < v.top + 4 || r.bottom > v.bottom - 4) view.scrollTop += r.top - v.top - v.height / 3;
+  }
+  ['wheel', 'touchmove', 'keydown'].forEach(function (type) {
+    view.addEventListener(type, function () { userScroll = Date.now() + 3000; }, { passive: true });
+  });
+
+  function progress(k) {
+    var c = S.chunks[k];
+    setText(progEl, 'Sentence ' + fmt(c.sent + 1) + ' of ' + fmt(S.chunks.sentences));
+    var p = S.to > S.from ? (c.s - S.from) / (S.to - S.from) : 0;
+    barEl.style.width = (clamp(p, 0, 1) * 100).toFixed(2) + '%';
+  }
+
+  function prepare() {
+    S.cap = capFor(cur);
+    S.segTag = cur ? cur.tag : '';
+    S.seg = wordSegmenter(cur);
+    S.chunks = split(S.text, S.from, S.to, S.cap);
+  }
+
+  function start() {
+    setText(errEl, '');
+    if (!canSpeak) {
+      setText(errEl, 'This browser cannot read text aloud: it has no speech synthesis (the Web Speech API). Try a current version of Chrome, Edge, Safari or Firefox.');
+      return;
+    }
+    var t = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
+    var sel = b > a && b - a < t.length;
+    var from = sel ? a : 0, to = sel ? b : t.length, part = sel ? t.slice(from, to) : t;
+    var n = cpCount(part);
+    if (n > LIMIT) {
+      showTextError(sel ? 'The selected part has ' + fmt(n) + ' characters, more than the 1,000,000 this page reads at a time. Select a shorter part.' : tooLong(n));
+      ta.focus();
+      return;
+    }
+    if (!/\S/.test(part)) {
+      showTextError(sel ? 'The selected part is empty. Select some words, or click in the box to read all of it.' : 'There is nothing to read yet. Type or paste some text into the box.');
+      ta.focus();
+      return;
+    }
+    S.text = t;
+    S.from = from;
+    S.to = to;
+    S.sel = sel;
+    prepare();
+    if (!S.chunks.length) {
+      showTextError('This text has no words a voice could read, only spaces and punctuation.');
+      ta.focus();
+      return;
+    }
+    showTextError('');
+    showView();
+    setState('reading', readingMessage());
+    speakFrom(S.chunks[0].s);
+  }
+
+  function pause() {
+    if (S.state !== 'reading') return;
+    stopSpeech();
+    setState('paused', 'Paused.');
+  }
+  function resume(pos) {
+    setText(errEl, '');
+    if (capFor(cur) !== S.cap) prepare();
+    else if ((cur ? cur.tag : '') !== S.segTag) {
+      // Words are found with the rules of the voice's language.
+      S.segTag = cur ? cur.tag : '';
+      S.seg = wordSegmenter(cur);
+      S.chunks.forEach(function (c) { c.segs = null; });
+    }
+    setState('reading', readingMessage());
+    speakFrom(pos);
+  }
+  function stop(msg) {
+    if (S.state === 'idle') return;
+    stopSpeech();
+    hideView();
+    setState('idle', msg);
+  }
+  function finish() {
+    stopSpeech();
+    hideView();
+    setState('idle', 'Finished reading.');
+  }
+
+  function sentenceStart(k) {
+    var s = S.chunks[k].sent;
+    while (k > 0 && S.chunks[k - 1].sent === s) k--;
+    return k;
+  }
+  function jump(k) {
+    var pos = S.chunks[k].s;
+    if (S.state === 'reading') { speakFrom(pos); return; }
+    S.idx = k;
+    S.pos = pos;
+    paint(k, -1, -1);
+    progress(k);
+  }
+  function next() {
+    if (S.state === 'idle') return;
+    var j = S.idx + 1;
+    while (j < S.chunks.length && S.chunks[j].sent === S.chunks[S.idx].sent) j++;
+    if (j >= S.chunks.length) { TT.announce('This is the last sentence.'); return; }
+    jump(j);
+  }
+  function prev() {
+    if (S.state === 'idle') return;
+    var k0 = sentenceStart(S.idx);
+    jump(S.pos > S.chunks[k0].s ? k0 : k0 > 0 ? sentenceStart(k0 - 1) : 0);
+  }
+
+  playBtn.addEventListener('click', function () {
+    if (S.state === 'reading') pause();
+    else if (S.state === 'paused') resume(S.pos);
+    else start();
+  });
+  stopBtn.addEventListener('click', function () { stop('Stopped.'); });
+  nextBtn.addEventListener('click', next);
+  prevBtn.addEventListener('click', prev);
+
+  // Click a word to read on from it (not when text is being selected).
+  view.addEventListener('click', function (e) {
+    if (S.state === 'idle') return;
+    var sel = window.getSelection();
+    if (sel && !sel.isCollapsed && view.contains(sel.anchorNode)) return;
+    var off = offsetAt(e.clientX, e.clientY);
+    if (off == null) return;
+    var k = chunkAt(off);
+    if (k < 0) return;
+    var c = S.chunks[k];
+    resume(off <= c.s ? c.s : wordStart(c, off));
+  });
+  function offsetAt(x, y) {
+    var node = null, off = 0;
+    if (document.caretPositionFromPoint) {
+      var p = document.caretPositionFromPoint(x, y);
+      if (p) { node = p.offsetNode; off = p.offset; }
+    } else if (document.caretRangeFromPoint) {
+      var r = document.caretRangeFromPoint(x, y);
+      if (r) { node = r.startContainer; off = r.startOffset; }
+    }
+    if (!node || !view.contains(node)) return null;
+    if (node.nodeType !== 3) {
+      var child = node.childNodes[off];
+      if (!child) return null;
+      node = child.nodeType === 3 ? child : document.createTreeWalker(child, NodeFilter.SHOW_TEXT).nextNode();
+      off = 0;
+      if (!node) return null;
+    }
+    var walker = document.createTreeWalker(view, NodeFilter.SHOW_TEXT), n, total = 0;
+    while ((n = walker.nextNode())) {
+      if (n === node) return total + off;
+      total += n.data.length;
+    }
+    return null;
+  }
+
+  // A new voice or setting applies at once: the current word is read again with it.
+  var applyLater = TT.debounce(function () {
+    if (S.state === 'reading') resume(S.pos);
+  }, 350);
+  function settingChanged() {
+    renderSliders();
+    if (S.state === 'reading') applyLater();
+  }
+  [rateIn, pitchIn, volIn].forEach(function (el) {
+    el.addEventListener('input', settingChanged);
+    el.addEventListener('change', settingChanged);
+  });
+  $('#tts-reset').addEventListener('click', function () {
+    rateIn.value = '1';
+    pitchIn.value = '1';
+    volIn.value = '100';
+    settingChanged();
+  });
+  listEl.addEventListener('change', function (e) {
+    var r = voices[+e.target.value];
+    if (!r || r === cur) return;
+    choose(r, false);
+    setText(errEl, '');
+    if (S.state !== 'idle') setText($('#tts-script'), scriptHint());
+    if (S.state === 'reading') applyLater();
+  });
+  findIn.addEventListener('input', filterLater);
+
+  ta.addEventListener('input', function () {
+    if (ta.value.length > 200000) countLater(); else updateCount();
+  });
+  $('#tts-clear').addEventListener('click', function () {
+    stop('Stopped.');
+    ta.value = '';
+    updateCount();
+    setText(fileOk, '');
+    setText(fileErr, '');
+    ta.focus();
+  });
+
+  // ---------- Opening and dropping text files ----------
+  function decodeFile(b, name) {
+    var ext = ((/\.([a-z0-9]+)$/i.exec(name) || [])[1] || '').toLowerCase(), text, legacy = false;
+    if (b[0] === 0xFF && b[1] === 0xFE) text = new TextDecoder('utf-16le').decode(b.subarray(2));
+    else if (b[0] === 0xFE && b[1] === 0xFF) text = new TextDecoder('utf-16be').decode(b.subarray(2));
+    else {
+      var head = String.fromCharCode.apply(null, b.subarray(0, 8)), n = Math.min(b.length, 4096), odd = 0, bin = false;
+      for (var i = 0; i < n; i++) {
+        var x = b[i];
+        if (x === 0) { bin = true; break; }
+        if (x < 9 || (x > 13 && x < 32 && x !== 27)) odd++;
+      }
+      // The first bytes name the format only when the content is not text anyway.
+      if (bin || odd > n / 10 || ext === 'pdf' || ext === 'docx' || ext === 'doc') {
+        if (head.slice(0, 5) === '%PDF-') return { error: 'is a PDF. Copy the text from your PDF viewer and paste it here.' };
+        if (head.slice(0, 4) === 'PK\u0003\u0004') return { error: 'is a Word document or another compressed file. Copy its text and paste it here, or save it as plain text (.txt).' };
+        if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return { error: 'is an old Word (.doc) file. Copy its text and paste it here, or save it as plain text (.txt).' };
+        return { error: 'does not look like a text file. Open a plain text (.txt) file.' };
+      }
+      // Notepad's UTF-8 starts with a byte order mark, which is not text.
+      var body = b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF ? b.subarray(3) : b;
+      try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body); } catch (e) { text = new TextDecoder('windows-1252').decode(body); legacy = true; }
+      if (/^\{\\rtf1/.test(text)) return { error: 'is a Rich Text (.rtf) file. Save it as plain text (.txt), or copy its text and paste it here.' };
+    }
+    return { text: text.replace(/\r\n?/g, '\n'), legacy: legacy };
+  }
+
+  function openFile(f) {
+    setText(fileOk, '');
+    setText(fileErr, '');
+    if (f.size > LIMIT * 4) {
+      setText(fileErr, f.name + ' is ' + (f.size / 1048576).toFixed(1) + ' MB, more than the 1,000,000 characters this page reads at a time.');
+      return;
+    }
+    f.arrayBuffer().then(function (buf) {
+      var r = decodeFile(new Uint8Array(buf), f.name);
+      if (r.error) { setText(fileErr, f.name + ' ' + r.error); return; }
+      var n = cpCount(r.text);
+      if (n > LIMIT) { setText(fileErr, f.name + ' has ' + fmt(n) + ' characters, more than the 1,000,000 this page reads at a time.'); return; }
+      if (!/\S/.test(r.text)) { setText(fileErr, f.name + ' is empty.'); return; }
+      stop('Stopped.');
+      ta.value = r.text;
+      ta.setSelectionRange(0, 0);
+      ta.scrollTop = 0;
+      updateCount();
+      setText(fileOk, 'Opened ' + f.name + ': ' + fmt(n) + (n === 1 ? ' character.' : ' characters.') +
+        (r.legacy ? ' It was not valid UTF-8, so it was read as Windows-1252 text.' : ''));
+    }, function () {
+      setText(fileErr, f.name + ' could not be read.');
+    });
+  }
+  $('#tts-open').addEventListener('click', function () { fileIn.click(); });
+  fileIn.addEventListener('change', function () {
+    var f = fileIn.files && fileIn.files[0];
+    fileIn.value = '';
+    if (f) openFile(f);
+  });
+  function hasFiles(e) {
+    return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
+  }
+  ta.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    ta.classList.add('is-over');
+  });
+  ta.addEventListener('dragleave', function () { ta.classList.remove('is-over'); });
+  ta.addEventListener('drop', function (e) {
+    ta.classList.remove('is-over');
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]);
+  });
+  // A file dropped next to the box would otherwise replace the page.
+  document.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener('drop', function (e) { if (hasFiles(e)) e.preventDefault(); });
+
+  // Speech must not outlive the page; a page restored with Back counts again,
+  // because the browser may have put back the text and the sliders.
+  window.addEventListener('pagehide', function () {
+    if (S.state !== 'idle') { stopSpeech(); hideView(); setState('idle', ''); }
+  });
+  window.addEventListener('pageshow', function () {
+    updateCount();
+    renderSliders();
+    if (canSpeak && !voices.length) renderVoices();
+  });
+
+  renderSliders();
+  updateCount();
+  setState('idle', '');
+  initVoices();
+})();
+</script>

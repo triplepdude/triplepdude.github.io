@@ -4,7 +4,7 @@ with that text, which is known independently of the OCR engine.
 
     python3 tests/fixtures/image-to-text/make_fixtures.py
 
-Needs Pillow (with AVIF), pillow-heif and pypdf, and the DejaVu, Liberation and
+Needs Pillow (with AVIF and libraqm), pillow-heif and pypdf, and the DejaVu, Liberation and
 WenQuanYi Zen Hei fonts (fonts-dejavu-core, fonts-liberation, fonts-wqy-zenhei).
 """
 import io
@@ -37,6 +37,8 @@ TEXT_PDF = ['This PDF already has a text layer.', 'Copy it exactly from the file
 SAMPLE = ['Library opening hours', 'Monday to Friday: 9:00 to 18:30', 'Saturday: 10:00 to 16:00',
           'Closed on Sundays and bank holidays']
 CHINESE = ['今天天气很好。', '我们去公园散步吧。']
+ARABIC = ['مرحبا بالعالم', 'هذا نص عربي بسيط']
+HYPHEN = ['The test checks a well-', 'known rule for lines that', 'end in a hyphen: a long-', 'awaited answer at last.']
 CJK = '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc'
 UI_BAR = 'Inbox (3 unread)'
 UI_BODY = ['Meeting moved to Thursday at 3 pm', 'Reply by Friday, 12 December']
@@ -190,10 +192,42 @@ def main():
     save(ui, 'ui.png', optimize=True)
     expected['ui'] = '\n'.join([UI_BAR] + UI_BODY)
 
+    # The paragraph turned a quarter to the left with no orientation tag: the
+    # page reads it upright only after one press of Rotate page (90 degrees clockwise).
+    para.rotate(90, expand=True).save(os.path.join(HERE, 'sideways.png'), optimize=True)
+
+    # Lines that end in a hyphen, for Join lines into paragraphs.
+    save(text_image(HYPHEN, size=34), 'hyphen.png', optimize=True)
+    expected['hyphen'] = '\n'.join(HYPHEN)
+
+    # Arabic, written right to left (Pillow shapes it with libraqm).
+    font = ImageFont.truetype(SANS, 40)
+    ar = Image.new('L', (520, 170), 255)
+    d = ImageDraw.Draw(ar)
+    for i, l in enumerate(ARABIC):
+        d.text((480, 30 + i * 64), l, font=font, fill=0, direction='rtl', language='ar', anchor='ra')
+    save(ar, 'arabic.png', optimize=True)
+    expected['arabic'] = '\n'.join(ARABIC)
+
     # Simplified Chinese, which the page reads with the chi_sim data.
     zh = text_image(CHINESE, font_path=CJK, size=40)
     save(zh, 'chinese.png', optimize=True)
     expected['chinese'] = '\n'.join(CHINESE)
+
+    # A PNG whose metadata holds the letters %PDF- in its first kilobyte, where a
+    # PDF's header may be: it is still a picture.
+    from PIL import PngImagePlugin
+    meta = PngImagePlugin.PngInfo()
+    meta.add_text('Comment', '%PDF-1.7 is only a comment here')
+    para.save(os.path.join(HERE, 'pdfish.png'), pnginfo=meta)
+
+    # More than 16 megapixels (4,800 x 3,600): made smaller before it is read.
+    big = Image.new('L', (4800, 3600), 255)
+    d = ImageDraw.Draw(big)
+    font = ImageFont.truetype(SERIF, 120)
+    for i, l in enumerate(PARA):
+        d.text((300, 1200 + i * 220), l, font=font, fill=0)
+    save(big, 'big.png', optimize=True)
 
     # Not a picture: plain text, and the same text under a picture's name.
     with open(os.path.join(HERE, 'notes.txt'), 'w', encoding='utf-8') as f:

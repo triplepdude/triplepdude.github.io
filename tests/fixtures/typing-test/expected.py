@@ -225,15 +225,17 @@ SCENARIOS = {
 
 def alice_actions():
     words = TEXTS['alice'].split(' ')
-    acts = []
+    # One wrong key, deleted again: 6,352 right of 6,353 is 99.98%, which
+    # must show as 99.9%, not 100.0%.
+    acts = [['insert', 'x', 500], ['back', 1, 500]]
     for i in range(0, len(words), 15):
         chunk = ' '.join(words[i:i + 15])
         acts.append(['insert', chunk if i + 15 >= len(words) else chunk + ' ', 1000])
     return acts
 
 
-# The whole first chapter of Alice, inserted 15 words a second, ends the
-# 5-minute test early when its last word is typed.
+# The whole first chapter of Alice, inserted 15 words a second after one
+# wrong key, ends the 5-minute test early when its last word is typed.
 SCENARIOS['alice'] = {'hash': '#5m-alice', 'book': 'alice', 'seconds': 300, 'actions': alice_actions()}
 
 if __name__ == '__main__':
