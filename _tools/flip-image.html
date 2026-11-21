@@ -1,0 +1,929 @@
+---
+title: "Flip Image: Mirror or Rotate Photos Online"
+description: Flip an image horizontally or vertically, mirror a selfie, or rotate it 90° or by any angle. Batch to ZIP, keep the JPG quality. Runs in your browser.
+category: Image & PDF
+keywords: [flip image, mirror image, flip image horizontally, flip image vertically, rotate image, rotate image by angle, mirror selfie, rotate image 90 degrees]
+howto: |
+  ## How to flip or rotate an image
+
+  1. Choose images, drop them on the page or paste one with Ctrl+V (⌘V on a
+     Mac). JPG, PNG, WebP, HEIC, AVIF, GIF, TIFF, BMP and SVG all open. A
+     sample picture is shown until you do.
+  2. Press **Flip horizontal** to mirror the picture left to right, or
+     **Flip vertical** to turn it into an upside-down mirror image. Each
+     press acts on the picture as it looks now, so a second press undoes it.
+  3. Turn it with the 90° buttons, type an angle, or drag **Straighten** to
+     level a tilted horizon.
+  4. Choose a format and press **Download**. With several images, every one
+     gets the same flip and turn, and **Download all (ZIP)** saves them in
+     one file.
+
+  ## Flipping is not the same as rotating
+
+  | You press | The top-left corner moves to | Text in the picture |
+  |---|---|---|
+  | Flip horizontal | top right | reads backwards |
+  | Flip vertical | bottom left | upside down and mirrored |
+  | Rotate 180° | bottom right | upside down, still readable |
+  | Both flips | bottom right | the same as Rotate 180° |
+  {: .data}
+
+  A horizontal flip is what you need for a selfie that came out reversed, or
+  for iron-on transfer paper for light fabrics, which is printed as a mirror
+  image.
+
+  ## Rotating by any angle
+
+  Type an angle in degrees: positive numbers turn clockwise, negative ones
+  anticlockwise, and a point or a comma works for decimals, so 2.5 and 2,5
+  are the same. A turn that is not a multiple of 90° leaves empty corners:
+
+  - **Enlarge the canvas** keeps the whole picture and fills the corners
+    with a colour or leaves them transparent. The new width is
+    w × |cos θ| + h × |sin θ|, so a 4000 × 3000 photo turned 10° becomes
+    4460 × 3649 pixels.
+  - **Crop off the corners** keeps the shape of the original and cuts the
+    largest rectangle with no empty corners, the way you straighten a
+    horizon. The same photo turned 2° keeps 3821 × 2866 pixels, 91% of it.
+
+  ## Why photos turn sideways (EXIF orientation)
+
+  Phones and cameras usually store a photo the way the sensor read it and
+  add an EXIF Orientation tag, a number from 1 to 8 that says how to show
+  it: 6 means turn 90° clockwise, 3 means 180°, and 2, 4, 5 and 7 add a
+  mirror. Browsers have followed the tag since 2020, but some older
+  programs, printers and upload forms ignore it and show the photo on its
+  side. This tool applies the tag first, so you work on the picture you
+  see, and the saved file holds upright pixels with no tag, so it looks the
+  same everywhere.
+
+  ## Does flipping reduce quality?
+
+  A flip or a 90° turn moves every pixel to a new place without changing
+  it (wide colour profiles aside, see below). Saving is what can cost
+  quality: PNG stores pixels without loss, while JPEG and WebP compress the
+  picture again. With **Keep each JPEG's quality** on, the tool reads the
+  original's quantisation tables, estimates the quality it was saved at
+  (75 or 90, say) and saves at the same setting, so the file is not bloated
+  by a higher setting or degraded by a lower one. Turning by other angles
+  blends neighbouring pixels, which softens fine detail slightly.
+
+  For a strictly lossless JPEG rotation, desktop tools such as jpegtran
+  rearrange the compressed data itself; that is exact only when the width
+  and height are multiples of the 8 or 16 pixel blocks JPEG uses. The new
+  files carry no metadata such as the camera model or GPS location, and
+  they are saved in sRGB, the colour space of the web: a photo with a wider
+  colour profile, such as the Display P3 of recent iPhones, is converted,
+  which tones down colours more saturated than sRGB can show. To change the
+  size as well, use the [image resizer](/resize-image/); for a
+  round profile picture, [crop the image to a circle](/crop-image-circle/).
+faq:
+  - q: Are my images uploaded to a server?
+    a: No. Every image is opened, flipped and saved by your own browser, and the ZIP file is built on your device. Nothing is sent to a server or stored.
+  - q: How do I stop my iPhone flipping selfies?
+    a: The front camera's preview is mirrored, but by default the photo is saved the way other people see you, so it looks flipped. To save selfies as the preview shows them, go to Settings > Camera and turn on Mirror Front Camera (iOS 14 and later). A selfie you have already taken can be flipped horizontally here.
+  - q: Can I flip or rotate many images at once?
+    a: Yes. Add as many as you like; the same flip and rotation applies to every one, each keeps its own format unless you choose another, and Download all saves them in one ZIP with names such as photo-flipped-horizontal.jpg.
+  - q: Will a transparent PNG stay transparent?
+    a: Yes, when you save as PNG or WebP, and the corners left by a custom angle can stay transparent too. JPEG cannot store transparency, so those areas are filled with the corner colour, white unless you pick another.
+---
+<style>
+.fl-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); pointer-events: none; }
+.fl-drop {
+  margin: 0 0 16px; padding: 22px 16px; text-align: center;
+  background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px;
+}
+.fl-drop.is-over, .fl-filebar.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.fl-drop p { margin: 10px 0 0; }
+.fl-drop .hint { display: block; margin-top: 4px; }
+.fl-filebar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin: 0 0 16px; padding: 10px 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.fl-filemeta { display: grid; flex: 1 1 220px; min-width: 0; }
+.fl-filemeta strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fl-list { display: grid; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; max-height: 300px; overflow-y: auto; }
+.fl-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; padding: 6px 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.fl-row.is-current { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.fl-thumb { flex: 0 0 auto; width: 40px; height: 40px; overflow: hidden; border-radius: 4px; background: var(--surface-2); }
+.fl-thumb img { display: block; width: 40px; height: 40px; object-fit: contain; }
+.fl-row-main { flex: 1 1 150px; min-width: 0; }
+.fl-acts { display: flex; flex: 0 0 auto; gap: 8px; margin-left: auto; }
+.fl-pick {
+  display: block; max-width: 100%; padding: 0; overflow: hidden; background: none; border: 0; color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 600; text-align: left; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
+}
+.fl-pick:hover { color: var(--accent); text-decoration: underline; }
+@media (pointer: coarse) { .fl-pick { min-height: 44px; } }
+.fl-row-info { color: var(--muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.fl-row-info.is-error { color: var(--danger); }
+.fl-row .btn.small { flex: 0 0 auto; }
+.fl-row .fl-x { width: 36px; padding: 0; }
+@media (max-width: 480px) { .fl-row { gap: 8px; padding: 6px; } .fl-row .fl-dl { padding: 0 10px; } }
+.fl-views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 8px; }
+@media (max-width: 560px) { .fl-views { gap: 8px; } }
+.fl-view { margin: 0; min-width: 0; }
+.fl-view figcaption { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.fl-view figcaption span { color: var(--muted); font-weight: 400; }
+.fl-frame {
+  display: flex; align-items: center; justify-content: center; height: clamp(130px, 34vw, 300px); padding: 8px; overflow: hidden;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.fl-frame canvas {
+  display: block; max-width: 100%; max-height: 100%;
+  background: repeating-conic-gradient(var(--border) 0% 25%, var(--surface) 0% 50%) 0 0 / 16px 16px;
+}
+.fl-frame canvas.is-tiny { image-rendering: pixelated; }
+.fl-state { margin: 0 0 16px; font-weight: 600; overflow-wrap: anywhere; }
+.fl-ops { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.fl-ops .btn { flex: 1 1 auto; padding: 0 12px; white-space: nowrap; }
+@media (max-width: 560px) {
+  .fl-ops { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fl-ops .btn { padding: 4px 8px; white-space: normal; text-align: center; }
+}
+@media (max-width: 420px) { .fl-ops svg { display: none; } }
+.fl-ops svg { flex: 0 0 auto; }
+.fl-angle-row > .field, #fl-corner-row > .field, .fl-out-row > .field { flex: 1 1 220px; }
+.fl-fine-label { display: flex; justify-content: space-between; gap: 8px; }
+.fl-fine-label output { font-variant-numeric: tabular-nums; }
+.fl-bg-row { display: flex; align-items: center; gap: 10px; }
+.fl-bg-row select { flex: 1 1 auto; min-width: 0; }
+.fl-bg-row input[type="color"] { flex: 0 0 auto; }
+.fl-note { margin: -4px 0 12px; }
+.fl-note:empty { display: none; }
+.fl-match { margin: 0 0 12px; }
+</style>
+
+<input type="file" id="fl-file" class="fl-file" multiple tabindex="-1" aria-label="Choose images">
+<div class="fl-drop" id="fl-drop">
+  <button class="btn" type="button" id="fl-choose">Choose images</button>
+  <p>or drop them here, or paste with Ctrl+V</p>
+  <span class="hint">Showing a sample picture. JPG, PNG, WebP, HEIC, AVIF, GIF, TIFF, BMP or SVG; nothing is uploaded.</span>
+</div>
+<div class="fl-filebar" id="fl-filebar" hidden>
+  <div class="fl-filemeta"><strong id="fl-fname"></strong><span class="hint" id="fl-forig"></span></div>
+  <button class="btn secondary small" type="button" id="fl-another">Add images</button>
+  <button class="btn secondary small" type="button" id="fl-clear">Remove all</button>
+</div>
+<p class="msg error" id="fl-error" role="alert"></p>
+<ul class="fl-list" id="fl-list" aria-label="Images to flip" hidden></ul>
+
+<div class="fl-views">
+  <figure class="fl-view">
+    <figcaption>Before <span id="fl-before-size"></span></figcaption>
+    <div class="fl-frame"><canvas id="fl-before" width="1" height="1" role="img" aria-label="The original image"></canvas></div>
+  </figure>
+  <figure class="fl-view">
+    <figcaption>After <span id="fl-after-size"></span></figcaption>
+    <div class="fl-frame"><canvas id="fl-after" width="1" height="1" role="img" aria-label="The image after flipping and rotating"></canvas></div>
+  </figure>
+</div>
+<p class="fl-state" id="fl-state">Not flipped or rotated</p>
+<p class="visually-hidden" id="fl-live" role="status"></p>
+
+<div class="fl-ops" role="group" aria-label="Flip and rotate">
+  <button class="btn secondary" type="button" id="fl-flip-h"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3v18"/><path d="M9 6 3 18h6z" fill="currentColor"/><path d="m15 6 6 12h-6z"/></svg>Flip horizontal</button>
+  <button class="btn secondary" type="button" id="fl-flip-v"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 12h18"/><path d="M6 9 18 3v6z" fill="currentColor"/><path d="m6 15 12 6v-6z"/></svg>Flip vertical</button>
+  <button class="btn secondary" type="button" id="fl-rot-l"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v6h6"/><path d="M4.5 10A8 8 0 1 1 6 17"/></svg>Rotate left 90°</button>
+  <button class="btn secondary" type="button" id="fl-rot-r"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v6h-6"/><path d="M19.5 10A8 8 0 1 0 18 17"/></svg>Rotate right 90°</button>
+  <button class="btn secondary" type="button" id="fl-rot-180">Rotate 180°</button>
+  <button class="btn secondary" type="button" id="fl-reset">Reset</button>
+</div>
+
+<div class="row fl-angle-row">
+  <div class="field">
+    <label for="fl-angle">Angle (degrees clockwise)</label>
+    <input type="text" id="fl-angle" value="0" inputmode="decimal" maxlength="16" autocomplete="off" spellcheck="false" aria-describedby="fl-angle-hint">
+    <span class="hint" id="fl-angle-hint">−360 to 360. Negative turns anticlockwise; 2.5 and 2,5 both work.</span>
+    <p class="msg error" id="fl-angle-error" aria-live="polite"></p>
+  </div>
+  <div class="field">
+    <label class="fl-fine-label" for="fl-fine"><span>Straighten</span><output id="fl-fine-out" for="fl-fine" aria-hidden="true">0°</output></label>
+    <input type="range" id="fl-fine" min="-45" max="45" step="0.1" value="0" aria-valuetext="0°">
+  </div>
+</div>
+<div class="row" id="fl-corner-row" hidden>
+  <div class="field">
+    <label for="fl-corners">Corners</label>
+    <select id="fl-corners">
+      <option value="expand">Enlarge the canvas</option>
+      <option value="crop">Crop off the corners</option>
+    </select>
+  </div>
+  <div class="field" id="fl-bg-field">
+    <label for="fl-bg">Corner colour</label>
+    <div class="fl-bg-row">
+      <select id="fl-bg">
+        <option value="transparent">Transparent</option>
+        <option value="#ffffff">White</option>
+        <option value="#000000">Black</option>
+        <option value="custom">Custom colour</option>
+      </select>
+      <input type="color" id="fl-bg-color" value="#ffffff" aria-label="Custom corner colour">
+    </div>
+  </div>
+</div>
+
+<div class="row fl-out-row">
+  <div class="field">
+    <label for="fl-format">Save as</label>
+    <select id="fl-format">
+      <option value="same">Original format</option>
+      <option value="png">PNG (lossless)</option>
+      <option value="jpeg">JPEG</option>
+      <option value="webp">WebP</option>
+    </select>
+  </div>
+  <div class="field" id="fl-q-field">
+    <label for="fl-quality">Quality: <span id="fl-q-out">92</span></label>
+    <input type="range" id="fl-quality" min="1" max="100" value="92">
+  </div>
+</div>
+<div class="checks fl-match" id="fl-match-row" hidden>
+  <label class="check"><input type="checkbox" id="fl-match" checked> Keep each JPEG's quality</label>
+</div>
+<p class="hint fl-note" id="fl-note"></p>
+
+<div class="actions">
+  <button class="btn" type="button" id="fl-download">Download</button>
+  <button class="btn secondary" type="button" id="fl-copy">Copy image</button>
+  <button class="btn secondary" type="button" id="fl-zip" hidden>Download all (ZIP)</button>
+</div>
+<p class="msg ok" id="fl-status" aria-live="polite"></p>
+
+<script src="{{ '/assets/js/image-decode.js' | relative_url }}"></script>
+<script src="{{ '/assets/js/zip.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+
+  var $ = TT.$;
+  var fileInput = $('#fl-file'), dropZone = $('#fl-drop'), fileBar = $('#fl-filebar'), list = $('#fl-list');
+  var errBox = $('#fl-error'), statusEl = $('#fl-status'), stateEl = $('#fl-state'), noteEl = $('#fl-note');
+  var beforeCv = $('#fl-before'), afterCv = $('#fl-after');
+  var angleIn = $('#fl-angle'), angleErr = $('#fl-angle-error'), fineIn = $('#fl-fine'), fineOut = $('#fl-fine-out');
+  var cornersSel = $('#fl-corners'), bgSel = $('#fl-bg'), bgColor = $('#fl-bg-color');
+  var fmtSel = $('#fl-format'), qIn = $('#fl-quality'), matchBox = $('#fl-match');
+  var downloadBtn = $('#fl-download'), copyBtn = $('#fl-copy'), zipBtn = $('#fl-zip');
+
+  var DECODE_MAX = 100e6, MAX_SIDE = 16384, MAX_OUT = 100e6, VIEW_MAX = 1200, DEG = Math.PI / 180;
+  var LABEL = { jpeg: 'JPG', png: 'PNG', webp: 'WebP', avif: 'AVIF', bmp: 'BMP', ico: 'ICO', tiff: 'TIFF', gif: 'GIF' };
+  var EXT = { jpeg: 'jpg', png: 'png', webp: 'webp', avif: 'avif', bmp: 'bmp', ico: 'ico', tiff: 'tif', gif: 'gif' };
+  var LOSSY = { jpeg: true, webp: true, avif: true };
+  var NO_ALPHA = { jpeg: true, bmp: true };
+  var canSave = { webp: true, avif: false };
+  var ORIENT = { 2: 'mirrored', 3: 'turned 180°', 4: 'flipped upside down', 5: 'mirrored and turned 90° anticlockwise',
+    6: 'turned 90° clockwise', 7: 'mirrored and turned 90° clockwise', 8: 'turned 90° anticlockwise' };
+
+  // The transform: mirrored left to right first (when mirror is on), then turned q quarter turns and
+  // fine degrees clockwise. Every button acts on the picture as it is shown, so a flip changes the turn too.
+  var st = { mirror: false, q: 0, fine: 0 };
+  var items = [], current = null, sample = null, nextId = 1, pastedCount = 0, busy = false, angleBad = '';
+  var addError = '';
+
+  fileInput.accept = TTImage.accept;
+
+  function friendly(message) { var e = new Error(message); e.friendly = true; return e; }
+  function round2(v) { var r = Math.round(v * 100) / 100; return r === 0 ? 0 : r; }
+  function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
+    return (n / 1048576).toFixed(n < 10485760 ? 2 : 1) + ' MB';
+  }
+  function fmtDeg(v) { return String(round2(v)).replace('-', '−'); }
+  function baseName(name) { return (String(name).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').trim()) || 'image'; }
+
+  // ---------- angles ----------
+  // The total turn, from −180 (exclusive) to 180 degrees.
+  function total() {
+    var t = round2(st.q * 90 + st.fine);
+    t = ((t % 360) + 360) % 360;
+    return round2(t > 180 ? t - 360 : t);
+  }
+  // A turn as quarter turns plus a fine angle from −45 to 45 with the sign of the whole turn, so a
+  // picture turned 45° either way keeps its own shape when cropped, and the slider shows the direction.
+  function split(t) {
+    t = ((t % 360) + 360) % 360;
+    if (t > 180) t -= 360;
+    var q = (t < 0 ? -1 : 1) * Math.ceil(Math.abs(t) / 90 - 0.5);
+    return { q: ((q % 4) + 4) % 4, fine: round2(t - 90 * q) };
+  }
+  // Reads an angle typed in degrees. A comma counts as the decimal point (angles have no thousands).
+  function parseAngle(text) {
+    var s = String(text);
+    if (s.length > 24) return { error: 'That is not an angle. Type a number of degrees, such as 90 or −2.5.' };
+    s = s.trim().replace(/−/g, '-').replace(/\s*(°|deg)$/i, '').replace(',', '.');
+    if (s === '' || s === '-' || s === '+') return { value: 0, empty: true };
+    if (!/^[+-]?(\d{1,4}(\.\d*)?|\.\d+)$/.test(s)) return { error: 'That is not an angle. Type a number of degrees, such as 90 or −2.5.' };
+    var v = Number(s);
+    if (!(Math.abs(v) <= 360)) return { error: 'Type an angle from −360 to 360 degrees.' };
+    return { value: round2(v) };
+  }
+
+  // Where each source pixel goes: the output size and the canvas transform for a w x h source.
+  function geometry(w, h) {
+    var t = total(), n = split(t), exact = n.fine === 0, cos, sin, W, H;
+    if (exact) { cos = [1, 0, -1, 0][n.q]; sin = [0, 1, 0, -1][n.q]; } else { cos = Math.cos(t * DEG); sin = Math.sin(t * DEG); }
+    var bw = n.q % 2 ? h : w, bh = n.q % 2 ? w : h, crop = !exact && cornersSel.value === 'crop';
+    if (exact) {
+      W = bw; H = bh;
+    } else if (crop) {
+      // The largest centred rectangle of the original's shape that stays 1 px inside the turned picture,
+      // so no pixel of it shows a corner.
+      var c = Math.abs(Math.cos(n.fine * DEG)), s = Math.abs(Math.sin(n.fine * DEG));
+      var k = Math.min((bw - 2) / (bw * c + bh * s), (bh - 2) / (bw * s + bh * c));
+      W = Math.max(1, Math.floor(k * bw));
+      H = Math.max(1, Math.floor(k * bh));
+    } else {
+      W = Math.round(w * Math.abs(cos) + h * Math.abs(sin));
+      H = Math.round(w * Math.abs(sin) + h * Math.abs(cos));
+    }
+    var sx = st.mirror ? -1 : 1, a = cos * sx, b = sin * sx, cc = -sin, d = cos;
+    return { W: W, H: H, exact: exact, crop: crop, m: [a, b, cc, d, W / 2 - (a * w + cc * h) / 2, H / 2 - (b * w + d * h) / 2] };
+  }
+  function cornerFill() {
+    if (bgSel.value === 'custom') return bgColor.value;
+    return bgSel.value === 'transparent' ? null : bgSel.value;
+  }
+  // bg: a colour under the whole picture, as saved in a format that cannot store transparency.
+  function draw(g, src, w, h, geo, bg) {
+    g.save();
+    var fill = bg || (!geo.exact && !geo.crop ? cornerFill() : null);
+    if (fill) { g.fillStyle = fill; g.fillRect(0, 0, geo.W, geo.H); }
+    // Flips and quarter turns copy pixels one to one; other angles are resampled smoothly.
+    g.imageSmoothingEnabled = !geo.exact;
+    if (!geo.exact) g.imageSmoothingQuality = 'high';
+    g.setTransform(geo.m[0], geo.m[1], geo.m[2], geo.m[3], geo.m[4], geo.m[5]);
+    g.drawImage(src, 0, 0, w, h);
+    g.restore();
+  }
+
+  function describe() {
+    var t = total(), turn = Math.abs(t) + '° ' + (t < 0 ? 'anticlockwise' : 'clockwise');
+    turn = turn.replace('-', '−');
+    if (!st.mirror) {
+      if (t === 0) return 'Not flipped or rotated';
+      if (t === 180) return 'Rotated 180°';
+      return 'Rotated ' + turn;
+    }
+    if (t === 0) return 'Flipped horizontally';
+    if (t === 180) return 'Flipped vertically';
+    return 'Flipped horizontally, then rotated ' + turn;
+  }
+  function suffix() {
+    var t = total(), cw = round2(((t % 360) + 360) % 360);
+    if (!st.mirror) return t === 0 ? 'copy' : 'rotated-' + cw;
+    if (t === 0) return 'flipped-horizontal';
+    if (t === 180) return 'flipped-vertical';
+    return 'flipped-horizontal-rotated-' + cw;
+  }
+
+  // ---------- JPEG quality ----------
+  // The libjpeg (IJG) luminance table in the zigzag order a DQT segment stores it in.
+  var STD_LUM = [16, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 40, 26, 24, 22, 22, 24, 49, 35, 37, 29, 40, 58, 51,
+    61, 60, 57, 51, 56, 55, 64, 72, 92, 78, 64, 68, 87, 69, 55, 56, 80, 109, 81, 87, 95, 98, 103, 104, 103, 62, 77, 113, 121, 112,
+    100, 120, 92, 101, 103, 99];
+  // The IJG quality (1 to 100) whose scaled table is closest to the file's first luminance table.
+  function jpegQuality(b) {
+    if (b[0] !== 0xff || b[1] !== 0xd8) return null;
+    var i = 2, table = null;
+    while (i + 4 <= b.length && !table) {
+      if (b[i] !== 0xff) return null;
+      var m = b[i + 1];
+      if (m === 0xff) { i++; continue; }
+      if (m === 0x01 || (m >= 0xd0 && m <= 0xd8)) { i += 2; continue; }
+      if (m === 0xda || m === 0xd9) break;
+      var len = (b[i + 2] << 8) | b[i + 3], p = i + 4, end = i + 2 + len;
+      if (len < 2) return null;
+      if (m === 0xdb) {
+        while (p < end && p < b.length) {
+          var wide = b[p] >> 4, id = b[p] & 15, size = wide ? 128 : 64;
+          if (p + 1 + size > b.length) break;
+          if (id === 0) {
+            table = [];
+            for (var k = 0; k < 64; k++) table.push(wide ? (b[p + 1 + 2 * k] << 8) | b[p + 2 + 2 * k] : b[p + 1 + k]);
+            break;
+          }
+          p += 1 + size;
+        }
+      }
+      i = end;
+    }
+    if (!table) return null;
+    var best = null, bestErr = Infinity;
+    for (var q = 1; q <= 100; q++) {
+      var scale = q < 50 ? Math.floor(5000 / q) : 200 - 2 * q, err = 0;
+      for (var j = 0; j < 64; j++) err += Math.abs(Math.min(255, Math.max(1, Math.floor((STD_LUM[j] * scale + 50) / 100))) - table[j]);
+      if (err < bestErr) { bestErr = err; best = q; }
+    }
+    return best;
+  }
+
+  // ---------- settings and output ----------
+  function outKey(it) {
+    var f = fmtSel.value;
+    if (f === 'png' || f === 'jpeg') return f;
+    if (f === 'webp') return canSave.webp ? 'webp' : 'png';
+    f = it.fmt;
+    if (f === 'jpeg' || f === 'png' || f === 'bmp' || f === 'tiff' || f === 'gif') return f;
+    if (f === 'webp') return canSave.webp ? 'webp' : 'png';
+    if (f === 'avif') return canSave.avif ? 'avif' : 'jpeg';
+    if (f === 'heic' || f === 'jxl') return 'jpeg';
+    if (f === 'ico') { var g = geometry(it.w, it.h); return g.W <= 256 && g.H <= 256 ? 'ico' : 'png'; }
+    return 'png';
+  }
+  function usesOwnQuality(it, key) { return key === 'jpeg' && it.fmt === 'jpeg' && it.jpegQ && matchBox.checked; }
+  function qualityFor(it, key) { return (usesOwnQuality(it, key) ? it.jpegQ : Number(qIn.value)) / 100; }
+
+  // The finished file for one image with the settings as they are now.
+  async function produce(it) {
+    var src = await sourceOf(it), geo = geometry(it.w, it.h), key = outKey(it);
+    if (geo.W > MAX_SIDE || geo.H > MAX_SIDE || geo.W * geo.H > MAX_OUT) {
+      throw friendly('Turned this way the image would be ' + geo.W + ' × ' + geo.H + ' pixels, more than this tool can create (16,384 per side, 100 megapixels). Crop off the corners instead.');
+    }
+    var c = document.createElement('canvas');
+    c.width = geo.W;
+    c.height = geo.H;
+    var g = c.getContext('2d');
+    if (!g) throw friendly('Your browser could not create an image this large.');
+    try {
+      draw(g, src, it.w, it.h, geo);
+      var blob = await TTImage.encode(c, key, {
+        quality: qualityFor(it, key), background: NO_ALPHA[key] ? cornerFill() || '#ffffff' : null, wasm: key === 'avif',
+        icoSizes: key === 'ico' ? [Math.max(geo.W, geo.H)] : null
+      });
+      return { blob: blob, key: key, w: geo.W, h: geo.H, name: baseName(it.name) + '-' + suffix() + '.' + EXT[key] };
+    } finally {
+      c.width = c.height = 0;
+    }
+  }
+
+  // ---------- images ----------
+  // The full-size upright picture on the page. Only the previewed image keeps it.
+  async function sourceOf(it) {
+    if (it.sample) return it.canvas;
+    if (it.canvas) return it.canvas;
+    if (!it.res) it.res = await TTImage.decode(it.file, { canvas: false, maxPixels: DECODE_MAX });
+    it.canvas = await TTImage.toCanvas(it.res);
+    return it.canvas;
+  }
+  function releaseSrc(it) {
+    if (!it || it.sample) return;
+    if (it.res) { TTImage.release(it.res); it.res = null; }
+    if (it.canvas) { it.canvas.width = it.canvas.height = 0; it.canvas = null; }
+  }
+  function viewSize(w, h) {
+    var k = Math.min(1, VIEW_MAX / Math.max(w, h));
+    return [Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k))];
+  }
+  // The lighter copy both previews are drawn from; it is made in the decoder's worker.
+  async function viewOf(it) {
+    if (it.view) return it.view;
+    var vs = viewSize(it.w, it.h);
+    if (!it.res) it.res = await TTImage.decode(it.file, { canvas: false, maxPixels: DECODE_MAX });
+    var blob = await TTImage.encode(it.res, it.hasAlpha ? 'png' : 'bmp', { width: vs[0], height: vs[1] });
+    it.view = await createImageBitmap(blob);
+    return it.view;
+  }
+
+  function sampleCanvas() {
+    var c = document.createElement('canvas');
+    c.width = 900; c.height = 600;
+    var g = c.getContext('2d');
+    var sky = g.createLinearGradient(0, 0, 0, 600);
+    sky.addColorStop(0, '#1d3f7a'); sky.addColorStop(0.55, '#7fb2e5'); sky.addColorStop(1, '#f2d9a6');
+    g.fillStyle = sky; g.fillRect(0, 0, 900, 600);
+    g.fillStyle = '#ffd36b'; g.beginPath(); g.arc(170, 140, 70, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#4a5d8a'; g.beginPath(); g.moveTo(0, 600); g.lineTo(0, 470); g.lineTo(330, 400); g.lineTo(700, 170); g.lineTo(900, 300); g.lineTo(900, 600); g.fill();
+    g.fillStyle = '#e34b3c'; g.fillRect(696, 104, 6, 68); g.beginPath(); g.moveTo(702, 104); g.lineTo(760, 120); g.lineTo(702, 136); g.fill();
+    g.fillStyle = '#2f6b3f'; g.beginPath(); g.moveTo(0, 600); g.lineTo(0, 520); g.lineTo(420, 560); g.lineTo(900, 500); g.lineTo(900, 600); g.fill();
+    return c;
+  }
+
+  // ---------- the previews ----------
+  var paintToken = 0;
+  async function paint() {
+    var token = ++paintToken, it = current || sample, v;
+    try { v = it.sample ? it.canvas : await viewOf(it); } catch (e) { if (token === paintToken) showError(it, e); return; }
+    if (token !== paintToken) return;
+    var vw = v.width, vh = v.height, geo = geometry(vw, vh);
+    beforeCv.width = vw; beforeCv.height = vh;
+    beforeCv.getContext('2d').drawImage(v, 0, 0);
+    afterCv.width = geo.W; afterCv.height = geo.H;
+    // The After preview shows what will be saved: a JPEG's transparent areas are filled in.
+    draw(afterCv.getContext('2d'), v, vw, vh, geo, NO_ALPHA[outKey(it)] ? cornerFill() || '#ffffff' : null);
+    fit(beforeCv);
+    fit(afterCv);
+  }
+  // Each preview is scaled to fill its frame; small pictures are enlarged with sharp pixels.
+  function fit(cv) {
+    var f = cv.parentNode, fw = f.clientWidth - 16, fh = f.clientHeight - 16;
+    if (fw <= 0 || fh <= 0) return;
+    var k = Math.min(fw / cv.width, fh / cv.height);
+    cv.style.width = (cv.width * k).toFixed(2) + 'px';
+    cv.style.height = (cv.height * k).toFixed(2) + 'px';
+    cv.classList.toggle('is-tiny', k > 2);
+  }
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(function () { fit(beforeCv); fit(afterCv); }).observe(beforeCv.parentNode);
+  }
+
+  function showError(it, e) {
+    var msg = e && e.friendly ? e.message : e && e.code ? e.message : 'The image could not be prepared.';
+    errBox.textContent = '“' + it.name + '”: ' + msg;
+  }
+
+  // Text that follows the settings: sizes, the state line, the notes and which options apply.
+  function refresh() {
+    var it = current || sample, geo = geometry(it.w, it.h), key = outKey(it), t = total();
+    setText($('#fl-before-size'), '· ' + it.w + ' × ' + it.h + ' px');
+    setText($('#fl-after-size'), '· ' + geo.W + ' × ' + geo.H + ' px');
+    setText(stateEl, describe() + ' · ' + geo.W + ' × ' + geo.H + ' px');
+    afterCv.setAttribute('aria-label', 'The image after: ' + describe().toLowerCase() + ', ' + geo.W + ' by ' + geo.H + ' pixels');
+    $('#fl-corner-row').hidden = split(t).fine === 0;
+    $('#fl-bg-field').hidden = cornersSel.value === 'crop';
+    var keys = (items.length ? items : [it]).map(outKey);
+    $('#fl-q-field').hidden = !keys.some(function (k) { return LOSSY[k]; });
+    var own = (items.length ? items : [it]).filter(function (x) { return x.fmt === 'jpeg' && x.jpegQ && outKey(x) === 'jpeg'; });
+    $('#fl-match-row').hidden = !own.length;
+    setText($('#fl-q-out'), qIn.value);
+    var sameOpt = fmtSel.querySelector('option[value="same"]');
+    var sameKey = fmtSel.value === 'same' ? key : (function () { var v = fmtSel.value; fmtSel.value = 'same'; var k = outKey(it); fmtSel.value = v; return k; })();
+    setText(sameOpt, sameKey === it.fmt ? 'Original format (' + LABEL[sameKey] + ')' : 'Original (saved as ' + LABEL[sameKey] + ')');
+    setText(noteEl, notesFor(it, key, geo).join(' '));
+    updateRows();
+  }
+  function notesFor(it, key, geo) {
+    var notes = [], fill = cornerFill();
+    if (usesOwnQuality(it, key)) notes.push('Saved at quality ' + it.jpegQ + ', the setting this JPEG was saved with.');
+    if (fmtSel.value === 'webp' && key !== 'webp') notes.push('Your browser cannot save WebP images, so this is a PNG.');
+    if (NO_ALPHA[key] && (it.hasAlpha || (!geo.exact && !geo.crop && !fill))) notes.push(LABEL[key] + ' cannot store transparency, so transparent areas become ' + (fill ? 'the corner colour' : 'white') + '.');
+    if (it.animated) notes.push('Only the first frame of the animation is kept.');
+    if (it.pages > 1) notes.push('Only the first of its ' + it.pages + ' ' + (it.fmt === 'tiff' ? 'pages' : 'images') + ' is used.');
+    if (!geo.exact) notes.push('Turning by an angle that is not a multiple of 90° resamples the picture, which softens fine detail slightly.');
+    return notes;
+  }
+
+  var paintSoon = TT.debounce(paint, 0);
+  // The state line is read out once typing or dragging pauses, not at every keystroke or slider step.
+  var announce = TT.debounce(function () { setText($('#fl-live'), stateEl.textContent); }, 500);
+  function update() {
+    statusEl.textContent = '';
+    refresh();
+    paintSoon();
+  }
+  function changed() {
+    update();
+    announce();
+  }
+
+  // ---------- the angle controls ----------
+  function setAngleError(msg) {
+    angleBad = msg;
+    setText(angleErr, msg);
+    angleIn.setAttribute('aria-invalid', msg ? 'true' : 'false');
+    angleIn.setAttribute('aria-describedby', msg ? 'fl-angle-hint fl-angle-error' : 'fl-angle-hint');
+  }
+  function syncControls() {
+    var t = total();
+    angleIn.value = fmtDeg(t).replace('−', '-');
+    setAngleError('');
+    syncFine();
+  }
+  function syncFine() {
+    fineIn.value = String(st.fine);
+    var label = st.fine === 0 ? '0°' : fmtDeg(Math.abs(st.fine)) + '° ' + (st.fine < 0 ? 'anticlockwise' : 'clockwise');
+    setText(fineOut, (st.fine > 0 ? '+' : '') + fmtDeg(st.fine) + '°');
+    fineIn.setAttribute('aria-valuetext', label);
+  }
+  function applyTyped() {
+    var r = parseAngle(angleIn.value);
+    if (r.error) { setAngleError(r.error); return false; }
+    setAngleError('');
+    var n = split(r.value);
+    st.q = n.q; st.fine = n.fine;
+    syncFine();
+    return true;
+  }
+  angleIn.addEventListener('input', function () { if (applyTyped()) changed(); });
+  angleIn.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    var r = parseAngle(angleIn.value);
+    if (r.error) return;
+    e.preventDefault();
+    var v = round2(Math.max(-360, Math.min(360, r.value + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1))));
+    angleIn.value = String(v);
+    if (applyTyped()) changed();
+  });
+  angleIn.addEventListener('change', function () { if (!angleBad && parseAngle(angleIn.value).empty) syncControls(); });
+  fineIn.addEventListener('input', function () {
+    st.fine = round2(Math.max(-45, Math.min(45, Number(fineIn.value) || 0)));
+    syncControls();
+    changed();
+  });
+  function op(fn) { return function () { fn(); syncControls(); changed(); }; }
+  // A flip mirrors the picture as shown: horizontally the turn changes sign, vertically it becomes 180° minus it.
+  $('#fl-flip-h').addEventListener('click', op(function () { st.mirror = !st.mirror; st.q = (4 - st.q) % 4; st.fine = round2(-st.fine); }));
+  $('#fl-flip-v').addEventListener('click', op(function () { st.mirror = !st.mirror; st.q = (6 - st.q) % 4; st.fine = round2(-st.fine); }));
+  $('#fl-rot-r').addEventListener('click', op(function () { st.q = (st.q + 1) % 4; }));
+  $('#fl-rot-l').addEventListener('click', op(function () { st.q = (st.q + 3) % 4; }));
+  $('#fl-rot-180').addEventListener('click', op(function () { st.q = (st.q + 2) % 4; }));
+  $('#fl-reset').addEventListener('click', op(function () { st.mirror = false; st.q = 0; st.fine = 0; }));
+  [cornersSel, bgSel, fmtSel, matchBox].forEach(function (el) { el.addEventListener('change', changed); });
+  bgColor.addEventListener('input', function () { bgSel.value = 'custom'; changed(); });
+  bgSel.addEventListener('change', function () { if (/^#[0-9a-f]{6}$/i.test(bgSel.value)) bgColor.value = bgSel.value; });
+  qIn.addEventListener('input', changed);
+
+  // ---------- the list of images ----------
+  function rowInfo(it) {
+    if (it.error) return it.error;
+    var geo = geometry(it.w, it.h), key = outKey(it), f = TTImage.formats[it.fmt];
+    return it.w + '\u00a0×\u00a0' + it.h + ' ' + (f ? f.label : '') + ' → ' + geo.W + '\u00a0×\u00a0' + geo.H + ' ' + LABEL[key];
+  }
+  function buildRow(it) {
+    var li = document.createElement('li');
+    li.className = 'fl-row';
+    li.dataset.id = it.id;
+    li.innerHTML = '<span class="fl-thumb"><img alt=""></span><div class="fl-row-main"><button type="button" class="fl-pick"></button><div class="fl-row-info"></div></div>' +
+      '<span class="fl-acts"><button type="button" class="btn secondary small fl-dl">Download</button>' +
+      '<button type="button" class="btn secondary small fl-x"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span>';
+    $('img', li).src = it.thumb;
+    $('.fl-pick', li).textContent = it.name;
+    $('.fl-pick', li).title = 'Preview ' + it.name;
+    $('.fl-dl', li).setAttribute('aria-label', 'Download ' + it.name);
+    $('.fl-x', li).setAttribute('aria-label', 'Remove ' + it.name);
+    $('.fl-x', li).title = 'Remove';
+    return li;
+  }
+  function updateRows() {
+    var t = total(), tf = 'rotate(' + t + 'deg)' + (st.mirror ? ' scaleX(-1)' : '');
+    items.forEach(function (it, i) {
+      if (!it.el) it.el = buildRow(it);
+      if (list.children[i] !== it.el) list.insertBefore(it.el, list.children[i] || null);
+      var cur = it === current;
+      it.el.classList.toggle('is-current', cur);
+      $('.fl-pick', it.el).setAttribute('aria-pressed', cur ? 'true' : 'false');
+      var info = $('.fl-row-info', it.el);
+      setText(info, rowInfo(it));
+      info.classList.toggle('is-error', !!it.error);
+      $('img', it.el).style.transform = tf;
+      TT.$$('button', it.el).forEach(function (b) { b.disabled = busy; });
+    });
+    while (list.children.length > items.length) list.removeChild(list.lastChild);
+    var n = items.length;
+    fileBar.hidden = n === 0;
+    dropZone.hidden = n > 0;
+    list.hidden = n < 2;
+    zipBtn.hidden = n < 2;
+    [zipBtn, downloadBtn, copyBtn, $('#fl-another'), $('#fl-clear')].forEach(function (b) { b.disabled = busy; });
+  }
+  function showCurrent() {
+    var it = current;
+    if (!it) return;
+    setText($('#fl-fname'), it.name);
+    $('#fl-fname').title = it.name;
+    var f = TTImage.formats[it.fmt];
+    setText($('#fl-forig'), it.w + ' × ' + it.h + ' px, ' + fmtBytes(it.size) + (f ? ', ' + f.label : '') +
+      (it.jpegQ ? ', quality about ' + it.jpegQ : '') + (items.length > 1 ? ' · image ' + (items.indexOf(it) + 1) + ' of ' + items.length : '') +
+      (it.orientation > 1 ? '. Its EXIF orientation tag (' + it.orientation + ': ' + ORIENT[it.orientation] + ') was applied first, so it is shown, and saved, upright.' : ''));
+  }
+  function select(it) {
+    if (current && current !== it) { releaseSrc(current); if (current.view) { current.view.close(); current.view = null; } }
+    current = it;
+    showCurrent();
+  }
+
+  list.addEventListener('click', function (e) {
+    var btn = e.target.closest('button'), li = e.target.closest('.fl-row');
+    if (!btn || !li || busy) return;
+    var it = items.filter(function (x) { return String(x.id) === li.dataset.id; })[0];
+    if (!it) return;
+    if (btn.classList.contains('fl-pick')) {
+      if (it !== current) { select(it); changed(); }
+    } else if (btn.classList.contains('fl-dl')) {
+      saveOne(it, btn);
+    } else if (btn.classList.contains('fl-x')) {
+      var i = items.indexOf(it);
+      items.splice(i, 1);
+      releaseSrc(it);
+      if (it.view) it.view.close();
+      URL.revokeObjectURL(it.thumb);
+      if (it.el) it.el.remove();
+      if (!items.length) { clearAll(); return; }
+      if (it === current) { current = null; select(items[Math.min(i, items.length - 1)]); }
+      showCurrent();
+      changed();
+      statusEl.textContent = 'Removed ' + it.name + '.';
+      var next = items[Math.min(i, items.length - 1)];
+      if (items.length > 1) $('.fl-x', next.el).focus(); else $('#fl-another').focus();
+    }
+  });
+
+  function clearAll() {
+    items.forEach(function (it) { releaseSrc(it); if (it.view) it.view.close(); URL.revokeObjectURL(it.thumb); });
+    items = [];
+    current = null;
+    list.textContent = '';
+    addError = '';
+    errBox.textContent = '';
+    statusEl.textContent = '';
+    changed();
+    $('#fl-choose').focus();
+  }
+  $('#fl-clear').addEventListener('click', clearAll);
+
+  // ---------- saving ----------
+  // Every save is made from the settings as they are at that moment.
+  function ready() {
+    if (busy) return false;
+    if (angleBad) { angleIn.focus(); return false; }
+    return true;
+  }
+  async function saveOne(it, btn) {
+    if (!ready()) return;
+    errBox.textContent = '';
+    statusEl.textContent = 'Saving ' + it.name + '…';
+    try {
+      var r = await produce(it);
+      it.error = null;
+      TT.download(r.name, r.blob);
+      statusEl.textContent = 'Saved ' + r.name + ' (' + r.w + ' × ' + r.h + ' px, ' + fmtBytes(r.blob.size) + ').';
+    } catch (e) {
+      statusEl.textContent = '';
+      errBox.textContent = e && (e.friendly || e.code) ? e.message : 'The image could not be saved, probably because this device ran out of memory.';
+    } finally {
+      if (it !== current) releaseSrc(it);
+      updateRows();
+      if (btn && document.activeElement === document.body) btn.focus();
+    }
+  }
+  downloadBtn.addEventListener('click', function () { saveOne(current || sample, downloadBtn); });
+
+  copyBtn.addEventListener('click', async function () {
+    if (!ready()) return;
+    errBox.textContent = '';
+    if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem !== 'function') {
+      errBox.textContent = 'Your browser cannot copy images to the clipboard. Use Download instead.';
+      return;
+    }
+    var it = current || sample, geo = geometry(it.w, it.h);
+    var png = (async function () {
+      var src = await sourceOf(it), c = document.createElement('canvas');
+      c.width = geo.W; c.height = geo.H;
+      draw(c.getContext('2d'), src, it.w, it.h, geo);
+      try { return await TTImage.encode(c, 'png'); } finally { c.width = c.height = 0; }
+    })();
+    try {
+      // The clipboard takes PNG in every browser, whatever format is chosen for downloads.
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      TT.flash(copyBtn, 'Copied!');
+      statusEl.textContent = 'Copied a ' + geo.W + ' × ' + geo.H + ' px PNG. Paste it into any app that accepts images.';
+    } catch (e) {
+      errBox.textContent = 'The browser did not allow copying the image. Use Download instead.';
+    }
+  });
+
+  zipBtn.addEventListener('click', async function () {
+    if (items.length < 2 || !ready()) return;
+    var had = document.activeElement === zipBtn, todo = items.slice(), files = [], bad = 0;
+    busy = true;
+    errBox.textContent = '';
+    updateRows();
+    try {
+      for (var i = 0; i < todo.length; i++) {
+        var it = todo[i];
+        zipBtn.textContent = 'Saving ' + (i + 1) + ' of ' + todo.length + '…';
+        try {
+          var r = await produce(it);
+          it.error = null;
+          files.push({ name: r.name, data: r.blob, date: it.file.lastModified ? new Date(it.file.lastModified) : undefined });
+        } catch (e) {
+          it.error = e && (e.friendly || e.code) ? e.message : 'This image could not be saved.';
+          bad++;
+        } finally {
+          if (it !== current) releaseSrc(it);
+        }
+        updateRows();
+      }
+      if (files.length) {
+        zipBtn.textContent = 'Building the ZIP…';
+        var zipName = (st.mirror ? 'flipped' : 'rotated') + '-images.zip', zip = await TTZip.create(files, { compress: 'auto' });
+        TT.download(zipName, zip);
+        statusEl.textContent = 'Saved ' + zipName + ': ' + files.length + (files.length === 1 ? ' image, ' : ' images, ') + fmtBytes(zip.size) + '.' +
+          (bad ? ' ' + bad + (bad === 1 ? ' image' : ' images') + ' could not be saved; see the list.' : '');
+      } else {
+        statusEl.textContent = 'None of the images could be saved; see the list.';
+      }
+    } catch (e) {
+      statusEl.textContent = e && e.message ? e.message : 'The ZIP file could not be created.';
+    } finally {
+      busy = false;
+      zipBtn.textContent = 'Download all (ZIP)';
+      updateRows();
+      if (had) zipBtn.focus();
+    }
+  });
+
+  // ---------- loading ----------
+  async function addOne(file) {
+    var name = file.name || ('pasted-image-' + (++pastedCount) + '.png');
+    var res = await TTImage.decode(file, { canvas: false, maxPixels: DECODE_MAX });
+    var it = { id: nextId++, file: file, name: name, size: file.size, res: res, el: null, error: null };
+    try {
+      it.fmt = res.format; it.w = res.width; it.h = res.height; it.hasAlpha = !!res.hasAlpha;
+      it.orientation = res.orientation || 1; it.animated = !!res.animated; it.pages = res.images || 1;
+      it.jpegQ = it.fmt === 'jpeg' ? jpegQuality(new Uint8Array(await file.slice(0, 262144).arrayBuffer())) : null;
+      var k = Math.min(1, 80 / Math.max(it.w, it.h));
+      it.thumb = URL.createObjectURL(await TTImage.encode(res, 'png', { width: Math.max(1, Math.round(it.w * k)), height: Math.max(1, Math.round(it.h * k)) }));
+    } catch (e) {
+      TTImage.release(res);
+      throw e;
+    }
+    return it;
+  }
+  async function addFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
+    if (busy) { errBox.textContent = 'Please wait until the images being opened or saved are ready, then add those again.'; return; }
+    var hadFocus = document.activeElement === $('#fl-choose'), added = [], bad = [];
+    busy = true;
+    errBox.textContent = '';
+    statusEl.textContent = files.length > 1 ? 'Opening ' + files.length + ' images…' : 'Opening the image…';
+    updateRows();
+    for (var i = 0; i < files.length; i++) {
+      try { added.push(await addOne(files[i])); } catch (e) {
+        bad.push({ name: files[i].name || 'pasted file', why: e && (e.friendly || e.code) ? e.message : '' });
+      }
+    }
+    busy = false;
+    statusEl.textContent = added.length > 1 ? 'Added ' + added.length + ' images.' : '';
+    added.forEach(function (it) { items.push(it); if (it !== added[0]) { TTImage.release(it.res); it.res = null; } });
+    if (bad.length === 1) errBox.textContent = '“' + bad[0].name + '” could not be opened. ' + (bad[0].why || 'It is not an image this browser can open.');
+    else if (bad.length) errBox.textContent = bad.length + ' files could not be opened: ' + bad.map(function (b) { return b.name; }).join(', ') + '.';
+    if (added.length) {
+      select(added[0]);
+      if (hadFocus) $('#fl-another').focus();
+    }
+    changed();
+  }
+
+  $('#fl-choose').addEventListener('click', function () { fileInput.click(); });
+  $('#fl-another').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    var files = Array.prototype.slice.call(fileInput.files || []);
+    fileInput.value = '';
+    addFiles(files);
+  });
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1; }
+  function dropTarget() { return items.length ? fileBar : dropZone; }
+  document.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropTarget().classList.add('is-over');
+  });
+  document.addEventListener('dragleave', function (e) {
+    if (!e.relatedTarget) { dropZone.classList.remove('is-over'); fileBar.classList.remove('is-over'); }
+  });
+  document.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropZone.classList.remove('is-over');
+    fileBar.classList.remove('is-over');
+    addFiles(e.dataTransfer.files);
+  });
+  document.addEventListener('paste', function (e) {
+    var files = e.clipboardData ? Array.prototype.filter.call(e.clipboardData.files || [], function (f) { return /^image\//.test(f.type); }) : [];
+    if (!files.length) return;
+    e.preventDefault();
+    addFiles(files);
+  });
+
+  // Which formats this browser can write; AVIF uses the WebAssembly encoder where the browser has none.
+  ['webp', 'avif'].forEach(function (k) {
+    TTImage.canEncode(k, { wasm: true }).then(function (ok) {
+      canSave[k] = ok;
+      var o = fmtSel.querySelector('option[value="' + k + '"]');
+      if (!ok && o) { o.disabled = true; o.textContent = LABEL[k] + ' (this browser cannot save it)'; if (fmtSel.value === k) fmtSel.value = 'same'; }
+      refresh();
+    });
+  });
+
+  // The browser may put back the angle typed before a reload or Back after this script ran; a
+  // Straighten slider it puts back on its own (the flips and quarter turns are gone) is reset.
+  window.addEventListener('pageshow', function () {
+    if (angleIn.value !== fmtDeg(total()).replace('−', '-')) applyTyped();
+    if (Number(fineIn.value) !== st.fine) syncFine();
+    update();
+  });
+
+  var sc = sampleCanvas();
+  sample = { sample: true, name: 'sample', fmt: 'png', w: sc.width, h: sc.height, canvas: sc, hasAlpha: false, size: 0 };
+  syncControls();
+  update();
+})();
+</script>
