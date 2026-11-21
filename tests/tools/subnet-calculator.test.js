@@ -514,4 +514,25 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.evaluate(() => { const e = document.querySelector('#sc-split-num'); e.value = '9'.repeat(100000); e.dispatchEvent(new Event('input')); });
   assert.ok(Date.now() - t0 < 1000, 'huge count handled in ' + (Date.now() - t0) + ' ms');
   assert.match(await page.textContent('#sc-split-msg'), /can be split into at most 16,777,216 subnets/);
+
+  // ----- Guide: it names the Binary rows of the results, gives a mask octet in binary and
+  // links the binary translator for converting one number. Every link points at a tool page. -----
+  {
+    const guide = (await page.textContent('.prose')).replace(/\s+/g, ' ');
+    const m = guide.match(/bit set\. For IPv4 the results show these bits under Binary, with the network part in bold; the binary translator converts a single number, such as the mask octet (\d+) \(([01]{8})\), between decimal, binary and hex\./);
+    assert.ok(m, 'the guide points to the Binary rows and the binary translator');
+    assert.equal(parseInt(m[2], 2), Number(m[1]), `${m[2]} is ${m[1]}`);
+    // The rows the guide names: a /26 mask ends in that octet, and its 26 network bits are bold.
+    await page.fill('#sc-ip', '10.0.0.1/26');
+    assert.equal(await page.textContent('#sc-bin-label'), 'Binary');
+    const rows = await page.$$eval('#sc-bin dt', l => l.map(x => x.textContent));
+    const mask = page.locator('#sc-bin dd').nth(rows.indexOf('Netmask'));
+    assert.equal((await mask.textContent()).split('.')[3], m[2], 'the /26 netmask ends in ' + m[2]);
+    assert.equal((await mask.locator('.sc-n').textContent()).replace(/\./g, ''), '1'.repeat(26), 'the network part is bold');
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/binary-translator/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+  }
 };

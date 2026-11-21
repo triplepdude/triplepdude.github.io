@@ -639,6 +639,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // points at a tool that exists.
   const guideLinks = await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href')));
   assert.ok(guideLinks.includes('/jwt-decoder/'), 'the guide links the JWT decoder');
+  // Next to the Base64 input option, the guide links the Base64 encoder and decoder.
+  assert.ok(guideLinks.includes('/base64-encode-decode/'), 'the guide links the Base64 encoder and decoder');
+  assert.match((await page.textContent('.prose')).replace(/\s+/g, ' '), /or Base64 to hash raw bytes instead; the Base64 decoder shows what a Base64 string contains\./);
   for (const h of guideLinks) assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', h.replace(/\//g, '') + '.html')), `the guide links ${h}, which is not a tool`);
   // The FAQ gives the command that hashes a file on each system; the compare box reads what they
   // print (the formats are tested above).
