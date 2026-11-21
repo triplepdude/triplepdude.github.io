@@ -120,7 +120,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await text('#tt-error'), 'Only the first 20,000 characters can be typed in one test; the rest was cut off.');
   assert.equal(await page.getAttribute('#tt-input', 'aria-invalid'), 'true');
   assert.deepEqual((await page.getAttribute('#tt-input', 'aria-describedby')).split(' ').sort(), ['tt-error', 'tt-hint']);
-  assert.ok((await page.locator('#tt-text .tt-w').count()) >= 1818 + 60, 'enough words were added for the flood');
+  // 'flood word ' 1,818 times and 'fl': 3,637 words typed, and 60 more ready.
+  assert.ok((await page.locator('#tt-text .tt-w').count()) >= 3637 + 60, 'enough words were added for the flood');
   // An emoji at the limit is not cut in half.
   await page.evaluate(() => {
     const i = document.getElementById('tt-input');
@@ -299,8 +300,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // Common words, 1 minute: 20 words typed right, one a second. WPM counts
   // each word and its space; consistency counts the 40 idle seconds too.
   await f.goto(url + '#1m');
-  await f.evaluate(() => { document.querySelector('input[name="tt-mode"][value="words"]').click(); });
   await ready(f);
+  assert.equal(await checkedVal('tt-mode', f), 'words');
   const cw = await words(f);
   await f.focus('#tt-input');
   const perSecond = [];
@@ -316,7 +317,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const mean = chars / 60;
   const sd = Math.sqrt(bins.reduce((a, b) => a + (b - mean) * (b - mean), 0) / 60);
   assert.deepEqual(await scores(), {
-    wpm: String(Math.floor((2 * chars + 10) / 10)), raw: String(Math.floor((2 * chars + 10) / 10)),
+    wpm: String(Math.floor((2 * chars + 5) / 10)), raw: String(Math.floor((2 * chars + 5) / 10)),
     acc: '100.0%', con: Math.max(0, Math.round(100 * (1 - sd / mean))) + '%', errorWords: '0'
   });
   assert.equal(await text('#tt-r-detail', f), `You typed ${chars} characters in 1 minute, ${chars} of them in correct words. ${chars} keys typed a character and 0 of them were wrong. No errors left in the text.`);
@@ -359,7 +360,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await p.keyboard.insertText('Alice was ');
   assert.equal(await text('#tt-sr', p), 'Test 1 started: 30 seconds.');
   assert.equal(await p.locator('#tt-text .tt-w').nth(1).locator('.tt-ok').count(), 3);
-  // A curly apostrophe from smart punctuation, and a word suggestion with its space.
+  // A whole word and its space at once, as a word suggestion inserts it.
   await p.keyboard.insertText('beginning ');
   assert.equal(await p.locator('#tt-text .tt-w .tt-bad').count(), 0);
   const sizes = await p.evaluate(() => ({
@@ -397,8 +398,16 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     assert.ok(q.split(' ').every(x => hay.includes(x)), `the homepage search finds nothing for "${q}"`);
   }
 
-  // Leave a finished test on screen for the runner's phone-width checks.
-  await page.goto(url + '#30s');
+  // Leave a finished test, with words in error, on screen for the runner's
+  // phone-width checks.
+  await page.clock.install();
+  await page.goto(url + '#30s-the-great-gatsby');
   await page.reload();
+  await page.clock.pauseAt(Date.now() + 1000);
   await ready();
+  await page.focus('#tt-input');
+  await page.keyboard.insertText('In my youngerrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr and mroe vulnerable ');
+  await page.clock.runFor(31000);
+  await page.waitForFunction(() => !document.getElementById('tt-result').hidden);
+  assert.equal(await text('#tt-r-errs'), '2');
 };
