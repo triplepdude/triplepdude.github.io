@@ -11,9 +11,10 @@ Package:  pdfjs-dist 6.3.289, the "legacy" build (wider browser support), unmodi
             wasm/openjpeg.wasm   JPEG 2000 decoder     (LICENSE_OPENJPEG, LICENSE_PDFJS_OPENJPEG)
             wasm/jbig2.wasm      JBIG2 decoder (PDFium) (LICENSE_JBIG2, LICENSE_PDFJS_JBIG2)
             wasm/qcms_bg.wasm    colour management      (LICENSE_QCMS, LICENSE_PDFJS_QCMS)
-          The CMaps and standard font files of the package are not included; they
-          are only needed to draw some non-embedded (mostly CJK) fonts, which only
-          affects how a thumbnail looks, never the merged PDF.
+          The package's cmaps/, standard_fonts/ and iccs/ folders are kept
+          separately, unmodified, in assets/vendor/pdfjs-resources/. They draw
+          fonts a PDF does not embed (mostly CJK, Symbol and ZapfDingbats) and
+          CMYK colours; PDF to JPG and Split PDF pass their URLs to pdf.js.
 Source:   https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.3.289.tgz
           sha256 06f25e887adc6489f04c9fcb14198c77e4e5623a59a0bba5c4cea5838a4f1241
           https://github.com/mozilla/pdf.js
