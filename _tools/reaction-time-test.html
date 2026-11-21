@@ -1,0 +1,568 @@
+---
+title: "Reaction Time Test: Measure Your Reflexes"
+description: Measure your reaction time in milliseconds over 5 rounds, with false-start checks, average, median, percentile and a sound cue option. Runs in your browser.
+category: Device Tests
+keywords: [reaction time test, reaction test, reflex test, reaction speed test, average reaction time, reaction time by age, audio reaction time test, click reaction test]
+howto: |
+  ## How to take the reaction time test
+
+  Click the box, tap it or press Space to start a round. The box turns red;
+  when it turns green, click, tap or press Space as fast as you can. The wait
+  is a random 2 to 5 seconds, so it cannot be timed. After 5 rounds you get
+  your average, median and best time, and how your average compares with
+  other people's.
+
+  - **Too soon** means you pressed before the green, or less than 100 ms
+    after it. Reaction time research counts a response that fast as a
+    guess, so the round is repeated and counted as a false start.
+  - **Beep** replaces the green with a short beep and leaves the box
+    unchanged, to test your hearing instead of your sight, or for use with a
+    screen reader. Use **Play the beep** to check the volume first; on an
+    iPhone or iPad, silent mode mutes it. Bluetooth headphones add a delay of
+    their own, so use the built-in speaker or wired headphones.
+  - The clock starts at the screen frame that turns the box green, or when
+    the browser expects the beep to reach the speaker, and stops at the time
+    stamp of your press, so your screen's and mouse's delay is included.
+
+  ## What is a good reaction time?
+
+  Human Benchmark, the best-known online test, gives a median of 273 ms and
+  a mean of 284 ms for the 81 million clicks it has recorded. In a lab study
+  of 1,469 adults using a gaming mouse the average was 231 ms, of which
+  17.8 ms was the delay of the screen and mouse (Woods et al., 2015).
+
+  The percentile shown with your result compares your average with the
+  70,940 scores in the results chart on Human Benchmark's test page. That
+  chart's median is just under 230 ms, well below the 273 ms of all recorded
+  clicks, so it is a demanding comparison:
+
+  | Your average | Faster than |
+  |---|---|
+  | 150 ms | 99% |
+  | 175 ms | 92% |
+  | 200 ms | 74% |
+  | 225 ms | 53% |
+  | 250 ms | 33% |
+  | 275 ms | 19% |
+  | 300 ms | 11% |
+  | 350 ms | 5% |
+
+  ## Reaction time by age
+
+  | Age | Average in the lab study |
+  |---|---|
+  | 18 to 24 | 218 ms |
+  | 32 to 38 | 225 ms |
+  | 46 to 51 | 234 ms |
+  | 59 to 65 | 239 ms |
+
+  That is about half a millisecond slower for each year of age. A survey of
+  7,130 adults in the UK found that simple reaction time changes little
+  until about 50 and slows after that. Expect higher numbers on an
+  ordinary computer or phone than in the lab.
+
+  ## Laptops, phones and 144 Hz monitors
+
+  A screen can only show the green on a new frame: every 16.7 ms at 60 Hz
+  and every 6.9 ms at 144 Hz, and a change takes at least one frame to reach
+  the screen. A 144 Hz monitor therefore takes about 10 ms or more off your
+  times without changing your reflexes. Below the box the page shows how
+  many frames a second your browser is drawing; the
+  [screen resolution checker](/screen-resolution/) shows your refresh rate.
+
+  Many laptop screens run at 60 Hz, and Human Benchmark puts the delay of a
+  typical desktop or laptop at about 30 ms. Phones add more: in a 2023 study
+  of 26 smartphones, touch and display delay together came to between 35
+  and 140 ms.
+
+  Sound is quicker than sight. Textbook averages for young adults are about
+  160 ms for a sound and 190 ms for a light, so with wired sound the beep
+  usually gives lower times. To measure how fast you click rather than react, try the
+  [CPS test](/cps-test/).
+faq:
+  - q: Is my reaction time saved or sent anywhere?
+    a: No. The test runs in your browser with JavaScript and keeps your times only in memory, so they are gone when you reload or close the page. Nothing is uploaded, stored or tracked.
+  - q: Why does it say Too soon when I clicked after it turned green?
+    a: Any press less than 100 ms after the green counts as a false start. Reaction time research, such as the psychomotor vigilance test used in sleep studies, treats responses that fast as guesses made before the signal was seen. Wait for the change and the next press will count.
+  - q: How can I improve my reaction time?
+    a: Get enough sleep. Sleep loss is one of the best-documented causes of slow and missed reactions, which is why sleep research measures it with a reaction time test. People who play action video games regularly tend to react faster in studies, although whether gaming itself speeds you up is disputed. For a better score, test on a computer monitor rather than a TV, which Human Benchmark says can add as much as 150 ms, and with a mouse or keyboard rather than a touch screen.
+---
+<style>
+.rt {
+  --rt-wait: #b3261e; --rt-wait-text: #ffffff;
+  --rt-go: #3ddc84; --rt-go-text: #04210f;
+}
+.rt-opts { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; margin: 0 0 14px; }
+.rt-seg { min-width: 0; margin: 0; padding: 0; border: 0; }
+.rt-seg legend { margin: 0 0 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.rt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rt-chip { position: relative; display: inline-flex; }
+.rt-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.rt-chip span {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 14px;
+  border: 1px solid var(--field-border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 15px; white-space: nowrap;
+}
+.rt-chip input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.rt-chip input:checked + span::before { content: "\2713"; }
+.rt-chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rt-pad {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; min-height: 280px; margin: 0 0 12px; padding: 24px 16px;
+  border: 2px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text);
+  font: inherit; text-align: center; cursor: pointer;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.rt-pad:focus { outline: none; }
+.rt-pad:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.rt-pad.is-wait { background: var(--rt-wait); border-color: var(--rt-wait); color: var(--rt-wait-text); }
+.rt-pad.is-go { background: var(--rt-go); border-color: var(--rt-go); color: var(--rt-go-text); }
+.rt-pad.is-listen { border-style: dashed; border-color: var(--field-border); }
+.rt-pad.is-soon { border-color: var(--danger); }
+.rt-pad.is-soon .rt-main { color: var(--danger); }
+.rt-icon { display: block; width: 48px; height: 48px; border: 4px solid currentColor; border-radius: 50%; }
+.rt-pad.is-wait .rt-icon, .rt-pad.is-listen .rt-icon { border-style: dashed; }
+.rt-pad.is-go .rt-icon { width: 64px; height: 64px; background: currentColor; }
+.rt-main { font-size: clamp(1.6rem, 7vw, 2.6rem); font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.rt-sub { max-width: 34em; font-size: 15px; }
+.rt-pad:not(.is-wait):not(.is-go) .rt-sub { color: var(--muted); }
+.rt-under { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0 0 16px; }
+.rt-under .hint { flex: 1 1 260px; margin: 0; }
+.rt-live { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+.rt-live .stat b { font-variant-numeric: tabular-nums; }
+.rt-rounds { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+.rt-rounds li { padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.rt-result { margin: 0 0 20px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.rt-result p { margin: 0 0 8px; }
+.rt-score { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.rt-score b { font-size: clamp(2rem, 8vw, 3rem); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.rt-score span { font-size: 1.05rem; font-weight: 600; }
+.rt-h { margin: 24px 0 8px; font-size: 1.05rem; }
+.rt-hist td.num, .rt-hist th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.rt-empty { color: var(--muted); }
+@media (max-width: 480px) {
+  .rt-pad { min-height: 230px; }
+  .rt-live { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .rt-live .stat { padding: 10px; }
+  .rt-live .stat b { font-size: 1.1rem; }
+}
+@media (max-width: 400px) {
+  /* .data.rt-hist outranks the site's table.data padding. */
+  .data.rt-hist th, .data.rt-hist td { padding: 8px 4px; font-size: 13px; }
+}
+</style>
+
+<div class="rt">
+  <div class="rt-opts">
+    <fieldset class="rt-seg">
+      <legend>Signal</legend>
+      <div class="rt-chips">
+        <label class="rt-chip"><input type="radio" name="rt-cue" value="visual" autocomplete="off" checked><span>Box turns green</span></label>
+        <label class="rt-chip"><input type="radio" name="rt-cue" value="sound" autocomplete="off"><span>Beep</span></label>
+      </div>
+    </fieldset>
+    <button type="button" class="btn secondary small" id="rt-try-beep" hidden>Play the beep</button>
+  </div>
+
+  <button type="button" class="rt-pad" id="rt-pad">
+    <span class="rt-icon" aria-hidden="true"></span>
+    <span class="rt-main" id="rt-main">Click to start</span>
+    <span class="rt-sub" id="rt-sub">When the box turns green, click as fast as you can.</span>
+  </button>
+  <div class="rt-under">
+    <p class="hint" id="rt-hint">Click, tap, or Tab to the box and press Space. Each set has 5 rounds. If you use a screen reader, choose Beep.</p>
+    <button type="button" class="btn secondary small" id="rt-restart">Restart set</button>
+  </div>
+  <p class="msg error" id="rt-error" role="alert"></p>
+  <p class="visually-hidden" id="rt-sr" role="status"></p>
+
+  <div class="stats rt-live">
+    <div class="stat"><b id="rt-round">0 / 5</b><span>Rounds done</span></div>
+    <div class="stat"><b id="rt-avg">&ndash;</b><span>Average</span></div>
+    <div class="stat"><b id="rt-med">&ndash;</b><span>Median</span></div>
+    <div class="stat"><b id="rt-best">&ndash;</b><span>Best</span></div>
+    <div class="stat"><b id="rt-false">0</b><span>False starts</span></div>
+  </div>
+  <ol class="rt-rounds" id="rt-rounds" aria-label="Times in this set"></ol>
+
+  <div class="rt-result" id="rt-result" hidden>
+    <p class="rt-score"><b id="rt-res-avg">0</b><span>ms average</span></p>
+    <p id="rt-compare"></p>
+    <p id="rt-detail"></p>
+    <p id="rt-session-best"></p>
+    <div class="actions">
+      <button type="button" class="btn secondary small" id="rt-copy">Copy results</button>
+    </div>
+  </div>
+
+  <p class="hint" id="rt-fps">Measuring how often your browser draws a new frame&hellip;</p>
+
+  <h2 class="rt-h" id="rt-hist-h">Your sets this session</h2>
+  <div class="table-wrap">
+    <table class="data rt-hist" aria-labelledby="rt-hist-h">
+      <thead><tr><th scope="col">Set</th><th scope="col" class="num">Average (ms)</th><th scope="col" class="num">Median (ms)</th><th scope="col" class="num">Best (ms)</th><th scope="col" class="num">False starts</th></tr></thead>
+      <tbody id="rt-hist"><tr><td colspan="5" class="rt-empty">No sets finished yet.</td></tr></tbody>
+    </table>
+  </div>
+  <div class="actions">
+    <button type="button" class="btn secondary small" id="rt-clear">Clear session</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var ROUNDS = 5;
+  var MIN_WAIT = 2000, MAX_WAIT = 5000; // random wait before the signal, in ms
+  var GUESS_MS = 100;                   // faster than this after the signal is a guess
+  var BEEP_LEAD = 150;                  // the beep is scheduled this long before it plays
+  // Human Benchmark's reaction time results chart: the number of scores in
+  // each 25 ms band from 0 ms up to 1000 ms, as drawn on its test page
+  // (humanbenchmark.com, read 21 November 2026).
+  var HB = [32, 22, 18, 7, 80, 690, 4593, 12677, 15342, 14149, 9769, 5539, 2813, 1597, 925, 640, 424, 273, 231, 164,
+    130, 108, 94, 94, 67, 48, 55, 57, 36, 41, 28, 36, 34, 21, 26, 18, 25, 20, 17, 0];
+  var HB_TOTAL = HB.reduce(function (a, b) { return a + b; }, 0);
+  var CUES = {
+    visual: { name: 'box turns green', signal: 'green',
+      idle: 'When the box turns green, click as fast as you can.', wait: 'Wait for green…' },
+    sound: { name: 'beep', signal: 'beep',
+      idle: 'When you hear the beep, click as fast as you can. The box does not change colour.', wait: 'Listen for the beep…' }
+  };
+
+  var pad = TT.$('#rt-pad'), mainEl = TT.$('#rt-main'), subEl = TT.$('#rt-sub');
+  var srEl = TT.$('#rt-sr'), errEl = TT.$('#rt-error');
+  var state = 'idle';   // idle, wait, go, result, soon, paused, done
+  var setCue = null;    // the signal of the set in progress
+  var rounds = [];      // this set's times, whole ms
+  var falseStarts = 0;
+  var sets = [];        // finished sets this session
+  var goT = 0;          // when the signal appeared or sounded, on the performance.now() clock
+  var waitTimer = 0, goTimer = 0, rafId = 0;
+  var audio = null, beep = null;
+
+  function now() { return performance.now(); }
+  // The time the browser gave the event, which is when the button or key
+  // went down rather than when this script got round to it.
+  function stamp(e) {
+    var t = e && e.timeStamp, n = now();
+    return t > 0 && Math.abs(n - t) < 10000 ? t : n;
+  }
+  function say(text) { if (srEl.textContent !== text) srEl.textContent = text; }
+  function cue() { var el = TT.$('input[name="rt-cue"]:checked'); return el && CUES.hasOwnProperty(el.value) ? el.value : 'visual'; }
+  function ms(n) { return n + ' ms'; }
+
+  // Average and median of whole milliseconds, rounded half up with integers.
+  function average(list) {
+    var sum = list.reduce(function (a, b) { return a + b; }, 0), n = list.length;
+    return Math.floor((2 * sum + n) / (2 * n));
+  }
+  function median(list) {
+    var s = list.slice().sort(function (a, b) { return a - b; }), h = s.length >> 1;
+    return s.length % 2 ? s[h] : Math.floor((s[h - 1] + s[h] + 1) / 2);
+  }
+  // Share of the chart's scores slower than t ms, counting a band in part
+  // when t falls inside it.
+  function fasterThan(t) {
+    var below = 0;
+    for (var i = 0; i < HB.length; i++) {
+      var lo = i * 25;
+      if (t >= lo + 25) { below += HB[i]; continue; }
+      if (t > lo) below += HB[i] * (t - lo) / 25;
+      break;
+    }
+    return 100 * (HB_TOTAL - below) / HB_TOTAL;
+  }
+  function percentText(p) {
+    if (p > 99) return 'over 99%';
+    if (p < 1) return 'under 1%';
+    return 'about ' + Math.round(p) + '%';
+  }
+
+  // ---- Sound ----
+  function ensureAudio() {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!audio) { try { audio = new AC(); } catch (e) { return null; } }
+    if (audio.state === 'suspended' && audio.resume) audio.resume().catch(function () {});
+    return audio;
+  }
+  function playBeep(when) {
+    var o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'sine';
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(0.3, when + 0.004);
+    g.gain.setValueAtTime(0.3, when + 0.12);
+    g.gain.linearRampToValueAtTime(0, when + 0.15);
+    o.connect(g);
+    g.connect(audio.destination);
+    o.start(when);
+    o.stop(when + 0.16);
+    return { osc: o, gain: g };
+  }
+  function stopBeep() {
+    if (!beep) return;
+    try { beep.osc.stop(); } catch (e) { /* already stopped */ }
+    beep.gain.disconnect();
+    beep = null;
+  }
+  // When a sound scheduled for audio time `when` reaches the speaker, on the
+  // performance.now() clock, allowing for the output delay the browser knows.
+  function perfAt(when) {
+    var ts = audio.getOutputTimestamp ? audio.getOutputTimestamp() : null;
+    if (ts && ts.performanceTime > 0 && ts.contextTime > 0) return ts.performanceTime + (when - ts.contextTime) * 1000;
+    return now() + (when - audio.currentTime) * 1000 + ((audio.outputLatency || 0) + (audio.baseLatency || 0)) * 1000;
+  }
+
+  // ---- Display ----
+  function view(cls, main, sub) {
+    pad.className = 'rt-pad' + (cls ? ' is-' + cls : '');
+    mainEl.textContent = main;
+    subEl.textContent = sub;
+  }
+  function showStats() {
+    TT.$('#rt-round').textContent = rounds.length + ' / ' + ROUNDS;
+    TT.$('#rt-avg').textContent = rounds.length ? ms(average(rounds)) : '–';
+    TT.$('#rt-med').textContent = rounds.length ? ms(median(rounds)) : '–';
+    TT.$('#rt-best').textContent = rounds.length ? ms(Math.min.apply(null, rounds)) : '–';
+    TT.$('#rt-false').textContent = String(falseStarts);
+    TT.$('#rt-rounds').innerHTML = rounds.map(function (r, i) { return '<li>' + (i + 1) + ': ' + ms(r) + '</li>'; }).join('');
+  }
+  function idleView() {
+    var c = CUES[cue()];
+    view('', 'Click to start', c.idle);
+    TT.$('#rt-try-beep').hidden = cue() !== 'sound';
+  }
+
+  function clearTimers() {
+    clearTimeout(waitTimer); clearTimeout(goTimer); cancelAnimationFrame(rafId);
+    stopBeep();
+  }
+
+  // ---- A round ----
+  function showError(text) {
+    errEl.textContent = text;
+    if (text) pad.setAttribute('aria-describedby', 'rt-error'); else pad.removeAttribute('aria-describedby');
+  }
+  function startRound() {
+    clearTimers();
+    showError('');
+    if (!setCue) setCue = cue();
+    var c = CUES[setCue], delay = MIN_WAIT + Math.random() * (MAX_WAIT - MIN_WAIT);
+    goT = 0;
+    state = 'wait';
+    view(setCue === 'sound' ? 'listen' : 'wait', c.wait, 'Round ' + (rounds.length + 1) + ' of ' + ROUNDS + '.');
+    say('Round ' + (rounds.length + 1) + ' of ' + ROUNDS + '. ' + (setCue === 'sound' ? 'Listen for the beep.' : 'Wait for green.'));
+    if (setCue === 'sound') {
+      if (!ensureAudio()) { soundFailed(); return; }
+      var planned = now() + delay;
+      waitTimer = setTimeout(function () { armBeep(planned); }, delay - BEEP_LEAD);
+    } else {
+      waitTimer = setTimeout(function () {
+        rafId = requestAnimationFrame(function (frame) {
+          if (state !== 'wait') return;
+          // The change is drawn in this frame, so the clock starts at its start.
+          goT = frame;
+          state = 'go';
+          view('go', 'Go!', '');
+        });
+      }, delay);
+    }
+  }
+  function armBeep(planned) {
+    if (state !== 'wait') return;
+    if (!audio || audio.state !== 'running') { soundFailed(); return; }
+    var when = audio.currentTime + Math.max(0.03, (planned - now()) / 1000);
+    beep = playBeep(when);
+    goT = perfAt(when);
+    goTimer = setTimeout(function () { if (state === 'wait') state = 'go'; }, Math.max(0, goT - now()));
+  }
+  function soundFailed() {
+    clearTimers();
+    state = 'paused';
+    showError('The beep could not be played: this browser has not allowed sound yet. Click the box again, or choose Box turns green.');
+    view('soon', 'No sound', 'Click to try again.');
+  }
+
+  function respond(t) {
+    if (state === 'wait' || state === 'go') {
+      if (!goT || t < goT) { falseStart(false); return; }
+      var rt = t - goT;
+      if (rt < GUESS_MS) { falseStart(true); return; }
+      record(rt);
+      return;
+    }
+    if (state === 'done' || state === 'idle') { rounds = []; falseStarts = 0; setCue = null; showStats(); }
+    startRound();
+  }
+  function record(rt) {
+    clearTimers();
+    var r = Math.round(rt);
+    rounds.push(r);
+    showStats();
+    if (rounds.length >= ROUNDS) { finishSet(); return; }
+    state = 'result';
+    view('', ms(r), 'Click for round ' + (rounds.length + 1) + ' of ' + ROUNDS + '.');
+    say('Round ' + rounds.length + ': ' + r + ' milliseconds.');
+  }
+  function falseStart(afterSignal) {
+    clearTimers();
+    falseStarts++;
+    showStats();
+    state = 'soon';
+    var c = CUES[setCue];
+    var why = afterSignal
+      ? 'That was less than ' + GUESS_MS + ' ms after the ' + c.signal + ', which counts as a guess.'
+      : 'You pressed before the ' + c.signal + '.';
+    view('soon', 'Too soon!', why + ' Click to try this round again.');
+    say('Too soon, false start ' + falseStarts + '. ' + why);
+  }
+  function finishSet() {
+    var set = {
+      n: sets.length + 1, cue: setCue, times: rounds.slice(), falseStarts: falseStarts,
+      avg: average(rounds), med: median(rounds), best: Math.min.apply(null, rounds), worst: Math.max.apply(null, rounds)
+    };
+    sets.push(set);
+    state = 'done';
+    view('', ms(set.avg) + ' average', 'Click to start a new set.');
+    var pct = percentText(fasterThan(set.avg));
+    TT.$('#rt-result').hidden = false;
+    TT.$('#rt-res-avg').textContent = String(set.avg);
+    TT.$('#rt-compare').textContent = 'Faster than ' + pct + ' of the ' + HB_TOTAL.toLocaleString('en-GB') + ' scores in Human Benchmark’s results chart.';
+    TT.$('#rt-detail').textContent = 'Median ' + ms(set.med) + ', best ' + ms(set.best) + ', slowest ' + ms(set.worst) + '. ' +
+      (set.falseStarts === 1 ? '1 false start.' : set.falseStarts + ' false starts.') + ' Signal: ' + CUES[set.cue].name + '.';
+    var bestAvg = Math.min.apply(null, sets.map(function (s) { return s.avg; }));
+    TT.$('#rt-session-best').textContent = sets.length > 1 ? 'Best average this session: ' + ms(bestAvg) + '.' : '';
+    showHistory();
+    say('Set ' + set.n + ' done. Average ' + set.avg + ' milliseconds, median ' + set.med + '. Faster than ' + pct + ' of Human Benchmark scores.');
+  }
+  function showHistory() {
+    var body = TT.$('#rt-hist');
+    if (!sets.length) { body.innerHTML = '<tr><td colspan="5" class="rt-empty">No sets finished yet.</td></tr>'; return; }
+    body.innerHTML = sets.slice(-100).reverse().map(function (s) {
+      return '<tr><td>' + s.n + (s.cue === 'sound' ? ' (beep)' : '') + '</td><td class="num">' + s.avg + '</td><td class="num">' + s.med +
+        '</td><td class="num">' + s.best + '</td><td class="num">' + s.falseStarts + '</td></tr>';
+    }).join('');
+  }
+  function resultText(s) {
+    return 'Reaction time test (' + CUES[s.cue].name + '): ' + s.times.join(', ') + ' ms. Average ' + ms(s.avg) + ', median ' + ms(s.med) +
+      ', best ' + ms(s.best) + '. False starts: ' + s.falseStarts + '. Faster than ' + percentText(fasterThan(s.avg)) + ' of Human Benchmark scores.';
+  }
+
+  // A round cannot be timed fairly while the page is hidden or frozen.
+  function pause(why) {
+    if (state !== 'wait' && state !== 'go') return;
+    clearTimers();
+    state = 'paused';
+    view('', 'Paused', why + ' This round was not counted. Click to carry on.');
+    say('Paused. ' + why);
+  }
+  function resetSet(message) {
+    clearTimers();
+    rounds = []; falseStarts = 0; setCue = null;
+    state = 'idle';
+    showError('');
+    showStats();
+    idleView();
+    if (message) say(message);
+  }
+
+  // ---- Frame rate ----
+  var fpsRun = 0;
+  function measureFps() {
+    var id = ++fpsRun, stamps = [];
+    function step(ts) {
+      if (id !== fpsRun) return;
+      stamps.push(ts);
+      if (stamps.length < 61) { requestAnimationFrame(step); return; }
+      var d = [];
+      for (var i = 1; i < stamps.length; i++) d.push(stamps[i] - stamps[i - 1]);
+      d.sort(function (a, b) { return a - b; });
+      var frame = d[d.length >> 1];
+      if (!(frame > 0)) return;
+      TT.$('#rt-fps').textContent = 'Your browser is drawing about ' + Math.round(1000 / frame) + ' frames a second, one every ' +
+        frame.toFixed(1) + ' ms. The green can only appear on a new frame.';
+    }
+    requestAnimationFrame(step);
+  }
+
+  // ---- Input ----
+  var lastPress = -1e9; // time stamp of the last pointer or key press on the box
+  pad.addEventListener('pointerdown', function (e) {
+    lastPress = stamp(e);
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    respond(lastPress);
+  });
+  pad.addEventListener('keydown', function (e) {
+    var space = e.key === ' ' || e.code === 'Space' || e.key === 'Spacebar';
+    if (!space && e.key !== 'Enter') return;
+    e.preventDefault(); // no scrolling, and no click from the button itself
+    lastPress = stamp(e);
+    if (e.repeat) return; // a key held down is not a reaction
+    if (cue() === 'sound' || setCue === 'sound') ensureAudio();
+    respond(lastPress);
+  });
+  pad.addEventListener('keyup', function (e) { if (e.key === ' ' || e.code === 'Space') e.preventDefault(); });
+  pad.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  // Browsers allow sound to start only after a click, tap or key press has
+  // finished, so the audio is switched on at those moments too. A screen
+  // reader that activates the box sends a click with no press before it
+  // (detail 0), and that click is the response.
+  pad.addEventListener('click', function (e) {
+    e.preventDefault();
+    if (cue() === 'sound' || setCue === 'sound') ensureAudio();
+    var t = stamp(e);
+    if (e.detail === 0 && t - lastPress > 500) respond(t);
+  });
+  pad.addEventListener('pointerup', function () {
+    if (cue() === 'sound' || setCue === 'sound') ensureAudio();
+    // Safari does not focus a button that is clicked; Space needs the focus.
+    if (document.activeElement !== pad) pad.focus({ preventScroll: true });
+  });
+
+  TT.$$('input[name="rt-cue"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (cue() === 'sound') ensureAudio();
+      var busy = state !== 'idle' && state !== 'done';
+      resetSet(busy ? 'Set restarted with the new signal.' : '');
+    });
+  });
+  TT.$('#rt-try-beep').addEventListener('click', function () {
+    // A beep heard during a round would be taken for the signal.
+    pause('You played the test beep.');
+    if (!ensureAudio()) { soundFailed(); return; }
+    var go = function () { stopBeep(); beep = playBeep(audio.currentTime + 0.03); };
+    if (audio.state === 'running') go(); else audio.resume().then(go, function () {});
+  });
+  TT.$('#rt-restart').addEventListener('click', function () { resetSet('Set restarted.'); pad.focus({ preventScroll: true }); });
+  TT.$('#rt-clear').addEventListener('click', function () {
+    resetSet('');
+    sets = [];
+    TT.$('#rt-result').hidden = true;
+    showHistory();
+    say('Session cleared.');
+  });
+  TT.$('#rt-copy').addEventListener('click', function (e) {
+    var s = sets[sets.length - 1];
+    if (s) TT.copy(resultText(s), e.currentTarget);
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) pause('The page was hidden.');
+    else measureFps();
+  });
+  // Back and Forward can bring the page back from the cache with a round
+  // frozen half way, or restore the other signal after this script ran.
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted) pause('The page was reopened.');
+    if (state === 'idle') idleView();
+    TT.$('#rt-try-beep').hidden = cue() !== 'sound';
+    measureFps();
+  });
+
+  showStats();
+  idleView();
+})();
+</script>

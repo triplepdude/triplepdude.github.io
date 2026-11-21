@@ -1,0 +1,526 @@
+---
+title: "CPS Test: Click Speed Test, 1 to 100 Seconds"
+description: Test your clicks per second over 1, 5, 10, 15, 30, 60 or 100 seconds with left click, right click, space bar or taps. Runs in your browser.
+category: Device Tests
+keywords: [cps test, click speed test, clicks per second test, cps test 5 seconds, cps test 10 seconds, right click cps test, spacebar cps test, jitter click test, butterfly click test]
+howto: |
+  ## How to use the CPS test
+
+  Choose a test length and what to count, then click the box as fast as you
+  can. The timer starts with your first click, not when the page loads, and
+  the count stops the moment the time is up. Your score is clicks divided by
+  seconds: 52 clicks in the 5-second test is 10.40 CPS.
+
+  - **Left click or tap** counts the main mouse button, touchpad clicks and
+    taps on a touch screen, one for each finger.
+  - **Right click** counts the right button and stops the menu from opening
+    inside the box. It needs a mouse or touchpad: taps on a touch screen are
+    not counted in this mode.
+  - **Space bar** counts presses while the box has the focus. Holding the key
+    down counts once, because auto-repeat is ignored. If the bar seems to
+    type twice, the [keyboard tester](/keyboard-tester/) checks for key
+    chatter.
+
+  Your best score for each length and button is kept until you reload or
+  close the page. To open a set-up directly, add it to the address, for
+  example `#10s`, `#60s-right` or `#5s-space`.
+
+  ## What is a good CPS?
+
+  The Guinness World Record for the most mouse clicks in one minute is 760,
+  an average of 12.67 clicks per second, set by Yiğit Arslan in Istanbul on
+  10 February 2026. Short tests give higher scores because fingers tire
+  quickly: in a 2024 study, people tapping a screen as fast as they could
+  slowed by about 17% within 30 seconds. Only compare scores from tests of
+  the same length.
+
+  The rank shown with your score is this page's own scale: under 4 CPS is
+  *warming up*, 4 to 6 *steady*, 6 to 8 *quick*, 8 to 11 *fast*, 11 to 14
+  *very fast* and 14 or more *extreme*.
+
+  ## Jitter, butterfly and drag clicking
+
+  | Technique | How it works | CPS players usually report |
+  |---|---|---|
+  | Normal | One finger presses and lets go | 6 to 9 |
+  | Jitter | Tense the forearm so the finger vibrates on the button | 10 to 14 |
+  | Butterfly | Index and middle finger hit one button in turn | 15 to 25 |
+  | Drag | Slide a dry fingertip along the button so it skips | 25 or more, in bursts |
+
+  Butterfly and drag clicking also depend on the mouse. A mouse ignores a
+  second press that comes within its debounce time, which filters out the
+  bounce of the switch contacts, so a mouse with a long debounce time counts
+  fewer of these clicks. Some gaming mice let you change it in their
+  software.
+
+  ## Does CPS matter in Minecraft PvP?
+
+  It depends on the edition. Since Java Edition 1.9 (2016) an attack
+  cooldown scales damage by the time since your last swing, and a sword
+  needs 0.625 seconds to recharge fully, so spam clicking lands weak hits.
+  Bedrock Edition and servers that keep 1.8 combat have no cooldown, so a
+  higher CPS gives you more chances to hit the moment the target's
+  half-second damage immunity ends.
+
+  To test how fast you react rather than how fast you click, try the
+  [reaction time test](/reaction-time-test/).
+faq:
+  - q: Is my score saved or sent anywhere?
+    a: No. Clicks are counted by JavaScript in this page and kept only in memory, so your scores are gone when you reload or close the tab. Nothing is uploaded, stored in your browser or tracked.
+  - q: Can an auto-clicker get me banned?
+    a: On most multiplayer servers, yes. Hypixel's rules forbid auto-clickers, burst-click buttons and click macros, and server anti-cheat systems can flag clicking that is too fast or too regular to be human. Before you use a mouse's rapid-fire or macro feature, check the rules of the server you play on.
+  - q: Why does my mouse double-click when I click once?
+    a: A mechanical mouse switch has metal contacts that bounce for a moment when pressed, and the mouse ignores that bounce for a short debounce time. When the switch wears out or gets dirty, the bounce lasts longer and one press is reported as two. To check, start a 10-second test and click slowly, about once a second; if the counter ever jumps by two, the switch is failing.
+  - q: Does the CPS test work on a phone, tablet or touchpad?
+    a: Yes. In left-click mode every tap on a touch screen counts, so two fingers tapping in turn both count. On a touchpad, taps and presses count as left clicks, and a two-finger tap usually counts as a right click.
+---
+<style>
+.cps-opts { display: flex; flex-wrap: wrap; gap: 12px 28px; margin: 0 0 14px; }
+.cps-seg { min-width: 0; margin: 0; padding: 0; border: 0; }
+.cps-seg legend { margin: 0 0 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.cps-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cps-chip { position: relative; display: inline-flex; }
+.cps-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.cps-chip span {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 44px; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--field-border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 15px; white-space: nowrap;
+}
+.cps-chip input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.cps-chip input:checked + span::before { content: "\2713"; }
+.cps-chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cps-live { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cps-live .stat b { font-variant-numeric: tabular-nums; }
+.cps-pad {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; min-height: 240px; margin: 0 0 12px; padding: 20px 16px;
+  border: 2px dashed var(--field-border); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text);
+  font: inherit; text-align: center; cursor: pointer;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.cps-pad:focus { outline: none; }
+.cps-pad:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.cps-pad.is-running { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+.cps-pad.is-running:active { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+.cps-pad.is-over { border-style: solid; border-color: var(--border); }
+.cps-pad-main { font-size: clamp(1.5rem, 6vw, 2.4rem); font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.cps-pad.is-running .cps-pad-main { font-size: clamp(2.6rem, 12vw, 4.5rem); }
+.cps-pad-sub { max-width: 32em; color: var(--muted); font-size: 15px; }
+.cps-under { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0 0 16px; }
+.cps-under .hint { flex: 1 1 260px; margin: 0; }
+.cps-result { margin: 0 0 20px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.cps-score { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 8px; }
+.cps-score b { font-size: clamp(2rem, 8vw, 3rem); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.cps-score .cps-unit { font-size: 1.1rem; font-weight: 600; }
+.cps-rank { padding: 2px 10px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-size: 14px; font-weight: 600; }
+.cps-result p { margin: 0 0 8px; }
+.cps-bars { display: flex; align-items: flex-end; gap: 2px; height: 72px; margin: 12px 0 6px; padding: 0 0 2px; border-bottom: 1px solid var(--border); }
+.cps-bars i { flex: 1 1 0; min-width: 0; max-width: 40px; background: var(--accent); border-radius: 2px 2px 0 0; }
+/* 60 or 100 bars: thinner gaps, so every second fits on a 320 px screen. */
+.cps-bars.is-dense { gap: 1px; }
+.cps-bars.is-dense i { border-radius: 0; }
+.cps-h { margin: 24px 0 8px; font-size: 1.05rem; }
+.cps-hist td.num, .cps-hist th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.cps-empty { color: var(--muted); }
+@media (max-width: 480px) {
+  .cps-pad { min-height: 200px; }
+  .cps-live { gap: 8px; }
+  .cps-live .stat { padding: 10px; }
+  .cps-live .stat b { font-size: 1.15rem; }
+}
+@media (max-width: 400px) {
+  /* .data.cps-hist outranks the site's table.data padding. */
+  .data.cps-hist th, .data.cps-hist td { padding: 8px 4px; font-size: 13px; }
+}
+</style>
+
+<div class="cps-opts">
+  <fieldset class="cps-seg">
+    <legend>Test length in seconds</legend>
+    <div class="cps-chips">
+      <label class="cps-chip"><input type="radio" name="cps-len" value="1" autocomplete="off"><span>1</span></label>
+      <label class="cps-chip"><input type="radio" name="cps-len" value="5" autocomplete="off" checked><span>5</span></label>
+      <label class="cps-chip"><input type="radio" name="cps-len" value="10" autocomplete="off"><span>10</span></label>
+      <label class="cps-chip"><input type="radio" name="cps-len" value="15" autocomplete="off"><span>15</span></label>
+      <label class="cps-chip"><input type="radio" name="cps-len" value="30" autocomplete="off"><span>30</span></label>
+      <label class="cps-chip"><input type="radio" name="cps-len" value="60" autocomplete="off"><span>60</span></label>
+      <label class="cps-chip"><input type="radio" name="cps-len" value="100" autocomplete="off"><span>100</span></label>
+    </div>
+  </fieldset>
+  <fieldset class="cps-seg">
+    <legend>Count</legend>
+    <div class="cps-chips">
+      <label class="cps-chip"><input type="radio" name="cps-mode" value="left" autocomplete="off" checked><span>Left click or tap</span></label>
+      <label class="cps-chip"><input type="radio" name="cps-mode" value="right" autocomplete="off"><span>Right click</span></label>
+      <label class="cps-chip"><input type="radio" name="cps-mode" value="space" autocomplete="off"><span>Space bar</span></label>
+    </div>
+  </fieldset>
+</div>
+
+<button type="button" class="cps-pad" id="cps-pad">
+  <span class="cps-pad-main" id="cps-pad-main">Click or tap here to start</span>
+  <span class="cps-pad-sub" id="cps-pad-sub">The timer starts with your first click.</span>
+</button>
+<div class="stats cps-live">
+  <div class="stat"><b id="cps-time">5.0 s</b><span>Time left</span></div>
+  <div class="stat"><b id="cps-count">0</b><span id="cps-count-label">Clicks</span></div>
+  <div class="stat"><b id="cps-rate">0.00</b><span>Clicks per second</span></div>
+</div>
+<div class="cps-under">
+  <p class="hint" id="cps-hint">Clicks are counted the moment the button goes down. Nothing is saved: scores last until you reload the page.</p>
+  <button type="button" class="btn secondary small" id="cps-restart">Restart</button>
+</div>
+<p class="visually-hidden" id="cps-sr" role="status"></p>
+
+<div class="cps-result" id="cps-result" hidden>
+  <p class="cps-score"><b id="cps-score">0.00</b><span class="cps-unit">CPS</span><span class="cps-rank" id="cps-rank"></span></p>
+  <p id="cps-detail"></p>
+  <p id="cps-best"></p>
+  <div id="cps-bars-wrap" hidden>
+    <div class="cps-bars" id="cps-bars" aria-hidden="true"></div>
+    <p class="hint" id="cps-bars-note"></p>
+  </div>
+  <div class="actions">
+    <button type="button" class="btn secondary small" id="cps-copy">Copy result</button>
+  </div>
+</div>
+
+<h2 class="cps-h" id="cps-hist-h">Your tests this session</h2>
+<div class="table-wrap">
+  <table class="data cps-hist" aria-labelledby="cps-hist-h">
+    <thead><tr><th scope="col">Test</th><th scope="col">Length</th><th scope="col">Counted</th><th scope="col" class="num">Clicks</th><th scope="col" class="num">CPS</th></tr></thead>
+    <tbody id="cps-hist"><tr><td colspan="5" class="cps-empty">No tests yet.</td></tr></tbody>
+  </table>
+</div>
+<div class="actions">
+  <button type="button" class="btn secondary small" id="cps-clear">Clear session</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var LENGTHS = [1, 5, 10, 15, 30, 60, 100];
+  var DEFAULT_LEN = 5;
+  var MODES = {
+    left: { name: 'left click', label: 'Left click or tap', one: 'click', many: 'clicks', start: 'Click or tap here to start', again: 'Click or tap to go again', sub: 'The timer starts with your first click.' },
+    right: { name: 'right click', label: 'Right click', one: 'click', many: 'clicks', start: 'Right-click here to start', again: 'Right-click to go again', sub: 'The timer starts with your first right click. The menu stays closed in this box.' },
+    space: { name: 'space bar', label: 'Space bar', one: 'press', many: 'presses', start: 'Press Space here to start', again: 'Press Space to go again', sub: 'Click the box or Tab to it, then press Space. The timer starts with your first press.' }
+  };
+  // Longer than any address this page writes (#100s-space), so an edited or
+  // pasted address that is longer is ignored rather than parsed.
+  var HASH_MAX = 16;
+  var CLOSE_MS = 60;    // presses stamped before the end may still be on their way
+  var COOL_MS = 1000;   // pause after the end so the last frantic clicks do not start a new test
+  var RANKS = [[1400, 'Extreme'], [1100, 'Very fast'], [800, 'Fast'], [600, 'Quick'], [400, 'Steady'], [0, 'Warming up']];
+
+  var pad = TT.$('#cps-pad'), padMain = TT.$('#cps-pad-main'), padSub = TT.$('#cps-pad-sub');
+  var timeEl = TT.$('#cps-time'), countEl = TT.$('#cps-count'), rateEl = TT.$('#cps-rate');
+  var srEl = TT.$('#cps-sr');
+
+  var phase = 'idle';   // idle, running, closing, cooldown, done
+  var run = null;       // the test in progress or the last one
+  var tests = [];       // finished tests, oldest first
+  var best = {};        // 'mode-length' -> best score in hundredths of a CPS
+  var endTimer = 0, closeTimer = 0, coolTimer = 0, rafId = 0;
+
+  function now() { return performance.now(); }
+  // The time the browser gave the event, which is when the button went down
+  // rather than when this script got round to it. Falls back to now() for a
+  // browser whose event times are on another clock.
+  function stamp(e) {
+    var t = e && e.timeStamp, n = now();
+    return t > 0 && Math.abs(n - t) < 10000 ? t : n;
+  }
+  function say(text) { if (srEl.textContent !== text) srEl.textContent = text; }
+  function checked(name) { var el = TT.$('input[name="' + name + '"]:checked'); return el ? el.value : ''; }
+  function getLen() { var v = Number(checked('cps-len')); return LENGTHS.indexOf(v) >= 0 ? v : DEFAULT_LEN; }
+  function getMode() { var v = checked('cps-mode'); return MODES.hasOwnProperty(v) ? v : 'left'; }
+  function setRadio(name, value) {
+    TT.$$('input[name="' + name + '"]').forEach(function (r) { r.checked = r.value === String(value); });
+  }
+
+  // Score in hundredths, rounded half up with whole numbers only:
+  // round(100 * clicks / seconds) = floor((200 * clicks + seconds) / (2 * seconds)).
+  function cents(clicks, len) { return Math.floor((200 * clicks + len) / (2 * len)); }
+  function fmtCents(c) { var r = c % 100; return Math.floor(c / 100) + '.' + (r < 10 ? '0' : '') + r; }
+  function rankOf(c) { for (var i = 0; i < RANKS.length; i++) if (c >= RANKS[i][0]) return RANKS[i][1]; return RANKS[RANKS.length - 1][1]; }
+  function secs(n) { return n === 1 ? '1 second' : n + ' seconds'; }
+  function count(n, m) { return n.toLocaleString('en-GB') + ' ' + (n === 1 ? m.one : m.many); }
+  function fmtLeft(ms) { return (Math.ceil(Math.max(0, ms) / 100) / 10).toFixed(1) + ' s'; }
+
+  // ---- Address (#10s, #60s-right, #5s-space) ----
+  function readHash() {
+    var h = location.hash;
+    if (!h || h.length > HASH_MAX) return null;
+    var m = /^#(\d{1,3})s(?:-(right|space))?$/.exec(h);
+    if (!m || LENGTHS.indexOf(Number(m[1])) < 0) return null;
+    return { len: Number(m[1]), mode: m[2] || 'left' };
+  }
+  function writeHash() {
+    var len = getLen(), mode = getMode();
+    var h = len === DEFAULT_LEN && mode === 'left' ? '' : '#' + len + 's' + (mode === 'left' ? '' : '-' + mode);
+    if (h === location.hash || (!h && !location.hash)) return;
+    try { history.replaceState(null, '', location.pathname + location.search + h); } catch (e) { /* a sandboxed page may refuse */ }
+  }
+  function applyHash() {
+    var s = readHash() || { len: DEFAULT_LEN, mode: 'left' };
+    setRadio('cps-len', s.len);
+    setRadio('cps-mode', s.mode);
+  }
+
+  // ---- Display ----
+  function idleView(again) {
+    var m = MODES[getMode()];
+    pad.classList.remove('is-running', 'is-over');
+    padMain.textContent = again && run ? fmtCents(run.cents) + ' CPS' : m.start;
+    padSub.textContent = again ? m.again + '.' : m.sub;
+    timeEl.textContent = fmtLeft(getLen() * 1000);
+    TT.$('#cps-count-label').textContent = m.many.charAt(0).toUpperCase() + m.many.slice(1);
+    if (!again) { countEl.textContent = '0'; rateEl.textContent = '0.00'; }
+  }
+  function liveRate(n, elapsed) { return fmtCents(Math.round(n * 100000 / Math.max(elapsed, 1000))); }
+  function showCount() {
+    var el = now() - run.start;
+    countEl.textContent = run.times.length.toLocaleString('en-GB');
+    padMain.textContent = run.times.length.toLocaleString('en-GB');
+    rateEl.textContent = liveRate(run.times.length, el);
+  }
+
+  function clearTimers() {
+    clearTimeout(endTimer); clearTimeout(closeTimer); clearTimeout(coolTimer);
+    cancelAnimationFrame(rafId);
+  }
+
+  // ---- A test ----
+  function start(t) {
+    clearTimers();
+    var mode = getMode();
+    run = { n: tests.length + 1, len: getLen(), mode: mode, start: t, times: [t] };
+    phase = 'running';
+    pad.classList.remove('is-over');
+    pad.classList.add('is-running');
+    padSub.textContent = MODES[mode].many.charAt(0).toUpperCase() + MODES[mode].many.slice(1) + ' so far';
+    timeEl.textContent = fmtLeft(run.len * 1000);
+    showCount();
+    endTimer = setTimeout(checkEnd, run.len * 1000 - (now() - t) + 2);
+    rafId = requestAnimationFrame(tick);
+    say('Test ' + run.n + ' started: ' + secs(run.len) + '.');
+  }
+  function endAt() { return run.start + run.len * 1000; }
+  function checkEnd() {
+    if (phase !== 'running') return;
+    var left = endAt() - now();
+    if (left > 0) { endTimer = setTimeout(checkEnd, left + 2); return; }
+    close();
+  }
+  function tick() {
+    if (phase !== 'running') return;
+    var left = endAt() - now();
+    if (left <= 0) { close(); return; }
+    timeEl.textContent = fmtLeft(left);
+    rateEl.textContent = liveRate(run.times.length, now() - run.start);
+    rafId = requestAnimationFrame(tick);
+  }
+  // Time is up: stop at once on screen, then wait a moment for presses that
+  // happened before the end but are still being delivered.
+  function close() {
+    if (phase !== 'running') return;
+    phase = 'closing';
+    clearTimers();
+    pad.classList.remove('is-running');
+    pad.classList.add('is-over');
+    padMain.textContent = 'Time’s up!';
+    padSub.textContent = '';
+    timeEl.textContent = fmtLeft(0);
+    closeTimer = setTimeout(finish, CLOSE_MS);
+  }
+  function finish() {
+    if (phase !== 'closing') return;
+    var len = run.len, times = run.times, n = times.length;
+    run.clicks = n;
+    run.cents = cents(n, len);
+    run.gap = null;
+    for (var i = 1; i < n; i++) {
+      var g = times[i] - times[i - 1];
+      if (run.gap === null || g < run.gap) run.gap = g;
+    }
+    run.bins = null;
+    if (len >= 5) {
+      run.bins = [];
+      for (i = 0; i < len; i++) run.bins.push(0);
+      times.forEach(function (t) { run.bins[Math.min(len - 1, Math.floor((t - run.start) / 1000))]++; });
+    }
+    var key = run.mode + '-' + len, prev = best.hasOwnProperty(key) ? best[key] : null;
+    run.newBest = prev !== null && run.cents > prev;
+    run.first = prev === null;
+    if (prev === null || run.cents > prev) best[key] = run.cents;
+    run.best = best[key];
+    tests.push(run);
+
+    countEl.textContent = n.toLocaleString('en-GB');
+    rateEl.textContent = fmtCents(run.cents);
+    padSub.textContent = fmtCents(run.cents) + ' CPS';
+    showResult(run);
+    showHistory();
+    say('Test ' + run.n + ': ' + count(n, MODES[run.mode]) + ' in ' + secs(len) + ', ' + fmtCents(run.cents) +
+      ' per second. Rank: ' + rankOf(run.cents).toLowerCase() + '.' + (run.newBest ? ' New best for this length.' : ''));
+    phase = 'cooldown';
+    coolTimer = setTimeout(function () {
+      if (phase !== 'cooldown') return;
+      phase = 'done';
+      idleView(true);
+    }, COOL_MS);
+  }
+
+  function bestLine(r) {
+    var what = secs(r.len).replace(' seconds', '-second').replace(' second', '-second') + ' ' + MODES[r.mode].name;
+    if (r.first) return 'First ' + what + ' test this session.';
+    return 'Best ' + what + ' score this session: ' + fmtCents(r.best) + ' CPS.' + (r.newBest ? ' New best!' : '');
+  }
+  function detailLine(r) {
+    var m = MODES[r.mode];
+    var s = count(r.clicks, m) + ' in ' + secs(r.len) + ' (' + m.name + ').';
+    if (r.gap !== null) s += ' Shortest gap between ' + m.many + ': ' + Math.round(r.gap) + ' ms.';
+    if (r.len === 60 && r.mode !== 'space') s += ' The Guinness World Record for one minute is 760 clicks.';
+    return s;
+  }
+  function showResult(r) {
+    TT.$('#cps-result').hidden = false;
+    TT.$('#cps-score').textContent = fmtCents(r.cents);
+    TT.$('#cps-rank').textContent = rankOf(r.cents);
+    TT.$('#cps-detail').textContent = detailLine(r);
+    TT.$('#cps-best').textContent = bestLine(r);
+    var wrap = TT.$('#cps-bars-wrap');
+    wrap.hidden = !r.bins;
+    if (!r.bins) return;
+    var max = Math.max.apply(null, r.bins), min = Math.min.apply(null, r.bins);
+    TT.$('#cps-bars').classList.toggle('is-dense', r.bins.length > 30);
+    TT.$('#cps-bars').innerHTML = r.bins.map(function (b) {
+      return '<i style="height:' + (max ? Math.max(b ? 4 : 0, Math.round(b / max * 100)) : 0) + '%"></i>';
+    }).join('');
+    var m = MODES[r.mode];
+    TT.$('#cps-bars-note').textContent = max === min
+      ? m.many.charAt(0).toUpperCase() + m.many.slice(1) + ' in each second: ' + max + ' every second.'
+      : m.many.charAt(0).toUpperCase() + m.many.slice(1) + ' in each second: most ' + max + ' (second ' + (r.bins.indexOf(max) + 1) +
+        '), fewest ' + min + ' (second ' + (r.bins.indexOf(min) + 1) + ').';
+  }
+  function showHistory() {
+    var body = TT.$('#cps-hist');
+    if (!tests.length) { body.innerHTML = '<tr><td colspan="5" class="cps-empty">No tests yet.</td></tr>'; return; }
+    body.innerHTML = tests.slice(-100).reverse().map(function (r) {
+      return '<tr><td>' + r.n + '</td><td>' + r.len + ' s</td><td>' + MODES[r.mode].label + '</td><td class="num">' +
+        r.clicks.toLocaleString('en-GB') + '</td><td class="num">' + fmtCents(r.cents) + '</td></tr>';
+    }).join('');
+  }
+  function resultText(r) {
+    var s = fmtCents(r.cents) + ' CPS (' + rankOf(r.cents) + '): ' + count(r.clicks, MODES[r.mode]) + ' in ' + secs(r.len) + ' (' + MODES[r.mode].name + ').';
+    if (!r.first) s += ' Best this session: ' + fmtCents(r.best) + ' CPS.';
+    return s;
+  }
+
+  function stop(message) {
+    var was = phase === 'running' || phase === 'closing';
+    clearTimers();
+    phase = 'idle';
+    idleView(false);
+    if (was && message) say(message);
+  }
+
+  // ---- Input ----
+  function press(t) {
+    if (phase === 'cooldown') return;
+    if (phase === 'closing') {
+      // Only a press that happened before the end still counts.
+      if (t < endAt()) { run.times.push(t); countEl.textContent = run.times.length.toLocaleString('en-GB'); }
+      return;
+    }
+    if (phase === 'running') {
+      if (t >= endAt()) { close(); return; }
+      run.times.push(Math.max(t, run.start));
+      showCount();
+      return;
+    }
+    start(t);
+  }
+  function wanted(button, pointerType) {
+    var mode = getMode();
+    if (mode === 'space') return false;
+    if (pointerType === 'touch') return mode === 'left';
+    return mode === 'left' ? button === 0 : button === 2;
+  }
+  pad.addEventListener('pointerdown', function (e) {
+    var mode = getMode(), waiting = phase === 'idle' || phase === 'done';
+    if (mode === 'space') {
+      if (waiting) padSub.textContent = 'Now press Space. Clicks are not counted in Space bar mode.';
+      return;
+    }
+    if (mode === 'right' && e.pointerType === 'touch') {
+      if (waiting) padSub.textContent = 'Taps are not counted in Right click mode. Choose Left click or tap, or use a mouse.';
+      return;
+    }
+    if (wanted(e.button, e.pointerType)) press(stamp(e));
+  });
+  // Safari does not focus a button that is clicked, and Space bar mode needs
+  // the focus on the box.
+  pad.addEventListener('pointerup', function () {
+    if (document.activeElement !== pad) pad.focus({ preventScroll: true });
+  });
+  // A second button pressed while another is held sends pointermove, not
+  // pointerdown (Pointer Events "chorded" buttons).
+  pad.addEventListener('pointermove', function (e) {
+    if (e.button < 0 || e.pointerType !== 'mouse') return;
+    var mask = e.button === 0 ? 1 : e.button === 2 ? 2 : 0;
+    if (mask && (e.buttons & mask) && wanted(e.button, e.pointerType)) press(stamp(e));
+  });
+  pad.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  pad.addEventListener('keydown', function (e) {
+    var space = e.key === ' ' || e.code === 'Space' || e.key === 'Spacebar';
+    if (!space && e.key !== 'Enter') return;
+    e.preventDefault(); // no scrolling and no button click
+    if (getMode() !== 'space') {
+      if (!e.repeat) {
+        padSub.textContent = 'Key presses are not counted in click mode. Choose Space bar to test the keyboard.';
+        say('Key presses are not counted in click mode. Choose Space bar under Count to test the keyboard.');
+      }
+      return;
+    }
+    if (!space || e.repeat) return;
+    press(stamp(e));
+  });
+  pad.addEventListener('keyup', function (e) { if (e.key === ' ' || e.code === 'Space') e.preventDefault(); });
+  // The box is a button for keyboard and screen reader users, but its own
+  // click (from Enter or Space) must do nothing.
+  pad.addEventListener('click', function (e) { e.preventDefault(); });
+
+  TT.$$('input[name="cps-len"], input[name="cps-mode"]').forEach(function (r) {
+    r.addEventListener('change', function () { writeHash(); stop('Test stopped.'); });
+  });
+  TT.$('#cps-restart').addEventListener('click', function () { stop('Test stopped.'); pad.focus({ preventScroll: true }); });
+  TT.$('#cps-clear').addEventListener('click', function () {
+    stop('');
+    tests = []; best = {}; run = null;
+    TT.$('#cps-result').hidden = true;
+    showHistory();
+    say('Session cleared.');
+  });
+  TT.$('#cps-copy').addEventListener('click', function (e) {
+    var r = tests[tests.length - 1];
+    if (r) TT.copy(resultText(r), e.currentTarget);
+  });
+  window.addEventListener('hashchange', function () { applyHash(); stop('Test stopped.'); });
+  // Back and Forward can restore the page from the cache with a test frozen
+  // half way, or restore other radio choices after this script ran.
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted || readHash()) applyHash();
+    writeHash();
+    stop('');
+  });
+
+  applyHash();
+  idleView(false);
+})();
+</script>
