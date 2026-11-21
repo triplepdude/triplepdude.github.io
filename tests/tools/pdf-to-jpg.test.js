@@ -192,7 +192,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   let single = await save('.p2j-page:nth-child(2) .p2j-dl');
   assert.equal(single.name, 'pages-page-2.png');
   assert.ok(single.buf.equals(entries[1].data));
-  assert.match((await infos())[0], /^595 × 842 · [\d.]+ KB$/);
+  // A no-break space keeps a file size and its unit on one line in the narrow page cards.
+  assert.match((await infos())[0], /^595 × 842 · [\d.]+\u00a0KB$/);
 
   // Transparent background: only the parts with nothing drawn on them.
   await page.check('#p2j-transp');
@@ -259,11 +260,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(await infos(), sized(150), 'full-width digits are read');
 
   // ---- Pages to convert: mistakes, an empty choice, a megabyte paste ----
-  for (const [value, message] of [['4', 'Page 4 does not exist: this PDF has 3 pages.'], ['0', 'There is no page 0: the first page is 1.'], ['1-x', '“x” is not a page number. Use numbers, dashes and commas, such as 1-3, 5.']]) {
+  for (const [value, message] of [['4', 'Page 4 does not exist: this PDF has 3 pages.'], ['0', 'There is no page 0: the first page is 1.'], ['1-x', '“x” is not a page number. Use numbers, dashes and commas, such as 1-3, 5.'],
+    ['1-2-3', 'A range has one dash, as in 4-7. Separate ranges with commas: 1-3, 5.'], ['0,500', 'There is no page 0: the first page is 1.'], ['00000000004', 'Page 4 does not exist: this PDF has 3 pages.'],
+    ['2\u200b3', 'A hidden character (U+200B) cannot be used in a page list. Use numbers, dashes and commas, such as 1-3, 5.']]) {
     await page.fill('#p2j-pages', value);
     await page.waitForFunction(() => document.getElementById('p2j-pages-error').textContent !== '');
     assert.deepEqual(await fieldError('p2j-pages'), { text: message, invalid: 'true', linked: true }, value);
   }
+  await page.fill('#p2j-pages', '00000000002');
+  assert.equal(await plan(), 'Page 2 to JPG at 150 DPI, quality 95. Page 2 becomes 1,650 × 1,275 pixels.', 'leading zeros do not make a number too long');
   await page.fill('#p2j-pages', '');
   assert.equal(await plan(), 'Select at least one page: click it below or type its number.');
   assert.equal((await fieldError('p2j-pages')).invalid, null, 'no error before Convert is pressed');

@@ -615,6 +615,7 @@ faq:
       canvas.height = Math.max(1, Math.round(vp.height));
       var ctx = canvas.getContext('2d', { alpha: false });
       return page.render({ canvasContext: ctx, canvas: canvas, viewport: vp }).promise.then(function () {
+        page.cleanup();
         return new Promise(function (resolve) { canvas.toBlob(resolve, 'image/jpeg', 0.82); });
       }).then(function (blob) {
         canvas.width = canvas.height = 0;
@@ -651,7 +652,8 @@ faq:
   }
   function infoHtml(i, st) {
     var r = done[i], size = doc.sizes[i];
-    if (r && r.key === st.key) return '<strong>' + r.w + ' × ' + r.h + '</strong> · ' + fmtBytes(r.blob.size) + (r.dpi !== st.dpi ? '<br>at ' + r.dpi + ' DPI' : '');
+    // A no-break space keeps "58 KB" on one line in a narrow card.
+    if (r && r.key === st.key) return '<strong>' + r.w + ' × ' + r.h + '</strong> · ' + fmtBytes(r.blob.size).replace(' ', '\u00a0') + (r.dpi !== st.dpi ? '<br>at ' + r.dpi + ' DPI' : '');
     if (!size || st.error) return '';
     var px = pixelsFor(size, st.dpi);
     return px.w + ' × ' + px.h + ' px' + (px.dpi !== st.dpi ? '<br>at ' + px.dpi + ' DPI' : '');
