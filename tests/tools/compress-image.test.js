@@ -627,6 +627,48 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(await text('#cmpi-error'), /not a supported image/);
   assert.equal(await page.isVisible('#cmpi-result'), false);
 
+  // ---------- Damaged and HDR files: the decoder's findings, file by file ----------
+  // cut.jpg (120x90, top half (40,90,200), bottom half (230,180,40)) stops 40% into its image
+  // data: the browser draws the top and leaves the rest blank, so it is compressed with a note,
+  // in its row as well as its preview, so it stands out in a batch. The decoder refuses
+  // early.jpg (cut before anything can be drawn), cut.webp (drawn wholly blank), cut.avif (ends
+  // before its image data) and damaged.avif (AV1 data overwritten): each row gives the decoder's
+  // own message and the batch carries on. pq.avif is an HDR (PQ) AVIF that the browser maps to
+  // standard range; hdr-pq.heic an HDR HEIC that libheif decodes without tone mapping.
+  const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
+  await open();
+  await page.setInputFiles('#cmpi-file', ['cut.jpg', 'early.jpg', 'cut.webp', 'cut.avif', 'damaged.avif', 'pq.avif', 'hdr-pq.heic', 'green.bmp'].map(F));
+  await page.waitForFunction(() => document.querySelectorAll('.cmpi-item').length === 8 &&
+    !document.querySelector('.cmpi-item[data-state="working"], .cmpi-item[data-state="queued"]'), null, { timeout: 60000 });
+  const damaged = await page.$$eval('.cmpi-item', els => els.map(e => [e.dataset.state, e.querySelector('.hint').textContent, (e.querySelector('.cmpi-item-note') || {}).textContent || '']));
+  assert.match(damaged[0][1], /^JPG · 120 × 90 px · /);
+  assert.deepEqual(damaged.map(r => r[0]), ['done', 'error', 'error', 'error', 'error', 'done', 'done', 'done']);
+  assert.deepEqual(damaged.slice(1, 5).map(r => r[1]), [
+    'The JPG file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again.',
+    'The WebP file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again.',
+    'The AVIF file is incomplete: it ends before all of its image data. Download or copy it again.',
+    'The AVIF file could not be decoded. It may be damaged or use a feature this browser does not support.'
+  ]);
+  assert.deepEqual(damaged.map(r => r[2]), [CUT, '', '', '', '', '', '', ''], 'only the cut-off JPG is marked in its row');
+  assert.equal(await page.isVisible('.cmpi-item:nth-child(2) .cmpi-item-note'), false, 'an empty row note takes no space');
+  await page.waitForFunction(() => / 4 could not be compressed\.$/.test(document.querySelector('#cmpi-live').textContent));
+  assert.equal(await page.getAttribute('.cmpi-item:nth-child(1)', 'aria-current'), 'true');
+  assert.ok((await text('#cmpi-note')).startsWith(CUT + ' '), await text('#cmpi-note'));
+  img = await decode((await download('.cmpi-item:nth-child(1) [data-act="dl"]')).buf, [[60, 10]]);
+  assert.deepEqual([img.w, img.h], [120, 90]);
+  assert.ok(near(img.px[0], [40, 90, 200], 10), `the part before the cut: ${img.px[0]}`);
+  const noteOf = async n => { await page.click(`.cmpi-item:nth-child(${n}) [data-act="show"]`); return text('#cmpi-note'); };
+  assert.match(await noteOf(6), /This is an HDR image\. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen\./);
+  assert.match(await noteOf(7), /This is an HDR photo\. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen\./);
+  for (const n of [6, 7]) assert.doesNotMatch(await noteOf(n), /cut off/);
+  assert.doesNotMatch(await noteOf(8), /cut off|HDR/, 'no note for a sound standard-range file');
+  // A changed setting compresses again; the row keeps its note meanwhile and after.
+  await page.selectOption('#cmpi-format', 'webp');
+  assert.equal(await page.textContent('.cmpi-item:nth-child(1) .cmpi-item-note'), CUT);
+  await page.waitForFunction(() => !document.querySelector('.cmpi-item[data-state="working"], .cmpi-item[data-state="queued"]'), null, { timeout: 30000 });
+  assert.match(await page.textContent('.cmpi-item:nth-child(1) .hint'), /^WebP · 120 × 90 px · /);
+  assert.equal(await page.textContent('.cmpi-item:nth-child(1) .cmpi-item-note'), CUT);
+
   // ---------- Dropped anywhere on the page; savings never shown as a misleading 100% ----------
   // A 600 x 600 grey 24-bit BMP (1,080,054 bytes) becomes a JPG of a few KB: 99.7% smaller, shown
   // as −99%, as "−100%" would claim nothing is left.

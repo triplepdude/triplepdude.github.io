@@ -481,7 +481,7 @@ faq:
     }
     // HEIC and TIFF (and anything the browser refuses) go to the shared decoder, which also
     // explains what is wrong with a file that is not an image.
-    else if (fmt !== 'heic' && fmt !== 'tiff' && fmt !== 'avif' && fmt !== 'webp') { try { src = await decodeNative(file); } catch (e) { src = null; } }
+    else if (!window.TTImage) { try { src = await decodeNative(file); } catch (e) { src = null; } }
     if (!src) {
       if (!window.TTImage) { if (run === st.loadRun) errEl.textContent = 'This file could not be opened as an image.'; return; }
       if (run === st.loadRun && (fmt === 'heic' || fmt === 'tiff')) okEl.textContent = 'Opening the ' + TTImage.formats[fmt].label + ' image…';
@@ -505,7 +505,8 @@ faq:
     if (run !== st.loadRun) { if (src.close) src.close(); if (view !== src && view.close) view.close(); if (dec) TTImage.release(dec); return; }
     okEl.textContent = '';
     // Only files the browser decodes itself can be decoded again in the export worker.
-    setImage(src, view, dec || fmt === 'svg' ? null : file, w, h, (file.name || 'image').replace(/\.[^.]+$/, '') || 'image', false, dec);
+    const again = dec ? dec.decoder === 'browser' && dec.orientation === 1 && dec.warnings.indexOf('truncated') < 0 : fmt !== 'svg';
+    setImage(src, view, again ? file : null, w, h, (file.name || 'image').replace(/\.[^.]+$/, '') || 'image', false, dec);
     $('#circ-drop-title').textContent = file.name || 'Pasted image';
     $('#circ-drop-hint').textContent = (fmt === 'svg' ? 'SVG, drawn at ' : '') + w + ' × ' + h + ' px. Choose or drop another image to replace it.';
   }
