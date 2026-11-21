@@ -78,6 +78,23 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // (Omar) ends there.
   assert.ok(near(await colourAt(10, 0.5), BRIGHT[0]), `below the pointer ${await colourAt(10, 0.5)}`);
   assert.ok(near(await colourAt(-10, 0.5), BRIGHT[7]), `above the pointer ${await colourAt(-10, 0.5)}`);
+  // Names are written in black or white, whichever stands out more on the slice: black on
+  // Amara's red (slice 0, 0 to 45 degrees), white on Kofi's purple (slice 5, 225 to 270).
+  // The darkest and lightest pixels along the middle of each slice, where its name is.
+  const ink = deg => page.$eval('#ws-wheel', (c, deg) => {
+    const h = c.width / 2, g = c.getContext('2d'), a = deg * Math.PI / 180;
+    let lo = 255, hi = 0;
+    for (let r = 0.4; r <= 0.77; r += 0.005) for (let j = -3; j <= 3; j++) {
+      const d = g.getImageData(Math.round(h + h * r * Math.cos(a) - j * Math.sin(a)), Math.round(h + h * r * Math.sin(a) + j * Math.cos(a)), 1, 1).data;
+      const l = 0.2126 * d[0] + 0.7152 * d[1] + 0.0722 * d[2];
+      lo = Math.min(lo, l);
+      hi = Math.max(hi, l);
+    }
+    return [Math.round(lo), Math.round(hi)];
+  }, deg);
+  const amaraInk = await ink(22.5), kofiInk = await ink(247.5);
+  assert.ok(amaraInk[0] < 40, `black name on the red slice ${amaraInk}`);
+  assert.ok(kofiInk[1] > 230, `white name on the purple slice ${kofiInk}`);
 
   // ---------- An animated spin: decided at the click, shown afterwards ----------
   await page.uncheck('#ws-confetti-on');
@@ -684,7 +701,12 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // Two quick presses: the second one wins, even when it comes before the browser has gone
   // full screen for the first. Both run inside one key event here, so the browser cannot
   // finish going full screen in between (two separate presses only sometimes overlap).
+  // (First let the browser finish leaving full screen and report it.)
+  await page.waitForFunction(() => !document.fullscreenElement);
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50)))));
   await page.evaluate(() => {
+    window.__fsChanges = 0;
+    document.addEventListener('fullscreenchange', () => window.__fsChanges++);
     document.addEventListener('keydown', e => {
       if (e.key !== 'F2') return;
       const b = document.querySelector('#ws-full');
@@ -693,7 +715,9 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     }, { once: true });
   });
   await page.keyboard.press('F2');
-  await page.waitForTimeout(700);
+  // The browser goes full screen for the first press, then the page leaves it again.
+  await page.waitForFunction(() => window.__fsChanges >= 2, null, { timeout: 5000 })
+    .catch(() => assert.fail('after two quick presses the browser stayed full screen'));
   assert.deepEqual(await page.evaluate(() => [!!document.fullscreenElement, document.querySelector('#ws-stage').classList.contains('is-full'), document.querySelector('#ws-full').textContent, document.querySelectorAll('[inert]').length]), [false, false, 'Full screen', 0]);
   // Where pages cannot go full screen (Safari on iPhone), the wheel fills the window instead,
   // and Tab still stays on what is shown.

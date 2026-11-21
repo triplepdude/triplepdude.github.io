@@ -1608,7 +1608,7 @@
 
   function tooBig(w, h, max) {
     var mp = function (n) { return (n / 1e6).toFixed(n < 1e7 ? 1 : 0); };
-    return fail('TOO_BIG', 'The image is ' + w + ' × ' + h + ' pixels (' + mp(w * h) + ' megapixels), over the ' + mp(max) + ' megapixel limit for converting in a browser.', { width: w, height: h });
+    return fail('TOO_BIG', 'The image is ' + w + ' × ' + h + ' pixels (' + mp(w * h) + ' megapixels), over the ' + mp(max) + ' megapixel limit for opening in a browser.', { width: w, height: h });
   }
 
   // ---------- SVG ----------
