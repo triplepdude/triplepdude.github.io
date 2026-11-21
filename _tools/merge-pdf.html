@@ -1,5 +1,5 @@
 ---
-title: Merge PDF Files and Organize Pages
+title: Merge PDF Files and Organise Pages
 description: Combine PDF files into one in your browser. Reorder, rotate and delete pages, extract or split pages, and unlock protected PDFs. Nothing is uploaded.
 category: Image & PDF
 keywords: [merge pdf, combine pdf, join pdf files, merge pdf online free, reorder pdf pages, rotate pdf pages, split pdf, extract pdf pages]
@@ -27,22 +27,25 @@ howto: |
   To split instead of merging, choose how under **Split**: one PDF per page,
   a PDF for every few pages, or one PDF per original file with the pages you
   kept. The PDFs are saved together in a ZIP file. To pull out a few pages,
-  tick them and press **Save selected pages**.
+  tick them and press **Save selected pages**. To split one PDF by page
+  ranges you type, such as `1-3, 4-7, 8-end`, use [Split PDF](/split-pdf/);
+  to save pages as JPG or PNG images, use [PDF to JPG](/pdf-to-jpg/).
 
   ## What is kept
 
   Pages are copied as they are, not redrawn, so text stays selectable and
-  searchable, pictures keep their quality and web links keep working. Each
-  page keeps its size, so A4, Letter and landscape pages can sit in one
-  document. Rotating sets the page's rotation value (the /Rotate
-  entry of ISO 32000), which every PDF reader honours, so nothing is
-  re-rendered and the file does not grow.
+  searchable, pictures keep their quality and web links keep working. A
+  link to another page of the same file keeps working when that page is in
+  the new file, and is removed when it is not. Each page keeps its size, so
+  A4, Letter and landscape pages can sit in one document. Rotating sets the
+  page's rotation value (the /Rotate entry of ISO 32000), which every PDF
+  reader honours, so nothing is re-rendered and the file does not grow.
 
   Some things belong to the whole document rather than to a page, and are
-  not carried over: bookmarks (the outline), links that jump to another
-  page of the same file, fillable form fields, which keep their current look
-  but may no longer be fillable, digital signatures, which are no longer
-  valid once the file changes, and attachments.
+  not carried over: bookmarks (the outline), fillable form fields, which
+  keep their current look but may no longer be fillable, digital
+  signatures, which are no longer valid once the file changes, and
+  attachments.
 
   ## Password-protected PDFs
 
@@ -67,7 +70,7 @@ faq:
   - q: Is there a limit on the number of files or pages?
     a: Each file can be up to 1 GB, and there is no set limit on the number of files or pages. Everything happens in your device's memory, so hundreds of files or thousands of pages work on a computer, while a phone may run out of memory sooner.
   - q: Why did the merged PDF lose its bookmarks or form fields?
-    a: Bookmarks and form fields belong to the document, not to its pages, and this tool copies pages. The page content, web links and look are kept, but the outline is not, and form fields may no longer be fillable. Fill in forms before you merge them.
+    a: Bookmarks and form fields belong to the document, not to its pages, and this tool copies pages. The page content and look, web links and links to pages in the new file are kept, but the outline is not, and form fields may no longer be fillable. Fill in forms before you merge them.
   - q: Can I merge a password-protected PDF?
     a: Yes. PDFs that only restrict editing or printing are unlocked automatically. For a PDF that needs a password to open, type that password in the box next to the file. The merged file is not password-protected.
   - q: Does merging reduce quality?
@@ -198,6 +201,7 @@ faq:
   var PDFJS_URL = new URL({{ '/assets/vendor/pdfjs/pdf.min.js' | relative_url | jsonify }}, location.href).href;
   var PDFJS_WORKER = new URL({{ '/assets/vendor/pdfjs/pdf.worker.min.js' | relative_url | jsonify }}, location.href).href;
   var PDFJS_WASM = new URL({{ '/assets/vendor/pdfjs/wasm/' | relative_url | jsonify }}, location.href).href;
+  var PDFJS_RES = new URL({{ '/assets/vendor/pdfjs-resources/' | relative_url | jsonify }}, location.href).href;
   var PDFLIB_URL = new URL({{ '/assets/vendor/pdf-lib/pdf-lib.min.js' | relative_url | jsonify }}, location.href).href;
   {% raw %}
   var $ = TT.$;
@@ -264,7 +268,13 @@ faq:
   function openPdf(f, password) {
     return loadPdfjs().then(function (lib) {
       return f.file.arrayBuffer().then(function (buf) {
-        var task = lib.getDocument({ data: new Uint8Array(buf), password: password || undefined, worker: pdfjsWorker, verbosity: 0, wasmUrl: PDFJS_WASM });
+        // The CMaps and standard fonts let PDF.js draw text in fonts a PDF does not embed, and the
+        // profile its CMYK colours; it fetches them from this site, and only when a PDF needs them.
+        var task = lib.getDocument({
+          data: new Uint8Array(buf), password: password || undefined, worker: pdfjsWorker, verbosity: 0,
+          wasmUrl: PDFJS_WASM, cMapUrl: PDFJS_RES + 'cmaps/', cMapPacked: true,
+          standardFontDataUrl: PDFJS_RES + 'standard_fonts/', iccUrl: PDFJS_RES + 'iccs/'
+        });
         f.task = task;
         return task.promise;
       });
@@ -601,8 +611,222 @@ faq:
     return { open: open, md5: md5, rc4: rc4 };
   }
 
+  // The page copying below is the Split PDF tool's (its buildPart), here for several source files,
+  // with rotation, and keeping the resources of a file whose every page is copied as they are; a
+  // fix in one belongs in the other.
   function workerMain(scope) {
     var unlocker = null;
+    function nameText(o) {
+      var L = scope.PDFLib;
+      if (o instanceof L.PDFName) return o.decodeText ? o.decodeText() : o.asString().slice(1);
+      if (o instanceof L.PDFString || o instanceof L.PDFHexString) { try { return o.decodeText(); } catch (e) { return null; } }
+      return null;
+    }
+    // Named destinations ("sec6") live in the catalog, which the new file does not copy, so links
+    // that use them are first rewritten to point at the page itself.
+    function resolveNamed(L, doc, pages) {
+      var ctx = doc.context, N = L.PDFName, names = new Map(), seen = new Set();
+      function destOf(v) {
+        v = ctx.lookup(v);
+        if (v instanceof L.PDFDict) v = ctx.lookup(v.get(N.of('D')));
+        return v instanceof L.PDFArray ? v : null;
+      }
+      var old = doc.catalog.lookup(N.of('Dests'));
+      if (old instanceof L.PDFDict) old.entries().forEach(function (en) { var d = destOf(en[1]); if (d) names.set(nameText(en[0]), d); });
+      function walk(node, depth) {
+        node = ctx.lookup(node);
+        if (!(node instanceof L.PDFDict) || depth > 40 || seen.has(node)) return;
+        seen.add(node);
+        var arr = ctx.lookup(node.get(N.of('Names')));
+        if (arr instanceof L.PDFArray) {
+          for (var i = 0; i + 1 < arr.size(); i += 2) {
+            var key = nameText(ctx.lookup(arr.get(i))), d = destOf(arr.get(i + 1));
+            if (key !== null && d && !names.has(key)) names.set(key, d);
+          }
+        }
+        var kids = ctx.lookup(node.get(N.of('Kids')));
+        if (kids instanceof L.PDFArray) for (var j = 0; j < kids.size(); j++) walk(kids.get(j), depth + 1);
+      }
+      var nm = doc.catalog.lookup(N.of('Names'));
+      if (nm instanceof L.PDFDict) walk(nm.get(N.of('Dests')), 0);
+      if (!names.size) return;
+      pages.forEach(function (p) {
+        var annots = ctx.lookup(p.node.get(N.of('Annots')));
+        if (!(annots instanceof L.PDFArray)) return;
+        for (var i = 0; i < annots.size(); i++) {
+          var a = ctx.lookup(annots.get(i));
+          if (!(a instanceof L.PDFDict)) continue;
+          var dest = a.get(N.of('Dest'));
+          var key = dest !== undefined ? nameText(ctx.lookup(dest)) : null;
+          if (key !== null && names.has(key)) { a.set(N.of('Dest'), names.get(key)); continue; }
+          var act = ctx.lookup(a.get(N.of('A')));
+          if (act instanceof L.PDFDict && nameText(act.get(N.of('S'))) === 'GoTo') {
+            var d2 = act.get(N.of('D')), k2 = d2 !== undefined ? nameText(ctx.lookup(d2)) : null;
+            if (k2 !== null && names.has(k2)) act.set(N.of('D'), names.get(k2));
+          }
+        }
+      });
+    }
+    // A link to a page that is not in this file (its page became null), or to a named destination
+    // the new file has no table for, would do nothing: it is left out.
+    function deadLink(L, ctx, a) {
+      var N = L.PDFName;
+      if (nameText(a.get(N.of('Subtype'))) !== 'Link') return false;
+      var d = a.get(N.of('Dest'));
+      if (d === undefined) {
+        var act = ctx.lookup(a.get(N.of('A')));
+        if (!(act instanceof L.PDFDict) || nameText(act.get(N.of('S'))) !== 'GoTo') return false;
+        d = act.get(N.of('D'));
+      }
+      d = ctx.lookup(d);
+      if (d instanceof L.PDFArray) { var first = d.get(0); return first === undefined || first === L.PDFNull; }
+      return nameText(d) !== null;
+    }
+    // Some PDF writers give every page one resource dictionary with the pictures and fonts of all
+    // pages. Copied as it is, a new file would carry, out of sight, the pictures of pages that are
+    // not in it. So a page's copy gets only the resources its content names: the names are read from
+    // the page's content, and from forms, Type 3 fonts and patterns that use the page's resources
+    // because they have none of their own. If any of that cannot be read, the page keeps them all.
+    var RES_KINDS = ['XObject', 'Font', 'ExtGState', 'ColorSpace', 'Pattern', 'Shading', 'Properties'];
+    function plainName(s) { return s.indexOf('#') < 0 ? s : s.replace(/#([0-9A-Fa-f]{2})/g, function (m, h) { return String.fromCharCode(parseInt(h, 16)); }); }
+    function keyName(k) { return plainName(k.asString().slice(1)); }
+    function namesIn(L, ctx, v, used) {
+      v = ctx.lookup(v);
+      if (!(v instanceof L.PDFRawStream)) throw new Error('not a stream');
+      var b = L.decodePDFRawStream(v).decode(), n = b.length, i = 0;
+      while (i < n) {
+        if (b[i++] !== 0x2F) continue;
+        var name = '';
+        // A name runs to the next white-space or delimiter character: ( ) < > [ ] { } / %
+        while (i < n) {
+          var c = b[i];
+          if (c <= 0x20 || c === 0x28 || c === 0x29 || c === 0x3C || c === 0x3E || c === 0x5B || c === 0x5D || c === 0x7B || c === 0x7D || c === 0x2F || c === 0x25) break;
+          name += String.fromCharCode(c);
+          i++;
+        }
+        if (name) used.add(plainName(name));
+      }
+    }
+    function prunedResources(L, ctx, node) {
+      var N = L.PDFName, res = ctx.lookup(node.getInheritableAttribute(N.of('Resources')));
+      if (!(res instanceof L.PDFDict)) return null;
+      var used = new Set(), done = new Set(), contents = ctx.lookup(node.get(N.of('Contents')));
+      (contents instanceof L.PDFArray ? contents.asArray() : contents ? [contents] : []).forEach(function (s) { namesIn(L, ctx, s, used); });
+      function sub(kind) { var d = ctx.lookup(res.get(N.of(kind))); return d instanceof L.PDFDict ? d : null; }
+      for (var more = true, rounds = 0; more && rounds < 50; rounds++) {
+        more = false;
+        ['XObject', 'Font', 'Pattern'].forEach(function (kind) {
+          var d = sub(kind);
+          if (!d) return;
+          d.entries().forEach(function (en) {
+            var o = ctx.lookup(en[1]);
+            if (!used.has(keyName(en[0])) || done.has(o) || !(o instanceof L.PDFDict || o instanceof L.PDFStream)) return;
+            done.add(o);
+            var dict = o instanceof L.PDFStream ? o.dict : o;
+            if (dict.get(N.of('Resources'))) return;
+            var type = nameText(dict.get(N.of('Subtype')));
+            if (kind === 'XObject' && type === 'Form') { namesIn(L, ctx, o, used); more = true; }
+            else if (kind === 'Pattern' && o instanceof L.PDFStream) { namesIn(L, ctx, o, used); more = true; }
+            else if (kind === 'Font' && type === 'Type3') {
+              var procs = ctx.lookup(dict.get(N.of('CharProcs')));
+              if (procs instanceof L.PDFDict) procs.entries().forEach(function (p) { namesIn(L, ctx, p[1], used); });
+              more = true;
+            }
+          });
+        });
+      }
+      var out = L.PDFDict.withContext(ctx), changed = false;
+      res.entries().forEach(function (en) {
+        var kind = keyName(en[0]), d = RES_KINDS.indexOf(kind) >= 0 ? ctx.lookup(en[1]) : null;
+        if (!(d instanceof L.PDFDict)) { out.set(en[0], en[1]); return; }
+        var keep = L.PDFDict.withContext(ctx), kept = 0;
+        d.entries().forEach(function (e2) {
+          var nm = keyName(e2[0]);
+          // Default colour spaces are used without being named.
+          if (used.has(nm) || (kind === 'ColorSpace' && /^Default(Gray|RGB|CMYK)$/.test(nm))) { keep.set(e2[0], e2[1]); kept++; }
+          else changed = true;
+        });
+        if (kept) out.set(en[0], keep);
+      });
+      return changed ? out : null;
+    }
+    function pagePrepared(L, c, idx) {
+      if (!c.prepared[idx]) {
+        var node = c.pages[idx].node, res = null;
+        try { res = prunedResources(L, c.doc.context, node); } catch (err) { res = null; }
+        if (res) { node = node.clone(); node.set(L.PDFName.of('Resources'), res); }
+        c.prepared[idx] = node;
+      }
+      return c.prepared[idx];
+    }
+    // Copies the pages of one job into a new PDF, with one copier for each source file. Every page
+    // of a source is mapped in advance: a page of this job to its new copy, any other page to null.
+    // A plain copy follows a link to the page it points at and copies that page too, with its text
+    // and pictures, where no one sees it; and a link between two copied pages would point at that
+    // hidden copy instead of the page in the file. For the same reason the catalog, which a
+    // signature's value may refer to, and the parent of each form field on these pages are not
+    // followed: a parent's other kids are fields on other pages, with their values. The fields keep
+    // their look. When every page of a file is in the new one, nothing of it is left out, so its
+    // pages keep their resources as they are: trimming them means reading the content of every
+    // page, which made merging whole files of big drawings 3 to 4 times slower.
+    async function buildJob(L, src, job) {
+      var N = L.PDFName, out = await L.PDFDocument.create(), octx = out.context, copiers = {}, kept = {}, whole = {};
+      job.pages.forEach(function (p) {
+        var c = src[p.f], sctx = c.doc.context, cp = copiers[p.f], i;
+        if (!cp) {
+          cp = copiers[p.f] = L.PDFObjectCopier.for(sctx, octx);
+          kept[p.f] = new Set();
+          for (i = 0; i < c.pages.length; i++) cp.traversedObjects.set(c.pages[i].ref, L.PDFNull);
+          if (sctx.trailerInfo.Root instanceof L.PDFRef) cp.traversedObjects.set(sctx.trailerInfo.Root, L.PDFNull);
+        }
+        kept[p.f].add(p.i);
+        var an = sctx.lookup(c.pages[p.i].node.get(N.of('Annots')));
+        if (!(an instanceof L.PDFArray)) return;
+        for (i = 0; i < an.size(); i++) {
+          var w = sctx.lookup(an.get(i)), parent = w instanceof L.PDFDict ? w.get(N.of('Parent')) : null;
+          if (parent instanceof L.PDFRef && nameText(w.get(N.of('Subtype'))) === 'Widget') cp.traversedObjects.set(parent, L.PDFNull);
+        }
+      });
+      Object.keys(kept).forEach(function (f) { whole[f] = kept[f].size === src[f].pages.length; });
+      var refs = job.pages.map(function (p) {
+        var r = octx.nextRef(), map = copiers[p.f].traversedObjects, sref = src[p.f].pages[p.i].ref;
+        if (map.get(sref) === L.PDFNull) map.set(sref, r);
+        return r;
+      });
+      var done = new Set();
+      for (var k = 0; k < job.pages.length; k++) {
+        var p = job.pages[k], c = src[p.f];
+        var node = copiers[p.f].copy(whole[p.f] ? c.pages[p.i].node : pagePrepared(L, c, p.i));
+        octx.assign(refs[k], node);
+        var ann = octx.lookup(node.get(N.of('Annots')));
+        if (ann instanceof L.PDFArray) {
+          var keep = [], again = done.has(p.f + ':' + p.i);
+          for (var i = 0; i < ann.size(); i++) {
+            var a = octx.lookup(ann.get(i));
+            if (!(a instanceof L.PDFDict) || deadLink(L, octx, a)) continue;
+            if (again) {
+              // The same page twice in one file: an annotation may sit on one page only.
+              if (nameText(a.get(N.of('Subtype'))) === 'Popup') continue;
+              var cl = a.clone(octx);
+              cl.delete(N.of('Popup'));
+              cl.set(N.of('P'), refs[k]);
+              keep.push(octx.register(cl));
+            } else keep.push(ann.get(i));
+          }
+          node.set(N.of('Annots'), octx.obj(keep));
+        }
+        done.add(p.f + ':' + p.i);
+        var page = L.PDFPage.of(node, refs[k], out);
+        // /Rotate must be a multiple of 90 (ISO 32000-1, 7.7.3.3); readers treat any other value as 0.
+        var own = Number(page.getRotation().angle) || 0;
+        if (own % 90) own = 0;
+        page.setRotation(L.degrees(((own + p.rot) % 360 + 360) % 360));
+        out.addPage(page);
+      }
+      out.setProducer('TripleP Tools (pdf-lib)');
+      out.setCreator('TripleP Tools Merge PDF');
+      return out.save({ useObjectStreams: true, objectsPerTick: 200 });
+    }
     scope.onmessage = async function (e) {
       var msg = e.data;
       if (msg.type === 'init') {
@@ -614,17 +838,19 @@ faq:
         return;
       }
       if (msg.type !== 'build') return;
-      var PDFLib = scope.PDFLib, id = msg.id;
+      var L = scope.PDFLib, id = msg.id;
       try {
-        var docs = {}, total = 0, done = 0;
+        var src = {}, total = 0, done = 0;
         msg.jobs.forEach(function (j) { total += j.pages.length; });
         for (var fi = 0; fi < msg.files.length; fi++) {
           var f = msg.files[fi];
           try {
-            var src;
-            try { src = new Uint8Array(await f.file.arrayBuffer()); } catch (readErr) { var re = new Error('READ'); re.code = 'GONE'; throw re; }
-            docs[f.id] = (await unlocker.open(src, f.password || '')).doc;
-            src = null;
+            var raw;
+            try { raw = new Uint8Array(await f.file.arrayBuffer()); } catch (readErr) { var re = new Error('READ'); re.code = 'GONE'; throw re; }
+            var doc = (await unlocker.open(raw, f.password || '')).doc, pages = doc.getPages();
+            raw = null;
+            try { resolveNamed(L, doc, pages); } catch (nameErr) { /* a damaged name table: links by name are left out */ }
+            src[f.id] = { doc: doc, pages: pages, prepared: [] };
           } catch (err) {
             scope.postMessage({ type: 'error', id: id, fileId: f.id, code: err && err.code || 'READ', message: String(err && err.message || err) });
             return;
@@ -633,29 +859,11 @@ faq:
         }
         var outputs = [];
         for (var ji = 0; ji < msg.jobs.length; ji++) {
-          var job = msg.jobs[ji], out = await PDFLib.PDFDocument.create(), byFile = {}, copied = {};
-          job.pages.forEach(function (p) { (byFile[p.f] = byFile[p.f] || []).push(p.i); });
-          for (var fid in byFile) {
-            var list = byFile[fid], got = await out.copyPages(docs[fid], list), map = {};
-            list.forEach(function (idx, k) { map[idx] = got[k]; });
-            copied[fid] = map;
-          }
-          for (var pi = 0; pi < job.pages.length; pi++) {
-            var p = job.pages[pi], page = copied[p.f][p.i];
-            // /Rotate must be a multiple of 90 (ISO 32000-1, 7.7.3.3); readers treat any other value as 0.
-            var own = Number(page.getRotation().angle) || 0;
-            if (own % 90) own = 0;
-            var angle = ((own + p.rot) % 360 + 360) % 360;
-            page.setRotation(PDFLib.degrees(angle));
-            out.addPage(page);
-            done++;
-          }
-          out.setProducer('TripleP Tools (pdf-lib)');
-          out.setCreator('TripleP Tools Merge PDF');
+          var job = msg.jobs[ji], bytes = await buildJob(L, src, job);
           // The Blob is made here, so the page never copies the whole file on its own thread.
-          var bytes = await out.save({ useObjectStreams: true, objectsPerTick: 200 });
           outputs.push({ name: job.name, blob: new Blob([bytes], { type: 'application/pdf' }), pages: job.pages.length });
           bytes = null;
+          done += job.pages.length;
           scope.postMessage({ type: 'progress', id: id, value: 0.3 + 0.7 * done / Math.max(1, total) });
         }
         scope.postMessage({ type: 'done', id: id, outputs: outputs });

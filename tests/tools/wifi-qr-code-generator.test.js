@@ -466,7 +466,10 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     assert.equal(await page.textContent('#wq-card-h'), 'Printable cards');
     const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-    assert.deepEqual(links, ['/passphrase-generator/', '/qr-code-generator/']);
+    assert.deepEqual(links, ['/passphrase-generator/', '/qr-code-generator/', '/qr-code-scanner/']);
+    // The phones FAQ adds computers: the scanner shows a Wi-Fi code's name, security and password.
+    const faq = (await page.locator('.faq').textContent()).replace(/\s+/g, ' ');
+    assert.match(faq, /On a computer, the QR code scanner reads a Wi-Fi code from the webcam or a screenshot and shows its network name, security type and password\./);
     for (const href of links) {
       assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
     }

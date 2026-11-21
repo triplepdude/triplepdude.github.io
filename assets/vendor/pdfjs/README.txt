@@ -1,5 +1,5 @@
-PDF.js, a PDF renderer (used by the Merge PDF tool for page thumbnails)
-========================================================================
+PDF.js, a PDF renderer (used by the Merge PDF, Split PDF and PDF to JPG tools to draw pages)
+=============================================================================================
 
 Package:  pdfjs-dist 6.3.289, the "legacy" build (wider browser support), unmodified
           except for the file extension:
@@ -14,7 +14,8 @@ Package:  pdfjs-dist 6.3.289, the "legacy" build (wider browser support), unmodi
           The package's cmaps/, standard_fonts/ and iccs/ folders are kept
           separately, unmodified, in assets/vendor/pdfjs-resources/. They draw
           fonts a PDF does not embed (mostly CJK, Symbol and ZapfDingbats) and
-          CMYK colours; PDF to JPG and Split PDF pass their URLs to pdf.js.
+          CMYK colours; Merge PDF, PDF to JPG and Split PDF pass their URLs to
+          pdf.js.
 Source:   https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.3.289.tgz
           sha256 06f25e887adc6489f04c9fcb14198c77e4e5623a59a0bba5c4cea5838a4f1241
           https://github.com/mozilla/pdf.js

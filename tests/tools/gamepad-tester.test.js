@@ -4,6 +4,9 @@
 // 7 = right trigger, axes 0/1 = left stick with up = -1) and were computed in
 // python3: right stick (-0.25, 1) is 1.031 from centre at 256 degrees; a stick
 // whose reach is 1 - 0.08 sin^2(2θ) averages a 4.0% circularity error.
+const fs = require('fs');
+const path = require('path');
+
 module.exports = async ({ page, open, assert, url, base }) => {
   await page.addInitScript(() => {
     if (location.search.includes('nogp')) { delete Navigator.prototype.getGamepads; return; }
@@ -371,6 +374,15 @@ module.exports = async ({ page, open, assert, url, base }) => {
   assert.match(drift, /press Measure drift/);
   assert.match(drift, /recalibrating the sticks/);
   assert.match(drift, /has to be replaced/);
+  // The update rate is put beside human reaction time. Neither the reaction time test
+  // nor the CPS test reads a controller, so the sentence names what they do take, and
+  // the CPS test, which counts mouse clicks, is not linked.
+  assert.match((await text('.prose')).replace(/\s+/g, ' '), /not necessarily the controller’s USB polling rate\. Your own reactions are far slower: the reaction time test times them with a mouse, keyboard or touch screen\./);
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.deepEqual(links, ['/reaction-time-test/']);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
   // Homepage search (index.html): every typed word must be a substring of the
   // tool's title, description and keywords.
   const home = await (await page.request.get(base + '/')).text();

@@ -310,4 +310,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await val('#wc-file-ok'), '');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'wc-input');
   assert.equal(await page.locator('#wc-kw-body tr').count(), 0);
+
+  // The page-count rule of thumb sends a reader with their own template to placeholder
+  // text of an exact length; every internal link in the guide and FAQ is a page of this site.
+  const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
+  assert.match(guide, /so 1,000 words is about 2 or 4 pages\. To test your own layout, use the lorem ipsum generator for an exact number of words\./);
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.deepEqual(links, ['/lorem-ipsum-generator/']);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
 };

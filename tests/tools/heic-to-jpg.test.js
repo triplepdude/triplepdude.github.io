@@ -310,4 +310,16 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await open();
   await page.waitForFunction(() => document.querySelector('#h2j-format option[value="webp"]').disabled);
   assert.equal(await page.textContent('#h2j-format option[value="webp"]'), 'WebP (this browser cannot save it)');
+
+  // AVIF is the other common HEIF image (AV1 instead of HEVC); the guide sends those
+  // files to their own converter. Every internal link is a tool page or a vendored file.
+  const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
+  assert.match(guide, /HEIC is the High Efficiency Image File Format \(HEIF, ISO\/IEC 23008-12\) holding pictures compressed with HEVC/);
+  assert.match(guide, /AVIF pictures, often saved from websites, share the HEIF container but are compressed with AV1; for those, use the AVIF to JPG converter\./);
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.deepEqual(links, ['/avif-to-jpg/', '/assets/vendor/libheif/README.txt', '/remove-exif-data/', '/image-to-pdf/']);
+  for (const href of links) {
+    const file = href.startsWith('/assets/') ? path.join(__dirname, '..', '..', href) : path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html');
+    assert.ok(fs.existsSync(file), `${href} is linked from the guide but does not exist`);
+  }
 };

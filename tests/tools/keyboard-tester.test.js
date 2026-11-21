@@ -1,6 +1,9 @@
 // Expected values come from the UI Events spec and the legacy keyCode table
 // (a = 65, Shift = 16, Enter = 13, Escape = 27) and from counting a standard
 // ANSI board: 104 keys full-size, 87 tenkeyless, 61 for a 60% board.
+const fs = require('fs');
+const path = require('path');
+
 module.exports = async ({ page, open, assert, base }) => {
   await open();
   const text = sel => page.locator(sel).textContent();
@@ -416,6 +419,15 @@ module.exports = async ({ page, open, assert, base }) => {
   // keywords (index.html): the page shows keyCode for every press and tests
   // rollover and chatter, under the names people use for them.
   assert.equal(await page.locator('#kbt-ev-keycode').count(), 1, 'the keyCode readout');
+  // The chatter section sends a reader whose mouse double-clicks to the CPS test, whose
+  // live click count shows one slow click counted twice.
+  const guide = (await text('.prose')).replace(/\s+/g, ' ');
+  assert.match(guide, /let you raise the debounce time\. A mouse that double-clicks on a single press has the same fault: click slowly in the CPS test and watch whether the count ever jumps by two\./);
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.deepEqual(links, ['/cps-test/']);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
   const home = await (await page.request.get(base + '/')).text();
   const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/keyboard-tester\/"/) || [])[1] || '').replace(/&amp;/g, '&');
   assert.ok(hay, 'the homepage lists the keyboard tester');

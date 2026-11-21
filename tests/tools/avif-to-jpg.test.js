@@ -12,6 +12,8 @@
 //   damaged.avif   gradient.avif at full length, its AV1 data overwritten with a
 //                  byte pattern: Chrome draws it as a blank, transparent picture
 //   broken.avif    gradient.avif's ftyp box followed by zeros: no readable boxes
+//   pq.avif        128x16 HDR AVIF made with ffmpeg (libaom, 10-bit 4:4:4, BT.2020,
+//                  PQ transfer): eight grey steps at PQ code values 0.3 to 1.0, 16 px each
 const fs = require('fs');
 const path = require('path');
 
@@ -151,4 +153,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.setInputFiles('#imc-file', [fx('cut.avif')]);
   await page.waitForFunction(() => document.querySelector('#imc-status').textContent === 'The image could not be converted to JPG.', null, { timeout: 30000 });
   assert.equal(await page.isDisabled('#imc-zip'), true);
+
+  // ---------- An HDR AVIF gets a note; Chromium tone-maps it, so highlights are not clipped ----------
+  await page.click('#imc-clear');
+  await page.setInputFiles('#imc-file', ['pq.avif', 'srgb.avif'].map(fx));
+  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '2 of 2 converted.', null, { timeout: 30000 });
+  assert.match(await rowText(0), /^pq\.jpg AVIF 128×16, .* This is an HDR image\. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen\. /);
+  assert.doesNotMatch(await rowText(1), /HDR/, 'no HDR note for a standard-range AVIF');
+  const steps = (await pixels((await download(0)).data, [0, 1, 2, 3, 4].map(k => [8 + 16 * k, 8]))).map(p => p[1]);
+  assert.ok(steps.every((v, k) => !k || v > steps[k - 1] + 10) && steps[4] < 245, `PQ 0.3 to 0.7 (about 10 to 600 nits) should stay apart, not clip at white: ${steps}`);
 };

@@ -4,6 +4,12 @@
 //   anim.webp   40x30 animation, frame 1 red, frame 2 blue
 //   photo.webp  scikit-image's "astronaut" sample (NASA, public domain) at
 //               200x200, saved by Pillow as lossy WebP at quality 80
+//   rotated.webp    lossless (Pillow), stored 120x80: a (220,30,30) band along the
+//                   top 20 rows, (235,235,235) elsewhere; EXIF Orientation 6, Make
+//                   TestCam, a GPS position -> shown 80x120 with the band on the right
+//   late-exif.webp  40x30 lossless animation (Pillow), frame 1 (30,140,90), with an
+//                   sRGB profile: chunks VP8X, ICCP, ANIM, ANMF, ANMF, then EXIF (Make
+//                   LateCam, a GPS position)
 const fs = require('fs');
 const path = require('path');
 
@@ -14,7 +20,7 @@ function jpegInfo(b) {
   for (let i = 2; i < b.length;) {
     const m = b[i + 1], len = b.readUInt16BE(i + 2);
     if (m === 0xDA) break;
-    if (m === 0xE1 && b.toString('latin1', i + 4, i + 8) === 'Exif') info.exif = true;
+    if (m === 0xE1 && b.toString('latin1', i + 4, i + 8) === 'Exif') { info.exif = true; info.tags = exifTags(b.subarray(i + 10, i + 2 + len)); }
     if (m >= 0xC0 && m <= 0xC2) {
       info.h = b.readUInt16BE(i + 5); info.w = b.readUInt16BE(i + 7);
       info.sampling = [0, 1, 2].map(k => (b[i + 11 + 3 * k] >> 4) + 'x' + (b[i + 11 + 3 * k] & 15)).join(' ');
@@ -22,6 +28,24 @@ function jpegInfo(b) {
     i += 2 + len;
   }
   return info;
+}
+// TIFF/EXIF reader: IFD0 tags, and the GPS IFD if linked.
+function exifTags(t) {
+  const le = t.toString('latin1', 0, 2) === 'II';
+  const r16 = o => (le ? t.readUInt16LE(o) : t.readUInt16BE(o)), r32 = o => (le ? t.readUInt32LE(o) : t.readUInt32BE(o));
+  const ifd = off => {
+    const out = {};
+    for (let k = 0, n = r16(off); k < n; k++) {
+      const p = off + 2 + k * 12, tag = r16(p), type = r16(p + 2), count = r32(p + 4);
+      if (type === 3) out[tag] = r16(p + 8);
+      else if (type === 4) out[tag] = r32(p + 8);
+      else if (type === 2) out[tag] = t.toString('latin1', count > 4 ? r32(p + 8) : p + 8, (count > 4 ? r32(p + 8) : p + 8) + count - 1);
+      else out[tag] = true;
+    }
+    return out;
+  };
+  const ifd0 = ifd(r32(4));
+  return { ifd0, gps: ifd0[0x8825] ? ifd(ifd0[0x8825]) : null };
 }
 // File names in a ZIP, from its central directory.
 function zipNames(b) {
@@ -139,4 +163,30 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const [zdl] = await Promise.all([page.waitForEvent('download'), page.click('#imc-zip')]);
   assert.equal(zdl.suggestedFilename(), 'converted-images-jpg.zip');
   assert.deepEqual(zipNames(fs.readFileSync(await zdl.path())), ['alpha.jpg', 'photo.jpg', 'anim.jpg']);
+
+  // ---------- EXIF in a WebP is found, wherever its chunk is, and its orientation applied ----------
+  // (It used to be missed: the chunk length was read from the wrong place.)
+  await page.click('#imc-clear');
+  await page.selectOption('#imc-meta', 'keep');
+  await page.setInputFiles('#imc-file', ['rotated.webp', 'late-exif.webp'].map(fx));
+  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '2 of 2 converted.', null, { timeout: 30000 });
+  assert.match(await rowText(0), /^rotated\.jpg WebP 80×120, 240 B → JPG 80×120, .*Rotated upright using the photo’s orientation tag\. EXIF kept, including any location\./);
+  assert.match(await rowText(1), /^late-exif\.jpg WebP 40×30, .*Animated image: only the first frame was converted\..* EXIF kept, including any location\./);
+  f = await download(0);
+  j = jpegInfo(f.data);
+  assert.deepEqual([j.w, j.h, j.tags.ifd0[0x010F], j.tags.ifd0[0x0112], !!j.tags.gps], [80, 120, 'TestCam', 1, true], 'rotated.jpg: upright, EXIF kept with its location, orientation reset');
+  px = await pixels(f.data, [[75, 60], [10, 60], [40, 2]]);
+  near(px[0], [220, 30, 30, 255], 14, 'band on the right');
+  near(px[1], [235, 235, 235, 255], 8, 'background');
+  near(px[2], [235, 235, 235, 255], 8, 'top is not the band');
+  f = await download(1);
+  j = jpegInfo(f.data);
+  assert.deepEqual([j.w, j.h, j.tags.ifd0[0x010F], !!j.tags.gps], [40, 30, 'LateCam', true], 'late-exif.jpg: EXIF after the animation chunks is kept');
+  near((await pixels(f.data, [[20, 15]]))[0], [30, 140, 90, 255], 10, 'late-exif.jpg first frame');
+  await rerun(() => page.selectOption('#imc-meta', 'nogps'));
+  for (const [i, make] of [[0, 'TestCam'], [1, 'LateCam']]) {
+    assert.match(await rowText(i), /EXIF kept without location\./);
+    j = jpegInfo((await download(i)).data);
+    assert.deepEqual([j.tags.ifd0[0x010F], j.tags.gps], [make, null], `${make}: camera kept, GPS removed`);
+  }
 };

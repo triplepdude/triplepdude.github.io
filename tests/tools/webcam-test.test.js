@@ -325,6 +325,9 @@ module.exports = async ({ page, open, assert }) => {
   // and FAQ is a page of this site.
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
   assert.ok(links.includes('/mic-test/'), `guide links: ${links}`);
+  // A laptop user who checks the webcam in order to scan a code is sent to the scanner.
+  assert.deepEqual(links, ['/mic-test/', '/qr-code-scanner/']);
+  assert.match((await text('.prose')).replace(/\s+/g, ' '), /use the mic test; to read a QR code with your webcam, use the QR code scanner\./);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(toolsDir, href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }
