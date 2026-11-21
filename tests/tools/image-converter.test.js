@@ -132,6 +132,32 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   page.on('request', r => requests.push(r.url()));
   await open();
 
+  // The page is _includes/image-converter-tool.html with no parameters: no
+  // Liquid or parameter notes reach the HTML, and the controls as served are
+  // the ones the script leaves after loading, so nothing moves as it starts.
+  const load = await page.evaluate(async () => {
+    const state = doc => {
+      const q = s => doc.querySelector(s);
+      return [q('#imc-format').value, q('#imc-quality').value, q('#imc-quality-out').textContent, q('#imc-bg').value, q('#imc-meta').value,
+        ['#imc-quality-field', '#imc-resize-field', '#imc-bg-field', '#imc-meta-field', '#imc-sizes', '#imc-resize-val'].map(s => q(s).hidden).join(),
+        q('#imc-note').textContent, q('#imc-drop .hint').textContent];
+    };
+    const html = await (await fetch(location.href)).text();
+    return { html, served: state(new DOMParser().parseFromString(html, 'text/html')), live: state(document) };
+  });
+  assert.doesNotMatch(load.html, /\{%|\{\{|include\.|imc_[a-z]|animated_note/, 'Liquid or include notes in the page');
+  assert.deepEqual(load.served, ['jpeg', '90', '90%', '#ffffff', 'strip', 'false,false,false,false,true,true', '',
+    'PNG, JPG, WebP, AVIF, GIF, BMP, ICO, TIFF, HEIC or SVG, as many as you like. Nothing is uploaded.']);
+  assert.deepEqual(load.live, load.served, 'the script changed the controls as it started');
+
+  // The guide lists the pages set up for one conversion each (checked in the
+  // repository, since a run builds only the tools it tests).
+  const guideLinks = await page.$$eval('.prose a', as => as.map(a => a.getAttribute('href')));
+  for (const s of ['webp-to-png', 'webp-to-jpg', 'png-to-jpg', 'jpg-to-png', 'avif-to-jpg']) {
+    assert.ok(guideLinks.includes(`/${s}/`), `the guide links to /${s}/`);
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', s + '.html')), `_tools/${s}.html exists`);
+  }
+
   const summary = () => page.textContent('#imc-summary');
   const rows = page.locator('.imc-item');
   const rowText = async i => (await rows.nth(i).innerText()).replace(/\s+/g, ' ');
