@@ -707,6 +707,44 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(sideBox.y >= listBox.y + listBox.height, 'settings below the pages on a phone');
   await page.setViewportSize({ width: 1280, height: 900 });
 
+  // ---------- Damaged and HDR files: the decoder's findings, file by file ----------
+  // cut.jpg (120x90, top half (40,90,200), bottom half (230,180,40)) stops 40% into its image
+  // data: the browser draws the top and leaves the rest blank. It is added with a note, and its
+  // page is drawn from the decoded pixels, as its card is: copied as it is, its data would stop
+  // part-way, and PDF readers fill in the rest their own way (pdf.js and Poppler paint it grey).
+  // The decoder refuses early.jpg (cut before anything can be drawn), cut.webp (drawn wholly
+  // blank), cut.avif (ends before its image data) and damaged.avif (AV1 data overwritten): the
+  // message gives each one's reason in the decoder's words, and the other files are added.
+  // pq.avif is an HDR (PQ) AVIF that the browser maps to standard range; hdr-pq.heic an HDR HEIC
+  // that libheif decodes without tone mapping.
+  await page.click('#itp-clear');
+  await page.selectOption('#itp-compress', 'off');
+  await page.setInputFiles('#itp-file', ['cut.jpg', 'early.jpg', 'cut.webp', 'cut.avif', 'damaged.avif', 'pq.avif', 'hdr-pq.heic', 'gray.jpg'].map(fx));
+  await page.waitForFunction(() => document.querySelectorAll('#itp-list .itp-item').length === 4 && !document.querySelector('#itp-make').disabled, null, { timeout: 30000 });
+  assert.equal(await page.textContent('#itp-error'), '4 files could not be added: ' +
+    'early.jpg (The JPG file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again); ' +
+    'cut.webp (The WebP file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again); ' +
+    'cut.avif (The AVIF file is incomplete: it ends before all of its image data. Download or copy it again); ' +
+    'damaged.avif (The AVIF file could not be decoded. It may be damaged or use a feature this browser does not support).');
+  assert.deepEqual(await names(), ['cut.jpg', 'pq.avif', 'hdr-pq.heic', 'gray.jpg']);
+  assert.equal(await page.textContent('#itp-note'), '“cut.jpg” seems to be cut off, so part of the picture may be blank. ' +
+    '“pq.avif” is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen. ' +
+    '“hdr-pq.heic” is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.');
+  res = await makePdf();
+  assert.equal(res.pdf.pages.length, 4);
+  const [cutPage, , , grayPage] = res.pdf.pages;
+  assert.equal(cutPage.image.filter, 'DCTDecode');
+  assert.deepEqual([cutPage.image.width, cutPage.image.height], [120, 90]);
+  const cutPx = await page.evaluate(async bytes => {
+    const bmp = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }));
+    const c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext('2d');
+    x.drawImage(bmp, 0, 0);
+    return [[60, 10], [60, 80]].map(([px, py]) => Array.from(x.getImageData(px, py, 1, 1).data));
+  }, [...cutPage.image.data]);
+  near(assert, cutPx[0], [40, 90, 200, 255], 'cut.jpg in the PDF: the part before the cut', 10);
+  near(assert, cutPx[1], [255, 255, 255, 255], 'cut.jpg in the PDF: a complete JPEG, the blank part white as on its card', 3);
+  assert.equal(Buffer.compare(grayPage.image.data, metadataFree(fs.readFileSync(fx('gray.jpg')))), 0, 'a sound JPEG is still copied as it is');
+
   // Adding images while a PDF is being created is refused with a message, not silently dropped.
   await page.evaluate(() => {
     document.querySelector('#itp-make').click();

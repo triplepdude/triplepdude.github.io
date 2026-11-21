@@ -645,6 +645,46 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.locator('#ri-list .ri-row').count(), 4);
   assert.match(await page.evaluate(() => document.activeElement.getAttribute('aria-label') || ''), /^Remove flag\.bmp/);
 
+  // ---------- Damaged and HDR files: the decoder's findings, file by file ----------
+  // cut.jpg (120x90, top half (40,90,200), bottom half (230,180,40)) stops 40% into its image
+  // data: the browser draws the top and leaves the rest blank, so it is resized with a note, in
+  // its row as well as the preview, so it stands out in a batch. The decoder refuses early.jpg
+  // (cut before anything can be drawn), cut.webp (drawn wholly blank), cut.avif (ends before its
+  // image data) and damaged.avif (AV1 data overwritten): the message gives each one's reason in
+  // the decoder's words, and the other files load. pq.avif is an HDR (PQ) AVIF that the browser
+  // maps to standard range; hdr-pq.heic an HDR HEIC that libheif decodes without tone mapping.
+  const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
+  await page.click('#ri-clear');
+  await page.selectOption('#ri-format', 'image/jpeg');
+  await page.setInputFiles('#ri-file', ['cut.jpg', 'early.jpg', 'cut.webp', 'cut.avif', 'damaged.avif', 'pq.avif', 'hdr-pq.heic'].map(fx));
+  await page.waitForFunction(() => document.querySelectorAll('#ri-list .ri-row').length === 3 && !document.querySelector('#ri-download').disabled, null, { timeout: 30000 });
+  assert.equal(await text('#ri-error'), '4 files could not be opened: ' +
+    'early.jpg (The JPG file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again); ' +
+    'cut.webp (The WebP file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again); ' +
+    'cut.avif (The AVIF file is incomplete: it ends before all of its image data. Download or copy it again); ' +
+    'damaged.avif (The AVIF file could not be decoded. It may be damaged or use a feature this browser does not support).');
+  assert.deepEqual(await page.locator('#ri-list .ri-pick').allTextContents(), ['cut.jpg', 'pq.avif', 'hdr-pq.heic']);
+  assert.deepEqual(await page.locator('#ri-list .ri-row-main').evaluateAll(els => els.map(e => (e.querySelector('.ri-row-note') || {}).textContent || '')),
+    [CUT, '', ''], 'only the cut-off JPG is marked in its row');
+  assert.equal(await page.locator('#ri-list .ri-row-note').nth(1).isVisible(), false, 'an empty row note takes no space');
+  await waitDims('120 × 90');
+  assert.ok((await text('#ri-note')).startsWith(CUT), await text('#ri-note'));
+  out = await download();
+  assert.deepEqual([out.info.type, out.info.width, out.info.height], ['jpeg', 120, 90]);
+  close((await pixels(out.buf, [[60, 10]]))[0], [40, 90, 200], 10, 'cut.jpg: the part before the cut');
+  await page.locator('#ri-list .ri-pick').nth(1).click();
+  await page.waitForFunction(() => /This is an HDR image\. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen\./.test(document.querySelector('#ri-note').textContent));
+  assert.match(await text('#ri-fname'), /^pq\.avif$/);
+  assert.doesNotMatch(await text('#ri-note'), /cut off/);
+  await page.locator('#ri-list .ri-pick').nth(2).click();
+  await page.waitForFunction(() => /This is an HDR photo\. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen\./.test(document.querySelector('#ri-note').textContent));
+  assert.match(await text('#ri-fname'), /^hdr-pq\.heic$/);
+  assert.doesNotMatch(await text('#ri-note'), /cut off/);
+  // A new size keeps the cut-off file's mark.
+  await page.fill('#ri-w', '60');
+  await page.waitForFunction(() => !document.querySelector('#ri-download').disabled && /→ 60 × /.test(document.querySelector('#ri-list .ri-row-info').textContent));
+  assert.equal(await page.locator('#ri-list .ri-row-note').first().textContent(), CUT);
+
   // ---------- SVG is drawn at the new size ----------
   // A viewBox-only SVG (100 x 50, red left half, blue right half) resized to 1000 px wide: a raster
   // upscale would blur the join over several pixels; drawn as vectors it is sharp.
