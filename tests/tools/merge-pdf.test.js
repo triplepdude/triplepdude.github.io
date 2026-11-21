@@ -8,8 +8,28 @@ const zlib = require('zlib');
 // landscape A4 page), many.pdf (40 pages), damaged.pdf, inherit.pdf (2 pages that inherit /Rotate 90
 // from the page tree) and oddrot.pdf (page 1 has the invalid /Rotate 45, page 2 /Rotate -90). Every page shows its label in large
 // text ("Alpha 2"). Outputs are read back with pdf.js, an independent reader (the tool writes with
-// pdf-lib), checking page order, text, /Rotate and encryption. Sizes are in points: A4 595 x 842,
-// Letter 612 x 792.
+// pdf-lib), checking page order, text, /Rotate, links and encryption. Sizes are in points: A4 595 x 842,
+// Letter 612 x 792. ten.pdf and shared.pdf are copies of the Split PDF tool's fixtures (made by
+// tests/fixtures/split-pdf/make_fixtures.py, described where they are used); fonts.pdf is made by
+// make_fonts.py here.
+
+// The text of a PDF file with every Flate stream inflated (object streams too), to search it.
+function allText(buf) {
+  const raw = buf.toString('latin1');
+  let text = raw, at = 0;
+  for (;;) {
+    const s = raw.indexOf('stream', at);
+    if (s < 0) break;
+    let b = s + 6;
+    if (raw[b] === '\r') b++;
+    if (raw[b] === '\n') b++;
+    const e = raw.indexOf('endstream', b);
+    if (e < 0) break;
+    try { text += zlib.inflateSync(buf.subarray(b, e)).toString('latin1'); } catch (err) { /* not deflated */ }
+    at = e + 9;
+  }
+  return text;
+}
 
 function unzip(buf) {
   let eocd = buf.length - 22;
@@ -31,11 +51,16 @@ function unzip(buf) {
 
 module.exports = async ({ page, open, assert, fixtures }) => {
   const fx = n => path.join(fixtures, n);
+  // PDF.js fetches CMaps, fonts and the CMYK profile from the site only when a PDF needs them.
+  const fetched = [];
+  page.on('response', r => { if (/pdfjs-resources/.test(r.url())) fetched.push(r.status() + ' ' + r.url().replace(/^.*pdfjs-resources\//, '')); });
   await open();
   assert.equal(await page.isVisible('#mpdf-drop'), true);
   assert.equal(await page.isVisible('#mpdf-work'), false);
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/image-to-pdf/', '/split-pdf/', '/pdf-to-jpg/']);
 
-  // Reads a PDF with pdf.js: page texts, rotations, sizes and whether it is encrypted.
+  // Reads a PDF with pdf.js: page texts, rotations, sizes, annotations (link targets as page
+  // numbers, with the annotation ids) and whether it is encrypted.
   const inspect = buf => page.evaluate(async b64 => {
     const lib = await import('/assets/vendor/pdfjs/pdf.min.js');
     lib.GlobalWorkerOptions.workerSrc = '/assets/vendor/pdfjs/pdf.worker.min.js';
@@ -47,10 +72,41 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     for (let i = 1; i <= doc.numPages; i++) {
       const pg = await doc.getPage(i);
       const tc = await pg.getTextContent();
-      pages.push({ text: tc.items.map(t => t.str).join(' ').replace(/\s+/g, ' ').split(' Fixture')[0].trim(), rotate: pg.rotate, size: Math.round(pg.view[2]) + 'x' + Math.round(pg.view[3]) });
+      const anns = [], ids = [];
+      for (const a of await pg.getAnnotations()) {
+        ids.push(a.id);
+        let s = a.subtype;
+        if (a.url) s += ' ' + a.url;
+        if (Array.isArray(a.dest) && a.dest[0] && typeof a.dest[0] === 'object') s += ' ->' + (await doc.getPageIndex(a.dest[0]) + 1);
+        if (a.contentsObj && a.contentsObj.str) s += ' "' + a.contentsObj.str + '"';
+        anns.push(s);
+      }
+      pages.push({ text: tc.items.map(t => t.str).join(' ').replace(/\s+/g, ' ').split(' Fixture')[0].trim(), rotate: pg.rotate, size: Math.round(pg.view[2]) + 'x' + Math.round(pg.view[3]), anns: anns.join(), ids });
     }
     await task.destroy();
     return { encrypted: !!meta.info.EncryptFilterName, producer: meta.info.Producer, pages };
+  }, buf.toString('base64'));
+  // Walks every object of a PDF with pdf-lib: the pages in the page tree, the page objects in the
+  // file (a page that is not in the tree is a hidden copy) and the pictures.
+  const objects = buf => page.evaluate(async b64 => {
+    if (!window.PDFLib) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = '/assets/vendor/pdf-lib/pdf-lib.min.js';
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    const L = window.PDFLib, doc = await L.PDFDocument.load(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+    let pageObjects = 0, pictures = 0;
+    for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+      const d = obj instanceof L.PDFDict ? obj : obj.dict;
+      if (!(d instanceof L.PDFDict)) continue;
+      if (d.get(L.PDFName.of('Type')) === L.PDFName.of('Page')) pageObjects++;
+      if (d.get(L.PDFName.of('Subtype')) === L.PDFName.of('Image')) pictures++;
+    }
+    return { pages: doc.getPageCount(), pageObjects, pictures };
   }, buf.toString('base64'));
   const save = async sel => {
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click(sel)]);
@@ -227,4 +283,112 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.textContent('#mpdf-error'), '');
   pdf = await inspect(out.buf);
   assert.deepEqual(pdf.pages.map(p => p.text + '@' + p.rotate), ['Inh 1@180', 'Inh 2@90', 'Odd 1@0', 'Odd 2@270']);
+
+  // ---- Links: a new file holds only its own pages, and its links lead to them ----
+  // ten.pdf has 10 pages, each with its own incompressible picture of 36,321 bytes, so a file's size
+  // shows whose pictures it holds. Page 1 links to page 10, page 2 to a web address, page 3 has a
+  // note whose /P is page 3, page 5 links to page 6 through the named destination "sec6" and page 7
+  // to page 8 through a /GoTo action. A plain page copy follows every reference of a page: page 1
+  // saved alone carried a hidden copy of page 10 with its picture, and in a merged file the links
+  // led to such hidden copies instead of the pages in the file.
+  const PICTURE = 36321;
+  const holds = (buf, n) => buf.length > n * PICTURE && buf.length < (n + 0.5) * PICTURE;
+  const tenLinks = at => ['Link ->' + (at + 9), 'Link https://example.com/split', 'Text "Note on page 3"', '', 'Link ->' + (at + 5), '', 'Link ->' + (at + 7), '', '', ''];
+  await page.click('#mpdf-clear');
+  await page.setInputFiles('#mpdf-file', [fx('ten.pdf'), fx('alpha.pdf'), fx('ten.pdf')]);
+  await page.waitForFunction(() => document.querySelectorAll('.mpdf-page').length === 23 && !/Reading/.test(document.getElementById('mpdf-files').textContent));
+  out = await save('#mpdf-merge');
+  pdf = await inspect(out.buf);
+  assert.deepEqual(pdf.pages.map(p => p.anns), [...tenLinks(1), ...[1, 2, 3].map(n => 'Link https://example.com/Alpha-' + n), ...tenLinks(14)], 'each copy of ten.pdf links to its own pages');
+  assert.deepEqual(await objects(out.buf), { pages: 23, pageObjects: 23, pictures: 20 });
+  // Page 1 alone: its link to page 10, which is not in the file, is removed, and page 10 stays out.
+  await page.check('.mpdf-page:nth-child(1) .mpdf-check');
+  out = await save('#mpdf-extract');
+  assert.deepEqual((await inspect(out.buf)).pages.map(p => p.anns), ['']);
+  assert.deepEqual(await objects(out.buf), { pages: 1, pageObjects: 1, pictures: 1 });
+  assert.ok(holds(out.buf, 1), `page 1 alone holds one picture (${out.buf.length} bytes)`);
+  // Page 10 removed: the merge leaves it out, link and picture.
+  await page.click('#mpdf-selnone');
+  await page.click('.mpdf-file:nth-child(3) .mpdf-fdel');
+  await page.click('.mpdf-file:nth-child(2) .mpdf-fdel');
+  await page.click('.mpdf-page:nth-child(10) .mpdf-del');
+  out = await save('#mpdf-merge');
+  assert.deepEqual((await inspect(out.buf)).pages.map(p => p.anns), ['', ...tenLinks(1).slice(1, 9)]);
+  assert.deepEqual(await objects(out.buf), { pages: 9, pageObjects: 9, pictures: 9 });
+  assert.ok(holds(out.buf, 9), `9 pages hold 9 pictures (${out.buf.length} bytes)`);
+  await page.selectOption('#mpdf-split-mode', 'each');
+  entries = unzip((await save('#mpdf-split')).buf);
+  assert.equal(entries.length, 9);
+  entries.forEach((e, i) => assert.ok(holds(e.data, 1), `page ${i + 1} alone holds one picture (${e.data.length} bytes)`));
+  // Named destinations and /GoTo actions lead to the right page inside each part.
+  await page.selectOption('#mpdf-split-mode', 'every');
+  await page.fill('#mpdf-every', '2');
+  entries = unzip((await save('#mpdf-split')).buf);
+  assert.deepEqual((await inspect(entries[2].data)).pages.map(p => p.anns), ['Link ->2', ''], 'pages 5-6');
+  assert.deepEqual((await inspect(entries[3].data)).pages.map(p => p.anns), ['Link ->2', ''], 'pages 7-8');
+
+  // ---- Pages that share one resource dictionary, and form fields with one parent ----
+  // shared.pdf has 3 pages that share one resource dictionary with all three pictures (43,200 bytes
+  // each; page 3 draws its own through a form that uses the page's resources). Page 1 has the form
+  // field applicant.name and page 2 applicant.ssn, whose value is SHARED-SECRET-2, both kids of the
+  // field "applicant"; page 1 also has a signature whose value refers to the document catalog. A
+  // page's file gets only its own picture, and no field of another page, through either path.
+  const redLevel = async buf => page.evaluate(async b64 => {
+    const lib = await import('/assets/vendor/pdfjs/pdf.min.js');
+    const task = lib.getDocument({ data: Uint8Array.from(atob(b64), c => c.charCodeAt(0)), verbosity: 0 });
+    const pg = await (await task.promise).getPage(1);
+    const vp = pg.getViewport({ scale: 0.5 }), c = document.createElement('canvas');
+    c.width = vp.width;
+    c.height = vp.height;
+    await pg.render({ canvasContext: c.getContext('2d'), canvas: c, viewport: vp }).promise;
+    const d = c.getContext('2d').getImageData(55, 76, 95, 95).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += d[i];
+    await task.destroy();
+    return sum / (d.length / 4);
+  }, buf.toString('base64'));
+  await page.click('#mpdf-clear');
+  await page.setInputFiles('#mpdf-file', fx('shared.pdf'));
+  await page.waitForFunction(() => document.querySelectorAll('.mpdf-page').length === 3);
+  await page.selectOption('#mpdf-split-mode', 'each');
+  entries = unzip((await save('#mpdf-split')).buf);
+  entries.forEach((e, i) => assert.ok(e.data.length > 43200 && e.data.length < 43200 + 6000, `page ${i + 1} holds one picture (${e.data.length} bytes)`));
+  assert.ok(allText(entries[0].data).includes('Alice Example'), 'the field on page 1 is kept');
+  assert.ok(!allText(entries[0].data).includes('SHARED-SECRET-2'), 'the field on page 2 is not in the file of page 1');
+  const level = await redLevel(entries[2].data);
+  assert.ok(level > 90 && level < 165, `page 3 still draws its picture (mean red ${level.toFixed(1)})`);
+  out = await save('#mpdf-merge');
+  assert.ok(allText(out.buf).includes('SHARED-SECRET-2'), 'the merged file has the field of page 2');
+  assert.deepEqual(await objects(out.buf), { pages: 3, pageObjects: 3, pictures: 3 });
+
+  // ---- Thumbnails of fonts that are not embedded, and of CMYK colours ----
+  // fonts.pdf: a Japanese line set with the predefined CMap UniJIS-UCS2-H, ZapfDingbats below it and a
+  // cyan DeviceCMYK box below that. Without the CMap from this site the Japanese line stayed blank.
+  await page.click('#mpdf-clear');
+  await page.setInputFiles('#mpdf-file', fx('fonts.pdf'));
+  await page.waitForFunction(() => { const i = document.querySelector('.mpdf-thumb img'); return i && i.complete && i.naturalWidth > 0; });
+  for (const f of ['cmaps/UniJIS-UCS2-H.bcmap', 'standard_fonts/FoxitDingbats.pfb', 'iccs/CGATS001Compat-v2-micro.icc']) {
+    assert.ok(fetched.includes('200 ' + f), `PDF.js fetched ${f} from this site: ${fetched.join()}`);
+  }
+  const thumb = await page.$eval('.mpdf-thumb img', img => {
+    const c = document.createElement('canvas'), g = c.getContext('2d');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    g.drawImage(img, 0, 0);
+    // A box given in points of the A4 page (595 x 842, from the bottom left): its share of dark pixels and its colour.
+    const box = (x0, y0, x1, y1) => {
+      const sx = c.width / 595, sy = c.height / 842;
+      const d = g.getImageData(Math.round(x0 * sx), Math.round((842 - y1) * sy), Math.round((x1 - x0) * sx), Math.round((y1 - y0) * sy)).data;
+      const n = d.length / 4, rgb = [0, 0, 0];
+      let dark = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] + d[i + 1] + d[i + 2] < 384) dark++;
+        for (let k = 0; k < 3; k++) rgb[k] += d[i + k] / n;
+      }
+      return { dark: dark / n, rgb: rgb.map(Math.round) };
+    };
+    return { japanese: box(60, 695, 380, 740), cyan: box(80, 320, 240, 430) };
+  });
+  assert.ok(thumb.japanese.dark > 0.05, `the Japanese line is drawn (${thumb.japanese.dark.toFixed(3)} of its box is dark)`);
+  assert.ok(thumb.cyan.rgb[0] < 40 && thumb.cyan.rgb[1] > 120 && thumb.cyan.rgb[2] > 200, `the CMYK box is cyan (${thumb.cyan.rgb})`);
 };

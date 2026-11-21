@@ -195,6 +195,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     return { name: dl.suggestedFilename(), buf, pdf: parsePdf(buf, assert) };
   };
 
+  // The guide links the tools for what comes after: merging, splitting, and pages back to images.
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/merge-pdf/', '/split-pdf/', '/pdf-to-jpg/']);
   assert.equal(await page.isDisabled('#itp-make'), true, 'nothing to convert yet');
   assert.equal(await page.locator('#itp-list .itp-item').count(), 0);
 

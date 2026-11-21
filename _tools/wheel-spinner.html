@@ -1,0 +1,1118 @@
+---
+title: "Wheel Spinner: Spin the Wheel to Pick a Name"
+description: Spin a wheel to pick a random name, number or yes or no. Paste a list, add weights, remove winners and share the wheel as a link. Runs in your browser.
+category: Generators
+keywords: [wheel spinner, spin the wheel, random name picker, random wheel, name picker wheel, yes or no wheel, number wheel 1 to 10, weighted wheel spinner, prize wheel spinner]
+howto: |
+  ## How to use the wheel spinner
+
+  Type or paste your entries in the box, one per line: names, numbers,
+  prizes or tasks. Blank lines are skipped, and an entry written twice gets
+  two slices. Press **Spin** or click the wheel. When it stops, a pop-up
+  shows the winner, and **Remove from wheel** takes that line out of the list
+  before the next spin. Results are listed under the wheel, and **Copy
+  results** copies them all.
+
+  **Quick lists** load yes or no, yes, no or maybe, or the numbers 1 to 10.
+  **Shuffle** and **Sort A–Z** reorder the box, and **Undo** brings back the
+  list as it was before the last change made with a button. You can also
+  open or drop a plain text file with one entry per line.
+
+  ## Is the wheel random, and can it be rigged?
+
+  The winner is drawn the moment you press Spin, before the wheel moves, by
+  your browser's cryptographically secure generator
+  (`crypto.getRandomValues`). The animation then turns the wheel to that
+  slice; the spin time, the colours and the moment you click change nothing.
+  Each slice's size is its exact chance, so with 8 equal entries each has
+  1 in 8 (12.5%).
+
+  The usual shortcut, a random 32-bit number modulo the number of entries,
+  slightly favours the first entries whenever 2³² is not a multiple of that
+  number. This page takes only as many random bits as it needs and draws
+  again when the value is too large, so no entry is favoured.
+
+  ## Weights
+
+  Tick **Use weights** and end a line with `*` and a number to change its
+  chance. A tab before the number works too, so you can paste two columns
+  from a spreadsheet. A line without a weight counts as 1.
+
+  | Line | Weight | Chance |
+  |---|---|---|
+  | `Pizza *3` | 3 | 1 in 2 (50%) |
+  | `Sushi *2` | 2 | 1 in 3 (33.33%) |
+  | `Tacos` | 1 | 1 in 6 (16.67%) |
+
+  A weight is a whole number or a decimal with up to two places, from 0.01
+  to 1000. `*1.5` and `*1,5` both mean one and a half. Thousands separators
+  are not accepted, so write `*1000`, not `*1,000`.
+
+  ## Picking without repeats
+
+  To pick everyone once in a random order, remove each winner after its
+  spin. With equal weights every order is then equally likely, as when names
+  are drawn from a hat. Without removing, a wheel of 30 names needs about 120
+  spins on average before every name has come up.
+
+  ## Saving and sharing
+
+  The page saves nothing in cookies or browser storage. The list and the
+  settings live in the page address after the `#`, which browsers never send
+  to a server, so a bookmark or the link from **Copy link** opens the same
+  wheel. The address
+  holds up to 16,000 characters, which is 1,600 names of seven letters;
+  accented letters and other scripts take more room. A longer list still
+  spins, and the page tells you that the link cannot hold it. To show the
+  link to a room, make a code with the [QR code generator](/qr-code-generator/).
+
+  ## Limits and options
+
+  - Up to 10,000 entries and 300,000 characters. Names on slices too thin
+    to label are not written on the wheel but win like any other.
+  - Spin time from 1 to 30 seconds. The tick and win sounds are made by your
+    browser, not downloaded.
+  - **Full screen** shows only the wheel, its Spin button and the result.
+    Safari on iPhone does not let pages go full screen, so there the wheel
+    fills the browser window instead.
+  - If your device is set to reduce motion, the wheel stops at once unless
+    you tick **Animate the spin**.
+
+  For a number from any range, use the
+  [random number generator](/random-number-generator/); to give each turn a
+  time limit, the [online timer](/online-timer/).
+faq:
+  - q: Why did the same name come up twice in a row?
+    a: Every spin is a new draw and the wheel has no memory, so with 8 entries the last winner wins again 1 time in 8. Streaks like that are normal in a fair draw. If a name should not win twice, press Remove from wheel after it is picked.
+  - q: Does a longer spin or clicking at the right moment change the result?
+    a: No. The winner is drawn as soon as you press Spin, and the animation only shows the wheel turning to it. The spin time, the colours, the sound and earlier spins make no difference.
+  - q: How do I show the wheel on a projector or interactive whiteboard?
+    a: Press Full screen to hide everything except the wheel, the Spin button and the result, and press Esc or Exit full screen to come back. On a touch screen, tap the wheel to spin it.
+  - q: Does the wheel work without an internet connection?
+    a: Once the page has loaded, yes. The wheel, the sounds and the draw need no connection. Opening or reloading the page needs one, because the site keeps no offline copy.
+  - q: Are the names I enter uploaded or saved anywhere?
+    a: "No. The wheel and the draw run in your browser, and nothing is sent to a server or written to storage. The list is kept only in the page address after the #, so it is in your browser history like any address you visit, and anyone you send the link to sees the names."
+---
+<style>
+.ws-layout { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 9fr); gap: 28px; align-items: start; }
+@media (max-width: 820px) { .ws-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+.ws-stage { text-align: center; }
+.ws-wheel-box { position: relative; width: 100%; max-width: 520px; margin: 0 auto; aspect-ratio: 1 / 1; }
+.ws-wheel { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.ws-wheel[data-state="spinning"] { cursor: progress; }
+.ws-stage-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 16px 0 8px; }
+.ws-spin { min-width: 9em; min-height: 52px; font-size: 1.15rem; }
+.ws-spin[aria-disabled="true"] { opacity: 0.6; cursor: progress; }
+.ws-result { margin: 6px 0 0; min-height: 1.6em; font-size: 1.1rem; font-weight: 600; overflow-wrap: anywhere; }
+.ws-stage .msg { margin: 8px 0 0; text-align: left; }
+.ws-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.ws-head > label { font-size: 14px; font-weight: 600; }
+.ws textarea { min-height: 220px; }
+.ws textarea.is-over { outline: 2px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
+.ws .actions { margin-bottom: 12px; }
+.ws-quick-field { margin-bottom: 8px; }
+.ws-quick { margin-bottom: 0; }
+.ws-weights-hint { margin: 0 0 16px; }
+.ws code { padding: 1px 5px; border-radius: 4px; background: var(--surface-2); font-family: var(--mono); font-size: 0.9em; }
+.ws-opts { margin-bottom: 8px; }
+.ws-range { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.ws-range output { flex: 0 0 auto; min-width: 3.2em; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.ws-motion-hint { margin: -8px 0 16px; }
+.ws-link-hint { margin: -4px 0 12px; }
+.ws-h { margin: 28px 0 10px; font-size: 1.15rem; }
+.ws-hist-list { margin: 0 0 12px; padding-left: 2.6em; max-height: 260px; overflow-y: auto; overflow-wrap: anywhere; }
+.ws-hist-list li { padding: 2px 0; }
+.ws-hist-note { margin: -4px 0 8px; }
+.ws-hist-list:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Full screen: the real one where the browser allows it, otherwise the stage fills the window. */
+.ws-stage.is-full { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; overflow: auto; background: var(--bg); }
+.ws-stage.is-full .ws-wheel-box { width: min(100%, calc(100vh - 170px)); width: min(100%, calc(100dvh - 170px)); max-width: none; flex: 0 0 auto; }
+.ws-stage.is-full .ws-result { font-size: 1.4rem; }
+html.ws-lock, html.ws-lock body { overflow: hidden; }
+.ws-dialog { width: min(460px, calc(100% - 32px)); max-width: calc(100% - 32px); padding: 24px 20px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 12px 40px rgb(0 0 0 / 0.3); text-align: center; }
+.ws-dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+.ws-dlg-title { margin: 0 0 8px; font-size: 1rem; font-weight: 400; }
+.ws-dlg-kicker { display: block; color: var(--muted); font-size: 14px; font-weight: 600; }
+.ws-dlg-name { display: block; max-height: 40vh; margin-top: 4px; overflow: auto; color: var(--text); font-size: clamp(1.6rem, 6vw, 2.4rem); font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.ws-dlg-chance { margin: 0 0 18px; }
+.ws-dlg-actions { justify-content: center; margin: 0 !important; }
+.ws-confetti { position: fixed; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; }
+@media (max-width: 480px) {
+  .ws-dlg-actions .btn { flex: 1 1 100%; }
+}
+</style>
+
+<div class="ws">
+  <div class="ws-layout">
+    <div class="ws-main">
+      <div class="ws-stage" id="ws-stage">
+        <div class="ws-wheel-box">
+          <canvas class="ws-wheel" id="ws-wheel" role="img" aria-label="Wheel" data-state="idle" data-spins="0"></canvas>
+        </div>
+        <div class="ws-stage-bar">
+          <button class="btn ws-spin" type="button" id="ws-spin" aria-describedby="ws-spin-msg">Spin</button>
+          <button class="btn secondary" type="button" id="ws-full">Full screen</button>
+        </div>
+        <p class="msg error" id="ws-spin-msg" aria-live="polite"></p>
+        <p class="ws-result" id="ws-result" role="status">Press Spin or click the wheel.</p>
+      </div>
+      <div class="ws-hist" id="ws-hist" hidden>
+        <h2 class="ws-h" id="ws-hist-h">Results</h2>
+        <p class="hint ws-hist-note" id="ws-hist-note" hidden></p>
+        <ol class="ws-hist-list" id="ws-hist-list" aria-labelledby="ws-hist-h"></ol>
+        <div class="actions">
+          <button class="btn secondary small" type="button" id="ws-hist-copy">Copy results</button>
+          <button class="btn secondary small" type="button" id="ws-hist-clear">Clear results</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ws-side">
+      <div class="field">
+        <div class="ws-head">
+          <label for="ws-entries">Entries, one per line</label>
+          <button class="btn secondary small" type="button" id="ws-open" aria-describedby="ws-file-msg">Open list…</button>
+          <input type="file" id="ws-file" hidden accept=".txt,.csv,.tsv,.text,text/plain,text/csv,text/tab-separated-values">
+        </div>
+        <textarea id="ws-entries" rows="9" spellcheck="false" autocomplete="off" aria-describedby="ws-count ws-entries-msg">Amara
+Ben
+Chloé
+Diego
+Hana
+Kofi
+Lena
+Omar</textarea>
+        <span class="hint" id="ws-count">8 entries</span>
+      </div>
+      <p class="msg error" id="ws-entries-msg" aria-live="polite"></p>
+      <p class="msg error" id="ws-file-msg" role="alert"></p>
+      <div class="actions">
+        <button class="btn secondary small" type="button" id="ws-shuffle">Shuffle</button>
+        <button class="btn secondary small" type="button" id="ws-sort">Sort A–Z</button>
+        <button class="btn secondary small" type="button" id="ws-undo" disabled>Undo</button>
+        <button class="btn secondary small" type="button" id="ws-clear">Clear</button>
+      </div>
+      <div class="field ws-quick-field">
+        <span class="label" id="ws-quick-label">Quick lists</span>
+        <div class="actions ws-quick" role="group" aria-labelledby="ws-quick-label">
+          <button class="btn secondary small" type="button" data-preset="names">Names</button>
+          <button class="btn secondary small" type="button" data-preset="yesno">Yes / No</button>
+          <button class="btn secondary small" type="button" data-preset="maybe">Yes / No / Maybe</button>
+          <button class="btn secondary small" type="button" data-preset="ten">1 to 10</button>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="ws-weights" aria-describedby="ws-weights-hint"> Use weights</label>
+      <p class="hint ws-weights-hint" id="ws-weights-hint">End a line with <code>*3</code>, or a tab and 3, to give it three times the chance.</p>
+      <div class="row ws-opts">
+        <div class="field">
+          <label for="ws-time">Spin time</label>
+          <div class="ws-range">
+            <input type="range" id="ws-time" min="1" max="30" step="1" value="5" aria-valuetext="5 seconds">
+            <output id="ws-time-out" for="ws-time">5 s</output>
+          </div>
+        </div>
+        <div class="field">
+          <label for="ws-theme">Colours</label>
+          <select id="ws-theme">
+            <option value="bright" selected>Bright</option>
+            <option value="pastel">Pastel</option>
+            <option value="ocean">Ocean</option>
+            <option value="forest">Forest</option>
+            <option value="mono">Black and white</option>
+          </select>
+        </div>
+      </div>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="ws-sound" checked> Sound</label>
+        <label class="check"><input type="checkbox" id="ws-confetti-on" checked> Confetti</label>
+        <label class="check"><input type="checkbox" id="ws-animate" checked> Animate the spin</label>
+      </div>
+      <p class="hint ws-motion-hint" id="ws-motion-hint" hidden>Your device is set to reduce motion, so the wheel stops at once. Tick Animate the spin to watch it turn.</p>
+      <div class="actions">
+        <button class="btn secondary" type="button" id="ws-copy-link" aria-describedby="ws-link-hint ws-link-msg">Copy link</button>
+      </div>
+      <p class="hint ws-link-hint" id="ws-link-hint">The page address keeps this wheel, so a bookmark or the link brings it back.</p>
+      <p class="msg error" id="ws-link-msg" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <dialog class="ws-dialog" id="ws-dialog" aria-labelledby="ws-dlg-title" aria-describedby="ws-dlg-chance">
+    <canvas class="ws-confetti" id="ws-confetti" aria-hidden="true"></canvas>
+    <h2 class="ws-dlg-title" id="ws-dlg-title"><span class="ws-dlg-kicker">The wheel picked</span> <span class="ws-dlg-name" id="ws-dlg-name"></span></h2>
+    <p class="hint ws-dlg-chance" id="ws-dlg-chance"></p>
+    <div class="actions ws-dlg-actions">
+      <button class="btn" type="button" id="ws-dlg-again">Spin again</button>
+      <button class="btn secondary" type="button" id="ws-dlg-remove">Remove from wheel</button>
+      <button class="btn secondary" type="button" id="ws-dlg-close">Close</button>
+    </div>
+  </dialog>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = TT.$;
+  var TAU = Math.PI * 2;
+  var MAX_CHARS = 300000;     // longest list the box is read from
+  var MAX_ENTRIES = 10000;
+  var MAX_HASH = 16000;       // longest page address state, for writing and reading alike
+  var MAX_UNITS = 100000;     // weight 1000 in hundredths
+  var SHOW = 300;             // characters of an entry shown in results (the box keeps all)
+  var KEEP = 200;             // results listed on the page; Copy results copies every one
+  var DEFAULT_TEXT = 'Amara\nBen\nChloé\nDiego\nHana\nKofi\nLena\nOmar';
+  var DEFAULTS = { theme: 'bright', time: 5 };
+  var PRESETS = {
+    names: DEFAULT_TEXT,
+    yesno: 'Yes\nNo',
+    maybe: 'Yes\nNo\nMaybe',
+    ten: '1\n2\n3\n4\n5\n6\n7\n8\n9\n10'
+  };
+  var THEMES = {
+    bright: ['#e63946', '#f4a261', '#e9c46a', '#2a9d8f', '#277da1', '#7b2cbf', '#43aa8b', '#f15bb5'],
+    pastel: ['#ffadad', '#ffd6a5', '#fdffb6', '#caffbf', '#9bf6ff', '#a0c4ff', '#bdb2ff', '#ffc6ff'],
+    ocean: ['#03045e', '#00b4d8', '#0077b6', '#90e0ef', '#023e8a', '#48cae4', '#0096c7', '#caf0f8'],
+    forest: ['#1b4332', '#95d5b2', '#2d6a4f', '#d8f3dc', '#40916c', '#b7e4c7', '#081c15', '#74c69d'],
+    mono: ['#111111', '#f2f2f2', '#555555', '#c8c8c8']
+  };
+
+  var ta = $('#ws-entries'), canvas = $('#ws-wheel'), ctx = canvas.getContext('2d');
+  var spinBtn = $('#ws-spin'), fullBtn = $('#ws-full'), stage = $('#ws-stage');
+  var countEl = $('#ws-count'), entriesMsg = $('#ws-entries-msg'), fileMsg = $('#ws-file-msg'), spinMsg = $('#ws-spin-msg');
+  var resultEl = $('#ws-result'), linkMsg = $('#ws-link-msg');
+  var weightsBox = $('#ws-weights'), timeIn = $('#ws-time'), timeOut = $('#ws-time-out'), themeSel = $('#ws-theme');
+  var soundBox = $('#ws-sound'), confettiBox = $('#ws-confetti-on'), animateBox = $('#ws-animate');
+  var undoBtn = $('#ws-undo'), fileIn = $('#ws-file');
+  var dialog = $('#ws-dialog'), dlgName = $('#ws-dlg-name'), dlgChance = $('#ws-dlg-chance');
+  var histBox = $('#ws-hist'), histList = $('#ws-hist-list');
+  var lockable = TT.$$('#ws-shuffle, #ws-sort, #ws-clear, #ws-open, .ws-quick button, #ws-weights');
+  var motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var darkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+  function fmt(n) { return n.toLocaleString('en-GB'); }
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+
+  // ---------- Randomness: crypto.getRandomValues only, fresh for every draw ----------
+  function words(n) {
+    var a = new Uint32Array(n);
+    crypto.getRandomValues(a);
+    return a;
+  }
+  // A whole number from 0 to n - 1, each equally likely. It keeps just enough of the top bits
+  // of a random 32-bit word to cover n and draws again when the value is n or more, so no
+  // value is favoured the way the remainder of a division favours the low ones.
+  function below(n) {
+    if (n <= 1) return 0;
+    var shift = Math.clz32(n - 1);
+    for (;;) {
+      var w = words(4);
+      for (var i = 0; i < 4; i++) {
+        var v = w[i] >>> shift;
+        if (v < n) return v;
+      }
+    }
+  }
+  function unit() { return words(1)[0] / 4294967296; }
+
+  // ---------- Reading the list ----------
+  var seg = window.Intl && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  // The first max + 1 user-perceived characters of s, never splitting an emoji or an accent.
+  function graphemes(s, max) {
+    var out = [];
+    if (s.length <= max) return seg ? Array.from(seg.segment(s), function (g) { return g.segment; }) : Array.from(s);
+    var it = seg ? seg.segment(s)[Symbol.iterator]() : s[Symbol.iterator]();
+    for (var r = it.next(); !r.done; r = it.next()) {
+      out.push(seg ? r.value.segment : r.value);
+      if (out.length > max) break;
+    }
+    return out;
+  }
+  function clip(s, max) {
+    if (s.length <= max) return s;
+    var g = graphemes(s, max);
+    return g.length > max ? g.slice(0, max).join('') + '…' : s;
+  }
+
+  var RE_WEIGHT = /^(\d{1,4})(?:[.,](\d{1,2}))?$/;
+  // Splits a weight off the end of a line: "Pizza *3", "Pizza * 1,5" or "Pizza<tab>2".
+  // Only a tail that starts with a digit is a weight; "M*A*S*H" stays one name.
+  function splitWeight(raw) {
+    var k = Math.max(raw.lastIndexOf('*'), raw.lastIndexOf('\t'));
+    if (k < 0) return null;
+    var tail = raw.slice(k + 1).trim();
+    if (!/^(?:[0-9]|[.,][0-9])/.test(tail)) return null;
+    return { name: raw.slice(0, k).trim(), tail: tail };
+  }
+  function gcd(a, b) { while (b) { var t = a % b; a = b; b = t; } return a; }
+
+  function parse(text, useWeights) {
+    var r = { entries: [], total: 0, cum: [], error: null, count: 0, weighty: 0, hundredths: 0 };
+    if (text.length > MAX_CHARS) {
+      r.error = 'The list is ' + fmt(text.length) + ' characters long. The wheel reads up to ' + fmt(MAX_CHARS) + ', so shorten it to spin.';
+      r.long = true;
+      return r;
+    }
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i];
+      if (raw.charCodeAt(raw.length - 1) === 13) raw = raw.slice(0, -1);
+      var name = raw.trim();
+      if (!name) continue;
+      r.count++;
+      if (r.count > MAX_ENTRIES) continue;
+      var units = 100, w = splitWeight(raw);
+      if (w && !useWeights) r.weighty++;
+      if (w && useWeights) {
+        var m = w.tail.length <= 7 ? RE_WEIGHT.exec(w.tail) : null;
+        var lineNo = 'Line ' + fmt(i + 1);
+        var err = null;
+        if (!w.name) err = lineNo + ' has a weight but no name before it.';
+        else if (!m) err = lineNo + ': “' + clip(w.tail, 20) + '” is not a weight the wheel can use. Write a number from 0.01 to 1000 with at most two decimal places and no thousands separators, such as *3, *0.5 or *2,5.';
+        else {
+          units = Number(m[1]) * 100 + Number(((m[2] || '') + '00').slice(0, 2));
+          if (units === 0) err = lineNo + ': a weight of 0 means “' + clip(w.name, 40) + '” could never win. Delete the line or give it a weight above 0.';
+          else if (units > MAX_UNITS) err = lineNo + ': weights go up to 1000.';
+        }
+        if (err) { if (!r.error) r.error = err; continue; }
+        name = w.name;
+      }
+      r.entries.push({ name: name.replace(/\s+/g, ' '), units: units, line: i, raw: raw });
+    }
+    if (r.count > MAX_ENTRIES && !r.error) {
+      r.error = 'The list has ' + fmt(r.count) + ' entries. The wheel holds up to ' + fmt(MAX_ENTRIES) + ', so remove some lines to spin.';
+    }
+    if (r.count > MAX_ENTRIES) r.entries = [];
+    // Weights in lowest terms: equal entries are 1 each, 1.5 and 1 become 3 and 2.
+    var g = 0, j;
+    for (j = 0; j < r.entries.length; j++) g = gcd(g, r.entries[j].units);
+    for (j = 0; j < r.entries.length; j++) {
+      r.hundredths += r.entries[j].units;
+      r.entries[j].w = r.entries[j].units / g;
+      r.total += r.entries[j].w;
+      r.cum.push(r.total);
+    }
+    return r;
+  }
+
+  // ---------- State ----------
+  var list = parse('', false), parsedText = null, parsedWeights = null;
+  var theta = 0;                 // rotation of the wheel, clockwise, in radians
+  var spin = null, spinCount = 0, results = [], undoStack = [];
+  var lastSpin = null, lastIndex = -1, lastTick = 0, motionTouched = false;
+
+  // The entry under the pointer (3 o'clock) when the wheel is turned by angle a.
+  function indexAt(a) {
+    var local = ((-a % TAU) + TAU) % TAU;
+    var u = local / TAU * list.total, lo = 0, hi = list.cum.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (list.cum[mid] > u) hi = mid; else lo = mid + 1;
+    }
+    return lo;
+  }
+
+  // ---------- Drawing ----------
+  var img = document.createElement('canvas'), imgCtx = img.getContext('2d');
+  var size = 0, dpr = 1;
+  var FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#000'; }
+  function lum(hex) {
+    var n = parseInt(hex.slice(1), 16);
+    var c = [n >> 16 & 255, n >> 8 & 255, n & 255].map(function (v) {
+      v /= 255;
+      return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  // Black or white text, whichever has more contrast (never under 4.58:1).
+  function textOn(hex) { var l = lum(hex); return (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? '#000000' : '#ffffff'; }
+  function colourOf(i, n, pal) {
+    var k = i % pal.length;
+    // The last slice touches the first: give it another colour when they would match.
+    if (n > 1 && i === n - 1 && k === 0) k = 1;
+    return pal[k];
+  }
+
+  function measure() {
+    var r = canvas.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 3);
+    var px = Math.max(1, Math.round(r.width * dpr));
+    if (canvas.width !== px || canvas.height !== px) { canvas.width = px; canvas.height = px; }
+    size = px;
+  }
+
+  // The largest label that fits: the whole name, then a smaller font, then a shortened name.
+  function fitLabel(c2, name, fs, maxW) {
+    var text = clip(name, 40);
+    c2.font = '600 ' + fs + 'px ' + FONT;
+    var w = c2.measureText(text).width;
+    if (w <= maxW) return { text: text, fs: fs };
+    var min = Math.max(9 * dpr, fs * 0.7);
+    var f2 = Math.max(min, Math.floor(fs * maxW / w));
+    c2.font = '600 ' + f2 + 'px ' + FONT;
+    if (c2.measureText(text).width <= maxW) return { text: text, fs: f2 };
+    var g = graphemes(name, 40), lo = 1, hi = Math.min(40, g.length), best = 0;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (c2.measureText(g.slice(0, mid).join('') + '…').width <= maxW) { best = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return { text: best ? g.slice(0, best).join('') + '…' : '', fs: f2 };
+  }
+
+  // Paints the wheel once into an offscreen canvas; each frame only turns that picture.
+  function renderWheel() {
+    measure();
+    if (img.width !== size) { img.width = size; img.height = size; }
+    var c2 = imgCtx, c = size / 2, R = c * 0.9, n = list.entries.length;
+    var pal = THEMES[themeSel.value] || THEMES.bright, edge = cssVar('--text');
+    c2.setTransform(1, 0, 0, 1, 0, 0);
+    c2.clearRect(0, 0, size, size);
+    if (!n) {
+      c2.beginPath();
+      c2.arc(c, c, R, 0, TAU);
+      c2.fillStyle = cssVar('--surface-2');
+      c2.fill();
+      c2.lineWidth = Math.max(2, R * 0.015);
+      c2.strokeStyle = cssVar('--field-border');
+      c2.stroke();
+      c2.fillStyle = cssVar('--muted');
+      c2.font = '600 ' + Math.round(R * 0.09) + 'px ' + FONT;
+      c2.textAlign = 'center';
+      c2.textBaseline = 'middle';
+      c2.fillText(list.count || list.long ? 'Fix the list to spin' : 'Add entries to spin', c, c);
+      return;
+    }
+    var a0 = 0, i, e;
+    for (i = 0; i < n; i++) {
+      e = list.entries[i];
+      var a1 = TAU * list.cum[i] / list.total;
+      c2.beginPath();
+      c2.moveTo(c, c);
+      c2.arc(c, c, R, a0, a1);
+      c2.closePath();
+      c2.fillStyle = colourOf(i, n, pal);
+      c2.fill();
+      e.a0 = a0; e.a1 = a1;
+      a0 = a1;
+    }
+    if (n > 1 && n <= 400) {
+      c2.strokeStyle = 'rgba(0, 0, 0, 0.28)';
+      c2.lineWidth = Math.max(1, dpr);
+      for (i = 0; i < n; i++) {
+        if (list.entries[i].a1 - list.entries[i].a0 < 0.004) continue;
+        c2.beginPath();
+        c2.moveTo(c, c);
+        c2.lineTo(c + R * Math.cos(list.entries[i].a0), c + R * Math.sin(list.entries[i].a0));
+        c2.stroke();
+      }
+    }
+    // Labels run from the rim towards the centre, so the winner reads left to right at the pointer.
+    c2.textAlign = 'right';
+    c2.textBaseline = 'middle';
+    for (i = 0; i < n; i++) {
+      e = list.entries[i];
+      var span = e.a1 - e.a0;
+      var fs = Math.floor(Math.min(R * 0.11, span * R * 0.42));
+      if (fs < 9 * dpr) continue;
+      var fit = fitLabel(c2, e.name, fs, R * 0.64);
+      if (!fit.text) continue;
+      c2.save();
+      c2.translate(c, c);
+      c2.rotate((e.a0 + e.a1) / 2);
+      c2.font = '600 ' + fit.fs + 'px ' + FONT;
+      c2.fillStyle = textOn(colourOf(i, n, pal));
+      c2.fillText(fit.text, R * 0.86, 0);
+      c2.restore();
+    }
+    c2.beginPath();
+    c2.arc(c, c, R, 0, TAU);
+    c2.lineWidth = Math.max(2, R * 0.02);
+    c2.strokeStyle = edge;
+    c2.stroke();
+    c2.beginPath();
+    c2.arc(c, c, R * 0.1, 0, TAU);
+    c2.fillStyle = cssVar('--surface');
+    c2.fill();
+    c2.lineWidth = Math.max(2, R * 0.015);
+    c2.stroke();
+  }
+
+  function drawFrame() {
+    var c = size / 2, R = c * 0.9;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.translate(c, c);
+    ctx.rotate(theta);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, -c, -c);
+    ctx.restore();
+    // The pointer stays still at 3 o'clock, dark with a light edge so it shows on any colour.
+    var tip = c + R * 0.9, base = c + R + (c - R) * 0.85, half = R * 0.085;
+    ctx.beginPath();
+    ctx.moveTo(base, c - half);
+    ctx.lineTo(tip, c);
+    ctx.lineTo(base, c + half);
+    ctx.closePath();
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(2, 2 * dpr);
+    ctx.strokeStyle = cssVar('--surface');
+    ctx.stroke();
+    ctx.fillStyle = cssVar('--text');
+    ctx.fill();
+  }
+
+  function redraw() { renderWheel(); drawFrame(); }
+
+  function describe() {
+    var n = list.entries.length;
+    if (!n) return list.count || list.long ? 'Empty wheel. Fix the list to spin it.' : 'Empty wheel. Add entries to the list to spin it.';
+    var names = list.entries.slice(0, 12).map(function (e) { return clip(e.name, 40); }).join(', ');
+    return 'Wheel with ' + fmt(n) + (n === 1 ? ' entry: ' : ' entries: ') + names + (n > 12 ? ' and ' + fmt(n - 12) + ' more.' : '.');
+  }
+
+  // A weight kept in hundredths, written back as typed: 300 is 3, 150 is 1.5, 1 is 0.01.
+  function weightText(h) {
+    var f = h % 100;
+    return fmt(Math.floor(h / 100)) + (f ? '.' + String(f).padStart(2, '0').replace(/0$/, '') : '');
+  }
+
+  // ---------- The list box ----------
+  function showState() {
+    var n = list.entries.length;
+    var t = list.long ? '' : !list.count ? 'No entries yet' : fmt(list.count) + (list.count === 1 ? ' entry' : ' entries');
+    if (t && weightsBox.checked && n && !list.error) t += ', total weight ' + weightText(list.hundredths);
+    if (t && !weightsBox.checked && list.weighty) {
+      t += list.weighty === 1 ? '. 1 line ends in what looks like a weight; tick Use weights to use it.'
+        : '. ' + fmt(list.weighty) + ' lines end in what look like weights; tick Use weights to use them.';
+    }
+    setText(countEl, t);
+    setText(entriesMsg, list.error || '');
+    if (list.error) ta.setAttribute('aria-invalid', 'true'); else ta.removeAttribute('aria-invalid');
+    canvas.setAttribute('aria-label', describe());
+    if (!list.error && n) setText(spinMsg, '');
+  }
+
+  var pending = 0;
+  function update(now) {
+    var text = ta.value;
+    if (text === parsedText && weightsBox.checked === parsedWeights) return;
+    if (!now && text.length > 20000) {
+      clearTimeout(pending);
+      pending = setTimeout(function () { update(true); }, 200);
+      return;
+    }
+    clearTimeout(pending);
+    list = parse(text, weightsBox.checked);
+    parsedText = text;
+    parsedWeights = weightsBox.checked;
+    redraw();
+    showState();
+    scheduleHash();
+  }
+
+  var UNDO_LABEL = { shuffle: 'Undo shuffle', sort: 'Undo sort', clear: 'Undo clear', quick: 'Undo quick list', remove: 'Undo remove', open: 'Undo open', link: 'Undo link' };
+  function showUndo() {
+    var top = undoStack[undoStack.length - 1];
+    undoBtn.disabled = !top || !!spin;
+    setText(undoBtn, top ? UNDO_LABEL[top.kind] : 'Undo');
+  }
+  // Every change made by a button can be undone, so no list is lost to a misclick.
+  function replaceList(text, kind) {
+    if (text === ta.value) return;
+    undoStack.push({ text: ta.value, kind: kind });
+    if (undoStack.length > 30) undoStack.shift();
+    ta.value = text;
+    update(true);
+    showUndo();
+  }
+
+  function cleanLines() {
+    return ta.value.split('\n').map(function (l) { return l.replace(/\r$/, ''); }).filter(function (l) { return l.trim(); });
+  }
+  $('#ws-shuffle').addEventListener('click', function () {
+    var lines = cleanLines();
+    for (var i = lines.length - 1; i > 0; i--) {
+      var j = below(i + 1), t = lines[i];
+      lines[i] = lines[j];
+      lines[j] = t;
+    }
+    replaceList(lines.join('\n'), 'shuffle');
+  });
+  $('#ws-sort').addEventListener('click', function () {
+    var coll = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    var keyed = cleanLines().map(function (l) {
+      var w = weightsBox.checked ? splitWeight(l) : null;
+      return { line: l, key: (w && w.name ? w.name : l).trim() };
+    });
+    keyed.sort(function (a, b) { return coll.compare(a.key, b.key); });
+    replaceList(keyed.map(function (k) { return k.line; }).join('\n'), 'sort');
+  });
+  $('#ws-clear').addEventListener('click', function () { replaceList('', 'clear'); ta.focus(); });
+  undoBtn.addEventListener('click', function () {
+    var top = undoStack.pop();
+    if (!top) return;
+    ta.value = top.text;
+    update(true);
+    showUndo();
+    if (document.activeElement === undoBtn && undoBtn.disabled) ta.focus();
+  });
+  TT.$$('.ws-quick button').forEach(function (b) {
+    b.addEventListener('click', function () { replaceList(PRESETS[b.getAttribute('data-preset')], 'quick'); });
+  });
+  ta.addEventListener('input', function () { update(false); });
+  weightsBox.addEventListener('change', function () { update(true); scheduleHash(); });
+
+  // ---------- Opening and dropping a text file ----------
+  function decodeText(bytes) {
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+    // TextDecoder drops a UTF-8 byte order mark (Notepad's "UTF-8 with BOM") by itself.
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch (e) {
+      return new TextDecoder('windows-1252').decode(bytes);
+    }
+  }
+  function openFile(file) {
+    if (!file) return;
+    setText(fileMsg, '');
+    if (spin) return;
+    if (file.size > MAX_CHARS * 4) {
+      setText(fileMsg, file.name + ' is larger than 1.2 MB, which is more than the wheel can hold.');
+      return;
+    }
+    file.arrayBuffer().then(function (buf) {
+      var text = decodeText(new Uint8Array(buf));
+      // Text lists have no NUL and almost no other control characters; images, Word files
+      // and other binary files are full of them.
+      var head = text.slice(0, 4000), ctrl = head.match(/[\u0000-\u0008\u000E-\u001F]/g);
+      if (/\u0000/.test(head) || (ctrl && ctrl.length > head.length / 100)) {
+        setText(fileMsg, file.name + ' is not a plain text file. Save the list as .txt, or copy and paste it.');
+        return;
+      }
+      text = text.replace(/\r\n?/g, '\n').replace(/\n$/, '');
+      if (text.length > MAX_CHARS) {
+        setText(fileMsg, file.name + ' has ' + fmt(text.length) + ' characters, more than the ' + fmt(MAX_CHARS) + ' the wheel reads.');
+        return;
+      }
+      replaceList(text, 'open');
+    }, function () {
+      setText(fileMsg, file.name + ' could not be read.');
+    });
+  }
+  $('#ws-open').addEventListener('click', function () { fileIn.click(); });
+  fileIn.addEventListener('change', function () {
+    var f = fileIn.files && fileIn.files[0];
+    fileIn.value = '';
+    openFile(f);
+  });
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+  ta.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    ta.classList.add('is-over');
+  });
+  ta.addEventListener('dragleave', function () { ta.classList.remove('is-over'); });
+  ta.addEventListener('drop', function (e) {
+    ta.classList.remove('is-over');
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    openFile(e.dataTransfer.files[0]);
+  });
+  // A file dropped anywhere else would replace the page and lose the wheel.
+  document.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener('drop', function (e) { if (hasFiles(e)) e.preventDefault(); });
+
+  // ---------- Sound, made by the browser ----------
+  var audio = null;
+  function audioCtx() {
+    if (!audio) {
+      var C = window.AudioContext || window.webkitAudioContext;
+      if (!C) return null;
+      try { audio = new C(); } catch (e) { return null; }
+    }
+    if (audio.state === 'suspended') {
+      var p = audio.resume();
+      if (p && p.catch) p.catch(function () {});
+    }
+    return audio;
+  }
+  function tone(a, freq, start, length, type, peak) {
+    var o = a.createOscillator(), g = a.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(peak, start + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + length);
+    o.connect(g);
+    g.connect(a.destination);
+    o.start(start);
+    o.stop(start + length + 0.02);
+  }
+  function tick() {
+    var a = soundBox.checked && audioCtx();
+    if (a) tone(a, 1500, a.currentTime, 0.03, 'square', 0.05);
+  }
+  function chime() {
+    var a = soundBox.checked && audioCtx();
+    if (!a) return;
+    [523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) { tone(a, f, a.currentTime + i * 0.1, 0.35, 'triangle', 0.18); });
+  }
+
+  // ---------- Confetti ----------
+  var confettiCanvas = $('#ws-confetti'), confettiRaf = 0;
+  function stopConfetti() {
+    cancelAnimationFrame(confettiRaf);
+    confettiRaf = 0;
+    var c = confettiCanvas.getContext('2d');
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+  }
+  function confetti() {
+    stopConfetti();
+    var k = Math.min(window.devicePixelRatio || 1, 2), W = window.innerWidth, H = window.innerHeight;
+    confettiCanvas.width = Math.round(W * k);
+    confettiCanvas.height = Math.round(H * k);
+    var c = confettiCanvas.getContext('2d'), pal = THEMES[themeSel.value] || THEMES.bright;
+    var count = Math.round(Math.min(160, W / 5)), rnd = words(count * 7), parts = [];
+    for (var i = 0; i < count; i++) {
+      var r = function (j) { return rnd[i * 7 + j] / 4294967296; };
+      parts.push({
+        x: W * r(0), y: -20 - H * 0.4 * r(1), vx: (r(2) - 0.5) * 120, vy: 80 + 160 * r(3),
+        rot: TAU * r(4), vr: (r(5) - 0.5) * 12, s: 6 + 6 * r(6), col: pal[i % pal.length]
+      });
+    }
+    var t0 = performance.now(), prev = t0;
+    function frame(now) {
+      var dt = Math.min(0.05, (now - prev) / 1000), age = (now - t0) / 1000;
+      prev = now;
+      c.setTransform(k, 0, 0, k, 0, 0);
+      c.clearRect(0, 0, W, H);
+      c.globalAlpha = age > 2.6 ? Math.max(0, 1 - (age - 2.6) / 0.6) : 1;
+      parts.forEach(function (p) {
+        p.vy += 240 * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.rot += p.vr * dt;
+        c.save();
+        c.translate(p.x, p.y);
+        c.rotate(p.rot);
+        c.fillStyle = p.col;
+        c.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2);
+        c.restore();
+      });
+      if (age < 3.2) confettiRaf = requestAnimationFrame(frame); else stopConfetti();
+    }
+    confettiRaf = requestAnimationFrame(frame);
+  }
+
+  // ---------- Spinning ----------
+  function lock(on) {
+    ta.readOnly = on;
+    lockable.forEach(function (el) { el.disabled = on; });
+    spinBtn.setAttribute('aria-disabled', on ? 'true' : 'false');
+    canvas.setAttribute('data-state', on ? 'spinning' : (spinCount ? 'done' : 'idle'));
+    showUndo();
+  }
+
+  function chance(e) {
+    var g = gcd(e.w, list.total), num = e.w / g, den = list.total / g;
+    var h = Math.floor((e.w * 20000 + list.total) / (2 * list.total)); // hundredths of a per cent, rounded half up
+    var pct = String(Math.floor(h / 100)) + (h % 100 ? '.' + String(h % 100).padStart(2, '0').replace(/0$/, '') : '');
+    return fmt(num) + ' in ' + fmt(den) + ' (' + pct + '%)';
+  }
+
+  function startSpin() {
+    if (spin) return;
+    setText(fileMsg, '');
+    update(true);
+    if (list.error) {
+      setText(spinMsg, 'Fix the list first: ' + list.error);
+      return;
+    }
+    if (!list.entries.length) {
+      setText(spinMsg, 'Add at least one entry to the list first.');
+      return;
+    }
+    setText(spinMsg, '');
+    if (soundBox.checked) audioCtx();
+    // The winner is drawn here, before anything moves; the animation only shows it.
+    var pick = list.entries.length === 1 ? 0 : (function () {
+      var u = below(list.total), lo = 0, hi = list.cum.length - 1;
+      while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (list.cum[mid] > u) hi = mid; else lo = mid + 1;
+      }
+      return lo;
+    })();
+    var e = list.entries[pick];
+    // Somewhere inside the winning slice, away from its edges, comes to rest under the pointer.
+    var start = TAU * (list.cum[pick] - e.w) / list.total, width = TAU * e.w / list.total;
+    var phi = start + (0.1 + 0.8 * unit()) * width;
+    var seconds = Number(timeIn.value) || DEFAULTS.time;
+    var animate = animateBox.checked;
+    var turns = animate ? Math.max(1, Math.round(seconds * 0.8)) : 0;
+    var target = theta + ((((-phi - theta) % TAU) + TAU) % TAU) + turns * TAU;
+    spin = { pick: pick, entry: e, text: parsedText, from: theta, to: target, t0: performance.now(), ms: seconds * 1000, animate: animate };
+    canvas.setAttribute('data-pick', String(pick));
+    lock(true);
+    if (!animate) { finish(); return; }
+    lastIndex = indexAt(theta);
+    requestAnimationFrame(step);
+  }
+
+  function step(now) {
+    if (!spin) return;
+    var p = Math.min(1, Math.max(0, (now - spin.t0) / spin.ms));
+    var eased = 1 - Math.pow(1 - p, 3);
+    theta = spin.from + (spin.to - spin.from) * eased;
+    drawFrame();
+    var idx = indexAt(theta);
+    if (idx !== lastIndex) {
+      lastIndex = idx;
+      if (now - lastTick > 30) { lastTick = now; tick(); }
+    }
+    // A short pause at rest shows where the wheel stopped before the pop-up covers it.
+    if (p < 1) requestAnimationFrame(step); else setTimeout(finish, 400);
+  }
+
+  function finish() {
+    var s = spin;
+    theta = ((s.to % TAU) + TAU) % TAU;
+    drawFrame();
+    spin = null;
+    spinCount++;
+    lastSpin = s;
+    canvas.setAttribute('data-spins', String(spinCount));
+    canvas.setAttribute('data-angle', (theta * 180 / Math.PI).toFixed(4));
+    lock(false);
+    var shown = clip(s.entry.name, SHOW);
+    results.push(s.entry.name);
+    var li = document.createElement('li');
+    li.value = spinCount;
+    li.textContent = shown;
+    histList.appendChild(li);
+    if (histList.childElementCount > KEEP) histList.firstElementChild.remove();
+    var note = $('#ws-hist-note');
+    note.hidden = spinCount <= KEEP;
+    if (spinCount > KEEP) setText(note, 'Showing the last ' + fmt(KEEP) + ' of ' + fmt(spinCount) + ' results. Copy results copies them all.');
+    histBox.hidden = false;
+    scrollResults();
+    setText(resultEl, 'Spin ' + fmt(spinCount) + ': ' + shown);
+    dlgName.textContent = shown;
+    setText(dlgChance, (weightsBox.checked ? 'Weight ' + weightText(s.entry.units) + ', chance ' : 'Chance ') + chance(s.entry));
+    if (!dialog.open) dialog.showModal();
+    $('#ws-dlg-close').focus();
+    chime();
+    if (s.animate && confettiBox.checked) confetti();
+  }
+
+  spinBtn.addEventListener('click', startSpin);
+  canvas.addEventListener('click', startSpin);
+  $('#ws-dlg-close').addEventListener('click', function () { dialog.close(); });
+  $('#ws-dlg-again').addEventListener('click', function () { dialog.close(); startSpin(); });
+  $('#ws-dlg-remove').addEventListener('click', function () {
+    var s = lastSpin;
+    dialog.close();
+    if (!s) return;
+    var lines = ta.value.split('\n');
+    var at = ta.value === s.text ? s.entry.line : lines.indexOf(s.entry.raw);
+    if (at < 0 || at >= lines.length) {
+      setText(spinMsg, 'That entry is no longer in the list.');
+      return;
+    }
+    lines.splice(at, 1);
+    lastSpin = null;
+    replaceList(lines.join('\n'), 'remove');
+  });
+  // Closing returns focus to where it was; after a click on the wheel (or on a button in
+  // Safari, which does not focus buttons on click) that is nowhere, so Spin gets it.
+  dialog.addEventListener('close', function () {
+    stopConfetti();
+    var a = document.activeElement;
+    if (!a || a === document.body || dialog.contains(a)) spinBtn.focus({ preventScroll: true });
+  });
+
+  // ---------- Results ----------
+  // The newest result scrolls into view; a list that scrolls becomes a tab stop, so it can be
+  // scrolled from the keyboard. Measured once per frame, not once per spin.
+  var histQueued = false;
+  function scrollResults() {
+    if (histQueued) return;
+    histQueued = true;
+    requestAnimationFrame(function () {
+      histQueued = false;
+      histList.scrollTop = histList.scrollHeight;
+      if (histList.scrollHeight > histList.clientHeight + 1) histList.tabIndex = 0;
+      else histList.removeAttribute('tabindex');
+    });
+  }
+  $('#ws-hist-copy').addEventListener('click', function (e) {
+    TT.copy(results.map(function (r, i) { return (i + 1) + '. ' + r; }).join('\n'), e.currentTarget);
+  });
+  $('#ws-hist-clear').addEventListener('click', function () {
+    results = [];
+    spinCount = 0;
+    histList.replaceChildren();
+    histList.removeAttribute('tabindex');
+    $('#ws-hist-note').hidden = true;
+    histBox.hidden = true;
+    canvas.setAttribute('data-spins', '0');
+    setText(resultEl, 'Press Spin or click the wheel.');
+    spinBtn.focus();
+  });
+
+  // ---------- Options ----------
+  function showTime() {
+    var v = Number(timeIn.value);
+    setText(timeOut, v + ' s');
+    timeIn.setAttribute('aria-valuetext', v + (v === 1 ? ' second' : ' seconds'));
+  }
+  timeIn.addEventListener('input', function () { showTime(); scheduleHash(); });
+  themeSel.addEventListener('change', function () { redraw(); scheduleHash(); });
+  soundBox.addEventListener('change', scheduleHash);
+  confettiBox.addEventListener('change', scheduleHash);
+  animateBox.addEventListener('change', function () { motionTouched = true; });
+  function followMotion() {
+    var reduce = !!(motionQuery && motionQuery.matches);
+    $('#ws-motion-hint').hidden = !reduce;
+    if (!motionTouched) animateBox.checked = !reduce;
+  }
+
+  // ---------- Full screen ----------
+  function isFull() { return stage.classList.contains('is-full'); }
+  function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+  function setFull(on) {
+    if (on === isFull()) return;
+    stage.classList.toggle('is-full', on);
+    document.documentElement.classList.toggle('ws-lock', on);
+    setText(fullBtn, on ? 'Exit full screen' : 'Full screen');
+    if (on) {
+      var req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+      if (req && (document.fullscreenEnabled || document.webkitFullscreenEnabled)) {
+        try {
+          var p = req.call(stage);
+          if (p && p.catch) p.catch(function () {});
+        } catch (err) { /* the window-filling view stays */ }
+      }
+    } else if (fsElement()) {
+      var exit = document.exitFullscreen || document.webkitExitFullscreen;
+      try {
+        var q = exit.call(document);
+        if (q && q.catch) q.catch(function () {});
+      } catch (err) { /* already left */ }
+    }
+    requestAnimationFrame(redraw);
+  }
+  fullBtn.addEventListener('click', function () { setFull(!isFull()); });
+  function onFsChange() { if (!fsElement() && isFull()) setFull(false); }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && isFull() && !dialog.open) setFull(false);
+  });
+
+  // ---------- The page address keeps the wheel ----------
+  var lastHash = null;
+  function stateString() {
+    var p = new URLSearchParams();
+    if (ta.value !== DEFAULT_TEXT) p.set('e', ta.value);
+    if (weightsBox.checked) p.set('w', '1');
+    if (themeSel.value !== DEFAULTS.theme) p.set('t', themeSel.value);
+    if (Number(timeIn.value) !== DEFAULTS.time) p.set('d', timeIn.value);
+    if (!soundBox.checked) p.set('s', '0');
+    if (!confettiBox.checked) p.set('c', '0');
+    return p;
+  }
+  function writeHash() {
+    clearTimeout(hashTimer);
+    hashTimer = 0;
+    var p = stateString(), h = p.toString();
+    if (h.length > MAX_HASH) {
+      setText(linkMsg, 'This list is too long to keep in the page address: it needs ' + fmt(h.length) + ' characters and the limit is ' + fmt(MAX_HASH) + '. The wheel still spins, but a bookmark or link will not bring the list back.');
+      p.delete('e');
+      h = p.toString();
+    } else {
+      setText(linkMsg, '');
+    }
+    lastHash = h;
+    var url = location.pathname + location.search + (h ? '#' + h : '');
+    if (url !== location.pathname + location.search + location.hash) {
+      try { history.replaceState(history.state, '', url); } catch (err) { /* too many updates; the next one catches up */ }
+    }
+  }
+  var hashTimer = 0;
+  function scheduleHash() {
+    clearTimeout(hashTimer);
+    hashTimer = setTimeout(writeHash, 300);
+  }
+  var KEYS = ['e', 'w', 't', 'd', 's', 'c'];
+  function readHash() {
+    var h = location.hash.replace(/^#/, '');
+    if (!h) return false;
+    if (h.length > MAX_HASH) {
+      setText(linkMsg, 'This link is ' + fmt(h.length) + ' characters long, more than the ' + fmt(MAX_HASH) + ' a wheel link can have, so its list was not loaded.');
+      return false;
+    }
+    var p = new URLSearchParams(h);
+    if (!KEYS.some(function (k) { return p.has(k); })) return false;
+    setText(linkMsg, '');
+    ta.value = p.has('e') ? p.get('e').replace(/\r\n?/g, '\n') : DEFAULT_TEXT;
+    weightsBox.checked = p.get('w') === '1';
+    themeSel.value = THEMES[p.get('t')] ? p.get('t') : DEFAULTS.theme;
+    var d = Number(p.get('d'));
+    timeIn.value = String(p.has('d') && d >= 1 && d <= 30 && Math.floor(d) === d ? d : DEFAULTS.time);
+    soundBox.checked = p.get('s') !== '0';
+    confettiBox.checked = p.get('c') !== '0';
+    showTime();
+    lastHash = h;
+    return true;
+  }
+  window.addEventListener('hashchange', function () {
+    if (spin || location.hash.replace(/^#/, '') === lastHash) return;
+    var before = ta.value;
+    if (readHash()) {
+      // A wheel link opened in this tab replaces the list, which Undo brings back.
+      if (ta.value !== before) undoStack.push({ text: before, kind: 'link' });
+      if (dialog.open) dialog.close();
+      update(true);
+      redraw();
+      showUndo();
+    }
+  });
+  window.addEventListener('pagehide', function () { if (hashTimer) writeHash(); });
+  // Fields the browser fills back in after the script ran (Back button) are read again.
+  window.addEventListener('pageshow', function () {
+    followMotion();
+    showTime();
+    update(true);
+    redraw();
+  });
+
+  $('#ws-copy-link').addEventListener('click', function (e) {
+    update(true);
+    writeHash();
+    if (linkMsg.textContent) return;
+    TT.copy(location.href, e.currentTarget);
+  });
+
+  // ---------- Start ----------
+  if (!readHash()) ta.value = ta.value || DEFAULT_TEXT;
+  followMotion();
+  if (motionQuery && motionQuery.addEventListener) motionQuery.addEventListener('change', followMotion);
+  if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener('change', function () { redraw(); });
+  showTime();
+  update(true);
+  clearTimeout(hashTimer);
+  if (window.ResizeObserver) new ResizeObserver(function () { redraw(); }).observe(canvas);
+  else window.addEventListener('resize', TT.debounce(redraw, 100));
+  (function watchDpr() {
+    if (!window.matchMedia) return;
+    var mq = window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)');
+    if (mq.addEventListener) mq.addEventListener('change', function () { redraw(); watchDpr(); }, { once: true });
+  })();
+})();
+</script>

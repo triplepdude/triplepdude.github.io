@@ -452,41 +452,6 @@
     paint(it);
   }
 
-  // The browser decodes AVIF itself. Chrome draws a cut-off or damaged AVIF as a
-  // blank, transparent picture without an error, and the decoder reports any
-  // AVIF the browser rejects as "this browser cannot open AVIF", even where it
-  // can. So the file's boxes are read here: image data that runs past the end
-  // of the file means it was cut off, and transparency in an AVIF without an
-  // alpha layer means the picture did not decode.
-  var AVIF_CUT = 'The AVIF file is incomplete: it ends before all of its image data. Download or copy it again.';
-  var AVIF_BAD = 'The AVIF file could not be decoded. It may be damaged or use a feature this browser does not support.';
-  var AVIF_1PX = 'AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADrbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAAAAAAAOcGl0bQAAAAAAAQAAAB5pbG9jAAAAAEQAAAEAAQAAAAEAAAETAAAAHgAAAChpaW5mAAAAAAABAAAAGmluZmUCAAAAAAEAAGF2MDFDb2xvcgAAAABqaXBycAAAAEtpcGNvAAAAFGlzcGUAAAAAAAAAAQAAAAEAAAAQcGl4aQAAAAADCAgIAAAADGF2MUOBAAwAAAAAE2NvbHJuY2x4AAEADQAGgAAAABdpcG1hAAAAAAAAAAEAAQQBAoMEAAAAJm1kYXQSAAoIGAAGiAhoNCAyEBlHh4Yhh5555oJAAJBAzeg=';
-  var avifWorks = null;
-  function browserReadsAvif() {
-    if (!avifWorks) {
-      var px = new Blob([Uint8Array.from(atob(AVIF_1PX), function (c) { return c.charCodeAt(0); })], { type: 'image/avif' });
-      avifWorks = typeof createImageBitmap !== 'function' ? Promise.resolve(false) :
-        createImageBitmap(px).then(function (b) { b.close(); return true; }, function () { return false; });
-    }
-    return avifWorks;
-  }
-  // Null when the file cannot be read this way: the decoder's own checks then apply.
-  async function avifFacts(file) {
-    try {
-      var u8 = new Uint8Array(await file.arrayBuffer()), box = TTImage._parseHeif(u8), main = box.items[box.primary];
-    } catch (e) {
-      return null;
-    }
-    return {
-      cut: !!box.truncated,
-      still: !!main && (main.type === 'av01' || main.type === 'grid'),
-      alpha: box.props.some(function (p) {
-        return p.type === 'auxC' && /auxiliary:alpha|auxid:1/.test(String.fromCharCode.apply(null, u8.subarray(p.s, Math.min(p.e, p.s + 200))));
-      })
-    };
-  }
-  function badFile(message) { return Object.assign(new Error(message), { friendly: true, code: 'CORRUPT' }); }
-
   async function convert(it, g) {
     var s = settings(), d = null;
     try {
@@ -495,19 +460,12 @@
       if (d) remember(it.id, d);
       else {
         var type = await TTImage.sniff(it.file);
-        var avif = type === 'avif' && it.file.size < 64e6 ? await avifFacts(it.file) : null;
-        if (avif && avif.cut) throw (it.decodeError = badFile(AVIF_CUT));
         stage(it, g, type === 'heic' ? 'Decoding HEIC (the decoder loads once)…' : type === 'tiff' ? 'Decoding TIFF…' : 'Decoding…', 30);
         try {
           d = await TTImage.decode(it.file, { exif: true, canvas: false, maxPixels: MAX_PIXELS });
         } catch (e) {
-          if (avif && e && e.code === 'NO_SUPPORT' && await browserReadsAvif()) e = badFile(AVIF_BAD);
           it.decodeError = e;
           throw e;
-        }
-        if (avif && avif.still && !avif.alpha && d.hasAlpha) {
-          TTImage.release(d);
-          throw (it.decodeError = badFile(AVIF_BAD));
         }
         if (items.indexOf(it) < 0) { TTImage.release(d); return; }
         remember(it.id, d);
@@ -588,6 +546,7 @@
     if ((s.fmt === 'jpeg' || s.fmt === 'bmp') && d.hasAlpha) n.push('Transparent areas were filled with ' + ({ '#ffffff': 'white', '#000000': 'black' }[s.bg] || s.bg) + '.');
     if (d.orientation > 1) n.push('Rotated upright using the photo’s orientation tag.');
     if (d.warnings && d.warnings.indexOf('hdr') >= 0) n.push('This is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.');
+    if (d.warnings && d.warnings.indexOf('hdr-mapped') >= 0) n.push('This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.');
     if (s.fmt === 'ico') {
       var big = Math.max.apply(null, s.icoSizes);
       if (d.width !== d.height) n.push('Centred on a transparent square.');

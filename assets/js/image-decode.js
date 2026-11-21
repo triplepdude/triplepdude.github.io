@@ -40,12 +40,16 @@
  *                            converted to sRGB (browsers do this themselves for
  *                            the formats they decode)
  *              decoder,      'browser' | 'libheif' | 'utif' | 'svg'
- *              warnings }    'truncated' when a PNG/WebP ends early (the rest is blank);
+ *              warnings }    'truncated' when a PNG, WebP or JPEG ends early (the rest
+ *                            is blank; data after a JPEG's EOI marker is not a cut);
  *                            'foreignObject' when an SVG's HTML content was left out;
  *                            'hdr' when a HEIC decoded by libheif is HDR (PQ/HLG), which
- *                            is converted without tone mapping
+ *                            is converted without tone mapping; 'hdr-mapped' when the
+ *                            browser decoded an HDR AVIF or HEIC, which it draws in
+ *                            standard range (Chromium tone-maps it)
  *   Rejects with an Error with a readable .message and a .code: EMPTY,
- *   UNSUPPORTED, CORRUPT, TOO_BIG, NO_SUPPORT (browser lacks AVIF/JPEG XL),
+ *   UNSUPPORTED, CORRUPT (also a cut-off AVIF, and one the browser draws blank
+ *   or rejects although it decodes AVIF), TOO_BIG, NO_SUPPORT (browser lacks AVIF/JPEG XL),
  *   LOAD_FAILED (decoder file could not load), SVG_INVALID; encode() also GONE
  *   (the result was released, or its worker crashed: decode the file again).
  * TTImage.toCanvas(result) -> Promise<canvas>    the pixels on the page
@@ -416,13 +420,45 @@
       o += 12 + len;
     }
   }
-  async function webpChunks(blob, fn) {
-    var size = blob.size, o = 12;
-    while (o + 8 <= size) {
-      var h = await readRange(blob, o, o + 8), len = u32le(h, 0), type = ascii(h, 0, 4);
+  // The chunks of a WebP file in order: fn(type, dataStart, length) for each
+  // until it returns false. head holds the first bytes of the file; chunk
+  // headers beyond it are read from the blob. Like libwebp, the walk ends with
+  // the RIFF chunk (bytes after it are not part of the image) and at a chunk
+  // that runs past the end of the file. A chunk of odd length has a padding byte.
+  async function webpChunks(blob, head, fn) {
+    var end = Math.min(blob.size, 8 + u32le(head, 4)), o = 12;
+    while (o + 8 <= end) {
+      var h = o + 8 <= head.length ? head.subarray(o, o + 8) : await readRange(blob, o, o + 8);
+      var type = ascii(h, 0, 4), len = u32le(h, 4);
+      if (o + 8 + len > end) return;
       if (await fn(type, o + 8, len) === false) return;
       o += 8 + len + (len & 1);
     }
+  }
+  // Does this JPEG stop before the EOI marker that ends its image? Its markers
+  // and scans are followed from the start, so what phones and cameras store
+  // after EOI (a motion photo's video, an MPF file's second image, a maker's
+  // trailer, zero padding) is never taken for a cut. A file that ends with EOI,
+  // as nearly all do, is not read beyond its last few kilobytes.
+  async function jpegCut(blob) {
+    var n = blob.size, tail = await readRange(blob, Math.max(0, n - 4096), n), k = tail.length;
+    while (k > 0 && tail[k - 1] === 0) k--;
+    if (k >= 2 && tail[k - 2] === 0xFF && tail[k - 1] === 0xD9) return false;
+    if (n > 64e6) return false;
+    var b = new Uint8Array(await blob.arrayBuffer()), i = 2;
+    while (i >= 0 && i + 1 < n) {
+      // Stray bytes before a marker are skipped, as libjpeg does.
+      if (b[i] !== 0xFF) { i = b.indexOf(0xFF, i); continue; }
+      var m = b[i + 1];
+      if (m === 0xD9) return false;
+      if (m === 0xFF) { i++; continue; }
+      if (m === 0 || m === 0x01 || (m >= 0xD0 && m <= 0xD8)) { i += 2; continue; }
+      if (i + 4 > n) break;
+      i += 2 + u16be(b, i + 2);
+      // A scan's data runs to the next marker that is not a stuffed FF00 or a restart marker.
+      if (m === 0xDA) while ((i = b.indexOf(0xFF, i)) >= 0 && i + 1 < n && (b[i + 1] === 0 || (b[i + 1] >= 0xD0 && b[i + 1] <= 0xD7))) i += 2;
+    }
+    return true;
   }
 
   // Write EXIF into an encoded JPEG, PNG or WebP.
@@ -614,6 +650,8 @@
         var loc = out.iloc[id];
         return IMAGE.indexOf(out.items[id].type) >= 0 && loc && loc.method === 0 && loc.ext.some(function (x) { return x[0] + x[1] > n; });
       });
+      // An alpha layer: an auxiliary image whose auxC property names alpha (as AVIF and HEIF spell it).
+      out.alpha = out.props.some(function (p) { return p.type === 'auxC' && /auxiliary:alpha|auxid:1/.test(ascii(u8, p.s, Math.min(p.e - p.s, 200))); });
       var primary = out.primary || ids.filter(function (id) { return IMAGE.indexOf(out.items[id].type) >= 0; })[0];
       out.primary = primary;
       var ispe = propsOf(primary, 'ispe')[0];
@@ -1549,6 +1587,19 @@
     return orientTests[fmt];
   }
 
+  // Can this browser decode AVIF at all? Tested once, on the page, with a valid
+  // 1x1 AVIF (305 bytes): an AVIF it rejects is then damaged, not unsupported.
+  var AVIF_BAD = 'The AVIF file could not be decoded. It may be damaged or use a feature this browser does not support.';
+  var AVIF_1PX = 'AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADrbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAAAAAAAOcGl0bQAAAAAAAQAAAB5pbG9jAAAAAEQAAAEAAQAAAAEAAAETAAAAHgAAAChpaW5mAAAAAAABAAAAGmluZmUCAAAAAAEAAGF2MDFDb2xvcgAAAABqaXBycAAAAEtpcGNvAAAAFGlzcGUAAAAAAAAAAQAAAAEAAAAQcGl4aQAAAAADCAgIAAAADGF2MUOBAAwAAAAAE2NvbHJuY2x4AAEADQAGgAAAABdpcG1hAAAAAAAAAAEAAQQBAoMEAAAAJm1kYXQSAAoIGAAGiAhoNCAyEBlHh4Yhh5555oJAAJBAzeg=';
+  var avifTest = null;
+  function browserReadsAvif() {
+    if (!avifTest) {
+      avifTest = nativeImage(new Blob([bytesOf(atob(AVIF_1PX))], { type: 'image/avif' }))
+        .then(function (img) { closeSrc(img); return !!img; }, function () { return false; });
+    }
+    return avifTest;
+  }
+
   function tooBig(w, h, max) {
     var mp = function (n) { return (n / 1e6).toFixed(n < 1e7 ? 1 : 0); };
     return fail('TOO_BIG', 'The image is ' + w + ' × ' + h + ' pixels (' + mp(w * h) + ' megapixels), over the ' + mp(max) + ' megapixel limit for converting in a browser.', { width: w, height: h });
@@ -1719,7 +1770,7 @@
     var fmt = sniffBytes(head);
     if (!fmt) throw fail('UNSUPPORTED', notImage(head));
     var res = { format: fmt, orientation: 1, exif: null, animated: false, frames: null, images: 1, colorProfile: null, decoder: 'browser', warnings: [] };
-    var dims = headerSize(head, fmt), src = null, canvas = null, h = null, inWorker = false, W = 0, H = 0, i;
+    var dims = headerSize(head, fmt), src = null, canvas = null, h = null, inWorker = false, W = 0, H = 0, i, opaqueAvif = false;
     if (dims && dims[0] * dims[1] > maxPixels) throw tooBig(dims[0], dims[1], maxPixels);
     var worker = function () {
       try { return { w: pickWorker(), key: ++keySeq }; } catch (e) { useWorker = false; return null; }
@@ -1742,7 +1793,7 @@
         if (useWorker) h = worker();
       } else {
         // Byte-level checks and metadata first.
-        // Browsers draw a cut-off PNG or WebP with the missing part blank, without an error.
+        // Browsers draw a cut-off PNG, WebP or JPEG with the missing part blank, without an error.
         // Some apps add bytes after a PNG's IEND chunk, so look for it near the end.
         if (fmt === 'png' && !hasIend(await readRange(file, Math.max(0, file.size - 65536), file.size))) {
           // Refused when it ends before any real amount of image data (a first
@@ -1753,11 +1804,18 @@
           res.warnings.push('truncated');
         }
         if (fmt === 'webp' && u32le(head, 4) + 8 > file.size) res.warnings.push('truncated');
+        if (fmt === 'jpeg' && await jpegCut(file)) res.warnings.push('truncated');
         var exif = null;
         try {
           if (fmt === 'jpeg') exif = jpegExif(head);
           else if (fmt === 'png') pngChunks(head, function (t, st, len) { if (t === 'eXIf') { exif = exifStart(head.slice(st, st + len)); return false; } if (t === 'IDAT') return false; });
-          else if (fmt === 'webp') await webpChunks(file, async function (t, st, len) { if (t === 'EXIF') { exif = exifStart(await readRange(file, st, st + len)); return false; } });
+          else if (fmt === 'webp') {
+            await webpChunks(file, head, async function (t, st, len) {
+              if (t !== 'EXIF') return;
+              exif = exifStart(st + len <= head.length ? head.slice(st, st + len) : await readRange(file, st, st + len));
+              return false;
+            });
+          }
         } catch (e) { exif = null; }
         if (exif) res.orientation = exifOrientation(exif);
         if (o.exif) res.exif = exif;
@@ -1780,6 +1838,16 @@
           res.images = box.count || 1;
           if (o.exif && box.exif) res.exif = box.exif;
           if (box.width && box.height && box.width * box.height > maxPixels) throw tooBig(box.width, box.height, maxPixels);
+        }
+        // The browser decodes AVIF. Chrome draws a cut-off AVIF as a blank picture
+        // without an error, so image data that runs past the end of the file is refused here.
+        if (fmt === 'avif' && file.size < 64e6) {
+          box = parseHeif(new Uint8Array(await file.arrayBuffer()));
+          if (box.truncated) throw fail('CORRUPT', 'The AVIF file is incomplete: it ends before all of its image data. Download or copy it again.');
+          if (o.exif) res.exif = box.exif || null;
+          // (An image sequence is drawn from its track, which may have alpha the still item lacks.)
+          var main = box.items[box.primary];
+          opaqueAvif = !res.animated && !box.broken && !!main && (main.type === 'av01' || main.type === 'grid') && !box.alpha;
         }
 
         // The browser's own decoder (Safari also reads HEIC and TIFF), in the worker if there is one.
@@ -1817,14 +1885,15 @@
             context(src).putImageData(new ImageData(new Uint8ClampedArray(r.data), r.w, r.h), 0, 0);
           }
           res.hasAlpha = r.alpha ? null : false;
-        } else if (fmt === 'avif' && o.exif && file.size < 64e6) {
-          try { res.exif = parseHeif(new Uint8Array(await file.arrayBuffer())).exif || null; } catch (e) { res.exif = null; }
         }
         if (!inWorker && !src) {
-          if (fmt === 'avif') throw fail('NO_SUPPORT', 'This browser cannot open AVIF images. Chrome, Edge, Firefox and Safari 16.4 or later can.');
+          // Only a browser that cannot decode even a tiny valid AVIF lacks AVIF support.
+          if (fmt === 'avif') throw (await browserReadsAvif()) ? fail('CORRUPT', AVIF_BAD) : fail('NO_SUPPORT', 'This browser cannot open AVIF images. Chrome, Edge, Firefox and Safari 16.4 or later can.');
           if (fmt === 'jxl') throw fail('NO_SUPPORT', 'This browser cannot open JPEG XL images. Safari 17 or later can.');
           throw fail('CORRUPT', 'The ' + FORMATS[fmt].label + ' file could not be decoded. It may be damaged or incomplete.');
         }
+        // HDR (PQ or HLG transfer) decoded by the browser, which draws it in standard range.
+        if (res.decoder === 'browser' && box && box.nclx && (box.nclx.t === 16 || box.nclx.t === 18)) res.warnings.push('hdr-mapped');
 
         // EXIF orientation of JPEG, PNG and WebP, where this browser's decoder ignores it.
         if ((fmt === 'jpeg' || fmt === 'png' || fmt === 'webp') && res.orientation > 1 && !(await browserOrients(fmt))) {
@@ -1898,7 +1967,15 @@
     });
     Object.defineProperty(res, '_setCanvas', { configurable: true, value: function (c) { canvas = c; } });
     if (res.hasAlpha !== false) {
-      try { res.hasAlpha = (await pixelWork('alpha', inWorker ? res : (bitmap || canvas), { fmt: 'png' })).alpha; } catch (e) { res.hasAlpha = true; }
+      var alpha = null;
+      try { alpha = (await pixelWork('alpha', inWorker ? res : (bitmap || canvas), { fmt: 'png' })).alpha; } catch (e) { alpha = null; }
+      res.hasAlpha = alpha !== false;
+      // A still AVIF without an alpha layer has no transparent pixels: Chrome draws
+      // one whose AV1 data is damaged as a blank, transparent picture, without an error.
+      if (alpha && opaqueAvif) {
+        release(res);
+        throw fail('CORRUPT', AVIF_BAD);
+      }
     }
     if (inWorker && !lazy && !canvas) canvas = await toCanvas(res);
     return res;

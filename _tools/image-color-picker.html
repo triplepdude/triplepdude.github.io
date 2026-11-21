@@ -1,0 +1,917 @@
+---
+title: "Image Color Picker: HEX and RGB from a Photo"
+description: Pick colours from any image by clicking or with the arrow keys. Get HEX, RGB, HSL and CMYK codes and a palette of its main colours. Runs in your browser.
+category: Image & PDF
+keywords: [image color picker, color picker from image, get color from image, hex color from image, color code from picture, eyedropper online, color palette from image, rgb color picker]
+howto: |
+  ## How to pick a colour from an image
+
+  1. Choose an image, drop it on the page or paste a screenshot with Ctrl+V
+     (⌘V on a Mac). JPG, PNG, WebP, HEIC, AVIF, GIF, TIFF, BMP and SVG all
+     open. A sample picture is shown until you do.
+  2. Move over the picture: the magnifier shows the pixels around the
+     pointer, enlarged, with the one you will pick outlined. Click to pick
+     it. On a phone, touch the picture, slide your finger until the
+     magnifier above it shows the right pixel, and lift.
+  3. Copy the code you need. Every pick is added to **Picked colours**,
+     newest first.
+
+  With the keyboard, Tab to the picture, move one pixel with the arrow keys
+  (ten with Shift) and press Enter or Space to pick.
+
+  ## HEX, RGB, HSL, HSB and CMYK
+
+  | Format | Example | The numbers are |
+  |---|---|---|
+  | HEX | #1F6F4A | red, green and blue, two hexadecimal digits each |
+  | RGB | rgb(31, 111, 74) | the same three amounts from 0 to 255 |
+  | HSL | hsl(152, 56%, 28%) | hue angle, saturation, lightness |
+  | HSB (HSV) | 152°, 72%, 44% | hue, saturation, brightness, as in Photoshop's picker |
+  | CMYK | cmyk(72%, 0%, 33%, 56%) | cyan, magenta, yellow and black ink |
+  {: .data}
+
+  HEX and RGB are the same colour written in two number bases: 1F is
+  1 × 16 + 15 = 31. CSS accepts HEX, RGB and HSL as they are shown. A partly
+  transparent pixel also gets its opacity, as in #FF000080 or
+  rgba(255, 0, 0, 0.5). The CMYK figures use the plain formula
+  K = 1 − max(R, G, B) ÷ 255, which knows nothing about ink or paper;
+  printers convert with a profile for their press, so ask them for exact
+  values.
+
+  ## One pixel or an average
+
+  Photos are noisy: neighbouring pixels of a blue sky can differ by several
+  steps. **3 × 3 average** and **5 × 5 average** take the mean of the 9 or
+  25 pixels around the one you pick, like the sample sizes of Photoshop's
+  eyedropper, and give the colour you see rather than one stray pixel. Keep
+  **Single pixel** for logos, screenshots and flat graphics.
+
+  ## Getting a palette from a photo
+
+  The palette lists the 5 to 10 colours that best describe the image,
+  largest share first. The tool compares colours in the OKLab colour space,
+  where distances follow how different colours look. It keeps splitting the
+  image's colours where a split separates them most (variance-based median
+  cut), refines the groups with k-means, and shows each group's average
+  colour and its share of the pixels. Pixels that are more than half
+  transparent are left out, and images over 262,144 pixels are sampled on
+  an even grid.
+
+  ## Why the values can differ from Photoshop
+
+  In Chrome and Edge the codes here are sRGB values: the browser applies the
+  colour profile stored in the file, as it does to show the image, and sRGB
+  is what CSS needs. Photoshop shows the numbers stored in the file, in the
+  file's own profile such as Display P3 or Adobe RGB, so one pixel can read
+  200, 100, 50 there and 215, 93, 31 here. When an image
+  carries a profile, the tool names it and offers **As stored in the file**
+  to read the stored numbers. Other causes: a JPEG saved again shifts
+  colours slightly, a screenshot holds what your display showed, and a
+  partly transparent pixel can come back slightly off, the more so the more
+  transparent it is, because browsers store such pixels multiplied by their
+  opacity. iPhone HEIC photos open
+  here directly; to keep a copy in another format, use the
+  [image converter](/image-converter/) or [HEIC to JPG](/heic-to-jpg/).
+faq:
+  - q: Is my image uploaded anywhere?
+    a: No. The image is opened and read by your own browser, on this page. Nothing is sent to a server or stored, and picked colours are forgotten when you close the page.
+  - q: How do I get the colour code from a screenshot?
+    a: Copy a screenshot to the clipboard and paste it here with Ctrl+V or ⌘V. On Windows, Windows key + Shift + S copies the area you select; on a Mac, hold Control as well when you press Shift + Command + 4.
+  - q: Can I pick a colour from outside the browser?
+    a: In Chrome, Edge and Opera on a computer, Pick from screen turns the pointer into the browser's own eyedropper, which reads any pixel on your screen. Firefox, Safari and phone browsers do not offer it, so take a screenshot and paste it instead.
+  - q: How do I copy the whole palette?
+    a: Press Copy palette to copy its HEX codes as one line, such as #1F6F4A, #F0C800, #DC2828, ready to paste into a design tool or a style sheet. Copy all under Picked colours does the same for the colours you picked.
+---
+<style>
+.icp-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); pointer-events: none; }
+.icp-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 16px; padding: 12px;
+  background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px;
+}
+.icp-bar.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.icp-bar-text { display: grid; flex: 1 1 220px; min-width: 0; }
+.icp-bar-text strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.icp-layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(250px, 2fr); gap: 20px; align-items: start; }
+@media (max-width: 760px) { .icp-layout { grid-template-columns: minmax(0, 1fr); } }
+.icp-wrap { position: relative; min-width: 0; }
+.icp-stage { display: flex; justify-content: center; margin: 0 0 8px; }
+.icp-canvas {
+  display: block; max-width: 100%; cursor: crosshair; touch-action: none; border-radius: 4px;
+  background: repeating-conic-gradient(var(--border) 0% 25%, var(--surface) 0% 50%) 0 0 / 16px 16px;
+}
+.icp-canvas.is-pixelated { image-rendering: pixelated; }
+.icp-canvas:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.icp-marker {
+  position: absolute; top: 0; left: 0; width: 16px; height: 16px; margin: -8px 0 0 -8px; pointer-events: none;
+  border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000, inset 0 0 0 1px #000;
+}
+.icp-loupe {
+  position: absolute; top: 0; left: 0; z-index: 2; padding: 4px; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--field-border); border-radius: 10px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+}
+.icp-loupe canvas { display: block; width: 132px; height: 132px; border-radius: 6px; }
+.icp-loupe span { display: block; padding: 2px 0 0; font: 600 13px/1.3 var(--mono); text-align: center; color: var(--text); }
+.icp-help { margin: 0 0 12px; text-align: center; }
+.icp-opts > .field { flex: 1 1 200px; max-width: 340px; }
+.icp-current { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
+.icp-swatch {
+  flex: 0 0 auto; width: 64px; height: 64px; border-radius: 10px; border: 1px solid var(--field-border);
+  background: repeating-conic-gradient(#cfd3d8 0% 25%, #ffffff 0% 50%) 0 0 / 12px 12px;
+}
+.icp-swatch span { display: block; width: 100%; height: 100%; border-radius: 9px; }
+.icp-current b { display: block; font: 700 1.5rem/1.2 var(--mono); overflow-wrap: anywhere; }
+.icp-values { width: 100%; margin: 0 0 16px; border-collapse: collapse; }
+.icp-values th { padding: 3px 10px 3px 0; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; white-space: nowrap; }
+.icp-values td { padding: 3px 0; }
+.icp-values td:last-child { width: 1%; padding-left: 8px; text-align: right; }
+.icp-values code { font-family: var(--mono); font-size: 14px; overflow-wrap: anywhere; }
+.icp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.icp-head h2 { flex: 1 1 auto; margin: 0; font-size: 1rem; }
+.icp-head select { flex: 0 0 auto; width: auto; }
+.icp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+.icp-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 10px 4px 4px; cursor: pointer;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: 600 13px/1 var(--mono);
+}
+.icp-chip:hover { border-color: var(--muted); }
+.icp-dot { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--field-border); }
+@media (pointer: coarse) { .icp-chip { min-height: 44px; } }
+.icp-palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.icp-pal {
+  display: grid; width: 100%; padding: 0 0 8px; overflow: hidden; cursor: pointer; text-align: left;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: inherit;
+}
+.icp-pal:hover { border-color: var(--muted); }
+.icp-pal .icp-pal-sw { height: 56px; margin: 0 0 6px; }
+.icp-pal b { padding: 0 8px; font: 700 14px/1.3 var(--mono); }
+.icp-pal span:last-child { padding: 0 8px; color: var(--muted); font-size: 13px; }
+.icp-chip:focus-visible, .icp-pal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.icp-section { margin-top: 8px; }
+</style>
+
+<input type="file" id="icp-file" class="icp-file" tabindex="-1" aria-label="Choose an image">
+<div class="icp-bar" id="icp-bar">
+  <button class="btn" type="button" id="icp-choose">Choose image</button>
+  <div class="icp-bar-text">
+    <strong id="icp-name">Sample picture</strong>
+    <span class="hint" id="icp-info">Drop an image anywhere on the page or paste one with Ctrl+V. Nothing is uploaded.</span>
+  </div>
+  <button class="btn secondary" type="button" id="icp-screen" hidden>Pick from screen</button>
+</div>
+<p class="msg error" id="icp-error" role="alert"></p>
+
+<div class="icp-layout">
+  <div class="icp-wrap" id="icp-wrap">
+    <div class="icp-stage">
+      <canvas class="icp-canvas" id="icp-canvas" width="1" height="1" tabindex="0" aria-label="Image to pick colours from" aria-describedby="icp-help"></canvas>
+    </div>
+    <div class="icp-marker" id="icp-marker" hidden></div>
+    <div class="icp-loupe" id="icp-loupe" hidden aria-hidden="true"><canvas id="icp-loupe-cv" width="132" height="132"></canvas><span id="icp-loupe-hex"></span></div>
+    <p class="hint icp-help" id="icp-help">Click or tap a pixel to pick its colour. Keyboard: arrow keys move one pixel, Shift+arrow ten, Enter picks.</p>
+    <div class="row icp-opts">
+      <div class="field">
+        <label for="icp-size">Sample</label>
+        <select id="icp-size">
+          <option value="1">Single pixel</option>
+          <option value="3">3 × 3 average</option>
+          <option value="5">5 × 5 average</option>
+        </select>
+      </div>
+      <div class="field" id="icp-mode-field" hidden>
+        <label for="icp-mode">Colour values</label>
+        <select id="icp-mode" aria-describedby="icp-profile">
+          <option value="srgb">Converted to sRGB</option>
+          <option value="raw">As stored in the file</option>
+        </select>
+      </div>
+    </div>
+    <p class="hint" id="icp-profile" aria-live="polite"></p>
+  </div>
+
+  <div class="icp-side">
+    <div class="icp-current">
+      <div class="icp-swatch"><span id="icp-swatch"></span></div>
+      <div><b id="icp-big">#000000</b><span class="hint" id="icp-where"></span></div>
+    </div>
+    <table class="icp-values">
+      <caption class="visually-hidden">Codes of the picked colour</caption>
+      <tr><th scope="row">HEX</th><td><code id="icp-hex"></code></td><td><button class="btn secondary small" type="button" data-copy-target="#icp-hex" aria-label="Copy HEX">Copy</button></td></tr>
+      <tr><th scope="row">RGB</th><td><code id="icp-rgb"></code></td><td><button class="btn secondary small" type="button" data-copy-target="#icp-rgb" aria-label="Copy RGB">Copy</button></td></tr>
+      <tr><th scope="row">HSL</th><td><code id="icp-hsl"></code></td><td><button class="btn secondary small" type="button" data-copy-target="#icp-hsl" aria-label="Copy HSL">Copy</button></td></tr>
+      <tr><th scope="row">HSB</th><td><code id="icp-hsb"></code></td><td><button class="btn secondary small" type="button" data-copy-target="#icp-hsb" aria-label="Copy HSB">Copy</button></td></tr>
+      <tr><th scope="row">CMYK</th><td><code id="icp-cmyk"></code></td><td><button class="btn secondary small" type="button" data-copy-target="#icp-cmyk" aria-label="Copy CMYK">Copy</button></td></tr>
+    </table>
+    <div class="icp-head">
+      <h2 id="icp-hist-title">Picked colours</h2>
+      <button class="btn secondary small" type="button" id="icp-hist-copy" disabled>Copy all</button>
+      <button class="btn secondary small" type="button" id="icp-hist-clear" disabled>Clear</button>
+    </div>
+    <ul class="icp-chips" id="icp-history" aria-labelledby="icp-hist-title"></ul>
+    <p class="hint" id="icp-hist-empty">Colours you pick appear here.</p>
+  </div>
+</div>
+
+<div class="icp-section">
+  <div class="icp-head">
+    <h2 id="icp-pal-title">Palette</h2>
+    <label class="visually-hidden" for="icp-count">Number of palette colours</label>
+    <select id="icp-count" class="icp-count">
+      <option value="5">5 colours</option>
+      <option value="6" selected>6 colours</option>
+      <option value="7">7 colours</option>
+      <option value="8">8 colours</option>
+      <option value="9">9 colours</option>
+      <option value="10">10 colours</option>
+    </select>
+    <button class="btn secondary small" type="button" id="icp-pal-copy">Copy palette</button>
+  </div>
+  <ul class="icp-palette" id="icp-palette" aria-labelledby="icp-pal-title"></ul>
+  <p class="hint" id="icp-pal-note"></p>
+</div>
+<p class="visually-hidden" id="icp-live" role="status"></p>
+
+<script src="{{ '/assets/js/image-decode.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+
+  var $ = TT.$;
+  var wrap = $('#icp-wrap'), cv = $('#icp-canvas'), marker = $('#icp-marker'), loupe = $('#icp-loupe'), loupeCv = $('#icp-loupe-cv');
+  var errBox = $('#icp-error'), live = $('#icp-live'), sizeSel = $('#icp-size'), modeSel = $('#icp-mode'), countSel = $('#icp-count');
+  var histList = $('#icp-history'), palList = $('#icp-palette'), palNote = $('#icp-pal-note');
+
+  var DECODE_MAX = 40e6, SCALED_MAX = 16e6, VIEW_MAX = 2048, SAMPLE_MAX = 262144, HISTORY_MAX = 30, R = 5;
+  // img: { name, w, h, data (sRGB as the browser shows it), raw (stored values, when asked for), view, res, file, orientation }
+  var img = null, aim = { x: 0, y: 0 }, cur = null, history = [], palette = [], palFor = '', loadRun = 0, dragging = null;
+
+  if (window.TTImage) $('#icp-file').accept = TTImage.accept;
+
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  function say(t) { setText(live, t); }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  // p / q rounded half up, for whole numbers p >= 0 and q > 0: exact, no floating point.
+  function roundFrac(p, q) { return Math.floor((2 * p + q) / (2 * q)); }
+  function hex2(n) { return (n < 16 ? '0' : '') + n.toString(16).toUpperCase(); }
+
+  // ---------- colour formats ----------
+  function formats(c) {
+    var r = c.r, g = c.g, b = c.b, mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, h;
+    if (d === 0) h = 0;
+    else if (mx === r) h = roundFrac(60 * (g - b) + (g < b ? 360 * d : 0), d);
+    else if (mx === g) h = roundFrac(60 * (b - r) + 120 * d, d);
+    else h = roundFrac(60 * (r - g) + 240 * d, d);
+    h %= 360;
+    var l = roundFrac(100 * (mx + mn), 510), sl = d === 0 ? 0 : roundFrac(100 * d, 255 - Math.abs(mx + mn - 255));
+    var v = roundFrac(100 * mx, 255), sv = mx === 0 ? 0 : roundFrac(100 * d, mx);
+    var k = mx === 0 ? [0, 0, 0, 100] : [roundFrac(100 * (mx - r), mx), roundFrac(100 * (mx - g), mx), roundFrac(100 * (mx - b), mx), roundFrac(100 * (255 - mx), 255)];
+    var hex = '#' + hex2(r) + hex2(g) + hex2(b), a = c.a < 255 ? String(roundFrac(100 * c.a, 255) / 100) : null;
+    return {
+      hex: a ? hex + hex2(c.a) : hex,
+      rgb: a ? 'rgba(' + r + ', ' + g + ', ' + b + ', ' + a + ')' : 'rgb(' + r + ', ' + g + ', ' + b + ')',
+      hsl: (a ? 'hsla(' : 'hsl(') + h + ', ' + sl + '%, ' + l + '%' + (a ? ', ' + a : '') + ')',
+      hsb: h + '°, ' + sv + '%, ' + v + '%',
+      cmyk: 'cmyk(' + k.join('%, ') + '%)',
+      css: 'rgba(' + r + ', ' + g + ', ' + b + ', ' + (c.a / 255) + ')'
+    };
+  }
+
+  // ---------- reading pixels ----------
+  function pixels() { return img.raw || img.data; }
+  // The colour of the n x n square around (x, y), clipped at the edges. Colours are weighted by
+  // opacity, so a transparent pixel (stored as black) does not darken the average.
+  function colourAt(x, y, n) {
+    var d = pixels(), w = img.w, h = img.h, r = (n - 1) / 2, sr = 0, sg = 0, sb = 0, sa = 0, cnt = 0;
+    for (var j = Math.max(0, y - r); j <= Math.min(h - 1, y + r); j++) {
+      for (var i = Math.max(0, x - r); i <= Math.min(w - 1, x + r); i++) {
+        var k = (j * w + i) * 4, al = d[k + 3];
+        sr += d[k] * al; sg += d[k + 1] * al; sb += d[k + 2] * al; sa += al; cnt++;
+      }
+    }
+    if (!sa) return { r: 0, g: 0, b: 0, a: 0 };
+    return { r: roundFrac(sr, sa), g: roundFrac(sg, sa), b: roundFrac(sb, sa), a: roundFrac(sa, cnt) };
+  }
+  function sampleSize() { return Number(sizeSel.value) || 1; }
+
+  // ---------- the current colour, history and live text ----------
+  function show(c, where) {
+    cur = c;
+    var f = formats(c);
+    $('#icp-swatch').style.background = f.css;
+    setText($('#icp-big'), f.hex);
+    setText($('#icp-hex'), f.hex);
+    setText($('#icp-rgb'), f.rgb);
+    setText($('#icp-hsl'), f.hsl);
+    setText($('#icp-hsb'), f.hsb);
+    setText($('#icp-cmyk'), f.cmyk);
+    setText($('#icp-where'), where);
+    return f;
+  }
+  function whereText(x, y) {
+    var n = sampleSize();
+    return 'x ' + x + ', y ' + y + (n > 1 ? ', ' + n + ' × ' + n + ' average' : '');
+  }
+  function addHistory(c) {
+    var f = formats(c);
+    if (history.length && formats(history[0]).hex === f.hex) return;
+    history.unshift({ r: c.r, g: c.g, b: c.b, a: c.a });
+    if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
+    renderHistory();
+  }
+  function renderHistory() {
+    histList.textContent = '';
+    history.forEach(function (c, i) {
+      var f = formats(c), li = document.createElement('li'), b = document.createElement('button'), dot = document.createElement('span');
+      b.type = 'button';
+      b.className = 'icp-chip';
+      b.dataset.i = i;
+      dot.className = 'icp-dot';
+      dot.style.background = f.css;
+      b.appendChild(dot);
+      b.appendChild(document.createTextNode(f.hex));
+      li.appendChild(b);
+      histList.appendChild(li);
+    });
+    $('#icp-hist-empty').hidden = history.length > 0;
+    $('#icp-hist-copy').disabled = $('#icp-hist-clear').disabled = !history.length;
+  }
+  histList.addEventListener('click', function (e) {
+    var b = e.target.closest('.icp-chip');
+    if (!b) return;
+    var f = show(history[Number(b.dataset.i)], 'From your picked colours');
+    say('Showing ' + f.hex + '.');
+  });
+  $('#icp-hist-copy').addEventListener('click', function (e) {
+    TT.copy(history.map(function (c) { return formats(c).hex; }).join(', '), e.currentTarget);
+  });
+  $('#icp-hist-clear').addEventListener('click', function () {
+    history = [];
+    renderHistory();
+    say('Picked colours cleared.');
+    $('#icp-choose').focus();
+  });
+
+  function pick() {
+    if (!img) return;
+    var c = colourAt(aim.x, aim.y, sampleSize());
+    c.fromImage = true;
+    var f = show(c, whereText(aim.x, aim.y));
+    addHistory(c);
+    img.picked = { x: aim.x, y: aim.y };
+    placeMarker(aim.x, aim.y);
+    say(f.hex + ' picked at x ' + aim.x + ', y ' + aim.y + '.');
+  }
+
+  // ---------- the picture, the marker and the magnifier ----------
+  function layout() {
+    if (!img) return;
+    var availW = $('.icp-stage').clientWidth, maxH = Math.max(200, Math.min(window.innerHeight * 0.7, 640));
+    var k = Math.min(availW / img.w, maxH / img.h, 24);
+    cv.style.width = (img.w * k).toFixed(2) + 'px';
+    cv.style.height = (img.h * k).toFixed(2) + 'px';
+    cv.classList.toggle('is-pixelated', k >= 2);
+    if (img.picked && marker.dataset.at === 'pick') placeMarker(img.picked.x, img.picked.y);
+  }
+  // The centre of image pixel (x, y), in the wrapper's coordinates.
+  function pointOf(x, y) {
+    var r = cv.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+    return { x: r.left - wr.left + (x + 0.5) * r.width / img.w, y: r.top - wr.top + (y + 0.5) * r.height / img.h };
+  }
+  function placeMarker(x, y, aiming) {
+    var p = pointOf(x, y);
+    marker.style.transform = 'translate(' + p.x.toFixed(1) + 'px,' + p.y.toFixed(1) + 'px)';
+    marker.dataset.at = aiming ? 'aim' : 'pick';
+    marker.hidden = false;
+  }
+  function drawLoupe(x, y) {
+    var dpr = Math.min(2, window.devicePixelRatio || 1), n = 2 * R + 1, px = Math.round(132 * dpr), c = px / n, d = pixels();
+    if (loupeCv.width !== px) { loupeCv.width = px; loupeCv.height = px; }
+    var g = loupeCv.getContext('2d');
+    g.clearRect(0, 0, px, px);
+    for (var j = 0; j < n; j++) {
+      for (var i = 0; i < n; i++) {
+        var xx = x + i - R, yy = y + j - R, X = i * c, Y = j * c;
+        if (xx < 0 || yy < 0 || xx >= img.w || yy >= img.h) { g.fillStyle = '#8a8f96'; g.fillRect(X, Y, c, c); continue; }
+        var k = (yy * img.w + xx) * 4;
+        if (d[k + 3] < 255) {
+          g.fillStyle = '#ffffff'; g.fillRect(X, Y, c, c);
+          g.fillStyle = '#cfd3d8'; g.fillRect(X, Y, c / 2, c / 2); g.fillRect(X + c / 2, Y + c / 2, c / 2, c / 2);
+        }
+        g.fillStyle = 'rgba(' + d[k] + ',' + d[k + 1] + ',' + d[k + 2] + ',' + d[k + 3] / 255 + ')';
+        g.fillRect(X, Y, c, c);
+      }
+    }
+    g.strokeStyle = 'rgba(128, 128, 128, 0.45)';
+    g.lineWidth = 1;
+    g.beginPath();
+    for (var t = 1; t < n; t++) { var p = Math.round(t * c) + 0.5; g.moveTo(p, 0); g.lineTo(p, px); g.moveTo(0, p); g.lineTo(px, p); }
+    g.stroke();
+    // The pixels that make up the colour: a white frame inside a black one shows on any colour.
+    var s = sampleSize(), o = (R - (s - 1) / 2) * c, w = s * c;
+    g.lineWidth = 2 * dpr;
+    g.strokeStyle = '#000';
+    g.strokeRect(o, o, w, w);
+    g.strokeStyle = '#fff';
+    g.strokeRect(o + 2 * dpr, o + 2 * dpr, w - 4 * dpr, w - 4 * dpr);
+    setText($('#icp-loupe-hex'), formats(colourAt(x, y, s)).hex);
+  }
+  function showLoupe(x, y, touch) {
+    drawLoupe(x, y);
+    loupe.hidden = false;
+    var p = pointOf(x, y), lw = loupe.offsetWidth, lh = loupe.offsetHeight, W = wrap.clientWidth, left, top;
+    if (touch) {
+      // Above the finger, which would hide anything under it.
+      left = p.x - lw / 2;
+      top = p.y - lh - 56;
+      if (wrap.getBoundingClientRect().top + top < 0) top = p.y + 56;
+    } else {
+      left = p.x + 20;
+      top = p.y + 20;
+      if (left + lw > W) left = p.x - 20 - lw;
+      if (top + lh > wrap.clientHeight) top = p.y - 20 - lh;
+    }
+    left = clamp(left, 0, Math.max(0, W - lw));
+    loupe.style.transform = 'translate(' + left.toFixed(1) + 'px,' + top.toFixed(1) + 'px)';
+  }
+  function hideLoupe() {
+    loupe.hidden = true;
+    if (img && img.picked) placeMarker(img.picked.x, img.picked.y);
+  }
+  function aimAt(x, y, touch) {
+    aim.x = clamp(x, 0, img.w - 1);
+    aim.y = clamp(y, 0, img.h - 1);
+    placeMarker(aim.x, aim.y, true);
+    showLoupe(aim.x, aim.y, touch);
+  }
+  function eventPixel(e) {
+    var r = cv.getBoundingClientRect();
+    return { x: Math.floor((e.clientX - r.left) / r.width * img.w), y: Math.floor((e.clientY - r.top) / r.height * img.h) };
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    if (!img || e.button > 0) return;
+    try { cv.setPointerCapture(e.pointerId); } catch (x) { /* not capturable */ }
+    dragging = e.pointerId;
+    var p = eventPixel(e);
+    aimAt(p.x, p.y, e.pointerType === 'touch');
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!img || (dragging !== e.pointerId && e.pointerType === 'touch')) return;
+    var p = eventPixel(e);
+    aimAt(p.x, p.y, e.pointerType === 'touch');
+  });
+  cv.addEventListener('pointerup', function (e) {
+    if (dragging !== e.pointerId) return;
+    dragging = null;
+    var p = eventPixel(e);
+    aimAt(p.x, p.y, e.pointerType === 'touch');
+    pick();
+    if (e.pointerType === 'touch') hideLoupe();
+  });
+  cv.addEventListener('pointercancel', function () { dragging = null; hideLoupe(); });
+  cv.addEventListener('pointerleave', function (e) { if (dragging === null && e.pointerType !== 'touch') hideLoupe(); });
+  cv.addEventListener('focus', function () {
+    if (img && dragging === null && cv.matches(':focus-visible')) aimAt(aim.x, aim.y, false);
+  });
+  cv.addEventListener('blur', hideLoupe);
+  var sayAim = TT.debounce(function () {
+    if (img) say('x ' + aim.x + ', y ' + aim.y + ': ' + formats(colourAt(aim.x, aim.y, sampleSize())).hex);
+  }, 300);
+  cv.addEventListener('keydown', function (e) {
+    if (!img || e.altKey || e.ctrlKey || e.metaKey) return;
+    var s = e.shiftKey ? 10 : 1, mv = { ArrowLeft: [-s, 0], ArrowRight: [s, 0], ArrowUp: [0, -s], ArrowDown: [0, s] }[e.key];
+    if (mv) {
+      aimAt(aim.x + mv[0], aim.y + mv[1], false);
+      sayAim();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      pick();
+    } else return;
+    e.preventDefault();
+  });
+
+  // ---------- the palette ----------
+  var LIN = new Float64Array(256);
+  for (var li = 0; li < 256; li++) { var cc = li / 255; LIN[li] = cc <= 0.04045 ? cc / 12.92 : Math.pow((cc + 0.055) / 1.055, 2.4); }
+  // sRGB to OKLab (Björn Ottosson, 2020).
+  function oklab(r, g, b, out, o) {
+    var lr = LIN[r], lg = LIN[g], lb = LIN[b];
+    var l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+    var m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+    var s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+    out[o] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+    out[o + 1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    out[o + 2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  }
+  // Groups the image's colours into at most n: variance-based median cut, then k-means, both in OKLab.
+  function computePalette(n) {
+    var d = pixels(), w = img.w, h = img.h, step = 1, counts = new Map(), total = 0, x, y, k, i;
+    if (w * h > SAMPLE_MAX) step = Math.ceil(Math.sqrt(w * h / SAMPLE_MAX));
+    for (y = step >> 1; y < h; y += step) {
+      for (x = step >> 1; x < w; x += step) {
+        k = (y * w + x) * 4;
+        if (d[k + 3] < 128) continue;
+        var key = (d[k] << 16) | (d[k + 1] << 8) | d[k + 2];
+        counts.set(key, (counts.get(key) || 0) + 1);
+        total++;
+      }
+    }
+    if (!total) return { total: 0, list: [] };
+    var m = counts.size, keys = new Int32Array(m), wt = new Float64Array(m), lab = new Float64Array(m * 3);
+    i = 0;
+    counts.forEach(function (c, key) { keys[i] = key; wt[i] = c; oklab(key >> 16, (key >> 8) & 255, key & 255, lab, i * 3); i++; });
+    function stats(idx) {
+      var W = 0, s = [0, 0, 0], q = 0, j, a;
+      for (j = 0; j < idx.length; j++) { var p = idx[j]; W += wt[p]; for (a = 0; a < 3; a++) s[a] += wt[p] * lab[p * 3 + a]; }
+      var mean = [s[0] / W, s[1] / W, s[2] / W];
+      for (j = 0; j < idx.length; j++) { var t = idx[j]; for (a = 0; a < 3; a++) { var e = lab[t * 3 + a] - mean[a]; q += wt[t] * e * e; } }
+      return { idx: idx, sse: q };
+    }
+    // The split along one axis that separates the two halves most (largest between-group variance).
+    function bestSplit(box) {
+      var best = null;
+      for (var a = 0; a < 3; a++) {
+        var idx = box.idx.slice().sort(function (p, q) { return lab[p * 3 + a] - lab[q * 3 + a] || keys[p] - keys[q]; });
+        var Wt = 0, St = 0, j;
+        for (j = 0; j < idx.length; j++) { Wt += wt[idx[j]]; St += wt[idx[j]] * lab[idx[j] * 3 + a]; }
+        var W1 = 0, S1 = 0;
+        for (j = 0; j < idx.length - 1; j++) {
+          W1 += wt[idx[j]]; S1 += wt[idx[j]] * lab[idx[j] * 3 + a];
+          if (lab[idx[j] * 3 + a] === lab[idx[j + 1] * 3 + a]) continue;
+          var W2 = Wt - W1, diff = S1 / W1 - (St - S1) / W2, gain = W1 * W2 / Wt * diff * diff;
+          if (!best || gain > best.gain) best = { gain: gain, left: idx.slice(0, j + 1), right: idx.slice(j + 1) };
+        }
+      }
+      return best;
+    }
+    var all = [];
+    for (i = 0; i < m; i++) all.push(i);
+    var boxes = [stats(all)];
+    while (boxes.length < n) {
+      var bi = -1;
+      for (i = 0; i < boxes.length; i++) if (boxes[i].sse > 1e-12 && (bi < 0 || boxes[i].sse > boxes[bi].sse)) bi = i;
+      if (bi < 0) break;
+      var sp = bestSplit(boxes[bi]);
+      if (!sp) { boxes[bi].sse = 0; continue; }
+      boxes.splice(bi, 1, stats(sp.left), stats(sp.right));
+    }
+    // k-means from the boxes' means.
+    var kk = boxes.length, assign = new Int32Array(m), cen = new Float64Array(kk * 3);
+    boxes.forEach(function (bx, b) { bx.idx.forEach(function (p) { assign[p] = b; }); });
+    for (var round = 0; round < 12; round++) {
+      var sw = new Float64Array(kk), sum = new Float64Array(kk * 3), a;
+      for (i = 0; i < m; i++) { var c0 = assign[i]; sw[c0] += wt[i]; for (a = 0; a < 3; a++) sum[c0 * 3 + a] += wt[i] * lab[i * 3 + a]; }
+      for (var b2 = 0; b2 < kk; b2++) for (a = 0; a < 3; a++) cen[b2 * 3 + a] = sw[b2] ? sum[b2 * 3 + a] / sw[b2] : 1e9;
+      var moved = false;
+      for (i = 0; i < m; i++) {
+        var bestC = assign[i], bestD = Infinity;
+        for (var c1 = 0; c1 < kk; c1++) {
+          var e0 = lab[i * 3] - cen[c1 * 3], e1 = lab[i * 3 + 1] - cen[c1 * 3 + 1], e2 = lab[i * 3 + 2] - cen[c1 * 3 + 2], dd = e0 * e0 + e1 * e1 + e2 * e2;
+          if (dd < bestD) { bestD = dd; bestC = c1; }
+        }
+        if (bestC !== assign[i]) { assign[i] = bestC; moved = true; }
+      }
+      if (!moved) break;
+    }
+    // Each group's average colour in sRGB, weighted by how many pixels have each colour.
+    var acc = [];
+    for (i = 0; i < kk; i++) acc.push({ w: 0, r: 0, g: 0, b: 0 });
+    for (i = 0; i < m; i++) {
+      var t = acc[assign[i]], cnt = wt[i];
+      t.w += cnt; t.r += cnt * (keys[i] >> 16); t.g += cnt * ((keys[i] >> 8) & 255); t.b += cnt * (keys[i] & 255);
+    }
+    var byHex = {};
+    acc.forEach(function (t) {
+      if (!t.w) return;
+      var c = { r: roundFrac(t.r, t.w), g: roundFrac(t.g, t.w), b: roundFrac(t.b, t.w), a: 255 }, hx = formats(c).hex;
+      if (byHex[hx]) byHex[hx].w += t.w; else byHex[hx] = { c: c, w: t.w, hex: hx };
+    });
+    var list = Object.keys(byHex).map(function (hx) { return byHex[hx]; });
+    list.sort(function (p, q) { return q.w - p.w || (p.hex < q.hex ? -1 : 1); });
+    return { total: total, list: list };
+  }
+  function renderPalette() {
+    if (!img) return;
+    var key = img.id + ':' + (img.raw ? 'raw' : 'srgb') + ':' + countSel.value;
+    if (palFor === key) return;
+    palFor = key;
+    var p = computePalette(Number(countSel.value));
+    palette = p.list;
+    palList.textContent = '';
+    p.list.forEach(function (e, i) {
+      var li = document.createElement('li'), b = document.createElement('button'), sw = document.createElement('span'), hx = document.createElement('b'), share = document.createElement('span');
+      var pct = roundFrac(100 * e.w, p.total);
+      b.type = 'button';
+      b.className = 'icp-pal';
+      b.dataset.i = i;
+      sw.className = 'icp-pal-sw';
+      sw.style.background = e.hex;
+      hx.textContent = e.hex;
+      share.textContent = pct ? pct + '%' : 'under 1%';
+      b.appendChild(sw); b.appendChild(hx); b.appendChild(document.createTextNode(' ')); b.appendChild(share);
+      li.appendChild(b);
+      palList.appendChild(li);
+    });
+    $('#icp-pal-copy').disabled = !p.list.length;
+    setText(palNote, !p.total ? 'No palette: every pixel of this image is more than half transparent.' :
+      p.list.length < Number(countSel.value) ? 'This image has only ' + p.list.length + (p.list.length === 1 ? ' colour.' : ' distinct colours.') : '');
+  }
+  var paletteSoon = TT.debounce(renderPalette, 30);
+  palList.addEventListener('click', function (e) {
+    var b = e.target.closest('.icp-pal');
+    if (!b) return;
+    var c = palette[Number(b.dataset.i)].c, f = show(c, 'From the palette');
+    addHistory(c);
+    say(f.hex + ' picked from the palette.');
+  });
+  $('#icp-pal-copy').addEventListener('click', function (e) {
+    renderPalette();
+    TT.copy(palette.map(function (x) { return x.hex; }).join(', '), e.currentTarget);
+  });
+  countSel.addEventListener('change', renderPalette);
+  sizeSel.addEventListener('change', function () {
+    if (!img) return;
+    if (img.picked && cur && cur.fromImage) {
+      var c = colourAt(img.picked.x, img.picked.y, sampleSize());
+      c.fromImage = true;
+      show(c, whereText(img.picked.x, img.picked.y));
+    }
+    if (!loupe.hidden) drawLoupe(aim.x, aim.y);
+  });
+
+  // ---------- colour profiles ----------
+  // The description of an embedded ICC profile (ICC.1, 'desc' tag: textDescriptionType or
+  // multiLocalizedUnicodeType), or '' when there is none.
+  function iccName(p) {
+    if (!p || p.length < 132) return '';
+    var n = (p[128] << 24 | p[129] << 16 | p[130] << 8 | p[131]) >>> 0;
+    for (var i = 0; i < n && i < 100; i++) {
+      var o = 132 + 12 * i, sig = String.fromCharCode(p[o], p[o + 1], p[o + 2], p[o + 3]);
+      if (sig !== 'desc') continue;
+      var at = (p[o + 4] << 24 | p[o + 5] << 16 | p[o + 6] << 8 | p[o + 7]) >>> 0, t = String.fromCharCode(p[at], p[at + 1], p[at + 2], p[at + 3]), s = '';
+      if (t === 'desc') {
+        var len = (p[at + 8] << 24 | p[at + 9] << 16 | p[at + 10] << 8 | p[at + 11]) >>> 0;
+        for (var j = 0; j < len && j < 200 && p[at + 12 + j]; j++) s += String.fromCharCode(p[at + 12 + j]);
+      } else if (t === 'mluc') {
+        var rl = (p[at + 20] << 24 | p[at + 21] << 16 | p[at + 22] << 8 | p[at + 23]) >>> 0, ro = (p[at + 24] << 24 | p[at + 25] << 16 | p[at + 26] << 8 | p[at + 27]) >>> 0;
+        for (var q = 0; q + 1 < rl && q < 400; q += 2) s += String.fromCharCode(p[at + ro + q] << 8 | p[at + ro + q + 1]);
+      }
+      return Array.from(s.replace(/[\u0000-\u001f]/g, '').trim()).slice(0, 80).join('');
+    }
+    return '';
+  }
+  async function inflate(bytes) {
+    if (typeof DecompressionStream !== 'function') return null;
+    var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  // The embedded profile of a JPEG (APP2 ICC_PROFILE), PNG (iCCP) or WebP (ICCP) file.
+  async function profileOf(b) {
+    try {
+      if (b[0] === 0xff && b[1] === 0xd8) {
+        var parts = [], i = 2;
+        while (i + 4 < b.length && b[i] === 0xff && b[i + 1] !== 0xda) {
+          var len = b[i + 2] << 8 | b[i + 3];
+          if (b[i + 1] === 0xe2 && String.fromCharCode.apply(null, b.subarray(i + 4, i + 15)) === 'ICC_PROFILE') parts[b[i + 16]] = b.subarray(i + 18, i + 2 + len);
+          i += 2 + len;
+        }
+        parts = parts.filter(Boolean);
+        if (!parts.length) return '';
+        var size = parts.reduce(function (s, x) { return s + x.length; }, 0), all = new Uint8Array(size), at = 0;
+        parts.forEach(function (x) { all.set(x, at); at += x.length; });
+        return iccName(all);
+      }
+      if (b[0] === 0x89 && b[1] === 0x50) {
+        for (var o = 8; o + 8 < b.length;) {
+          var n = (b[o] << 24 | b[o + 1] << 16 | b[o + 2] << 8 | b[o + 3]) >>> 0, type = String.fromCharCode(b[o + 4], b[o + 5], b[o + 6], b[o + 7]);
+          if (type === 'iCCP') {
+            var z = o + 8;
+            while (b[z] && z < o + 88) z++;
+            return iccName(await inflate(b.subarray(z + 2, o + 8 + n)));
+          }
+          if (type === 'IDAT') return '';
+          o += 12 + n;
+        }
+        return '';
+      }
+      if (String.fromCharCode(b[0], b[1], b[2], b[3], b[8], b[9], b[10], b[11]) === 'RIFFWEBP') {
+        for (var w = 12; w + 8 < b.length;) {
+          var cl = b[w + 4] | b[w + 5] << 8 | b[w + 6] << 16 | b[w + 7] << 24;
+          if (String.fromCharCode(b[w], b[w + 1], b[w + 2], b[w + 3]) === 'ICCP') return iccName(b.subarray(w + 8, w + 8 + cl));
+          w += 8 + cl + (cl & 1);
+        }
+      }
+    } catch (e) { /* no readable profile */ }
+    return '';
+  }
+  // The numbers stored in the file, without the profile applied. Only used when the browser's
+  // own decoder gives the same upright picture as the converted one.
+  async function rawPixels() {
+    var bm = await createImageBitmap(img.file, { colorSpaceConversion: 'none', imageOrientation: 'from-image' });
+    try {
+      var turned = img.orientation >= 5;
+      if (bm.width !== img.w || bm.height !== img.h || (img.orientation > 1 && !turned)) return null;
+      return readPixels(bm, img.w, img.h);
+    } finally { bm.close(); }
+  }
+  modeSel.addEventListener('change', applyMode);
+  async function applyMode() {
+    if (!img) return;
+    var want = modeSel.value === 'raw', it = img;
+    if (want && !it.rawData) {
+      var data = null;
+      try { data = await rawPixels(); } catch (e) { data = null; }
+      if (it !== img) return;
+      if (!data) {
+        modeSel.value = 'srgb';
+        setText($('#icp-profile'), profileText() + ' The stored values cannot be read for this file, so the converted ones are shown.');
+        return;
+      }
+      it.rawData = data;
+    }
+    it.raw = want ? it.rawData : null;
+    setText($('#icp-profile'), profileText());
+    palFor = '';
+    renderPalette();
+    if (it.picked && cur && cur.fromImage) {
+      var c = colourAt(it.picked.x, it.picked.y, sampleSize());
+      c.fromImage = true;
+      show(c, whereText(it.picked.x, it.picked.y));
+    }
+  }
+  function profileText() {
+    if (!img || !img.profile) return '';
+    return 'This image has an embedded colour profile, ' + img.profile + '. ' + (img.raw ? 'The values are the numbers stored in the file, as Photoshop shows them.' : 'The values are converted to sRGB, as the browser shows the image.');
+  }
+
+  // ---------- loading ----------
+  function readPixels(src, w, h) {
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    var g = c.getContext('2d', { willReadFrequently: true });
+    if (!g) throw new Error('canvas');
+    try {
+      g.drawImage(src, 0, 0, w, h);
+      return g.getImageData(0, 0, w, h).data;
+    } finally { c.width = c.height = 0; }
+  }
+  var nextId = 1;
+  function setImage(o) {
+    if (img && img.res && window.TTImage) TTImage.release(img.res);
+    if (img && img.view && img.view.close && img.view !== o.view) img.view.close();
+    o.id = nextId++;
+    img = o;
+    cv.width = o.view.width;
+    cv.height = o.view.height;
+    cv.getContext('2d').drawImage(o.view, 0, 0);
+    layout();
+    aim = { x: Math.floor(o.w / 2), y: Math.floor(o.h / 2) };
+    loupe.hidden = true;
+    marker.hidden = true;
+    modeSel.value = 'srgb';
+    $('#icp-mode-field').hidden = !o.profile || /sRGB/i.test(o.profile);
+    setText($('#icp-profile'), profileText());
+    palFor = '';
+    setText(palNote, 'Working out the palette…');
+    paletteSoon();
+  }
+  // The whole image, decoded by the shared decoder (EXIF orientation applied, HEIC and TIFF too).
+  async function fullRead(file) {
+    var res = await TTImage.decode(file, { maxPixels: DECODE_MAX });
+    try {
+      var w = res.width, h = res.height, src = res.bitmap || res.canvas, data;
+      try { data = readPixels(src, w, h); } catch (e) { throw Object.assign(new Error('The image is too large for this browser to read its pixels.'), { code: 'TOO_BIG' }); }
+      var k = Math.min(1, VIEW_MAX / Math.max(w, h));
+      var view = k === 1 ? src : await createImageBitmap(src, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'high' });
+      return { w: w, h: h, data: data, view: view, res: res, fmt: res.format, orientation: res.orientation || 1 };
+    } catch (e) {
+      TTImage.release(res);
+      throw e;
+    }
+  }
+  // When the browser cannot hold the whole image (iOS Safari caps a canvas at about 16.7 megapixels,
+  // and this page at 40), a copy scaled to at most 16 megapixels, decoded by the browser itself.
+  async function scaledRead(file) {
+    var bm = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    try {
+      var k = Math.min(1, Math.sqrt(SCALED_MAX / (bm.width * bm.height)));
+      var w = Math.max(1, Math.floor(bm.width * k)), h = Math.max(1, Math.floor(bm.height * k));
+      var c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      var g = c.getContext('2d', { willReadFrequently: true });
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(bm, 0, 0, w, h);
+      var data = g.getImageData(0, 0, w, h).data, kv = Math.min(1, VIEW_MAX / Math.max(w, h));
+      var view = kv === 1 ? c : await createImageBitmap(c, { resizeWidth: Math.max(1, Math.round(w * kv)), resizeHeight: Math.max(1, Math.round(h * kv)), resizeQuality: 'high' });
+      if (view !== c) c.width = c.height = 0;
+      return { w: w, h: h, data: data, view: view, res: null, fmt: await TTImage.sniff(file), orientation: 1, scaledFrom: k < 1 ? [bm.width, bm.height] : null };
+    } finally { bm.close(); }
+  }
+  async function load(file) {
+    if (!file) return;
+    var run = ++loadRun, name = file.name || 'Pasted image', o = null, why = '', profile = '';
+    errBox.textContent = '';
+    try {
+      o = await fullRead(file);
+    } catch (e) {
+      why = e && (e.friendly || e.code) ? e.message : 'It is not an image this browser can open.';
+      if (e && e.code === 'TOO_BIG') { try { o = await scaledRead(file); } catch (x) { o = null; } }
+    }
+    if (o) { try { profile = await profileOf(new Uint8Array(await file.slice(0, 1 << 20).arrayBuffer())); } catch (e) { profile = ''; } }
+    if (run !== loadRun) { if (o && o.res) TTImage.release(o.res); return; }
+    if (!o) { errBox.textContent = '“' + name + '” could not be opened. ' + why; return; }
+    setImage({ name: name, w: o.w, h: o.h, data: o.data, raw: null, view: o.view, res: o.res, file: file, orientation: o.orientation, profile: profile });
+    var f = TTImage.formats[o.fmt];
+    setText($('#icp-name'), name);
+    setText($('#icp-info'), o.scaledFrom
+      ? 'Read at ' + o.w + ' × ' + o.h + ' px, scaled down from ' + o.scaledFrom[0] + ' × ' + o.scaledFrom[1] + ' because the full image is too large for this browser; positions are in the smaller copy.'
+      : o.w + ' × ' + o.h + ' px' + (f ? ', ' + f.label : '') + (profile ? ', ' + profile + ' profile' : '') + '. Drop or paste another image to replace it.');
+    var c = colourAt(aim.x, aim.y, sampleSize());
+    c.fromImage = true;
+    img.picked = { x: aim.x, y: aim.y };
+    show(c, whereText(aim.x, aim.y));
+    placeMarker(aim.x, aim.y);
+    say('Opened ' + name + ', ' + o.w + ' by ' + o.h + ' pixels.');
+  }
+  function sample() {
+    var c = document.createElement('canvas');
+    c.width = 960; c.height = 640;
+    var g = c.getContext('2d'), sky = g.createLinearGradient(0, 0, 0, 420);
+    sky.addColorStop(0, '#355070'); sky.addColorStop(0.45, '#b56576'); sky.addColorStop(1, '#eaac8b');
+    g.fillStyle = sky; g.fillRect(0, 0, 960, 640);
+    g.fillStyle = '#ffd166'; g.beginPath(); g.arc(640, 300, 110, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#6d597a'; g.beginPath(); g.moveTo(0, 640); g.lineTo(0, 330); g.lineTo(220, 230); g.lineTo(420, 380); g.lineTo(960, 360); g.lineTo(960, 640); g.fill();
+    g.fillStyle = '#264653'; g.fillRect(0, 420, 960, 220);
+    g.fillStyle = '#2a9d8f'; g.beginPath(); g.moveTo(0, 640); g.lineTo(0, 520); g.lineTo(380, 470); g.lineTo(960, 560); g.lineTo(960, 640); g.fill();
+    var data = readPixels(c, 960, 640);
+    setImage({ name: 'sample', w: 960, h: 640, data: data, raw: null, view: c, res: null, file: null, orientation: 1, profile: '' });
+    aim = { x: 640, y: 300 };
+    var col = colourAt(640, 300, 1);
+    col.fromImage = true;
+    img.picked = { x: 640, y: 300 };
+    show(col, whereText(640, 300));
+    placeMarker(640, 300);
+  }
+
+  // ---------- picking from the screen (Chromium's EyeDropper) ----------
+  if ('EyeDropper' in window) {
+    var screenBtn = $('#icp-screen');
+    screenBtn.hidden = false;
+    screenBtn.addEventListener('click', async function () {
+      try {
+        var r = await new window.EyeDropper().open(), m = /^#?([0-9a-f]{6})$/i.exec(r && r.sRGBHex || '');
+        var rgb = m ? parseInt(m[1], 16) : null, mm = !m && /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(r && r.sRGBHex || '');
+        var c = m ? { r: rgb >> 16, g: (rgb >> 8) & 255, b: rgb & 255, a: 255 } : mm ? { r: +mm[1], g: +mm[2], b: +mm[3], a: 255 } : null;
+        if (!c) return;
+        var f = show(c, 'From your screen');
+        addHistory(c);
+        say(f.hex + ' picked from the screen.');
+      } catch (e) { /* closed with Escape */ }
+    });
+  }
+
+  // ---------- files ----------
+  var fileInput = $('#icp-file'), bar = $('#icp-bar');
+  $('#icp-choose').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    var f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    load(f);
+  });
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1; }
+  document.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    bar.classList.add('is-over');
+  });
+  document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) bar.classList.remove('is-over'); });
+  document.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    bar.classList.remove('is-over');
+    load(e.dataTransfer.files[0]);
+  });
+  document.addEventListener('paste', function (e) {
+    var f = e.clipboardData && Array.prototype.filter.call(e.clipboardData.files || [], function (x) { return /^image\//.test(x.type); })[0];
+    if (!f) return;
+    e.preventDefault();
+    load(f);
+  });
+
+  var relayout = TT.debounce(function () { layout(); if (!loupe.hidden) hideLoupe(); }, 100);
+  window.addEventListener('resize', relayout);
+  if (typeof ResizeObserver === 'function') new ResizeObserver(relayout).observe($('.icp-stage'));
+  // Selects can be put back by the browser after a reload or Back, after this script ran.
+  window.addEventListener('pageshow', function () {
+    if (!img) return;
+    if ((modeSel.value === 'raw') !== !!img.raw) { applyMode(); return; }
+    renderPalette();
+    if (img.picked && cur && cur.fromImage) {
+      var c = colourAt(img.picked.x, img.picked.y, sampleSize());
+      c.fromImage = true;
+      show(c, whereText(img.picked.x, img.picked.y));
+    }
+  });
+  renderHistory();
+  sample();
+})();
+</script>

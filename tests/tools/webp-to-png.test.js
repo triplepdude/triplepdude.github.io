@@ -4,6 +4,12 @@
 //   anim.webp   40x30 animation, frame 1 red, frame 2 blue
 //   photo.webp  scikit-image's "astronaut" sample (NASA, public domain) at
 //               200x200, saved by Pillow as lossy WebP at quality 80
+//   rotated.webp    lossless (Pillow), stored 120x80: a (220,30,30) band along the
+//                   top 20 rows, (235,235,235) elsewhere; EXIF Orientation 6, Make
+//                   TestCam, a GPS position -> shown 80x120 with the band on the right.
+//                   Chunks VP8X, VP8L (odd length, so a padding byte), EXIF
+//   late-exif.webp  40x30 lossless animation (Pillow) with an sRGB profile: chunks
+//                   VP8X, ICCP, ANIM, ANMF, ANMF, then EXIF (Make LateCam, a GPS position)
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -11,13 +17,14 @@ const zlib = require('zlib');
 // PNG reader for what browsers write: 8-bit RGB or RGBA, not interlaced.
 function decodePng(b) {
   if (b.toString('latin1', 1, 4) !== 'PNG') throw new Error('not a PNG');
-  let o = 8, w, h, depth, type, interlace;
+  let o = 8, w, h, depth, type, interlace, exif = null;
   const idat = [], chunks = [];
   while (o < b.length) {
     const len = b.readUInt32BE(o), t = b.toString('latin1', o + 4, o + 8), d = b.subarray(o + 8, o + 8 + len);
     chunks.push(t);
     if (t === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); depth = d[8]; type = d[9]; interlace = d[12]; }
     if (t === 'IDAT') idat.push(d);
+    if (t === 'eXIf') exif = d;
     o += 12 + len;
   }
   const ch = { 2: 3, 6: 4 }[type];
@@ -36,7 +43,25 @@ function decodePng(b) {
     }
   }
   const at = (x, y) => { const i = y * stride + x * ch; return ch === 4 ? [...px.subarray(i, i + 4)] : [...px.subarray(i, i + 3), 255]; };
-  return { w, h, type, chunks, at };
+  return { w, h, type, chunks, exif, at };
+}
+// TIFF/EXIF reader: IFD0 tags, and the GPS IFD if linked.
+function exifTags(t) {
+  const le = t.toString('latin1', 0, 2) === 'II';
+  const r16 = o => (le ? t.readUInt16LE(o) : t.readUInt16BE(o)), r32 = o => (le ? t.readUInt32LE(o) : t.readUInt32BE(o));
+  const ifd = off => {
+    const out = {};
+    for (let k = 0, n = r16(off); k < n; k++) {
+      const p = off + 2 + k * 12, tag = r16(p), type = r16(p + 2), count = r32(p + 4);
+      if (type === 3) out[tag] = r16(p + 8);
+      else if (type === 4) out[tag] = r32(p + 8);
+      else if (type === 2) out[tag] = t.toString('latin1', count > 4 ? r32(p + 8) : p + 8, (count > 4 ? r32(p + 8) : p + 8) + count - 1);
+      else out[tag] = true;
+    }
+    return out;
+  };
+  const ifd0 = ifd(r32(4));
+  return { ifd0, gps: ifd0[0x8825] ? ifd(ifd0[0x8825]) : null };
 }
 
 module.exports = async ({ page, open, assert, fixtures, base }) => {
@@ -128,6 +153,33 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   let worst = 0;
   for (let y = 0; y < 200; y++) for (let x = 0; x < 200; x++) png.at(x, y).forEach((v, i) => { worst = Math.max(worst, Math.abs(v - ref[(y * 200 + x) * 4 + i])); });
   assert.equal(worst, 0, 'PNG pixels differ from the decoded WebP');
+
+  // ---------- EXIF in a WebP: the orientation is applied, and it is kept without the location ----------
+  // (The EXIF chunk of a WebP used to be missed: its length was read from the wrong place.)
+  await page.click('#imc-clear');
+  await page.setInputFiles('#imc-file', ['rotated.webp', 'late-exif.webp'].map(fx));
+  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '2 of 2 converted.', null, { timeout: 30000 });
+  assert.match(await rowText(0), /^rotated\.png WebP 80×120, 240 B → PNG 80×120, .* Rotated upright using the photo’s orientation tag\./);
+  png = decodePng((await download(0)).data);
+  assert.deepEqual([png.w, png.h, png.exif], [80, 120, null]);
+  assert.deepEqual([png.at(75, 60), png.at(60, 119), png.at(10, 60), png.at(40, 2)], [[220, 30, 30, 255], [220, 30, 30, 255], [235, 235, 235, 255], [235, 235, 235, 255]], 'band down the right-hand side');
+  await page.evaluate(() => {
+    window.__saw = false;
+    const el = document.querySelector('#imc-summary');
+    window.__mo = new MutationObserver(() => { if (/working/.test(el.textContent)) window.__saw = true; });
+    window.__mo.observe(el, { childList: true, characterData: true, subtree: true });
+  });
+  await page.selectOption('#imc-meta', 'nogps');
+  await page.waitForFunction(() => window.__saw && !/working/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 20000 });
+  for (const [i, name, make, size] of [[0, 'rotated', 'TestCam', [80, 120]], [1, 'late-exif', 'LateCam', [40, 30]]]) {
+    assert.match(await rowText(i), /EXIF kept without location\./, name);
+    png = decodePng((await download(i)).data);
+    assert.ok(png.exif && png.chunks.indexOf('eXIf') < png.chunks.indexOf('IDAT'), `${name}: eXIf chunk before the image data`);
+    const tags = exifTags(png.exif);
+    assert.deepEqual([png.w, png.h, tags.ifd0[0x010F], tags.gps], [...size, make, null], `${name}: camera kept, GPS removed`);
+    assert.ok(!tags.ifd0[0x0112] || tags.ifd0[0x0112] === 1, `${name}: orientation reset, since the pixels are upright`);
+  }
+  await page.selectOption('#imc-meta', 'strip');
 
   // ---------- The page's note belongs to PNG only ----------
   await page.selectOption('#imc-format', 'jpeg');
