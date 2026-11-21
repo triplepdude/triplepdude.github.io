@@ -2,6 +2,7 @@
 // section 1.1, and the timing expectations use the PARIS standard (a unit is
 // 1200/WPM ms) and the ARRL Farnsworth formula, independent of the page.
 const fs = require('fs');
+const path = require('path');
 
 const ITU = {
   A: '.-', B: '-...', C: '-.-.', D: '-..', E: '.', 'É': '..-..', F: '..-.', G: '--.', H: '....', I: '..', J: '.---', K: '-.-',
@@ -285,4 +286,16 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.isChecked('#mc-flash'), false);
   assert.equal(await page.isVisible('#mc-motion'), true);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  // ----- Guide: under the timing table, Morse (sent as units of on and off, two states like
+  // binary) links the binary translator. Every link points at a tool page. -----
+  {
+    const afterTable = (await page.$eval('.prose table + p', p => p.textContent)).replace(/\s+/g, ' ');
+    assert.equal(afterTable, 'Every unit is either on or off, so Morse, like binary, needs only two states; the binary translator shows the 0s and 1s a computer stores for each letter.');
+    const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+    assert.deepEqual(links, ['/binary-translator/']);
+    for (const href of links) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+    }
+  }
 };
