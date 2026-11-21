@@ -1,9 +1,9 @@
 PDF.js resource files (CMaps, standard fonts, CMYK colour profile)
 ===================================================================
 
-Used by:  the Split PDF and PDF to JPG tools, together with assets/vendor/pdfjs/.
-          PDF.js fetches a file from here only when a PDF needs it, from this
-          site and never from another host:
+Used by:  the Merge PDF, Split PDF and PDF to JPG tools, together with
+          assets/vendor/pdfjs/. PDF.js fetches a file from here only when a PDF
+          needs it, from this site and never from another host:
             cmaps/            169 packed CMaps (.bcmap) for Chinese, Japanese and
                               Korean text set in fonts with a predefined CMap
                               (getDocument option cMapUrl)

@@ -48,8 +48,9 @@
  *                            browser decoded an HDR AVIF or HEIC, which it draws in
  *                            standard range (Chromium tone-maps it)
  *   Rejects with an Error with a readable .message and a .code: EMPTY,
- *   UNSUPPORTED, CORRUPT (also a cut-off AVIF, and one the browser draws blank
- *   or rejects although it decodes AVIF), TOO_BIG, NO_SUPPORT (browser lacks AVIF/JPEG XL),
+ *   UNSUPPORTED, CORRUPT (also a cut-off file the browser draws none of, a
+ *   cut-off AVIF, and an AVIF the browser draws blank or rejects although it
+ *   decodes AVIF), TOO_BIG, NO_SUPPORT (browser lacks AVIF/JPEG XL),
  *   LOAD_FAILED (decoder file could not load), SVG_INVALID; encode() also GONE
  *   (the result was released, or its worker crashed: decode the file again).
  * TTImage.toCanvas(result) -> Promise<canvas>    the pixels on the page
@@ -422,13 +423,15 @@
   }
   // The chunks of a WebP file in order: fn(type, dataStart, length) for each
   // until it returns false. head holds the first bytes of the file; chunk
-  // headers beyond it are read from the blob. Like libwebp, the walk ends with
-  // the RIFF chunk (bytes after it are not part of the image) and at a chunk
-  // that runs past the end of the file. A chunk of odd length has a padding byte.
+  // headers beyond it are read from the blob, 256 KB at a time (a long
+  // animation has a chunk per frame). Like libwebp, the walk ends with the RIFF
+  // chunk (bytes after it are not part of the image) and at a chunk that runs
+  // past the end of the file. A chunk of odd length has a padding byte.
   async function webpChunks(blob, head, fn) {
-    var end = Math.min(blob.size, 8 + u32le(head, 4)), o = 12;
+    var end = Math.min(blob.size, 8 + u32le(head, 4)), o = 12, buf = head, at = 0;
     while (o + 8 <= end) {
-      var h = o + 8 <= head.length ? head.subarray(o, o + 8) : await readRange(blob, o, o + 8);
+      if (o + 8 > at + buf.length) { at = o; buf = await readRange(blob, o, Math.min(end, o + 262144)); }
+      var h = buf.subarray(o - at, o - at + 8);
       var type = ascii(h, 0, 4), len = u32le(h, 4);
       if (o + 8 + len > end) return;
       if (await fn(type, o + 8, len) === false) return;
@@ -1473,16 +1476,19 @@
           c.width = 0;
         }
       },
-      // Any transparent pixel? Checked on a copy of at most 4 megapixels.
+      // Any transparent pixel? Checked on a copy of at most 4 megapixels. 'blank'
+      // when not one pixel shows (how Chrome draws a cut-off WebP).
       alpha: function (src) {
         var d = dims(src), k = d[0] * d[1] <= 4194304 ? 1 : Math.sqrt(4194304 / (d[0] * d[1]));
         var w = Math.max(1, Math.round(d[0] * k)), h = Math.max(1, Math.round(d[1] * k));
         var c = make(w, h), g = ctx(c, { willReadFrequently: true });
         g.drawImage(src, 0, 0, w, h);
-        var px = g.getImageData(0, 0, w, h).data;
+        var px = g.getImageData(0, 0, w, h).data, i;
         c.width = 0;
-        for (var i = 3; i < px.length; i += 4) if (px[i] < 255) return true;
-        return false;
+        for (i = 3; i < px.length; i += 4) if (px[i] < 255) break;
+        if (i >= px.length) return false;
+        for (i = 3; i < px.length; i += 4) if (px[i]) return true;
+        return 'blank';
       }
     };
   }
@@ -1967,10 +1973,18 @@
       }
     });
     Object.defineProperty(res, '_setCanvas', { configurable: true, value: function (c) { canvas = c; } });
-    if (res.hasAlpha !== false) {
+    // A cut-off file (see 'truncated' above) is checked too: Chrome draws a cut-off
+    // WebP, and a JPEG cut early in its image data, as a wholly blank picture
+    // without an error, and then there is nothing to convert.
+    var cut = res.warnings.indexOf('truncated') >= 0;
+    if (res.hasAlpha !== false || cut) {
       var alpha = null;
       try { alpha = (await pixelWork('alpha', inWorker ? res : (bitmap || canvas), { fmt: 'png' })).alpha; } catch (e) { alpha = null; }
-      res.hasAlpha = alpha !== false;
+      if (res.hasAlpha !== false) res.hasAlpha = alpha !== false;
+      if (cut && alpha === 'blank') {
+        release(res);
+        throw fail('CORRUPT', 'The ' + FORMATS[fmt].label + ' file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again.');
+      }
       // A still AVIF without an alpha layer has no transparent pixels: Chrome draws
       // one whose AV1 data is damaged as a blank, transparent picture, without an error.
       if (alpha && opaqueAvif) {

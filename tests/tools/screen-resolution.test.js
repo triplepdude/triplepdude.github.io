@@ -241,6 +241,10 @@ module.exports = async ({ page, open, assert, base }) => {
   // in the guide and FAQ is a page of this site.
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
   assert.ok(links.includes('/dead-pixel-test/'), `guide links: ${links}`);
+  // A faster screen shows a change sooner: 16.7 - 6.9 = 9.8 ms per frame, the "about
+  // 10 ms or more" that the reaction time test's own guide gives for 144 Hz.
+  assert.deepEqual(links, ['/reaction-time-test/', '/dead-pixel-test/']);
+  assert.match((await page.locator('.prose').textContent()).replace(/\s+/g, ' '), /144 Hz at 6\.9 ms\. A 144 Hz screen therefore takes about 10 ms or more off your times in the reaction time test\./);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }

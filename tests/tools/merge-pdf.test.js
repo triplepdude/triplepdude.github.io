@@ -87,8 +87,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     return { encrypted: !!meta.info.EncryptFilterName, producer: meta.info.Producer, pages };
   }, buf.toString('base64'));
   // Walks every object of a PDF with pdf-lib: the pages in the page tree, the page objects in the
-  // file (a page that is not in the tree is a hidden copy) and the pictures.
-  const objects = buf => page.evaluate(async b64 => {
+  // file (a page that is not in the tree is a hidden copy) and the pictures; with withResources, also
+  // the number of different resource dictionaries the pages use.
+  const objects = (buf, withResources) => page.evaluate(async ([b64, withRes]) => {
     if (!window.PDFLib) {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');
@@ -106,8 +107,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
       if (d.get(L.PDFName.of('Type')) === L.PDFName.of('Page')) pageObjects++;
       if (d.get(L.PDFName.of('Subtype')) === L.PDFName.of('Image')) pictures++;
     }
-    return { pages: doc.getPageCount(), pageObjects, pictures };
-  }, buf.toString('base64'));
+    const r = { pages: doc.getPageCount(), pageObjects, pictures };
+    if (withRes) r.resources = new Set(doc.getPages().map(p => p.node.get(L.PDFName.of('Resources')))).size;
+    return r;
+  }, [buf.toString('base64'), !!withResources]);
   const save = async sel => {
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click(sel)]);
     return { name: dl.suggestedFilename(), buf: fs.readFileSync(await dl.path()) };
@@ -357,9 +360,17 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.ok(!allText(entries[0].data).includes('SHARED-SECRET-2'), 'the field on page 2 is not in the file of page 1');
   const level = await redLevel(entries[2].data);
   assert.ok(level > 90 && level < 165, `page 3 still draws its picture (mean red ${level.toFixed(1)})`);
+  // A merge of the whole file copies the shared dictionary as it is: trimming it would mean reading
+  // the content of every page, which made merging big drawings 3 to 4 times slower, for nothing.
   out = await save('#mpdf-merge');
   assert.ok(allText(out.buf).includes('SHARED-SECRET-2'), 'the merged file has the field of page 2');
-  assert.deepEqual(await objects(out.buf), { pages: 3, pageObjects: 3, pictures: 3 });
+  assert.deepEqual(await objects(out.buf, true), { pages: 3, pageObjects: 3, pictures: 3, resources: 1 });
+  // A merge that leaves page 2 out trims it, so page 2's picture and field stay out.
+  await page.click('.mpdf-page:nth-child(2) .mpdf-del');
+  out = await save('#mpdf-merge');
+  assert.ok(!allText(out.buf).includes('SHARED-SECRET-2'), 'the field of the removed page 2 is not in the merge');
+  assert.deepEqual(await objects(out.buf, true), { pages: 2, pageObjects: 2, pictures: 2, resources: 2 });
+  assert.ok(out.buf.length > 2 * 43200 && out.buf.length < 3 * 43200, `pages 1 and 3 hold two pictures (${out.buf.length} bytes)`);
 
   // ---- Thumbnails of fonts that are not embedded, and of CMYK colours ----
   // fonts.pdf: a Japanese line set with the predefined CMap UniJIS-UCS2-H, ZapfDingbats below it and a

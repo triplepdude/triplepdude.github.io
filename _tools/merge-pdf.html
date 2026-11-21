@@ -1,5 +1,5 @@
 ---
-title: Merge PDF Files and Organize Pages
+title: Merge PDF Files and Organise Pages
 description: Combine PDF files into one in your browser. Reorder, rotate and delete pages, extract or split pages, and unlock protected PDFs. Nothing is uploaded.
 category: Image & PDF
 keywords: [merge pdf, combine pdf, join pdf files, merge pdf online free, reorder pdf pages, rotate pdf pages, split pdf, extract pdf pages]
@@ -611,8 +611,9 @@ faq:
     return { open: open, md5: md5, rc4: rc4 };
   }
 
-  // The page copying below is the Split PDF tool's (its buildPart), here for several source files
-  // and with rotation; a fix in one belongs in the other.
+  // The page copying below is the Split PDF tool's (its buildPart), here for several source files,
+  // with rotation, and keeping the resources of a file whose every page is copied as they are; a
+  // fix in one belongs in the other.
   function workerMain(scope) {
     var unlocker = null;
     function nameText(o) {
@@ -765,16 +766,20 @@ faq:
     // hidden copy instead of the page in the file. For the same reason the catalog, which a
     // signature's value may refer to, and the parent of each form field on these pages are not
     // followed: a parent's other kids are fields on other pages, with their values. The fields keep
-    // their look.
+    // their look. When every page of a file is in the new one, nothing of it is left out, so its
+    // pages keep their resources as they are: trimming them means reading the content of every
+    // page, which made merging whole files of big drawings 3 to 4 times slower.
     async function buildJob(L, src, job) {
-      var N = L.PDFName, out = await L.PDFDocument.create(), octx = out.context, copiers = {};
+      var N = L.PDFName, out = await L.PDFDocument.create(), octx = out.context, copiers = {}, kept = {}, whole = {};
       job.pages.forEach(function (p) {
         var c = src[p.f], sctx = c.doc.context, cp = copiers[p.f], i;
         if (!cp) {
           cp = copiers[p.f] = L.PDFObjectCopier.for(sctx, octx);
+          kept[p.f] = new Set();
           for (i = 0; i < c.pages.length; i++) cp.traversedObjects.set(c.pages[i].ref, L.PDFNull);
           if (sctx.trailerInfo.Root instanceof L.PDFRef) cp.traversedObjects.set(sctx.trailerInfo.Root, L.PDFNull);
         }
+        kept[p.f].add(p.i);
         var an = sctx.lookup(c.pages[p.i].node.get(N.of('Annots')));
         if (!(an instanceof L.PDFArray)) return;
         for (i = 0; i < an.size(); i++) {
@@ -782,6 +787,7 @@ faq:
           if (parent instanceof L.PDFRef && nameText(w.get(N.of('Subtype'))) === 'Widget') cp.traversedObjects.set(parent, L.PDFNull);
         }
       });
+      Object.keys(kept).forEach(function (f) { whole[f] = kept[f].size === src[f].pages.length; });
       var refs = job.pages.map(function (p) {
         var r = octx.nextRef(), map = copiers[p.f].traversedObjects, sref = src[p.f].pages[p.i].ref;
         if (map.get(sref) === L.PDFNull) map.set(sref, r);
@@ -789,7 +795,8 @@ faq:
       });
       var done = new Set();
       for (var k = 0; k < job.pages.length; k++) {
-        var p = job.pages[k], node = copiers[p.f].copy(pagePrepared(L, src[p.f], p.i));
+        var p = job.pages[k], c = src[p.f];
+        var node = copiers[p.f].copy(whole[p.f] ? c.pages[p.i].node : pagePrepared(L, c, p.i));
         octx.assign(refs[k], node);
         var ann = octx.lookup(node.get(N.of('Annots')));
         if (ann instanceof L.PDFArray) {

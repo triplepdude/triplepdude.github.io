@@ -434,4 +434,14 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   for (const q of ['reaction time', 'reaction test', 'reflex', 'reaction speed', 'reaction time by age', 'average reaction time']) {
     assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
   }
+
+  // ---- Guide links: neighbouring tests, and the stopwatch, whose guide gives the error
+  // of hand-timed sprints (Hetzler et al., 2008); every internal link is a tool page ----
+  const prose = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
+  assert.match(prose, /try the CPS test\. Reaction time is also what limits timing by hand: the stopwatch page shows how far off hand-timed sprints were in one study\./);
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.deepEqual(links, ['/screen-resolution/', '/cps-test/', '/stopwatch/']);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
 };

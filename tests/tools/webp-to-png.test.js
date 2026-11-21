@@ -10,6 +10,8 @@
 //                   Chunks VP8X, VP8L (odd length, so a padding byte), EXIF
 //   late-exif.webp  40x30 lossless animation (Pillow) with an sRGB profile: chunks
 //                   VP8X, ICCP, ANIM, ANMF, ANMF, then EXIF (Make LateCam, a GPS position)
+//   cut.webp        photo.webp cut off after 5400 of its 9084 bytes: Chrome draws a
+//                   cut-off WebP as a wholly blank picture, without an error
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -156,9 +158,23 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
 
   // ---------- EXIF in a WebP: the orientation is applied, and it is kept without the location ----------
   // (The EXIF chunk of a WebP used to be missed: its length was read from the wrong place.)
+  // A cut-off WebP is refused: it used to become a blank PNG noted as "part of the picture may be blank".
+  // far-exif.webp is rotated.webp with a 300 KB chunk of an unknown type (which readers skip)
+  // before its EXIF, so the EXIF lies beyond the first 256 KB the decoder reads at once.
+  const rotated = fs.readFileSync(fx('rotated.webp')), at = rotated.indexOf('EXIF', 12, 'latin1');
+  const fill = Buffer.alloc(8 + 300000);
+  fill.write('FILL', 0, 'latin1');
+  fill.writeUInt32LE(300000, 4);
+  const far = Buffer.concat([rotated.subarray(0, at), fill, rotated.subarray(at)]);
+  far.writeUInt32LE(far.length - 8, 4);
   await page.click('#imc-clear');
-  await page.setInputFiles('#imc-file', ['rotated.webp', 'late-exif.webp'].map(fx));
-  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '2 of 2 converted.', null, { timeout: 30000 });
+  await page.setInputFiles('#imc-file', [
+    ...['rotated.webp', 'late-exif.webp', 'cut.webp'].map(name => ({ name, mimeType: 'image/webp', buffer: fs.readFileSync(fx(name)) })),
+    { name: 'far-exif.webp', mimeType: 'image/webp', buffer: far }
+  ]);
+  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '3 of 4 converted, 1 failed.', null, { timeout: 30000 });
+  assert.equal(await rowText(2), 'cut.webp 5.4 KB The WebP file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again. ×');
+  assert.match(await rowText(3), /^far-exif\.png WebP 80×120, 300 KB → PNG 80×120, .* Rotated upright using the photo’s orientation tag\./);
   assert.match(await rowText(0), /^rotated\.png WebP 80×120, 240 B → PNG 80×120, .* Rotated upright using the photo’s orientation tag\./);
   png = decodePng((await download(0)).data);
   assert.deepEqual([png.w, png.h, png.exif], [80, 120, null]);
@@ -171,7 +187,7 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   });
   await page.selectOption('#imc-meta', 'nogps');
   await page.waitForFunction(() => window.__saw && !/working/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 20000 });
-  for (const [i, name, make, size] of [[0, 'rotated', 'TestCam', [80, 120]], [1, 'late-exif', 'LateCam', [40, 30]]]) {
+  for (const [i, name, make, size] of [[0, 'rotated', 'TestCam', [80, 120]], [1, 'late-exif', 'LateCam', [40, 30]], [3, 'far-exif', 'TestCam', [80, 120]]]) {
     assert.match(await rowText(i), /EXIF kept without location\./, name);
     png = decodePng((await download(i)).data);
     assert.ok(png.exif && png.chunks.indexOf('eXIf') < png.chunks.indexOf('IDAT'), `${name}: eXIf chunk before the image data`);

@@ -2,6 +2,9 @@
 // (<t:1618953630>, shown there as "Tuesday, April 20, 2021 at 16:20" etc. for a
 // reader in US Central time), converted to the English (US) 12-hour clock.
 // Unix values were computed independently with Python's zoneinfo.
+const fs = require('fs');
+const path = require('path');
+
 module.exports = async ({ page, open, assert, url }) => {
   const text = sel => page.locator(sel).textContent();
   const item = style => page.locator(`.dts-item[data-style="${style}"]`);
@@ -15,12 +18,16 @@ module.exports = async ({ page, open, assert, url }) => {
   await open();
 
   // The guide links the Unix timestamp converter where it introduces Unix
-  // time and the date calculator for counting the days to an event, and it
-  // names the ID format, a snowflake, that the decoder reads.
+  // time, the date calculator for counting the days to an event and the online
+  // timer for a countdown that rings on the reader's own device, and it names the
+  // ID format, a snowflake, that the decoder reads.
   const guide = (await text('.prose')).replace(/\s+/g, ' ');
-  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/unix-timestamp-converter/', '/date-calculator/']);
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/unix-timestamp-converter/', '/date-calculator/', '/online-timer/']);
   assert.match(guide, /is <t:-14182940:F>\. The Unix timestamp converter turns any such number into a date\./);
-  assert.match(guide, /To count the days until the event, use the date calculator\./);
+  assert.match(guide, /To count the days until the event, use the date calculator; for a countdown alarm on your own device, the online timer\./);
+  for (const href of await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')))) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
   assert.match(guide, /stored in the ID itself, a “snowflake”: the top 42 bits are milliseconds since the start of 2015/);
 
   // Defaults: the current minute, in the visitor's own time zone.

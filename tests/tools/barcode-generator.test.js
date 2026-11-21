@@ -735,9 +735,13 @@ module.exports = async ({ page, open, assert, base }) => {
     // A linear barcode is not what a phone camera opens a link or a contact from: where
     // the guide helps to choose a type, it sends that need to the QR code generator.
     const guide = (await text('.prose')).replace(/\s+/g, ' ');
-    assert.match(guide, /sold in shops\. For a link or contact card that a phone camera can scan, use the QR code generator\./);
+    assert.match(guide, /licensed from GS1\. For a link or contact card that a phone camera can scan, use the QR code generator\./);
+    // The scanner reads 1D barcodes only through the browser's BarcodeDetector (Chrome on
+    // Android, macOS and ChromeOS; QR codes only elsewhere, and never MSI), so the tip
+    // names those browsers and says "most".
+    assert.match(guide, /Test a printed sample with the scanner that will read it\. The QR code scanner reads most of these barcodes in Chrome on Android, macOS and ChromeOS\./);
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-    assert.deepEqual(links, ['/qr-code-generator/']);
+    assert.deepEqual(links, ['/qr-code-generator/', '/qr-code-scanner/']);
     for (const href of links) {
       assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
     }

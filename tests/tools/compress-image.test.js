@@ -651,4 +651,16 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const outSize = Number((await text('#cmpi-bytes')).match(/JPG: ([\d,]+) bytes/)[1].replace(/,/g, ''));
   assert.ok(outSize < 1080054 * 0.005, `tiny output: ${outSize}`);
   assert.equal(await text('#cmpi-saved'), '99%');
+
+  // A PNG photo is better as JPG: for a plain conversion without a KB target the guide
+  // sends it to the PNG to JPG converter. It says "no target size", the guide's own term,
+  // because "without a size limit" also reads as a converter with no maximum file size.
+  // Every internal link is a tool page.
+  const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
+  assert.match(guide, /For photos, JPG or WebP keeps far more detail at the same size\. To convert PNG photos to JPG with no target size, use the PNG to JPG converter, which shows how much smaller each file gets\./);
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.deepEqual(links, ['/resize-image/', '/png-to-jpg/', '/remove-exif-data/']);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
 };

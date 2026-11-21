@@ -15,12 +15,14 @@
  * phone width (on a fresh page and with the test's results on screen) or at
  * 200% zoom, no text field under 16px on a touch screen,
  * nothing saved in cookies or browser storage, empty .msg live regions still
- * rendered, and valid JSON-LD with no blog-post markup.
+ * rendered, no button that a quick second tap would zoom instead of pressing,
+ * and valid JSON-LD with no blog-post markup.
  *
  * A full run (no slugs) also runs siteChecks: the homepage, About, Privacy and
  * 404 pages, the sitemap, related-tool links, the shared colour tokens, the
- * icon and theme colours in the head, reduced motion, and keyboard scrolling
- * of a guide table that is too wide for a phone.
+ * icon and theme colours in the head, reduced motion, keyboard scrolling of a
+ * guide table that is too wide for a phone, and a long line in a guide's code
+ * block on a phone (on a sample page that only a full run builds).
  *
  * Needs `jekyll` (or $JEKYLL) and the `playwright` package on the module path.
  */
@@ -58,6 +60,36 @@ function toolFile(slug) {
   throw new Error(`No _tools/${slug}.html or .md`);
 }
 
+// No guide has a code block yet, so a full run builds this page, which is in
+// no list and not in the sitemap, through the tool layout: kramdown renders
+// its guide and FAQ answer as on a real tool page (see siteChecks). Its file
+// name must not start with an `exclude` entry of _config.yml, such as tests.
+const CODE_SAMPLE_URL = '/sample-code-block/';
+const CODE_SAMPLE = [
+  '---',
+  'layout: tool',
+  'title: Code block sample',
+  'description: Built only by a full test run, to check that a long line in a code block of a guide or an FAQ answer fits on a phone.',
+  'category: Developer',
+  `permalink: ${CODE_SAMPLE_URL}`,
+  'sitemap: false',
+  'howto: |',
+  '  ## Guide',
+  '',
+  '  ```bash',
+  '  magick input.webp -auto-orient -strip -quality 92 -define png:compression-level=9 output-with-a-long-file-name.png',
+  '  ```',
+  'faq:',
+  '  - q: A question',
+  '    a: |',
+  '      ```',
+  '      data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  '      ```',
+  '---',
+  '<p>A sample page for the test runner.</p>',
+  '',
+].join('\n');
+
 // Builds into a private temp dir so several runs can happen at once.
 function build(onlySlugs) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'tools-site-'));
@@ -69,6 +101,7 @@ function build(onlySlugs) {
     const f = toolFile(slug);
     fs.copyFileSync(f, path.join(src, '_tools', path.basename(f)));
   }
+  if (!onlySlugs.length) fs.writeFileSync(path.join(src, 'sample-code-block.html'), CODE_SAMPLE);
   const out = path.join(work, 'site');
   // cwd matters: Jekyll 3 resolves _layouts relative to the working directory.
   execFileSync(process.env.JEKYLL || 'jekyll', ['build', '--quiet', '-s', src, '-d', out], { stdio: 'inherit', cwd: src });
@@ -117,6 +150,11 @@ async function newPage(browser, base, viewport, problems, options = {}) {
   return { context, page };
 }
 
+// Controls that may be tapped twice in quick succession (Lap, +1 min, a row of
+// choices). iOS Safari can take two quick taps as a double-tap zoom and drop
+// the second one, so _includes/style.css gives them touch-action: manipulation.
+const TAP_TARGETS = 'button, .btn, .check, label, summary, [role="button"], input[type="checkbox"], input[type="radio"], input[type="button"], input[type="submit"], input[type="reset"]';
+
 async function commonChecks(page, problems) {
   const h1s = await page.locator('h1').count();
   if (h1s !== 1) problems.push(`expected exactly one <h1>, found ${h1s}`);
@@ -131,6 +169,14 @@ async function commonChecks(page, problems) {
     .filter(e => getComputedStyle(e).display === 'none' && e.style.display !== 'none')
     .map(e => '#' + e.id));
   if (removed.length) problems.push(`empty .msg elements are display: none, so not in the accessibility tree: ${removed.join(', ')}`);
+
+  // A tool may give a control a touch-action of its own (none on a drag
+  // handle), but auto, which lets a double tap zoom, means the shared rule
+  // was lost or overridden.
+  const zoomable = await page.$$eval(TAP_TARGETS, els => [...new Set(els
+    .filter(e => getComputedStyle(e).touchAction === 'auto')
+    .map(e => (e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map(c => '.' + c).join(''))))]);
+  if (zoomable.length) problems.push(`controls where a quick second tap zooms the page on iPhone instead of pressing again (touch-action: auto): ${zoomable.slice(0, 5).join(', ')}${zoomable.length > 5 ? ` and ${zoomable.length - 5} more` : ''}`);
 
   // Structured data must parse, and a tool page is not a blog post.
   for (const text of await page.$$eval('script[type="application/ld+json"]', els => els.map(e => e.textContent))) {
@@ -396,6 +442,28 @@ async function siteChecks(browser, base, problems) {
       if (!scrolled) problems.push('/case-converter/ at 390px: the Right arrow key does not scroll the focused guide table');
     }
   }
+
+  // A long line in a code block of a guide or an FAQ answer must not make the
+  // page scroll sideways on a phone or at 200% zoom, nor be cut off in a box
+  // that is not a tab stop, which keyboard users could not scroll. The style
+  // sheet wraps the line.
+  for (const [p, viewport] of [[narrow.page, PHONES[0]], [narrow.page, PHONES[1]], [page, ZOOMED]]) {
+    await p.setViewportSize(viewport);
+    await p.goto(base + CODE_SAMPLE_URL, { waitUntil: 'load' });
+    const c = await p.evaluate(width => {
+      for (const d of document.querySelectorAll('details')) d.open = true;
+      const blocks = [...document.querySelectorAll('.prose pre, .faq pre')];
+      return {
+        where: blocks.map(b => (b.closest('.prose') ? 'guide' : 'faq')).sort().join(),
+        cut: blocks.filter(b => getComputedStyle(b).overflowX !== 'visible' && b.scrollWidth > b.clientWidth + 1 && b.getAttribute('tabindex') !== '0').length,
+        overflow: document.documentElement.scrollWidth - width,
+      };
+    }, viewport.width);
+    if (c.where !== 'faq,guide') problems.push(`${CODE_SAMPLE_URL}: expected one code block (pre) in the guide and one in the FAQ answer, found [${c.where}]`);
+    if (c.overflow > 1) problems.push(`${CODE_SAMPLE_URL}: a long line in a code block makes the page scroll sideways at ${viewport.width}px wide (${c.overflow}px overflow)`);
+    if (c.cut) problems.push(`${CODE_SAMPLE_URL}: at ${viewport.width}px wide ${c.cut} code block(s) cut off a long line in a box that is not a tab stop, so a keyboard cannot scroll to the rest`);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
   await narrow.context.close();
   await page.goto(base + '/case-converter/', { waitUntil: 'load' });
   const onDesktop = await guideTables(page);

@@ -9,6 +9,7 @@
 //   motion.jpg   the same JPG complete, followed by an MP4 (ftyp and mdat boxes), as
 //                a motion photo stores its clip after the end-of-image marker
 //   padded.jpg   the same JPG complete, followed by 6000 zero bytes
+//   early.jpg    the same JPG stopped 12 bytes into its image data: Chrome draws none of it
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -174,8 +175,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // (Browsers draw a cut-off JPG with its lower part blank and no error.)
   await page.click('#imc-clear');
   await page.selectOption('#imc-resize', 'none');
-  await page.setInputFiles('#imc-file', ['cut.jpg', 'motion.jpg', 'padded.jpg'].map(fx));
-  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '3 of 3 converted.', null, { timeout: 30000 });
+  await page.setInputFiles('#imc-file', ['cut.jpg', 'motion.jpg', 'padded.jpg', 'early.jpg'].map(fx));
+  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '3 of 4 converted, 1 failed.', null, { timeout: 30000 });
+  // Cut before anything could be drawn: refused, not saved as a blank PNG.
+  assert.equal(await rowText(3), 'early.jpg 635 B The JPG file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again. ×');
   assert.match(await rowText(0), /^cut\.png JPG 120×90, 1\.0 KB → PNG 120×90, .*The file seems to be cut off, so part of the picture may be blank\./);
   near(decodePng((await download(0)).data).at(60, 10), [40, 90, 200, 255], 8, 'cut.jpg: the part before the cut');
   for (const i of [1, 2]) {
