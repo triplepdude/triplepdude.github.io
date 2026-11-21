@@ -1042,15 +1042,11 @@ faq:
     // between two copied pages would point at that hidden copy instead of the page in the file.
     // For the same reason the catalog, which a signature's value may refer to, and the parent of
     // each form field on these pages are not followed: a parent's other kids are fields on other
-    // pages, with their values. The fields keep their look. When every page of the source is in
-    // the new file, nothing of it is left out, so its pages keep their resources as they are:
-    // trimming them means reading the content of every page, which made a file of all the pages
-    // of a big drawing several times slower to make, for nothing. (Merge PDF's buildJob does the
-    // same; a fix in one belongs in the other.)
+    // pages, with their values. The fields keep their look.
     async function buildPart(L, c, list) {
       var N = L.PDFName, out = await L.PDFDocument.create();
       var copier = L.PDFObjectCopier.for(c.doc.context, out.context), map = copier.traversedObjects;
-      var i, k, sctx = c.doc.context, whole = new Set(list).size === c.pages.length;
+      var i, k, sctx = c.doc.context;
       for (i = 0; i < c.pages.length; i++) map.set(c.pages[i].ref, L.PDFNull);
       if (sctx.trailerInfo.Root instanceof L.PDFRef) map.set(sctx.trailerInfo.Root, L.PDFNull);
       list.forEach(function (idx) {
@@ -1068,7 +1064,7 @@ faq:
       });
       var done = new Set();
       for (k = 0; k < list.length; k++) {
-        var node = copier.copy(whole ? c.pages[list[k]].node : pagePrepared(L, c, list[k])), ctx = out.context;
+        var node = copier.copy(pagePrepared(L, c, list[k])), ctx = out.context;
         ctx.assign(refs[k], node);
         var ann = ctx.lookup(node.get(N.of('Annots')));
         if (ann instanceof L.PDFArray) {

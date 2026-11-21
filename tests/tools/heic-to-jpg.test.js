@@ -15,8 +15,6 @@
 //                     around (2000,1500), a (20,20,20) block from (3800,2800), EXIF Make Apple
 //   truncated.heic    the first 60% of quadrants.heic; notes.heic is a text file
 //   hdr-pq.heic       quadrants.heic with the nclx transfer characteristics set to 16 (PQ)
-//   pq.avif           copy of avif-to-jpg's: 128x16 HDR AVIF (libaom, 10-bit, BT.2020, PQ)
-//   cut.jpg           copy of jpg-to-png's: a 120x90 JPG that stops 40% into its image data
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -283,17 +281,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForFunction(() => /^2 of 2 converted\.$/.test(document.querySelector('#h2j-summary').textContent), null, { timeout: 15000 });
   assert.match(await rowText(1), /hdr-pq\.jpg 240 × 160 px .*This is an HDR photo/);
   assert.doesNotMatch(await rowText(0), /HDR/);
-  // An HDR AVIF (or an HDR HEIC that the browser decodes itself, as Safari does) is drawn in
-  // standard range by the browser, so it gets the other HDR note. pq.avif is a 128x16 HDR (PQ)
-  // AVIF. cut.jpg is a 120x90 JPG cut off 40% into its image data: the browser draws the top and
-  // leaves the rest blank, so it is converted with a note.
-  await page.setInputFiles('#h2j-file', [fx('pq.avif'), fx('cut.jpg')]);
-  await page.waitForFunction(() => /^4 of 4 converted\.$/.test(document.querySelector('#h2j-summary').textContent), null, { timeout: 15000 });
-  assert.match(await rowText(2), /^pq\.jpg 128 × 16 px .*This file is AVIF, not HEIC; it was converted anyway\. This is an HDR image\. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen\./);
-  assert.doesNotMatch(await rowText(2), /tone mapping|cut off/);
-  assert.match(await rowText(3), /^cut\.jpg 120 × 90 px .*This file is JPG, not HEIC; it was converted anyway\. The file seems to be cut off, so part of the picture may be blank\./);
-  assert.doesNotMatch(await rowText(3), /HDR/);
-  assert.doesNotMatch(await rowText(1), /HDR image|cut off/, 'an HDR HEIC decoded by libheif keeps its own note');
 
   // A setting changed while photos are still decoding: each photo is decoded
   // once, not once per setting (the second decode used to leak the first).

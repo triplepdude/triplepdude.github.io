@@ -976,11 +976,7 @@ faq:
         it.w = res.width;
         it.h = res.height;
         it.hasAlpha = !!res.hasAlpha;
-        // A cut-off JPEG is not copied: its data stops part-way, and PDF readers fill in the rest their
-        // own way (pdf.js and Poppler paint it grey). Drawn from the decoded pixels instead, its page
-        // shows what the card shows.
-        var warn = res.warnings || [], cut = warn.indexOf('truncated') >= 0;
-        if (res.format === 'jpeg' && !cut) {
+        if (res.format === 'jpeg') {
           var jpg = parseJpeg(new Uint8Array(await file.arrayBuffer()));
           if (copyable(jpg)) {
             // The page uses the stored size and turns it with the matrix, exactly as the photo is copied.
@@ -991,9 +987,6 @@ faq:
         }
         if (res.images > 1) notes.push('“' + name + '” holds ' + res.images + (res.format === 'tiff' ? ' pages' : ' images') + '; only the ' + (res.format === 'tiff' ? 'first page' : 'main image') + ' is added.');
         if (res.animated) notes.push('“' + name + '” is animated; only its first frame is added.');
-        if (cut) notes.push('“' + name + '” seems to be cut off, so part of the picture may be blank.');
-        if (warn.indexOf('hdr') >= 0) notes.push('“' + name + '” is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.');
-        if (warn.indexOf('hdr-mapped') >= 0) notes.push('“' + name + '” is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.');
         k = Math.min(1, THUMB / Math.max(it.w, it.h));
         thumb = await TTImage.encode(res, 'jpeg', { width: Math.max(1, Math.round(res.width * k)), height: Math.max(1, Math.round(res.height * k)), quality: 0.85, background: '#ffffff' });
       } finally {

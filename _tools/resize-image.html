@@ -119,8 +119,6 @@ faq:
 .ri-pick:hover { color: var(--accent); text-decoration: underline; }
 .ri-row-info { color: var(--muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .ri-row-info.is-error { color: var(--danger); }
-.ri-row-note { font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
-.ri-row-note:empty { display: none; }
 @media (max-width: 480px) { .ri-row { gap: 8px; padding: 6px; } .ri-row .ri-dl { padding: 0 10px; } }
 .ri-row .btn.small { flex: 0 0 auto; }
 .ri-row .ri-x { width: 36px; padding: 0; }
@@ -363,13 +361,6 @@ faq:
   var NO_ALPHA = { jpeg: true, bmp: true };
   var canSave = { jpeg: true, png: true, bmp: true, ico: true, webp: true, avif: false };
   var QUALITY_FLOOR = 0.4, EXACT_FLOOR = 0.05;
-  // What the decoder found in the file itself, in the image converter's words.
-  var CUT = 'The file seems to be cut off, so part of the picture may be blank.';
-  var HDR = {
-    hdr: 'This is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.',
-    'hdr-mapped': 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.'
-  };
-  function isCut(it) { return !!it.warnings && it.warnings.indexOf('truncated') >= 0; }
 
   var items = [], current = null, nextId = 1, pastedCount = 0, lastEdited = 'w', renderToken = 0;
   var result = null, resultUrl = null, busy = false, addError = '', renderError = '';
@@ -703,7 +694,7 @@ faq:
     } finally {
       if (done) done();
     }
-    var notes = isCut(it) ? [CUT] : [];
+    var notes = [];
     if (s.fmt !== 'same' && KEY_OF[s.fmt] !== key) notes.push('Your browser cannot save ' + LABEL[KEY_OF[s.fmt]] + ' images, so this is a ' + LABEL[key] + ' file.');
     if (NO_ALPHA[key] && it.hasAlpha && !bgFill(s)) notes.push(LABEL[key] + ' cannot store transparency, so the background is white. Save as PNG or WebP to keep it transparent.');
     else if (t.fit === 'pad' && s.bg === 'transparent' && NO_ALPHA[key]) notes.push(LABEL[key] + ' cannot store transparency, so the background is white. Save as PNG or WebP to keep it transparent.');
@@ -716,7 +707,6 @@ faq:
     if (key === 'ico' && s.icoMulti && Math.max(enc.w, enc.h) > 16) notes.push('The icon file also holds ' + [16, 32, 48].filter(function (x) { return x < Math.max(enc.w, enc.h); }).join(', ') + ' px versions.');
     if (it.frames) notes.push('Only the first frame of the animation is kept.');
     if (it.pages > 1) notes.push('Only the first of its ' + it.pages + ' ' + (it.fmt === 'tiff' ? 'pages' : 'images') + ' is used.');
-    (it.warnings || []).forEach(function (w) { if (HDR[w]) notes.push(HDR[w]); });
     var ow = enc.w, oh = enc.h;
     if (key === 'ico' && ow !== oh) {
       // Icon entries are square: the image is centred on a transparent square the size of its long side.
@@ -810,7 +800,7 @@ faq:
     var li = document.createElement('li');
     li.className = 'ri-row';
     li.dataset.id = it.id;
-    li.innerHTML = '<img alt=""><div class="ri-row-main"><button type="button" class="ri-pick"></button><div class="ri-row-info"></div><div class="ri-row-note"></div></div>' +
+    li.innerHTML = '<img alt=""><div class="ri-row-main"><button type="button" class="ri-pick"></button><div class="ri-row-info"></div></div>' +
       '<button type="button" class="btn secondary small ri-dl">Download</button>' +
       '<button type="button" class="btn secondary small ri-x"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
     $('img', li).src = it.thumb;
@@ -833,8 +823,6 @@ faq:
       var info = $('.ri-row-info', it.el);
       info.textContent = rowInfo(it, s);
       info.classList.toggle('is-error', !!it.error);
-      // A cut-off file is named in its row too, so it stands out in a batch without a preview.
-      $('.ri-row-note', it.el).textContent = isCut(it) && !it.error ? CUT : '';
       $('.ri-pick', it.el).disabled = busy;
       $('.ri-dl', it.el).disabled = busy;
       $('.ri-x', it.el).disabled = busy;
@@ -1103,7 +1091,6 @@ faq:
         it.hasAlpha = !!res.hasAlpha;
         it.frames = res.animated;
         it.pages = res.images;
-        it.warnings = res.warnings || [];
         k = Math.min(1, 80 / Math.max(it.w, it.h));
         thumb = await TTImage.encode(res, 'png', { width: Math.max(1, Math.round(it.w * k)), height: Math.max(1, Math.round(it.h * k)) });
       } catch (e) {
