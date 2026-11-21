@@ -1,0 +1,657 @@
+---
+title: Online Stopwatch with Laps and Milliseconds
+description: Free online stopwatch with lap and split times to the millisecond, fastest and slowest laps, CSV export and full screen. Runs in your browser.
+category: Date & Time
+keywords: [online stopwatch, stopwatch, stopwatch with laps, lap timer, stopwatch with milliseconds, split timer, full screen stopwatch, stopwatch with lap times]
+howto: |
+  ## How to use the stopwatch
+
+  Press **Start** or the Space bar to start. **Lap** (or L) records a lap
+  while the stopwatch runs, **Stop** (or Space) pauses it and **Resume**
+  carries on from the same time. **Reset** (or R) clears the time and the
+  laps once the stopwatch is stopped; straight after a reset the button reads
+  **Undo reset**, in case you pressed it by mistake. **Full screen** (or F)
+  shows big digits for a room or a sports hall.
+
+  | Key | What it does |
+  |---|---|
+  | Space | Start, stop and resume |
+  | L | Record a lap |
+  | R | Reset (when stopped) |
+  | F | Full screen on or off |
+  | Esc | Leave full screen |
+
+  The keys work while the stopwatch is on screen and you are not typing in a
+  field. A press counts from the moment the key or your finger goes down, not
+  when you let go.
+
+  ## Lap time and split time
+
+  On Casio and most sports stopwatches, a **split** is the time from the
+  start to a point in the race, and a **lap** is the time of one segment. The
+  table shows both: **Lap time** is the time since the previous lap, and
+  **Total** is the split. Apps use the words loosely: Strava, for example,
+  calls the time of each mile or kilometre a split.
+
+  Say you press Lap at 1:05.123, 2:06.123 and 3:08.623:
+
+  | Lap | Lap time | Total |
+  |---|---|---|
+  | 1 | 01:05.123 | 01:05.123 |
+  | 2 | 01:01.000 | 02:06.123 |
+  | 3 | 01:02.500 | 03:08.623 |
+
+  Lap 2 is marked fastest and lap 1 slowest, and the average lap is
+  3:08.623 ÷ 3 = 1:02.874. When you stop, the lap in progress becomes the
+  last row of the copy and the download, but only laps recorded with Lap are
+  compared. **Copy laps** gives a table that pastes into a spreadsheet, with a
+  decimal comma if your browser's language writes one (1,5); the CSV file
+  always has full stops.
+
+  ## How accurate is it?
+
+  The time is read from your device's clock, which browsers give to a page
+  to a millisecond or better, and it is worked out from time stamps, so a
+  busy or slow page cannot make it fall behind. The digits are redrawn with
+  the screen, usually 60 times a second, so the last digit jumps in steps of
+  about 16 ms while it runs; the time shown when you stop, and every lap, is
+  exact to the millisecond.
+
+  Your reaction time is the real limit. In a study of 26 timekeepers, trained
+  for the study, timing 200 m sprints with handheld stopwatches, each time
+  was off by 0.15 seconds on average compared with electronic timing, and too
+  fast in two cases out of three (Hetzler et al., 2008). The
+  [reaction time test](/reaction-time-test/) shows your own delay.
+
+  ## In the background, asleep or after a reload
+
+  The stopwatch keeps counting in a background tab, in a minimised window
+  and with the screen off. On most systems the browser's precise clock
+  pauses while the computer or phone sleeps, so the stopwatch also compares
+  the time of day and adds any gap of more than a second; setting the clock
+  back is ignored. The start time and the laps are kept in the page address
+  after the # sign, so a reload, or reopening the tab from your history,
+  carries on where you were.
+
+  To count down instead, use the [online timer](/online-timer/).
+faq:
+  - q: Is anything I time sent or saved anywhere?
+    a: Nothing is sent. The stopwatch runs in your browser, and the start time and laps live only in the page address after the # sign, which browsers never send to a server; like any address, it stays in your browser history. Nothing is kept in cookies or browser storage.
+  - q: Can I use the stopwatch on a phone?
+    a: Yes. A lap is taken the moment your finger touches the button, and the screen stays on while the stopwatch runs if your browser allows it. Safari on the iPhone has no full screen for web pages, so there the full-screen view fills the browser window; turn the phone sideways for bigger digits.
+  - q: How many laps can it record?
+    a: Up to 1,000 laps between resets, over at most 999 hours 59 minutes 59.999 seconds, where it stops by itself. The table, the average and the fastest and slowest marks cover every lap; after the last one, copy or download them, reset and carry on.
+  - q: Why can't I reset while it is running?
+    a: So that a stray press of R or Reset cannot wipe your laps. Stop the stopwatch first, then reset; if you reset by mistake, Undo reset brings everything back until you start again.
+---
+<style>
+.sw-panel { text-align: center; }
+.sw-time { margin: 4px 0 2px; font-size: clamp(2.6rem, 15vw, 6.5rem); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sw-time.is-long { font-size: clamp(1.9rem, 11vw, 4.5rem); }
+.sw-ms { font-size: 0.62em; }
+.sw-sub { min-height: 1.6em; margin: 0 0 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sw-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 0 0 10px; }
+.sw-buttons .btn { min-width: 7.5em; min-height: 52px; font-size: 1.05rem; touch-action: manipulation; }
+.sw .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.sw .btn.is-stop { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+.sw .btn.is-stop:hover { background: var(--danger-soft); border-color: var(--text); }
+.sw-keys { margin: 0 0 4px; }
+.sw-keys kbd { padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); color: var(--text); font: 12px/1.6 var(--mono); }
+.sw-wake { margin-top: 6px; }
+.sw-wake-note:empty { display: none; }
+.sw-laps { margin-top: 18px; text-align: left; }
+.sw-laps .stats { margin-bottom: 12px; }
+.sw-laps .stat b { font-variant-numeric: tabular-nums; }
+.sw-laps .stat small { display: block; color: var(--muted); font-size: 12px; }
+.sw-table th.num, .sw-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sw-table td:first-child { white-space: nowrap; }
+.sw-tag { display: inline-block; margin-left: 6px; padding: 0 7px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.5; }
+.sw-tag:empty { display: none; }
+.sw-fast { color: var(--accent); }
+.sw-slow { color: var(--danger); }
+.sw-table tr.sw-now td, .sw-table tr.sw-now .sw-tag { color: var(--muted); }
+.sw-panel.is-full { position: fixed; inset: 0; z-index: 1000; overflow: auto; overscroll-behavior: contain; margin: 0; padding: max(24px, 6vh) 16px 24px; background: var(--bg); color: var(--text); }
+.sw-panel.is-full .sw-time { font-size: min(17vw, 34vh); }
+.sw-panel.is-full .sw-time.is-long { font-size: min(11vw, 24vh); }
+.sw-panel.is-full .sw-sub { font-size: min(5vw, 6vh); }
+.sw-panel.is-full .sw-laps { max-width: 760px; margin-inline: auto; }
+:root.sw-noscroll, :root.sw-noscroll body { overflow: hidden; }
+@media (max-width: 480px) {
+  table.data.sw-table th, table.data.sw-table td { padding: 8px 4px; }
+  /* The tag goes under the lap number when the columns need the room. */
+  .sw-table td:first-child { white-space: normal; }
+  .sw-table .sw-tag { margin-left: 0; }
+  .sw-buttons .btn { min-width: 0; flex: 1 1 40%; padding: 0 8px; font-size: 1rem; }
+}
+</style>
+
+<div class="sw" id="sw">
+  <div class="sw-panel" id="sw-panel">
+    <div class="sw-time" id="sw-time" role="timer"><span id="sw-hms">00:00</span><span class="sw-ms" id="sw-ms">.000</span></div>
+    <p class="sw-sub" id="sw-sub"></p>
+    <div class="sw-buttons">
+      <button type="button" class="btn" id="sw-start">Start</button>
+      <button type="button" class="btn secondary" id="sw-lap" aria-disabled="true">Lap</button>
+      <button type="button" class="btn secondary" id="sw-reset" aria-disabled="true">Reset</button>
+      <button type="button" class="btn secondary" id="sw-full">Full screen</button>
+    </div>
+    <p class="hint sw-keys">Keys: <kbd>Space</kbd> start or stop, <kbd>L</kbd> lap, <kbd>R</kbd> reset, <kbd>F</kbd> full screen</p>
+    <p class="msg error" id="sw-msg" role="alert"></p>
+    <div class="sw-laps" id="sw-laps" hidden>
+      <div class="stats">
+        <div class="stat"><b id="sw-count">0</b><span>Laps</span></div>
+        <div class="stat"><b id="sw-avg">–</b><span>Average lap</span></div>
+        <div class="stat"><b id="sw-best">–</b><span>Fastest lap</span><small id="sw-best-which"></small></div>
+        <div class="stat"><b id="sw-worst">–</b><span>Slowest lap</span><small id="sw-worst-which"></small></div>
+      </div>
+      <div class="table-wrap">
+        <table class="data sw-table">
+          <caption class="visually-hidden">Laps, newest first</caption>
+          <thead><tr><th scope="col">Lap</th><th scope="col" class="num">Lap time</th><th scope="col" class="num">Total</th></tr></thead>
+          <tbody id="sw-rows"></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn secondary small" id="sw-copy">Copy laps</button>
+        <button type="button" class="btn secondary small" id="sw-csv">Download laps (.csv)</button>
+      </div>
+    </div>
+    <p class="visually-hidden" id="sw-status" role="status"></p>
+  </div>
+  <div class="sw-wake" id="sw-wake-row">
+    <label class="check"><input type="checkbox" id="sw-wake" checked> Keep the screen on while the stopwatch runs</label>
+    <p class="hint sw-wake-note" id="sw-wake-note"></p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var MAX_LAPS = 1000;
+  // One limit for writing and reading the page address: 1,000 laps of up
+  // to 13 digits each, plus the start time, always fit.
+  var MAX_HASH = 16000;
+  var MAX_MS = 3599999999; // 999:59:59.999, the most the digits show on a narrow phone
+  var BAD_HASH = 'The stopwatch in the page address could not be read, so it starts from zero.';
+  var LONG_HASH = 'The stopwatch in the page address is longer than 16,000 characters, too long to read, so it starts from zero.';
+  var LONG_TIME = 'The stopwatch in the page address has run for more than 999 hours, the most it shows, so it starts from zero.';
+  var MAXED = 'The stopwatch stopped at 999:59:59.999, the most it shows.';
+  var LIMIT = 'This stopwatch keeps up to 1,000 laps. Copy or download them, then reset to record more.';
+
+  var root = $('#sw'), panel = $('#sw-panel');
+  var startBtn = $('#sw-start'), lapBtn = $('#sw-lap'), resetBtn = $('#sw-reset'), fullBtn = $('#sw-full');
+  var timeEl = $('#sw-time'), hmsEl = $('#sw-hms'), msEl = $('#sw-ms'), subEl = $('#sw-sub');
+  var lapsBox = $('#sw-laps'), rowsEl = $('#sw-rows');
+  var statusEl = $('#sw-status'), msgEl = $('#sw-msg');
+  var wakeBox = $('#sw-wake'), wakeNote = $('#sw-wake-note');
+  var baseTitle = document.title;
+
+  // ---------- Clock ----------
+  // Milliseconds since the page opened. performance.now() is precise but
+  // stops while most computers and phones sleep; Date.now() keeps going but
+  // jumps when the clock is set. Each reading adds the performance.now()
+  // step, or the Date.now() step when that is more than a second longer
+  // (the device slept), and never goes backwards.
+  var clock = (function () {
+    var p0 = performance.now(), w0 = Date.now(), t = 0;
+    return function () {
+      var p = performance.now(), w = Date.now(), dp = p - p0, dw = w - w0;
+      t += dw - dp > 1000 ? dw : (dp > 0 ? dp : 0);
+      p0 = p; w0 = w;
+      return t;
+    };
+  })();
+
+  // ---------- State ----------
+  var running = false;
+  var banked = 0;     // ms counted before the current run
+  var runStart = 0;   // clock() when the current run began
+  var splits = [];    // total time in whole ms at each lap
+  var undo = null;    // what the last reset cleared
+  var undoMode = false;
+  var lastChange = -Infinity; // clock() of the last start, stop, lap or reset
+
+  function elapsed(at) { return running ? banked + (at - runStart) : banked; }
+  function whole(x) { return x > 0 ? Math.floor(x + 1e-6) : 0; }
+  function lastSplit() { return splits.length ? splits[splits.length - 1] : 0; }
+  function lapMs(i) { return splits[i] - (i ? splits[i - 1] : 0); }
+
+  // ---------- Formatting ----------
+  function pad(n, w) { n = String(n); while (n.length < w) n = '0' + n; return n; }
+  function parts(ms) {
+    return { h: Math.floor(ms / 3600000), m: Math.floor(ms / 60000) % 60, s: Math.floor(ms / 1000) % 60, f: ms % 1000 };
+  }
+  // 01:05.123, or 1:02:05.123 from one hour on
+  function fmt(ms) {
+    var p = parts(ms);
+    return (p.h ? p.h + ':' + pad(p.m, 2) : pad(p.m, 2)) + ':' + pad(p.s, 2) + '.' + pad(p.f, 3);
+  }
+  // 0:01:05.123 in files, so every row has the same columns
+  function fmtFull(ms) { var p = parts(ms); return p.h + ':' + pad(p.m, 2) + ':' + pad(p.s, 2) + '.' + pad(p.f, 3); }
+  function secs(ms) { return Math.floor(ms / 1000) + '.' + pad(ms % 1000, 3); }
+  function fmtShort(ms) { var p = parts(ms); return (p.h ? p.h + ':' + pad(p.m, 2) : p.m) + ':' + pad(p.s, 2); }
+  function spoken(ms) {
+    var p = parts(ms), out = [];
+    if (p.h) out.push(p.h + (p.h === 1 ? ' hour' : ' hours'));
+    if (p.m) out.push(p.m + (p.m === 1 ? ' minute' : ' minutes'));
+    if (p.s || p.f || !out.length) {
+      var s = p.s + (p.f ? '.' + pad(p.f, 3).replace(/0+$/, '') : '');
+      out.push(s + (s === '1' ? ' second' : ' seconds'));
+    }
+    return out.join(' ');
+  }
+  function lapsWord(n) { return n.toLocaleString('en-GB') + (n === 1 ? ' lap' : ' laps'); }
+  function listLaps(idx) {
+    if (idx.length === 1) return 'lap ' + idx[0];
+    if (idx.length <= 3) return 'laps ' + idx.slice(0, -1).join(', ') + ' and ' + idx[idx.length - 1];
+    return idx.length + ' laps';
+  }
+
+  function say(text) { if (statusEl.textContent !== text) statusEl.textContent = text; }
+  function showMsg(text) { if (msgEl.textContent !== text) msgEl.textContent = text; }
+
+  // ---------- Drawing ----------
+  var nowRow = document.createElement('tr');
+  nowRow.className = 'sw-now';
+  nowRow.innerHTML = '<td><span class="sw-n"></span> <span class="sw-tag"></span></td><td class="num"></td><td class="num"></td>';
+  var nowNum = nowRow.querySelector('.sw-n'), nowTag = nowRow.querySelector('.sw-tag');
+  var nowLap = nowRow.cells[1], nowTotal = nowRow.cells[2];
+  var shown = {};
+  function put(el, key, text) { if (shown[key] !== text) { shown[key] = text; el.textContent = text; } }
+
+  function paint(at) {
+    var e = whole(elapsed(at)), s = fmt(e), dot = s.lastIndexOf('.');
+    put(hmsEl, 'hms', s.slice(0, dot));
+    put(msEl, 'ms', s.slice(dot));
+    var long = s.length > 11;
+    if (shown.long !== long) { shown.long = long; timeEl.classList.toggle('is-long', long); }
+    if (splits.length) {
+      var cur = Math.max(0, e - lastSplit());
+      put(subEl, 'sub', 'Lap ' + (splits.length + 1) + ' · ' + fmt(cur));
+      put(nowNum, 'nn', String(splits.length + 1));
+      put(nowTag, 'nt', running ? 'Running' : cur ? 'At stop' : '');
+      put(nowLap, 'nl', fmt(cur));
+      put(nowTotal, 'ntot', fmt(e));
+    } else put(subEl, 'sub', '');
+    var title = running || e ? fmtShort(e) + (running ? '' : ' stopped') + ' · ' + baseTitle : baseTitle;
+    if (document.title !== title) document.title = title;
+  }
+
+  function lapRow(i) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td><span class="sw-n"></span> <span class="sw-tag"></span></td><td class="num"></td><td class="num"></td>';
+    tr.querySelector('.sw-n').textContent = String(i + 1);
+    tr.cells[1].textContent = fmt(lapMs(i));
+    tr.cells[2].textContent = fmt(splits[i]);
+    tr._tag = tr.querySelector('.sw-tag');
+    return tr;
+  }
+  var rowEls = [], tagged = [];
+  function rebuildRows() {
+    rowsEl.textContent = '';
+    rowEls = []; tagged = [];
+    rowsEl.appendChild(nowRow);
+    var frag = document.createDocumentFragment();
+    for (var i = splits.length - 1; i >= 0; i--) { rowEls[i] = lapRow(i); frag.appendChild(rowEls[i]); }
+    rowsEl.appendChild(frag);
+    marks();
+  }
+  function addRow(i) {
+    rowEls[i] = lapRow(i);
+    rowsEl.insertBefore(rowEls[i], nowRow.nextSibling);
+    marks();
+  }
+  // Fastest and slowest of the recorded laps (ties are all marked; nothing
+  // is marked while every lap is the same).
+  function marks() {
+    tagged.forEach(function (tr) { tr._tag.textContent = ''; tr._tag.className = 'sw-tag'; });
+    tagged = [];
+    var n = splits.length;
+    lapsBox.hidden = !n;
+    $('#sw-count').textContent = n.toLocaleString('en-GB');
+    $('#sw-avg').textContent = n ? fmt(Math.floor((2 * splits[n - 1] + n) / (2 * n))) : '–';
+    var min = Infinity, max = -1, i, d, fast = [], slow = [];
+    for (i = 0; i < n; i++) { d = lapMs(i); if (d < min) min = d; if (d > max) max = d; }
+    if (n >= 2 && min !== max) {
+      for (i = 0; i < n; i++) {
+        d = lapMs(i);
+        if (d !== min && d !== max) continue;
+        var tag = rowEls[i]._tag;
+        tag.textContent = d === min ? 'Fastest' : 'Slowest';
+        tag.className = 'sw-tag ' + (d === min ? 'sw-fast' : 'sw-slow');
+        tagged.push(rowEls[i]);
+        (d === min ? fast : slow).push(i + 1);
+      }
+    }
+    $('#sw-best').textContent = fast.length ? fmt(min) : '–';
+    $('#sw-best-which').textContent = fast.length ? listLaps(fast) : '';
+    $('#sw-worst').textContent = slow.length ? fmt(max) : '–';
+    $('#sw-worst-which').textContent = slow.length ? listLaps(slow) : '';
+  }
+
+  function setOff(btn, off) { btn.setAttribute('aria-disabled', off ? 'true' : 'false'); }
+  function syncButtons() {
+    var e = whole(elapsed(clock()));
+    startBtn.textContent = running ? 'Stop' : e ? 'Resume' : 'Start';
+    startBtn.classList.toggle('is-stop', running);
+    setOff(lapBtn, !running || splits.length >= MAX_LAPS);
+    undoMode = !running && !e && !splits.length && !!undo;
+    resetBtn.textContent = undoMode ? 'Undo reset' : 'Reset';
+    setOff(resetBtn, !undoMode && (running || (!e && !splits.length)));
+  }
+
+  // ---------- Page address ----------
+  var written = location.hash;
+  function hashText() {
+    var e = whole(elapsed(clock()));
+    if (!running && !e && !splits.length) return '';
+    var s = running ? 'r' + (Date.now() - e) : 'p' + e;
+    if (splits.length) s += ';' + splits.map(function (v, i) { return v - (i ? splits[i - 1] : 0); }).join(',');
+    return s;
+  }
+  var retry = 0;
+  function writeHash() {
+    var h = hashText();
+    if (h.length > MAX_HASH) return; // 1,000 laps always fit, so this never happens
+    var url = location.pathname + location.search + (h ? '#' + h : '');
+    try { history.replaceState(history.state, '', url); } catch (err) {
+      // Safari refuses more than 100 address changes in 30 (newer versions: 10) seconds; try again shortly.
+      if (!retry) retry = setTimeout(function () { retry = 0; writeHash(); }, 1000);
+      return;
+    }
+    written = location.hash;
+  }
+  function readHash(raw) {
+    var h = raw.charAt(0) === '#' ? raw.slice(1) : raw;
+    if (!h) return { empty: true };
+    if (h.length > MAX_HASH) return { error: LONG_HASH };
+    try { h = decodeURIComponent(h); } catch (err) { return { error: BAD_HASH }; }
+    var m = /^([rp])(\d{1,15})(?:;(\d{1,13}(?:,\d{1,13})*))?$/.exec(h);
+    if (!m) return { error: BAD_HASH };
+    var deltas = m[3] ? m[3].split(',') : [];
+    if (deltas.length > MAX_LAPS) return { error: BAD_HASH };
+    var list = [], total = 0;
+    for (var i = 0; i < deltas.length; i++) { total += Number(deltas[i]); list.push(total); }
+    var e;
+    if (m[1] === 'r') e = Math.max(Date.now() - Number(m[2]), total);
+    else { e = Number(m[2]); if (e < total) return { error: BAD_HASH }; }
+    if (!(e <= MAX_MS)) return { error: LONG_TIME };
+    return { running: m[1] === 'r', elapsed: e, splits: list };
+  }
+  // An address that names a part of this page, such as a heading of the
+  // guide, is a link to it, not a stopwatch. The guide comes after this
+  // script, so the check waits until the whole page has been read.
+  function hashError(text) {
+    function show() {
+      var id = location.hash.slice(1);
+      try { id = decodeURIComponent(id); } catch (err) { /* kept as typed */ }
+      if (!id || !document.getElementById(id)) showMsg(text);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+    else show();
+  }
+  function load(st) {
+    running = st.running; banked = st.elapsed; runStart = clock(); splits = st.splits; undo = null;
+    rebuildRows();
+    showMsg(splits.length >= MAX_LAPS ? LIMIT : '');
+    commit();
+  }
+
+  // ---------- Animation and background ----------
+  // A stopwatch left running for 1,000 hours stops at 999:59:59.999.
+  function overMax(at) {
+    if (!running || elapsed(at) < MAX_MS) return false;
+    doStop(runStart + MAX_MS - banked);
+    showMsg(MAXED);
+    return true;
+  }
+  function refresh() { var at = clock(); if (!overMax(at)) paint(at); }
+  var raf = 0, ticker = 0;
+  function frame() { raf = 0; refresh(); if (running && !document.hidden) raf = requestAnimationFrame(frame); }
+  function loop() {
+    if (running && !document.hidden && !raf) raf = requestAnimationFrame(frame);
+    if (running && !ticker) ticker = setInterval(function () { if (document.hidden) refresh(); }, 1000);
+    if (!running && ticker) { clearInterval(ticker); ticker = 0; }
+  }
+
+  var wake = null, wakeBusy = false;
+  function wantWake() { return running && wakeBox.checked && document.visibilityState === 'visible'; }
+  function updateWake() {
+    if (!navigator.wakeLock) return;
+    if (wantWake() && !wake && !wakeBusy) {
+      wakeBusy = true;
+      navigator.wakeLock.request('screen').then(function (lock) {
+        wakeBusy = false;
+        wake = lock;
+        wakeNote.textContent = '';
+        lock.addEventListener('release', function () { if (wake === lock) wake = null; });
+        if (!wantWake()) updateWake();
+      }, function () {
+        wakeBusy = false;
+        wakeNote.textContent = 'The browser did not let this page keep the screen on, so it may turn off as usual.';
+      });
+    } else if (!wantWake() && wake) {
+      var lock = wake;
+      wake = null;
+      lock.release().catch(function () {});
+    }
+  }
+  if (!navigator.wakeLock) $('#sw-wake-row').hidden = true;
+  wakeBox.addEventListener('change', updateWake);
+
+  function commit() {
+    lastChange = clock();
+    syncButtons();
+    paint(clock());
+    writeHash();
+    loop();
+    updateWake();
+  }
+
+  // ---------- Actions ----------
+  function doStart(at) {
+    if (running) return;
+    var resumed = whole(banked);
+    running = true; runStart = at; undo = null;
+    commit();
+    say(resumed ? 'Resumed at ' + spoken(resumed) + '.' : 'Started.');
+  }
+  function doStop(at) {
+    if (!running) return;
+    banked = Math.min(elapsed(at), MAX_MS); running = false;
+    commit();
+    say('Stopped at ' + spoken(whole(banked)) + '.');
+  }
+  function doLap(at) {
+    if (!running || overMax(at)) return;
+    if (splits.length >= MAX_LAPS) { showMsg(LIMIT); return; }
+    var total = Math.max(whole(elapsed(at)), lastSplit()), before = lastSplit();
+    splits.push(total);
+    addRow(splits.length - 1);
+    commit();
+    if (splits.length >= MAX_LAPS) showMsg(LIMIT);
+    say('Lap ' + splits.length + ': ' + spoken(total - before) + '. Total ' + spoken(total) + '.');
+  }
+  function doReset() {
+    if (running) { say('Stop the stopwatch before you reset it.'); return; }
+    var e = whole(banked);
+    if (!e && !splits.length) return;
+    undo = { banked: banked, splits: splits };
+    banked = 0; splits = [];
+    rebuildRows();
+    showMsg('');
+    commit();
+    say('Reset to zero. Undo reset brings back ' + spoken(e) + (undo.splits.length ? ' and ' + lapsWord(undo.splits.length) : '') + '.');
+  }
+  function doUndo() {
+    if (!undo || running || whole(banked) || splits.length) return;
+    banked = undo.banked; splits = undo.splits; undo = null;
+    rebuildRows();
+    showMsg(splits.length >= MAX_LAPS ? LIMIT : '');
+    commit();
+    say('Restored ' + spoken(whole(banked)) + (splits.length ? ' and ' + lapsWord(splits.length) : '') + '.');
+  }
+
+  // A press counts from when the pointer or key went down on the button,
+  // committed on click, so sliding off the button still cancels it.
+  var press = null;
+  function pressTime(btn) {
+    var p = press, now = clock();
+    press = null;
+    return p && p.btn === btn && now - p.t < 5000 && p.t >= lastChange ? p.t : now;
+  }
+  [startBtn, lapBtn, resetBtn].forEach(function (b) {
+    b.addEventListener('pointerdown', function (e) { if (e.button === 0) press = { btn: b, t: clock() }; });
+    b.addEventListener('keydown', function (e) {
+      if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) press = { btn: b, t: clock() };
+    });
+  });
+  document.addEventListener('pointerup', function (e) { if (press && !press.btn.contains(e.target)) press = null; }, true);
+  // A touch that became a scroll is no press.
+  document.addEventListener('pointercancel', function () { press = null; }, true);
+  // A mouse click does not move the focus to a button, so Space stays the
+  // start/stop key after clicking one (as in Safari). Tab still reaches them.
+  root.addEventListener('mousedown', function (e) {
+    if (e.button === 0 && e.target.closest && e.target.closest('button')) e.preventDefault();
+  });
+
+  startBtn.addEventListener('click', function () {
+    var at = pressTime(startBtn);
+    if (running) doStop(at); else doStart(at);
+  });
+  lapBtn.addEventListener('click', function () {
+    var at = pressTime(lapBtn);
+    if (lapBtn.getAttribute('aria-disabled') === 'true') {
+      if (splits.length >= MAX_LAPS) showMsg(LIMIT);
+      else if (!running) say('Start the stopwatch to record laps.');
+      return;
+    }
+    doLap(at);
+  });
+  resetBtn.addEventListener('click', function () {
+    pressTime(resetBtn);
+    if (undoMode) { doUndo(); return; }
+    if (resetBtn.getAttribute('aria-disabled') === 'true') { if (running) say('Stop the stopwatch before you reset it.'); return; }
+    doReset();
+  });
+
+  // ---------- Full screen ----------
+  // The Fullscreen API where the browser has it (not on iPhone), and in any
+  // case a view that fills the window. The rest of the page is made inert
+  // meanwhile, so Tab stays in the stopwatch.
+  function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+  var inerted = [];
+  function setInert(on) {
+    if (!on) { inerted.forEach(function (s) { s.inert = false; }); inerted = []; return; }
+    for (var el = panel; el.parentElement; el = el.parentElement) {
+      for (var s = el.parentElement.firstElementChild; s; s = s.nextElementSibling) {
+        if (s === el || s.inert || /^(SCRIPT|STYLE|LINK|META|TEMPLATE)$/.test(s.tagName) || s.matches('[aria-live],[role="status"],[role="alert"]')) continue;
+        s.inert = true;
+        inerted.push(s);
+      }
+      if (el.parentElement === document.body) break;
+    }
+  }
+  function quiet(p) { if (p && p.catch) p.catch(function () {}); }
+  function setFull(on) {
+    if (on === panel.classList.contains('is-full')) return;
+    panel.classList.toggle('is-full', on);
+    document.documentElement.classList.toggle('sw-noscroll', on);
+    setInert(on);
+    fullBtn.textContent = on ? 'Exit full screen' : 'Full screen';
+    try {
+      if (on) {
+        var req = panel.requestFullscreen || panel.webkitRequestFullscreen;
+        if (req) quiet(req.call(panel));
+      } else if (fsElement() === panel) {
+        quiet((document.exitFullscreen || document.webkitExitFullscreen).call(document));
+      }
+    } catch (err) { /* the window-filling view stays */ }
+  }
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (type) {
+    document.addEventListener(type, function () { if (!fsElement() && panel.classList.contains('is-full')) setFull(false); });
+  });
+  fullBtn.addEventListener('click', function () { setFull(!panel.classList.contains('is-full')); });
+
+  // ---------- Keys ----------
+  function letter(e) {
+    var k = e.key || '';
+    if (/^[a-z]$/i.test(k)) return k.toLowerCase();
+    var m = /^Key([A-Z])$/.exec(e.code || '');
+    return m && k.length === 1 && !/[\x20-\x7e]/.test(k) ? m[1].toLowerCase() : '';
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && panel.classList.contains('is-full') && !fsElement()) { setFull(false); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    var t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+    // Keys belong to the page (scrolling, links) unless focus is in the
+    // stopwatch, or nothing is focused while the stopwatch is on screen.
+    if (t && t.closest && !t.closest('#sw')) {
+      if (t !== document.body && t !== document.documentElement) return;
+      var r = panel.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;
+    }
+    var at = clock();
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space presses those
+      e.preventDefault();
+      if (!e.repeat) { if (running) doStop(at); else doStart(at); }
+      return;
+    }
+    var c = letter(e);
+    if (!c || e.shiftKey) return;
+    if (c === 'l' || c === 'r' || c === 'f') e.preventDefault();
+    if (e.repeat) return;
+    if (c === 'l') { if (running) doLap(at); else say('Start the stopwatch to record laps.'); }
+    else if (c === 'r') doReset();
+    else if (c === 'f') setFull(!panel.classList.contains('is-full'));
+  });
+
+  // ---------- Copy and download ----------
+  // Recorded laps, and once stopped the lap in progress, which Stop ended.
+  function exportRows() {
+    var out = [], prev = 0;
+    splits.forEach(function (s, i) { out.push([i + 1, s - prev, s]); prev = s; });
+    var e = whole(elapsed(clock()));
+    if (!running && e > prev) out.push([splits.length + 1, e - prev, e]);
+    return out;
+  }
+  // Copied text uses the decimal comma of a language that writes 1,5, as a
+  // spreadsheet in that language reads 65.123 as 65123. The CSV file keeps
+  // points, as the format expects.
+  var comma = (function () {
+    try { return new Intl.NumberFormat().format(1.5) === '1,5'; } catch (err) { return false; }
+  })();
+  function table(sep, mark) {
+    return [['Lap', 'Lap time', 'Total time', 'Lap (s)', 'Total (s)']].concat(exportRows().map(function (r) {
+      return [r[0], fmtFull(r[1]), fmtFull(r[2]), secs(r[1]), secs(r[2])].map(function (c) { return String(c).replace('.', mark); });
+    })).map(function (r) { return r.join(sep); });
+  }
+  $('#sw-copy').addEventListener('click', function (e) { TT.copy(table('\t', comma ? ',' : '.').join('\n'), e.currentTarget); });
+  $('#sw-csv').addEventListener('click', function () {
+    var lines = table(',', '.');
+    TT.download('stopwatch-laps.csv', lines.join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
+    say('Downloaded ' + lapsWord(lines.length - 1) + '.');
+  });
+
+  // ---------- Start ----------
+  document.addEventListener('visibilitychange', function () { refresh(); loop(); updateWake(); });
+  window.addEventListener('pageshow', function () { syncButtons(); refresh(); loop(); updateWake(); });
+  window.addEventListener('hashchange', function () {
+    if (location.hash === written) return;
+    var st = readHash(location.hash);
+    if (st.error) { hashError(st.error); return; }
+    if (!st.empty) load(st);
+  });
+
+  var first = readHash(location.hash);
+  rebuildRows();
+  if (first.error) hashError(first.error);
+  else if (!first.empty) load(first);
+  syncButtons();
+  paint(clock());
+  loop();
+})();
+</script>

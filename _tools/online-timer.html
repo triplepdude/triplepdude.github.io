@@ -1,0 +1,1165 @@
+---
+title: "Online Timer: Countdown Timer with Alarm"
+description: Set a countdown with presets or any hours, minutes and seconds, pick an alarm sound, run several timers at once and go full screen. Runs in your browser.
+category: Date & Time
+keywords: [online timer, timer, countdown timer, timer with alarm, 10 minute timer, 5 minute timer, multiple timers, full screen timer, timer with sound]
+howto: |
+  ## How to set a timer
+
+  Type the hours, minutes and seconds and press **Start** or Enter, or press
+  one of the presets from 1 minute to 1 hour, which start at once. Decimals
+  work in every box: 1.5 or 1,5 hours is 1 hour 30 minutes, and 90 minutes
+  becomes 1:30:00. A number such as 1,500 could be 1.5 or 1500, so the box
+  asks you to type one of those instead. **Pause** stops the countdown and **Resume** carries on;
+  **+1 min** adds a minute, even to a timer that has just rung; **Reset**
+  goes back to the time you set.
+
+  For a 10-minute timer you can also open `/online-timer/#10m` and bookmark
+  it. The address takes hours, minutes and seconds such as `#1h30m` or
+  `#90s`, clock times such as `#5:00` or `#1:30:00`, a plain number of
+  minutes (`#10`), and several timers separated by commas (`#10m,3m`).
+
+  | Key | What it does |
+  |---|---|
+  | Space | Start, pause or resume; stops a ringing alarm |
+  | R | Reset |
+  | F | Full screen on or off |
+  | Esc | Stop the alarm; leave full screen |
+
+  Keys act on the timer you used last, and not while you type in a box.
+
+  ## Several timers at once
+
+  **Add a timer** for each thing you are timing, up to 10, and give each a
+  name such as "Pasta". Each one counts down and rings on its own, and the
+  tab title shows the one that ends next, so you can follow it from another
+  tab.
+
+  ## Is it accurate in a background tab?
+
+  The countdown runs to a fixed end time on your device's clock, shown under
+  the digits, rather than counting ticks, so it never runs slow. Chrome runs
+  a background tab's timers at most once a second, and once a page has been
+  hidden for 5 minutes without playing sound, repeating timers only once a
+  minute. So the check for the end is started straight from your click, and
+  once a click has let the page play sound, the alarm is also scheduled in
+  advance on the sound card's clock, which keeps time in a background tab.
+  The countdown in the tab title is redrawn by a repeating timer, so after
+  those 5 minutes it can lag by up to a minute; the alarm does not.
+
+  If the computer sleeps, the timer catches up when it wakes. A timer that
+  ended more than a minute earlier shows the time it ended instead of
+  ringing late.
+
+  Phones may pause pages they do not show. On an iPhone or iPad, Safari pauses
+  the page soon after you switch apps or lock the screen, so the alarm cannot
+  sound until you come back to it, and not at all once the timer ended more
+  than a minute before. The page asks to keep the screen on while a timer
+  runs; for an alarm you cannot miss, use the phone's Clock app.
+
+  ## No sound on an iPhone?
+
+  - Most browsers let a page play sound only after you tap or click on it;
+    Start or a preset counts. After a reload, tap anywhere on the page once.
+  - Safari mutes sound that a page makes itself, like this alarm, while the
+    iPhone is in silent mode, though music and videos still play.
+  - Press **Test sound** to check the volume, or try the
+    [speaker test](/speaker-test/).
+
+  To time something as it happens, use the [stopwatch](/stopwatch/).
+faq:
+  - q: Is anything uploaded or saved?
+    a: No. The timers run in your browser. Their lengths, names and end times are kept only in the page address after the # sign, which browsers never send to a server, so a reload keeps them; nothing goes into cookies or browser storage.
+  - q: Can I get a notification when a timer ends?
+    a: Yes, in desktop browsers. Tick "Show a notification" and allow notifications when the browser asks. Chrome on Android can show them only through a service worker, and Safari on iPhone and iPad only for web apps added to the Home Screen; this page uses neither, so there the alarm and the tab title tell you instead.
+  - q: What happens if I close the tab?
+    a: A closed page cannot ring. Reopen it from your history, or with Ctrl+Shift+T (Cmd+Shift+T on a Mac), and the timers come back from the page address; one that is still running carries on, and one that ended meanwhile shows when it ended.
+  - q: How do I make the alarm louder?
+    a: The volume slider works within your device's own volume, so turn that up too and check with Test sound. The Beeps and Alarm clock sounds are pitched around 2,000 Hz, close to the 2,000 to 5,000 Hz range where hearing is most sensitive, so at the same volume they sound louder than Soft.
+---
+<style>
+.ot-list { display: grid; gap: 16px; margin-bottom: 16px; }
+.ot-card { text-align: center; min-width: 0; }
+.ot-list.is-multi .ot-card { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.ot-head { display: flex; gap: 8px; align-items: center; justify-content: center; margin-bottom: 10px; }
+.ot .ot-name { max-width: 16rem; text-align: center; font-weight: 600; }
+.ot-card.is-ready .ot-meta { display: none; }
+.ot-set { display: flex; justify-content: center; align-items: flex-start; gap: 4px; margin: 0 auto 4px; max-width: 30rem; }
+.ot-unit { display: flex; flex-direction: column; align-items: stretch; flex: 1 1 0; min-width: 0; max-width: 8rem; }
+.ot .ot-in { min-height: 0; padding: 4px 2px; text-align: center; font-size: clamp(2rem, 9vw, 3.5rem); font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.ot-unit label { color: var(--muted); font-size: 13px; font-weight: 600; }
+.ot-colon { padding-top: 0.15em; font-size: clamp(2rem, 9vw, 3.5rem); font-weight: 700; line-height: 1.2; }
+.ot-time { font-size: clamp(2.6rem, 15vw, 6.5rem); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ot-bar { max-width: 32rem; height: 6px; margin: 8px auto 0; overflow: hidden; border-radius: 999px; background: var(--border); }
+.ot-bar span { display: block; width: 0; height: 100%; background: var(--accent); }
+.ot-meta { min-height: 1.6em; margin: 6px 0 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ot-card.is-done .ot-time { color: var(--danger); }
+.ot-card.is-done .ot-meta { color: var(--danger); font-weight: 600; }
+.ot-card.is-done .ot-bar span { background: var(--danger); }
+/* Ringing: a band flashes behind the digits, which keep their contrast. */
+.ot-time { display: inline-block; padding: 0 0.12em; border-radius: 12px; }
+@media (prefers-reduced-motion: no-preference) {
+  .ot-card.is-ringing .ot-time { animation: ot-blink 1s steps(1, end) infinite; }
+}
+@keyframes ot-blink { 50% { background: var(--danger-soft); } }
+.ot-presets { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 4px 0 12px; }
+.ot-presets .btn { min-width: 4.6em; white-space: nowrap; }
+.ot .btn { touch-action: manipulation; }
+.ot-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.ot-actions .btn { min-width: 6.5em; white-space: nowrap; }
+.ot-actions .ot-go { min-width: 8em; min-height: 52px; font-size: 1.05rem; }
+.ot .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.ot .ot-err { margin: 8px auto; max-width: 32rem; }
+.ot-more { text-align: center; }
+.ot-add { margin-bottom: 8px; }
+.ot-note { border-left: 3px solid var(--accent); background: var(--surface-2); color: var(--text); }
+.ot-h { margin: 20px 0 10px; font-size: 1.15rem; }
+.ot-settings .row { align-items: flex-end; }
+.ot-settings .row > .field { flex: 1 1 150px; }
+.ot-vol-row { display: flex; align-items: center; gap: 10px; }
+.ot-vol-row output { min-width: 3em; font-variant-numeric: tabular-nums; }
+.ot-keys { margin: 10px 0 0; }
+.ot-keys kbd { padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); color: var(--text); font: 12px/1.6 var(--mono); }
+.ot-wake-note:empty { display: none; }
+.ot-list .ot-card.is-full { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; justify-content: center; justify-content: safe center; overflow: auto; overscroll-behavior: contain; margin: 0; padding: 24px 16px; border: 0; border-radius: 0; background: var(--bg); color: var(--text); }
+.ot-list .ot-card.is-full .ot-time { font-size: min(28vw, 40vh); }
+.ot-list .ot-card.is-full .ot-time.is-long { font-size: min(19vw, 32vh); }
+.ot-list .ot-card.is-full .ot-in, .ot-list .ot-card.is-full .ot-colon { font-size: min(11vw, 20vh); }
+.ot-list .ot-card.is-full .ot-set { max-width: 60rem; }
+.ot-list .ot-card.is-full .ot-unit { max-width: 16rem; }
+.ot-list .ot-card.is-full .ot-meta { font-size: min(5vw, 5vh); }
+:root.ot-noscroll, :root.ot-noscroll body { overflow: hidden; }
+/* On a phone the buttons share each row; one that does not fit its label
+   moves to the next row rather than breaking the label in two. */
+@media (max-width: 480px) {
+  .ot-actions .btn { min-width: auto; flex: 1 1 40%; padding: 0 8px; }
+  .ot-presets .btn { flex: 1 1 22%; min-width: auto; padding: 0 6px; }
+}
+</style>
+
+<div class="ot" id="ot">
+  <p class="msg error" id="ot-msg" role="alert"></p>
+  <p class="msg ot-note" id="ot-sound-note" role="status"></p>
+  <div class="ot-list" id="ot-list"></div>
+  <div class="ot-more">
+    <button type="button" class="btn secondary ot-add" id="ot-add">Add a timer</button>
+    <p class="hint ot-keys">Keys: <kbd>Space</kbd> start or pause, <kbd>R</kbd> reset, <kbd>F</kbd> full screen, <kbd>Esc</kbd> stop the alarm</p>
+  </div>
+
+  <div class="ot-settings">
+    <h2 class="ot-h">Alarm</h2>
+    <div class="row">
+      <div class="field">
+        <label for="ot-sound">Sound</label>
+        <select id="ot-sound">
+          <option value="bell" selected>Bell</option>
+          <option value="beeps">Beeps</option>
+          <option value="chime">Chime</option>
+          <option value="clock">Alarm clock</option>
+          <option value="soft">Soft</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="ot-ring">Ring for</label>
+        <select id="ot-ring">
+          <option value="5">5 seconds</option>
+          <option value="15">15 seconds</option>
+          <option value="30" selected>30 seconds</option>
+          <option value="60">1 minute</option>
+          <option value="0">Until I stop it</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="ot-vol">Volume</label>
+        <div class="ot-vol-row"><input type="range" id="ot-vol" min="0" max="100" step="5" value="70" aria-valuetext="70%"><output id="ot-vol-out" for="ot-vol" aria-hidden="true">70%</output></div>
+      </div>
+      <button type="button" class="btn secondary" id="ot-test">Test sound</button>
+    </div>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="ot-notify"> Show a notification when a timer ends</label>
+      <label class="check" id="ot-wake-row"><input type="checkbox" id="ot-wake" checked> Keep the screen on while a timer runs</label>
+    </div>
+    <p class="msg error" id="ot-notify-msg"></p>
+    <p class="hint ot-wake-note" id="ot-wake-note"></p>
+  </div>
+  <p class="visually-hidden" id="ot-status" role="status"></p>
+  <p class="visually-hidden" id="ot-alert" role="alert"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var MAX_TIMERS = 10;
+  var MAX_MS = 359999000;   // 99:59:59
+  // One limit for writing and reading the page address. Ten timers with
+  // 40-character names always fit.
+  var MAX_HASH = 4000;
+  var LATE = 60000;         // a timer found more than a minute late does not ring
+  var DEFAULT_MS = 300000;
+  var NAME_MAX = 40;
+  var PRESETS = [[1, '1 min'], [3, '3 min'], [5, '5 min'], [10, '10 min'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [60, '1 hour']];
+
+  var root = $('#ot'), list = $('#ot-list'), addBtn = $('#ot-add');
+  var statusEl = $('#ot-status'), alertEl = $('#ot-alert'), msgEl = $('#ot-msg'), soundNote = $('#ot-sound-note');
+  var soundSel = $('#ot-sound'), ringSel = $('#ot-ring'), volIn = $('#ot-vol'), volOut = $('#ot-vol-out');
+  var notifyBox = $('#ot-notify'), notifyMsg = $('#ot-notify-msg'), wakeBox = $('#ot-wake'), wakeNote = $('#ot-wake-note');
+  var baseTitle = document.title;
+
+  // ---------- Clock ----------
+  // Milliseconds since the page opened. performance.now() is precise but
+  // stops while most computers and phones sleep; Date.now() keeps going but
+  // jumps when the clock is set. Each reading adds the performance.now()
+  // step, or the Date.now() step when that is more than a second longer
+  // (the device slept), and never goes backwards.
+  var clock = (function () {
+    var p0 = performance.now(), w0 = Date.now(), t = 0;
+    return function () {
+      var p = performance.now(), w = Date.now(), dp = p - p0, dw = w - w0;
+      t += dw - dp > 1000 ? dw : (dp > 0 ? dp : 0);
+      p0 = p; w0 = w;
+      return t;
+    };
+  })();
+  function wallAt(at) { return Date.now() + (at - clock()); }
+
+  // ---------- Text ----------
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  // 04:59, or 1:04:59 for timers of an hour or more (whole seconds, rounded up)
+  function fmtClock(ms, hours) {
+    var s = Math.ceil(ms / 1000 - 1e-9), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    return (hours || h ? h + ':' + pad(m) : pad(m)) + ':' + pad(s % 60);
+  }
+  function fmtShort(ms) { var s = fmtClock(ms, false); return s.charAt(0) === '0' && s.charAt(2) === ':' ? s.slice(1) : s; }
+  function spoken(ms) {
+    var s = Math.ceil(ms / 1000 - 1e-9), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, out = [];
+    s %= 60;
+    if (h) out.push(h + (h === 1 ? ' hour' : ' hours'));
+    if (m) out.push(m + (m === 1 ? ' minute' : ' minutes'));
+    if (s || !out.length) out.push(s + (s === 1 ? ' second' : ' seconds'));
+    return out.join(' ');
+  }
+  var timeFmt = null, dayFmt = null, dateFmt = null;
+  function fmtTime(wall) {
+    if (!timeFmt) {
+      timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+      dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit', second: '2-digit' });
+      dateFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    }
+    var d = new Date(wall), now = new Date();
+    if (d.toDateString() === now.toDateString()) return timeFmt.format(d);
+    // A weekday alone would name the wrong day from a week or more away.
+    return (Math.abs(d - now) < 6 * 86400000 ? dayFmt : dateFmt).format(d);
+  }
+  function iso(wall) { return new Date(wall).toISOString().replace(/\.\d{3}Z$/, 'Z'); }
+  // Cut to n UTF-16 units without splitting an emoji's surrogate pair.
+  function clip(s, n) {
+    if (s.length <= n) return s;
+    var cut = s.slice(0, n);
+    if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+    return cut + '…';
+  }
+  function cleanName(s) {
+    s = s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
+    if (s.length > NAME_MAX) { s = s.slice(0, NAME_MAX); if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1); }
+    return s;
+  }
+  function say(text) { if (statusEl.textContent !== text) statusEl.textContent = text; }
+  function showMsg(text) { if (msgEl.textContent !== text) msgEl.textContent = text; }
+
+  // ---------- Numbers typed in the boxes ----------
+  // The zero of every set of decimal digits in Unicode 14, so digits typed
+  // on any keyboard (Arabic, Persian, Devanagari, full-width...) count.
+  var ZEROS = [0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66, 0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90, 0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0, 0xff10, 0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0, 0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x16a60, 0x16ac0, 0x16b50, 0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e950, 0x1fbf0];
+  function asciiDigits(s) {
+    return s.replace(/\p{Nd}/gu, function (ch) {
+      var c = ch.codePointAt(0);
+      for (var i = ZEROS.length - 1; i >= 0; i--) if (ZEROS[i] <= c) return c - ZEROS[i] <= 9 ? String(c - ZEROS[i]) : ch;
+      return ch;
+    });
+  }
+  // A whole or decimal number of hours, minutes or seconds, in whole ms.
+  // A full stop, a comma or the Arabic decimal separator marks decimals
+  // (full-width ones too); thousands separators are refused, as no box needs
+  // one. 1,500 or 1.500 is 1.5 to some readers and 1500 to others, so it is
+  // refused rather than guessed (0,500 is not: no thousands group starts with 0).
+  function readBox(raw, unit) {
+    if (raw.length > 20) return { error: 'that is too long for a number.' };
+    var s = asciiDigits(raw.trim()).replace(/．/g, '.').replace(/，/g, ',');
+    if (s === '') return { ms: 0 };
+    if (/^[-−]/.test(s)) return { error: 'a time cannot be negative.' };
+    var m = /^(\d*)(?:([.,٫])(\d*))?$/.exec(s);
+    if (!m || !/\d/.test(s)) return { error: 'use a number such as 5 or 1.5, with no spaces or thousands separators.' };
+    var frac = m[3] || '';
+    if (frac.length > 3) return { error: 'use at most 3 decimals.' };
+    if (m[1].length > 5) return { error: 'that number is too big.' };
+    if (m[2] !== '٫' && /^[1-9]\d{0,2}$/.test(m[1]) && frac.length === 3) {
+      return { error: '“' + s + '” could mean ' + Number(m[1] + '.' + frac) + ' or ' + m[1] + frac + ', so type one of those.' };
+    }
+    return { ms: Number(m[1] || '0') * unit + Number(frac || '0') * unit / Math.pow(10, frac.length) };
+  }
+
+  // ---------- Page address ----------
+  // Timers separated by commas. Each is a length (10m, 1h30m, 90s, 5:00,
+  // 1:30:00 or a plain number of minutes), then !r<end> while running (the
+  // end as a Date.now() time), !p<ms left> when paused or !d<end> when it has
+  // ended, then ~<name>.
+  function amount(num, unit) {
+    var m = /^(\d+)(?:[.,](\d{1,3}))?$/.exec(num);
+    var frac = m[2] || '';
+    return Number(m[1]) * unit + Number(frac || '0') * unit / Math.pow(10, frac.length);
+  }
+  var NUM = '(\\d{1,5}(?:[.,]\\d{1,3})?)';
+  var HMS = new RegExp('^(?:' + NUM + '(?:h|hr|hrs|hours?))?(?:' + NUM + '(?:m|min|mins|minutes?))?(?:' + NUM + '(?:s|sec|secs|seconds?))?$');
+  function readLength(s) {
+    if (s.length > 30) return null;
+    s = s.toLowerCase();
+    var m = /^(\d{1,5})(?:[.,](\d{1,3}))?$/.exec(s);
+    if (m) return amount(s, 60000);
+    if ((m = /^(\d{1,3}):(\d{1,2})(?::(\d{1,2}))?$/.exec(s))) {
+      return m[3] === undefined ? Number(m[1]) * 60000 + Number(m[2]) * 1000 : Number(m[1]) * 3600000 + Number(m[2]) * 60000 + Number(m[3]) * 1000;
+    }
+    m = HMS.exec(s);
+    if (!m || !(m[1] || m[2] || m[3])) return null;
+    return (m[1] ? amount(m[1], 3600000) : 0) + (m[2] ? amount(m[2], 60000) : 0) + (m[3] ? amount(m[3], 1000) : 0);
+  }
+  function lengthText(ms) {
+    var s = Math.round(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    return (h ? h + 'h' : '') + (m ? m + 'm' : '') + (s % 60 ? s % 60 + 's' : '');
+  }
+  function readHash(raw) {
+    var h = raw.charAt(0) === '#' ? raw.slice(1) : raw;
+    if (!h) return { items: [], error: '' };
+    if (h.length > MAX_HASH) return { items: [], error: 'The page address is longer than 4,000 characters, too long to read, so the timers in it were not loaded.' };
+    var items = [], bad = [];
+    h.split(',').forEach(function (part) {
+      if (!part) return;
+      var tilde = part.indexOf('~'), name = '', head = tilde < 0 ? part : part.slice(0, tilde);
+      try {
+        head = decodeURIComponent(head);
+        if (tilde >= 0) name = cleanName(decodeURIComponent(part.slice(tilde + 1)));
+      } catch (err) { bad.push(part); return; }
+      var st = /^([^!]*)(?:!([rpd])(\d{1,15}))?$/.exec(head);
+      var len = st && readLength(st[1].trim());
+      if (len !== null && len !== undefined) len = Math.round(len / 1000) * 1000;
+      if (!st || len === null || len === undefined || !(len > 0 && len <= MAX_MS)) { bad.push(head); return; }
+      var item = { setMs: len, name: name, state: 'ready' }, v = Number(st[3]);
+      if (st[2] === 'r') {
+        if (v - Date.now() > MAX_MS) { bad.push(head); return; }
+        if (v > Date.now()) { item.state = 'running'; item.left = v - Date.now(); } else { item.state = 'done'; item.ended = v; }
+      } else if (st[2] === 'p') {
+        if (!(v > 0 && v <= MAX_MS)) { bad.push(head); return; }
+        item.state = 'paused'; item.left = v;
+      } else if (st[2] === 'd') { item.state = 'done'; item.ended = v; }
+      items.push(item);
+    });
+    var error = [];
+    if (items.length > MAX_TIMERS) { items = items.slice(0, MAX_TIMERS); error.push('Only the first 10 timers in the page address were loaded; 10 is the most.'); }
+    if (bad.length) error.push('Part of the page address could not be read as a timer: “' + clip(bad[0], 40) + '”.');
+    return { items: items, error: error.join(' ') };
+  }
+  var written = location.hash;
+  var retry = 0;
+  function writeHash() {
+    var h = timers.map(function (t) {
+      var s = lengthText(t.setMs);
+      if (t.state === 'running') s += '!r' + Math.round(wallAt(t.end));
+      else if (t.state === 'paused') s += '!p' + Math.round(t.left);
+      else if (t.state === 'done') s += '!d' + Math.round(t.ended);
+      return t.name ? s + '~' + encodeURIComponent(t.name) : s;
+    }).join(',');
+    if (timers.length === 1 && h === lengthText(DEFAULT_MS) && !location.hash) h = '';
+    if (h.length > MAX_HASH) { showMsg('These timers are too long to keep in the page address, so a reload would lose them.'); return; }
+    // The mark tells Back and Forward apart from a link to new timers.
+    try { history.replaceState({ otTimers: 1 }, '', location.pathname + location.search + (h ? '#' + h : '')); } catch (err) {
+      // Safari refuses more than 100 address changes in 30 (newer versions: 10) seconds; try again shortly.
+      if (!retry) retry = setTimeout(function () { retry = 0; writeHash(); }, 1000);
+      return;
+    }
+    written = location.hash;
+  }
+
+  // ---------- Sound ----------
+  // Short decaying partials and beeps, scheduled on the audio clock.
+  function ping(ctx, out, t, f, peak, tau, nodes) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.005);
+    g.gain.setTargetAtTime(0, t + 0.005, tau);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.005 + 7 * tau);
+    nodes.push(o);
+  }
+  function beep(ctx, out, t, f, type, peak, len, nodes) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.004);
+    g.gain.setValueAtTime(peak, t + len - 0.006);
+    g.gain.linearRampToValueAtTime(0, t + len);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + len + 0.01);
+    nodes.push(o);
+  }
+  var SOUNDS = {
+    // Two strikes; partials at 1, 2.76, 5.40 and 8.93 times 880 Hz, the
+    // modes of a struck bar, dying away faster the higher they are.
+    bell: { cycle: 1.6, tail: 3.9, play: function (ctx, out, t, nodes) {
+      [0, 0.4].forEach(function (d) {
+        [[880, 0.3, 0.5], [2428.8, 0.13, 0.22], [4752, 0.06, 0.12], [7858.4, 0.03, 0.07]].forEach(function (p) { ping(ctx, out, t + d, p[0], p[1], p[2], nodes); });
+      });
+    } },
+    beeps: { cycle: 1, tail: 0.45, play: function (ctx, out, t, nodes) {
+      for (var i = 0; i < 4; i++) beep(ctx, out, t + i * 0.12, 1760, 'triangle', 0.45, 0.07, nodes);
+    } },
+    chime: { cycle: 2.2, tail: 4.3, play: function (ctx, out, t, nodes) {
+      [[0, 1318.51], [0.45, 1046.5]].forEach(function (n) {
+        ping(ctx, out, t + n[0], n[1], 0.32, 0.55, nodes);
+        ping(ctx, out, t + n[0], n[1] * 2, 0.07, 0.25, nodes);
+      });
+    } },
+    clock: { cycle: 1.4, tail: 0.95, play: function (ctx, out, t, nodes) {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.value = 2349.32;
+      g.gain.setValueAtTime(0, t);
+      for (var i = 0; i < 18; i++) {
+        g.gain.setValueAtTime(0.4, t + i * 0.05);
+        g.gain.setTargetAtTime(0, t + i * 0.05 + 0.002, 0.012);
+      }
+      o.connect(g).connect(out);
+      o.start(t);
+      o.stop(t + 0.95);
+      nodes.push(o);
+    } },
+    soft: { cycle: 2.4, tail: 2.8, play: function (ctx, out, t, nodes) {
+      [523.25, 659.26, 783.99].forEach(function (f, i) { ping(ctx, out, t + i * 0.18, f, 0.3, 0.35, nodes); });
+    } }
+  };
+  var AHEAD = 65;   // seconds of ringing scheduled at a time
+
+  var audio = (function () {
+    var api = { ctx: null, master: null, supported: !!(window.AudioContext || window.webkitAudioContext) };
+    api.ready = function () { return !!api.ctx && api.ctx.state === 'running'; };
+    api.now = function () { return api.ctx ? api.ctx.currentTime : 0; };
+    // Called from a click, tap or key press, which browsers require before
+    // a page may play sound.
+    api.unlock = function () {
+      if (!api.supported) return false;
+      try {
+        if (!api.ctx) {
+          var AC = window.AudioContext || window.webkitAudioContext;
+          api.ctx = new AC();
+          api.master = api.ctx.createGain();
+          api.master.gain.value = volume();
+          api.master.connect(api.ctx.destination);
+          api.ctx.onstatechange = onAudioState;
+        }
+        if (api.ctx.state !== 'running') {
+          var p = api.ctx.resume();
+          if (p && p.then) p.then(onAudioState, function () {});
+          // Older iPhones also want a sound started in the same tap.
+          var src = api.ctx.createBufferSource();
+          src.buffer = api.ctx.createBuffer(1, 1, api.ctx.sampleRate);
+          src.connect(api.master);
+          src.start(0);
+        }
+      } catch (err) { return false; }
+      return true;
+    };
+    function extend(h, upto) {
+      var s = SOUNDS[h.key];
+      while (h.until < upto - 1e-6 && h.until < h.end - 1e-6) {
+        s.play(api.ctx, h.bus, h.until, h.nodes);
+        h.last = h.until + s.tail;
+        h.until += s.cycle;
+      }
+    }
+    // Rings `key` from audio time `at` for `seconds` (Infinity: until stopped).
+    api.ring = function (key, at, seconds) {
+      if (!api.ctx) return null;
+      var bus = api.ctx.createGain();
+      bus.connect(api.master);
+      var h = { key: SOUNDS[key] ? key : 'bell', at: at, end: at + seconds, seconds: seconds, until: at, last: at, bus: bus, nodes: [] };
+      extend(h, Math.min(h.end, at + AHEAD));
+      return h;
+    };
+    api.extend = function (h) { if (h && !h.cancelled && h.end === Infinity && h.until - api.now() < AHEAD / 2) extend(h, api.now() + AHEAD); };
+    api.finished = function (h) { return !h || h.cancelled || (h.end !== Infinity && api.now() > h.last + 0.05); };
+    api.cancel = function (h) {
+      if (!h || h.cancelled || !api.ctx) return;
+      h.cancelled = true;
+      var t = api.now();
+      try {
+        h.bus.gain.cancelScheduledValues(t);
+        h.bus.gain.setValueAtTime(h.bus.gain.value, t);
+        h.bus.gain.linearRampToValueAtTime(0, t + 0.03);
+      } catch (err) { /* the nodes are stopped below anyway */ }
+      h.nodes.forEach(function (n) { try { n.stop(t + 0.04); } catch (err) { /* already stopped */ } });
+      h.nodes = [];
+      setTimeout(function () { try { h.bus.disconnect(); } catch (err) { /* gone */ } }, 200);
+    };
+    return api;
+  })();
+  function volume() { var v = Number(volIn.value) / 100; return v * v; }
+  function ringSeconds() { var v = Number(ringSel.value); return v > 0 ? v : Infinity; }
+  function onAudioState() {
+    if (audio.ready()) timers.forEach(prearm);
+    updateSoundNote();
+  }
+  function needsSound() { return timers.some(function (t) { return t.state === 'running' || t.state === 'paused'; }); }
+  function updateSoundNote() {
+    var text = '';
+    if (needsSound()) {
+      if (!audio.supported) text = 'This browser cannot play sound, so the timer can only show that time is up.';
+      else if (!audio.ready()) text = 'Click or tap anywhere on this page so the alarm can sound.';
+    }
+    if (soundNote.textContent !== text) soundNote.textContent = text;
+  }
+  ['pointerdown', 'pointerup', 'keydown', 'click'].forEach(function (type) {
+    document.addEventListener(type, function () { if (needsSound() && !audio.ready()) audio.unlock(); }, true);
+  });
+
+  // The alarm of a running timer is scheduled ahead on the audio clock,
+  // which keeps time while the browser slows down a background tab's code.
+  function prearm(t) {
+    if (t.state !== 'running' || !audio.ready()) return;
+    var left = (t.end - clock()) / 1000, at = audio.now() + left;
+    var a = t.alarm;
+    if (a && !a.cancelled && a.key === soundSel.value && a.seconds === ringSeconds() && (Math.abs(a.at - at) < 0.03 || left < 0.5)) return;
+    if (a) audio.cancel(a);
+    t.alarm = audio.ring(soundSel.value, at, ringSeconds());
+  }
+  function disarm(t) {
+    if (t.alarm) audio.cancel(t.alarm);
+    t.alarm = null;
+    t.ringing = false;
+  }
+
+  // ---------- Timers ----------
+  var timers = [], seq = 0, lastUsed = null, full = null;
+  function nameOf(t) { return t.name || 'Timer ' + t.n; }
+  function leftOf(t, now) {
+    if (t.state === 'running') return Math.max(0, t.end - now);
+    if (t.state === 'paused') return t.left;
+    return t.state === 'done' ? 0 : t.setMs;
+  }
+
+  function makeTimer(item) {
+    var t = { n: ++seq, name: item.name || '', setMs: item.setMs || DEFAULT_MS, state: 'ready', end: 0, left: 0, total: 0, ended: 0, doneAt: 0, alarm: null, ringing: false, timeout: 0, shown: {} };
+    t.total = t.setMs;
+    var id = 'ot-' + t.n, card = document.createElement('section');
+    card.className = 'ot-card';
+    card.id = id;
+    card.innerHTML =
+      '<div class="ot-head"><input type="text" class="ot-name" id="' + id + '-name" maxlength="' + NAME_MAX + '" autocomplete="off" spellcheck="false">' +
+      '<button type="button" class="btn secondary small ot-remove">Remove<span class="visually-hidden"></span></button></div>' +
+      '<div class="ot-set" role="group" aria-labelledby="' + id + '-len"><span class="visually-hidden" id="' + id + '-len"></span>' +
+      ['h', 'm', 's'].map(function (u, i) {
+        return (i ? '<span class="ot-colon" aria-hidden="true">:</span>' : '') +
+          '<div class="ot-unit"><input type="text" class="ot-in" id="' + id + '-' + u + '" inputmode="decimal" autocomplete="off" enterkeyhint="go">' +
+          '<label for="' + id + '-' + u + '">' + ['hours', 'minutes', 'seconds'][i] + '</label></div>';
+      }).join('') + '</div>' +
+      '<div class="ot-run"><div class="ot-time" role="timer"></div><div class="ot-bar" aria-hidden="true"><span></span></div></div>' +
+      '<p class="ot-meta"></p>' +
+      '<p class="msg error ot-err" id="' + id + '-err"></p>' +
+      '<div class="ot-presets" role="group" aria-labelledby="' + id + '-pre"><span class="visually-hidden" id="' + id + '-pre"></span>' +
+      PRESETS.map(function (p) { return '<button type="button" class="btn secondary small" data-min="' + p[0] + '">' + p[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="ot-actions"><button type="button" class="btn ot-go">Start</button>' +
+      '<button type="button" class="btn secondary ot-stop">Stop alarm</button>' +
+      '<button type="button" class="btn secondary ot-reset">Reset</button>' +
+      '<button type="button" class="btn secondary ot-plus">+1 min</button>' +
+      '<button type="button" class="btn secondary ot-full">Full screen</button></div>';
+    var q = function (s) { return card.querySelector(s); };
+    t.el = {
+      card: card, name: q('.ot-name'), h: q('#' + id + '-h'), m: q('#' + id + '-m'), s: q('#' + id + '-s'),
+      set: q('.ot-set'), lenLabel: q('#' + id + '-len'), run: q('.ot-run'), time: q('.ot-time'), bar: q('.ot-bar span'),
+      meta: q('.ot-meta'), err: q('.ot-err'), presets: q('.ot-presets'), preLabel: q('#' + id + '-pre'),
+      go: q('.ot-go'), stop: q('.ot-stop'), reset: q('.ot-reset'), plus: q('.ot-plus'), full: q('.ot-full'),
+      remove: q('.ot-remove'), removeName: q('.ot-remove span')
+    };
+    t.el.name.value = t.name;
+    t.typedName = t.name;
+    renderFields(t);
+    if (item.state === 'running') { t.state = 'running'; t.end = clock() + item.left; t.total = Math.max(t.setMs, item.left); }
+    else if (item.state === 'paused') { t.state = 'paused'; t.left = item.left; t.total = Math.max(t.setMs, item.left); }
+    else if (item.state === 'done') { t.state = 'done'; t.ended = item.ended; t.doneAt = clock() - Math.max(0, Date.now() - item.ended); }
+    wire(t);
+    return t;
+  }
+
+  function renderFields(t) {
+    var s = Math.round(t.setMs / 1000);
+    t.rendered = [pad(Math.floor(s / 3600)), pad(Math.floor(s / 60) % 60), pad(s % 60)];
+    t.el.h.value = t.rendered[0]; t.el.m.value = t.rendered[1]; t.el.s.value = t.rendered[2];
+    setErrors(t, '', []);
+  }
+  function setErrors(t, text, bad) {
+    var c = t.el;
+    if (c.err.textContent !== text) c.err.textContent = text;
+    [c.h, c.m, c.s].forEach(function (inp, i) {
+      if (text && bad.indexOf(i) >= 0) { inp.setAttribute('aria-invalid', 'true'); inp.setAttribute('aria-describedby', c.err.id); }
+      else { inp.removeAttribute('aria-invalid'); inp.removeAttribute('aria-describedby'); }
+    });
+  }
+  // Reads the three boxes: the length in whole seconds (as ms), or null with
+  // the problem shown. A zero length is only wrong when starting.
+  function validate(t, starting) {
+    var c = t.el, boxes = [c.h, c.m, c.s], names = ['Hours', 'Minutes', 'Seconds'], units = [3600000, 60000, 1000];
+    var total = 0, text = '', bad = [];
+    boxes.forEach(function (inp, i) {
+      var r = readBox(inp.value, units[i]);
+      if (r.error) { bad.push(i); if (!text) text = names[i] + ': ' + r.error; } else total += r.ms;
+    });
+    if (!text) {
+      total = Math.round(total / 1000) * 1000;
+      if (total > MAX_MS) { text = 'The longest timer is 99 hours 59 minutes 59 seconds.'; bad = [0, 1, 2]; }
+      else if (starting && total <= 0) { text = 'Set a time longer than zero.'; bad = [0, 1, 2]; }
+    }
+    setErrors(t, text, bad);
+    return text ? null : total;
+  }
+
+  function sync(t) {
+    var c = t.el, st = t.state;
+    ['ready', 'running', 'paused', 'done'].forEach(function (s) { c.card.classList.toggle('is-' + s, s === st); });
+    c.card.classList.toggle('is-ringing', t.ringing);
+    c.set.hidden = c.presets.hidden = st !== 'ready';
+    c.run.hidden = st === 'ready';
+    c.go.textContent = { ready: 'Start', running: 'Pause', paused: 'Resume', done: 'Restart' }[st];
+    c.stop.hidden = !t.ringing;
+    c.reset.hidden = c.plus.hidden = st === 'ready';
+    c.remove.hidden = timers.length < 2;
+    var name = nameOf(t);
+    c.card.setAttribute('aria-label', name);
+    c.removeName.textContent = ' ' + name;
+    c.lenLabel.textContent = 'Length of ' + name;
+    c.preLabel.textContent = 'Presets for ' + name + ', which start at once';
+    c.name.placeholder = 'Timer ' + t.n;
+    c.name.setAttribute('aria-label', 'Name of timer ' + t.n);
+    paint(t, clock());
+    // A control that was just hidden hands the focus to the main button.
+    var a = document.activeElement;
+    if (a && c.card.contains(a) && !a.getClientRects().length) c.go.focus();
+  }
+
+  function paint(t, now) {
+    var c = t.el, sh = t.shown, left = leftOf(t, now);
+    var text = fmtClock(left, t.total >= 3600000);
+    if (sh.time !== text) { sh.time = text; c.time.textContent = text; c.time.classList.toggle('is-long', text.length > 5); }
+    var frac = t.state === 'ready' ? 0 : t.total ? 1 - left / t.total : 1;
+    var w = Math.round(Math.min(1, Math.max(0, frac)) * 1000) / 10 + '%';
+    if (sh.bar !== w) { sh.bar = w; c.bar.style.width = w; }
+    var key = t.state, wall = 0, lead = '', tail = '';
+    if (t.state === 'running') { wall = Math.round(wallAt(t.end) / 1000) * 1000; lead = 'Ends at '; }
+    else if (t.state === 'paused') lead = 'Paused';
+    else if (t.state === 'done') {
+      wall = Math.round(t.ended / 1000) * 1000;
+      lead = 'Time’s up at ';
+      tail = ' · ' + fmtShort(Math.floor(Math.max(0, now - t.doneAt) / 1000) * 1000) + ' ago';
+    }
+    key += wall + tail;
+    if (sh.meta === key) return;
+    sh.meta = key;
+    c.meta.textContent = lead;
+    if (t.state === 'running' || t.state === 'done') {
+      var tm = document.createElement('time');
+      tm.dateTime = iso(wall);
+      tm.textContent = fmtTime(wall);
+      c.meta.appendChild(tm);
+      c.meta.appendChild(document.createTextNode(tail));
+    }
+  }
+
+  function updateTitle(now) {
+    var ringing = timers.filter(function (t) { return t.ringing; })[0];
+    var running = timers.filter(function (t) { return t.state === 'running'; }).sort(function (a, b) { return a.end - b.end; })[0];
+    var done = timers.filter(function (t) { return t.state === 'done'; })[0];
+    var paused = timers.filter(function (t) { return t.state === 'paused'; })[0];
+    var head = '', who = null;
+    if (ringing) { head = 'Time’s up!'; who = ringing; }
+    else if (running) { head = fmtShort(running.end - now); who = running; }
+    else if (done) { head = 'Time’s up'; who = done; }
+    else if (paused) { head = fmtShort(paused.left) + ' paused'; who = paused; }
+    var title = who ? head + (who.name ? ' ' + who.name : '') + ' · ' + baseTitle : baseTitle;
+    if (document.title !== title) document.title = title;
+  }
+
+  // ---------- Running ----------
+  // The end check is a single timeout started from the visitor's action, so
+  // it is never one of the repeating timers that Chrome slows to once a
+  // minute in a background tab.
+  function arm(t) {
+    clearTimeout(t.timeout);
+    if (t.state !== 'running') return;
+    t.timeout = setTimeout(function fire() {
+      if (t.state !== 'running') return;
+      var left = t.end - clock();
+      if (left > 0) t.timeout = setTimeout(fire, left + 1);
+      else tick();
+    }, Math.max(0, t.end - clock()) + 1);
+  }
+  var alertNames = [];
+  function finish(t, now) {
+    var late = now - t.end;
+    clearTimeout(t.timeout);
+    t.state = 'done';
+    t.doneAt = t.end;
+    t.ended = Date.now() - late;
+    var a = t.alarm, ring = late <= LATE;
+    if (a && !(ring && audio.ready() && !a.cancelled && a.at <= audio.now() + 0.5)) { audio.cancel(a); a = null; }
+    if (ring && !a && audio.ready()) a = audio.ring(soundSel.value, audio.now() + 0.02, ringSeconds());
+    t.alarm = a;
+    t.ringing = !!a;
+    if (ring) {
+      alertNames.push(nameOf(t));
+      notify(t);
+    } else say(nameOf(t) + ' ended at ' + fmtTime(t.ended) + '.');
+  }
+  var raf = 0, ticker = 0, lastSync = 0;
+  function tick() {
+    var now = clock(), ended = false;
+    alertNames = [];
+    timers.forEach(function (t) { if (t.state === 'running' && now >= t.end) { finish(t, now); sync(t); ended = true; } });
+    if (alertNames.length) alertEl.textContent = 'Time’s up: ' + alertNames.join(' and ') + '.';
+    if (ended) { writeHash(); updateWake(); updateSoundNote(); }
+    timers.forEach(function (t) {
+      if (!t.ringing) return;
+      audio.extend(t.alarm);
+      if (audio.finished(t.alarm)) { t.alarm = null; t.ringing = false; sync(t); updateWake(); }
+    });
+    if (now - lastSync > 5000) { lastSync = now; timers.forEach(prearm); }
+    timers.forEach(function (t) { paint(t, now); });
+    updateTitle(now);
+    loop();
+  }
+  // Every frame while a timer counts down or rings; once a second for the
+  // rest (a background tab, or the "ago" of a timer that has ended).
+  function active() { return timers.some(function (t) { return t.state === 'running' || t.state === 'done'; }); }
+  function busy() { return timers.some(function (t) { return t.state === 'running' || t.ringing; }); }
+  function frame() { raf = 0; tick(); }
+  function loop() {
+    var on = active();
+    if (busy() && !document.hidden && !raf) raf = requestAnimationFrame(frame);
+    if (on && !ticker) ticker = setInterval(function () { if (document.hidden || !raf) tick(); }, 1000);
+    if (!on && ticker) { clearInterval(ticker); ticker = 0; }
+  }
+
+  // keepAddress: an address that could not be read stays as it was typed
+  // until the visitor changes something.
+  function commit(keepAddress) {
+    list.classList.toggle('is-multi', timers.length > 1);
+    timers.forEach(sync);
+    setOff(addBtn, timers.length >= MAX_TIMERS);
+    if (!keepAddress) writeHash();
+    updateTitle(clock());
+    loop();
+    updateWake();
+    updateSoundNote();
+  }
+  function setOff(btn, off) { btn.setAttribute('aria-disabled', off ? 'true' : 'false'); }
+
+  function startFrom(t, ms, how) {
+    disarm(t);
+    t.state = 'running';
+    t.total = ms;
+    t.end = clock() + ms;
+    alertEl.textContent = '';
+    arm(t);
+    prearm(t);
+    commit();
+    say(nameOf(t) + ' ' + how + ': ' + spoken(ms) + '.');
+  }
+  function start(t) {
+    audio.unlock();
+    var ms = validate(t, true);
+    if (ms === null) {
+      var bad = [t.el.h, t.el.m, t.el.s].filter(function (i) { return i.getAttribute('aria-invalid') === 'true'; })[0];
+      if (bad) bad.focus();
+      return;
+    }
+    t.setMs = ms;
+    renderFields(t);
+    startFrom(t, ms, 'started');
+  }
+  function pause(t) {
+    var left = t.end - clock();
+    // Pressed in the very millisecond the time ran out: it has ended.
+    if (left <= 0) { tick(); return; }
+    t.left = Math.max(1, left); // never written as !p0, which reads back as nothing
+    t.state = 'paused';
+    clearTimeout(t.timeout);
+    disarm(t);
+    commit();
+    say(nameOf(t) + ' paused with ' + spoken(t.left) + ' left.');
+  }
+  function resume(t) {
+    audio.unlock();
+    t.state = 'running';
+    t.end = clock() + t.left;
+    arm(t);
+    prearm(t);
+    commit();
+    say(nameOf(t) + ' resumed with ' + spoken(t.left) + ' left.');
+  }
+  function reset(t) {
+    clearTimeout(t.timeout);
+    disarm(t);
+    t.state = 'ready';
+    t.total = t.setMs;
+    alertEl.textContent = '';
+    renderFields(t);
+    commit();
+    say(nameOf(t) + ' reset to ' + spoken(t.setMs) + '.');
+  }
+  function plusMinute(t) {
+    audio.unlock();
+    var now = clock(), left;
+    if (t.state === 'running' || t.state === 'paused') {
+      left = leftOf(t, now) + 60000;
+      if (left > MAX_MS) { say('The longest timer is 99 hours 59 minutes 59 seconds.'); return; }
+      t.total += 60000;
+      if (t.state === 'running') { t.end += 60000; arm(t); prearm(t); } else t.left = left;
+      commit();
+    } else if (t.state === 'done') { left = 60000; startFrom(t, left, 'restarted'); }
+    else return;
+    say('Added 1 minute to ' + nameOf(t) + ': ' + spoken(left) + ' left.');
+  }
+  function stopRinging(list) {
+    var any = false;
+    list.forEach(function (t) { if (t.ringing) { disarm(t); any = true; sync(t); } });
+    if (any) { alertEl.textContent = ''; updateWake(); updateTitle(clock()); say('Alarm stopped.'); }
+    return any;
+  }
+  function primary(t) {
+    if (t.state === 'ready') start(t);
+    else if (t.state === 'running') pause(t);
+    else if (t.state === 'paused') resume(t);
+    else { audio.unlock(); startFrom(t, t.setMs, 'restarted'); }
+  }
+  function remove(t) {
+    if (timers.length < 2) return;
+    clearTimeout(t.timeout);
+    disarm(t);
+    if (full === t) setFull(null);
+    var i = timers.indexOf(t);
+    timers.splice(i, 1);
+    t.el.card.remove();
+    if (lastUsed === t) lastUsed = null;
+    commit();
+    timers[Math.min(i, timers.length - 1)].el.go.focus();
+    showMsg('');
+    say(nameOf(t) + ' removed.');
+  }
+
+  function wire(t) {
+    var c = t.el;
+    [c.h, c.m, c.s].forEach(function (inp) {
+      inp.addEventListener('input', function () { onField(t); });
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' && t.state === 'ready') { e.preventDefault(); start(t); } });
+    });
+    c.name.addEventListener('input', function () { onName(t); });
+    c.go.addEventListener('click', function () { primary(t); });
+    c.stop.addEventListener('click', function () { stopRinging([t]); });
+    c.reset.addEventListener('click', function () { reset(t); });
+    c.plus.addEventListener('click', function () { plusMinute(t); });
+    c.full.addEventListener('click', function () { setFull(full === t ? null : t); });
+    c.remove.addEventListener('click', function () { remove(t); });
+    c.presets.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-min]');
+      if (!b || t.state !== 'ready') return;
+      t.setMs = Number(b.getAttribute('data-min')) * 60000;
+      renderFields(t);
+      start(t);
+    });
+    c.card.addEventListener('focusin', function () { lastUsed = t; });
+    c.card.addEventListener('pointerdown', function () { lastUsed = t; });
+  }
+  function onField(t) {
+    var ms = validate(t, false);
+    if (ms) { t.setMs = ms; t.total = ms; writeHash(); }
+    t.rendered = [t.el.h.value, t.el.m.value, t.el.s.value];
+  }
+  function onName(t) {
+    t.typedName = t.el.name.value;
+    t.name = cleanName(t.typedName);
+    var name = nameOf(t);
+    t.el.card.setAttribute('aria-label', name);
+    t.el.removeName.textContent = ' ' + name;
+    t.el.lenLabel.textContent = 'Length of ' + name;
+    t.el.preLabel.textContent = 'Presets for ' + name + ', which start at once';
+    writeHash();
+    updateTitle(clock());
+  }
+  function current() { return lastUsed && timers.indexOf(lastUsed) >= 0 ? lastUsed : timers[0]; }
+
+  function build(items, keepAddress) {
+    timers.forEach(function (t) { clearTimeout(t.timeout); disarm(t); t.el.card.remove(); });
+    timers = [];
+    lastUsed = null;
+    (items.length ? items : [{}]).forEach(function (item) { var t = makeTimer(item); timers.push(t); list.appendChild(t.el.card); });
+    timers.forEach(arm);
+    commit(keepAddress);
+  }
+
+  addBtn.addEventListener('click', function () {
+    if (timers.length >= MAX_TIMERS) { showMsg('10 timers is the most this page runs at once. Remove one to add another.'); return; }
+    var t = makeTimer({});
+    timers.push(t);
+    list.appendChild(t.el.card);
+    commit();
+    t.el.m.focus();
+    t.el.m.select();
+    say(nameOf(t) + ' added.');
+  });
+
+  // ---------- Full screen ----------
+  function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+  var inerted = [];
+  function setInert(el) {
+    inerted.forEach(function (s) { s.inert = false; });
+    inerted = [];
+    for (; el && el.parentElement; el = el.parentElement) {
+      for (var s = el.parentElement.firstElementChild; s; s = s.nextElementSibling) {
+        if (s === el || s.inert || /^(SCRIPT|STYLE|LINK|META|TEMPLATE)$/.test(s.tagName) || s.matches('[aria-live],[role="status"],[role="alert"]')) continue;
+        s.inert = true;
+        inerted.push(s);
+      }
+      if (el.parentElement === document.body) break;
+    }
+  }
+  function quiet(p) { if (p && p.catch) p.catch(function () {}); }
+  function setFull(t) {
+    var was = full;
+    if (was === t) return;
+    if (was) {
+      was.el.card.classList.remove('is-full');
+      was.el.full.textContent = 'Full screen';
+      if (fsElement() === was.el.card) { try { quiet((document.exitFullscreen || document.webkitExitFullscreen).call(document)); } catch (err) { /* left as is */ } }
+    }
+    full = t;
+    document.documentElement.classList.toggle('ot-noscroll', !!t);
+    setInert(t ? t.el.card : null);
+    if (!t) return;
+    t.el.card.classList.add('is-full');
+    t.el.full.textContent = 'Exit full screen';
+    var req = t.el.card.requestFullscreen || t.el.card.webkitRequestFullscreen;
+    try { if (req) quiet(req.call(t.el.card)); } catch (err) { /* the window-filling view stays */ }
+  }
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (type) {
+    document.addEventListener(type, function () { if (!fsElement() && full) setFull(null); });
+  });
+
+  // ---------- Keys ----------
+  function letter(e) {
+    var k = e.key || '';
+    if (/^[a-z]$/i.test(k)) return k.toLowerCase();
+    var m = /^Key([A-Z])$/.exec(e.code || '');
+    return m && k.length === 1 && !/[\x20-\x7e]/.test(k) ? m[1].toLowerCase() : '';
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      var any = stopRinging(timers);
+      if (full && !fsElement()) { setFull(null); any = true; }
+      if (any) e.preventDefault();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    var target = e.target, tag = target && target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (target && target.isContentEditable)) return;
+    if (target && target.closest && !target.closest('#ot')) {
+      if (target !== document.body && target !== document.documentElement) return;
+      var r = (full ? full.el.card : list).getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;
+    }
+    var t = current();
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space presses those
+      e.preventDefault();
+      if (e.repeat) return;
+      if (!stopRinging(timers)) primary(t);
+      return;
+    }
+    var k = letter(e);
+    if (!k || e.shiftKey) return;
+    if (k === 'r' || k === 'f') e.preventDefault();
+    if (e.repeat) return;
+    if (k === 'r' && t.state !== 'ready') reset(t);
+    else if (k === 'f') setFull(full === t ? null : t);
+  });
+  // A mouse click does not move the focus to a button, so Space keeps
+  // acting on the timer (as in Safari). Tab still reaches every button.
+  root.addEventListener('mousedown', function (e) {
+    if (e.button === 0 && e.target.closest && e.target.closest('button')) e.preventDefault();
+  });
+
+  // ---------- Alarm settings ----------
+  function renderVol() {
+    var text = volIn.value + '%';
+    volOut.textContent = text;
+    volIn.setAttribute('aria-valuetext', text);
+  }
+  volIn.addEventListener('input', function () {
+    renderVol();
+    if (audio.master) audio.master.gain.setTargetAtTime(volume(), audio.now(), 0.02);
+  });
+  function rearmAll() { timers.forEach(prearm); }
+  soundSel.addEventListener('change', rearmAll);
+  ringSel.addEventListener('change', rearmAll);
+  var testRing = null;
+  $('#ot-test').addEventListener('click', function () {
+    if (!audio.unlock()) { say('This browser cannot play sound.'); return; }
+    if (testRing) audio.cancel(testRing);
+    var key = soundSel.value;
+    testRing = audio.ring(key, audio.now() + 0.03, SOUNDS[key].cycle * 0.99);
+    say('Playing the ' + soundSel.options[soundSel.selectedIndex].text + ' sound.');
+  });
+
+  // ---------- Notifications ----------
+  var NOTIFY_NONE = 'This browser does not let web pages show notifications themselves (on phones only installed apps can), so the alarm and the tab title will tell you instead.';
+  function setNotifyError(text) {
+    notifyMsg.textContent = text;
+    if (text) { notifyBox.setAttribute('aria-invalid', 'true'); notifyBox.setAttribute('aria-describedby', 'ot-notify-msg'); }
+    else { notifyBox.removeAttribute('aria-invalid'); notifyBox.removeAttribute('aria-describedby'); }
+  }
+  function showNote(title, body, tag) {
+    try {
+      var n = new Notification(title, { body: body, tag: tag });
+      n.onclick = function () { window.focus(); n.close(); };
+      return true;
+    } catch (err) { return false; }
+  }
+  if (!('Notification' in window)) {
+    notifyBox.disabled = true;
+    notifyBox.setAttribute('aria-describedby', 'ot-notify-msg');
+    notifyMsg.className = 'hint';
+    notifyMsg.textContent = NOTIFY_NONE;
+  } else if (Notification.permission === 'granted') notifyBox.checked = true;
+  notifyBox.addEventListener('change', function () {
+    setNotifyError('');
+    if (!notifyBox.checked) return;
+    var done = false;
+    function answer(result) {
+      if (done) return;
+      done = true;
+      if (result !== 'granted') {
+        notifyBox.checked = false;
+        setNotifyError(result === 'denied' ? 'Notifications are blocked for this site. Allow them in your browser’s site settings, then tick the box again.' : 'Notifications were not allowed, so none will be shown.');
+      } else if (!showNote('Notifications are on', 'You will get one when a timer ends.', 'ot-on')) {
+        notifyBox.checked = false;
+        setNotifyError(NOTIFY_NONE);
+      }
+    }
+    if (Notification.permission === 'granted') { answer('granted'); return; }
+    try {
+      var p = Notification.requestPermission(answer);
+      if (p && p.then) p.then(answer, function () { answer('default'); });
+    } catch (err) { answer('default'); }
+  });
+  function notify(t) {
+    if (!notifyBox.checked || !('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!document.hidden && document.hasFocus()) return;
+    if (!showNote('Time’s up: ' + nameOf(t), spoken(t.total) + ' timer, ended at ' + fmtTime(t.ended) + '.', 'ot-' + t.n)) {
+      notifyBox.checked = false;
+      setNotifyError(NOTIFY_NONE);
+    }
+  }
+
+  // ---------- Screen wake lock ----------
+  var wake = null, wakeBusy = false;
+  function wantWake() {
+    return wakeBox.checked && document.visibilityState === 'visible' && timers.some(function (t) { return t.state === 'running' || t.ringing; });
+  }
+  function updateWake() {
+    if (!navigator.wakeLock) return;
+    if (wantWake() && !wake && !wakeBusy) {
+      wakeBusy = true;
+      navigator.wakeLock.request('screen').then(function (lock) {
+        wakeBusy = false;
+        wake = lock;
+        wakeNote.textContent = '';
+        lock.addEventListener('release', function () { if (wake === lock) wake = null; });
+        if (!wantWake()) updateWake();
+      }, function () {
+        wakeBusy = false;
+        wakeNote.textContent = 'The browser did not let this page keep the screen on, so it may turn off as usual.';
+      });
+    } else if (!wantWake() && wake) {
+      var lock = wake;
+      wake = null;
+      lock.release().catch(function () {});
+    }
+  }
+  if (!navigator.wakeLock) $('#ot-wake-row').hidden = true;
+  wakeBox.addEventListener('change', updateWake);
+
+  // ---------- Start ----------
+  document.addEventListener('visibilitychange', function () { tick(); updateWake(); });
+  // Fields the browser filled back in after the script ran (Back button)
+  // are read again, so the timer matches what is on screen.
+  window.addEventListener('pageshow', function () {
+    timers.forEach(function (t) {
+      if (t.state === 'ready' && [t.el.h.value, t.el.m.value, t.el.s.value].join('|') !== t.rendered.join('|')) onField(t);
+      if (t.el.name.value !== t.typedName) onName(t);
+    });
+    renderVol();
+    if (audio.master) audio.master.gain.value = volume();
+    tick();
+  });
+  // An address that names a part of this page, such as a heading of the
+  // guide, is a link to it, not a timer. The guide comes after this script,
+  // so the check waits until the whole page has been read.
+  function hashError(text) {
+    function show() {
+      var id = location.hash.slice(1);
+      try { id = decodeURIComponent(id); } catch (err) { /* kept as typed */ }
+      showMsg(text && id && document.getElementById(id) ? '' : text);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+    else show();
+  }
+  // A timer from the address that is already on the page.
+  function present(item) {
+    return timers.some(function (t) {
+      if (t.name !== item.name || t.setMs !== item.setMs || t.state !== item.state) return false;
+      if (t.state === 'running') return Math.abs(wallAt(t.end) - (Date.now() + item.left)) < 2000;
+      if (t.state === 'paused') return Math.abs(t.left - item.left) < 1000;
+      if (t.state === 'done') return Math.abs(t.ended - item.ended) < 2000;
+      return true;
+    });
+  }
+  window.addEventListener('hashchange', function () {
+    if (location.hash === written) return;
+    var ready = timers.every(function (t) { return t.state === 'ready'; });
+    // Back or Forward to an address this page wrote while timers count: the
+    // timers on screen are newer, so the address is brought up to date.
+    if (!ready && history.state && history.state.otTimers) { showMsg(''); writeHash(); return; }
+    var r = readHash(location.hash);
+    hashError(r.error);
+    if (!r.items.length) return;
+    if (ready) { build(r.items, !!r.error); return; }
+    // Timers already counting are kept; the new ones are added, unless the
+    // same timer is already here.
+    var items = r.items.filter(function (item) { return !present(item); });
+    var room = MAX_TIMERS - timers.length;
+    items.slice(0, Math.max(0, room)).forEach(function (item) {
+      var t = makeTimer(item);
+      timers.push(t);
+      list.appendChild(t.el.card);
+      arm(t);
+    });
+    if (items.length > room) showMsg('10 timers is the most this page runs at once, so not every timer in the address was added.');
+    commit();
+  });
+
+  var first = readHash(location.hash);
+  hashError(first.error);
+  build(first.items, !!first.error);
+  renderVol();
+  tick();
+})();
+</script>
