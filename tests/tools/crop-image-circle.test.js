@@ -316,6 +316,82 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(near(png.px(30, 100), [230, 30, 30, 255], 20), `TIFF red block ${png.px(30, 100)}`);
   assert.ok(near(png.px(100, 20), [40, 90, 210, 255], 20), `TIFF blue ${png.px(100, 20)}`);
 
+  // ---------- Damaged and cut-off files: refused with the shared decoder's message, or noted ----------
+  // Chrome draws cut.avif (ends inside its image data), damaged.avif (AV1 data overwritten),
+  // cut.webp and early.jpg (a JPG cut 12 bytes into its image data) as wholly transparent
+  // pictures without an error, which used to give a blank crop. Each is refused, and the
+  // previous image stays.
+  const errIs = async (msg, what) => {
+    await page.waitForFunction(m => document.querySelector('#circ-error').textContent === m, msg, { timeout: 20000 }).catch(() => {});
+    assert.equal(await page.textContent('#circ-error'), msg, what);
+  };
+  for (const [name, msg] of [
+    ['cut.avif', 'The AVIF file is incomplete: it ends before all of its image data. Download or copy it again.'],
+    ['damaged.avif', 'The AVIF file could not be decoded. It may be damaged or use a feature this browser does not support.'],
+    ['cut.webp', 'The WebP file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again.'],
+    ['early.jpg', 'The JPG file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again.'],
+  ]) {
+    await page.setInputFiles('#circ-file', path.join(fixtures, name));
+    await errIs(msg, name);
+    assert.match(await page.textContent('#circ-drop-title'), /tiled-o8\.tif/, `${name}: the previous image stays`);
+  }
+  png = await download();
+  assert.equal(png.name, 'tiled-o8-circle-128.png');
+  // cut.jpg (120 x 90, top half (40,90,200), bottom half (230,180,40)) stops 40% into its image
+  // data and cut.png (160 x 120, top 20 rows (200,40,90)) 60% into it: the browser draws the
+  // rows before the cut and leaves the rest transparent, so they open with a note. At 100% the
+  // shorter side spans the circle: output y = image y * 128 / 90 and * 128 / 120.
+  const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
+  const opened = name => page.waitForFunction(n => document.querySelector('#circ-drop-title').textContent === n, name, { timeout: 20000 });
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'cut.jpg'));
+  await opened('cut.jpg');
+  assert.equal(await page.textContent('#circ-drop-hint'), `120 × 90 px. ${CUT} Choose or drop another image to replace it.`);
+  assert.equal(await page.textContent('#circ-error'), '');
+  png = await download();
+  assert.ok(near(png.px(64, 20), [40, 90, 200, 255], 10), `cut.jpg before the cut ${png.px(64, 20)}`);
+  assert.deepEqual(png.px(64, 100), [0, 0, 0, 0], 'cut.jpg after the cut: blank');
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'cut.png'));
+  await opened('cut.png');
+  assert.equal(await page.textContent('#circ-drop-hint'), `160 × 120 px. ${CUT} Choose or drop another image to replace it.`);
+  png = await download();
+  assert.ok(near(png.px(64, 10), [200, 40, 90, 255], 4), `cut.png before the cut ${png.px(64, 10)}`);
+  assert.deepEqual(png.px(64, 120), [0, 0, 0, 0], 'cut.png after the cut: blank');
+  // motion.jpg is cut.jpg's picture complete, followed by a video clip, as a motion photo stores
+  // it after the end-of-image marker: not a cut.
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'motion.jpg'));
+  await opened('motion.jpg');
+  assert.equal(await page.textContent('#circ-drop-hint'), '120 × 90 px. Choose or drop another image to replace it.');
+
+  // ---------- WebP and AVIF through the shared decoder ----------
+  // rotated.webp is stored 120 x 80 with a (220,30,30) band along the top 20 rows, (235,235,235)
+  // elsewhere, and EXIF Orientation 6, which browsers ignore in a WebP. Upright it is 80 x 120
+  // with the band down the right-hand side: at 100% its width spans the circle, so the band
+  // (x 60-79) lands at output x 96-127. Unturned, the band would cross the top instead.
+  const GREY = [235, 235, 235, 255], BAND = [220, 30, 30, 255];
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'rotated.webp'));
+  await opened('rotated.webp');
+  assert.match(await page.textContent('#circ-drop-hint'), /^80 × 120 px\. Choose/);
+  png = await download();
+  assert.ok(near(png.px(115, 64), BAND, 4) && near(png.px(30, 64), GREY, 4) && near(png.px(64, 15), GREY, 4), `rotated.webp upright: ${png.px(115, 64)} ${png.px(64, 15)}`);
+  // square-o6.webp: the same on a 96 x 96 picture (band x 72-95 upright, output x 96-127), whose
+  // size does not give a missed turn away. The export must come from the turned pixels, not
+  // from the browser decoding the file once more.
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'square-o6.webp'));
+  await opened('square-o6.webp');
+  png = await download();
+  assert.ok(near(png.px(118, 64), BAND, 4) && near(png.px(64, 10), GREY, 4) && near(png.px(10, 64), GREY, 4), `square-o6.webp upright: ${png.px(118, 64)} ${png.px(64, 10)}`);
+  // anim.webp (40 x 30): frame 1 red, frame 2 blue. srgb.avif: 32 x 32 of (200,100,100).
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'anim.webp'));
+  await opened('anim.webp');
+  png = await download();
+  assert.ok(near(png.px(64, 64), RED, 4), `an animated WebP shows its first frame: ${png.px(64, 64)}`);
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'srgb.avif'));
+  await opened('srgb.avif');
+  assert.match(await page.textContent('#circ-drop-hint'), /^32 × 32 px\. Choose/);
+  png = await download();
+  assert.ok(near(png.px(64, 64), [200, 100, 100, 255], 12), `AVIF ${png.px(64, 64)}`);
+  checkCorners(png, [0, 0, 0, 0]);
+
   // ---------- Keyboard: browser shortcuts pass through; no chatter while dragging ----------
   const passed = await page.$eval('#circ-editor', ed => {
     const e = new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true });
@@ -365,8 +441,33 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     return Array.from(g.getImageData(0, 0, 1, 1).data);
   }, fs.readFileSync(await dl2j.path()).toString('base64'));
   assert.ok(near(jc, [255, 255, 255, 255], 4), `white corner ${jc}`);
+  // Without a worker the shared decoder turns a WebP upright on the page, and the page draws it.
+  await p2.selectOption('#circ-format', 'png');
+  await p2.selectOption('#circ-bg', 'none');
+  await p2.setInputFiles('#circ-file', path.join(fixtures, 'square-o6.webp'));
+  await p2.waitForFunction(() => /square-o6\.webp/.test(document.querySelector('#circ-drop-title').textContent));
+  const [dl2w] = await Promise.all([p2.waitForEvent('download'), p2.click('#circ-download')]);
+  png = decodePng(fs.readFileSync(await dl2w.path()), assert);
+  assert.ok(near(png.px(118, 64), BAND, 4) && near(png.px(64, 10), GREY, 4), `upright without a worker: ${png.px(118, 64)} ${png.px(64, 10)}`);
   assert.deepEqual(p2errors, []);
   await p2.close();
+
+  // ---------- Too big for the shared decoder: the browser's own decoder takes over ----------
+  // The decoder refuses pictures over 100 megapixels, and ones bigger than a canvas may be in the
+  // browser (16.7 megapixels in Safari on iPhone before iOS 18), which the browser may still hold
+  // as an image bitmap. Simulated by having the decoder refuse every file as too big.
+  const p4 = await page.context().newPage();
+  await p4.goto(url);
+  await p4.evaluate(() => {
+    TTImage.decode = async () => { const e = new Error('The image is too large for this browser.'); e.code = 'TOO_BIG'; e.friendly = true; throw e; };
+  });
+  await p4.setInputFiles('#circ-file', path.join(fixtures, 'rotated.webp'));
+  await p4.waitForFunction(() => /rotated\.webp/.test(document.querySelector('#circ-drop-title').textContent));
+  assert.match(await p4.textContent('#circ-drop-hint'), /^120 × 80 px\. Choose/, 'opened by the browser, which leaves it as stored');
+  await p4.setInputFiles('#circ-file', path.join(fixtures, 'gps.heic'));
+  await p4.waitForFunction(() => document.querySelector('#circ-error').textContent.length > 0);
+  assert.equal(await p4.textContent('#circ-error'), 'The image is too large for this browser.', 'a HEIC this browser cannot open itself keeps the message');
+  await p4.close();
 
   // ---------- Startup on a 3x phone: one editor paint at 2x, redrawn only on a real resize ----------
   const ctx3 = await page.context().browser().newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
