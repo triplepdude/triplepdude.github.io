@@ -576,7 +576,10 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await pick('phone');   // back to what the test left on screen
     assert.match(await err(), /can only contain digits/);
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-    assert.deepEqual(links, ['/url-encode-decode/', '/wifi-qr-code-generator/', '/barcode-generator/']);
+    assert.deepEqual(links, ['/url-encode-decode/', '/wifi-qr-code-generator/', '/barcode-generator/', '/qr-code-scanner/']);
+    // The logo FAQ sends a desktop reader to the scanner, which takes a dropped PNG or SVG.
+    const faq = (await page.locator('.faq').textContent()).replace(/\s+/g, ' ');
+    assert.match(faq, /Always test the final file with more than one phone\. On a computer, drop the downloaded PNG or SVG on the QR code scanner to check that it scans\./);
     for (const href of links) {
       assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
     }

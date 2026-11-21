@@ -1845,7 +1845,8 @@
           box = parseHeif(new Uint8Array(await file.arrayBuffer()));
           if (box.truncated) throw fail('CORRUPT', 'The AVIF file is incomplete: it ends before all of its image data. Download or copy it again.');
           if (o.exif) res.exif = box.exif || null;
-          // (An image sequence is drawn from its track, which may have alpha the still item lacks.)
+          // A still AVIF without an alpha layer must decode opaque (checked below). Not an
+          // image sequence: that is drawn from its track, which may have alpha the still item lacks.
           var main = box.items[box.primary];
           opaqueAvif = !res.animated && !box.broken && !!main && (main.type === 'av01' || main.type === 'grid') && !box.alpha;
         }
