@@ -75,7 +75,7 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   assert.equal(await page.textContent('h1'), 'WebP to PNG Converter, Transparency Kept');
 
   // ---------- Set up for WebP to PNG as served, and nothing moves as the script starts ----------
-  const NOTE = 'PNG is lossless: every pixel is kept exactly, and photos make large files. Transparent areas stay transparent, soft edges included. For a photo without transparency, JPG makes a far smaller file.';
+  const NOTE = 'PNG is lossless: the decoded pixels are saved without further loss, and photos make large files. Transparent areas stay transparent, soft edges included. For a photo without transparency, JPG makes a far smaller file.';
   const HINT = 'WebP images, still or animated, as many as you like. Nothing is uploaded.';
   const START = ['png', '90', '90%', '#ffffff', 'strip', 'true,false,true,false,true,true', NOTE, HINT];
   const controls = () => page.evaluate(async () => {

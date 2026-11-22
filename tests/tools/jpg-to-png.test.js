@@ -76,7 +76,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.textContent('h1'), 'JPG to PNG Converter for JPEG Photos');
 
   // ---------- Set up for JPG to PNG as served, and nothing moves as the script starts ----------
-  const NOTE = 'PNG is lossless: every pixel is kept exactly, and photos make large files. Converting cannot restore detail that the JPG compression has already removed.';
+  const NOTE = 'PNG is lossless: the decoded pixels are saved without further loss, and photos make large files. Converting cannot restore detail that the JPG compression has already removed.';
   const HINT = 'JPG or JPEG photos, as many as you like. Nothing is uploaded.';
   const START = ['png', '90', '90%', '#ffffff', 'strip', 'true,false,true,false,true,true', NOTE, HINT];
   const load = await page.evaluate(async () => {

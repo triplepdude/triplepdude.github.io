@@ -131,7 +131,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
 
   // ---------- The page's note belongs to JPG: not shown for PNG, back with JPG ----------
   await rerun(() => page.selectOption('#imc-format', 'png'));
-  assert.equal(await page.textContent('#imc-note'), 'PNG is lossless: every pixel is kept exactly, and photos make large files.');
+  assert.equal(await page.textContent('#imc-note'), 'PNG is lossless: the decoded pixels are saved without further loss, and photos make large files.');
   assert.equal(await page.isVisible('#imc-bg-field'), false);
   assert.match(await rowText(0), /^alpha\.png PNG 64×48/);
   assert.doesNotMatch(await rowText(0), /filled with/);
