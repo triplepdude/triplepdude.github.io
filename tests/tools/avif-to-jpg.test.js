@@ -60,9 +60,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual(load.live, START, 'the script changed the controls as it started');
   assert.deepEqual(load.settled, START, 'the encoder checks changed the controls');
 
-  // ---------- The guide links to the hub and to HEIC to JPG, all real tool pages ----------
+  // ---------- The guide links to the hub, HEIC to JPG and WebP to JPG, all real tool pages ----------
   const links = await page.$$eval('.prose a', as => as.map(a => a.getAttribute('href')));
-  for (const h of ['/image-converter/', '/heic-to-jpg/']) assert.ok(links.includes(h), `guide links to ${h}`);
+  for (const h of ['/image-converter/', '/heic-to-jpg/', '/webp-to-jpg/']) assert.ok(links.includes(h), `guide links to ${h}`);
+  // The FAQ says how to open an AVIF without converting it ('open avif file' is a keyword).
+  assert.deepEqual(await page.$$eval('.faq summary', s => s.map(e => e.textContent.trim())), [
+    'What is an AVIF file?', 'Why does Chrome save images as AVIF?', 'Will the JPG look the same as the AVIF?', 'How do I open an AVIF file without converting it?']);
+  assert.match((await page.textContent('.faq')).replace(/\s+/g, ' '), /Any current browser opens it: drag the file into a Chrome, Edge, Firefox or Safari window\. macOS 13 Ventura and later also open AVIF in Preview, and Windows 10 and 11 show it in Photos once the free AV1 Video Extension from the Microsoft Store is installed\./);
   for (const h of links) assert.ok(/^\/[a-z0-9-]+\/$/.test(h) && fs.existsSync(path.join(__dirname, '..', '..', '_tools', h.slice(1, -1) + '.html')), `guide link ${h} is not a tool page`);
 
   const rows = page.locator('.imc-item');

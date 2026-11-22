@@ -418,7 +418,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await value(f), ex.value);
   assert.equal(await f.evaluate(() => document.getElementById('tt-input').readOnly), true);
   assert.equal(await active(f), 'tt-input');
-  assert.deepEqual(await f.evaluate(() => window.__keys.map(e => e.key + ' ' + e.defaultPrevented)), ['k true', 'e true', '  true', 'Shift false', '  true']);
+  const afterEnd = await f.evaluate(() => window.__keys.map(e => e.key + ' ' + e.defaultPrevented));
+  assert.deepEqual(afterEnd, ['k true', 'e true', '  true', 'Shift false', '  true'], 'keys seen: ' + JSON.stringify(afterEnd));
   assert.equal(await f.evaluate(() => scrollY), 0);
   await f.click('#tt-copy');
   assert.equal(await f.evaluate(() => navigator.clipboard.readText()), ex.copy.concat(url + ex.hash).join('\n'));
@@ -524,7 +525,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // The page keeps I and lower-case words, and drops anything else (here with
   // a byte order mark and Windows line ends): only I, the and of are dealt.
   const o2 = await offCtx.newPage();
-  await o2.route('**/common-words/words.txt', r => r.fulfill({ contentType: 'text/plain', body: '\uFEFF' + "I\r\nthe\r\nEngland\r\ndon't\r\n\r\nof\r\nHello\r\ni2\r\n".repeat(40) }));
+  await o2.route('**/common-words/words.txt', r => r.fulfill({ contentType: 'text/plain', body: '\uFEFF' + "I\r\nthe\r\nEngland\r\ndon't\r\n\r\nof\r\nHello\r\ni2\r\n".repeat(60) }));
   await o2.goto(url);
   await ready(o2);
   const dealt = await words(o2);
@@ -609,7 +610,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await t7.locator('#tt-box').tap();
   assert.equal(await active(t7), 'tt-input');
   for (let i = 0; i < 6; i++) { await t7.keyboard.insertText(tw[i] + ' '); await t7.clock.runFor(1000); }
-  await t7.clock.runFor(25000);
+  // To 0.1 s past the end, so that most of the quiet second after it is left.
+  await t7.clock.runFor(24100);
   await t7.waitForFunction(() => !document.getElementById('tt-result').hidden);
   // The field has let go of the focus, which closes the keyboard, and the
   // result's heading has it; the result scrolls into view (smoothly: wait).
@@ -622,7 +624,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await t7.evaluate(() => { window.__keys = []; window.addEventListener('keydown', e => window.__keys.push(e), true); });
   await t7.keyboard.press('Space');
   await t7.locator('#tt-clear').click();
-  assert.deepEqual(await t7.evaluate(() => window.__keys.map(e => e.key + ' ' + e.defaultPrevented)), ['  true']);
+  const lateKeys = await t7.evaluate(() => window.__keys.map(e => e.key + ' ' + e.defaultPrevented + ' ' + (e.target.id || e.target.nodeName) + ' ' + Math.round(performance.now())));
+  assert.deepEqual(lateKeys.map(k => k.split(' ').slice(0, 3).join(' ')), ['  true'], 'keys seen: ' + JSON.stringify(lateKeys));
   assert.equal((await rows('#tt-hist', t7)).length, 1, 'a stray tap did not clear the session');
   assert.equal(await t7.locator('#tt-result').isVisible(), true);
   // ...and then they work again.

@@ -84,7 +84,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
       pages.push({ text: tc.items.map(t => t.str).join(' ').replace(/\s+/g, ' ').split(' Fixture')[0].trim(), rotate: pg.rotate, size: Math.round(pg.view[2]) + 'x' + Math.round(pg.view[3]), anns: anns.join(), ids });
     }
     await task.destroy();
-    return { encrypted: !!meta.info.EncryptFilterName, producer: meta.info.Producer, pages };
+    const info = {};
+    for (const k of ['Title', 'Author', 'Subject', 'Keywords', 'Creator', 'Producer', 'CreationDate', 'ModDate']) if (meta.info[k] !== undefined) info[k] = meta.info[k];
+    return { encrypted: !!meta.info.EncryptFilterName, producer: meta.info.Producer, info, pages };
   }, buf.toString('base64'));
   // Walks every object of a PDF with pdf-lib: the pages in the page tree, the page objects in the
   // file (a page that is not in the tree is a hidden copy) and the pictures; with withResources, also
@@ -273,7 +275,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   pdf = await inspect(out.buf);
   assert.equal(pdf.pages.length, 40);
   assert.equal(pdf.pages[39].text, 'Many 40');
-  assert.match(pdf.producer, /TripleP Tools/);
+  // Only the tool's name: none of many.pdf's document properties, and no date of making, which
+  // would tell anyone given the file when it was made, to the second.
+  assert.deepEqual(pdf.info, { Creator: 'TripleP Tools Merge PDF', Producer: 'TripleP Tools (pdf-lib)' });
 
   // ---- Rotation read from the page tree, and invalid /Rotate values ----
   // ISO 32000-1 7.7.3.3: /Rotate is inheritable and must be a multiple of 90; readers treat 45 as 0
