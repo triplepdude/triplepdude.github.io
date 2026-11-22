@@ -318,9 +318,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const shortWav = parseWav((await download(() => row('cut-short.mp4').locator('.m2m-dl').click())).bytes);
   assert.equal(shortWav.data.length / 2, exp['cut-short.mp4'].decoded_samples, 'the WAV holds every sample there is, and no more');
   await page.check('#m2m-f-mp3');
-  // The first half of clip.mp4 has no index at all (it is at the end), and a
-  // WAV header with no samples has an empty sound track.
-  await page.evaluate(b64 => {
+  // The first half of clip.mp4 has no index at all (it is at the end), a WAV
+  // header with no samples has an empty sound track, and a copy of
+  // cut-short.mp4 can be converted, with a warning.
+  await page.evaluate(([b64, b64short]) => {
     const clip = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
     const head = new DataView(new ArrayBuffer(44)), w = (o, s) => { for (let i = 0; i < s.length; i++) head.setUint8(o + i, s.charCodeAt(i)); };
     w(0, 'RIFF'); head.setUint32(4, 36, true); w(8, 'WAVEfmt '); head.setUint32(16, 16, true); head.setUint16(20, 1, true); head.setUint16(22, 2, true);
@@ -328,12 +329,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     const dt = new DataTransfer();
     dt.items.add(new File([clip.subarray(0, clip.length >> 1)], 'half.mp4', { type: 'video/mp4' }));
     dt.items.add(new File([head.buffer], 'empty.wav', { type: 'audio/wav' }));
+    dt.items.add(new File([Uint8Array.from(atob(b64short), ch => ch.charCodeAt(0))], 'cut-short copy.mp4', { type: 'video/mp4' }));
     document.getElementById('m2m-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  }, fs.readFileSync(F('clip.mp4')).toString('base64'));
+  }, [fs.readFileSync(F('clip.mp4')).toString('base64'), fs.readFileSync(F('cut-short.mp4')).toString('base64')]);
   await waitRead();
   assert.equal((await card('half.mp4')).msg, 'No sound or video was found in this file. It may be incomplete, such as a copy or download that did not finish, or damaged.');
   assert.equal((await card('empty.wav')).msg, 'Its sound track is empty, so there is no audio to save. The file may be incomplete or damaged.');
-  assert.equal(await text('#m2m-status'), 'Added 2 files, 2 of them cannot be converted to MP3: see the message under each.');
+  assert.equal(await text('#m2m-status'), 'Added 3 files, 2 of them cannot be converted to MP3 and 1 more has a warning: see the message under each.');
   await page.click('#m2m-clear');
 
   // ---------- Keyboard: Choose files opens the file picker ----------

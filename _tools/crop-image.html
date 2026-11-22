@@ -627,7 +627,8 @@ faq:
     if (!st.qTouched) qIn.value = String(qValue(it, key));
     setText(qOut, qIn.value + (own ? ' (as the original)' : ''));
     qIn.setAttribute('aria-valuetext', qIn.value + (own ? ', as the original' : ''));
-    exifRow.hidden = !(it.exif && (key === 'jpeg' || key === 'png' || key === 'webp'));
+    // The other pictures of a batch are read only when the ZIP is made, and may have EXIF.
+    exifRow.hidden = !((it.exif || st.extra.length) && (key === 'jpeg' || key === 'png' || key === 'webp'));
     var o = fmtSel.querySelector('option[value="same"]'), sameKey = outKeySame(it, out);
     setText(o, 'Original format (' + LABEL[sameKey] + ')');
     dlBtn.textContent = 'Download ' + LABEL[key];
@@ -794,6 +795,7 @@ faq:
     });
     // New pictures start upright: a turn or mirror belongs to the pictures it was made for.
     st.rot = 0; st.flip = false;
+    st.extra = rest.map(function (f) { return { file: f, name: baseName(f.name || 'pasted-image') }; });
     setItem(it);
     // A print size turns with each new picture, as it does when it is chosen.
     var pr = PRESETS[presetSel.value];
@@ -802,7 +804,6 @@ faq:
       var ow = owIn.value; owIn.value = ohIn.value; ohIn.value = ow;
       applyRatio(true);
     }
-    st.extra = rest.map(function (f) { return { file: f, name: baseName(f.name || 'pasted-image') }; });
     $('#crp-drop-title').textContent = (it.file.name || 'Pasted image') + (st.extra.length ? ' and ' + st.extra.length + ' more' : '');
     $('#crp-drop-hint').textContent = fmtN(it.iw) + ' × ' + fmtN(it.ih) + ' px ' + (TTImage.formats[it.fmt] || { label: '' }).label + '. Choose or drop other images to replace ' + (st.extra.length ? 'them' : 'it') + '.';
     setText(noteEl, notesFor(it));

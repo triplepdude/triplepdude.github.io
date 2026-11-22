@@ -556,10 +556,14 @@ faq:
     }
     var kept = added.filter(function (e) { return entries.indexOf(e) >= 0; }), one = kept[0];
     var bad = kept.filter(function (e) { return !convertible(e); }).length;
+    var warned = kept.filter(function (e) { return convertible(e) && entryMsg(e); }).length, has = warned === 1 ? ' has' : ' have';
     if (added.length === 1 && one) {
       say(one.status === 'error' ? one.name + ': ' + one.error : 'Added ' + one.name + ': ' + fmtTime(one.durMs) + ', ' + codecName(one.t) + ' ' + channelsText(one.t.ch) + '.' +
         (entryMsg(one) ? ' ' + entryMsg(one) : ''));
-    } else if (added.length > 1) say('Added ' + added.length + ' files' + (bad ? ', ' + bad + ' of them cannot be ' + formatWord() + ': see the message under each.' : '.'));
+    } else if (added.length > 1) {
+      say('Added ' + added.length + ' files' + (bad ? ', ' + bad + ' of them cannot be ' + formatWord() : '') +
+        (warned ? (bad ? ' and ' + warned + ' more' + has : ', ' + warned + ' of them' + has) + ' a warning' : '') + (bad || warned ? ': see the message under each.' : '.'));
+    }
   }
 
   async function probe(e) {
@@ -1249,7 +1253,8 @@ faq:
   });
   function endDrag(ev) { if (drag && ev.pointerId === drag.id) drag = null; }
   dom.wave.addEventListener('pointerup', function (ev) {
-    if (drag && drag.pending && ev.pointerId === drag.id && editorOn() && !dom.editFs.disabled) {
+    if (drag && drag.pending && ev.pointerId === drag.id && editorOn() && !dom.editFs.disabled &&
+        Math.abs(ev.clientX - drag.x) < 10 && Math.abs(ev.clientY - drag.y) < 10) {
       var ms = msAt(drag.x);
       startDrag(ev, nearer(ms), ms);
     }
