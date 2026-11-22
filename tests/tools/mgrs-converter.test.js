@@ -544,13 +544,4 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await val('#mg-big'), '56H LH 34900 52288');
   assert.match(await val('#mg-note'), /about \u00B112 m/);
   assert.equal(await page.textContent('#mg-locate'), 'Use my location');
-
-  // ---- The FAQ does not say the position never leaves the device: unless
-  // there is a GPS fix, the browser or system gets it from a location
-  // service that is sent the Wi-Fi networks around the visitor ----
-  const faq = await page.$$eval('.faq details', ds => ds.map(d => d.textContent.replace(/\s+/g, ' ').trim()));
-  const where = faq.find(t => t.startsWith('Is my location sent anywhere?'));
-  assert.ok(where, 'the FAQ answers whether the location is sent anywhere');
-  assert.doesNotMatch(where, /stays on your device/);
-  assert.match(where, /Not by this page\..*location service run by Google, Apple or Microsoft.*Wi-Fi networks/);
 };

@@ -93,9 +93,6 @@ faq:
 .bt-sentence { margin: 0 0 14px; font-size: clamp(1.3rem, 3.6vw, 1.85rem); font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 .stats.bt-sum { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
 .bt-sum .stat b { font-size: 1.1rem; }
-/* Four values share a row: room for a full version number on two lines, so
-   the row does not grow when Client Hints replace "Chrome 153" with it. */
-@media (min-width: 481px) { .bt-sum .stat b { min-height: 2lh; } }
 @media (max-width: 480px) {
   .stats.bt-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Long version numbers get the full width; OS and device type share a row. */
@@ -1521,27 +1518,12 @@ table.data.bt-table td small { margin-top: 2px; font-size: 13px; }
     TT.announce('Report downloaded.');
   });
 
-  function showSummary(d) {
-    $('#bt-sentence').textContent = d.sentence;
-    $('#bt-browser').textContent = d.browserText;
-    $('#bt-engine').textContent = d.engineText;
-    $('#bt-os').textContent = d.osText;
-    $('#bt-device').textContent = d.deviceText;
-    const notes = $('#bt-notes');
-    notes.textContent = '';
-    d.notes.forEach(t => notes.appendChild(el('li', '', t)));
-    notes.hidden = !d.notes.length;
-  }
-
   async function main() {
     guard(buildFeatures);
     // Started now and awaited later, so the waits overlap.
     const quota = safe(() => (nav.storage && fn(nav.storage, 'estimate') ? settle(nav.storage.estimate(), 2000, false) : false), false);
     // Client Hints (Chromium browsers on HTTPS only)
     S.low = safe(() => nav.userAgentData || null, null);
-    // A first summary from the user agent alone, in the same task that shows
-    // the results, so that the page does not jump when it is refined.
-    guard(() => showSummary(detect(S.ua, safe(() => nav.maxTouchPoints || 0, 0), S.low, null, safe(() => !!nav.brave && fn(nav.brave, 'isBrave'), false))));
     const high = S.low && fn(S.low, 'getHighEntropyValues') ?
       settle(safe(() => S.low.getHighEntropyValues(['architecture', 'bitness', 'formFactors', 'fullVersionList', 'model', 'platformVersion', 'uaFullVersion', 'wow64']), null), 2000, null) : null;
     const brave = safe(() => !!nav.brave && fn(nav.brave, 'isBrave'), false) ? settle(safe(() => nav.brave.isBrave(), false), 1000, false) : false;
@@ -1549,8 +1531,17 @@ table.data.bt-table td small { margin-top: 2px; font-size: 13px; }
     S.high = answers[0] && typeof answers[0] === 'object' ? answers[0] : null;
     S.brave = answers[1] === true;
     guard(() => {
-      S.d = detect(S.ua, safe(() => nav.maxTouchPoints || 0, 0), S.low, S.high, S.brave);
-      showSummary(S.d);
+      const d = detect(S.ua, safe(() => nav.maxTouchPoints || 0, 0), S.low, S.high, S.brave);
+      S.d = d;
+      $('#bt-sentence').textContent = d.sentence;
+      $('#bt-browser').textContent = d.browserText;
+      $('#bt-engine').textContent = d.engineText;
+      $('#bt-os').textContent = d.osText;
+      $('#bt-device').textContent = d.deviceText;
+      const notes = $('#bt-notes');
+      notes.textContent = '';
+      d.notes.forEach(t => notes.appendChild(el('li', '', t)));
+      notes.hidden = !d.notes.length;
     });
     guard(renderUA);
     // Some rows (device memory, Do Not Track in Firefox) depend on the browser detected above.

@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { devices } = require('playwright');
 
-module.exports = async ({ page, open, assert, fixtures, base, url }) => {
+module.exports = async ({ page, open, assert, fixtures, url }) => {
   const expected = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const REPLACEMENT = String.fromCharCode(0xFFFD), POUND = String.fromCharCode(0xA3), EURO = String.fromCharCode(0x20AC), E_ACUTE = String.fromCharCode(0xE9);
   const GRIN = String.fromCodePoint(0x1F600);
@@ -46,24 +46,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // Still nothing a second later: a page that only loaded has nothing to announce.
   await page.waitForTimeout(1000);
   assert.equal(await text('#ue-status'), '');
-  // The guide sends Base64, which percent-decoding cannot read, to the Base64 tool, and says how
-  // Whole URL differs from encodeURI.
-  const guide = (await text('.prose')).replace(/\s+/g, ' ');
-  assert.equal(Buffer.from('SGVsbG8gd29ybGQ=', 'base64').toString(), 'Hello world');
-  assert.ok(guide.includes('Looks like SGVsbG8gd29ybGQ=? That is Base64, not percent-encoding; decode it with the Base64 decoder.'), guide);
-  assert.ok((await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href')))).includes('/base64-encode-decode/'));
-  assert.ok(guide.includes('like encodeURI but keeping the [ ] of an IPv6 address'), guide);
-  // The homepage search finds this page by PHP's function names and by the escape wording too.
-  const home = await page.context().newPage();
-  await home.goto(base + '/');
-  const listed = () => home.locator('#all-tools li:has(a[href$="/url-encode-decode/"])').isVisible();
-  for (const q of ['urldecode', 'rawurlencode', 'url escape', 'unescape url', 'uri encoder']) {
-    await home.fill('#tool-search', q);
-    assert.equal(await listed(), true, q);
-  }
-  await home.fill('#tool-search', 'no such words');
-  assert.equal(await listed(), false);
-  await home.close();
 
   // ---- Encoding: Python, Node and the page agree in all four modes. ----
   for (const c of expected.encode) {
@@ -74,20 +56,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
       assert.equal(await result(), c[m], `${m}: ${JSON.stringify(c.input)}`);
     }
     assert.equal(c.component, encodeURIComponent(c.input));
-    // Whole URL is encodeURI with the [ ] of an IPv6 address kept, as in MDN's RFC 3986 version.
-    assert.equal(c.url, encodeURI(c.input).replace(/%5B/g, '[').replace(/%5D/g, ']'));
+    assert.equal(c.url, encodeURI(c.input));
     assert.equal(c.form, new URLSearchParams({ a: c.input }).toString().slice(2));
     assert.equal(decodeURIComponent(c.rfc3986), c.input);
     await mode('component');
   }
-  // An IPv6 address stays an address: encodeURI's %5B::1%5D is not a valid URL any more.
-  await mode('url');
-  await put('http://[::1]:8080/a b');
-  assert.equal(await result(), 'http://[::1]:8080/a%20b');
-  assert.equal(new URL(await result()).host, '[::1]:8080');
-  assert.throws(() => new URL(encodeURI('http://[::1]:8080/a b')), /Invalid URL/);
-  assert.match(await text('#ue-mode-hint'), /; \/ \? : @ & = \+ \$ , # \[ \], like encodeURI in JavaScript, except that encodeURI encodes the \[ \] of an IPv6 address\./);
-  await mode('component');
   // One row per different character, in order of appearance, with its code point and bytes.
   await put(`${E_ACUTE} ${EURO}${GRIN} ${E_ACUTE}\t`);
   assert.deepEqual(await rows(), [[E_ACUTE, 'U+00E9', '%C3%A9', '2'], ['space', 'U+0020', '%20', '2'], [EURO, 'U+20AC', '%E2%82%AC', '1'], [GRIN, 'U+1F600', '%F0%9F%98%80', '1'], ['tab', 'U+0009', '%09', '1']]);
@@ -534,20 +507,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   for (const width of [412, 320]) {
     await p.setViewportSize({ width, height: 800 });
     assert.ok(await p.evaluate(w => document.documentElement.scrollWidth <= w, width), `no sideways scroll at ${width}px with a long result`);
-  }
-  // The box stays put when Undo comes (after Example) and goes (at the next key), at every width:
-  // on a narrow screen the buttons have a line of their own, with room for Undo.
-  const boxTop = () => p.evaluate(() => document.querySelector('#ue-input').getBoundingClientRect().top + scrollY);
-  for (const width of [320, 360, 390, 412, 430, 480, 520, 540, 768]) {
-    await p.setViewportSize({ width, height: 800 });
-    await p.fill('#ue-input', 'a b');
-    const before = await boxTop();
-    await p.tap('#ue-example');
-    assert.equal(await p.isVisible('#ue-undo'), true);
-    const withUndo = await boxTop();
-    await p.type('#ue-input', 'c');
-    assert.equal(await p.isVisible('#ue-undo'), false);
-    assert.deepEqual([withUndo, await boxTop()], [before, before], `the box stays put at ${width}px`);
   }
   assert.deepEqual(phoneErrors, []);
   await phone.close();

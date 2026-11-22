@@ -23,8 +23,6 @@ function unzip(buf) {
     const raw = buf.subarray(start, start + csize);
     const data = method === 8 ? zlib.inflateRawSync(raw) : raw;
     if (data.length !== usize) throw new Error(`${name}: size mismatch`);
-    // The entry's MS-DOS modification date and time, from the central directory and the local header.
-    data.dos = [buf.readUInt16LE(p + 14), buf.readUInt16LE(p + 12), buf.readUInt16LE(off + 12), buf.readUInt16LE(off + 10)];
     files[name] = data;
     p += 46 + nlen + xlen + clen;
   }
@@ -48,8 +46,6 @@ function png(w, h) {
 }
 
 module.exports = async ({ page, open, assert }) => {
-  const fetched = [];
-  page.on('request', r => fetched.push(r.url()));
   await open();
   const frame = await (await page.$('#mdw-frame')).contentFrame();
   // Waits by polling from the test: inside the sandboxed preview frame no script may run, so
@@ -63,22 +59,11 @@ module.exports = async ({ page, open, assert }) => {
     }
   };
   const inFrameSel = sel => inFrame(s => !!document.querySelector(s), sel);
-  // ---- On load: a short sample without formulas or code, so that neither KaTeX nor
-  // highlight.js (about 120 KB compressed) is fetched until a document uses them. ----
   await inFrameSel('#mdw-doc h1');
-  await page.waitForFunction(() => /\d words?$/.test(document.getElementById('mdw-info').textContent));
-  await page.waitForLoadState('networkidle');
-  assert.deepEqual(fetched.filter(u => /katex|highlight/.test(u)), [], 'fetched on load');
+  await inFrameSel('#mdw-doc .katex');
   assert.equal(await frame.textContent('#mdw-doc h1'), 'Project kickoff notes');
   assert.equal(await page.inputValue('#mdw-name'), 'Project kickoff notes');
   assert.equal(await page.$$eval('h1', l => l.length), 1);
-  assert.equal(await frame.$$eval('#mdw-doc table, #mdw-doc .footnotes li', l => l.length), 2);
-  assert.match(await page.inputValue('#mdw-input'), /Press \*\*Example\*\* for a longer sample with an equation and a code block\./);
-  // The Example button loads the longer sample, which fetches both.
-  await page.click('#mdw-sample');
-  await inFrameSel('#mdw-doc .katex');
-  await inFrameSel('#mdw-doc pre code .hljs-keyword');
-  assert.doesNotMatch(await page.inputValue('#mdw-input'), /Press \*\*Example\*\*/);
 
   const setMd = async md => { await page.fill('#mdw-input', md); await page.waitForTimeout(200); };
   // Parses every XML part in the page's XML parser and returns the files.
@@ -106,10 +91,6 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(ct, /PartName="\/word\/footnotes\.xml"/);
   assert.match(d.text('_rels/.rels'), /Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/officeDocument" Target="word\/document\.xml"/);
   assert.match(d.text('docProps/core.xml'), /<dc:title>Project kickoff notes<\/dc:title>/);
-  // The file does not record when it was made: no created or modified date, and every ZIP
-  // entry dated 1 January 1980 at midnight (MS-DOS date 0x0021, time 0).
-  assert.doesNotMatch(d.text('docProps/core.xml'), /dcterms:created|dcterms:modified|\d{4}-\d\d-\d\dT/);
-  for (const [n, f] of Object.entries(d.files)) assert.deepEqual(f.dos, [0x21, 0, 0x21, 0], `${n} is dated`);
   const styles = d.text('word/styles.xml');
   for (const id of ['Normal', 'Heading1', 'Heading2', 'Heading6', 'Quote', 'CodeBlock', 'CodeChar', 'Hyperlink', 'TableGrid', 'FootnoteText', 'FootnoteReference', 'ListParagraph']) assert.match(styles, new RegExp(`w:styleId="${id}"`));
   assert.match(styles, /<w:name w:val="heading 1"\/>.*?<w:outlineLvl w:val="0"\/>/, 'headings are Word\'s built-in headings');

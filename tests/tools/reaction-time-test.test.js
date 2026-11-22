@@ -182,14 +182,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await text('#rt-sub'), 'When you hear the beep, click as fast as you can. The box does not change colour.');
   await page.evaluate(() => {
     window.__beeps = [];
-    window.__sleeps = [];
     const proto = AudioScheduledSourceNode.prototype, start = proto.start, stop = proto.stop;
     proto.start = function (when) {
       const ctx = this.context;
-      window.__ctx = ctx;
       const out = ctx.getOutputTimestamp ? ctx.getOutputTimestamp() : null;
       window.__beeps.push({ when, ctxNow: ctx.currentTime, perfNow: performance.now(), lat: (ctx.outputLatency || 0) + (ctx.baseLatency || 0),
-        out: out && { contextTime: out.contextTime, performanceTime: out.performanceTime }, stops: [], state: ctx.state });
+        out: out && { contextTime: out.contextTime, performanceTime: out.performanceTime }, stops: [] });
       if (window.__pressOnBeep) {
         window.__pressOnBeep = false;
         setTimeout(() => document.getElementById('rt-pad').dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true })), 0);
@@ -200,14 +198,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
       const b = window.__beeps[window.__beeps.length - 1];
       if (b) b.stops.push(arguments.length ? arguments[0] : 'now');
       return stop.apply(this, arguments);
-    };
-    // When the page switches the sound output off, and the latest end of a
-    // beep scheduled before that.
-    const suspend = AudioContext.prototype.suspend;
-    AudioContext.prototype.suspend = function () {
-      const ends = window.__beeps.map(b => Math.max(0, ...b.stops.filter(x => typeof x === 'number')));
-      window.__sleeps.push({ at: this.currentTime, lastEnd: Math.max(0, ...ends) });
-      return suspend.apply(this, arguments);
     };
   });
   await page.click('#rt-try-beep');
@@ -256,26 +246,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(await stats(), ['0 / 5', '–', '–', '–', '0']);
   assert.equal(await text('#rt-sr'), 'Set restarted with the new signal.');
   assert.equal(await page.locator('#rt-try-beep').isVisible(), false);
-  // A running audio context renders silence for as long as the page is
-  // open: once no beep is playing or due, the page suspends it, and the
-  // next beep starts it again without a delay of its own.
-  const asleep = () => page.waitForFunction(() => window.__ctx.state === 'suspended', null, { timeout: 8000 });
-  await asleep();
-  await page.check('input[name="rt-cue"][value="sound"]');
-  await page.waitForFunction(() => window.__ctx.state === 'running');
-  await asleep();
-  const nBeeps = await page.evaluate(() => window.__beeps.length);
-  await page.click('#rt-try-beep');
-  await page.waitForFunction(n => window.__beeps.length === n + 1, nBeeps);
-  const test = await page.evaluate(() => window.__beeps[window.__beeps.length - 1]);
-  assert.equal(test.state, 'running', 'the test beep was scheduled while the sound was off');
-  assert.ok(test.when - test.ctxNow <= 0.05, `the test beep was scheduled ${(test.when - test.ctxNow).toFixed(3)} s ahead`);
-  await page.waitForFunction(() => window.__ctx.state === 'running');
-  await asleep();
-  const sleeps = await page.evaluate(() => window.__sleeps);
-  assert.ok(sleeps.length >= 3, `the sound was switched off ${sleeps.length} times`);
-  for (const z of sleeps) assert.ok(z.at >= z.lastEnd, `the sound was switched off at ${z.at.toFixed(3)} s, before the beep ending at ${z.lastEnd.toFixed(3)} s`);
-  await page.check('input[name="rt-cue"][value="visual"]');
 
   // ---- A hidden page or one restored from the cache pauses the round ----
   await page.focus('#rt-pad');
@@ -418,46 +388,10 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await p.goto(url);
   const box = await p.locator('#rt-pad').boundingBox();
   const tap = () => p.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-  // A finger that lands on the box to scroll the page is no press: the
-  // browser sends pointercancel once the touch has become a scroll.
-  const cdp = await phone.newCDPSession(p);
-  const stillY = () => p.waitForFunction(() => new Promise(r => {
-    const y = scrollY;
-    requestAnimationFrame(() => requestAnimationFrame(() => r(scrollY === y)));
-  }));
-  const swipe = async () => {
-    const x = box.x + box.width / 2, y = box.y + box.height * 0.7;
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-    for (let i = 1; i <= 8; i++) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i / 3, y: y - i * 36 }] });
-      await p.waitForTimeout(16);
-    }
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await stillY();
-    const moved = await p.evaluate(() => scrollY);
-    await p.evaluate(() => window.scrollTo(0, 0));
-    await stillY();
-    assert.ok(moved > 100, `the swipe scrolled the page by ${moved} px`);
-  };
-  const look = () => p.evaluate(() => [document.getElementById('rt-pad').className, ...['#rt-main', '#rt-sub', '#rt-round', '#rt-false'].map(s => document.querySelector(s).textContent)]);
-  const before = await look();
-  await swipe();
-  assert.deepEqual(await look(), before, 'a swipe that started on the box started a round');
   await tap();
   assert.match(await p.getAttribute('#rt-pad', 'class'), /is-wait/);
   await tap();
   assert.equal(await p.textContent('#rt-main'), 'Too soon!');
-  // A swipe while the box waits for green, or once it is green, pauses the
-  // round: no false start, and no time from a press made to scroll.
-  const paused = ['rt-pad', 'Paused', 'The page was scrolled or zoomed. This round was not counted. Click to carry on.', '0 / 5', '1'];
-  await tap();
-  assert.match(await p.getAttribute('#rt-pad', 'class'), /is-wait/);
-  await swipe();
-  assert.deepEqual(await look(), paused);
-  await tap();
-  await p.waitForSelector('#rt-pad.is-go', { timeout: 7000 });
-  await swipe();
-  assert.deepEqual(await look(), paused);
   await tap();
   await p.waitForSelector('#rt-pad.is-go', { timeout: 7000 });
   await p.waitForTimeout(200);

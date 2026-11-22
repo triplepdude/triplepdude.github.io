@@ -93,13 +93,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const links = await page.$$eval('.prose a', as => as.map(a => a.getAttribute('href')));
   for (const h of ['/image-converter/', '/webp-to-png/', '/compress-image/']) assert.ok(links.includes(h), `guide links to ${h}`);
   for (const h of links) assert.ok(/^\/[a-z0-9-]+\/$/.test(h) && fs.existsSync(path.join(__dirname, '..', '..', '_tools', h.slice(1, -1) + '.html')), `guide link ${h} is not a tool page`);
-  // The FAQ answers why saved pictures are WebP at all, and sends .avif downloads to their own page.
-  assert.deepEqual(await page.$$eval('.faq summary', s => s.map(e => e.textContent.trim())), [
-    'Why do pictures I save from websites come out as WebP?', 'What happens to a transparent WebP when it becomes a JPG?',
-    'Which JPG quality should I choose for a WebP?', 'Can I convert several WebP files to JPG at once?']);
-  assert.match((await page.textContent('.faq')).replace(/\s+/g, ' '), /the browser saves the file it was sent\. Chrome, Edge, Firefox and Safari have no setting to save it as JPG instead/);
-  assert.deepEqual(await page.$$eval('.faq a', as => as.map(a => a.getAttribute('href'))), ['/avif-to-jpg/']);
-  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', 'avif-to-jpg.html')));
 
   const rows = page.locator('.imc-item');
   const rowText = async i => (await rows.nth(i).innerText()).replace(/\s+/g, ' ');

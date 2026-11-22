@@ -61,44 +61,6 @@ module.exports = async ({ page, open, assert, base, url, fixtures }) => {
   assert.equal(await text('#bt-sentence'), `You are using Headless Chrome ${headless.version.split('.')[0]} on Linux.`);
   assert.match((await items(page, '#bt-notes li')).join(' '), /headless mode/);
 
-  // ---------- The summary does not move once it is on screen ----------
-  // It used to show "Checking…" placeholders until the Client Hints came,
-  // and the longer sentence, values and notes then pushed everything down
-  // (a layout shift of 0.05 in Lighthouse on a phone). A MutationObserver
-  // callback runs before the browser can draw a frame, so what it sees when
-  // the results are first shown is what the first frame shows.
-  const firstFrame = async width => {
-    const p = await page.context().newPage();
-    await p.setViewportSize({ width, height: 844 });
-    await p.addInitScript(() => {
-      const look = () => ({
-        texts: ['bt-sentence', 'bt-browser', 'bt-engine', 'bt-os', 'bt-device'].map(id => document.getElementById(id).textContent),
-        notes: document.getElementById('bt-notes').children.length,
-        height: Math.round(document.getElementById('bt-sec-summary').getBoundingClientRect().height)
-      });
-      window.__look = look;
-      new MutationObserver((list, obs) => {
-        const bt = document.getElementById('bt');
-        if (!bt || bt.hidden) return;
-        obs.disconnect();
-        window.__first = look();
-      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden'] });
-    });
-    await p.goto(url);
-    await done(p);
-    const r = await p.evaluate(() => ({ first: window.__first, now: window.__look() }));
-    await p.close();
-    return r;
-  };
-  for (const width of [390, 1280]) {
-    const { first, now } = await firstFrame(width);
-    assert.equal(first.texts[0], now.texts[0], `${width} px: the first frame shows "${first.texts[0]}"`);
-    assert.ok(first.texts[1].startsWith('Headless Chrome ' + headless.version.split('.')[0]), `${width} px: the first frame shows the browser as "${first.texts[1]}"`);
-    assert.deepEqual(first.texts.slice(3), now.texts.slice(3), `${width} px: operating system and device type`);
-    assert.equal(first.notes, now.notes, `${width} px: notes added after the first frame`);
-    assert.equal(first.height, now.height, `${width} px: the summary grew from ${first.height} to ${now.height} px after the first frame`);
-  }
-
   // ---------- User agent and Client Hints ----------
   assert.equal(await text('#bt-ua'), raw.ua);
   assert.match((await items(page, '#bt-ua-notes li')).join('\n'), /"AppleWebKit\/537\.36".*the engine is Blink/);

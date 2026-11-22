@@ -191,8 +191,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await text('#b64-stats'), '');
   assert.equal(await type(' \n '), '');
   assert.deepEqual(await errors(), NONE);
-  // Text in encodings the page only decodes, and the guide's example: 6Q== is the byte E9, é in
-  // Windows-1252 and in Windows-1250 too (so not "only" in Windows-1252), й in Windows-1251.
+  // Text in encodings the page only decodes, and the guide's example: 6Q== is é in Windows-1252 only.
   for (const l of data.legacy) {
     await page.selectOption('#b64-charset', l.charset);
     assert.equal(await type(l.std), l.text, l.charset);
@@ -200,16 +199,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   }
   await page.selectOption('#b64-charset', 'windows-1252');
   assert.equal(await type('6Q=='), 'é');
-  await page.selectOption('#b64-charset', 'windows-1250');
-  assert.equal(await out(), Buffer.from([0xE9]).toString('latin1'));
-  await page.selectOption('#b64-charset', 'windows-1251');
-  assert.equal(await out(), '\u0439');
-  const guide = (await text('.prose')).replace(/\s+/g, ' ');
-  assert.ok(guide.includes('so 6Q== decodes to \uFFFD as UTF-8 and to é once Text encoding is set to Windows-1252.'), guide);
-  assert.ok(!/é only when/.test(guide));
-  // The guide sends percent-encoding to the URL encoder.
-  assert.ok(guide.includes('To percent-encode text for a link or a query string instead, use the URL encoder and decoder.'), guide);
-  assert.ok((await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href')))).includes('/url-encode-decode/'));
   await page.selectOption('#b64-charset', 'utf-8');
   assert.equal(await out(), '\uFFFD');
   assert.equal(await text('#b64-note'), 'These bytes are not valid UTF-8, so the characters shown as \uFFFD are wrong. If this is text, try another text encoding. If it is a file, download it.');
@@ -604,49 +593,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await settles('#b64-file-name', 'dots.gif');
   assert.equal(await out(), files['dots.gif'].std);
   await settles('#b64-img-info', 'GIF image, 4 × 4 pixels, 53 bytes.');
-  assert.equal(await text('#b64-note'), '');
-  // A file dropped anywhere else on the page is opened too: the browser would otherwise open it in
-  // place of the page and lose what is in the box. Of several, the first, and the page says so.
-  const dropOn = (sel, names) => page.evaluate(([sel, names, b64, type]) => {
-    const dt = new DataTransfer();
-    for (const name of names) dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], name, { type }));
-    const el = document.querySelector(sel), root = document.querySelector('#b64');
-    const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }), drop = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
-    el.dispatchEvent(over);
-    const marked = root.classList.contains('is-over');
-    el.dispatchEvent(drop);
-    return [over.defaultPrevented, marked, drop.defaultPrevented, root.classList.contains('is-over')];
-  }, [sel, names, files['dots.gif'].std, files['dots.gif'].mime]);
-  for (const [sel, name] of [['h1', 'title.gif'], ['.prose', 'guide.gif'], ['.faq', 'faq.gif'], ['.site-footer', 'footer.gif']]) {
-    assert.deepEqual(await dropOn(sel, [name]), [true, true, true, false], sel);
-    await settles('#b64-file-name', name);
-    assert.equal(await out(), files['dots.gif'].std);
-  }
-  assert.deepEqual(await dropOn('.faq', ['list-1.gif', 'list-2.gif', 'list-3.gif']), [true, true, true, false]);
-  await settles('#b64-file-name', 'list-1.gif');
-  await settles('#b64-note', 'Only the first of the 3 files was opened.');
-  // The box is marked while a file is over the page, through every element it crosses, until it
-  // leaves the window: dragenter and dragleave come in pairs, without a relatedTarget in Safari.
-  assert.deepEqual(await page.evaluate(() => {
-    const dt = new DataTransfer();
-    dt.items.add(new File(['x'], 'x.txt', { type: 'text/plain' }));
-    const fire = (type, sel) => document.querySelector(sel).dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
-    const marked = () => document.querySelector('#b64').classList.contains('is-over');
-    const seen = [];
-    fire('dragenter', 'h1'); seen.push(marked());
-    fire('dragenter', '.faq'); fire('dragleave', 'h1'); seen.push(marked());
-    fire('dragleave', '.faq'); seen.push(marked());
-    return seen;
-  }), [true, true, false]);
-  await page.click('#b64-file-remove');
-  assert.equal(await text('#b64-note'), '');
-  await page.evaluate(([b64, type]) => {
-    const dt = new DataTransfer();
-    for (const name of ['copied-1.gif', 'copied-2.gif']) dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], name, { type }));
-    document.querySelector('#b64-input').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
-  }, [files['dots.gif'].std, files['dots.gif'].mime]);
-  await settles('#b64-file-name', 'copied-1.gif');
-  await settles('#b64-note', 'Only the first of the 2 files was opened.');
   assert.equal(await give('paste', 'photo.jpg'), false);
   await settles('#b64-file-name', 'photo.jpg');
   assert.equal(await out(), files['photo.jpg'].std);

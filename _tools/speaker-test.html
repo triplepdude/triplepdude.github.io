@@ -413,20 +413,6 @@ faq:
 
   // ---------- Playback ----------
   let ctx = null, master = null, cur = null, token = 0, tick = 0;
-  // A running audio context renders silence for as long as the page is
-  // open, so it is suspended a moment after the last sound ends; the next
-  // test resumes it.
-  const IDLE_MS = 2000;
-  let idleTimer = 0, asleep = false, preparing = 0;
-  function rest() {
-    clearTimeout(idleTimer);
-    if (!ctx) return;
-    idleTimer = setTimeout(function () {
-      if (cur || preparing || ctx.state !== 'running') return;
-      asleep = true;
-      ctx.suspend().catch(function () {});
-    }, IDLE_MS);
-  }
   function ensure() {
     if (!ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -436,11 +422,7 @@ faq:
       master.gain.value = vol();
       master.connect(ctx.destination);
     }
-    if (asleep || ctx.state !== 'running') {
-      asleep = false;
-      ctx.resume().catch(function () { /* the next click resumes */ });
-    }
-    rest();
+    if (ctx.state === 'suspended') ctx.resume().catch(function () { /* the next click resumes */ });
     showChannels();
     return ctx;
   }
@@ -455,8 +437,6 @@ faq:
 
   function stop(announce) {
     token++;
-    preparing = 0;
-    rest();
     clearTimeout(tick);
     if (cur) {
       try { cur.src.stop(); } catch (e) { /* already ended */ }
@@ -496,10 +476,8 @@ faq:
     if (btn) btn.setAttribute('aria-pressed', 'true');
     const label = opts && opts.label ? opts.label : TEST_NAMES[name];
     nowEl.textContent = 'Preparing ' + label + '…';
-    preparing = mine;
     render(spec, ac.sampleRate).then(function (buffer) {
       if (mine !== token) return;
-      preparing = 0;
       const src = ac.createBufferSource();
       src.buffer = buffer;
       src.connect(master);

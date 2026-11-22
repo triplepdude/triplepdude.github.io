@@ -2,7 +2,7 @@
 title: URL Encoder and Decoder (Percent-Encoding)
 description: Encode or decode URLs and query strings with percent-encoding, see each character that changed, and choose how plus signs are read. Runs in your browser.
 category: Developer
-keywords: [url encoder, url decoder, url encode decode, percent encoding, encodeuricomponent, url decode online, urlencode, urldecode, rawurlencode, url escape, unescape url, uri encoder, query string decoder]
+keywords: [url encoder, url decoder, url encode decode, percent encoding, encodeuricomponent, url decode online, urlencode, query string decoder]
 howto: |
   ## How to encode or decode a URL
 
@@ -21,7 +21,7 @@ howto: |
   | Mode | Leaves as they are | Use it for |
   |---|---|---|
   | Component | A–Z a–z 0–9 `- _ . ! ~ * ' ( )` | one query value or path segment, like `encodeURIComponent` |
-  | Whole URL | the same and `; / ? : @ & = + $ , # [ ]` | a complete address, like `encodeURI` but keeping the `[ ]` of an IPv6 address |
+  | Whole URL | the same and `; / ? : @ & = + $ , #` | a complete address, like `encodeURI` |
   | Form data | A–Z a–z 0–9 `* - . _`, space as `+` | form posts and query strings, like `URLSearchParams` and Java's `URLEncoder` |
   | RFC 3986 | A–Z a–z 0–9 `- . _ ~` | strict encoders such as PHP's `rawurlencode` and Python's `quote(s, safe='')` |
 
@@ -61,8 +61,6 @@ howto: |
     another set from the list.
   - **A % without two hexadecimal digits after it** is left as it is and
     reported with its line and column.
-  - **Looks like `SGVsbG8gd29ybGQ=`?** That is Base64, not
-    percent-encoding; decode it with the [Base64 decoder](/base64-encode-decode/).
 
   To read JSON or a token carried in a query string, decode it here and pass
   it to the [JSON formatter](/json-formatter/) or the
@@ -93,9 +91,6 @@ faq:
 .ue-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; }
 .ue-head > label { font-size: 14px; font-weight: 600; }
 .ue-head-btns { display: flex; flex-wrap: wrap; gap: 8px; }
-/* On a narrow screen the buttons have a line of their own, with room for Undo beside Example and
-   Clear, so the box below stays put when Undo comes and goes. */
-@media (max-width: 520px) { .ue-head-btns { flex-basis: 100%; } }
 .ue textarea { min-height: 120px; }
 .ue-mode-hint { display: block; margin: -4px 0 16px; }
 .ue-opts { margin-bottom: 8px; }
@@ -265,9 +260,9 @@ pre.ue-out:empty::before { content: "The result appears here."; color: var(--mut
       <tr><th scope="row"><code>&gt;</code></th><td>%3E</td><td>%3E</td><td>%3E</td><td>%3E</td><td class="ue-kind">must be encoded</td></tr>
       <tr><th scope="row"><code>?</code></th><td>%3F</td><td>?</td><td>%3F</td><td>%3F</td><td class="ue-kind">reserved (gen-delim)</td></tr>
       <tr><th scope="row"><code>@</code></th><td>%40</td><td>@</td><td>%40</td><td>%40</td><td class="ue-kind">reserved (gen-delim)</td></tr>
-      <tr><th scope="row"><code>[</code></th><td>%5B</td><td>[</td><td>%5B</td><td>%5B</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>[</code></th><td>%5B</td><td>%5B</td><td>%5B</td><td>%5B</td><td class="ue-kind">reserved (gen-delim)</td></tr>
       <tr><th scope="row"><code>\</code></th><td>%5C</td><td>%5C</td><td>%5C</td><td>%5C</td><td class="ue-kind">must be encoded</td></tr>
-      <tr><th scope="row"><code>]</code></th><td>%5D</td><td>]</td><td>%5D</td><td>%5D</td><td class="ue-kind">reserved (gen-delim)</td></tr>
+      <tr><th scope="row"><code>]</code></th><td>%5D</td><td>%5D</td><td>%5D</td><td>%5D</td><td class="ue-kind">reserved (gen-delim)</td></tr>
       <tr><th scope="row"><code>^</code></th><td>%5E</td><td>%5E</td><td>%5E</td><td>%5E</td><td class="ue-kind">must be encoded</td></tr>
       <tr><th scope="row"><code>_</code></th><td>_</td><td>_</td><td>_</td><td>_</td><td class="ue-kind">unreserved</td></tr>
       <tr><th scope="row"><code>`</code></th><td>%60</td><td>%60</td><td>%60</td><td>%60</td><td class="ue-kind">must be encoded</td></tr>
@@ -325,11 +320,9 @@ pre.ue-out:empty::before { content: "The result appears here."; color: var(--mut
     for (var i = 0; i < s.length; i++) a[s.charCodeAt(i)] = 1;
     return a;
   }
-  // What each mode leaves as it is: encodeURIComponent; encodeURI and the [ ] that RFC 3986
-  // puts around an IPv6 address, which encodeURI would break (the URL Standard leaves them too);
-  // the form-urlencoded set of the URL Standard (which also writes a space as +); and the
-  // unreserved set of RFC 3986.
-  var KEEP = { component: keepSet("-_.!~*'()"), url: keepSet("-_.!~*'();/?:@&=+$,#[]"), form: keepSet('*-._'), rfc3986: keepSet('-._~') };
+  // What each mode leaves as it is: encodeURIComponent, encodeURI, the form-urlencoded set of
+  // the URL Standard (which also writes a space as +), and the unreserved set of RFC 3986.
+  var KEEP = { component: keepSet("-_.!~*'()"), url: keepSet("-_.!~*'();/?:@&=+$,#"), form: keepSet('*-._'), rfc3986: keepSet('-._~') };
 
   // One row of the table for each character and the way it is written.
   function tally(map, ch, enc, why) {
@@ -509,7 +502,7 @@ pre.ue-out:empty::before { content: "The result appears here."; color: var(--mut
 
   var HINTS = {
     component: 'For one value or one part of a path. Keeps A–Z a–z 0–9 - _ . ! ~ * \' ( ) and encodes everything else, like encodeURIComponent in JavaScript.',
-    url: 'For a complete address. Also keeps the characters that give a URL its structure, ; / ? : @ & = + $ , # [ ], like encodeURI in JavaScript, except that encodeURI encodes the [ ] of an IPv6 address. A % is encoded as well, so text that is already encoded is encoded twice.',
+    url: 'For a complete address. Also keeps the characters that give a URL its structure, ; / ? : @ & = + $ , #, like encodeURI in JavaScript. A % is encoded as well, so text that is already encoded is encoded twice.',
     form: 'For form data and query strings (application/x-www-form-urlencoded). A space becomes +, and only A–Z a–z 0–9 * - . _ are kept, as URLSearchParams and HTML forms do.',
     rfc3986: 'Keeps only the unreserved characters of RFC 3986, A–Z a–z 0–9 - . _ ~, so ! * \' ( ) are encoded too. PHP calls this rawurlencode.'
   };

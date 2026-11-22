@@ -172,47 +172,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await text('#tts-play'), 'Play');
   for (const b of ['#tts-stop', '#tts-prev', '#tts-next']) assert.equal(await page.getAttribute(b, 'aria-disabled'), 'true', b);
   assert.equal(await page.getAttribute('#tts-prev', 'aria-label'), 'Previous sentence');
-  // Keyboard focus on a dimmed button: its focus ring keeps full strength (3:1 or more between the
-  // same pixel focused and not, by the WCAG contrast formula), and the button still looks dimmed.
-  const ringContrast = async sel => {
-    await page.locator(sel).scrollIntoViewIfNeeded();
-    const b = await page.locator(sel).boundingBox();
-    const clip = { x: b.x - 6, y: b.y - 6, width: b.width + 12, height: b.height + 12 };
-    await page.evaluate(() => document.activeElement && document.activeElement.blur());
-    const off = await page.screenshot({ clip });
-    await page.focus('#tts-play');
-    for (let i = 0; i < 4 && await page.evaluate(() => '#' + document.activeElement.id) !== sel; i++) await page.keyboard.press('Tab');
-    assert.equal(await page.evaluate(() => document.activeElement.matches(':focus-visible') && '#' + document.activeElement.id), sel);
-    const on = await page.screenshot({ clip });
-    return page.evaluate(async urls => {
-      const px = await Promise.all(urls.map(async u => {
-        const i = new Image(); i.src = u; await i.decode();
-        const c = document.createElement('canvas'); c.width = i.width; c.height = i.height;
-        const x = c.getContext('2d'); x.drawImage(i, 0, 0);
-        return x.getImageData(0, 0, i.width, i.height).data;
-      }));
-      const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
-      const L = (d, i) => 0.2126 * lin(d[i]) + 0.7152 * lin(d[i + 1]) + 0.0722 * lin(d[i + 2]);
-      let best = 1;
-      for (let i = 0; i < px[0].length; i += 4) {
-        const a = L(px[0], i), b = L(px[1], i);
-        best = Math.max(best, (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05));
-      }
-      return best;
-    }, ['data:image/png;base64,' + off.toString('base64'), 'data:image/png;base64,' + on.toString('base64')]);
-  };
-  for (const scheme of ['light', 'dark']) {
-    await page.emulateMedia({ colorScheme: scheme });
-    for (const b of ['#tts-next', '#tts-stop']) {
-      const c = await ringContrast(b);
-      assert.ok(c >= 3, `the focus ring of the dimmed ${b} (${scheme}) reaches only ${c.toFixed(2)}:1`);
-    }
-    // Stop has the focus now: it still looks unlike an enabled button such as Reset.
-    const looks = await page.evaluate(() => ['#tts-stop', '#tts-reset'].map(s => { const c = getComputedStyle(document.querySelector(s)); return c.color + ' ' + c.opacity; }));
-    assert.notEqual(looks[0], looks[1], `the focused, dimmed Stop (${scheme}) looks like an enabled button`);
-  }
-  await page.emulateMedia({ colorScheme: null });
-  await page.evaluate(() => document.activeElement.blur());
   // Emoji count once: "a👍b" is 3 characters, not 4 UTF-16 units.
   await page.fill('#tts-text', 'a\u{1F44D}b');
   assert.equal(await text('#tts-count'), '3 characters');
@@ -415,10 +374,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await setRange('#tts-vol', '40');
   assert.deepEqual([await text('#tts-rate-out'), await text('#tts-pitch-out'), await text('#tts-vol-out')], ['1.5×', '0.5', '40%']);
   assert.equal(await page.getAttribute('#tts-rate', 'aria-valuetext'), '1.5×');
-  // The sliders speak their own values; the numbers beside them are no live status regions,
-  // which would read every step out a second time.
-  assert.deepEqual(await page.getByRole('status').evaluateAll(l => l.filter(e => e.tagName === 'OUTPUT').map(e => e.id)), []);
-  assert.deepEqual([await page.getAttribute('#tts-pitch', 'aria-valuetext'), await page.getAttribute('#tts-vol', 'aria-valuetext')], ['0.5', '40%']);
   await page.fill('#tts-text', 'One two three four. Five six.');
   await manual();
   await page.click('#tts-play');
@@ -638,26 +593,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   });
   await page.waitForFunction(() => document.querySelector('#tts-file-ok').textContent === 'Opened drop.txt: 25 characters.');
   assert.equal(await page.inputValue('#tts-text'), 'Dropped text, with a BOM.');
-  // Several files dropped at once: the first is opened, and the page says so.
-  const dropFiles = files => page.evaluate(files => {
-    document.querySelector('#tts-file-ok').textContent = '';
-    document.querySelector('#tts-file-err').textContent = '';
-    const dt = new DataTransfer();
-    for (const [name, body, type] of files) dt.items.add(new File([body], name, { type }));
-    const box = document.querySelector('#tts-text');
-    box.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
-    box.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  }, files);
-  await dropFiles([['list-1.txt', 'Name 1a\nName 1b', 'text/plain'], ['list-2.txt', 'Name 2a', 'text/plain'], ['list-3.txt', 'Name 3a', 'text/plain']]);
-  await page.waitForFunction(() => document.querySelector('#tts-file-ok').textContent);
-  assert.equal(await text('#tts-file-ok'), 'Opened list-1.txt: 15 characters. Only the first of the 3 files was opened.');
-  assert.equal(await page.inputValue('#tts-text'), 'Name 1a\nName 1b');
-  await dropFiles([['scan.pdf', '%PDF-1.7\n%\u00e2\u00e3\n1 0 obj', 'application/pdf'], ['notes.txt', 'Notes', 'text/plain']]);
-  await page.waitForFunction(() => document.querySelector('#tts-file-err').textContent);
-  assert.equal(await text('#tts-file-err'), 'scan.pdf is a PDF. Copy the text from your PDF viewer and paste it here. Only the first of the 2 files was opened.');
-  assert.equal(await page.inputValue('#tts-text'), 'Name 1a\nName 1b');
-  await dropFiles([['drop.txt', '\uFEFFDropped text, with a BOM.', 'text/plain']]);
-  await page.waitForFunction(() => document.querySelector('#tts-file-ok').textContent === 'Opened drop.txt: 25 characters.');
   // Opening a file while reading stops the reading first.
   await manual();
   await page.click('#tts-play');
@@ -716,7 +651,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // ---- What the page says about itself ----
   const faq = async q => page.locator('.faq details', { hasText: q }).locator('.faq-answer').textContent();
   assert.match(await faq('Is my text uploaded or saved anywhere?'), /The one exception is a voice marked Online, for which your browser itself sends the text to Google or Microsoft/);
-  assert.match((await faq('Can it read a PDF or a Word document aloud?')).replace(/\s+/g, ' '), /select all its text \(Ctrl\+A, or Cmd\+A on a Mac\), copy it and paste it here\. A scanned PDF .* image to text/);
+  assert.match(await faq('Does it work offline?'), /voices without the Online label/);
   const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
   assert.match(guide, /up to 1,000,000 characters at a time/);
   assert.match(guide, /The page starts with a voice on your device when there is one, and shows a notice whenever an online voice is chosen\./);
@@ -724,11 +659,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const home = await (await page.request.get(base + '/')).text();
   const hay = (home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/text-to-speech\/"/) || [])[1] || '';
   assert.ok(hay, 'the homepage lists the page');
-  for (const q of ['tts', 'read aloud', 'text to voice', 'read out loud', 'speech synthesis', 'voice reader', 'txt file', 'read pdf aloud', 'text to audio', 'speak text']) {
+  for (const q of ['tts', 'read aloud', 'text to voice', 'read out loud', 'speech synthesis', 'voice reader', 'txt file']) {
     assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
   }
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/image-to-text/', '/speaker-test/', '/image-to-text/']);
+  assert.deepEqual(links, ['/image-to-text/', '/speaker-test/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }

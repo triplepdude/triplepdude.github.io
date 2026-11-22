@@ -4,10 +4,9 @@ urllib.parse and codecs, never with the page.
 
   python3 make_expected.py     writes expected.json next to this file
 
-"encode"  each text in the four modes of the page: what JavaScript's encodeURIComponent keeps;
-          what encodeURI keeps and the [ ] that RFC 3986 puts around an IPv6 address; the
-          form-urlencoded set of the URL Standard (space as +); and the unreserved set of
-          RFC 3986; also with CR LF line breaks and line by line.
+"encode"  each text in the four modes of the page: what JavaScript's encodeURIComponent and
+          encodeURI keep, the form-urlencoded set of the URL Standard (space as +), and the
+          unreserved set of RFC 3986; also with CR LF line breaks and line by line.
 "decode"  percent-encoded texts read as UTF-8 and as older character sets, with + kept or read
           as a space.
 "urls"    whole URLs, decoded part by part with urlsplit: + is a space in the query only.
@@ -21,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def component(s): return u.quote(s, safe="!'()*")
-def whole(s): return u.quote(s, safe="!#$&'()*+,/:;=?@[]")
+def whole(s): return u.quote(s, safe="!#$&'()*+,/:;=?@")
 def form(s): return u.quote_plus(s, safe='*').replace('~', '%7E')
 def strict(s): return u.quote(s, safe='')
 
@@ -31,7 +30,6 @@ TEXTS = [
     'Fish & chips: £5.50 (2 for £10?)',
     ASCII,
     'https://example.com/a path/café?q=1 + 1 = 2&lang=de#frag ment',
-    'http://[::1]:8080/a b?list[]=1&x=[2]#[top]',
     'naïve café – 日本語 한국어 العربية עברית',
     '\U0001F600 \U0001F468‍\U0001F469‍\U0001F467 é \U00010000 �  \u007f \u0080 ߿ ࠀ ￿',
     '\U00020000 \U0002F800 \U000E0001 \U000FFFFF \U0010FFFF',

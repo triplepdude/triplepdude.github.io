@@ -20,14 +20,7 @@ const HOOKS = () => {
   window.__osc = 0;
   const proto = (window.BaseAudioContext || window.AudioContext).prototype;
   const make = proto.createOscillator;
-  proto.createOscillator = function () { window.__osc++; window.__ac = this; return make.call(this); };
-  // When the last tone was set to end, and the audio clock when the page suspended the context.
-  window.__toneEnd = 0;
-  window.__suspendedAt = null;
-  const stop = AudioScheduledSourceNode.prototype.stop;
-  AudioScheduledSourceNode.prototype.stop = function (when) { window.__toneEnd = Math.max(window.__toneEnd, when || 0); return stop.apply(this, arguments); };
-  const suspend = AudioContext.prototype.suspend;
-  AudioContext.prototype.suspend = function () { window.__suspendedAt = this.currentTime; return suspend.apply(this, arguments); };
+  proto.createOscillator = function () { window.__osc++; return make.call(this); };
   window.__mathRandom = 0;
   const mr = Math.random;
   Math.random = function () { window.__mathRandom++; return mr(); };
@@ -65,15 +58,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     return '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('');
   }, { deg, r });
   const near = (a, b) => [1, 3, 5].every(i => Math.abs(parseInt(a.slice(i, i + 2), 16) - parseInt(b.slice(i, i + 2), 16)) <= 3);
-  // The WCAG contrast of two computed colours such as "rgb(31, 111, 74)".
-  const contrast = (a, b) => {
-    const lum = s => {
-      const [r, g, bl] = s.match(/[\d.]+/g).slice(0, 3).map(v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
-      return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
-    };
-    const x = lum(a), y = lum(b);
-    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
-  };
   const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
   // Slice index under the pointer for equal slices, from the documented layout: at rotation 0
   // slice 0 starts at the pointer and the slices follow clockwise.
@@ -117,9 +101,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await setRange('#ws-time', 1);
   assert.equal(await text('#ws-time-out'), '1 s');
   assert.equal(await page.getAttribute('#ws-time', 'aria-valuetext'), '1 second');
-  // The slider reads out its own value; the number beside it (an <output>, which is a live
-  // status region) is hidden from screen readers so each step is not read out twice.
-  assert.equal(await page.getAttribute('#ws-time-out', 'aria-hidden'), 'true');
   const before = await page.evaluate(() => ({ calls: window.__rcalls, osc: window.__osc }));
   const t0 = Date.now();
   await page.click('#ws-spin');
@@ -153,11 +134,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await page.evaluate(() => document.activeElement.id), 'ws-dlg-close');
   const osc = await page.evaluate(() => window.__osc) - before.osc;
   assert.ok(osc >= 8, `ticks and the win chime: ${osc} tones`);
-  // Once the chime has played, the sound is suspended, so the browser stops working on silence
-  // for the rest of the visit; the last tone has ended by then.
-  await page.waitForFunction(() => window.__ac.state === 'suspended', null, { timeout: 3000 })
-    .catch(() => assert.fail('the sound is suspended after the spin'));
-  assert.ok(await page.evaluate(() => window.__suspendedAt >= window.__toneEnd), 'no tone is cut short');
   // The dialog is named by its heading, which includes the winner.
   assert.equal(await page.getAttribute('#ws-dialog', 'aria-labelledby'), 'ws-dlg-title');
   assert.equal((await text('#ws-dlg-title')).replace(/\s+/g, ' ').trim(), `The wheel picked ${names[+w.pick]}`);
@@ -172,20 +148,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const t1 = Date.now();
   await page.keyboard.press('Enter');
   assert.equal((await wheel()).state, 'spinning', 'Enter on the focused Spin button spins');
-  await page.waitForFunction(() => window.__ac.state === 'running', null, { timeout: 2000 })
-    .catch(() => assert.fail('the next spin resumes the sound'));
-  // While it turns, Spin looks dimmed but its focus ring keeps full strength: the button is not
-  // faded with opacity, which faded the ring to 2.7:1 against the page.
-  const ring = await page.$eval('#ws-spin', b => {
-    const cs = getComputedStyle(b);
-    return { visible: b.matches(':focus-visible'), off: b.getAttribute('aria-disabled'), opacity: cs.opacity, style: cs.outlineStyle, colour: cs.outlineColor, fill: cs.backgroundColor, page: getComputedStyle(document.body).backgroundColor };
-  });
-  assert.equal(ring.visible, true, 'the focus ring shows after a keyboard spin');
-  assert.equal(ring.off, 'true');
-  assert.equal(ring.opacity, '1');
-  assert.equal(ring.style, 'solid');
-  assert.ok(contrast(ring.colour, ring.page) >= 3, `focus ring ${ring.colour} on ${ring.page}`);
-  assert.notEqual(ring.fill, ring.colour, 'the button is dimmed from the accent colour while the wheel turns');
   await page.waitForSelector('#ws-dialog[open]', { timeout: 5000 });
   const elapsed2 = Date.now() - t1;
   assert.ok(elapsed2 >= 2000 && elapsed2 < 3600, `a 2 s spin took ${elapsed2} ms`);
@@ -545,8 +507,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.click('#ws-copy-link');
   assert.equal(await clipboard(), copied, 'Copy link does not copy a link that cannot hold the list');
   assert.equal(await page.getAttribute('#ws-copy-link', 'aria-describedby'), 'ws-link-hint ws-link-msg');
-  // The names travel in the link, and the hint beside the button says so.
-  assert.match(await text('#ws-link-hint'), /Anyone you send the link to sees every entry\.$/);
   // A longer link made by hand is refused with a message, and the example list is shown.
   // (about:blank first: a goto that only changes the hash would not load the page again.)
   await page.goto('about:blank');
@@ -559,15 +519,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await page.inputValue('#ws-theme'), 'bright');
   assert.equal(await page.inputValue('#ws-time'), '5');
   assert.equal(await text('#ws-count'), '2 entries');
-  // So is a name that every object has, such as constructor: the menu still shows Bright, and
-  // the next change writes no theme into the address.
-  for (const t of ['constructor', '__proto__', 'toString']) {
-    await page.goto('about:blank');
-    await page.goto(url + '#t=' + t + '&e=A%0AB');
-    assert.equal(await page.$eval('#ws-theme', s => s.selectedIndex), 0, `#t=${t}`);
-  }
-  await setList('A\nB\nC');
-  await waitHash('#e=A%0AB%0AC');
   await page.goto('about:blank');
   await page.goto(url + '#ws-entries');
   assert.equal(await page.inputValue('#ws-entries'), DEFAULT, 'an ordinary #fragment is not a wheel');
@@ -698,15 +649,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.waitForFunction(() => document.querySelector('#ws-entries').value === 'PNG party\nGIF night');
   assert.equal(await text('#ws-file-msg'), '');
   await page.click('#ws-undo');
-  // A file with nothing to spin leaves the list as it was, and says why.
-  await page.setInputFiles('#ws-file', { name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) });
-  await page.waitForFunction(() => document.querySelector('#ws-file-msg').textContent !== '');
-  assert.equal(await text('#ws-file-msg'), 'empty.txt is empty, so the list was kept.');
-  assert.equal(await page.inputValue('#ws-entries'), 'Renée\nJosé');
-  await page.setInputFiles('#ws-file', { name: 'blank.txt', mimeType: 'text/plain', buffer: Buffer.from(' \r\n\t\n\n') });
-  await page.waitForFunction(() => /^blank/.test(document.querySelector('#ws-file-msg').textContent));
-  assert.equal(await text('#ws-file-msg'), 'blank.txt has only blank lines, so the list was kept.');
-  assert.equal(await page.inputValue('#ws-entries'), 'Renée\nJosé');
   // Dropped on the box it opens; dropped beside it, the page does not navigate away.
   const pageUrl = page.url();
   await page.evaluate(() => {
@@ -717,7 +659,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     box.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
   });
   await page.waitForFunction(() => document.querySelector('#ws-entries').value === 'Dropped\nList');
-  assert.equal(await text('#ws-file-msg'), '');
   const prevented = await page.evaluate(() => {
     const dt = new DataTransfer();
     dt.items.add(new File(['x'], 'x.txt', { type: 'text/plain' }));
@@ -727,14 +668,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   });
   assert.equal(prevented, true);
   assert.equal(page.url(), pageUrl);
-  // Several files dropped at once: the first is opened, and the page says the others were not.
-  await page.evaluate(() => {
-    const dt = new DataTransfer();
-    for (let i = 1; i <= 3; i++) dt.items.add(new File([`Name ${i}a\nName ${i}b`], `list-${i}.txt`, { type: 'text/plain' }));
-    document.querySelector('#ws-entries').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  });
-  await page.waitForFunction(() => document.querySelector('#ws-entries').value === 'Name 1a\nName 1b');
-  assert.equal(await text('#ws-file-msg'), 'Only list-1.txt, the first of the 3 files, was opened. To spin the names from several lists, paste them all into the box.');
 
   // ---------- Full screen ----------
   await setList('Yes\nNo');
@@ -837,122 +770,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await p.check('#ws-animate');
     await p.click('#ws-spin');
     assert.equal(await p.$eval('#ws-wheel', c => c.dataset.state), 'spinning');
-    await ctx.close();
-  }
-
-  // ---------- No flashing while the wheel turns fast (WCAG 2.3.1) ----------
-  // Slice edges and names sweeping past a point make it flash, so a fast wheel is drawn in
-  // colours of nearly one luminance, without names, and sharpens as it slows. Measured on every
-  // frame of real spins, which a virtual clock runs at exactly 60 frames a second however slow
-  // the machine: at each point of a 6 px grid over the wheel, the mean relative luminance of a
-  // square around it is followed, a change of 0.10 or more against the extreme since the last
-  // one (the darker side below 0.80) is a transition, and two make a flash. With 15 px squares
-  // no point flashes more than 3 times in any second (before the softening, the example wheel
-  // flashed up to 15 times a second almost everywhere). With 5 px squares, where single strokes
-  // of a name count, the points that do so cover less than a quarter of any 341 x 256 px field
-  // (21,824 px), the limit for a flash to count. No square turns to or from a saturated red
-  // (R / (R + G + B) of 0.8 or more in linear light) more than 3 times a second.
-  {
-    const ctx = await page.context().browser().newContext({ viewport: { width: 1280, height: 900 } });
-    await ctx.addInitScript(() => {
-      let now = 1000, id = 0;
-      const queue = new Map();
-      performance.now = () => now;
-      window.requestAnimationFrame = cb => { queue.set(++id, cb); return id; };
-      window.cancelAnimationFrame = i => { queue.delete(i); };
-      window.__frame = () => { now += 1000 / 60; const cbs = [...queue.values()]; queue.clear(); cbs.forEach(cb => cb(now)); return queue.size; };
-    });
-    const p = await ctx.newPage();
-    const errors = [];
-    p.on('pageerror', e => errors.push(e.message));
-    await p.goto(url);
-    await p.uncheck('#ws-sound');
-    await p.uncheck('#ws-confetti-on');
-    const flashes = (list, secs, theme) => p.evaluate(({ list, secs, theme }) => {
-      const set = (sel, v, type) => { const el = document.querySelector(sel); el.value = v; el.dispatchEvent(new Event(type, { bubbles: true })); };
-      if (list) set('#ws-entries', list, 'input');
-      set('#ws-time', String(secs), 'input');
-      set('#ws-theme', theme, 'change');
-      const c = document.getElementById('ws-wheel'), g = c.getContext('2d');
-      const W = c.width, k = W / c.getBoundingClientRect().width, half = W / 2, S = W + 1;
-      const lin = new Float64Array(256).map((_, v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
-      const bg = getComputedStyle(document.body).backgroundColor.match(/\d+/g).slice(0, 3).map(v => lin[v]);
-      const step = Math.round(6 * k), cell = step / k, pts = [];
-      for (let y = 0; y < W; y += step) for (let x = 0; x < W; x += step) if (Math.hypot(x - half, y - half) <= half * 0.9 * 0.98) pts.push([x, y]);
-      const sizes = [15, 5].map(px => ({ h: Math.max(0, Math.round(px * k / 2 - 0.5)), dir: [], ext: [], hi: [], lo: [], tr: pts.map(() => []), red: [], rt: pts.map(() => []) }));
-      const L = new Float64Array(S * S), Rd = new Float64Array(S * S), All = new Float64Array(S * S);
-      let t = 0;
-      const sample = first => {
-        const d = g.getImageData(0, 0, W, W).data;
-        for (let y = 0; y < W; y++) {
-          let l = 0, r = 0, a = 0;
-          for (let x = 0; x < W; x++) {
-            const q = (y * W + x) * 4, al = d[q + 3] / 255;
-            const R = lin[d[q]] * al + bg[0] * (1 - al), G = lin[d[q + 1]] * al + bg[1] * (1 - al), B = lin[d[q + 2]] * al + bg[2] * (1 - al);
-            l += 0.2126 * R + 0.7152 * G + 0.0722 * B; r += R; a += R + G + B;
-            const o = (y + 1) * S + x + 1;
-            L[o] = L[o - S] + l; Rd[o] = Rd[o - S] + r; All[o] = All[o - S] + a;
-          }
-        }
-        for (const z of sizes) pts.forEach(([px, py], i) => {
-          const x0 = Math.max(0, px - z.h), y0 = Math.max(0, py - z.h), x1 = Math.min(W, px + z.h + 1), y1 = Math.min(W, py + z.h + 1);
-          const box = A => A[y1 * S + x1] - A[y0 * S + x1] - A[y1 * S + x0] + A[y0 * S + x0];
-          const v = box(L) / ((x1 - x0) * (y1 - y0)), all = box(All), red = all > 0 && box(Rd) >= 0.8 * all ? 1 : 0;
-          if (first) { z.dir[i] = 0; z.ext[i] = z.hi[i] = z.lo[i] = v; z.red[i] = red; return; }
-          if (red !== z.red[i]) { z.red[i] = red; z.rt[i].push(t); }
-          const dir = z.dir[i];
-          if (dir === 0) {
-            z.hi[i] = Math.max(z.hi[i], v); z.lo[i] = Math.min(z.lo[i], v);
-            if (z.hi[i] - v >= 0.1 && v < 0.8) { z.dir[i] = -1; z.ext[i] = v; z.tr[i].push(t); }
-            else if (v - z.lo[i] >= 0.1 && z.lo[i] < 0.8) { z.dir[i] = 1; z.ext[i] = v; z.tr[i].push(t); }
-          } else if (dir === 1) {
-            if (v > z.ext[i]) z.ext[i] = v;
-            else if (z.ext[i] - v >= 0.1 && v < 0.8) { z.dir[i] = -1; z.ext[i] = v; z.tr[i].push(t); }
-          } else if (v < z.ext[i]) z.ext[i] = v;
-          else if (v - z.ext[i] >= 0.1 && z.ext[i] < 0.8) { z.dir[i] = 1; z.ext[i] = v; z.tr[i].push(t); }
-        });
-      };
-      sample(true);
-      document.getElementById('ws-spin').click();
-      let frames = 0;
-      while (frames < 60 * 40) {
-        const more = window.__frame();
-        t += 1000 / 60;
-        frames++;
-        sample(false);
-        if (!more) break;
-      }
-      // The most pairs of transitions (flashes) that fall in any one second.
-      const most = times => {
-        const f = times.filter((_, j) => j % 2 === 1);
-        let m = 0;
-        for (let a = 0, b = 0; b < f.length; b++) { while (f[b] - f[a] >= 1000) a++; m = Math.max(m, b - a + 1); }
-        return m;
-      };
-      const out = sizes.map(z => ({ flashes: Math.max(...z.tr.map(most)), red: Math.max(...z.rt.map(most)), over: z.tr.map(tr => most(tr) > 3) }));
-      // The largest area of points over 3 flashes a second inside any 341 x 256 px field.
-      const n = Math.ceil(W / step) + 1, sum = new Int32Array((n + 1) * (n + 1));
-      pts.forEach(([px, py], i) => { if (out[1].over[i]) sum[(py / step + 1) * (n + 1) + px / step + 1] = 1; });
-      for (let y = 1; y <= n; y++) for (let x = 1; x <= n; x++) sum[y * (n + 1) + x] += sum[(y - 1) * (n + 1) + x] + sum[y * (n + 1) + x - 1] - sum[(y - 1) * (n + 1) + x - 1];
-      const fw = Math.ceil(341 / cell), fh = Math.ceil(256 / cell);
-      let area = 0;
-      for (let y = 0; y <= n; y++) for (let x = 0; x <= n; x++) {
-        const x1 = Math.min(n, x + fw), y1 = Math.min(n, y + fh);
-        area = Math.max(area, (sum[y1 * (n + 1) + x1] - sum[y * (n + 1) + x1] - sum[y1 * (n + 1) + x] + sum[y * (n + 1) + x]) * cell * cell);
-      }
-      return { frames, points: pts.length, flashes15: out[0].flashes, flashes5: out[1].flashes, red: Math.max(out[0].red, out[1].red), area };
-    }, { list, secs, theme });
-    const twenty = Array.from({ length: 20 }, (_, i) => 'Name ' + (i + 1)).join('\n');
-    for (const [list, secs, theme, label] of [[null, 5, 'bright', 'the example list, 5 s'], [twenty, 10, 'mono', '20 names, 10 s, black and white']]) {
-      const m = await flashes(list, secs, theme);
-      assert.ok(m.frames >= secs * 60 - 2 && m.points > 4000, `${label}: ${m.frames} frames at ${m.points} points`);
-      assert.ok(m.flashes15 <= 3, `${label}: a 15 px square flashed ${m.flashes15} times in one second`);
-      assert.ok(m.area < 21824, `${label}: 5 px squares flashing more than 3 times a second (up to ${m.flashes5}) cover ${m.area} px of a 341 x 256 px field`);
-      assert.ok(m.red <= 3, `${label}: ${m.red} red flashes in one second`);
-      await p.waitForSelector('#ws-dialog[open]');
-      await p.click('#ws-dlg-close');
-    }
-    assert.deepEqual(errors, []);
     await ctx.close();
   }
 

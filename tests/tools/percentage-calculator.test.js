@@ -295,7 +295,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---- The guide's examples open in the calculator, and give what the guide says. ----
   const EXAMPLES = [
-    ['#what=180,240', 'what', '180 is 75% of 240'],
     ['#subtract=45,20', 'add', '45 − 20% = 36'], ['#add=150,20', 'add', '150 + 20% = 180'], ['#before-increase=180,20', 'orig', '180 is 20% more than 150'],
     ['#of=18,64.5', 'of', '18% of 64.5 = 11.61'], ['#change=80,60', 'change', 'From 80 to 60: 25% decrease'],
   ];
@@ -328,17 +327,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#pc-of-answer'), '15% of 80 = 12');
   await page.goto(url + '#nothing=1,2', { waitUntil: 'load' });
   assert.equal(await text('#pc-of-answer'), '15% of 80 = 12');
-  // A name that every object has, such as constructor, is not an example either: it used to
-  // throw an error as the page opened.
-  const thrown = [];
-  page.on('pageerror', e => thrown.push(e.message));
-  await page.goto('about:blank');
-  await page.goto(url + '#constructor=1,2', { waitUntil: 'load' });
-  assert.equal(await text('#pc-of-answer'), '15% of 80 = 12');
-  // (The page's own hashchange listener runs before this one, which was added after it.)
-  await page.evaluate(() => new Promise(r => { addEventListener('hashchange', r, { once: true }); location.hash = '#constructor=3,4'; }));
-  assert.equal(await text('#pc-of-answer'), '15% of 80 = 12');
-  assert.deepEqual(thrown, []);
   // The "See examples" link under the add or subtract calculator has a target.
   assert.equal(await page.locator(await attr('.pc-note a', 'href')).count(), 1);
 
@@ -412,29 +400,4 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await p.textContent('#pc-of-answer'), '18% of 64.5 = 11.61');
   assert.deepEqual(errors, []);
   await phone.close();
-
-  // ---- Negative numbers on an iPhone or iPad. ----
-  // Their number keypad has no minus key, and every box here may take a negative number, so
-  // there the boxes open the ordinary keyboard, whose number keys include it. Elsewhere they
-  // keep the number keypad (checked above). A hint at the top says how to write one.
-  assert.equal(await text('.pc-sign-hint'), 'For a negative number, type a minus sign: -20.');
-  for (const platform of ['iPhone', 'MacIntel']) {
-    const ios = await page.context().browser().newContext({ ...devices['iPhone 13'] });
-    await ios.addInitScript(pf => {
-      Object.defineProperty(Navigator.prototype, 'platform', { get: () => pf });
-      Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => 5 });
-    }, platform);
-    const q = await ios.newPage();
-    await q.goto(url, { waitUntil: 'load' });
-    assert.deepEqual(await q.$$eval('.pc input', els => [...new Set(els.map(e => e.inputMode))]), ['text'], platform);
-    assert.equal(await q.$$eval('.pc input', els => els.length), 14);
-    await q.tap('#pc-change-a');
-    await q.keyboard.press('Control+A');
-    await q.keyboard.type('-20');
-    await q.tap('#pc-change-b');
-    await q.keyboard.press('Control+A');
-    await q.keyboard.type('30');
-    assert.equal(await q.textContent('#pc-change-answer'), 'From -20 to 30: 250% increase');
-    await ios.close();
-  }
 };

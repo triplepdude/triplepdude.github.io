@@ -270,13 +270,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   for (const href of links) assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), href);
   const faqs = await page.locator('.faq summary').allTextContents();
   assert.match(faqs[faqs.length - 1], /uploaded/);
-  // Homepage search (index.html) matches every typed word against title, description and keywords.
-  const home = await (await page.request.get(base + '/')).text();
-  const hay = (home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/font-generator\/"/) || [])[1] || '';
-  assert.ok(hay, 'the homepage lists the page');
-  for (const q of ['fancy text', 'cool fonts', 'aesthetic fonts', 'tiktok fonts', 'italic text generator', 'strikethrough text', 'underline text', 'instagram fonts']) {
-    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
-  }
 
   // ---- A phone with a touch screen ----
   const browser = page.context().browser();

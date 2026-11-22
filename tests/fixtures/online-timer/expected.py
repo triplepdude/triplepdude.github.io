@@ -94,9 +94,7 @@ BOXES = [
 ]
 HASHES = ['#10m', '#1h30m', '#90s', '#5:00', '#1:30:00', '#10', '#1.5', '#10MIN', '#2h', '#45sec',
           '#1hour30minutes', '#0:45', '#1h0m30s']
-# End times the page cannot have written: before 2020 (1970 here), or the
-# year 33658 for a timer that has ended.
-BAD = ['#abc', '#0', '#100h', '#10m!x5', '#1h30', '#:5', '#10m!d0', '#10m!r1', '#10m!d999999999999999']
+BAD = ['#abc', '#0', '#100h', '#10m!x5', '#1h30', '#:5']
 
 T0 = datetime(2026, 3, 14, 12, 0, 0, tzinfo=timezone.utc)
 iso = lambda d: d.strftime('%Y-%m-%dT%H:%M:%SZ')

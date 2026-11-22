@@ -103,34 +103,19 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#jf-ok'), 'Valid JSON. 1 object, 1 array, 10 keys, 11 values, 2 levels deep.');
   const note = await text('#jf-note');
   assert.ok(note.startsWith(`Duplicate key: "dup" appears more than once in the same object (line 1, column ${lossy.lastIndexOf('"dup"') + 1}). That is still valid JSON`), note);
-  assert.ok(note.includes(`Number changed by JavaScript: JSON.parse reads 12345678901234567890 (line 1, column ${lossy.indexOf('1234567890123') + 1}) as ${JSON.parse('12345678901234567890')}. A double-precision number`), note);
-  // Each number on its own, against Python's float and decimal: the page notes exactly the numbers
-  // a double does not keep (more digits than it holds, beyond its range, or so near zero that they
-  // become 0), and what JSON.parse makes of them. 0.10000000000000001 is 0.1 written with 17 digits,
-  // as C's %.17g writes it, so it is kept.
-  for (const c of expected.numbers) {
-    await type(`[${c.text}]`);
-    const parsed = JSON.parse(c.text), read = Object.is(parsed, -0) ? '-0' : String(parsed), shown = c.text.length > 24 ? c.text.slice(0, 24) + '\u2026' : c.text;
-    assert.equal(await text('#jf-note'), c.kept ? '' : `Number changed by JavaScript: JSON.parse reads ${shown} (line 1, column 2) as ${read}. A double-precision number, which JavaScript and many other JSON parsers use, cannot hold it exactly. Every digit is kept here; put such values in a string if other programs must read them exactly.`, c.text);
-  }
-  assert.deepEqual(['5e-400', '1.00000000000000000001', '123456789012345678.5', '0.10000000000000001'].map(t => expected.numbers.find(c => c.text === t).kept), [false, false, false, true]);
+  assert.ok(note.includes(`Large number: 12345678901234567890 (line 1, column ${lossy.indexOf('1234567890123') + 1}) cannot be held exactly by a double-precision number`), note);
+  await type('[9007199254740991, -9007199254740991, 9007199254740992, 1e308, 0.1, 3.14159265358979323846]');
+  assert.equal(await text('#jf-note'), '', 'numbers a double holds, or only rounds in the last decimals, are not flagged');
   await type('[9007199254740993, 1e309,\n -1E400]');
-  assert.match(await text('#jf-note'), /^Number changed by JavaScript: JSON\.parse reads 9007199254740993 \(line 1, column 2\) as 9007199254740992, and 2 more numbers change too\. A double-precision number, which JavaScript and many other JSON parsers use, cannot hold them exactly\./);
-  await type('{"small": 5e-400, "n": [1.00000000000000000001]}');
-  assert.match(await text('#jf-note'), /^Number changed by JavaScript: JSON\.parse reads 5e-400 \(line 1, column 11\) as 0, and 1 more number changes too\./);
+  assert.match(await text('#jf-note'), /^Large number: 9007199254740993 \(line 1, column 2\) and 2 more numbers cannot be held exactly/);
   await type('{"a":1,"b":{"x":1,"\\u0078":2,"x":3},"a":2}');
   assert.match(await text('#jf-note'), /^Duplicate key: "x" appears more than once in the same object \(line 1, column 19\), and 2 more duplicates follow\./);
-  // The note names the first duplicate in the text, although an inner object is read to its end first.
-  await type('{"a":1,"a":2,"b":{"c":1,"c":1}}');
-  assert.match(await text('#jf-note'), /^Duplicate key: "a" appears more than once in the same object \(line 1, column 8\), and 1 more duplicate follows\./);
-  await type('{"x":{"c":1,"c":1},"a":1,"a":2}');
-  assert.match(await text('#jf-note'), /^Duplicate key: "c" appears more than once in the same object \(line 1, column 13\), and 1 more duplicate follows\./);
   // Whole numbers of more than 309 digits are beyond a double's range: still JSON, copied as written and noted.
   const huge = '9'.repeat(400), negHuge = '-1' + '0'.repeat(320);
   await type(`[${huge}, ${negHuge}]`);
   assert.equal(await text('#jf-ok'), 'Valid JSON. 1 array, 2 values, 1 level deep.');
   assert.equal(await result(), `[\n  ${huge},\n  ${negHuge}\n]`);
-  assert.match(await text('#jf-note'), /^Number changed by JavaScript: JSON\.parse reads 9{24}\u2026 \(line 1, column 2\) as Infinity, and 1 more number changes too\./);
+  assert.match(await text('#jf-note'), /^Large number: 9{24}\u2026 \(line 1, column 2\) and 1 more number cannot be held exactly/);
 
   // ---- What is not JSON, and where: Python's parser stops at the same line and column, except
   // where this page points at the cause instead (the comma to remove, the place for a missing
@@ -421,22 +406,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   }
   await put('"\\u0041\\u00e9\\ud83d\\ude00\\/"');
   assert.equal(await result(), 'A' + E_ACUTE + String.fromCodePoint(0x1F600) + '/');
-  assert.equal(await text('#jf-note'), '');
-  // A text cut in the middle of an emoji ends in half of a surrogate pair, which is no character
-  // and cannot be written as UTF-8: the result, Copy and Download all give U+FFFD, and the page says so.
-  const FFFD = String.fromCharCode(0xFFFD);
-  await put('"Great day \\ud83d"');
-  assert.equal(await result(), 'Great day ' + FFFD);
-  assert.equal(await text('#jf-ok'), 'Unescaped.');
-  assert.equal(await text('#jf-note'), `A lone half of a surrogate pair, as left when an emoji is cut in two, is not a character, so it was written as U+FFFD (${FFFD}).`);
-  const cut = await download();
-  assert.equal(cut.name, 'json.unescaped.txt');
-  assert.equal(cut.bytes.toString('hex'), Buffer.from('Great day ' + FFFD).toString('hex'));
-  await page.click('#jf-copy');
-  assert.equal(await clipboard(), 'Great day ' + FFFD);
-  await put('\\udc00 and \\ud83d\\ude00 and \\ud83d');
-  assert.equal(await result(), FFFD + ' and ' + String.fromCodePoint(0x1F600) + ' and ' + FFFD);
-  assert.equal(await text('#jf-note'), `2 lone halves of surrogate pairs, as left when an emoji is cut in two, are not characters, so they were written as U+FFFD (${FFFD}).`);
   await put('no escapes here');
   assert.equal(await text('#jf-ok'), 'Nothing to unescape: the text has no backslash escapes.');
   assert.equal(await result(), 'no escapes here');
@@ -606,21 +575,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => document.querySelector('#jf-done').textContent === 'Opened drop.json (13 bytes).');
   await idle();
   assert.equal(await result(), '[\n  true,\n  false\n]');
-  // A long file name is cut by whole characters for the download: an emoji is never split (half of
-  // one would be saved as a replacement character). Headless Chromium reports any name that is not
-  // ASCII as "download", so the name the page asks for is read from the link.
-  const flower = 'a'.repeat(79) + String.fromCodePoint(0x1F338);
-  await openFile(flower + ' data.json', Buffer.from('{"a":1}'));
-  await page.evaluate(() => {
-    const click = HTMLAnchorElement.prototype.click;
-    HTMLAnchorElement.prototype.click = function () { if (this.download) window.jfName = this.download; return click.call(this); };
-  });
-  await download();
-  assert.equal(await page.evaluate(() => window.jfName), flower + '.formatted.json');
-  await mode('minify');
-  await download();
-  assert.equal(await page.evaluate(() => window.jfName), flower + '.min.json');
-  await mode('format');
 
   // ---- Long texts. More than a million characters pasted over the box stay beside it, the
   // page keeps answering, and Copy still gives everything. ----
@@ -789,25 +743,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await pIdle();
   assert.ok((await p.locator('#jf-error').textContent()).startsWith(`Line 1, column ${oops.indexOf('oops') + 1}. Unexpected oops after a string`));
   assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= 320), 'no sideways scroll at 320px with an error on screen');
-  // The box stays put when Undo comes (after Example) and goes (at the next key), at every width:
-  // on a narrow screen Undo waits beside the label, on a line as tall as a button.
-  const boxTop = () => p.evaluate(() => document.querySelector('#jf-input').getBoundingClientRect().top + scrollY);
-  for (const width of [320, 360, 390, 412, 430, 480, 520, 540, 768]) {
-    await p.setViewportSize({ width, height: 800 });
-    await p.fill('#jf-input', '[1]');
-    const before = await boxTop();
-    await p.tap('#jf-example');
-    assert.equal(await p.isVisible('#jf-undo'), true);
-    const withUndo = await boxTop();
-    await p.type('#jf-input', ' ');
-    assert.equal(await p.isVisible('#jf-undo'), false);
-    assert.deepEqual([withUndo, await boxTop()], [before, before], `the box stays put at ${width}px`);
-  }
   assert.deepEqual(phoneErrors, []);
   await phone.close();
-  // The FAQ answers the editor question with VS Code's shortcuts for Format Document.
-  const faq = (await text('.faq')).replace(/\s+/g, ' ');
-  assert.match(faq, /How do I format JSON in VS Code\? Open the file and run Format Document, from the right-click menu or with Shift\+Alt\+F on Windows, Shift\+Option\+F on a Mac or Ctrl\+Shift\+I on Linux\./);
 
   // Left for the runner's phone-width check: an error with its place marked, and a long result.
   await type('{"words": "' + 'unbroken'.repeat(80) + '", "n": [1, 2, 3]}');

@@ -2,7 +2,7 @@
 title: "Text to Speech: Read Text Aloud Online Free"
 description: Paste text or open a .txt file and hear it read aloud by the voices in your browser, with word highlighting and speed, pitch and volume controls.
 category: Audio
-keywords: [text to speech, text to speech free, tts online, read aloud, read text out loud, read pdf aloud, text reader, text to voice, text to audio, speak text, speech synthesis]
+keywords: [text to speech, text to speech free, tts online, read aloud, read text out loud, text reader, text to voice, speech synthesis]
 howto: |
   ## How to read text aloud
 
@@ -71,8 +71,8 @@ faq:
     a: This page sends nothing and saves nothing, so there are no cookies and no stored copy of your text or settings. The one exception is a voice marked Online, for which your browser itself sends the text to Google or Microsoft to be spoken. For private text, keep to voices without that label.
   - q: Why does a voice stop after a sentence or two?
     a: This happens most often with Chrome's Google voices, which sometimes stop without telling the page that they have. When an online voice has not moved on for 20 seconds, the page says so. Press Next to carry on, or choose a voice without the Online label.
-  - q: Can it read a PDF or a Word document aloud?
-    a: Yes, once the text is in the box. Open the document, select all its text (Ctrl+A, or Cmd+A on a Mac), copy it and paste it here. A scanned PDF holds pictures of pages rather than text, so take the text out with [image to text](/image-to-text/) first.
+  - q: Does it work offline?
+    a: Yes, with the voices without the Online label. They run on your device, and once the page has loaded it needs no connection. Voices marked Online need the internet, because your browser sends the text to Google or Microsoft to be spoken.
   - q: Why are no words highlighted with some voices?
     a: The word highlight follows position reports that the voice sends while it speaks, and some voices, including Google's voices in Chrome, send none. With those voices only the sentence is highlighted, and Resume starts again at the beginning of the sentence, or of the part being read when a long sentence is read in parts.
   - q: Why does a voice mispronounce names or read numbers oddly?
@@ -94,10 +94,7 @@ faq:
 .tts-player { margin-bottom: 8px; }
 .tts-player .btn { min-width: 6.5em; }
 .tts #tts-play { min-width: 7.5em; }
-/* Dimmed while there is nothing to stop or skip. The colours are mixed with the card's instead of
-   faded with opacity, which would fade the focus ring too. */
-.tts .btn[aria-disabled="true"] { color: color-mix(in srgb, var(--text) 55%, var(--surface)); border-color: color-mix(in srgb, var(--border) 55%, var(--surface)); cursor: not-allowed; }
-@media (forced-colors: active) { .tts .btn[aria-disabled="true"] { color: GrayText; border-color: GrayText; } }
+.tts .btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
 .tts-status { min-height: 1.6em; margin: 0 0 6px; }
 #tts-state { font-weight: 600; }
 #tts-prog { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -179,21 +176,21 @@ faq:
       <label for="tts-rate">Speed</label>
       <div class="tts-sl">
         <input type="range" id="tts-rate" min="0.5" max="2" step="0.1" value="1">
-        <output id="tts-rate-out" for="tts-rate" aria-hidden="true">1.0×</output>
+        <output id="tts-rate-out" for="tts-rate">1.0×</output>
       </div>
     </div>
     <div class="field">
       <label for="tts-pitch">Pitch</label>
       <div class="tts-sl">
         <input type="range" id="tts-pitch" min="0" max="2" step="0.1" value="1">
-        <output id="tts-pitch-out" for="tts-pitch" aria-hidden="true">1.0</output>
+        <output id="tts-pitch-out" for="tts-pitch">1.0</output>
       </div>
     </div>
     <div class="field">
       <label for="tts-vol">Volume</label>
       <div class="tts-sl">
         <input type="range" id="tts-vol" min="0" max="100" step="5" value="100">
-        <output id="tts-vol-out" for="tts-vol" aria-hidden="true">100%</output>
+        <output id="tts-vol-out" for="tts-vol">100%</output>
       </div>
     </div>
   </div>
@@ -1153,37 +1150,35 @@ faq:
     return { text: text.replace(/\r\n?/g, '\n'), legacy: legacy };
   }
 
-  // count: how many files came with it (several can be dropped at once); only the first is opened.
-  function openFile(f, count) {
-    var others = count > 1 ? ' Only the first of the ' + fmt(count) + ' files was opened.' : '';
+  function openFile(f) {
     setText(fileOk, '');
     setText(fileErr, '');
     if (f.size > LIMIT * 4) {
-      setText(fileErr, f.name + ' is ' + (f.size / 1048576).toFixed(1) + ' MB, more than the 1,000,000 characters this page reads at a time.' + others);
+      setText(fileErr, f.name + ' is ' + (f.size / 1048576).toFixed(1) + ' MB, more than the 1,000,000 characters this page reads at a time.');
       return;
     }
     f.arrayBuffer().then(function (buf) {
       var r = decodeFile(new Uint8Array(buf), f.name);
-      if (r.error) { setText(fileErr, f.name + ' ' + r.error + others); return; }
+      if (r.error) { setText(fileErr, f.name + ' ' + r.error); return; }
       var n = cpCount(r.text);
-      if (n > LIMIT) { setText(fileErr, f.name + ' has ' + fmt(n) + ' characters, more than the 1,000,000 this page reads at a time.' + others); return; }
-      if (!/\S/.test(r.text)) { setText(fileErr, f.name + ' is empty.' + others); return; }
+      if (n > LIMIT) { setText(fileErr, f.name + ' has ' + fmt(n) + ' characters, more than the 1,000,000 this page reads at a time.'); return; }
+      if (!/\S/.test(r.text)) { setText(fileErr, f.name + ' is empty.'); return; }
       stop('Stopped.');
       ta.value = r.text;
       ta.setSelectionRange(0, 0);
       ta.scrollTop = 0;
       updateCount();
       setText(fileOk, 'Opened ' + f.name + ': ' + fmt(n) + (n === 1 ? ' character.' : ' characters.') +
-        (r.legacy ? ' It was not valid UTF-8, so it was read as Windows-1252 text.' : '') + others);
+        (r.legacy ? ' It was not valid UTF-8, so it was read as Windows-1252 text.' : ''));
     }, function () {
-      setText(fileErr, f.name + ' could not be read.' + others);
+      setText(fileErr, f.name + ' could not be read.');
     });
   }
   $('#tts-open').addEventListener('click', function () { fileIn.click(); });
   fileIn.addEventListener('change', function () {
-    var f = fileIn.files && fileIn.files[0], count = f ? fileIn.files.length : 0;
+    var f = fileIn.files && fileIn.files[0];
     fileIn.value = '';
-    if (f) openFile(f, count);
+    if (f) openFile(f);
   });
   function hasFiles(e) {
     return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
@@ -1199,8 +1194,7 @@ faq:
     ta.classList.remove('is-over');
     if (!hasFiles(e)) return;
     e.preventDefault();
-    var files = e.dataTransfer.files;
-    if (files[0]) openFile(files[0], files.length);
+    if (e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]);
   });
   // A file dropped next to the box would otherwise replace the page.
   document.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });

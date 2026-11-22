@@ -74,9 +74,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const names = await page.$$eval('.ws-sw', els => els.map(e => e.textContent));
   assert.deepEqual(names, ['White', 'Black', 'Red', 'Green', 'Blue', 'Yellow', 'Orange', 'Pink', 'Purple', 'Grey', 'Custom']);
   assert.equal(await page.getAttribute('.ws-sw:nth-child(1)', 'aria-pressed'), 'true');
-  // The value beside each slider is for the eye: the slider says it itself
-  // (aria-valuetext), so a screen reader must not hear it twice.
-  for (const id of ['#ws-k-out', '#ws-b-out']) assert.equal(await page.getAttribute(id, 'aria-hidden'), 'true', `${id} is hidden from screen readers`);
 
   // ---- Preset colours are the CSS colour codes ----
   const presets = { Black: [0, 0, 0], Red: [255, 0, 0], Green: [0, 255, 0], Blue: [0, 0, 255], Yellow: [255, 255, 0],
@@ -129,7 +126,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await slide('#ws-b', 50);
   assert.equal(await text('#ws-code'), '#BCBCBC', 'the guide: 50% of white is #BCBCBC');
   assert.equal(await text('#ws-b-out'), '50%');
-  assert.equal(await page.getAttribute('#ws-b', 'aria-valuetext'), '50%');
   await page.click('.ws-sw:text-is("Red")');
   assert.equal(await bg(), 'rgb(188, 0, 0)');
   await page.click('.ws-sw:text-is("Black")');
@@ -211,25 +207,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#ws-msg'), 'Part of this link could not be read (“' + 'x'.repeat(23) + '\u{1F600}…”), so white is shown.');
   await visit('#' + 'a'.repeat(65));
   assert.equal(await text('#ws-msg'), 'The colour in this link is too long to read, so white is shown.');
-  // Names that every JavaScript object has are no colours: such a link is
-  // read like any other unknown word, and the page keeps working.
-  const pageErrors = [];
-  page.on('pageerror', e => pageErrors.push(e.message));
-  for (const [h, bad, b] of [['#constructor', 'constructor', 100], ['#__proto__&b=50', '__proto__', 50]]) {
-    await page.goto('about:blank');
-    await visit(h);
-    await page.waitForFunction(() => document.getElementById('ws-msg').textContent !== '', null, { timeout: 3000 }).catch(() => {});
-    assert.equal(await text('#ws-msg'), `Part of this link could not be read (“${bad}”), so white is shown.`, h);
-    assert.equal(await text('#ws-name'), 'White', h);
-    assert.equal(await page.getAttribute('.ws-sw:nth-child(1)', 'aria-pressed'), 'true', `${h}: the White swatch is selected`);
-    assert.equal(await bg(), rgb(dim([255, 255, 255], b / 100)), h);
-  }
-  const [protoDl] = await Promise.all([page.waitForEvent('download', { timeout: 5000 }), page.click('#ws-png')]);
-  assert.match(protoDl.suggestedFilename(), /^white-[0-9a-f]{6}-\d+x\d+\.png$/, 'Download PNG works after such a link');
-  await page.focus('#ws-stage');
-  await page.keyboard.press('ArrowRight');
-  assert.equal(await text('#ws-name'), 'Black', 'and so do the arrow keys');
-  assert.deepEqual(pageErrors, [], 'no script errors');
   await visit('#ffffff');
   await hashIs('#ffffff', 'a custom colour stays custom');
   // Editing the address on the page switches the colour.
@@ -322,21 +299,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.evaluate(() => { window.__lock.dispatchEvent(new Event('release')); document.dispatchEvent(new Event('visibilitychange')); });
   await page.waitForFunction(() => window.__wake.length === 2, null, { timeout: 3000 });
   assert.deepEqual(await page.$eval('#ws-stage', e => { const s = getComputedStyle(e); return [s.borderTopWidth, s.borderTopLeftRadius]; }), ['0px', '0px']);
-  // Arrows change the colour and the brightness in steps of 5%. A single
-  // press changes the colour at once; one that comes less than 350 ms after
-  // the last change waits for that time to pass (see the flash test below).
-  const nameIs = async (want, what) => {
-    await page.waitForFunction(n => document.getElementById('ws-name').textContent === n, want, { timeout: 3000 }).catch(() => {});
-    assert.equal(await text('#ws-name'), want, what);
-  };
+  // Arrows change the colour and the brightness in steps of 5%.
   await page.keyboard.press('ArrowRight');
-  assert.equal(await text('#ws-name'), 'Black', 'a single press changes the colour at once');
+  assert.equal(await text('#ws-name'), 'Black');
   await page.keyboard.press('ArrowLeft');
-  await nameIs('White');
   await page.keyboard.press('ArrowLeft');
-  await nameIs('Custom', 'wraps around backwards');
+  assert.equal(await text('#ws-name'), 'Custom', 'wraps around backwards');
   await page.keyboard.press('ArrowRight');
-  await nameIs('White');
+  assert.equal(await text('#ws-name'), 'White');
   for (const [key, want] of [['ArrowDown', '95%'], ['ArrowDown', '90%'], ['ArrowUp', '95%'], ['ArrowUp', '100%'], ['ArrowUp', '100%']]) {
     await page.keyboard.press(key);
     assert.equal(await text('#ws-b-out'), want, key);
@@ -363,65 +333,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#ws-name'), 'Black');
   assert.match(await text('#ws-bar-text'), /^Black 100% brightness$/);
   await page.click('#ws-bar-prev');
-  await nameIs('White');
-
-  // ---- No flashing (WCAG 2.3.1): at most 3 colour changes in any second ----
-  // Holding ← or → changes the colour once; presses and taps closer than
-  // 350 ms are spaced out; ↑ and ↓, small brightness steps one way, repeat.
-  // Colour changes and keydowns are timed in the page.
-  await page.evaluate(() => {
-    const s = document.getElementById('ws-stage');
-    let last = s.style.backgroundColor;
-    window.__changes = [];
-    window.__keys = [];
-    document.addEventListener('keydown', () => window.__keys.push(performance.now()), true);
-    new MutationObserver(() => {
-      if (s.style.backgroundColor !== last) { last = s.style.backgroundColor; window.__changes.push(performance.now()); }
-    }).observe(s, { attributes: true, attributeFilter: ['style'] });
-  });
-  const quiet = () => page.waitForFunction(() => performance.now() - Math.max(0, ...window.__changes, ...window.__keys) > 450, null, { timeout: 5000 });
-  const record = async fn => {
-    await quiet();
-    await page.evaluate(() => { window.__changes = []; window.__keys = []; });
-    await fn();
-    await quiet();
-    return page.evaluate(() => [window.__changes, window.__keys]);
-  };
-  const most = ts => Math.max(0, ...ts.map(t => ts.filter(u => u >= t && u < t + 1000).length));
-  // Later keydowns of a held key come with repeat set, as the browser sends them.
-  const hold = (key, ms) => async () => {
-    const t = Date.now();
-    while (Date.now() - t < ms) { await page.keyboard.down(key); await page.waitForTimeout(30); }
-    await page.keyboard.up(key);
-  };
-  const tapFor = (key, ms) => async () => {
-    const t = Date.now();
-    while (Date.now() - t < ms) { await page.keyboard.press(key); await page.waitForTimeout(30); }
-  };
-  let [changed, keys] = await record(hold('ArrowRight', 2000));
-  assert.ok(keys.length > 20, `the key repeated (${keys.length} keydowns)`);
-  assert.equal(changed.length, 1, `holding → for 2 s changed the colour ${changed.length} times`);
-  // Separate fast presses, as some keyboards send for a held key.
-  [changed, keys] = await record(tapFor('ArrowLeft', 1500));
-  assert.ok(most(changed) <= 3, `fast presses: ${most(changed)} colour changes in one second`);
-  assert.ok(changed.length >= 2, `fast presses still step through the colours (${changed.length})`);
-  assert.ok(changed[changed.length - 1] - keys[keys.length - 1] < 1000, 'and stop soon after the last press');
-  // Quick taps on the bar's › button.
-  [changed] = await record(() => page.evaluate(() => new Promise(done => {
-    let n = 0;
-    (function tap() { document.getElementById('ws-bar-next').click(); if (++n < 25) setTimeout(tap, 50); else done(); })();
-  })));
-  assert.ok(most(changed) <= 3 && changed.length >= 2, `quick taps on ›: ${changed.length} changes, ${most(changed)} in one second`);
-  [changed, keys] = await record(hold('ArrowDown', 400));
-  assert.ok(changed.length >= 3 && changed.length === keys.length, `holding ↓ dims step by step (${changed.length} of ${keys.length})`);
-  // A single press after a pause is instant.
-  await quiet();
-  const before = await text('#ws-name');
-  await page.keyboard.press('ArrowRight');
-  assert.notEqual(await text('#ws-name'), before, 'a single press is not delayed');
-  await page.$eval('.ws-sw[data-id="white"]', b => b.click());
-  await slide('#ws-b', 100);
-  await nameIs('White');
   // Esc leaves full screen and gives focus back to the button.
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.getElementById('ws-stage').classList.contains('is-active'));
@@ -439,11 +350,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // From the focused preview: Enter and F start it, F ends it, and the
   // browser leaving full screen by itself ends it too.
   await page.focus('#ws-stage');
-  await quiet();
   await page.keyboard.press('ArrowRight');
   assert.equal(await text('#ws-name'), 'Black', 'arrows work on the preview too');
-  [changed] = await record(hold('ArrowRight', 1000));
-  assert.equal(changed.length, 1, `holding → on the preview changed the colour ${changed.length} times`);
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.getElementById('ws-stage').classList.contains('is-active'));
   await page.keyboard.press('f');

@@ -73,22 +73,13 @@ def text_pdf(lines):
     # One A5-ish page with real text in Helvetica, written by hand so the file
     # holds a text layer (Pillow only writes pictures into a PDF).
     content = 'BT /F1 18 Tf 50 300 Td 24 TL ' + ' '.join('(%s) Tj T*' % l.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)') for l in lines) + ' ET'
-    return pdf_file([
+    objs = [
         '<< /Type /Catalog /Pages 2 0 R >>',
         '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
         '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 360] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
         '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
         '<< /Length %d >>\nstream\n%s\nendstream' % (len(content), content),
-    ])
-
-
-def no_pages_pdf():
-    # A valid PDF whose page tree is empty (/Count 0), as some broken exporters write.
-    return pdf_file(['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [] /Count 0 >>'])
-
-
-def pdf_file(objs):
-    # The objects (numbered from 1, the first is the catalog), a cross-reference table and a trailer.
+    ]
     out = io.BytesIO()
     out.write(b'%PDF-1.4\n')
     offsets = []
@@ -257,8 +248,6 @@ def main():
     with open(os.path.join(HERE, 'text.pdf'), 'wb') as f:
         f.write(text_pdf(TEXT_PDF))
     expected['text_pdf'] = '\n'.join(TEXT_PDF)
-    with open(os.path.join(HERE, 'zero-pages.pdf'), 'wb') as f:
-        f.write(no_pages_pdf())
 
     scan_pdfs(para)
     expected['stamp'] = STAMP

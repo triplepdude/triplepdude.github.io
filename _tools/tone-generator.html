@@ -530,10 +530,6 @@ faq:
   // ---------- Live audio ----------
   const player = (function () {
     let ctx = null, master = null, v = null, sched = 0, raf = 0, token = 0;
-    // A running audio context renders silence for as long as the page is
-    // open, so it is suspended a moment after the tone stops; Play resumes it.
-    const IDLE_MS = 2000;
-    let idleTimer = 0, asleep = false;
     const api = { playing: false };
 
     function ensure() {
@@ -629,7 +625,6 @@ faq:
       if (err) { $('#tg-error').textContent = err; return; }
       $('#tg-error').textContent = '';
       try { ensure(); } catch (e) { $('#tg-error').textContent = e.message; return; }
-      clearTimeout(idleTimer);
       const mine = ++token;
       const go = function () {
         if (mine !== token) return;
@@ -644,25 +639,14 @@ faq:
         frame();
         TT.announce('Playing ' + $('#tg-big').textContent.replace('→', 'to'));
       };
-      if (asleep || ctx.state !== 'running') {
-        asleep = false;
-        ctx.resume().then(go, function () { $('#tg-error').textContent = 'The browser blocked audio playback. Press Play again.'; });
-      } else go();
+      if (ctx.state === 'suspended') ctx.resume().then(go, function () { $('#tg-error').textContent = 'The browser blocked audio playback. Press Play again.'; });
+      else go();
     };
     api.stop = function () {
       token++;
       clearInterval(sched); clearTimeout(raf);
       if (v && ctx) release(v, ctx.currentTime);
       v = null;
-      if (ctx) {
-        // After the fade-out and the oscillators' stop (50 ms), with time to spare.
-        clearTimeout(idleTimer);
-        idleTimer = setTimeout(function () {
-          if (api.playing || ctx.state !== 'running') return;
-          asleep = true;
-          ctx.suspend().catch(function () {});
-        }, 50 + IDLE_MS);
-      }
       const was = api.playing;
       api.playing = false;
       st.lastSweepF = null;

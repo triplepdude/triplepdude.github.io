@@ -17,9 +17,6 @@
 //   hdr-pq.heic       quadrants.heic with the nclx transfer characteristics set to 16 (PQ)
 //   pq.avif           copy of avif-to-jpg's: 128x16 HDR AVIF (libaom, 10-bit, BT.2020, PQ)
 //   cut.jpg           copy of jpg-to-png's: a 120x90 JPG that stops 40% into its image data
-//   artist.heic       96x64 with an XMP packet and EXIF: Make Apple, Artist and CameraOwnerName
-//                     "Jane Example", Copyright "(c) Jane Example", BodySerialNumber 012345678901,
-//                     OffsetTimeOriginal +01:00 and a GPS position (51°30' N)
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -342,31 +339,4 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     const file = href.startsWith('/assets/') ? path.join(__dirname, '..', '..', href) : path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html');
     assert.ok(fs.existsSync(file), `${href} is linked from the guide but does not exist`);
   }
-
-  // ---------- What each metadata setting keeps, as the table, the note and the FAQ say ----------
-  // Keep, without location removes only the GPS block: the owner's name, the copyright notice,
-  // the serial number and the time zone stay. Keep all keeps the GPS block but not the XMP packet.
-  const table = await page.$$eval('.prose table tr', trs => trs.map(tr => Array.from(tr.cells, c => c.textContent.trim())));
-  assert.deepEqual(table, [
-    ['Setting', 'What the new file keeps'],
-    ['Remove all (default)', 'Nothing: no camera, date or location'],
-    ['Keep, without location', 'All EXIF except GPS: camera, lens, exposure, date and time zone, and any owner’s name, copyright notice or serial number'],
-    ['Keep all, with location', 'All EXIF, GPS included; XMP and other metadata are not copied']]);
-  assert.deepEqual(await page.$$eval('#h2j-meta option', os => os.map(o => o.textContent)), table.slice(1).map(r => r[0].replace(' (default)', '')));
-  assert.match((await page.textContent('.faq')).replace(/\s+/g, ' '), /“Keep, without location” keeps all EXIF data except the GPS position, so the date, the camera details and any owner’s name or serial number stay; “Keep all, with location” keeps the GPS position too\./);
-  await page.selectOption('#h2j-meta', 'nogps');
-  assert.equal(await page.textContent('#h2j-note'), 'All EXIF data except the GPS location is kept, including any owner’s name and camera serial number.');
-  await page.setInputFiles('#h2j-file', [fx('artist.heic')]);
-  await page.waitForFunction(() => /^1 of 1 converted\.$/.test(document.querySelector('#h2j-summary').textContent), null, { timeout: 30000 });
-  f = await download(0);
-  ex = exifTags(jpegInfo(f.data).exif);
-  assert.equal(ex.gps, null, 'no GPS');
-  assert.deepEqual([ex.ifd0[0x010F], ex.ifd0[0x013B], ex.ifd0[0x8298]], ['Apple', 'Jane Example', '(c) Jane Example']);
-  assert.deepEqual([ex.exif[0xA430], ex.exif[0xA431], ex.exif[0x9011]], ['Jane Example', '012345678901', '+01:00']);
-  await rerun(() => page.selectOption('#h2j-meta', 'keep'));
-  assert.equal(await page.textContent('#h2j-note'), 'All EXIF data is kept, including the GPS location where the photo was taken.');
-  f = await download(0);
-  ex = exifTags(jpegInfo(f.data).exif);
-  assert.deepEqual([ex.gps && ex.gps[1], ex.ifd0[0x013B], ex.exif[0xA431]], ['N', 'Jane Example', '012345678901']);
-  assert.ok(!f.data.includes('http://ns.adobe.com/xap/1.0/'), 'XMP is not copied');
 };

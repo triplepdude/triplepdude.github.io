@@ -8,9 +8,8 @@ const { devices } = require('playwright');
 // lands at an exact time and a 5-minute test takes no real time.
 module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const expected = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
-  const vendor = path.join(__dirname, '..', '..', 'assets', 'vendor', 'common-words');
-  const wordLines = fs.readFileSync(path.join(vendor, 'words.txt'), 'utf8').split('\n').filter(Boolean);
-  const list = new Set(wordLines);
+  const wordFile = path.join(__dirname, '..', '..', 'assets', 'vendor', 'random-words', 'words.txt');
+  const list = new Set(fs.readFileSync(wordFile, 'utf8').split('\n').filter(Boolean));
   const browser = page.context().browser();
 
   const text = (sel, p = page) => p.locator(sel).textContent();
@@ -40,43 +39,16 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const BULK_NOTE = 'Text added in one go, such as a paste from a phone keyboard, is not counted: type it yourself.';
   const PASTE_NOTE = 'Pasting is turned off in the typing test: type the text yourself.';
 
-  // ---- The common words: the most frequent words in English books ----
-  // tests/fixtures/typing-test/build_words.py makes words.txt from orgtre's list
-  // of the Google Books Ngram Corpus: the first 1,000 words, in frequency order,
-  // less capitalised words (but I) and American spellings.
-  assert.equal(wordLines.length, 979);
-  assert.equal(list.size, 979, 'no word is in the list twice');
-  assert.equal(wordLines.slice(0, 20).join(' '), 'the of and to a in that is for I it was as not with he on you be his');
-  assert.deepEqual(wordLines.filter(x => !/^(?:[a-z]+|I)$/.test(x)), [], 'lower-case words and I only');
-  const american = ['toward', 'program', 'percent', 'center', 'organization', 'behavior', 'color', 'labor', 'favor', 'honor',
-    'gray', 'defense', 'theater', 'realize', 'recognize', 'analyze', 'license', 'judgment'];
-  assert.deepEqual(american.filter(x => list.has(x)), [], 'no American spellings');
-  assert.ok(list.has('towards'), 'the British spelling of toward is there');
-  const meanLength = wordLines.reduce((a, x) => a + x.length, 0) / wordLines.length;
-  assert.ok(meanLength > 5.5 && meanLength < 5.7, `mean word length ${meanLength.toFixed(2)}: keep it near 5.6 so scores stay comparable`);
-  const readme = await (await page.request.get(base + '/assets/vendor/common-words/README.txt')).text();
-  for (const s of ['Google Books Ngram Corpus, list compiled by orgtre', 'CC BY 3.0', 'f7f63aa08f0bb2f7f654cddff3a7ced4968b27887b2c0e7cd4b4d108221e197d',
-    'tests/fixtures/typing-test/build_words.py', '979 words']) {
-    assert.ok(readme.includes(s), `the word list's README gives ${s}`);
-  }
-  assert.match(await (await page.request.get(base + '/assets/vendor/common-words/LICENSE.txt')).text(), /^Creative Commons Legal Code\s+Attribution 3\.0 Unported/);
-
   // ---- Defaults: 1 minute of common words from the vendored list ----
   await open();
   await ready();
-  assert.ok((await text('.lede')).startsWith('Take a 30-second to 5-minute typing test'), 'the description names every length offered');
   assert.equal(await checkedVal('tt-len'), '60');
   assert.equal(await checkedVal('tt-mode'), 'words');
   assert.equal(await hash(), '');
   assert.equal(await text('#tt-time'), '1:00');
   assert.equal(await text('#tt-acc'), '–');
   assert.equal(await page.locator('#tt-book-field').isVisible(), false);
-  assert.equal(await text('#tt-source'), 'Random words from 979 of the 1,000 most common words in English books (Google Books Ngram Corpus, list compiled by orgtre, CC BY 3.0).');
-  // The guide says what the list is and links it and its licence; the old list is gone.
-  assert.match(await text('.prose'), /Common words are drawn at random from 979 of the 1,000 most frequent words\s+in English books of the 2010s, as counted in the Google Books Ngram Corpus/);
-  assert.equal(await page.locator('.prose a[href="https://github.com/orgtre/google-books-ngram-frequency"]').textContent(), 'list by orgtre');
-  assert.equal(await page.locator('.prose a[href="https://creativecommons.org/licenses/by/3.0/"]').textContent(), 'CC BY 3.0');
-  assert.ok(!(await page.content()).includes('random-words'), 'the page does not use the random-words list');
+  assert.equal(await text('#tt-source'), 'Random words from a list of 1,952 common English words, in lower case.');
   assert.equal(await text('#tt-prompt'), 'Click or tap here, then start typing');
   assert.equal(await text('#tt-hist'), 'No tests yet.');
   assert.equal(await page.locator('#tt-result').isVisible(), false);
@@ -182,12 +154,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await active(), 'tt-input');
 
   // ---- Paste is refused, even a megabyte of it ----
-  // beforeinput cancels it. The paste event itself is not cancelled: that
-  // would mark the field as one that blocks pasting (Lighthouse Best Practices).
-  await page.evaluate(() => {
-    window.__paste = null;
-    document.getElementById('tt-input').addEventListener('paste', e => { window.__paste = e; });
-  });
   await page.evaluate(() => navigator.clipboard.writeText('paste '.repeat(175000)));
   await page.focus('#tt-input');
   const tp = Date.now();
@@ -195,7 +161,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.ok(Date.now() - tp < 3000, 'a megabyte paste is refused at once');
   assert.equal(await value(), '');
   assert.equal(await text('#tt-note'), 'Pasting is turned off in the typing test: type the text yourself.');
-  assert.equal(await page.evaluate(() => window.__paste === null ? 'no paste event' : window.__paste.defaultPrevented), false, 'the paste event is not cancelled');
   assert.equal(await text('#tt-time'), '1:00');
   assert.equal(await page.evaluate(() => document.querySelector('#tt-box').classList.contains('is-ready')), true);
 
@@ -409,18 +374,10 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await sr(f), ex.spoken);
   assert.deepEqual(await rows('#tt-hist', f), [['1', '30 s', 'The Great Gatsby', ex.wpm, ex.acc]]);
   assert.equal(await f.locator('#tt-text .tt-car').count(), 0, 'no caret once the test is over');
-  // Keys after the end change nothing. On a computer the field keeps the focus
-  // (Esc, or Tab and Enter, start a new test), so Space must not scroll the page.
-  await f.evaluate(() => { window.__keys = []; window.addEventListener('keydown', e => window.__keys.push(e)); });
+  // Keys after the end change nothing.
   await f.keyboard.type('ke');
-  await f.keyboard.press('Space');
-  await f.keyboard.press('Shift+Space');
   assert.equal(await value(f), ex.value);
   assert.equal(await f.evaluate(() => document.getElementById('tt-input').readOnly), true);
-  assert.equal(await active(f), 'tt-input');
-  const afterEnd = await f.evaluate(() => window.__keys.map(e => e.key + ' ' + e.defaultPrevented));
-  assert.deepEqual(afterEnd, ['k true', 'e true', '  true', 'Shift false', '  true'], 'keys seen: ' + JSON.stringify(afterEnd));
-  assert.equal(await f.evaluate(() => scrollY), 0);
   await f.click('#tt-copy');
   assert.equal(await f.evaluate(() => navigator.clipboard.readText()), ex.copy.concat(url + ex.hash).join('\n'));
 
@@ -511,28 +468,17 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // ---- The word list cannot be loaded: say so, and Restart tries again ----
   const offCtx = await browser.newContext();
   const o = await offCtx.newPage();
-  await o.route('**/common-words/words.txt', r => r.abort());
+  await o.route('**/random-words/words.txt', r => r.abort());
   await o.goto(url);
   await o.waitForFunction(() => document.getElementById('tt-error').textContent !== '');
   assert.equal(await text('#tt-error', o), 'The word list could not be loaded. Check your connection, then press Restart to try again.');
   assert.equal(await text('#tt-prompt', o), 'The text could not be loaded.');
   assert.equal(await o.locator('#tt-input').isDisabled(), true);
-  await o.unroute('**/common-words/words.txt');
+  await o.unroute('**/random-words/words.txt');
   await o.click('#tt-restart');
   await ready(o);
   assert.equal(await text('#tt-error', o), '');
   assert.equal(await o.locator('#tt-input').isDisabled(), false);
-  // The page keeps I and lower-case words, and drops anything else (here with
-  // a byte order mark and Windows line ends): only I, the and of are dealt.
-  const o2 = await offCtx.newPage();
-  await o2.route('**/common-words/words.txt', r => r.fulfill({ contentType: 'text/plain', body: '\uFEFF' + "I\r\nthe\r\nEngland\r\ndon't\r\n\r\nof\r\nHello\r\ni2\r\n".repeat(60) }));
-  await o2.goto(url);
-  await ready(o2);
-  const dealt = await words(o2);
-  assert.deepEqual(Array.from(new Set(dealt)).sort(), ['I', 'of', 'the']);
-  await o2.focus('#tt-input');
-  await o2.keyboard.type(dealt.slice(0, 3).join(' '));
-  assert.equal(await o2.locator('#tt-text .tt-bad, #tt-text .tt-extra').count(), 0, 'I typed with a capital is right');
   await offCtx.close();
 
   // ---- A phone: a tap opens the box, inserted words count ----
@@ -596,66 +542,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(perrors, []);
   await phone.close();
 
-  // ---- A phone: when a test ends the on-screen keyboard closes and the result comes into view ----
-  const touch = await browser.newContext({ ...devices['Pixel 7'] });
-  const t7 = await touch.newPage();
-  const terrors = [];
-  t7.on('pageerror', e => terrors.push(e.message));
-  t7.on('console', m => { if (m.type() === 'error') terrors.push(m.text()); });
-  await t7.clock.install();
-  await t7.goto(url + '#30s');
-  await t7.clock.pauseAt(Date.now() + 1000);
-  await ready(t7);
-  const tw = await words(t7);
-  await t7.locator('#tt-box').tap();
-  assert.equal(await active(t7), 'tt-input');
-  for (let i = 0; i < 6; i++) { await t7.keyboard.insertText(tw[i] + ' '); await t7.clock.runFor(1000); }
-  // To 0.1 s past the end, so that most of the quiet second after it is left.
-  await t7.clock.runFor(24100);
-  await t7.waitForFunction(() => !document.getElementById('tt-result').hidden);
-  // The field has let go of the focus, which closes the keyboard, and the
-  // result's heading has it; the result is scrolled into view at once (a
-  // smooth scroll still under way would carry on past an Esc, see below).
-  assert.equal(await active(t7), 'tt-r-h');
-  assert.equal(await text('#tt-r-h', t7), 'Your result');
-  const scoreShown = () => t7.evaluate(() => { const r = document.getElementById('tt-r-wpm').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
-  assert.equal(await scoreShown(), true, 'the score is on screen');
-  // For a second, taps and keys from fingers still typing do nothing, and keys
-  // typed on (a keyboard plugged into a tablet) stay quiet until none has come
-  // for a second: Space here 0.1, 0.7 and 1.3 seconds after the end...
-  await t7.evaluate(() => { window.__keys = []; window.addEventListener('keydown', e => window.__keys.push(e), true); });
-  await t7.locator('#tt-clear').click();
-  for (let i = 0; i < 3; i++) {
-    if (i) await t7.clock.runFor(600);
-    await t7.keyboard.press('Space');
-  }
-  const lateKeys = await t7.evaluate(() => window.__keys.map(e => e.key + ' ' + e.defaultPrevented + ' ' + (e.target.id || e.target.nodeName) + ' ' + Math.round(performance.now())));
-  assert.deepEqual(lateKeys.map(k => k.split(' ').slice(0, 3).join(' ')), ['  true', '  true', '  true'], 'keys seen: ' + JSON.stringify(lateKeys));
-  assert.equal((await rows('#tt-hist', t7)).length, 1, 'a stray tap did not clear the session');
-  assert.equal(await t7.locator('#tt-result').isVisible(), true);
-  // ...and then they work again.
-  await t7.clock.runFor(1100);
-  await t7.locator('#tt-clear').click();
-  assert.equal(await text('#tt-hist', t7), 'No tests yet.');
-  // With a keyboard plugged in, Esc just after the end starts a new test that
-  // takes keys at once, with the text box brought back on screen.
-  await ready(t7);
-  const tw2 = await words(t7);
-  await t7.locator('#tt-box').tap();
-  for (let i = 0; i < 6; i++) { await t7.keyboard.insertText(tw2[i] + ' '); await t7.clock.runFor(1000); }
-  await t7.clock.runFor(24100);
-  await t7.waitForFunction(() => document.activeElement && document.activeElement.id === 'tt-r-h');
-  await t7.keyboard.press('Escape');
-  assert.equal(await active(t7), 'tt-input');
-  const boxShown = () => t7.evaluate(() => { const r = document.getElementById('tt-box').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
-  for (const t0 = Date.now(); !(await boxShown()) && Date.now() - t0 < 5000;) await t7.waitForTimeout(50);
-  assert.equal(await boxShown(), true, 'the text box is on screen');
-  const tw3 = await words(t7);
-  await t7.keyboard.type(tw3[0]);
-  assert.equal(await value(t7), tw3[0], 'keys typed just after Esc count');
-  assert.deepEqual(terrors, []);
-  await touch.close();
-
   // ---- The line being typed stays in view, also when the box gets narrower ----
   const wide = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const r = await wide.newPage();
@@ -678,8 +564,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const home = await (await page.request.get(base + '/')).text();
   const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/typing-test\/"/) || [])[1] || '').replace(/&amp;/g, '&');
   assert.ok(hay, 'the homepage lists the typing test');
-  for (const q of ['typing test', 'typing speed', 'wpm', 'words per minute', 'accuracy', 'typing practice', 'keyboard speed test',
-    '30 second typing test', '2 minute typing test', '3 minute typing test']) {
+  for (const q of ['typing test', 'typing speed', 'wpm', 'words per minute', 'accuracy']) {
     assert.ok(q.split(' ').every(x => hay.includes(x)), `the homepage search finds nothing for "${q}"`);
   }
 

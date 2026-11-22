@@ -241,45 +241,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.locator('#cps-result').isVisible(), false);
   assert.equal(await text('#cps-sr'), 'Session cleared.');
 
-  // ---- Holding the button down on the running box changes only its edge ----
-  // Shading the whole box on each press made fast clicking flash a large
-  // area 6 to 12 times a second in light mode: a general flash under WCAG
-  // 2.3.1 is a change of 0.10 or more in relative luminance where the darker
-  // state is below 0.80.
-  const luminance = css => {
-    const v = css.match(/-?\d*\.?\d+/g).map(Number).slice(0, 3).map(c => (css.startsWith('color(') ? c : c / 255));
-    const lin = v.map(c => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
-  };
-  const padLook = () => page.$eval('#cps-pad', el => {
-    const s = getComputedStyle(el);
-    return { running: el.classList.contains('is-running'), bg: s.backgroundColor, shadow: s.boxShadow, filter: s.filter, opacity: s.opacity };
-  });
-  await page.goto(url + '#5s');
-  await page.reload();
-  for (const scheme of ['light', 'dark']) {
-    await page.emulateMedia({ colorScheme: scheme });
-    await page.locator('#cps-pad').scrollIntoViewIfNeeded();
-    const pb5 = await page.locator('#cps-pad').boundingBox();
-    await page.mouse.move(pb5.x + pb5.width / 2, pb5.y + pb5.height / 2);
-    await page.mouse.down();
-    await page.mouse.up();
-    await page.mouse.down();
-    const down = await padLook();
-    await page.mouse.up();
-    const up = await padLook();
-    assert.ok(down.running && up.running, `${scheme}: the test is not running`);
-    const [l1, l2] = [luminance(down.bg), luminance(up.bg)];
-    assert.ok(Math.abs(l1 - l2) < 0.1 || Math.min(l1, l2) >= 0.8,
-      `${scheme}: pressing the box changes its background from ${up.bg} to ${down.bg} (luminance ${l2.toFixed(3)} to ${l1.toFixed(3)}), a flash on every click`);
-    assert.equal(down.filter, up.filter, `${scheme}: a filter on press`);
-    assert.equal(down.opacity, up.opacity, `${scheme}: a change of opacity on press`);
-    assert.notEqual(down.shadow, up.shadow, `${scheme}: no feedback while the button is down`);
-    await page.click('#cps-restart');
-  }
-  await page.emulateMedia({ colorScheme: 'light' });
-  assert.equal(await text('#cps-hist'), 'No tests yet.');
-
   // ---- A phone: taps count, two fingers count twice, targets are big enough ----
   const phone = await page.context().browser().newContext({ ...devices['Pixel 7'] });
   const p = await phone.newPage();
@@ -287,36 +248,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   p.on('pageerror', e => errors.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   await p.goto(url + '#1s');
-  const cdp = await phone.newCDPSession(p);
-  // A finger that lands on the box to scroll the page is no click: the
-  // browser sends pointercancel once the touch has become a scroll.
-  const stillY = () => p.waitForFunction(() => new Promise(r => {
-    const y = scrollY;
-    requestAnimationFrame(() => requestAnimationFrame(() => r(scrollY === y)));
-  }));
-  const swipe = async () => {
-    const box = await p.locator('#cps-pad').boundingBox();
-    const x = box.x + box.width / 2, y = box.y + box.height * 0.7;
-    const y0 = await p.evaluate(() => scrollY);
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-    for (let i = 1; i <= 8; i++) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i / 3, y: y - i * 36 }] });
-      await p.waitForTimeout(16);
-    }
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await stillY();
-    const moved = (await p.evaluate(() => scrollY)) - y0;
-    await p.evaluate(() => window.scrollTo(0, 0));
-    await stillY();
-    return moved;
-  };
-  const padState = () => p.evaluate(() => ['#cps-pad-main', '#cps-pad-sub', '#cps-time', '#cps-count', '#cps-rate', '#cps-hist']
-    .map(s => document.querySelector(s).textContent));
-  const fresh = await padState();
-  assert.ok(await swipe() > 100, 'the swipe did not scroll the page');
-  assert.deepEqual(await padState(), fresh, 'a swipe that started on the box started a test');
-  await p.waitForTimeout(1100); // longer than the test
-  assert.deepEqual(await padState(), fresh, 'a swipe that started on the box recorded a test');
   const pb = await p.locator('#cps-pad').boundingBox();
   const cx = pb.x + pb.width / 2, cy = pb.y + pb.height / 2;
   for (let i = 0; i < 5; i++) await p.touchscreen.tap(cx, cy);
@@ -324,12 +255,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await p.textContent('#cps-score'), expected['5/1'].cps);
   assert.equal(await p.textContent('#cps-rank'), expected['5/1'].rank);
   await p.waitForFunction(() => /go again\.$/.test(document.getElementById('cps-pad-sub').textContent));
-  // After a test, a swipe leaves its score and the ready state as they were.
-  const done = await padState();
-  assert.deepEqual(done.slice(0, 5), ['5.00 CPS', 'Click or tap to go again.', '1.0 s', '5', '5.00']);
-  assert.ok(await swipe() > 100, 'the second swipe did not scroll the page');
-  assert.deepEqual(await padState(), done, 'a swipe after a test changed the box');
-  assert.equal(await p.textContent('#cps-score'), expected['5/1'].cps);
+  const cdp = await phone.newCDPSession(p);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx - 40, y: cy, id: 1 }, { x: cx + 40, y: cy, id: 2 }] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   assert.equal(await p.textContent('#cps-count'), '2');
@@ -431,69 +357,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // The session table fits its box at 320 px, so the CPS column is not hidden.
   const table = await f.evaluate(() => { const t = document.querySelector('.cps-hist'); return [t.scrollWidth, t.parentElement.clientWidth]; });
   assert.ok(table[0] <= table[1], `the session table is wider than its box at 320 px: ${table}`);
-
-  // ---- Touches that the browser turns into a scroll or a zoom are taken off again ----
-  await f.evaluate(() => {
-    document.querySelector('input[name="cps-len"][value="5"]').click();
-    document.querySelector('input[name="cps-mode"][value="left"]').click();
-  });
-  const touch = (type, id) => fire({ pointerType: 'touch', pointerId: id, isPrimary: false, buttons: type === 'pointerdown' ? 1 : 0 }, type);
-  const fview = () => f.evaluate(() => ['#cps-pad-main', '#cps-pad-sub', '#cps-time', '#cps-count', '#cps-rate', '#cps-hist']
-    .map(s => document.querySelector(s).textContent));
-  const ready5 = await fview();
-  assert.equal(ready5[0], 'Click or tap here to start');
-  // The only touch of a test scrolls: no test, the box is as it was.
-  await touch('pointerdown', 11);
-  assert.equal(await fcount(), '1');
-  await f.clock.runFor(40);
-  await touch('pointercancel', 11);
-  assert.deepEqual(await fview(), ready5);
-  await f.clock.runFor(6000);
-  assert.deepEqual(await fview(), ready5, 'a test started by a scroll was recorded');
-  // A touch in the middle of a test scrolls: the other touches still count.
-  // A finger still on the box at the end holds the result back until it
-  // lifts (counted) or scrolls (not counted).
-  await touch('pointerdown', 12); await touch('pointerup', 12);
-  await f.clock.runFor(100); await touch('pointerdown', 13);
-  await f.clock.runFor(50); await touch('pointerdown', 14); await touch('pointerup', 14);
-  assert.equal(await fcount(), '3');
-  await f.clock.runFor(50); await touch('pointercancel', 13);
-  assert.equal(await fcount(), '2');
-  await f.clock.runFor(4780); await touch('pointerdown', 15);
-  assert.equal(await fcount(), '3');
-  await f.clock.runFor(200);
-  assert.equal(await f.textContent('#cps-pad-main'), 'Time’s up!');
-  assert.equal(await f.$$eval('#cps-hist tr', trs => trs.length), 2, 'the result did not wait for the finger on the box');
-  await touch('pointerup', 15);
-  await f.clock.runFor(30);
-  assert.equal(await f.textContent('#cps-score'), expected['3/5'].cps);
-  assert.equal(await f.textContent('#cps-detail'), '3 clicks in 5 seconds (left click). Shortest gap between clicks: 150 ms.');
-  await f.clock.runFor(1200);
-  // The first touch of a test scrolls after another touch: the clock runs
-  // from that other touch. A finger that stays on past the end and then
-  // scrolls is not counted either.
-  await touch('pointerdown', 21);
-  await f.clock.runFor(200); await touch('pointerdown', 22); await touch('pointerup', 22);
-  await f.clock.runFor(100); await touch('pointercancel', 21);
-  assert.equal(await fcount(), '1');
-  await f.clock.runFor(4780); // 5.08 s after the first touch, 4.88 s after the second
-  assert.equal(await f.textContent('#cps-pad-main'), '1', 'the clock did not restart from the touch that is left');
-  await touch('pointerdown', 23);
-  await f.clock.runFor(200);
-  assert.equal(await f.textContent('#cps-pad-main'), 'Time’s up!');
-  await touch('pointercancel', 23);
-  await f.clock.runFor(30);
-  assert.equal(await f.textContent('#cps-score'), expected['1/5'].cps);
-  assert.equal(await f.textContent('#cps-detail'), '1 click in 5 seconds (left click).');
-  await f.clock.runFor(1200);
-  // A finger left on the box does not hold the result back for long, and counts.
-  await touch('pointerdown', 31); await touch('pointerup', 31);
-  await f.clock.runFor(4990); await touch('pointerdown', 32);
-  await f.clock.runFor(600);
-  assert.equal(await f.textContent('#cps-detail'), '2 clicks in 5 seconds (left click). Shortest gap between clicks: 4990 ms.');
-  await touch('pointercancel', 32);
-  assert.equal(await f.textContent('#cps-detail'), '2 clicks in 5 seconds (left click). Shortest gap between clicks: 4990 ms.');
-  assert.deepEqual((await f.$$eval('#cps-hist tr', trs => trs.map(tr => tr.cells[3].textContent))), ['2', '1', '3', '2', '7']);
   assert.deepEqual(ferrors, []);
   await slow.close();
 
@@ -501,7 +364,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const home = await (await page.request.get(base + '/')).text();
   const hay = ((home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/cps-test\/"/) || [])[1] || '').replace(/&amp;/g, '&');
   assert.ok(hay, 'the homepage lists the CPS test');
-  for (const q of ['cps', 'click speed', 'clicks per second', 'spacebar', 'right click', 'butterfly', 'jitter', 'mouse', 'double click', 'kohi']) {
+  for (const q of ['cps', 'click speed', 'clicks per second', 'spacebar', 'right click', 'butterfly', 'jitter']) {
     assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
   }
 };

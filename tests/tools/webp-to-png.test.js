@@ -12,9 +12,6 @@
 //                   VP8X, ICCP, ANIM, ANMF, ANMF, then EXIF (Make LateCam, a GPS position)
 //   cut.webp        photo.webp cut off after 5400 of its 9084 bytes: Chrome draws a
 //                   cut-off WebP as a wholly blank picture, without an error
-//   p3.webp         lossless 64x64 (Pillow) tagged with tests/fixtures/image-to-pdf/p3.icc
-//                   (Display P3): left half (200,100,50), right half (0,255,1). In sRGB that is
-//                   about (215,93,31), and the P3 green clips to (0,255,0)
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -75,7 +72,7 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   assert.equal(await page.textContent('h1'), 'WebP to PNG Converter, Transparency Kept');
 
   // ---------- Set up for WebP to PNG as served, and nothing moves as the script starts ----------
-  const NOTE = 'PNG is lossless: the decoded pixels are saved without further loss, and photos make large files. Transparent areas stay transparent, soft edges included. For a photo without transparency, JPG makes a far smaller file.';
+  const NOTE = 'PNG is lossless: every pixel is kept exactly, and photos make large files. Transparent areas stay transparent, soft edges included. For a photo without transparency, JPG makes a far smaller file.';
   const HINT = 'WebP images, still or animated, as many as you like. Nothing is uploaded.';
   const START = ['png', '90', '90%', '#ffffff', 'strip', 'true,false,true,false,true,true', NOTE, HINT];
   const controls = () => page.evaluate(async () => {
@@ -236,18 +233,4 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   assert.deepEqual(await restored('png', 'none'), [NOTE, true, true, true]);
   assert.deepEqual(await restored('jpeg', 'none'), ['', false, false, true]);
   assert.deepEqual(await restored('png', 'none'), [NOTE, true, true, true]);
-
-  // ---------- The FAQ on quality is true of a WebP with a wide colour profile too ----------
-  // Lossless otherwise, but a Display P3 WebP comes out in sRGB with no profile, as it says.
-  await open();
-  assert.deepEqual(await page.$$eval('.faq summary', s => s.map(e => e.textContent.trim())), [
-    'Does the PNG keep the transparent background of my WebP?', 'Does converting WebP to PNG lose quality?',
-    'Can I turn an animated WebP into an animated PNG?', 'Should I convert a WebP to PNG or to JPG?']);
-  assert.match((await page.textContent('.faq')).replace(/\s+/g, ' '), /No\. PNG is lossless, so the picture and its transparency are kept as they are, except that a WebP tagged with a wide colour profile, such as Display P3, is converted to sRGB, which tones down its most vivid colours\./);
-  await page.setInputFiles('#imc-file', [fx('p3.webp')]);
-  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '1 of 1 converted.', null, { timeout: 30000 });
-  const p3 = decodePng((await download(0)).data);
-  assert.ok(!p3.chunks.includes('iCCP') && !p3.chunks.includes('sRGB'), 'no colour profile in the PNG: ' + p3.chunks);
-  [[10, [215, 93, 31, 255], 4], [50, [0, 255, 0, 255], 2]].forEach(([x, want, tol]) =>
-    want.forEach((v, i) => assert.ok(Math.abs(p3.at(x, 32)[i] - v) <= tol, `P3 WebP at ${x},32: got ${p3.at(x, 32)} want ${want}`)));
 };

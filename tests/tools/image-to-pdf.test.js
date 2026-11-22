@@ -691,9 +691,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(res.name, 'receipts.pdf');
   assert.equal(pdfString(res.pdf.info, 'Title'), 'Überweisung – März 😀', 'UTF-16 title with an emoji');
   assert.equal(pdfString(res.pdf.info, 'Author'), 'Zoë (O’Brien)');
-  // The title, the author and the tool's name, and no date of making: it would tell anyone given the
-  // file when it was made, to the second.
-  assert.deepEqual(res.pdf.info.match(/\/[A-Za-z]+(?= )/g), ['/Title', '/Author', '/Producer'], res.pdf.info);
   assert.match(res.pdf.catalog, /\/ViewerPreferences << \/DisplayDocTitle true >>/, 'readers show the title');
   await page.fill('#itp-title', '');
   await page.fill('#itp-author', '  ');

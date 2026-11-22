@@ -72,30 +72,6 @@ const peak = x => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 module.exports = async ({ page, open, assert, base: site }) => {
   await page.addInitScript(() => {
     window.__oscs = [];
-    // Every sound source of the live audio context is logged with when it
-    // ends, and every suspend with the latest end scheduled before it.
-    window.__srcs = new Set();
-    window.__starts = [];
-    window.__sleeps = [];
-    const sStart = AudioScheduledSourceNode.prototype.start, sStop = AudioScheduledSourceNode.prototype.stop;
-    AudioScheduledSourceNode.prototype.start = function (when) {
-      if (this.context instanceof AudioContext) {
-        window.__ctx = this.context;
-        window.__starts.push({ when: when || 0, now: this.context.currentTime, state: this.context.state });
-        this.__end = Infinity;
-        window.__srcs.add(this);
-      }
-      return sStart.apply(this, arguments);
-    };
-    AudioScheduledSourceNode.prototype.stop = function (when) {
-      this.__end = arguments.length && when > this.context.currentTime ? when : this.context.currentTime;
-      return sStop.apply(this, arguments);
-    };
-    const suspend = AudioContext.prototype.suspend;
-    AudioContext.prototype.suspend = function () {
-      window.__sleeps.push({ at: this.currentTime, lastEnd: Math.max(0, ...[...window.__srcs].map(x => x.__end)) });
-      return suspend.apply(this, arguments);
-    };
     const create = BaseAudioContext.prototype.createOscillator;
     BaseAudioContext.prototype.createOscillator = function () { const o = create.call(this); window.__oscs.push(o); return o; };
     // Every connection to the speakers is also fed to a stereo splitter with
@@ -280,20 +256,6 @@ module.exports = async ({ page, open, assert, base: site }) => {
   await page.waitForTimeout(300);
   lv = await levels();
   assert.ok(lv.L < 0.001 && lv.R < 0.001, `silent after stop: ${JSON.stringify(lv)}`);
-  // A running audio context renders silence for as long as the page is
-  // open: a moment after Stop the page suspends it, never before the fade-out
-  // ends, and Play starts it again with no extra delay.
-  const asleep = () => page.waitForFunction(() => window.__ctx.state === 'suspended', null, { timeout: 6000 });
-  await asleep();
-  const s0 = await page.evaluate(() => window.__starts.length);
-  await page.click('#tg-play');
-  await page.waitForFunction(n => window.__starts.length > n, s0);
-  const resumed = await page.evaluate(() => window.__starts[window.__starts.length - 1]);
-  assert.equal(resumed.state, 'running', 'the tone was scheduled while the sound was off');
-  assert.ok(resumed.when - resumed.now <= 0.05, `the tone was scheduled ${(resumed.when - resumed.now).toFixed(3)} s ahead`);
-  await page.waitForFunction(() => { const l = window.__levels(); return Math.abs(l.fL - 2000) < 30 && l.L > 0.1; });
-  await page.click('#tg-play');
-  await asleep();
 
   // ---- Default WAV: 440 Hz sine, mono, 16-bit, 44.1 kHz, 5 s ----
   await page.fill('#tg-freq', '440');
@@ -533,12 +495,6 @@ module.exports = async ({ page, open, assert, base: site }) => {
   assert.equal(dl.buf.length, 11520044);
   const long = await page.evaluate(() => window.__long);
   assert.ok(long.every(d => d < 200), `long tasks while generating: ${long.join(', ')} ms`);
-  // Every time the sound was switched off (after each stop above, including
-  // the sweep that ended by itself), every tone had ended.
-  await page.waitForFunction(() => window.__ctx.state === 'suspended', null, { timeout: 6000 });
-  const sleeps = await page.evaluate(() => window.__sleeps);
-  assert.ok(sleeps.length >= 3, `the sound was switched off ${sleeps.length} times`);
-  for (const z of sleeps) assert.ok(z.at >= z.lastEnd, `the sound was switched off at ${z.at.toFixed(3)} s, before a tone ending at ${z.lastEnd} s`);
 
   // ---- Share link restores the settings but never the volume ----
   await page.fill('#tg-freq', '1234.5');

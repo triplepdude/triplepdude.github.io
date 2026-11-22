@@ -1085,28 +1085,7 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
   timeEl.value = pad(p.h) + ':' + pad(p.mi) + ':' + pad(p.s);
   convert();
   toTimestamp();
-  // The clock runs only as fast as someone can see it change: ten times a second while it is on
-  // screen, on each new second while only the rest of the page is (the relative time in the
-  // results counts seconds), and not at all while the page is hidden. Every change of the text
-  // costs the browser a new layout of the page.
-  var clock = $('.ut-now'), clockSeen = true, clockTimer = 0;
-  function runClock() {
-    clearTimeout(clockTimer);
-    clockTimer = 0;
-    if (document.hidden) return;
-    tick();
-    var n = Date.now();
-    clockTimer = setTimeout(runClock, clockSeen ? 100 - n % 100 : 1000 - n % 1000);
-  }
-  if (window.IntersectionObserver) {
-    new IntersectionObserver(function (entries) {
-      var seen = entries[entries.length - 1].isIntersecting;
-      if (seen !== clockSeen) { clockSeen = seen; runClock(); }
-    }).observe(clock);
-  }
-  document.addEventListener('visibilitychange', runClock);
-  // A copy of the clock gives the time of the press, not of the last tick.
-  TT.$$('[data-copy-target^="#ut-now"]').forEach(function (b) { b.addEventListener('click', tick); });
-  runClock();
+  tick();
+  setInterval(tick, 50);
 })();
 </script>

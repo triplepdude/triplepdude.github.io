@@ -22,46 +22,6 @@ module.exports = async ({ page, open, assert, url }) => {
   await page.clock.runFor(5000);
   const s1 = Number(await text('#ut-now-s'));
   assert.ok(s1 >= s0 + 5 && s1 < s0 + 10, `clock ticks: ${s0} -> ${s1}`);
-  // The clock is written only as often as someone can see it change, as each write costs a new
-  // layout of the page: ten times a second on screen, once a second scrolled away (the relative
-  // time in the results still counts seconds), and not at all in a hidden tab. Counted on the
-  // test clock; the old page wrote it twenty times a second, whatever was on screen.
-  const writes = async ms => {
-    await page.evaluate(() => {
-      window.utWrites = 0;
-      window.utWatch = window.utWatch || new MutationObserver(list => { window.utWrites += list.length; });
-      window.utWatch.observe(document.querySelector('#ut-now-ms'), { childList: true, characterData: true, subtree: true });
-    });
-    await page.clock.runFor(ms);
-    return page.evaluate(() => { window.utWrites += window.utWatch.takeRecords().length; window.utWatch.disconnect(); return window.utWrites; });
-  };
-  const clockSeen = seen => page.evaluate(v => new Promise(done => {
-    const io = new IntersectionObserver(es => { if (es[es.length - 1].isIntersecting === v) { io.disconnect(); done(); } });
-    io.observe(document.querySelector('.ut-now'));
-  }), seen);
-  const lag = () => page.evaluate(() => Date.now() - Number(document.querySelector('#ut-now-ms').textContent));
-  let count = await writes(2000);
-  assert.ok(count >= 15 && count <= 25, `${count} writes in 2 s on screen`);
-  await page.evaluate(() => document.querySelector('.faq').scrollIntoView());
-  await clockSeen(false);
-  count = await writes(3000);
-  assert.ok(count >= 2 && count <= 4, `${count} writes in 3 s scrolled away`);
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await clockSeen(true);
-  assert.ok(await lag() < 100, 'back on screen, the clock is right at once');
-  count = await writes(1000);
-  assert.ok(count >= 8 && count <= 13, `${count} writes in 1 s back on screen`);
-  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
-  assert.equal(await writes(3000), 0, 'a hidden page leaves the clock alone');
-  await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); });
-  assert.ok(await lag() < 100, 'shown again, the clock is right at once');
-  // Copy gives the time of the press, not of the last write, up to 100 ms before.
-  await page.evaluate(() => navigator.clipboard.writeText('(nothing copied yet)'));
-  await page.evaluate(() => document.querySelector('[data-copy-target="#ut-now-ms"]').addEventListener('click', () => { window.utPressed = Date.now(); }, { capture: true, once: true }));
-  await page.click('[data-copy-target="#ut-now-ms"]');
-  await page.waitForFunction(async () => /^\d+$/.test(await navigator.clipboard.readText()));
-  const pressed = await page.evaluate(() => window.utPressed), copiedMs = Number(await page.evaluate(() => navigator.clipboard.readText()));
-  assert.ok(copiedMs >= pressed && copiedMs - pressed < 20, `copied ${copiedMs}, pressed at ${pressed}`);
   const def = Number(await page.inputValue('#ut-ts'));
   assert.ok(def >= 1790208000 && def < 1790208010, 'defaults to the current time');
   assert.match(await text('#ut-detected'), /seconds/);

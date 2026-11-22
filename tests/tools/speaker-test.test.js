@@ -12,34 +12,10 @@ const { execFileSync } = require('child_process');
 module.exports = async ({ page, open, assert, url, base }) => {
   await page.addInitScript(() => {
     window.__played = [];
-    // Every live sound source is logged with when it ends (the end of its
-    // buffer, or an earlier stop), and every suspend of the audio context
-    // with the latest end scheduled before it.
-    window.__srcs = new Set();
-    window.__starts = [];
-    window.__sleeps = [];
     const start = AudioBufferSourceNode.prototype.start;
     AudioBufferSourceNode.prototype.start = function (...a) {
-      if (!(this.context instanceof OfflineAudioContext)) {
-        window.__played.push(this.buffer);
-        const ctx = this.context, when = Math.max(a[0] || 0, ctx.currentTime);
-        window.__ctx = ctx;
-        window.__starts.push({ when, now: ctx.currentTime, state: ctx.state });
-        this.__nat = this.loop ? Infinity : when + this.buffer.duration;
-        this.__stop = Infinity;
-        window.__srcs.add(this);
-      }
+      if (!(this.context instanceof OfflineAudioContext)) window.__played.push(this.buffer);
       return start.apply(this, a);
-    };
-    const sStop = AudioScheduledSourceNode.prototype.stop;
-    AudioScheduledSourceNode.prototype.stop = function (when) {
-      this.__stop = arguments.length && when > this.context.currentTime ? when : this.context.currentTime;
-      return sStop.apply(this, arguments);
-    };
-    const suspend = AudioContext.prototype.suspend;
-    AudioContext.prototype.suspend = function () {
-      window.__sleeps.push({ at: this.currentTime, lastEnd: Math.max(0, ...[...window.__srcs].map(x => Math.min(x.__nat, x.__stop))) });
-      return suspend.apply(this, arguments);
     };
     const win = (b, from, to) => [Math.max(0, Math.round(from * b.sampleRate)), Math.min(b.length, Math.round(to * b.sampleRate))];
     window.__stats = (from, to, idx = window.__played.length - 1) => {
@@ -81,7 +57,6 @@ module.exports = async ({ page, open, assert, url, base }) => {
           connect.call(up, sp); connect.call(sp, L, 0); connect.call(sp, R, 1);
           ctx.__tap = { up, L, R };
           window.__tap = ctx.__tap;
-          window.__ctx = ctx;
         }
         connect.call(this, ctx.__tap.up);
       }
@@ -180,20 +155,6 @@ module.exports = async ({ page, open, assert, url, base }) => {
   await page.waitForFunction(() => document.getElementById('spk-now').textContent === 'Finished: right channel.', null, { timeout: 6000 });
   assert.equal(await pressed('[data-test="right"]'), 'false');
   assert.equal(await page.$eval('#spk-icon-r', e => e.classList.contains('is-on')), false);
-  // A running audio context renders silence for as long as the page is
-  // open: a moment after a test ends or is stopped, the page suspends it,
-  // never before the sound has ended, and the next test starts it again.
-  const asleep = () => page.waitForFunction(() => window.__ctx.state === 'suspended', null, { timeout: 6000 });
-  await asleep();
-  await playTest('[data-test="left"]', 'left channel');
-  const again = await page.evaluate(() => window.__starts[window.__starts.length - 1]);
-  assert.ok(again.when - again.now <= 0.05, `the test was scheduled ${(again.when - again.now).toFixed(3)} s ahead`);
-  await page.waitForFunction(() => window.__ctx.state === 'running' && window.__live()[0] > 0.01, null, { timeout: 3000 });
-  await page.click('#spk-stop');
-  await asleep();
-  const sleeps = await page.evaluate(() => window.__sleeps);
-  assert.ok(sleeps.length >= 2, `the sound was switched off ${sleeps.length} times`);
-  for (const z of sleeps) assert.ok(z.at >= z.lastEnd, `the sound was switched off at ${z.at.toFixed(3)} s, before a sound ending at ${z.lastEnd} s`);
   await page.selectOption('#spk-sound', 'noise');
 
   // Left, then right.
@@ -398,12 +359,6 @@ module.exports = async ({ page, open, assert, url, base }) => {
   assert.deepEqual(await page.locator('#spk-sur button').allTextContents(),
     ['1 Front left', '2 Front right', '3 Centre', '4 LFE (subwoofer)', '5 Back left', '6 Back right', '7 Side left', '8 Side right']);
   await page.click('#spk-stop');
-  // Check output channels starts the audio only to read the channel count,
-  // and it does not stay on.
-  await page.goto(url);
-  await page.click('#spk-detect');
-  await page.waitForFunction(() => window.__ctx && window.__ctx.state === 'running');
-  await page.waitForFunction(() => window.__ctx.state === 'suspended', null, { timeout: 6000 });
 
   // ---- What the page says about itself ----
   // The description names what the page has (it used to end on "No voice

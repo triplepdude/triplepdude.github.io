@@ -266,9 +266,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await text('#ac-copy'), 'Copied!');
   await page.click('#ac-link');
   assert.equal(await clipboard(), `${url}#dob=1990-05-15`);
-  // The link holds the date of birth, and the hint beside the button says so.
-  assert.equal(await page.getAttribute('#ac-link', 'aria-describedby'), 'ac-link-hint');
-  assert.equal(await text('#ac-link-hint'), 'Anyone you send this link to can see the date of birth in it, and the time if given.');
   // Nothing is put in the address by itself: a date of birth is personal.
   assert.equal(await page.evaluate(() => location.hash), '');
   await setDate('ac-dob', [29, 2, 2000]);

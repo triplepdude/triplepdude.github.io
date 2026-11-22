@@ -2,7 +2,7 @@
 title: "Online Timer: Countdown Timer with Alarm"
 description: Set a countdown with presets or any hours, minutes and seconds, pick an alarm sound, run several timers at once and go full screen. Runs in your browser.
 category: Date & Time
-keywords: [online timer, timer, countdown timer, timer with alarm, 10 minute timer, 5 minute timer, multiple timers, full screen timer, timer with sound, kitchen timer, egg timer, cooking timer, countdown clock]
+keywords: [online timer, timer, countdown timer, timer with alarm, 10 minute timer, 5 minute timer, multiple timers, full screen timer, timer with sound]
 howto: |
   ## How to set a timer
 
@@ -12,8 +12,7 @@ howto: |
   becomes 1:30:00. A number such as 1,500 could be 1.5 or 1500, so the box
   asks you to type one of those instead. **Pause** stops the countdown and **Resume** carries on;
   **+1 min** adds a minute, even to a timer that has just rung; **Reset**
-  goes back to the time you set. While the alarm rings, the main button
-  reads **Stop alarm**.
+  goes back to the time you set.
 
   For a 10-minute timer you can also open `/online-timer/#10m` and bookmark
   it. The address takes hours, minutes and seconds such as `#1h30m` or
@@ -23,7 +22,7 @@ howto: |
   | Key | What it does |
   |---|---|
   | Space | Start, pause or resume; stops a ringing alarm |
-  | R | Reset a paused or finished timer |
+  | R | Reset |
   | F | Full screen on or off |
   | Esc | Stop the alarm; leave full screen |
 
@@ -33,9 +32,8 @@ howto: |
 
   **Add a timer** for each thing you are timing, up to 10, and give each a
   name such as "Pasta". Each one counts down and rings on its own, and the
-  tab title shows the time left on the one that ends next, so you can follow
-  it from another tab. Names stay out of the title, which others can see
-  when you share your screen.
+  tab title shows the one that ends next, so you can follow it from another
+  tab.
 
   ## Is it accurate in a background tab?
 
@@ -110,10 +108,7 @@ faq:
 .ot-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .ot-actions .btn { min-width: 6.5em; white-space: nowrap; }
 .ot-actions .ot-go { min-width: 8em; min-height: 52px; font-size: 1.05rem; }
-/* Dimmed with colour, not opacity, which would fade the focus ring too
-   (a contrast theme replaces the colours, but keeps GrayText). */
-.ot .btn.secondary[aria-disabled="true"] { border-color: color-mix(in srgb, var(--border) 50%, transparent); color: color-mix(in srgb, var(--text) 50%, transparent); cursor: not-allowed; }
-@media (forced-colors: active) { .ot .btn.secondary[aria-disabled="true"] { border-color: GrayText; color: GrayText; } }
+.ot .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 .ot .ot-err { margin: 8px auto; max-width: 32rem; }
 .ot-more { text-align: center; }
 .ot-add { margin-bottom: 8px; }
@@ -125,7 +120,6 @@ faq:
 .ot-vol-row output { min-width: 3em; font-variant-numeric: tabular-nums; }
 .ot-keys { margin: 10px 0 0; }
 .ot-keys kbd { padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); color: var(--text); font: 12px/1.6 var(--mono); }
-@media (hover: none) and (pointer: coarse) { .ot-keys { display: none; } }
 .ot-wake-note:empty { display: none; }
 .ot-list .ot-card.is-full { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; justify-content: center; justify-content: safe center; overflow: auto; overscroll-behavior: contain; margin: 0; padding: 24px 16px; border: 0; border-radius: 0; background: var(--bg); color: var(--text); }
 .ot-list .ot-card.is-full .ot-time { font-size: min(28vw, 40vh); }
@@ -141,11 +135,6 @@ faq:
   .ot-actions .btn { min-width: auto; flex: 1 1 40%; padding: 0 8px; }
   .ot-presets .btn { flex: 1 1 22%; min-width: auto; padding: 0 6px; }
 }
-/* When the alarm starts, the line under the clock grows from "Ends at
-   9:41:00 PM" to "Time’s up at 9:41:00 PM · 0:00 ago", two lines on a card
-   under 300 px wide. Two are kept there, so no button moves under a finger. */
-@media (max-width: 365px) { .ot-meta { min-height: 3.2em; } }
-@media (max-width: 395px) { .ot-list.is-multi .ot-meta { min-height: 3.2em; } }
 </style>
 
 <div class="ot" id="ot">
@@ -154,7 +143,7 @@ faq:
   <div class="ot-list" id="ot-list"></div>
   <div class="ot-more">
     <button type="button" class="btn secondary ot-add" id="ot-add">Add a timer</button>
-    <p class="hint ot-keys">Keys: <kbd>Space</kbd> start or pause, <kbd>R</kbd> reset when paused or finished, <kbd>F</kbd> full screen, <kbd>Esc</kbd> stop the alarm</p>
+    <p class="hint ot-keys">Keys: <kbd>Space</kbd> start or pause, <kbd>R</kbd> reset, <kbd>F</kbd> full screen, <kbd>Esc</kbd> stop the alarm</p>
   </div>
 
   <div class="ot-settings">
@@ -207,7 +196,6 @@ faq:
   // 40-character names always fit.
   var MAX_HASH = 4000;
   var LATE = 60000;         // a timer found more than a minute late does not ring
-  var EARLIEST = 1577836800000; // 1 January 2020: no end time in the address is older
   var DEFAULT_MS = 300000;
   var NAME_MAX = 40;
   var PRESETS = [[1, '1 min'], [3, '3 min'], [5, '5 min'], [10, '10 min'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [60, '1 hour']];
@@ -355,21 +343,14 @@ faq:
       var len = st && readLength(st[1].trim());
       if (len !== null && len !== undefined) len = Math.round(len / 1000) * 1000;
       if (!st || len === null || len === undefined || !(len > 0 && len <= MAX_MS)) { bad.push(head); return; }
-      var item = { setMs: len, name: name, state: 'ready' }, v = Number(st[3]), now = Date.now();
-      // An end time from before this page existed cannot have been written by
-      // it, and nor can an end in the future for a timer that has ended
-      // (a minute is allowed for a clock that is a little off).
-      if ((st[2] === 'r' || st[2] === 'd') && v < EARLIEST) { bad.push(head); return; }
+      var item = { setMs: len, name: name, state: 'ready' }, v = Number(st[3]);
       if (st[2] === 'r') {
-        if (v - now > MAX_MS) { bad.push(head); return; }
-        if (v > now) { item.state = 'running'; item.left = v - now; } else { item.state = 'done'; item.ended = v; }
+        if (v - Date.now() > MAX_MS) { bad.push(head); return; }
+        if (v > Date.now()) { item.state = 'running'; item.left = v - Date.now(); } else { item.state = 'done'; item.ended = v; }
       } else if (st[2] === 'p') {
         if (!(v > 0 && v <= MAX_MS)) { bad.push(head); return; }
         item.state = 'paused'; item.left = v;
-      } else if (st[2] === 'd') {
-        if (v > now + 60000) { bad.push(head); return; }
-        item.state = 'done'; item.ended = Math.min(v, now);
-      }
+      } else if (st[2] === 'd') { item.state = 'done'; item.ended = v; }
       items.push(item);
     });
     var error = [];
@@ -462,10 +443,7 @@ faq:
   var AHEAD = 65;   // seconds of ringing scheduled at a time
 
   var audio = (function () {
-    // idle: suspended by this page because nothing was due to sound, as
-    // opposed to not yet allowed to play by the browser.
-    var api = { ctx: null, master: null, idle: false, supported: !!(window.AudioContext || window.webkitAudioContext) };
-    var live = [], nap = 0;
+    var api = { ctx: null, master: null, supported: !!(window.AudioContext || window.webkitAudioContext) };
     api.ready = function () { return !!api.ctx && api.ctx.state === 'running'; };
     api.now = function () { return api.ctx ? api.ctx.currentTime : 0; };
     // Called from a click, tap or key press, which browsers require before
@@ -479,13 +457,11 @@ faq:
           api.master = api.ctx.createGain();
           api.master.gain.value = volume();
           api.master.connect(api.ctx.destination);
-          api.ctx.onstatechange = function () { if (api.ready()) api.idle = false; onAudioState(); };
+          api.ctx.onstatechange = onAudioState;
         }
-        // While idle, the suspend may still be on its way: resume() is
-        // queued after it.
-        if (api.ctx.state !== 'running' || api.idle) {
+        if (api.ctx.state !== 'running') {
           var p = api.ctx.resume();
-          if (p && p.then) p.then(function () { if (api.ready()) api.idle = false; onAudioState(); }, function () { api.idle = false; onAudioState(); });
+          if (p && p.then) p.then(onAudioState, function () {});
           // Older iPhones also want a sound started in the same tap.
           var src = api.ctx.createBufferSource();
           src.buffer = api.ctx.createBuffer(1, 1, api.ctx.sampleRate);
@@ -494,30 +470,6 @@ faq:
         }
       } catch (err) { return false; }
       return true;
-    };
-    // A running context renders silence for as long as the tab stays open,
-    // so it is suspended half a second after the last sound has died away,
-    // unless `needed` (a timer counts down with its alarm scheduled ahead,
-    // or rings). The next start or test sound resumes it.
-    api.settle = function (needed) {
-      clearTimeout(nap);
-      nap = 0;
-      if (!api.ctx) return;
-      if (needed) { if (api.idle) api.unlock(); return; }
-      var now = api.now(), until = now;
-      live = live.filter(function (h) {
-        var end = h.cancelled ? h.cut : h.last;
-        if (end > now) until = Math.max(until, end);
-        return end > now;
-      });
-      nap = setTimeout(function () {
-        nap = 0;
-        if (busy() || !api.ready()) return;
-        if (live.some(function (h) { return (h.cancelled ? h.cut : h.last) > api.now(); })) { api.settle(false); return; }
-        api.idle = true;
-        var p = api.ctx.suspend();
-        if (p && p.catch) p.catch(function () { api.idle = false; });
-      }, (until - now) * 1000 + 500);
     };
     function extend(h, upto) {
       var s = SOUNDS[h.key];
@@ -532,9 +484,8 @@ faq:
       if (!api.ctx) return null;
       var bus = api.ctx.createGain();
       bus.connect(api.master);
-      var h = { key: SOUNDS[key] ? key : 'bell', at: at, end: at + seconds, seconds: seconds, until: at, last: at, cut: 0, bus: bus, nodes: [] };
+      var h = { key: SOUNDS[key] ? key : 'bell', at: at, end: at + seconds, seconds: seconds, until: at, last: at, bus: bus, nodes: [] };
       extend(h, Math.min(h.end, at + AHEAD));
-      live.push(h);
       return h;
     };
     api.extend = function (h) { if (h && !h.cancelled && h.end === Infinity && h.until - api.now() < AHEAD / 2) extend(h, api.now() + AHEAD); };
@@ -543,7 +494,6 @@ faq:
       if (!h || h.cancelled || !api.ctx) return;
       h.cancelled = true;
       var t = api.now();
-      h.cut = t + 0.04;
       try {
         h.bus.gain.cancelScheduledValues(t);
         h.bus.gain.setValueAtTime(h.bus.gain.value, t);
@@ -558,24 +508,20 @@ faq:
   function volume() { var v = Number(volIn.value) / 100; return v * v; }
   function ringSeconds() { var v = Number(ringSel.value); return v > 0 ? v : Infinity; }
   function onAudioState() {
-    if (audio.ready()) { timers.forEach(prearm); settle(); }
+    if (audio.ready()) timers.forEach(prearm);
     updateSoundNote();
   }
-  function settle() { audio.settle(busy()); }
   function needsSound() { return timers.some(function (t) { return t.state === 'running' || t.state === 'paused'; }); }
-  // Sound this page suspended itself (idle) comes back with the next start,
-  // so only sound the browser has not allowed yet needs a click.
-  function blocked() { return !audio.ready() && !audio.idle; }
   function updateSoundNote() {
     var text = '';
     if (needsSound()) {
       if (!audio.supported) text = 'This browser cannot play sound, so the timer can only show that time is up.';
-      else if (blocked()) text = 'Click or tap anywhere on this page so the alarm can sound.';
+      else if (!audio.ready()) text = 'Click or tap anywhere on this page so the alarm can sound.';
     }
     if (soundNote.textContent !== text) soundNote.textContent = text;
   }
   ['pointerdown', 'pointerup', 'keydown', 'click'].forEach(function (type) {
-    document.addEventListener(type, function () { if (needsSound() && blocked()) audio.unlock(); }, true);
+    document.addEventListener(type, function () { if (needsSound() && !audio.ready()) audio.unlock(); }, true);
   });
 
   // The alarm of a running timer is scheduled ahead on the audio clock,
@@ -604,7 +550,7 @@ faq:
   }
 
   function makeTimer(item) {
-    var t = { n: ++seq, name: item.name || '', setMs: item.setMs || DEFAULT_MS, state: 'ready', end: 0, left: 0, total: 0, ended: 0, doneAt: 0, alarm: null, ringing: false, hushed: -Infinity, timeout: 0, shown: {} };
+    var t = { n: ++seq, name: item.name || '', setMs: item.setMs || DEFAULT_MS, state: 'ready', end: 0, left: 0, total: 0, ended: 0, doneAt: 0, alarm: null, ringing: false, timeout: 0, shown: {} };
     t.total = t.setMs;
     var id = 'ot-' + t.n, card = document.createElement('section');
     card.className = 'ot-card';
@@ -624,6 +570,7 @@ faq:
       '<div class="ot-presets" role="group" aria-labelledby="' + id + '-pre"><span class="visually-hidden" id="' + id + '-pre"></span>' +
       PRESETS.map(function (p) { return '<button type="button" class="btn secondary small" data-min="' + p[0] + '">' + p[1] + '</button>'; }).join('') + '</div>' +
       '<div class="ot-actions"><button type="button" class="btn ot-go">Start</button>' +
+      '<button type="button" class="btn secondary ot-stop">Stop alarm</button>' +
       '<button type="button" class="btn secondary ot-reset">Reset</button>' +
       '<button type="button" class="btn secondary ot-plus">+1 min</button>' +
       '<button type="button" class="btn secondary ot-full">Full screen</button></div>';
@@ -632,7 +579,7 @@ faq:
       card: card, name: q('.ot-name'), h: q('#' + id + '-h'), m: q('#' + id + '-m'), s: q('#' + id + '-s'),
       set: q('.ot-set'), lenLabel: q('#' + id + '-len'), run: q('.ot-run'), time: q('.ot-time'), bar: q('.ot-bar span'),
       meta: q('.ot-meta'), err: q('.ot-err'), presets: q('.ot-presets'), preLabel: q('#' + id + '-pre'),
-      go: q('.ot-go'), reset: q('.ot-reset'), plus: q('.ot-plus'), full: q('.ot-full'),
+      go: q('.ot-go'), stop: q('.ot-stop'), reset: q('.ot-reset'), plus: q('.ot-plus'), full: q('.ot-full'),
       remove: q('.ot-remove'), removeName: q('.ot-remove span')
     };
     t.el.name.value = t.name;
@@ -678,15 +625,13 @@ faq:
   }
 
   function sync(t) {
-    // Read first: Chrome drops the focus the moment a focused button is hidden.
-    var c = t.el, st = t.state, a = document.activeElement;
+    var c = t.el, st = t.state;
     ['ready', 'running', 'paused', 'done'].forEach(function (s) { c.card.classList.toggle('is-' + s, s === st); });
     c.card.classList.toggle('is-ringing', t.ringing);
     c.set.hidden = c.presets.hidden = st !== 'ready';
     c.run.hidden = st === 'ready';
-    // The alarm is stopped with the main button, so no button appears or
-    // moves when it starts ringing.
-    c.go.textContent = t.ringing ? 'Stop alarm' : { ready: 'Start', running: 'Pause', paused: 'Resume', done: 'Restart' }[st];
+    c.go.textContent = { ready: 'Start', running: 'Pause', paused: 'Resume', done: 'Restart' }[st];
+    c.stop.hidden = !t.ringing;
     c.reset.hidden = c.plus.hidden = st === 'ready';
     c.remove.hidden = timers.length < 2;
     var name = nameOf(t);
@@ -698,7 +643,8 @@ faq:
     c.name.setAttribute('aria-label', 'Name of timer ' + t.n);
     paint(t, clock());
     // A control that was just hidden hands the focus to the main button.
-    if (a && a !== c.go && c.card.contains(a) && !a.getClientRects().length) c.go.focus();
+    var a = document.activeElement;
+    if (a && c.card.contains(a) && !a.getClientRects().length) c.go.focus();
   }
 
   function paint(t, now) {
@@ -734,13 +680,12 @@ faq:
     var running = timers.filter(function (t) { return t.state === 'running'; }).sort(function (a, b) { return a.end - b.end; })[0];
     var done = timers.filter(function (t) { return t.state === 'done'; })[0];
     var paused = timers.filter(function (t) { return t.state === 'paused'; })[0];
-    // No timer name: the title is what a shared screen and the window list show.
-    var head = '';
-    if (ringing) head = 'Time’s up!';
-    else if (running) head = fmtShort(running.end - now);
-    else if (done) head = 'Time’s up';
-    else if (paused) head = fmtShort(paused.left) + ' paused';
-    var title = head ? head + ' · ' + baseTitle : baseTitle;
+    var head = '', who = null;
+    if (ringing) { head = 'Time’s up!'; who = ringing; }
+    else if (running) { head = fmtShort(running.end - now); who = running; }
+    else if (done) { head = 'Time’s up'; who = done; }
+    else if (paused) { head = fmtShort(paused.left) + ' paused'; who = paused; }
+    var title = who ? head + (who.name ? ' ' + who.name : '') + ' · ' + baseTitle : baseTitle;
     if (document.title !== title) document.title = title;
   }
 
@@ -781,11 +726,11 @@ faq:
     alertNames = [];
     timers.forEach(function (t) { if (t.state === 'running' && now >= t.end) { finish(t, now); sync(t); ended = true; } });
     if (alertNames.length) alertEl.textContent = 'Time’s up: ' + alertNames.join(' and ') + '.';
-    if (ended) { writeHash(); updateWake(); updateSoundNote(); settle(); }
+    if (ended) { writeHash(); updateWake(); updateSoundNote(); }
     timers.forEach(function (t) {
       if (!t.ringing) return;
       audio.extend(t.alarm);
-      if (audio.finished(t.alarm)) { t.alarm = null; t.ringing = false; t.hushed = clock(); sync(t); updateWake(); settle(); }
+      if (audio.finished(t.alarm)) { t.alarm = null; t.ringing = false; sync(t); updateWake(); }
     });
     if (now - lastSync > 5000) { lastSync = now; timers.forEach(prearm); }
     timers.forEach(function (t) { paint(t, now); });
@@ -815,7 +760,6 @@ faq:
     loop();
     updateWake();
     updateSoundNote();
-    settle();
   }
   function setOff(btn, off) { btn.setAttribute('aria-disabled', off ? 'true' : 'false'); }
 
@@ -887,19 +831,15 @@ faq:
   }
   function stopRinging(list) {
     var any = false;
-    list.forEach(function (t) { if (t.ringing) { disarm(t); t.hushed = clock(); any = true; sync(t); } });
-    if (any) { alertEl.textContent = ''; updateWake(); updateTitle(clock()); say('Alarm stopped.'); settle(); }
+    list.forEach(function (t) { if (t.ringing) { disarm(t); any = true; sync(t); } });
+    if (any) { alertEl.textContent = ''; updateWake(); updateTitle(clock()); say('Alarm stopped.'); }
     return any;
   }
-  // The main button and Space. While the alarm rings they stop it, and a
-  // second press straight after (a double click or tap) does not restart
-  // the timer.
   function primary(t) {
-    if (t.ringing) stopRinging([t]);
-    else if (t.state === 'ready') start(t);
+    if (t.state === 'ready') start(t);
     else if (t.state === 'running') pause(t);
     else if (t.state === 'paused') resume(t);
-    else if (clock() - t.hushed >= 700) { audio.unlock(); startFrom(t, t.setMs, 'restarted'); }
+    else { audio.unlock(); startFrom(t, t.setMs, 'restarted'); }
   }
   function remove(t) {
     if (timers.length < 2) return;
@@ -924,6 +864,7 @@ faq:
     });
     c.name.addEventListener('input', function () { onName(t); });
     c.go.addEventListener('click', function () { primary(t); });
+    c.stop.addEventListener('click', function () { stopRinging([t]); });
     c.reset.addEventListener('click', function () { reset(t); });
     c.plus.addEventListener('click', function () { plusMinute(t); });
     c.full.addEventListener('click', function () { setFull(full === t ? null : t); });
@@ -952,6 +893,7 @@ faq:
     t.el.lenLabel.textContent = 'Length of ' + name;
     t.el.preLabel.textContent = 'Presets for ' + name + ', which start at once';
     writeHash();
+    updateTitle(clock());
   }
   function current() { return lastUsed && timers.indexOf(lastUsed) >= 0 ? lastUsed : timers[0]; }
 
@@ -1046,13 +988,8 @@ faq:
     if (!k || e.shiftKey) return;
     if (k === 'r' || k === 'f') e.preventDefault();
     if (e.repeat) return;
-    // R never wipes a countdown (a stray key, or a word dictated with no
-    // box focused): it resets a paused or finished timer. The Reset button
-    // still resets a running one.
-    if (k === 'r') {
-      if (t.state === 'running') say(nameOf(t) + ' is running. Pause it before you reset it with R.');
-      else if (t.state !== 'ready') reset(t);
-    } else if (k === 'f') setFull(full === t ? null : t);
+    if (k === 'r' && t.state !== 'ready') reset(t);
+    else if (k === 'f') setFull(full === t ? null : t);
   });
   // A mouse click does not move the focus to a button, so Space keeps
   // acting on the timer (as in Safari). Tab still reaches every button.
@@ -1079,7 +1016,6 @@ faq:
     if (testRing) audio.cancel(testRing);
     var key = soundSel.value;
     testRing = audio.ring(key, audio.now() + 0.03, SOUNDS[key].cycle * 0.99);
-    settle();
     say('Playing the ' + soundSel.options[soundSel.selectedIndex].text + ' sound.');
   });
 

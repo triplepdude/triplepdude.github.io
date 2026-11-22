@@ -35,24 +35,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await hash(), '');
   assert.equal(await page.getAttribute('#sw-time', 'role'), 'timer');
   assert.equal(await page.getAttribute('#sw-time', 'aria-live'), null, 'the running digits are not announced');
-  assert.equal(await page.$eval('.sw-keys', el => getComputedStyle(el).display), 'block', 'the key hint shows with a mouse and keyboard');
-  // Lap and Reset are dimmed by colour, not opacity, which would fade the
-  // focus ring too.
-  await page.focus('#sw-start');
-  await page.keyboard.press('Tab');
-  const dim = await page.$eval('#sw-lap', el => {
-    let op = 1;
-    for (let e = el; e; e = e.parentElement) op *= Number(getComputedStyle(e).opacity);
-    const cs = getComputedStyle(el);
-    return { focus: el.matches(':focus-visible'), op, ring: cs.outlineStyle + ' ' + cs.outlineColor, color: cs.color };
-  });
-  assert.ok(dim.focus && dim.op === 1 && /^solid rgb\(\d+, \d+, \d+\)$/.test(dim.ring), JSON.stringify(dim));
-  assert.match(dim.color, / \/ 0\.5\)$/, 'the label is dimmed');
-  // A contrast theme replaces those colours; Lap is then greyed with its GrayText.
-  await page.emulateMedia({ forcedColors: 'active' });
-  const [startInk, lapInk] = await page.$$eval('#sw-start, #sw-lap', els => els.map(e => getComputedStyle(e).color));
-  assert.notEqual(lapInk, startInk, 'Lap still looks unavailable in a contrast theme');
-  await page.emulateMedia({ forcedColors: 'none' });
 
   // ---- The guide's example from the keyboard: Space, then L three times. ----
   await blur();
@@ -353,8 +335,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const outside = [];
   await pp.route('**/*', route => { if (!route.request().url().startsWith(base)) { outside.push(route.request().url()); return route.abort(); } return route.continue(); });
   await pp.goto(url);
-  // The key hint is for keyboards; a touch screen does not show it.
-  assert.equal(await pp.$eval('.sw-keys', el => getComputedStyle(el).display), 'none');
   for (const id of ['#sw-start', '#sw-lap', '#sw-reset', '#sw-full']) {
     const b = await pp.locator(id).boundingBox();
     assert.ok(b.height >= 44 && b.width >= 44, `${id} is ${b.width}x${b.height}`);

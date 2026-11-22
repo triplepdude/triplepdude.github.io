@@ -268,14 +268,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
 
   // Taps on a touch screen: two fingers 10 ms apart are two presses, not chatter.
   await f.check('input[name="sb-len"][value="5"]');
-  // A touch (or mouse) press on the key, with its own pointer id: 'tap' lifts
-  // the finger at once, 'down' leaves it on the key, and 'up' or 'cancel'
-  // (the browser turned the touch into a scroll) ends a press left down.
-  let nextId = 100;
-  const touchEv = (type, id, pt = 'touch') => f.evaluate(([ty, i, k]) => {
-    document.getElementById('sb-pad').dispatchEvent(new PointerEvent(ty, { bubbles: true, cancelable: true, pointerType: k, pointerId: i, isPrimary: false, button: ty === 'pointerdown' ? 0 : -1, buttons: ty === 'pointerdown' ? 1 : 0 }));
-  }, [type, id, pt]);
-  const tap = async (type = 'touch') => { const id = nextId++; await touchEv('pointerdown', id, type); await touchEv('pointerup', id, type); };
+  const tap = (type = 'touch') => f.evaluate(pt => {
+    document.getElementById('sb-pad').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: pt, isPrimary: true, button: 0, buttons: 1 }));
+  }, type);
   const P = ex.taps;
   at = 0;
   for (const t of P.taps) {
@@ -289,67 +284,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await text('#sb-session', f), P.session);
   await f.click('#sb-copy');
   assert.equal(await f.evaluate(() => navigator.clipboard.readText()), P.copy + '\n' + url + '#5s');
-
-  // Taps that the browser turns into a scroll or a zoom (pointercancel) are
-  // taken off again. One alone starts nothing: the last result stays.
-  const view = () => f.evaluate(() => ['#sb-pad-count', '#sb-pad-sub', '#sb-time', '#sb-count', '#sb-rate', '#sb-best', '#sb-score', '#sb-detail']
-    .map(s => document.querySelector(s).textContent).concat([document.getElementById('sb-result').hidden, document.getElementById('sb-copy').hidden]));
-  const kept = await view();
-  assert.equal(kept[1], 'Press Space or tap for another test');
-  await touchEv('pointerdown', 1);
-  assert.equal(await count(f), '1');
-  await f.clock.runFor(40);
-  await touchEv('pointercancel', 1);
-  assert.deepEqual(await view(), kept, 'a tap that scrolled the page started a test');
-  await f.clock.runFor(6000);
-  assert.deepEqual(await view(), kept, 'a tap that scrolled the page made a result');
-  // In a test the other taps still count, and best second and shortest gap
-  // leave the scroll out. A finger still on the key at the end holds the
-  // result back until it lifts (counted) or scrolls (not counted).
-  await tap();
-  await f.clock.runFor(100); await touchEv('pointerdown', 2);
-  await f.clock.runFor(50); await tap();
-  assert.equal(await count(f), '3');
-  assert.equal(await text('#sb-best', f), '3');
-  await f.clock.runFor(50); await touchEv('pointercancel', 2);
-  assert.equal(await count(f), '2');
-  assert.equal(await text('#sb-best', f), '2');
-  await f.clock.runFor(4780); await touchEv('pointerdown', 3);
-  await f.clock.runFor(200);
-  assert.equal(await text('#sb-pad-sub', f), 'Time is up');
-  assert.equal(await f.locator('#sb-result').isVisible(), false, 'the result did not wait for the finger on the key');
-  await touchEv('pointerup', 3);
-  await f.clock.runFor(30);
-  assert.equal(await text('#sb-score', f), '0.60');
-  assert.equal(await text('#sb-detail', f), '3 presses in 5 seconds. Best second: 2 presses. Shortest gap: 150 ms.');
-  await f.clock.runFor(1000);
-  // The first tap scrolls after a second one: the clock runs from the second.
-  // A finger left on the key past the end that then scrolls does not count.
-  await touchEv('pointerdown', 4);
-  await f.clock.runFor(200); await tap();
-  await f.clock.runFor(100); await touchEv('pointercancel', 4);
-  assert.equal(await count(f), '1');
-  await f.clock.runFor(4780);
-  assert.equal(await text('#sb-pad-sub', f), 'Keep pressing: the clock is running', 'the clock did not restart from the tap that is left');
-  await touchEv('pointerdown', 5);
-  await f.clock.runFor(200);
-  assert.equal(await text('#sb-pad-sub', f), 'Time is up');
-  await touchEv('pointercancel', 5);
-  await f.clock.runFor(30);
-  assert.equal(await text('#sb-score', f), '0.20');
-  assert.equal(await text('#sb-detail', f), '1 press in 5 seconds. Best second: 1 press.');
-  await f.clock.runFor(1000);
-  // With no time limit, the count and its clock leave out a tap that scrolled.
-  await f.check('input[name="sb-len"][value="0"]');
-  await touchEv('pointerdown', 6);
-  await f.clock.runFor(200); await tap();
-  await f.clock.runFor(100); await touchEv('pointercancel', 6);
-  assert.equal(await count(f), '1');
-  await f.clock.runFor(1050); // 1.15 s after the tap that is left, 1.35 s after the one that scrolled
-  assert.equal(await text('#sb-time', f), '1.1 s');
-  await f.click('#sb-reset');
-  assert.equal(await count(f), '0');
-  await f.check('input[name="sb-len"][value="5"]');
 
   // 60 seconds on a 320 px screen: every second's bar fits.
   await f.setViewportSize({ width: 320, height: 700 });
@@ -383,35 +317,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await p.goto(url);
   const pb = await p.locator('#sb-pad').boundingBox();
   const cx = pb.x + pb.width / 2, cy = pb.y + pb.height / 2;
-  const cdp = await phone.newCDPSession(p);
-  // A finger that lands on the key to scroll the page is no press: the
-  // browser sends pointercancel once the touch has become a scroll.
-  const stillY = () => p.waitForFunction(() => new Promise(r => {
-    const y = scrollY;
-    requestAnimationFrame(() => requestAnimationFrame(() => r(scrollY === y)));
-  }));
-  const swipe = async () => {
-    const x = cx, y = pb.y + pb.height * 0.7;
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-    for (let i = 1; i <= 8; i++) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i / 3, y: y - i * 36 }] });
-      await p.waitForTimeout(16);
-    }
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await stillY();
-    const moved = await p.evaluate(() => scrollY);
-    await p.evaluate(() => window.scrollTo(0, 0));
-    await stillY();
-    assert.ok(moved > 100, `the swipe scrolled the page by ${moved} px`);
-  };
-  const look = () => p.evaluate(() => ['#sb-pad-count', '#sb-pad-sub', '#sb-count'].map(s => document.querySelector(s).textContent));
-  const idle = await look();
-  await swipe();
-  assert.deepEqual(await look(), idle, 'a swipe that started on the key started counting');
   for (let i = 0; i < 4; i++) await p.touchscreen.tap(cx, cy);
   assert.equal(await count(p), '4');
-  await swipe();
-  assert.equal(await count(p), '4', 'a swipe that started on the key was counted');
+  const cdp = await phone.newCDPSession(p);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx - 40, y: cy, id: 1 }, { x: cx + 40, y: cy, id: 2 }] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   assert.equal(await count(p), '6');

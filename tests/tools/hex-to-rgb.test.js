@@ -460,15 +460,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
   assert.deepEqual(links, ['/binary-translator/', '/image-color-picker/']);
   for (const href of links) assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), href);
-  // The guide works through another colour than #FF5733, which the 'by hand' panel shows when the page
-  // opens, and its sums are right.
-  const handRows = await page.$$eval('.prose table', ts => [...ts[0].tBodies[0].rows].map(r => [...r.cells].map(c => c.textContent.trim())));
-  assert.notEqual(handRows.map(r => r[0]).join(''), 'FF5733');
-  for (const [pair, working, value] of handRows) {
-    const [hi, lo] = working.split(' × 16 + ').map(Number);
-    assert.deepEqual([hi, lo, Number(value)], [parseInt(pair[0], 16), parseInt(pair[1], 16), parseInt(pair, 16)], pair);
-  }
-  assert.match(guide, /So #1E90FF \(dodgerblue\) is rgb\(30, 144, 255\)\. To go the other way, divide by 16: 30 ÷ 16 is 1 remainder 14, and 14 is E, so 30 is 1E\./);
 
   // ---- A locale that writes decimals with a comma reads the same way. ----
   const de = await page.context().browser().newContext({ locale: 'de-DE' });

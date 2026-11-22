@@ -2,7 +2,7 @@
 title: "Wheel Spinner: Spin the Wheel to Pick a Name"
 description: Spin a wheel to pick a random name, number or yes or no. Paste a list, add weights, remove winners and share the wheel as a link. Runs in your browser.
 category: Generators
-keywords: [wheel spinner, spin the wheel, random name picker, random wheel, name picker wheel, yes or no wheel, number wheel 1 to 10, weighted wheel spinner, prize wheel spinner, wheel of names, decision wheel, wheel decider, raffle wheel, random names picker, roulette wheel]
+keywords: [wheel spinner, spin the wheel, random name picker, random wheel, name picker wheel, yes or no wheel, number wheel 1 to 10, weighted wheel spinner, prize wheel spinner]
 howto: |
   ## How to use the wheel spinner
 
@@ -76,8 +76,6 @@ howto: |
   - **Full screen** shows only the wheel, its Spin button and the result.
     Safari on iPhone does not let pages go full screen, so there the wheel
     fills the browser window instead.
-  - While the wheel turns fast it shows softer colours and no names, so it
-    does not flash; both come back as it slows down.
   - If your device is set to reduce motion, the wheel stops at once unless
     you tick **Animate the spin**.
 
@@ -105,8 +103,7 @@ faq:
 .ws-wheel[data-state="spinning"] { cursor: progress; }
 .ws-stage-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 16px 0 8px; }
 .ws-spin { min-width: 9em; min-height: 52px; font-size: 1.15rem; }
-/* Dimmed while the wheel turns, by colour rather than opacity, which would fade the focus ring too. */
-.ws-spin[aria-disabled="true"] { background: color-mix(in srgb, var(--accent) 60%, var(--bg)); color: color-mix(in srgb, var(--accent-text) 60%, var(--bg)); cursor: progress; }
+.ws-spin[aria-disabled="true"] { opacity: 0.6; cursor: progress; }
 .ws-result { margin: 6px 0 0; min-height: 1.6em; font-size: 1.1rem; font-weight: 600; overflow-wrap: anywhere; }
 .ws-stage .msg { margin: 8px 0 0; text-align: left; }
 .ws-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
@@ -222,7 +219,7 @@ Omar</textarea>
           <label for="ws-time">Spin time</label>
           <div class="ws-range">
             <input type="range" id="ws-time" min="1" max="30" step="1" value="5" aria-valuetext="5 seconds">
-            <output id="ws-time-out" for="ws-time" aria-hidden="true">5 s</output>
+            <output id="ws-time-out" for="ws-time">5 s</output>
           </div>
         </div>
         <div class="field">
@@ -245,7 +242,7 @@ Omar</textarea>
       <div class="actions">
         <button class="btn secondary" type="button" id="ws-copy-link" aria-describedby="ws-link-hint ws-link-msg">Copy link</button>
       </div>
-      <p class="hint ws-link-hint" id="ws-link-hint">The page address keeps this wheel, so a bookmark or the link brings it back. Anyone you send the link to sees every entry.</p>
+      <p class="hint ws-link-hint" id="ws-link-hint">The page address keeps this wheel, so a bookmark or the link brings it back.</p>
       <p class="msg error" id="ws-link-msg" aria-live="polite"></p>
     </div>
   </div>
@@ -282,14 +279,13 @@ Omar</textarea>
     maybe: 'Yes\nNo\nMaybe',
     ten: '1\n2\n3\n4\n5\n6\n7\n8\n9\n10'
   };
-  // Looked up by the name in the page address, so no inherited name such as "constructor" is a theme.
-  var THEMES = Object.assign(Object.create(null), {
+  var THEMES = {
     bright: ['#e63946', '#f4a261', '#e9c46a', '#2a9d8f', '#277da1', '#7b2cbf', '#43aa8b', '#f15bb5'],
     pastel: ['#ffadad', '#ffd6a5', '#fdffb6', '#caffbf', '#9bf6ff', '#a0c4ff', '#bdb2ff', '#ffc6ff'],
     ocean: ['#03045e', '#00b4d8', '#0077b6', '#90e0ef', '#023e8a', '#48cae4', '#0096c7', '#caf0f8'],
     forest: ['#1b4332', '#95d5b2', '#2d6a4f', '#d8f3dc', '#40916c', '#b7e4c7', '#081c15', '#74c69d'],
     mono: ['#111111', '#f2f2f2', '#555555', '#c8c8c8']
-  });
+  };
 
   var ta = $('#ws-entries'), canvas = $('#ws-wheel'), ctx = canvas.getContext('2d');
   var spinBtn = $('#ws-spin'), fullBtn = $('#ws-full'), stage = $('#ws-stage');
@@ -433,68 +429,25 @@ Omar</textarea>
 
   // ---------- Drawing ----------
   var img = document.createElement('canvas'), imgCtx = img.getContext('2d');
-  var soft = document.createElement('canvas'), softCtx = soft.getContext('2d'), softReady = false;
   var size = 0, dpr = 1;
   var FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
   function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#000'; }
-  // A colour in linear light, its relative luminance, and back to #rrggbb.
-  function linear(hex) {
+  function lum(hex) {
     var n = parseInt(hex.slice(1), 16);
-    return [n >> 16 & 255, n >> 8 & 255, n & 255].map(function (v) {
+    var c = [n >> 16 & 255, n >> 8 & 255, n & 255].map(function (v) {
       v /= 255;
       return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
     });
-  }
-  function lumOf(c) { return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
-  function lum(hex) { return lumOf(linear(hex)); }
-  function hexOf(c) {
-    return '#' + c.map(function (v) {
-      v = Math.min(1, Math.max(0, v));
-      v = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
-      return Math.round(v * 255).toString(16).padStart(2, '0');
-    }).join('');
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   }
   // Black or white text, whichever has more contrast (never under 4.58:1).
   function textOn(hex) { var l = lum(hex); return (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? '#000000' : '#ffffff'; }
-  function colourIndex(i, n, len) {
-    var k = i % len;
+  function colourOf(i, n, pal) {
+    var k = i % pal.length;
     // The last slice touches the first: give it another colour when they would match.
     if (n > 1 && i === n - 1 && k === 0) k = 1;
-    return k;
-  }
-  function colourOf(i, n, pal) { return pal[colourIndex(i, n, pal.length)]; }
-
-  // A wheel turning fast makes every point of it flash as the slices pass, and WCAG 2.3.1
-  // allows no more than three flashes a second: pairs of opposing changes of 0.10 or more in
-  // relative luminance, or changes to or from a saturated red. While it turns fast, the wheel
-  // is drawn in a softened copy of the theme without names or lines: each colour keeps its hue
-  // but is brought to within 0.03 of the theme's mean luminance, so no two slices differ by
-  // 0.10, and no colour is a saturated red (R / (R + G + B) of 0.8 or more in linear light).
-  var BAND = 0.03, RED = 0.7;
-  var softPalettes = Object.create(null);
-  function softPalette(name) {
-    if (softPalettes[name]) return softPalettes[name];
-    var cols = THEMES[name].map(linear), ls = cols.map(lumOf);
-    var mean = ls.reduce(function (a, b) { return a + b; }, 0) / ls.length;
-    return (softPalettes[name] = cols.map(function (c, i) {
-      var t = mean + Math.max(-BAND, Math.min(BAND, ls[i] - mean)), top = Math.max(c[0], c[1], c[2]);
-      if (!ls[i]) c = [t, t, t];
-      else if (top * t / ls[i] <= 1) c = c.map(function (v) { return v * t / ls[i]; });
-      else {
-        // Too bright to scale up: scale to full strength, then mix with white to the target.
-        c = c.map(function (v) { return v / top; });
-        var k = (t - lumOf(c)) / (1 - lumOf(c));
-        c = c.map(function (v) { return v + k * (1 - v); });
-      }
-      // A red is mixed with the grey of the same luminance until its share of red is 0.7.
-      var sum = c[0] + c[1] + c[2];
-      if (c[0] / sum > RED) {
-        var s = t * (3 * RED - 1) / (c[0] - t - RED * sum + 3 * RED * t);
-        c = c.map(function (v) { return t + s * (v - t); });
-      }
-      return hexOf(c);
-    }));
+    return pal[k];
   }
 
   function measure() {
@@ -523,48 +476,12 @@ Omar</textarea>
     return { text: best ? g.slice(0, best).join('') + '…' : '', fs: f2 };
   }
 
-  // The rim and the hub look the same however the wheel is turned.
-  function drawRim(c2, c, R) {
-    c2.beginPath();
-    c2.arc(c, c, R, 0, TAU);
-    c2.lineWidth = Math.max(2, R * 0.02);
-    c2.strokeStyle = cssVar('--text');
-    c2.stroke();
-    c2.beginPath();
-    c2.arc(c, c, R * 0.1, 0, TAU);
-    c2.fillStyle = cssVar('--surface');
-    c2.fill();
-    c2.lineWidth = Math.max(2, R * 0.015);
-    c2.stroke();
-  }
-
-  // The softened copy is painted when a spin first needs it, so typing a list costs nothing more.
-  function renderSoft() {
-    softReady = true;
-    if (soft.width !== size) { soft.width = size; soft.height = size; }
-    var c2 = softCtx, c = size / 2, R = c * 0.9, n = list.entries.length;
-    var pal = softPalette(THEMES[themeSel.value] ? themeSel.value : 'bright');
-    c2.setTransform(1, 0, 0, 1, 0, 0);
-    c2.clearRect(0, 0, size, size);
-    for (var i = 0; i < n; i++) {
-      var e = list.entries[i];
-      c2.beginPath();
-      c2.moveTo(c, c);
-      c2.arc(c, c, R, e.a0, e.a1);
-      c2.closePath();
-      c2.fillStyle = pal[colourIndex(i, n, pal.length)];
-      c2.fill();
-    }
-    drawRim(c2, c, R);
-  }
-
   // Paints the wheel once into an offscreen canvas; each frame only turns that picture.
   function renderWheel() {
     measure();
-    softReady = false;
     if (img.width !== size) { img.width = size; img.height = size; }
     var c2 = imgCtx, c = size / 2, R = c * 0.9, n = list.entries.length;
-    var pal = THEMES[themeSel.value] || THEMES.bright;
+    var pal = THEMES[themeSel.value] || THEMES.bright, edge = cssVar('--text');
     c2.setTransform(1, 0, 0, 1, 0, 0);
     c2.clearRect(0, 0, size, size);
     if (!n) {
@@ -624,14 +541,20 @@ Omar</textarea>
       c2.fillText(fit.text, R * 0.86, 0);
       c2.restore();
     }
-    drawRim(c2, c, R);
+    c2.beginPath();
+    c2.arc(c, c, R, 0, TAU);
+    c2.lineWidth = Math.max(2, R * 0.02);
+    c2.strokeStyle = edge;
+    c2.stroke();
+    c2.beginPath();
+    c2.arc(c, c, R * 0.1, 0, TAU);
+    c2.fillStyle = cssVar('--surface');
+    c2.fill();
+    c2.lineWidth = Math.max(2, R * 0.015);
+    c2.stroke();
   }
 
-  // sharp 1 shows the wheel as it is, 0 its softened copy, and values between blend the two.
-  // Without an argument a spin in progress keeps its blend, so a resize never flashes it sharp.
-  function drawFrame(sharp) {
-    if (sharp === undefined) sharp = spin ? spin.sharp : 1;
-    if (!list.entries.length) sharp = 1;
+  function drawFrame() {
     var c = size / 2, R = c * 0.9;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, size, size);
@@ -639,12 +562,7 @@ Omar</textarea>
     ctx.translate(c, c);
     ctx.rotate(theta);
     ctx.imageSmoothingQuality = 'high';
-    if (sharp < 1) {
-      if (!softReady) renderSoft();
-      ctx.drawImage(soft, -c, -c);
-      ctx.globalAlpha = sharp;
-    }
-    if (sharp > 0) ctx.drawImage(img, -c, -c);
+    ctx.drawImage(img, -c, -c);
     ctx.restore();
     // The pointer stays still at 3 o'clock, dark with a light edge so it shows on any colour.
     var tip = c + R * 0.9, base = c + R + (c - R) * 0.85, half = R * 0.085;
@@ -782,8 +700,7 @@ Omar</textarea>
       return new TextDecoder('windows-1252').decode(bytes);
     }
   }
-  // count is how many files were dropped at once; only the first is opened.
-  function openFile(file, count) {
+  function openFile(file) {
     if (!file) return;
     setText(fileMsg, '');
     if (spin) return;
@@ -805,13 +722,7 @@ Omar</textarea>
         setText(fileMsg, file.name + ' has ' + fmt(text.length) + ' characters, more than the ' + fmt(MAX_CHARS) + ' the wheel reads.');
         return;
       }
-      // A file with nothing to spin leaves the list as it was.
-      if (!/\S/.test(text)) {
-        setText(fileMsg, file.name + (text ? ' has only blank lines' : ' is empty') + ', so the list was kept.');
-        return;
-      }
       replaceList(text, 'open');
-      if (count > 1) setText(fileMsg, 'Only ' + file.name + ', the first of the ' + fmt(count) + ' files, was opened. To spin the names from several lists, paste them all into the box.');
     }, function () {
       setText(fileMsg, file.name + ' could not be read.');
     });
@@ -834,40 +745,25 @@ Omar</textarea>
     ta.classList.remove('is-over');
     if (!hasFiles(e)) return;
     e.preventDefault();
-    openFile(e.dataTransfer.files[0], e.dataTransfer.files.length);
+    openFile(e.dataTransfer.files[0]);
   });
   // A file dropped anywhere else would replace the page and lose the wheel.
   document.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
   document.addEventListener('drop', function (e) { if (hasFiles(e)) e.preventDefault(); });
 
   // ---------- Sound, made by the browser ----------
-  // The sound runs only around a spin: pressing Spin resumes it (a click or key press, which
-  // Safari on iPhone asks for), and half a second after a spin's last tone has ended it is
-  // suspended, so the browser stops working on silence until the next spin.
-  var audio = null, soundEnd = 0, restTimer = 0;
+  var audio = null;
   function audioCtx() {
     if (!audio) {
       var C = window.AudioContext || window.webkitAudioContext;
       if (!C) return null;
       try { audio = new C(); } catch (e) { return null; }
     }
-    clearTimeout(restTimer);
     if (audio.state === 'suspended') {
       var p = audio.resume();
       if (p && p.catch) p.catch(function () {});
     }
     return audio;
-  }
-  function rest() {
-    if (!audio) return;
-    clearTimeout(restTimer);
-    restTimer = setTimeout(function () {
-      if (spin || audio.state !== 'running') return;
-      // A busy device can let the audio clock fall behind: then wait for the last tone to end.
-      if (audio.currentTime < soundEnd) { rest(); return; }
-      var p = audio.suspend();
-      if (p && p.catch) p.catch(function () {});
-    }, Math.max(0, soundEnd - audio.currentTime) * 1000 + 500);
   }
   function tone(a, freq, start, length, type, peak) {
     var o = a.createOscillator(), g = a.createGain();
@@ -880,7 +776,6 @@ Omar</textarea>
     g.connect(a.destination);
     o.start(start);
     o.stop(start + length + 0.02);
-    soundEnd = Math.max(soundEnd, start + length + 0.02);
   }
   function tick() {
     var a = soundBox.checked && audioCtx();
@@ -993,9 +888,7 @@ Omar</textarea>
     var animate = animateBox.checked;
     var turns = animate ? Math.max(1, Math.round(seconds * 0.8)) : 0;
     var target = theta + ((((-phi - theta) % TAU) + TAU) % TAU) + turns * TAU;
-    var narrowest = list.entries.reduce(function (m, x) { return Math.min(m, x.w); }, Infinity);
-    spin = { pick: pick, entry: e, same: same, total: list.total, weights: weightsBox.checked, text: parsedText, from: theta, to: target, t0: performance.now(), ms: seconds * 1000, animate: animate,
-      slice: TAU * narrowest / list.total, sharp: 0 };
+    spin = { pick: pick, entry: e, same: same, total: list.total, weights: weightsBox.checked, text: parsedText, from: theta, to: target, t0: performance.now(), ms: seconds * 1000, animate: animate };
     canvas.setAttribute('data-pick', String(pick));
     lock(true);
     if (!animate) { finish(); return; }
@@ -1003,22 +896,12 @@ Omar</textarea>
     requestAnimationFrame(step);
   }
 
-  function ease(p) { p = Math.min(1, Math.max(0, p)); return 1 - Math.pow(1 - p, 3); }
-  // Each slice that passes a point brings an edge and a name, whose letters change the
-  // luminance there several times. So the wheel is soft while more than SOFT of its narrowest
-  // slices would pass a point in the coming second, sharp once fewer than SHARP would, and
-  // blends between; as the wheel only slows down, it never softens again. Measured on every
-  // frame of a spin, no 15 px square of the wheel then flashes more than three times a second.
-  // Fast or slow, the winner and where the wheel stops do not change.
-  var SOFT = 1, SHARP = 0.5;
   function step(now) {
     if (!spin) return;
-    var t = now - spin.t0, span = spin.to - spin.from;
-    theta = spin.from + span * ease(t / spin.ms);
-    var ahead = (ease((t + 1000) / spin.ms) - ease(t / spin.ms)) * span / spin.slice;
-    spin.sharp = Math.max(spin.sharp, Math.min(1, Math.max(0, (SOFT - ahead) / (SOFT - SHARP))));
-    drawFrame(spin.sharp);
-    var p = Math.min(1, Math.max(0, t / spin.ms));
+    var p = Math.min(1, Math.max(0, (now - spin.t0) / spin.ms));
+    var eased = 1 - Math.pow(1 - p, 3);
+    theta = spin.from + (spin.to - spin.from) * eased;
+    drawFrame();
     var idx = indexAt(theta);
     if (idx !== lastIndex) {
       lastIndex = idx;
@@ -1031,7 +914,7 @@ Omar</textarea>
   function finish() {
     var s = spin;
     theta = ((s.to % TAU) + TAU) % TAU;
-    drawFrame(1);
+    drawFrame();
     spin = null;
     spinCount++;
     lastSpin = s;
@@ -1058,7 +941,6 @@ Omar</textarea>
     if (!dialog.open) dialog.showModal();
     $('#ws-dlg-close').focus();
     chime();
-    rest();
     if (s.animate && confettiBox.checked) confetti();
   }
 

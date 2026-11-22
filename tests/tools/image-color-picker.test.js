@@ -28,19 +28,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   });
   const want = e => ({ hex: e.hex, rgbText: e.rgbText, hsl: e.hsl, hsb: e.hsb, cmyk: e.cmyk });
   const chips = () => page.$$eval('#icp-history .icp-chip', els => els.map(e => e.textContent));
-  // The palette is worked out in a worker; until it is ready the list is marked aria-busy.
-  const palReady = (pg = page) => pg.waitForFunction(() => !document.querySelector('#icp-palette').hasAttribute('aria-busy'));
-  const pal = async (pg = page) => {
-    await palReady(pg);
-    return pg.$$eval('#icp-palette .icp-pal', els => els.map(e => [e.querySelector('b').textContent, e.lastChild.textContent]));
-  };
+  const pal = () => page.$$eval('#icp-palette .icp-pal', els => els.map(e => [e.querySelector('b').textContent, e.lastChild.textContent]));
   const clip = () => page.evaluate(() => navigator.clipboard.readText());
   const rgbOf = async () => (await text('#icp-rgb')).match(/\d+/g).slice(0, 3).map(Number);
   const close = (a, b, tol) => a.every((v, k) => Math.abs(v - b[k]) <= tol);
 
-  // Added before the page's own script, so this listener runs first: once the flag is set and the
-  // event is over, the page has handled pageshow too.
-  await page.addInitScript(() => addEventListener('pageshow', () => { window.__pageshown = true; }));
   await open();
   // Screen readers pass the arrow keys through to the picture only in an application region.
   assert.equal(await page.getAttribute('#icp-canvas', 'role'), 'application');
@@ -57,7 +49,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal((await pal()).length, 8);
   await page.goto('about:blank');
   await page.goBack();
-  await page.waitForFunction(() => window.__pageshown && document.querySelectorAll('#icp-palette .icp-pal').length > 0);
+  await page.waitForFunction(() => document.querySelectorAll('#icp-palette .icp-pal').length > 0);
+  await page.waitForTimeout(200);
   assert.equal((await pal()).length, Number(await page.inputValue('#icp-count')));
   await page.selectOption('#icp-count', '6');
 
@@ -288,32 +281,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   }, b64);
   assert.deepEqual(handled, [true, true]);
   await page.waitForFunction(() => document.querySelector('#icp-name').textContent === 'dropped.png');
-  assert.doesNotMatch(await text('#icp-info'), /Only the first/);
   await page.evaluate(async data => {
     const dt = new DataTransfer();
     dt.items.add(new File([Uint8Array.from(atob(data), c => c.charCodeAt(0))], 'pasted.png', { type: 'image/png' }));
     document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   }, b64);
   await page.waitForFunction(() => document.querySelector('#icp-name').textContent === 'pasted.png');
-  // Several files at once: the first is opened, and the page says that the others were not.
-  const several = (names, how) => page.evaluate(async ([data, names, how]) => {
-    const dt = new DataTransfer();
-    for (const n of names) dt.items.add(n.endsWith('.png') ? new File([Uint8Array.from(atob(data), c => c.charCodeAt(0))], n, { type: 'image/png' }) : new File(['class list'], n, { type: 'text/plain' }));
-    if (how === 'paste') document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
-    else document.querySelector('h1').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  }, [b64, names, how]);
-  await several(['first.png', 'second.png', 'third.png'], 'drop');
-  await page.waitForFunction(() => document.querySelector('#icp-name').textContent === 'first.png');
-  assert.match(await text('#icp-info'), /^\d+ × \d+ px, PNG\. Only the first of the 3 files was opened\. Drop or paste another image to replace it\.$/);
-  assert.match(await text('#icp-live'), /^Opened first\.png, \d+ by \d+ pixels\. Only the first of the 3 files was opened\.$/);
-  await several(['one.png', 'two.png'], 'paste');
-  await page.waitForFunction(() => document.querySelector('#icp-name').textContent === 'one.png');
-  assert.match(await text('#icp-info'), /Only the first of the 2 files was opened\./);
-  // When the first is not an image, the error says the others were not tried.
-  await several(['names.txt', 'photo.png'], 'drop');
-  await page.waitForFunction(() => document.querySelector('#icp-error').textContent.length > 0);
-  assert.match(await text('#icp-error'), /^“names\.txt” could not be opened\. .+ Only the first of the 2 files was tried\.$/);
-  assert.equal(await text('#icp-name'), 'one.png');
 
   // ---------- Too large for the browser to hold: a copy of at most 16 megapixels is read ----------
   // A phone browser that cannot read back more than about 16.7 megapixels from a canvas.
@@ -389,40 +362,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(shares.length, 6);
   assert.ok(Math.abs(shares.reduce((x, y) => x + y, 0) - 100) <= 3, `shares ${shares}`);
 
-  // ---------- A 12-megapixel phone photo does not freeze the page ----------
-  // Its pixels are read and its palette worked out in a worker. Budgeted in main-thread CPU time
-  // (Chrome's ThreadTime), not wall time, which a busy machine stretches: about 95 ms here, against
-  // 200 to 240 ms when the page did all of it itself (tasks of 0.8 and 1.1 s at a mid-range phone's speed).
-  await page.evaluate(async () => {
-    const W = 4000, H = 3000, c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    const g = c.getContext('2d'), sky = g.createLinearGradient(0, 0, W, H);
-    sky.addColorStop(0, '#2b4a6f'); sky.addColorStop(0.5, '#c98b6b'); sky.addColorStop(1, '#3f6b3a');
-    g.fillStyle = sky; g.fillRect(0, 0, W, H);
-    const im = g.getImageData(0, 0, W, H), d = im.data;
-    let s = 1;
-    for (let i = 0; i < d.length; i += 4) { s = (Math.imul(s, 1103515245) + 12345) >>> 0; const n = (s >>> 28) - 8; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
-    g.putImageData(im, 0, 0);
-    window.__photo = new File([await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9))], 'photo.jpg', { type: 'image/jpeg' });
-    c.width = c.height = 0;
-  });
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Performance.enable');
-  const threadMs = async () => (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'ThreadTime').value * 1000;
-  const cpu0 = await threadMs();
-  await page.evaluate(() => {
-    const dt = new DataTransfer();
-    dt.items.add(window.__photo);
-    document.querySelector('h1').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  });
-  await page.waitForFunction(() => document.querySelector('#icp-name').textContent === 'photo.jpg' && !document.querySelector('#icp-palette').hasAttribute('aria-busy'), null, { timeout: 60000 });
-  const cpu = (await threadMs()) - cpu0;
-  await cdp.detach();
-  assert.match(await text('#icp-info'), /^4000 × 3000 px, JPG[,.]/);
-  assert.equal((await pal()).length, 6);
-  assert.ok(cpu < 150, `opening a 12 MP photo took ${Math.round(cpu)} ms of main-thread CPU`);
-  await page.evaluate(() => { delete window.__photo; });
-
   // ---------- Pick from screen, where the browser has an eyedropper ----------
   const ctx = page.context(), p2 = await ctx.newPage();
   await p2.addInitScript(() => { window.EyeDropper = class { open() { return Promise.resolve({ sRGBHex: '#123456' }); } }; });
@@ -442,68 +381,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await p3.isVisible('#icp-screen'), false, 'no button without an eyedropper');
   await p3.close();
 
-  // ---------- Without a worker the page does the same work itself ----------
-  const p4 = await ctx.newPage();
-  await p4.addInitScript(() => { delete window.Worker; });
-  await p4.goto(url);
-  await load('blocks.png', p4);
-  assert.deepEqual(await pal(p4), exp.blocks);
-  await load('merge.png', p4);
-  await p4.selectOption('#icp-count', '5');
-  assert.deepEqual(await pal(p4), exp.merge);
-  await p4.close();
-  // Copy palette pressed before the worker has answered copies the palette for what is chosen now.
-  const p5 = await ctx.newPage();
-  await p5.addInitScript(() => {
-    const Real = window.Worker;
-    window.Worker = class extends Real {
-      postMessage(m, t) {
-        if (m && m.cmd === 'palette' && window.__slow) setTimeout(() => super.postMessage(m, t), 3000);
-        else super.postMessage(m, t);
-      }
-    };
-  });
-  await p5.goto(url);
-  await load('merge.png', p5);
-  assert.equal((await pal(p5)).length, 6);
-  await p5.evaluate(() => { window.__slow = true; });
-  // The palette of the picture before is still on screen while the new one is worked out, and is not picked from.
-  await p5.setInputFiles('#icp-file', { name: 'blocks.png', mimeType: 'image/png', buffer: fs.readFileSync(path.join(fixtures, 'blocks.png')) });
-  await p5.waitForFunction(() => document.querySelector('#icp-name').textContent === 'blocks.png');
-  const before = await text('#icp-hex', p5);
-  await p5.locator('#icp-palette .icp-pal').first().click();
-  assert.equal(await text('#icp-hex', p5), before, 'a colour of the previous picture is not picked');
-  await p5.evaluate(() => { window.__slow = false; });
-  await load('merge.png', p5);
-  await p5.evaluate(() => { window.__slow = true; });
-  await p5.selectOption('#icp-count', '5');
-  assert.equal(await p5.getAttribute('#icp-palette', 'aria-busy'), 'true', 'the old palette is marked as out of date');
-  await p5.click('#icp-pal-copy');
-  assert.equal(await p5.evaluate(() => navigator.clipboard.readText()), exp.merge.map(m => m[0]).join(', '));
-  assert.deepEqual(await pal(p5), exp.merge);
-  await p5.close();
-
-  // ---------- Nothing moves while the page starts (layout shift) ----------
-  // The canvas is served at the sample picture's size and the screen picker is shown as the page is
-  // read, so neither the drawn sample nor the button moves what is below them.
-  for (const [width, eye] of [[412, true], [412, false], [800, true]]) {
-    const sc = await ctx.browser().newContext({ viewport: { width, height: 860 } });
-    await sc.addInitScript(eye => {
-      if (!eye) delete window.EyeDropper;
-      else if (!('EyeDropper' in window)) window.EyeDropper = class { open() { return Promise.reject(new Error('closed')); } };
-      window.__shift = 0;
-      new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__shift += e.value; }).observe({ type: 'layout-shift', buffered: true });
-    }, eye);
-    const sp = await sc.newPage();
-    await sp.goto(url, { waitUntil: 'load' });
-    await sp.waitForFunction(() => document.querySelectorAll('#icp-palette .icp-pal').length === 6 && !document.querySelector('#icp-palette').hasAttribute('aria-busy'));
-    const shift = await sp.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(window.__shift)))));
-    assert.equal(await sp.isVisible('#icp-screen'), eye);
-    assert.ok(shift < 0.01, `layout shift ${shift.toFixed(4)} at ${width} px ${eye ? 'with' : 'without'} an eyedropper`);
-    await sc.close();
-  }
-
-  // ---------- A phone: a tap picks, touch and hold aims with the magnifier, a swipe scrolls ----------
+  // ---------- A phone: tap to pick, drag with the magnifier above the finger ----------
   const { devices } = require('playwright');
   const ph = await ctx.browser().newContext({ ...devices['Pixel 7'] });
   const pp = await ph.newPage();
@@ -514,57 +392,20 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const t = await spot(35, 5, 120, 10, pp);
   await pp.touchscreen.tap(t.x, t.y);
   assert.equal(await text('#icp-hex', pp), '#7F7F7F');
-  // Real touches, scrolled by the browser itself, on a portrait picture of four bands that fills
-  // most of the screen (346 × 519 px here).
-  const BANDS = ['#C03030', '#30A040', '#3050C0', '#D0B020'];
-  await pp.evaluate(async bands => {
-    const c = document.createElement('canvas');
-    c.width = 600; c.height = 900;
-    const g = c.getContext('2d');
-    bands.forEach((b, i) => { g.fillStyle = b; g.fillRect(0, i * 225, 600, 225); });
-    const dt = new DataTransfer();
-    dt.items.add(new File([await new Promise(r => c.toBlob(r, 'image/png'))], 'portrait.png', { type: 'image/png' }));
-    document.querySelector('h1').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  }, BANDS);
-  await pp.waitForFunction(() => document.querySelector('#icp-name').textContent === 'portrait.png');
-  const tc = await ph.newCDPSession(pp);
-  const touch = (type, x, y) => tc.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
-  const slide = async (x, from, to) => { for (let i = 1; i <= 8; i++) { await touch('touchMove', x, from + (to - from) * i / 8); await pp.waitForTimeout(16); } };
-  const now = () => pp.evaluate(() => {
-    const r = document.querySelector('#icp-canvas').getBoundingClientRect(), l = document.querySelector('#icp-loupe');
-    return { top: r.top, x: r.left + r.width / 2, h: r.height, y: scrollY, picks: document.querySelectorAll('#icp-history li').length, loupe: !l.hidden,
-      loupeBottom: l.getBoundingClientRect().bottom, loupeHex: document.querySelector('#icp-loupe-hex').textContent, hex: document.querySelector('#icp-hex').textContent };
+  // Touch down on one block, slide to another and lift: the colour under the finger at the end is picked.
+  const seen = await pp.evaluate(() => {
+    const c = document.querySelector('#icp-canvas'), r = c.getBoundingClientRect(), y = r.top + r.height / 2;
+    const at = x => ({ pointerId: 7, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: r.left + (x + 0.5) * r.width / 120, clientY: y, button: 0, buttons: 1 });
+    c.dispatchEvent(new PointerEvent('pointerdown', at(45)));
+    c.dispatchEvent(new PointerEvent('pointermove', at(65)));
+    const l = document.querySelector('#icp-loupe'), lr = l.getBoundingClientRect();
+    const out = { shown: !l.hidden, above: lr.bottom < y, hex: document.querySelector('#icp-loupe-hex').textContent };
+    c.dispatchEvent(new PointerEvent('pointerup', Object.assign(at(65), { buttons: 0 })));
+    out.after = !l.hidden;
+    return out;
   });
-  // Until the page has stopped moving (a swipe can carry on as a fling), then with the picture in the middle.
-  const still = () => pp.evaluate(() => new Promise(done => { let last = scrollY, n = 0; (function f() { if (scrollY !== last) { last = scrollY; n = 0; } else if (++n >= 6) return done(); requestAnimationFrame(f); })(); }));
-  const centre = async () => { await still(); await pp.evaluate(() => document.querySelector('#icp-canvas').scrollIntoView({ block: 'center', behavior: 'instant' })); await still(); };
-  // A swipe up on the picture scrolls the page and picks nothing.
-  await centre();
-  let s = await now();
-  await touch('touchStart', s.x, s.top + s.h * 0.8);
-  await slide(s.x, s.top + s.h * 0.8, s.top + s.h * 0.8 - 200);
-  await touch('touchEnd');
-  await still();
-  let e = await now();
-  assert.ok(e.y > s.y + 100, `a swipe on the picture scrolls the page (scrollY ${s.y} -> ${e.y})`);
-  assert.equal(e.picks, s.picks, 'a swipe picks no colour');
-  assert.equal(e.loupe, false);
-  // Touch and hold on the first band until the magnifier comes up, slide to the third and lift.
-  await centre();
-  s = await now();
-  const y0 = s.top + s.h * 0.125, y1 = s.top + s.h * 0.625;
-  await touch('touchStart', s.x, y0);
-  await pp.waitForFunction(() => !document.querySelector('#icp-loupe').hidden, null, { timeout: 3000 });
-  assert.equal((await now()).loupeHex, BANDS[0]);
-  await slide(s.x, y0, y1);
-  e = await now();
-  assert.equal(e.y, s.y, 'the page stays still while the finger moves the magnifier');
-  assert.equal(e.loupeHex, BANDS[2]);
-  assert.ok(e.loupeBottom < y1, 'the magnifier is above the finger');
-  await touch('touchEnd');
-  e = await now();
-  assert.deepEqual([e.hex, e.picks, e.loupe], [BANDS[2], s.picks + 1, false], 'lifting picks the colour under the finger');
-  await tc.detach();
+  assert.deepEqual(seen, { shown: true, above: true, hex: exp.swatches[6].hex, after: false });
+  assert.equal(await text('#icp-hex', pp), exp.swatches[6].hex);
   const small = await pp.$$eval('#icp-choose, .icp-values .btn, #icp-size, #icp-count, #icp-pal-copy, .icp-chip', els => els.filter(e => e.getBoundingClientRect().height < 44).map(e => e.id || e.className));
   assert.deepEqual(small, []);
   assert.deepEqual(errs, []);
