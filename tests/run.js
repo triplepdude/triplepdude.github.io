@@ -27,8 +27,8 @@
  * block on a phone (on a sample page that only a full run builds), the
  * time a paste over a long text takes on Word Counter, a link to a quoted
  * FAQ answer on a page without a text box, the shared image decoder
- * with a canvas size limit like Safari's, and front matter values cut short
- * by a " #" that YAML reads as a comment.
+ * with a canvas size limit like Safari's, front matter values cut short by
+ * a " #" that YAML reads as a comment, and a swipe that starts on a slider.
  *
  * Needs `jekyll` (or $JEKYLL) and the `playwright` package on the module path.
  */
@@ -419,6 +419,42 @@ function emulateCanvasLimit() {
   self.Worker.prototype = RealWorker.prototype;
 }
 
+// On a touch screen, Chrome on Android moves a slider's thumb to where the
+// finger lands, then hands the touch to page scrolling. The shared script puts
+// the old value back on that pointercancel (_includes/common.js), so a swipe
+// that starts on a slider scrolls the page and leaves the value alone, while a
+// drag along the slider still changes it. Checked on the metronome's tempo.
+async function sliderSwipeChecks(browser, base, problems) {
+  const p = '/metronome/', sel = '#mt-slider';
+  const { context, page } = await newPage(browser, base, { width: 412, height: 915 }, problems, { hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+  await page.goto(base + p, { waitUntil: 'load' });
+  const cdp = await context.newCDPSession(page);
+  const drag = async (from, to) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+    for (let s = 1; s <= 8; s++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + (to.x - from.x) * s / 8, y: from.y + (to.y - from.y) * s / 8 }] });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(300);
+  };
+  const box = async () => {
+    await page.$eval(sel, el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+    return page.$eval(sel, el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  };
+  let b = await box();
+  const before = await page.inputValue(sel), y0 = await page.evaluate(() => scrollY);
+  await drag({ x: b.x + b.w * 0.2, y: b.y + b.h / 2 }, { x: b.x + b.w * 0.2 + 3, y: b.y + b.h / 2 - 200 });
+  const after = await page.inputValue(sel), y1 = await page.evaluate(() => scrollY);
+  if (!(y1 > y0)) problems.push(`${p}: a vertical swipe that starts on ${sel} did not scroll the page, so the slider check is not testing anything`);
+  else if (after !== before) problems.push(`${p}: a swipe that starts on ${sel} and scrolls the page changed it from ${before} to ${after}`);
+  b = await box();
+  await drag({ x: b.x + b.w * 0.3, y: b.y + b.h / 2 }, { x: b.x + b.w * 0.8, y: b.y + b.h / 2 + 2 });
+  if ((await page.inputValue(sel)) === before) problems.push(`${p}: a drag along ${sel} no longer changes it`);
+  await cdp.detach();
+  await context.close();
+}
+
 async function canvasLimitChecks(browser, base, problems) {
   const { context, page } = await newPage(browser, base, { width: 1280, height: 900 }, problems);
   await context.addInitScript(emulateCanvasLimit);
@@ -717,6 +753,7 @@ async function siteChecks(browser, base, problems) {
   await pasteOverLongText(page, base, problems);
   await quotedAnswerOpens(page, base, slugs, problems);
   await canvasLimitChecks(browser, base, problems);
+  await sliderSwipeChecks(browser, base, problems);
 
   // About and Privacy agree on whether the site shows ads, and the ad-blocker
   // promise only appears when there are ads.
