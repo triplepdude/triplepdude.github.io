@@ -1,30 +1,51 @@
 ---
 layout: page
 title: Privacy Policy
-description: How TripleP Tools handles your data. The tools run entirely in your browser, so text, files, and device input never leave your device.
+description: How TripleP Tools handles your data. The tools run in your browser, and this site uploads, stores and tracks nothing you enter; the few exceptions are listed.
 permalink: /privacy/
-last_modified_at: 2026-09-24
+last_modified_at: 2026-11-22
 ---
 {%- assign ea = site.ads.ethicalads_publisher | default: "" | strip -%}
 {%- assign adsense = site.ads.adsense_client | default: "" | strip -%}
 
 ## The short version
 
-Every tool on this site runs entirely in your web browser. Text you type or
-paste, files you open, and input from your camera, microphone, or keyboard are
-processed on your own device. None of it is uploaded to a server, and this site
-has no accounts, no sign-up, and no database.
+Every tool on this site runs in your web browser. Text you type or paste,
+files you open, and input from your camera, microphone, or keyboard are
+processed on your own device. This site uploads none of it, and it has no
+accounts, no sign-up, and no database. A few features that you choose hand
+something to your browser or to another site; they are listed below.
 
 ## What the tools do with your data
 
 - **Text and files** are read by JavaScript in your browser and never sent
-  anywhere. Downloads are created on your device.
-- **Camera, microphone, and location** are only requested when you press a
-  button that needs them. Your browser asks for permission first, the stream is
-  used only on the page, and it stops when you press Stop or leave the page.
-- **Nothing is stored.** The tools do not save what you enter. They use no
-  cookies, local storage, or any other browser storage, so nothing is kept
-  once you close the page.
+  anywhere by this site. Downloads are created on your device.
+- **Online voices in Text to Speech.** Text to Speech reads aloud with the
+  voices your browser offers. A voice marked Online (Google's voices in
+  Chrome, the "Online (Natural)" voices in Edge) runs on Google's or
+  Microsoft's servers, so your browser sends them the text it reads. The page
+  says so whenever such a voice is chosen; the other voices run on your
+  device.
+- **Images from the web in Markdown to PDF** are fetched only if you tick
+  Load images from the web, which tells the site hosting each image that the
+  document was opened.
+- **Use my location** in the MGRS Converter asks your browser for your
+  position. Unless your device has a GPS fix, your browser or operating
+  system usually works it out with a location service run by Google, Apple
+  or Microsoft, from the Wi-Fi networks and mobile masts around you.
+- **Camera, microphone, location, clipboard and notifications** are only
+  requested when you press a button or tick a box that needs them, such as
+  Start camera, Paste image or Show a notification when a timer ends. Your
+  browser asks for permission first, a camera or microphone stream is used
+  only on the page, and it stops when you press Stop or leave the page.
+- **Nothing is saved in your browser's storage.** The tools use no cookies,
+  local storage, or any other browser storage. Some tools, such as Wheel
+  Spinner, GPA Calculator, Online Timer, Stopwatch and Date Calculator, keep
+  their settings and entries in the page address after the # sign, so that a
+  reload, a bookmark or a link brings them back. Browsers never send that part
+  of the address to the server, but like any address it stays in your browser
+  history until you clear it, and anyone you send the link to sees what it
+  holds.
 
 This site does not use its own cookies or analytics.
 
