@@ -4,7 +4,8 @@ const path = require('path');
 // The pictures in tests/fixtures/image-to-text/ are drawn by make_fixtures.py with Pillow from
 // known lines of text, which are saved in expected.json: the test compares what the page reads
 // with the text that was drawn, not with an earlier reading. Paragraph breaks are Tesseract's
-// choice, so texts are compared line by line, with blank lines left out.
+// choice, so texts are compared line by line, with blank lines left out. (pq.avif, a 128 x 16
+// HDR AVIF with no text, is a copy of tests/fixtures/heic-to-jpg/pq.avif.)
 module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const expected = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const fx = name => path.join(fixtures, name);
@@ -143,6 +144,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.click('#i2t-clear');
   assert.equal((await state()).outHidden, true);
   assert.equal(await page.isVisible('#i2t-placeholder'), true);
+  // (A double click on the sample reads it once.)
+  await clearStatus();
+  await page.dblclick('#i2t-sample');
+  await done();
+  assert.deepEqual((await state()).options, ['1. sample.png'], 'a double click adds the sample once');
+  await page.click('#i2t-clear');
   await add('hyphen.png');
   s = await state();
   assert.deepEqual(lines(s.text), lines(expected.hyphen));
@@ -191,9 +198,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.uncheck('#i2t-heads');
   assert.ok(!(await state()).text.includes('--- '));
   await page.check('#i2t-heads');
-  // Remove a page: its text goes too.
+  // Remove a page: its text goes too. (A double click removes only the one shown.)
   await show('para.heic');
-  await page.click('#i2t-remove');
+  await page.dblclick('#i2t-remove');
   s = await state();
   assert.equal(s.status, 'Removed para.heic.');
   assert.equal(s.options.length, 5);
@@ -283,19 +290,35 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.uncheck('#i2t-asread');
   assert.ok((await shown()).grey > 1000, 'the photo itself has greys');
   assert.deepEqual(lines(section(s.text, 'dark.png')), lines(expected.dark));
+  // Faint grey print: Otsu's level falls between the letters and the paper, so the letters
+  // turn black (a fixed level of 128 would turn them white, and nothing would be read).
+  await page.click('#i2t-clear');
+  await add('faint.png');
+  s = await state();
+  assert.deepEqual(lines(s.text), lines(expected.faint), 'faint print read in black and white');
+  await page.check('#i2t-asread');
+  const faint = await shown();
+  assert.ok(faint.grey === 0 && faint.mean < 245, `the letters are black as read: ${JSON.stringify(faint)}`);
+  await page.uncheck('#i2t-asread');
   await page.uncheck('#i2t-bw');
   await done();
 
   // ---- Rotate page: a picture stored sideways without an orientation tag ----
   await page.click('#i2t-clear');
   await add('sideways.png');
-  assert.notDeepEqual(lines((await state()).text), lines(expected.para));
+  s = await state();
+  assert.notDeepEqual(lines(s.text), lines(expected.para));
+  // Read sideways, little is certain: the page suggests turning it.
+  const turnHint = 'If the text is sideways or upside down, press Rotate page.';
+  assert.match(s.status, /^Read \d+ lines? from sideways\.png, average confidence [1-4]?\d%; \d+ lines? to check\. If the text is sideways or upside down, press Rotate page\.$/);
+  assert.deepEqual(s.notes, ['Little of this page was read with confidence. ' + turnHint]);
   await clearStatus();
   await page.click('#i2t-rotate');
   await done();
   s = await state();
   assert.deepEqual(lines(s.text), lines(expected.para), 'read upright after one turn clockwise');
   assert.deepEqual(s.notes, ['Turned 90° clockwise.']);
+  assert.ok(!s.status.includes(turnHint), s.status);
 
   // ---- A picture of more than 16 megapixels is made smaller in the decoder's worker ----
   await page.click('#i2t-clear');
@@ -319,15 +342,49 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(s.rows, []);
   await page.waitForFunction(() => !document.querySelector('#i2t-fig').hidden);
   await clearStatus();
+  seen.length = 0;
   await page.uncheck('#i2t-pdftext');
   await done();
   await show('text.pdf');
   s = await state();
   assert.deepEqual(s.rows.map(r => r.text), lines(expected.text_pdf), 'read as a picture when the text layer is not used');
   assert.equal(s.linesNote, '');
+  // The scanned pages read the same either way: only text.pdf is read again.
+  assert.deepEqual(seen.filter(t => /^Reading /.test(t)), ['Reading 3 of 3: text.pdf…'], JSON.stringify(seen));
+  await clearStatus();
+  seen.length = 0;
   await page.check('#i2t-pdftext');
   await done();
   assert.equal(section((await state()).text, 'text.pdf'), expected.text_pdf);
+  assert.deepEqual(seen.filter(t => /^Reading /.test(t)), ['Reading 3 of 3: text.pdf…'], JSON.stringify(seen));
+  // A scan with only a reference number typed on it is still read from the picture; a scan
+  // with its scanner's own invisible text layer has that text copied.
+  await page.click('#i2t-clear');
+  await add(['stamped.pdf', 'searchable.pdf']);
+  s = await state();
+  assert.deepEqual(lines(section(s.text, 'stamped.pdf')), lines(expected.para).concat(expected.stamp), 'the scan and its stamp are read');
+  assert.equal(section(s.text, 'searchable.pdf'), expected.para, 'the stored text of a searchable scan is copied');
+  await show('stamped.pdf');
+  s = await state();
+  assert.deepEqual(s.notes, ['This page is a scan with little text stored in the file, so the picture was read.']);
+  assert.equal(s.rows.length, 4);
+  await show('searchable.pdf');
+  assert.deepEqual((await state()).notes, ['The text was copied from the PDF file, not read from the picture.']);
+  // Limits: 50 files at a time, and 100 pages of a PDF (the guide says both).
+  await page.click('#i2t-clear');
+  await clearStatus();
+  const tiny = fs.readFileSync(fx('tiny.pdf'));
+  await page.setInputFiles('#i2t-file', [{ name: 'long.pdf', mimeType: 'application/pdf', buffer: fs.readFileSync(fx('long.pdf')) }]
+    .concat(Array.from({ length: 50 }, (_, i) => ({ name: `t${i + 1}.pdf`, mimeType: 'application/pdf', buffer: tiny }))));
+  await done(page, 180000);
+  s = await state();
+  assert.equal(s.error, 'Only the first 50 of 51 files were added. Only the first 100 of the 101 pages of long.pdf were added. To read others, take them out first with Split PDF.');
+  assert.equal(s.options.length, 149);
+  assert.equal(s.options[99], '100. long.pdf, page 100');
+  assert.equal(s.options[148], '149. t49.pdf');
+  assert.equal(section(s.text, 'long.pdf, page 100'), 'Page 100');
+  assert.equal(section(s.text, 't49.pdf'), 'Tiny page');
+  assert.equal(s.status, 'Read 149 pages: 149 lines.');
   // A single PDF page with a text layer is summed up as copied.
   await page.click('#i2t-clear');
   await add('text.pdf');
@@ -356,6 +413,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.waitForFunction(() => document.querySelector('#i2t-pw-error').textContent !== '');
   assert.equal(await page.textContent('#i2t-pw-error'), 'That password is not right. Check it and try again.');
   assert.equal(await page.getAttribute('#i2t-pw', 'aria-invalid'), 'true');
+  assert.equal((await state()).status, 'locked.pdf is locked with a password. Type the password that opens it.',
+    'while the page waits for the password again, the status does not say it is still opening the file');
   await page.fill('#i2t-pw', 'open sesame');
   await page.keyboard.press('Enter');
   await done();
@@ -374,21 +433,49 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // ---- Files that are not pictures ----
   await clearStatus();
   const asBuffer = (name, mimeType) => ({ name, mimeType, buffer: fs.readFileSync(fx(name)) });
-  await page.setInputFiles('#i2t-file', [asBuffer('notes.txt', 'text/plain'), asBuffer('fake.png', 'image/png'), { name: 'empty.png', mimeType: 'image/png', buffer: Buffer.alloc(0) }]);
-  await page.waitForFunction(() => /fake\.png/.test(document.querySelector('#i2t-error').textContent) && document.querySelector('#i2t-progress').hidden);
+  // A PNG header that claims 20,000 x 20,000 pixels, and files the image reader names.
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0);
+  ihdr.write('IHDR', 4, 'latin1');
+  ihdr.writeUInt32BE(20000, 8);
+  ihdr.writeUInt32BE(20000, 12);
+  ihdr.set([8, 2, 0, 0, 0], 16);
+  const odd = [
+    { name: 'huge.png', mimeType: 'image/png', buffer: Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), ihdr, Buffer.alloc(64)]) },
+    { name: 'layers.psd', mimeType: 'image/vnd.adobe.photoshop', buffer: Buffer.concat([Buffer.from('8BPS\u0000\u0001', 'latin1'), Buffer.alloc(200)]) },
+    { name: 'photos.zip', mimeType: 'application/zip', buffer: Buffer.concat([Buffer.from([0x50, 0x4B, 3, 4]), Buffer.alloc(100)]) },
+    { name: 'clip.mp4', mimeType: 'video/mp4', buffer: Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom', 'latin1'), Buffer.alloc(300)]) },
+    { name: 'scan.tif', mimeType: 'image/tiff', buffer: Buffer.concat([Buffer.from([0x49, 0x49, 0x2B, 0, 8, 0, 0, 0]), Buffer.alloc(300)]) },
+    { name: 'broken.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\nnothing that a PDF needs\n', 'latin1') }
+  ];
+  await page.setInputFiles('#i2t-file', [asBuffer('notes.txt', 'text/plain'), asBuffer('fake.png', 'image/png'), { name: 'empty.png', mimeType: 'image/png', buffer: Buffer.alloc(0) }, ...odd]);
+  await page.waitForFunction(() => /scan\.tif/.test(document.querySelector('#i2t-error').textContent) && document.querySelector('#i2t-progress').hidden);
   s = await state();
   const notPicture = ': this is not a picture or PDF the page can read. Use a JPG, PNG, WebP, HEIC, AVIF, GIF, BMP, TIFF, SVG or PDF file.';
-  assert.equal(s.error, 'empty.png is empty. notes.txt' + notPicture + ' fake.png' + notPicture);
+  // The image reader's own explanation is passed on where it says more than "not a picture".
+  assert.equal(s.error, 'empty.png is empty. broken.pdf is damaged or is not a valid PDF. notes.txt' + notPicture + ' fake.png' + notPicture +
+    ' huge.png: The image is 20000 × 20000 pixels (400 megapixels), over the 100 megapixel limit for opening in a browser.' +
+    ' layers.psd: Photoshop (PSD) files are not supported. Export a PNG or JPG from Photoshop first.' +
+    ' photos.zip: This is a ZIP archive. Unzip it first, then add the images.' +
+    ' clip.mp4: This looks like a video file, not a still image.' +
+    ' scan.tif: BigTIFF files are not supported.');
   assert.equal(s.options.length, 2, 'pages that cannot be read are not kept');
-  // Clear all while a password is asked for drops that PDF quietly.
-  await page.setInputFiles('#i2t-file', fx('locked.pdf'));
+  // Clear all while a password is asked for drops that PDF quietly, and the files chosen
+  // with it, before and after it, and files chosen while it waited, as well.
+  await page.setInputFiles('#i2t-file', [fx('para.png'), fx('locked.pdf'), fx('hyphen.png')]);
   await page.waitForSelector('#i2t-pw-box:not([hidden])');
+  await page.setInputFiles('#i2t-file', fx('small.png'));
   await page.click('#i2t-clear');
   await page.waitForFunction(() => document.querySelector('#i2t-pw-box').hidden);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(1500);
   s = await state();
   assert.equal(s.error, '');
-  assert.deepEqual(s.options, []);
+  assert.deepEqual(s.options, [], 'nothing of that batch is added after Clear all');
+  assert.equal(s.text, '');
+  assert.equal(s.busy, false);
+  assert.equal(s.outHidden, true);
+  assert.equal(await page.isVisible('#i2t-placeholder'), true);
+  assert.equal(await page.isVisible('#i2t-wait'), false, 'no cleared page is shown');
   assert.equal(s.status, 'Cleared.');
   await add('blank.png');
   s = await state();
@@ -404,8 +491,38 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   s = await state();
   assert.equal(s.error, '');
   assert.deepEqual(lines(s.text), lines(expected.para));
+  // An HDR picture: the browser maps it into standard range, and the page says so.
+  await page.click('#i2t-clear');
+  await add('pq.avif');
+  assert.deepEqual((await state()).notes, ['This is an HDR image. The browser mapped it into standard range before it was read.']);
+  // A long file name is cut by whole characters for the download: an emoji is never split
+  // (half of one is saved as a replacement character). Headless Chromium reports any name
+  // that is not ASCII as "download", so the name the page asks for is read from the link.
+  await page.click('#i2t-clear');
+  await clearStatus();
+  const emojiName = 'a'.repeat(79) + '\u{1F600}';
+  await page.setInputFiles('#i2t-file', { name: emojiName + '.png', mimeType: 'image/png', buffer: fs.readFileSync(fx('small.png')) });
+  await done();
+  let downloads = 0;
+  const countDownload = () => { downloads++; };
+  page.on('download', countDownload);
+  await page.evaluate(() => {
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () { if (this.download) window.i2tName = this.download; return click.call(this); };
+  });
+  await Promise.all([page.waitForEvent('download'), page.dblclick('#i2t-download')]);
+  assert.equal(await page.evaluate(() => window.i2tName), emojiName + '.txt');
+  assert.equal((await state()).status, 'Downloaded ' + emojiName + '.txt.');
+  await page.waitForTimeout(500);
+  page.off('download', countDownload);
+  assert.equal(downloads, 1, 'a double click downloads the text once');
 
   // ---- Other languages: data is downloaded once per language ----
+  // Read with the English data, Spanish letters come out wrong, as the guide says.
+  await page.click('#i2t-clear');
+  await add('spanish.png');
+  assert.ok((await state()).text.includes('nifio'), (await state()).text);
+  assert.ok((await page.textContent('body')).includes('the Spanish niño comes out as nifio'), 'the guide gives the example');
   await page.click('#i2t-clear');
   await page.selectOption('#i2t-lang', 'spa');
   assert.equal(await page.isVisible('#i2t-also-row'), true);
@@ -466,7 +583,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // The Paste image button reads the clipboard.
   await page.evaluate(`navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([${png(fs.readFileSync(fx('hyphen.png')).toString('base64'))}], { type: 'image/png' }) })])`);
   await clearStatus();
-  await page.click('#i2t-paste');
+  await page.dblclick('#i2t-paste');
   await done();
   s = await state();
   assert.deepEqual(s.options, ['1. Pasted image 1', '2. Pasted image 2']);
@@ -534,7 +651,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.waitForSelector('#i2t-pw-box:not([hidden])');
   await page.click('#i2t-camera');
   await page.waitForSelector('#i2t-video:not([hidden])');
-  await page.click('#i2t-capture');
+  await page.dblclick('#i2t-capture');
   await page.waitForFunction(() => document.querySelector('#i2t-video').hidden, null, { timeout: 5000 });
   await clearStatus();
   await page.click('#i2t-pw-skip');
@@ -665,4 +782,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.ok(fit.every(o => o.fits), JSON.stringify(fit));
   assert.equal(section((await state(p3)).text, 'Screenshot 2026-11-21 at 09.41.27 of the quarterly report.png'), expected.small, 'the text keeps the whole name');
   await phone.close();
+
+  // ---- The browser's language is the first guess for the text ----
+  const taiwan = await page.context().browser().newContext({ locale: 'zh-TW' });
+  const p4 = await taiwan.newPage();
+  await p4.goto(url);
+  assert.equal(await p4.$eval('#i2t-lang', el => el.value), 'chi_tra');
+  assert.equal(await p4.isVisible('#i2t-also-row'), true);
+  assert.equal((await state(p4)).size, 'Before reading, the page downloads about 3.2 MB from this site: the OCR engine (1.5 MB) and Chinese (Traditional) data (1.7 MB). Nothing is uploaded.');
+  await taiwan.close();
 };

@@ -31,8 +31,8 @@ howto: |
   blue) cones, worked out with Smith and Pokorny's cone sensitivities for a
   standard sRGB screen. Such colours lie on a *confusion line*: to someone without that
   cone type, figure and background are the same colour. There are four plates
-  for each cone type, from bold to very faint, and two control plates drawn
-  in light and dark that everyone should see. Ishihara's test checks red-green
+  for each cone type, from bold to very faint, and two control plates with
+  the figure in darker dots, which everyone should see. Ishihara's test checks red-green
   vision only; the S-cone plates here also screen for blue-yellow (tritan)
   deficiency.
 
@@ -41,7 +41,7 @@ howto: |
   | Plates of one kind missed | Severity hint |
   |---|---|
   | 0 | No sign of a deficiency |
-  | 1 | Borderline, often the screen or lighting |
+  | 1 | No clear sign: often a mistap, the screen or the lighting |
   | 2 | Mild |
   | 3 | Moderate |
   | 4 | Strong, as in dichromacy |
@@ -70,9 +70,9 @@ howto: |
   ## A screening, not a diagnosis
 
   A screen test can point to a deficiency but cannot diagnose one. An
-  optometrist uses printed plates under standard lighting, and an
-  anomaloscope, the most accurate instrument, gives the type and severity of
-  a red-green deficiency. See one if your result shows signs of a
+  optometrist tests with printed plates under standard lighting, and
+  specialist clinics use an anomaloscope, the most accurate instrument, to
+  find the type and severity of a red-green deficiency. See one if your result shows signs of a
   deficiency, and promptly if your colour vision changes, above all in one
   eye only.
 
@@ -106,6 +106,13 @@ faq:
 .msg.cbt-warn { background: var(--surface-2); border-left: 3px solid var(--danger); color: var(--text); }
 .cbt-stage { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 28px; }
 .cbt-plate-wrap { flex: 1 1 280px; max-width: 420px; min-width: 0; }
+/* The whole plate and its clock stay in view while the clock runs: beside the
+   answers on a wide screen, above them on a phone (where the answers need
+   about 350px more). */
+.cbt-plate-wrap { max-width: min(420px, max(240px, 100vh - 64px)); max-width: min(420px, max(240px, 100svh - 64px)); }
+@media (max-width: 639px) {
+  .cbt-plate-wrap { max-width: min(420px, max(200px, 100vh - 360px)); max-width: min(420px, max(200px, 100svh - 360px)); }
+}
 .cbt-side { flex: 1 1 250px; min-width: 0; }
 .cbt-timer { height: 8px; margin: 10px 0 0; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
 .cbt-timer i { display: block; height: 100%; background: var(--accent); transform-origin: left center; }
@@ -482,11 +489,11 @@ faq:
       $('#cbt-q').textContent = 'What shape do you see?';
       keys = 'Keys: 1 circle, 2 square, 3 triangle, 4 star, N none.';
     } else {
-      for (var d = 1; d <= 9; d++) pad.appendChild(answerButton(String(d), String(d), ''));
+      for (var d = 1; d <= 9; d++) pad.appendChild(answerButton(String(d), String(d), '', String(d)));
       $('#cbt-q').textContent = 'What number do you see?';
       keys = 'Keys: 1 to 9, or N if you see no number.';
     }
-    var none = answerButton('none', mode === 'shapes' ? 'I see no shape' : 'I see no number', '');
+    var none = answerButton('none', mode === 'shapes' ? 'I see no shape' : 'I see no number', '', 'N 0');
     none.classList.add('cbt-none');
     pad.appendChild(none);
     $('#cbt-keys').textContent = keys;
@@ -498,7 +505,9 @@ faq:
     triangle: '<path d="M12 3.5 21 19.5H3Z"/>',
     star: '<path d="M12 2.5 14.6 9.1 21.5 9.4 16.1 13.7 18 20.5 12 16.6 6 20.5 7.9 13.7 2.5 9.4 9.4 9.1Z"/>'
   };
-  function answerButton(value, text, key) {
+  // key: shown on the button; shortcuts: the keys a screen reader announces,
+  // so the shown key stays out of the button's name ("Circle", not "Circle1").
+  function answerButton(value, text, key, shortcuts) {
     var b = document.createElement('button');
     b.type = 'button';
     b.className = 'btn secondary';
@@ -508,8 +517,10 @@ faq:
     if (key) {
       var k = document.createElement('kbd');
       k.textContent = key;
+      k.setAttribute('aria-hidden', 'true');
       b.appendChild(k);
     }
+    if (shortcuts || key) b.setAttribute('aria-keyshortcuts', shortcuts || key);
     return b;
   }
 
@@ -625,8 +636,11 @@ faq:
       detail = 'Likely type: tritan (the blue-sensitive S cones). Severity hint: ' + SEVERITY[miss.S] +
         '. Inherited blue-yellow deficiency is rare: a warm-tinted screen, Night Shift or the lens of the eye yellowing with age can also cause these misses.';
     } else if (rg === 1 || miss.S === 1) {
+      var missed = miss.L + miss.M + miss.S;
       title = 'No clear sign of a colour vision deficiency';
-      detail = 'You missed one of the 12 coloured plates, which a mistap or a dim or tinted screen can cause. Take the test again to check.';
+      detail = missed === 1
+        ? 'You missed one of the 12 coloured plates, which a mistap or a dim or tinted screen can cause. Take the test again to check.'
+        : 'You missed ' + missed + ' of the 12 coloured plates, but no more than one of each kind. A mistap or a dim or tinted screen can cause that, so take the test again to check.';
     } else {
       title = 'No sign of a colour vision deficiency';
       detail = 'You saw all ' + plates.length + ' plates, including the faintest of each kind.';
@@ -651,7 +665,7 @@ faq:
     body.textContent = '';
     var lines = [];
     ['C', 'L', 'M', 'S'].forEach(function (k) {
-      var tr = document.createElement('tr'), name = k === 'C' ? 'Control (light and dark)' : KIND_NAMES[k];
+      var tr = document.createElement('tr'), name = k === 'C' ? 'Control (everyone should see)' : KIND_NAMES[k];
       cell(tr, name, true);
       cell(tr, s.seen[k] + ' of ' + s.total[k]);
       body.appendChild(tr);

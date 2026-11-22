@@ -14,6 +14,8 @@ INPUTS = {
     'greek': 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ ϴ αβγδεζηθικλμνξοπρςστυφχψω ϵϑϰϕϱϖ Ϝϝ ıȷ',
     'accents': 'Crème brûlée, ÉCOLE, mañana, ά, Straße, Œuvre, café',
     'mixed': 'Hi 👋🏽 there!\nLine (2) 🇬🇧 + x = y?',
+    # Keycap emoji (a digit, # or *, U+FE0F, U+20E3) stay whole in every style.
+    'keycaps': 'Go 1\ufe0f\u20e3 #\ufe0f\u20e3 *\ufe0f\u20e3 2 \u2764\ufe0f 9\u20e3',
     'symbols': 'H2O & CO2: 1+1=2; [a] {b} <c> _d_ "e" \'f\' ¿g? ¡h!',
     'back': 'Back test',
     'hello': 'Hello',
@@ -164,6 +166,16 @@ def turned(c):
 
 def map_text(text, f):
     out, left = [], []
+    for g in clusters(text):
+        if '\u20e3' in g:  # a keycap emoji such as 1\ufe0f\u20e3 is left whole
+            out.append(g)
+            continue
+        out.extend(map_chars(g, f, left))
+    return ''.join(out), left
+
+
+def map_chars(text, f, left):
+    out = []
     for c in text:
         m = f(c)
         if m is None and ord(c) > 0x7F:
@@ -176,7 +188,7 @@ def map_text(text, f):
                 left.append(c)
         else:
             out.append(m)
-    return ''.join(out), left
+    return out
 
 
 def clusters(text):
@@ -187,7 +199,7 @@ BREAKS = {'\r\n', '\n', '\r', ' ', ' '}
 
 
 def marked(text, mark):
-    return ''.join(g if g in BREAKS or g in '\t\f\v' or regex.search(r'\p{Extended_Pictographic}|[\U0001F1E6-\U0001F1FF]', g) else g + mark
+    return ''.join(g if g in BREAKS or g in '\t\f\v' or regex.search(r'\p{Extended_Pictographic}|[\U0001F1E6-\U0001F1FF\u20e3\ufe0f]', g) else g + mark
                    for g in clusters(text))
 
 

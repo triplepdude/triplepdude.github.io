@@ -140,10 +140,14 @@ faq:
 .tc del { background: var(--tc-del-hl); text-decoration: line-through; text-decoration-thickness: 1px; }
 .tc del + ins { margin-left: 2px; }
 .tc ins { background: var(--tc-ins-hl); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
-/* Screen-reader-only labels. Static inline-blocks: absolutely positioned ones cost seconds of layout on big diffs. */
-.tc del::before, .tc del::after, .tc ins::before, .tc ins::after { display: inline-block; width: 1px; height: 1px; margin-right: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* Big outputs come in blocks; off-screen blocks skip layout. One block is left alone. */
-.tc-blk:not(:only-of-type) { content-visibility: auto; }
+/* Screen-reader-only labels: static 1px inline-blocks that show nothing, as their text starts after
+   1px of padding. Absolutely positioned ones cost seconds of layout on big diffs, and with
+   clip-path a long comparison took up to a third longer to draw. */
+.tc del::before, .tc del::after, .tc ins::before, .tc ins::after { display: inline-block; width: 1px; height: 1px; margin-right: -1px; padding-left: 1px; overflow: hidden; white-space: nowrap; }
+/* Long results come in blocks, drawn a few at a time (see draw()). Each keeps the containment that
+   content-visibility: auto gave it, which nearly halves the time to draw 12,000 rows that way.
+   One block is left alone. */
+.tc-blk:not(:only-of-type) { contain: content; }
 .tc del::before { content: " [removed: "; }
 .tc ins::before { content: " [added: "; }
 .tc del::after, .tc ins::after { content: "] "; }
@@ -543,10 +547,24 @@ faq:
       return [[0, CTX], [r.len - CTX, r.len]];
     }
 
-    // Rows go into blocks of BLOCK rows, each its own fixed-layout table with
-    // content-visibility: auto, so the browser only lays out the blocks on screen.
-    // One big table took over a second of main-thread layout for 5,000 changed lines.
+    // Rows go into blocks of BLOCK rows, each its own fixed-layout table, and the page draws only
+    // the blocks near the screen at once (see draw() below the engine). One big table took over
+    // a second of main-thread layout for 5,000 changed lines.
     var BLOCK = 200;
+    // The result's html is an outline with an empty box of about the right height in place of each
+    // block, of the block's own tag (so :only-of-type stays the same once it is drawn); the blocks
+    // come separately. Their contain-intrinsic-size serves the saved .html report, where off-screen
+    // blocks skip their layout (on the page nothing may: see draw()).
+    function blockList() {
+      var list = [];
+      return {
+        list: list,
+        add: function (tag, html, height) {
+          list.push(html);
+          return '<' + tag + ' class="tc-hole" data-b="' + (list.length - 1) + '" style="height:' + height + 'px"></' + tag + '>';
+        }
+      };
+    }
     // Past this many rows the rest is left out: inserting hundreds of thousands of rows would
     // freeze the page for seconds. The downloads always cover everything.
     var MAX_ROWS = 12000;
@@ -557,12 +575,13 @@ faq:
       var head = split
         ? '<table class="tc-table tc-split"><colgroup><col class="tc-num"><col class="tc-mk"><col><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>'
         : '<table class="tc-table tc-unified"><colgroup><col class="tc-num"><col class="tc-num"><col class="tc-mk"><col></colgroup><tbody>';
-      var html = [], rows = [];
+      var html = [], rows = [], blocks = blockList();
       var timedOut = false, total = 0, cut = false;
 
       function flushBlock() {
         if (!rows.length) return;
-        html.push('<div class="tc-blk" style="contain-intrinsic-size:auto ' + rows.length * 22 + 'px">' + head + rows.join('') + '</tbody></table></div>');
+        var h = rows.length * 22;
+        html.push(blocks.add('div', '<div class="tc-blk" style="contain-intrinsic-size:auto ' + h + 'px">' + head + rows.join('') + '</tbody></table></div>', h));
         rows = [];
       }
       function push(tr) {
@@ -627,19 +646,19 @@ faq:
       });
       if (cut) rows.push('<tr class="tc-fold tc-cut"><td colspan="' + cols + '">' + CUT_NOTE + '</td></tr>');
       flushBlock();
-      return { html: html.join(''), timedOut: timedOut, truncated: cut };
+      return { html: html.join(''), blocks: blocks.list, timedOut: timedOut, truncated: cut };
     }
 
     // A pane of running text, split into <pre> blocks of about BLOCK lines at
-    // fragment boundaries so off-screen blocks skip layout (content-visibility).
+    // fragment boundaries, so the page can draw them a few at a time.
     function pane(lineHeight) {
       var blocks = [], cur = [], lines = 0, total = 0, cut = false;
       function flush() {
         if (!cur.length) return;
         // The HTML parser drops a line break right after <pre>, so a block that
         // starts with an empty line gets a second one to keep it.
-        var body = cur.join('');
-        blocks.push('<pre class="tc-blk" style="contain-intrinsic-size:auto ' + Math.ceil(lines * lineHeight) + 'px">' + (body.charAt(0) === '\n' ? '\n' : '') + body + '</pre>');
+        var body = cur.join(''), h = Math.ceil(lines * lineHeight);
+        blocks.push({ h: h, html: '<pre class="tc-blk" style="contain-intrinsic-size:auto ' + h + 'px">' + (body.charAt(0) === '\n' ? '\n' : '') + body + '</pre>' });
         cur = [];
         lines = 0;
       }
@@ -660,7 +679,11 @@ faq:
           for (var i = 0; i < last; i++) add(parts[i] + '\n', 1);
           if (parts[last]) add(parts[last], 0);
         },
-        html: function () { flush(); return blocks.join(''); }
+        // The pane's outline; its blocks join the result's list.
+        html: function (list) {
+          flush();
+          return blocks.map(function (b) { return list.add('pre', b.html, b.h); }).join('');
+        }
       };
     }
 
@@ -707,16 +730,17 @@ faq:
         var note = '<span class="tc-fold-flow tc-cut">' + CUT_NOTE + '</span>';
         left.add(note, 1, true); right.add(note, 1, true); inline.add(note, 1, true);
       }
-      var prose = o.mode === 'word' ? ' is-prose' : '';
+      var prose = o.mode === 'word' ? ' is-prose' : '', blocks = blockList();
       if (o.view === 'split') {
         return {
-          html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Original</h2>' + left.html() + '</section>' +
-            '<section class="tc-pane"><h2>Changed</h2>' + right.html() + '</section></div>',
+          html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Original</h2>' + left.html(blocks) + '</section>' +
+            '<section class="tc-pane"><h2>Changed</h2>' + right.html(blocks) + '</section></div>',
+          blocks: blocks.list,
           timedOut: timedOut,
           truncated: cut
         };
       }
-      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Changes</h2>' + inline.html() + '</section></div>', timedOut: timedOut, truncated: cut };
+      return { html: '<div class="tc-flow' + prose + '"><section class="tc-pane"><h2>Changes</h2>' + inline.html(blocks) + '</section></div>', blocks: blocks.list, timedOut: timedOut, truncated: cut };
     }
 
     // ---- JSON: a strict parser (plus comments and trailing commas) that keeps every number's
@@ -945,6 +969,7 @@ faq:
       var patch = patchText(o.pa, o.pb, Math.max(t0 + 8000, Date.now() + 500), o.names);
       return {
         html: rendered.html,
+        blocks: rendered.blocks,
         stats: stats,
         tokens: counts,
         identical: stats.added + stats.removed + stats.changed === 0,
@@ -974,7 +999,8 @@ faq:
   var okBox = TT.$('#tc-ok'), errBox = TT.$('#tc-error'), statusBox = TT.$('#tc-status'), jsonBox = TT.$('#tc-json-msg');
   var announceBox = TT.$('#tc-announce');
   var worker = null, workerUrl = null, busy = false, seq = 0, latest = null, statusTimer = 0, local = null, lastReq = null;
-  var typing = false, exportWhenReady = null;
+  // typing: the texts changed since the last request; pending: a request is waiting for its result.
+  var typing = false, pending = false, exportWhenReady = null;
   // What was opened on each side: its name, exact text (original line endings), the text shown
   // (line breaks as \n, which is all a text box can hold), encoding and line-ending style.
   var meta = { a: null, b: null };
@@ -1099,13 +1125,105 @@ faq:
     return 'The texts are identical apart from a line break at the very end.';
   }
 
+  // ---------- Drawing the result ----------
+  // The result comes as an outline with an empty box, of about the right height, in place of each
+  // block of about 200 rows. The boxes near the screen are filled before the first frame and the
+  // rest a few per frame, nearest first, so no frame takes long and the whole result is soon in
+  // the page, for find in page, screen readers and copying. (With content-visibility: auto the
+  // browser skipped the off-screen blocks itself, but while anything in the page skips its content
+  // that way, Chromium takes seconds to paste over a long text.)
+  var holes = [], blocks = [], drawFrame = 0, root = document.documentElement;
+
+  function setBusy() { out.setAttribute('aria-busy', typing || pending || holes.length ? 'true' : 'false'); }
+
+  // A filled box is rarely as tall as its estimate, so while boxes are filled the page keeps what is
+  // on screen in place itself. The browser's scroll anchoring is off meanwhile: it would add its own
+  // correction, and in Chromium below about 800 px wide it let the rows on screen drift by thousands
+  // of pixels.
+  function anchoring(on) { root.style.overflowAnchor = on ? '' : 'none'; }
+
+  // What to keep in place: the top of the first drawn block on screen (in the first pane, side by
+  // side), or else the end of the result, when the screen is below it.
+  function onScreen() {
+    var vh = window.innerHeight, list = TT.$$('.tc-blk', out);
+    for (var k = 0; k < list.length; k++) {
+      var b = list[k].getBoundingClientRect();
+      if (b.bottom > 0 && b.top < vh) return { el: list[k], top: true, y: b.top };
+    }
+    var o = out.getBoundingClientRect();
+    return o.bottom < vh ? { el: out, top: false, y: o.bottom } : null;
+  }
+
+  function draw(r) {
+    cancelAnimationFrame(drawFrame);
+    blocks = r ? r.blocks : [];
+    out.innerHTML = r ? r.html : '';
+    holes = TT.$$('.tc-hole', out);
+    anchoring(!holes.length);
+    // Everything within a screen of the screen is drawn before the first frame.
+    for (var n = nearest(); n && n.gap < window.innerHeight; n = nearest()) fill(n.hole);
+    drawNext(true);
+  }
+
+  function fill(h) {
+    var i = holes.indexOf(h);
+    if (i < 0) return;
+    holes.splice(i, 1);
+    var keep = onScreen(), t = document.createElement('template');
+    t.innerHTML = blocks[h.getAttribute('data-b')];
+    h.replaceWith(t.content.firstChild);
+    if (!keep) return;
+    var b = keep.el.getBoundingClientRect(), d = (keep.top ? b.top : b.bottom) - keep.y;
+    if (d) window.scrollBy({ top: d, behavior: 'instant' });
+  }
+
+  // The box nearest the screen, and how far from it (0 when on screen).
+  function nearest() {
+    var vh = window.innerHeight, best = null;
+    holes.forEach(function (h) {
+      var b = h.getBoundingClientRect(), d = b.top > vh ? b.top - vh : b.bottom < 0 ? -b.bottom : 0;
+      if (!best || d < best.gap) best = { hole: h, gap: d };
+    });
+    return best;
+  }
+
+  // Each frame fills boxes for about 25 ms, laying each block out at once so the time counts. The
+  // first frame after a new result only draws what is near the screen.
+  function drawNext(later) {
+    drawFrame = 0;
+    if (!holes.length) { anchoring(true); setBusy(); return; }
+    drawFrame = requestAnimationFrame(function () {
+      if (later) { drawNext(); return; }
+      var start = performance.now();
+      do {
+        fill(nearest().hole);
+        void out.offsetHeight;
+      } while (holes.length && performance.now() - start < 25);
+      drawNext();
+    });
+  }
+
+  // Printing straight after a comparison prints all of it.
+  window.addEventListener('beforeprint', function () {
+    cancelAnimationFrame(drawFrame);
+    while (holes.length) fill(holes[0]);
+    anchoring(true);
+    setBusy();
+  });
+
+  // The whole result as html, also the blocks not drawn yet.
+  function wholeHtml(r) {
+    return r.html.replace(/<(div|pre) class="tc-hole" data-b="(\d+)"[^>]*><\/\1>/g, function (m, tag, k) { return r.blocks[k]; });
+  }
+
   function show(r) {
     clearTimeout(statusTimer);
     statusBox.textContent = '';
-    if (!typing) out.setAttribute('aria-busy', 'false');
+    pending = false;
     if (r.error) {
       errBox.textContent = 'The comparison failed: ' + r.error;
       exportWhenReady = null;
+      setBusy();
       return;
     }
     if (/^The comparison failed/.test(errBox.textContent)) errBox.textContent = '';
@@ -1124,20 +1242,21 @@ faq:
       jsonBox.textContent = '';
     }
     if (!o.a && !o.b) {
-      out.innerHTML = '';
+      draw(null);
       hint.hidden = false;
       okBox.textContent = '';
       announce();
       return;
     }
     hint.hidden = true;
-    out.innerHTML = r.html;
     okBox.textContent = r.identical ? identicalMessage(r, o) : '';
     statusBox.textContent = [
       r.autoFold ? 'Unchanged lines are folded because these texts are long.' : '',
       r.timedOut ? 'These texts differ in very many places, so some changes are shown as whole blocks.' : '',
       r.truncated ? 'Only the first 12,000 rows are shown; the .diff download has every change.' : ''
     ].filter(Boolean).join(' ');
+    // Last, so the boxes near the screen are found where they will be.
+    draw(r);
     announce();
     if (exportWhenReady) { var btn = exportWhenReady; exportWhenReady = null; exportHtml(btn); }
   }
@@ -1147,7 +1266,8 @@ faq:
     o.id = ++seq;
     lastReq = o;
     typing = false;
-    out.setAttribute('aria-busy', 'true');
+    pending = true;
+    setBusy();
     if (busy && worker) {
       worker.terminate();
       worker = null;
@@ -1166,7 +1286,7 @@ faq:
   var compareSoon = TT.debounce(compare, 200);
   function onInput() {
     typing = true;
-    out.setAttribute('aria-busy', 'true');
+    setBusy();
     showInfo('a');
     showInfo('b');
     compareSoon();
@@ -1262,7 +1382,9 @@ faq:
     '*,*::before,*::after{box-sizing:border-box}body{margin:0;padding:24px 16px;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}' +
     'main{max-width:1200px;margin:0 auto}h1{margin:0 0 6px;font-size:1.5rem}.tc-meta{margin:0 0 12px;color:var(--muted);font-size:14px}' +
     '.tc-sum{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 16px;padding:0;list-style:none;font-size:14px}.tc-sum b{font-variant-numeric:tabular-nums}' +
-    '.tc-sum .add b{color:var(--accent)}.tc-sum .del b{color:var(--danger)}';
+    '.tc-sum .add b{color:var(--accent)}.tc-sum .del b{color:var(--danger)}' +
+    // The report has no text box, so its off-screen blocks may skip their layout (see draw()).
+    '.tc-blk:not(:only-of-type){content-visibility:auto}';
   function escHtml(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function exportHtml(btn) {
     var o = lastReq, r = latest;
@@ -1281,8 +1403,9 @@ faq:
       items.push(['del', r.tokens.del, unit[0] + ' removed', unit[1] + ' removed']);
     }
     var title = 'Comparison of ' + o.names[0] + ' and ' + o.names[1];
-    // innerHTML leaves out the second line break that keeps an empty first line of a <pre> (see pane()).
-    var shown = out.innerHTML.replace(/(<pre\b[^>]*>)\n/g, '$1\n\n');
+    // The whole result as made, with any blocks not drawn yet. Unlike innerHTML, it keeps the second
+    // line break that holds an empty first line in a <pre> (see pane()).
+    var shown = wholeHtml(r);
     var html = '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
       '<title>' + escHtml(title) + '</title>\n<style>\n' + TOKENS + '\n' + TT.$('#tc-style').textContent.trim() + '\n</style>\n</head>\n<body>\n<main class="tc">\n' +
       '<h1>' + escHtml(title) + '</h1>\n<p class="tc-meta">Compared by ' + mode + (o.json ? ' as JSON' + (o.sortKeys ? ' with sorted keys' : '') : '') +
@@ -1301,7 +1424,7 @@ faq:
       return;
     }
     // Still comparing: save as soon as the result is on screen.
-    if (!isCurrent(options()) || out.getAttribute('aria-busy') === 'true') {
+    if (!isCurrent(options())) {
       exportWhenReady = btn;
       if (typing) compare();
       return;

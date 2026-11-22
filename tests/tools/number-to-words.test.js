@@ -120,6 +120,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     [['1', 'million', 'one million'], ['234', 'thousand', 'two hundred thirty-four thousand'], ['567', 'units', 'five hundred sixty-seven']]);
   await fill('999');
   assert.equal(await page.isVisible('#nw-places-wrap'), false);
+  // From four digits on, the table shows the groups.
+  await fill('1234');
+  assert.deepEqual(await page.$$eval('#nw-places tr', trs => trs.map(tr => [...tr.cells].map(c => c.textContent))),
+    [['1', 'thousand', 'one thousand'], ['234', 'units', 'two hundred thirty-four']]);
+  assert.equal(await page.isVisible('#nw-places-wrap'), true);
 
   // ---- Decimals: point, fraction words and figures over a power of ten ----
   const decimals = {
@@ -136,8 +141,12 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     }
   }
   await set({ scale: 'long', dec: 'fraction' });
-  await fill('0.000000001');
-  assert.equal(await out('words'), 'one thousand-millionth');
+  for (const [n, w] of [['0.000000001', 'one thousand-millionth'], ['0.001', 'one thousandth'], ['0.0001', 'one ten-thousandth'], ['0.00003', 'three hundred-thousandths'],
+    ['0.000001', 'one millionth'], ['0.0000001', 'one ten-millionth'], ['0.' + '0'.repeat(11) + '7', 'seven billionths'], ['0.' + '0'.repeat(14) + '1', 'one thousand-billionth'],
+    ['0.' + '0'.repeat(64) + '1', 'one hundred-thousand-decillionth']]) {
+    await fill(n);
+    assert.equal(await out('words'), w, `long scale ${n}`);
+  }
   await set({ scale: 'short', dec: 'point' });
   // Scientific notation is exact too.
   for (const [n, w] of [['1e21', 'one sextillion'], ['1.5e6', 'one million five hundred thousand'], ['2.5e-3', 'zero point zero zero two five'], ['-4E2', 'minus four hundred']]) {
@@ -180,6 +189,8 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await out('cheque'), 'Rupees One Lakh Twenty-Five Thousand and Fifty Paise Only');
   await fill('1.01');
   assert.equal(await out('money'), 'One Rupee and One Paisa');
+  await fill('0.50');
+  assert.equal(await out('cheque'), 'Fifty Paise Only');
   await set({ cur: 'eur', scale: 'short', case: 'upper', style: 'us' });
   await fill('2.50');
   r = await results();
@@ -199,6 +210,18 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.deepEqual([r.words.text, r.money.text, r.cheque.text], ['minus five', 'minus five dollars', 'A cheque cannot be written for a negative amount.']);
   await fill('-0');
   assert.equal(await out('words'), 'zero');
+  // A currency sign or code typed with the number chooses the currency.
+  for (const [n, cur, money] of [['£5', 'gbp', 'five pounds'], ['5 EUR', 'eur', 'five euros'], ['Rs. 2,00,000/-', 'inr', 'two hundred thousand rupees'],
+    ['500/-', 'inr', 'five hundred rupees'], ['-$1.50', 'usd', 'minus one dollar and fifty cents'], ['¥5', 'usd', 'five dollars']]) {
+    await fill(n);
+    assert.equal(await page.inputValue('#nw-cur'), cur, n);
+    assert.equal(await out('money'), money, n);
+  }
+  // A choice made after typing stands until the number is typed again.
+  await fill('£5');
+  await set({ cur: 'eur' });
+  assert.equal(await out('money'), 'five euros');
+  await set({ cur: 'usd' });
 
   // ---- Letter case and commas ----
   await fill('1234567');
@@ -207,6 +230,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await set({ case: mode });
     assert.equal(await out('words'), w, mode);
   }
+  // In sentence case only the whole number starts with a capital, not each group in the table.
+  await set({ case: 'sentence' });
+  assert.deepEqual(await page.$$eval('#nw-places td.nw-w', tds => tds.map(td => td.textContent)), ['one million', 'two hundred thirty-four thousand', 'five hundred sixty-seven']);
+  await set({ case: 'title' });
+  assert.deepEqual(await page.$$eval('#nw-places td.nw-w', tds => tds.map(td => td.textContent)), ['One Million', 'Two Hundred Thirty-Four Thousand', 'Five Hundred Sixty-Seven']);
   await set({ case: 'title', style: 'uk', commas: true });
   await fill('1001.5');
   assert.equal(await out('cheque'), 'One Thousand and One and 50/100');
@@ -216,7 +244,8 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // ---- How the number is read: grouping marks, signs, symbols, other digits ----
   const reads = [['1 234 567', 'Read as 1,234,567.'], ['12,34,567', 'Read as 1,234,567.'], ['1_000_000', 'Read as 1,000,000.'], ["1'234'567.89", 'Read as 1,234,567.89.'],
     ['$1,234.56', 'Read as 1,234.56.'], ['1,234.56 USD', 'Read as 1,234.56.'], ['−5', 'Read as −5.'], ['+5', 'Read as 5.'], ['١٬٢٣٤٫٥٦', 'Read as 1,234.56.'],
-    ['１２３', 'Read as 123.'], ['007', 'Read as 7.'], ['.5', 'Read as 0.5.'], ['5.', 'Read as 5.'],
+    ['１２３', 'Read as 123.'], ['１２３，４５６．７', 'Read as 123,456.7.'], ['－５', 'Read as −5.'], ['–5', 'Read as −5.'], ['$–1.5', 'Read as −1.5.'],
+    ['007', 'Read as 7.'], ['.5', 'Read as 0.5.'], ['5.', 'Read as 5.'],
     ['1,234', 'Read as 1,234. The comma groups thousands. If it is your decimal mark, choose Comma (1.234,5).'],
     ['1.234', 'Read as 1.234. The dot is read as the decimal mark. If it groups thousands, choose Comma (1.234,5).']];
   for (const [n, read] of reads) {
@@ -237,6 +266,8 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     ['1\t2', 'Type one number: a tab or line break separates two numbers here.'],
     ['twenty', 'Type the number in figures, such as 1234.56. This page turns figures into words.'],
     ['--5', 'This number has two signs. Type one minus sign at most.'],
+    ['–−5', 'This number has two signs. Type one minus sign at most.'],
+    ['5–10', '“–” is not part of a number.'],
     ['$', 'There are no digits in this number.'],
     ['5 %', '“%” is not part of a number.'],
     ['1' + '0'.repeat(66), 'This number has 67 digits before the decimal mark. Words go up to 66 digits (999 vigintillion and so on).'],
@@ -276,6 +307,13 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.locator('#nw-input').pressSequentially('1001', { delay: 40 });
   await settles('#nw-status', '1,001 in words: one thousand one.');
   assert.equal(await page.evaluate(() => window.__nwChanges), 1);
+  await set({ cur: 'gbp' });
+  await settles('#nw-status', 'Money: one thousand one pounds.');
+  await set({ cur: 'usd' });
+  await settles('#nw-status', 'Money: one thousand one dollars.');
+  await set({ case: 'upper' });
+  await settles('#nw-status', '1,001 in words: ONE THOUSAND ONE.');
+  await set({ case: 'lower' });
 
   // ---- Copy: the exact text of each result, a confirmation, and never an old result ----
   await fill('21');
@@ -345,6 +383,22 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   for (const href of links) assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), href);
   const faqs = await page.locator('.faq summary').allTextContents();
   assert.match(faqs[faqs.length - 1], /sent anywhere/);
+
+  // ---- Every option at once: random numbers against the rules in expected.py ----
+  for (const c of data.combos) {
+    const got = await page.evaluate(c => {
+      for (const [k, v] of Object.entries({ ...c.opts, mark: '.' })) {
+        if (k === 'commas') document.querySelector('#nw-commas').checked = v;
+        else document.querySelector('#nw-' + k).value = v;
+      }
+      const el = document.querySelector('#nw-input');
+      el.value = c.n;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return Object.fromEntries([...document.querySelectorAll('.nw-item')].map(li => [li.querySelector('.nw-copy').dataset.row,
+        li.querySelector('.nw-copy').disabled ? null : li.querySelector('.nw-out').textContent]));
+    }, c);
+    for (const id of ['words', 'ordinal', 'money', 'cheque']) assert.equal(got[id], c.expected[id] ?? null, `${c.n} ${JSON.stringify(c.opts)}: ${id}`);
+  }
 
   // ---- Browsers set to German, British and Indian English ----
   const browser = page.context().browser();

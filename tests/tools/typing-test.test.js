@@ -34,6 +34,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     const c = document.querySelector('#tt-text .tt-car').getBoundingClientRect();
     return c.top >= t.top - 1 && c.bottom <= t.bottom + 1;
   });
+  // The screen reader message, without the no-break space that marks a repeat.
+  const sr = (p = page) => text('#tt-sr', p).then(t => t.replace(/\u00a0$/, ''));
   const BULK_NOTE = 'Text added in one go, such as a paste from a phone keyboard, is not counted: type it yourself.';
   const PASTE_NOTE = 'Pasting is turned off in the typing test: type the text yourself.';
 
@@ -63,7 +65,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.press('Tab'); // the hidden book list is skipped
   assert.equal(await active(), 'tt-input');
   await page.keyboard.type(w[0] + ' ' + w[1]);
-  assert.equal(await text('#tt-sr'), 'Test 1 started: 1 minute.');
+  assert.equal(await sr(), 'Test 1 started: 1 minute.');
   assert.equal(await page.locator('#tt-text .tt-w').nth(0).locator('.tt-ok').count(), w[0].length);
   assert.equal(await page.locator('#tt-text .tt-w').nth(1).locator('.tt-ok').count(), w[1].length);
   assert.equal(await page.locator('#tt-text .tt-w .tt-bad, #tt-text .tt-w .tt-extra').count(), 0);
@@ -104,7 +106,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // Esc throws the test away and deals new words.
   await page.keyboard.press('Escape');
   assert.equal(await value(), '');
-  assert.equal(await text('#tt-sr'), 'Test stopped. A new test is ready.');
+  assert.equal(await sr(), 'Test stopped. A new test is ready.');
   assert.equal(await text('#tt-time'), '1:00');
   assert.equal(await text('#tt-acc'), '–');
   assert.equal(await active(), 'tt-input');
@@ -118,7 +120,17 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.press('Enter');
   assert.equal(await active(), 'tt-input');
   assert.equal(await value(), '');
-  assert.equal(await text('#tt-sr'), 'Test stopped. A new test is ready.');
+  assert.equal(await sr(), 'Test stopped. A new test is ready.');
+  // Esc twice before typing: new words each time, and the second message,
+  // the same as the first, still changes so that it is read out again.
+  await page.keyboard.press('Escape');
+  const said = await page.locator('#tt-sr').textContent();
+  assert.equal(said, 'A new test is ready.');
+  w = await words();
+  await page.keyboard.press('Escape');
+  assert.equal(await sr(), 'A new test is ready.');
+  assert.notEqual(await page.locator('#tt-sr').textContent(), said, 'a repeated message must change to be read out');
+  assert.notDeepEqual((await words()).slice(0, 12), w.slice(0, 12), 'Esc before typing deals new words');
   w = await words();
 
   // ---- A letter pressed with nothing focused goes into the box ----
@@ -126,12 +138,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.press(w[0][0]);
   assert.equal(await active(), 'tt-input');
   assert.equal(await value(), w[0][0]);
-  assert.equal(await text('#tt-sr'), 'Test 1 started: 1 minute.');
+  assert.equal(await sr(), 'Test 1 started: 1 minute.');
   // Esc starts again when nothing has the focus too, and from the tool's buttons.
   await page.evaluate(() => document.activeElement.blur());
   await page.keyboard.press('Escape');
   assert.equal(await value(), '');
-  assert.equal(await text('#tt-sr'), 'Test stopped. A new test is ready.');
+  assert.equal(await sr(), 'Test stopped. A new test is ready.');
   assert.equal(await active(), 'tt-input');
   w = await words();
   await page.keyboard.type(w[0]);
@@ -152,7 +164,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await text('#tt-time'), '1:00');
   assert.equal(await page.evaluate(() => document.querySelector('#tt-box').classList.contains('is-ready')), true);
 
-  // ---- A flood of text inserted some other way is cut, and the box says why ----
+  // ---- A megabyte added in one go some other way is refused at once ----
   const flood = await page.evaluate(() => {
     const i = document.getElementById('tt-input');
     const t0 = performance.now();
@@ -160,20 +172,65 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     return { ms: performance.now() - t0, len: i.value.length };
   });
-  assert.ok(flood.ms < 3000, `cutting a megabyte took ${Math.round(flood.ms)} ms`);
-  assert.equal(flood.len, 20000);
+  assert.ok(flood.ms < 3000, `refusing a megabyte took ${Math.round(flood.ms)} ms`);
+  assert.equal(flood.len, 0);
+  assert.equal(await text('#tt-note'), BULK_NOTE);
+  assert.equal(await text('#tt-time'), '1:00');
+  assert.equal(await text('#tt-error'), '');
+
+  // ---- Past 20,000 characters (only a script gets there) the rest is cut, and the box says why ----
+  const grow = await page.evaluate(() => {
+    const i = document.getElementById('tt-input');
+    const t0 = performance.now();
+    for (let k = 0; k < 220; k++) {
+      i.value += 'flood word '.repeat(9);
+      i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    }
+    return { ms: performance.now() - t0, len: i.value.length };
+  });
+  assert.ok(grow.ms < 8000, `typing 20,000 characters took ${Math.round(grow.ms)} ms`);
+  assert.equal(grow.len, 20000);
   assert.equal(await text('#tt-error'), 'Only the first 20,000 characters can be typed in one test; the rest was cut off.');
   assert.equal(await page.getAttribute('#tt-input', 'aria-invalid'), 'true');
   assert.deepEqual((await page.getAttribute('#tt-input', 'aria-describedby')).split(' ').sort(), ['tt-error', 'tt-hint']);
   // 'flood word ' 1,818 times and 'fl': 3,637 words typed, and 60 more ready.
   assert.ok((await page.locator('#tt-text .tt-w').count()) >= 3637 + 60, 'enough words were added for the flood');
-  // An emoji at the limit is not cut in half.
-  await page.evaluate(() => {
+  // One word of 19,999 letters, as a key held down for minutes types: each key
+  // stays quick because only 20 extra letters are drawn, and an emoji at the
+  // limit is not cut in half.
+  await page.click('#tt-restart');
+  const held = await page.evaluate(() => {
     const i = document.getElementById('tt-input');
-    i.value = 'a'.repeat(19999) + '\u{1F600}tail';
+    for (let k = 0; k < 202; k++) {
+      i.value += 'a'.repeat(99);
+      i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    }
+    const t0 = performance.now();
+    for (let k = 0; k < 30; k++) {
+      i.value = i.value.slice(0, -1);
+      i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+      i.value += 'a';
+      i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    }
+    const ms = (performance.now() - t0) / 60;
+    i.value += 'a';
     i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    i.value += '\u{1F600}tail';
+    i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    const word = document.querySelector('#tt-text .tt-w');
+    return {
+      ms, spans: word.querySelectorAll('.tt-l').length, text: word.textContent,
+      last: word.lastElementChild.className, before: word.lastElementChild.previousElementSibling.textContent
+    };
   });
+  assert.ok(held.ms < 25, `a key in a 20,000-letter word took ${held.ms.toFixed(1)} ms`);
+  // The word's own letters, 20 extra ones, an ellipsis and the caret.
+  assert.ok(held.text.endsWith('a'.repeat(20) + '…'), held.text);
+  assert.equal(held.spans, held.text.length + 1);
+  assert.equal(held.before, '…');
+  assert.equal(held.last, 'tt-l tt-car');
   assert.equal(await value(), 'a'.repeat(19999));
+  assert.equal(await text('#tt-error'), 'Only the first 20,000 characters can be typed in one test; the rest was cut off.');
   await page.click('#tt-restart');
   assert.equal(await text('#tt-error'), '');
   assert.equal(await page.getAttribute('#tt-input', 'aria-invalid'), null);
@@ -217,9 +274,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   w = await words();
   await page.focus('#tt-input');
   await page.keyboard.type(w[0] + ' ');
-  assert.equal(await text('#tt-sr'), 'Test 1 started: 3 minutes.');
+  assert.equal(await sr(), 'Test 1 started: 3 minutes.');
   await page.check('input[name="tt-len"][value="300"]');
-  assert.equal(await text('#tt-sr'), 'Test stopped.');
+  assert.equal(await sr(), 'Test stopped.');
   assert.equal(await value(), '');
   assert.equal(await text('#tt-time'), '5:00');
   assert.equal(await hash(), '#5m');
@@ -280,12 +337,14 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     0: async () => {
       assert.equal(await value(f), '');
       assert.equal(await text('#tt-time', f), '0:30');
-      assert.equal(await text('#tt-sr', f), '');
+      assert.equal(await sr(f), '');
     },
+    // Time left is rounded up: 29.02 s left, 0.98 s after the first key, reads 0:30.
+    1: async () => assert.equal(await text('#tt-time', f), '0:30'),
     // "yp": the wrong key shows the letter that was wanted, in red.
     2: async () => {
       assert.equal(await f.locator('#tt-text .tt-w').nth(2).locator('.tt-bad').textContent(), 'o');
-      assert.equal(await text('#tt-sr', f), 'Test 1 started: 30 seconds.');
+      assert.equal(await sr(f), 'Test 1 started: 30 seconds.');
     },
     3: async () => assert.equal(await f.locator('#tt-text .tt-w').nth(2).locator('.tt-bad').count(), 0),
     // Two spaces in a row move on one word; curly quotes count as straight ones.
@@ -312,16 +371,17 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(await rows('#tt-errs', f), ex.wrong);
   assert.deepEqual(await f.$$eval('#tt-bars i', els => els.map(e => e.style.height)), ex.heights);
   assert.equal(await text('#tt-bars-note', f), ex.barsNote);
-  assert.equal(await text('#tt-sr', f), ex.spoken);
+  assert.equal(await sr(f), ex.spoken);
   assert.deepEqual(await rows('#tt-hist', f), [['1', '30 s', 'The Great Gatsby', ex.wpm, ex.acc]]);
+  assert.equal(await f.locator('#tt-text .tt-car').count(), 0, 'no caret once the test is over');
   // Keys after the end change nothing.
   await f.keyboard.type('ke');
   assert.equal(await value(f), ex.value);
   assert.equal(await f.evaluate(() => document.getElementById('tt-input').readOnly), true);
   await f.click('#tt-copy');
-  assert.equal(await f.evaluate(() => navigator.clipboard.readText()), ex.copy.concat(url).join('\n'));
+  assert.equal(await f.evaluate(() => navigator.clipboard.readText()), ex.copy.concat(url + ex.hash).join('\n'));
 
-  // The whole chapter of Alice in 81 seconds ends the 5-minute test there.
+  // The whole passage from Alice in 82 seconds ends the 5-minute test there.
   const ax = expected.alice;
   await f.goto(url + ax.hash);
   await ready(f);
@@ -336,11 +396,11 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await text('#tt-r-detail', f), ax.detail);
   assert.equal(await text('#tt-bars-note', f), ax.barsNote);
   assert.deepEqual(await f.$$eval('#tt-bars i', els => els.map(e => e.style.height)), ax.heights);
-  assert.equal(await text('#tt-sr', f), ax.spoken);
+  assert.equal(await sr(f), ax.spoken);
   assert.equal(await f.locator('#tt-errs-wrap').isVisible(), false);
   assert.deepEqual((await rows('#tt-hist', f)).map(r => r.join('|')), ['2|5 min|Alice in Wonderland|' + ax.wpm + '|' + ax.acc, '1|30 s|The Great Gatsby|' + ex.wpm + '|' + ex.acc]);
   await f.click('#tt-copy');
-  assert.equal(await f.evaluate(() => navigator.clipboard.readText()), ax.copy.concat(url).join('\n'));
+  assert.equal(await f.evaluate(() => navigator.clipboard.readText()), ax.copy.concat(url + ax.hash).join('\n'));
 
   // Common words, 1 minute: 20 words typed right, one a second. WPM counts
   // each word and its space; consistency counts the 40 idle seconds too.
@@ -367,11 +427,41 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   });
   assert.equal(await text('#tt-r-detail', f), `You typed ${chars} characters in 1 minute, ${chars} of them in correct words. ${chars} keys typed a character and 0 of them were wrong. No errors left in the text.`);
   assert.equal((await rows('#tt-hist', f))[0].slice(0, 3).join('|'), '3|1 min|Common words');
+  await f.click('#tt-copy');
+  assert.ok((await f.evaluate(() => navigator.clipboard.readText())).endsWith('\nNo errors left in the text\n' + url), 'the 1-minute common-words link has no hash');
+
+  // 30 seconds of common words: one word right, then 52 wrong. Live WPM
+  // counts the right one only; the table lists the first 50, and a long
+  // typed word is cut without splitting an emoji.
+  await f.goto(url + '#30s');
+  await ready(f);
+  const lw = await words(f);
+  await f.focus('#tt-input');
+  await f.keyboard.insertText(lw[0] + ' ');
+  await f.keyboard.insertText('x'.repeat(39) + '\u{1F600}yyyy ');
+  for (let i = 0; i < 51; i++) await f.keyboard.insertText('# ');
+  await f.clock.runFor(4000);
+  const live = Number(await text('#tt-wpm', f)), good = lw[0].length + 1;
+  // 4 s after the start the live figures were last brought up to date 3.5 to 4 s in.
+  assert.ok(live >= Math.round(good * 12000 / 4000) && live <= Math.round(good * 12000 / 3480), `live WPM ${live} for ${good} characters in correct words`);
+  await f.clock.runFor(27000);
+  await f.waitForFunction(() => !document.getElementById('tt-result').hidden);
+  assert.equal(await text('#tt-r-errs', f), '52');
+  const errRows = await rows('#tt-errs', f);
+  assert.equal(errRows.length, 50);
+  assert.deepEqual(errRows[0], ['2', lw[1], 'x'.repeat(39) + '\u{1F600}…']);
+  assert.deepEqual(errRows[49], ['51', lw[50], '#']);
+  assert.equal(await text('#tt-errs-more', f), 'The first 50 of 52 words with errors are shown.');
+  await f.click('#tt-copy');
+  const copied = (await f.evaluate(() => navigator.clipboard.readText())).split('\n');
+  assert.equal(copied[0], 'Typing test (30 seconds, common words): ' + await text('#tt-r-wpm', f) + ' WPM');
+  assert.equal(copied[2], 'Words with errors: ' + 'x'.repeat(39) + '\u{1F600}… (' + lw[1] + '), ' + lw.slice(2, 11).map(x => '# (' + x + ')').join(', ') + ' and 42 more');
+  assert.equal(copied[3], url + '#30s');
   // Clear session empties the table and the result.
   await f.click('#tt-clear');
   assert.equal(await text('#tt-hist', f), 'No tests yet.');
   assert.equal(await f.locator('#tt-result').isVisible(), false);
-  assert.equal(await text('#tt-sr', f), 'Session cleared.');
+  assert.equal(await sr(f), 'Session cleared.');
   assert.deepEqual(ferrors, []);
   await fakeCtx.close();
 
@@ -403,11 +493,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await p.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
   assert.equal(await active(p), 'tt-input');
   await p.keyboard.insertText('Alice was ');
-  assert.equal(await text('#tt-sr', p), 'Test 1 started: 30 seconds.');
+  assert.equal(await sr(p), 'Test 1 started: 30 seconds.');
   assert.equal(await p.locator('#tt-text .tt-w').nth(1).locator('.tt-ok').count(), 3);
   // A whole word and its space at once, as a word suggestion inserts it.
   await p.keyboard.insertText('beginning ');
   assert.equal(await p.locator('#tt-text .tt-w .tt-bad').count(), 0);
+  // The rest of the passage in one go, as a keyboard's clipboard button puts
+  // it in (no paste event): refused, so the test is not over in no time.
+  const rest = (await words(p)).slice(3).join(' ');
+  await p.keyboard.insertText(rest);
+  assert.equal(await value(p), 'Alice was beginning ');
+  assert.equal(await text('#tt-note', p), BULK_NOTE);
+  assert.equal(await p.locator('#tt-result').isVisible(), false);
+  await p.keyboard.insertText('to ');
+  assert.equal(await value(p), 'Alice was beginning to ');
   const sizes = await p.evaluate(() => ({
     chips: Math.min(...Array.from(document.querySelectorAll('.tt-chip span')).map(s => s.getBoundingClientRect().height)),
     restart: document.getElementById('tt-restart').getBoundingClientRect().height,
@@ -423,6 +522,14 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.ok(sizes.overflow <= 1, `sideways scroll on a phone: ${sizes.overflow}px`);
   // Every book's name fits its list box at 320 px.
   await p.setViewportSize({ width: 320, height: 640 });
+  // So do the live figures, each on one line, 100.0% included.
+  assert.equal(await text('#tt-acc', p), '100.0%');
+  const cramped = await p.evaluate(() => Array.from(document.querySelectorAll('.tt-live .stat b')).filter(b => {
+    const box = b.parentElement, cs = getComputedStyle(box);
+    const room = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    return b.scrollWidth > room + 0.5 || b.getBoundingClientRect().height > parseFloat(getComputedStyle(b).fontSize) * 1.6;
+  }).map(b => b.id + ' ' + b.textContent));
+  assert.deepEqual(cramped, []);
   const cutNames = await p.evaluate(() => {
     const sel = document.getElementById('tt-book');
     const cs = getComputedStyle(sel);
@@ -434,6 +541,24 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(cutNames, []);
   assert.deepEqual(perrors, []);
   await phone.close();
+
+  // ---- The line being typed stays in view, also when the box gets narrower ----
+  const wide = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const r = await wide.newPage();
+  await r.goto(url + '#2m-moby-dick');
+  await ready(r);
+  const mw = await words(r);
+  await r.focus('#tt-input');
+  for (const x of mw.slice(0, 40)) await r.keyboard.insertText(x + ' ');
+  assert.equal(await caretInView(r), true, 'the caret is in view after 40 words');
+  assert.ok(await r.evaluate(() => document.getElementById('tt-text').scrollTop > 0), 'the text has moved up');
+  await r.setViewportSize({ width: 360, height: 800 });
+  await r.waitForTimeout(400);
+  assert.equal(await caretInView(r), true, 'the caret is in view after the box got narrower');
+  await r.setViewportSize({ width: 1280, height: 800 });
+  await r.waitForTimeout(400);
+  assert.equal(await caretInView(r), true, 'the caret is in view after the box got wider');
+  await wide.close();
 
   // ---- Homepage search finds the page under the words people use ----
   const home = await (await page.request.get(base + '/')).text();

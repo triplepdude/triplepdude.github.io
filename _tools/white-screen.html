@@ -67,7 +67,9 @@ faq:
   - q: Is a white screen a real light source?
     a: Yes. A full white makes every pixel give out as much light as your brightness setting allows. OLED screens, TVs above all, often dim a full-screen white to limit power and heat, so it can look less bright than a small white window.
   - q: How do I exit full screen?
-    a: Press Esc, or tap the screen and choose Exit. With the colour in focus, F also switches full screen on and off. If you used your browser's own full-screen key, such as F11, press it again; on a phone the back gesture works too.
+    a: Press Esc, or tap the screen and choose Exit. With the colour in focus, F also switches full screen on and off. If you used your browser's own full-screen key, such as F11, press it again. On Android the back gesture also leaves full screen.
+  - q: How do I find dead pixels with a white screen?
+    a: Show white in full screen and look for dots that stay dark, then black, where a pixel that stays lit stands out, then red, green and blue for a single faulty sub-pixel. The [dead pixel test](/dead-pixel-test/) cycles through these colours for you and explains each kind of fault.
   - q: Why does my white look yellow or blue?
     a: At 6500 K this page shows `#FFFFFF`, so any tint comes from the screen. Night Shift, Night Light, True Tone, eye-comfort modes and the monitor's own colour preset all change its white. Turn them off, or pick the warmth you want with the colour temperature slider.
 ---
@@ -146,7 +148,6 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
 .ws-presets { display: flex; flex-wrap: wrap; gap: 6px; }
 .ws-presets .btn { padding: 0 10px; font-variant-numeric: tabular-nums; }
 .ws-keys kbd { padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); font-family: var(--mono); font-size: 12px; }
-@media (pointer: coarse) { .ws-hexrow input.mono { font-size: 16px; } }
 </style>
 
 <div class="ws-stage" id="ws-stage" tabindex="0" role="group" aria-roledescription="colour screen" aria-describedby="ws-keys">
@@ -382,6 +383,11 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
     if (BY_ID[c] && c !== 'custom') next.id = c;
     else if (/^[0-9a-f]{6}$/.test(c)) { next.id = 'custom'; next.custom = c; }
     else if (/^[0-9a-f]{3}$/.test(c)) { next.id = 'custom'; next.custom = c.replace(/./g, '$&$&'); }
+    // A link to a part of this page, such as a heading of the guide. The
+    // guide comes after this script, so while the page is loading a single
+    // word waits for the second reading, when the page is shown.
+    else if (parts.length === 1 && document.getElementById(raw)) return { state: null, problem: '', anchor: true };
+    else if (parts.length === 1 && document.readyState === 'loading') return { state: null, problem: '', anchor: true };
     else bad.push(parts[0]);
     for (var i = 1; i < parts.length; i++) {
       var m = /^([kb])=(\d{1,5})$/.exec(parts[i].trim()), n = m ? Number(m[2]) : NaN;
@@ -395,8 +401,16 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
         (bad[0] === parts[0] ? 'white is shown.' : 'that part was left out.') : ''
     };
   }
-  function applyHash() {
+  function applyHash(e) {
     var r = readHash();
+    if (r.anchor) {
+      // The browser scrolls to that part; the colour and the address stay as
+      // they are until the next change.
+      render();
+      clearTimeout(hashTimer);
+      hashTimer = null;
+      return;
+    }
     st.id = r.state.id;
     st.custom = r.state.custom;
     st.kelvin = r.state.kelvin;
@@ -404,7 +418,9 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
     clearHexError();
     render();
     writeHash();
-    note(r.problem);
+    // Read again when the page is shown, the address is the one tidied
+    // above, so a message about the link as it came in must stay.
+    if (r.problem || !(e && e.type === 'pageshow')) note(r.problem);
   }
 
   // ---- Custom colour ----
@@ -641,8 +657,15 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
   // The address holds the settings; the browser may also restore the sliders
   // after this script ran (Back button), so the address wins on every show.
   window.addEventListener('hashchange', applyHash);
-  window.addEventListener('pageshow', applyHash);
-  window.addEventListener('pagehide', writeHash);
+  window.addEventListener('pageshow', function (e) {
+    // Back on the page after the browser left full screen without a word
+    // while it was away: the colour returns to the page, or the keyboard
+    // would stay held on it.
+    if (active && mode === 'fs' && fsElement() !== stage) deactivate();
+    applyHash(e);
+  });
+  // Only a change still waiting to be written; a link to a heading stays.
+  window.addEventListener('pagehide', function () { if (hashTimer) writeHash(); });
   applyHash();
 })();
 </script>

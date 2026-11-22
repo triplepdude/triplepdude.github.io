@@ -22,7 +22,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---- The example: 49.7 grade points over 14 credits, weighted 55.2. ----
   assert.deepEqual(await results(), expect(X.default));
-  assert.equal(await text('#gp-work'), 'Unweighted: 49.7 grade points ÷ 14 credits = 3.55; weighted: 55.2 ÷ 14 = 3.9429…');
+  assert.equal(await text('#gp-work'), `Unweighted: 49.7 grade points ÷ 14 credits = 3.55; weighted: 55.2 ÷ 14 = ${X.default.wwork}`);
+  assert.equal(X.default.wwork, '3.9428…');
   assert.equal(await text('#gp-plan-out'), `You need an average GPA of ${X.default.plan.need} over your next 15 credits to reach 3.7. That is between an A− (3.7) and an A (4.0).`);
   assert.deepEqual(await semLines(), ['GPA 3.55, weighted 3.94, from 14 credits']);
   assert.equal(await text('#gp-res-h'), 'Your GPA');
@@ -71,6 +72,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.isVisible('#gp-basis-f'), false);
   assert.equal(await text('#gp-gpa-l'), 'GPA');
   assert.equal(await text('#gp-work'), '49.7 grade points ÷ 14 credits = 3.55');
+  // An AP class with no grade yet does not make a weighted GPA either.
+  await sem(0).locator('.gp-add').click();
+  await f(0, 4).type.selectOption('a');
+  await f(0, 4).cr.fill('4');
+  assert.equal(await page.isVisible('#gp-w-stat'), false);
+  await row(0, 4).locator('.gp-del').click();
+  assert.equal(await sem(0).locator('.gp-row').count(), 4);
   await f(0, 1).type.selectOption('h');
   await f(0, 2).type.selectOption('a');
   assert.equal(await text('#gp-gpa-l'), 'Unweighted GPA');
@@ -104,12 +112,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(await results(), expect(X.two_sems));
   await page.fill('#gp-prev-cr', '60');
   assert.deepEqual(await results(), expect(X.two_sems_prev));
-  assert.equal(await text('#gp-work'), 'Unweighted: 260.5 grade points ÷ 80 credits = 3.2563…; weighted: 266 ÷ 80 = 3.325; includes 3.2 over 60 credits from earlier semesters');
+  assert.equal(await text('#gp-work'), `Unweighted: 260.5 grade points ÷ 80 credits = ${X.two_sems_prev.work}; weighted: 266 ÷ 80 = ${X.two_sems_prev.wwork}; includes 3.2 over 60 credits from earlier semesters`);
   let p = X.two_sems_prev.plan;
-  assert.equal(await text('#gp-plan-out'), `Not reachable in 30 credits: you would need an average of ${p.need}, and the most is 4.0. With straight A’s you would finish with ${p.best}. To reach 3.5 with straight A’s you need at least ${p.more} more credits.`);
+  assert.equal(await text('#gp-plan-out'), `Not reachable in 30 credits: you would need an average of ${p.need}, and the most is 4.0. With ${p.word} you would finish with ${p.best}. To reach 3.5 with ${p.word} you need at least ${p.more} more credits.`);
   // Planning on the weighted GPA, where AP classes can go above 4.0.
   await page.selectOption('#gp-basis', 'w');
-  assert.equal(await text('#gp-plan-out'), `You need an average weighted GPA of ${X.two_sems_prev_w.plan.need} over your next 30 credits to reach 3.5. That is between an A− (3.7) and an A (4.0).`);
+  assert.equal(await text('#gp-plan-out'), `You need an average weighted GPA of ${X.two_sems_prev_w.plan.need} over your next 30 credits to reach 3.5. That is between an A− (3.7) and an A (4.0) in regular classes.`);
   await page.selectOption('#gp-basis', 'u');
   await page.fill('#gp-target', '3.3');
   assert.equal(await text('#gp-plan-out'), `You need an average GPA of ${X.two_sems_prev_t33.plan.need} over your next 30 credits to reach 3.3. That is between a B+ (3.3) and an A− (3.7).`);
@@ -119,6 +127,31 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#gp-target', '4');
   assert.match(await text('#gp-plan-out'), /^Not reachable in 30 credits: .* A GPA of exactly 4 needs the top grade in every course, and some of yours are lower\.$/);
   await page.fill('#gp-target', '3.5');
+  // A weighted GPA so far counts in the weighted figure only.
+  await page.fill('#gp-prev-w', '3.6');
+  await page.selectOption('#gp-basis', 'w');
+  assert.deepEqual(await results(), expect(X.two_sems_prev_pw));
+  assert.equal(await text('#gp-work'), `Unweighted: 260.5 grade points ÷ 80 credits = ${X.two_sems_prev_pw.work}; weighted: 290 ÷ 80 = ${X.two_sems_prev_pw.wwork}; includes 3.2 (weighted 3.6) over 60 credits from earlier semesters`);
+  assert.equal(await text('#gp-plan-out'), `You need an average weighted GPA of ${X.two_sems_prev_pw.plan.need} over your next 30 credits to reach 3.5. That is between a B (3.0) and a B+ (3.3) in regular classes.`);
+  // The address keeps it, so a reload brings it back.
+  await page.waitForFunction(() => location.hash.includes('&p=3.2,60,3.6&'));
+  await page.reload();
+  assert.equal(await page.inputValue('#gp-prev-w'), '3.6');
+  assert.deepEqual(await results(), expect(X.two_sems_prev_pw));
+  // A GPA so far above 4.0 is a weighted one: it was added to the unweighted figure, giving 4.32 on a 4.0 scale.
+  await page.fill('#gp-prev-gpa', '4.5');
+  await tab('#gp-prev-gpa');
+  assert.equal(await text('#gp-prev-msg'), 'Enter your GPA so far as a number from 0 to 4.0, such as 3.2. A weighted GPA above that goes under Weighted GPA so far.');
+  assert.equal(await page.getAttribute('#gp-prev-gpa', 'aria-invalid'), 'true');
+  assert.equal(await text('#gp-gpa'), '–');
+  // Only a weighted GPA and credits: a prompt, not an error.
+  await page.fill('#gp-prev-gpa', '');
+  assert.match(await text('#gp-work'), /Your earlier semesters are left out until you enter their unweighted GPA under GPA so far\.$/);
+  assert.equal(await page.getAttribute('#gp-prev-w', 'aria-invalid'), null);
+  await page.fill('#gp-prev-gpa', '3.2');
+  await page.fill('#gp-prev-w', '');
+  await page.selectOption('#gp-basis', 'u');
+  assert.deepEqual(await results(), expect(X.two_sems_prev));
 
   // ---- Copy and download act on the current state. ----
   await page.click('#gp-copy');
@@ -149,12 +182,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(lines[3], '1,Calculus,A−,4,AP / IB,14.8,18.8');
   assert.equal(lines[6], '2,"\'=SUM(1), ""2D""",A,2,Regular,8,8');
   assert.equal(lines[7], '2,PE,no grade,1,Regular,,');
-  assert.equal(lines.length, 9);
-  assert.equal(lines[8], '');
+  assert.equal(lines[8], 'earlier,Earlier semesters,GPA 3.2,60,,192,192');
+  assert.equal(lines.length, 10);
+  assert.equal(lines[9], '');
   await f(1, 1).name.fill('Art');
 
   // ---- The page address keeps everything, so a reload brings it back. ----
-  await page.waitForFunction(() => location.hash.startsWith('#v=1&'));
+  // The address is written a moment after the last change; a reload sooner than that
+  // starts from the address as it was, so wait for the latest state.
+  await page.waitForFunction(() => location.hash.includes('&p=3.2,60&') && location.hash.includes(';Art,A,2,r;'));
   await page.reload();
   assert.deepEqual(await results(), expect(X.two_sems_prev));
   assert.equal(await f(1, 2).name.inputValue(), 'PE');
@@ -191,7 +227,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   for (const [sel, v, msg, re] of [
     ['#gp-hon', '3', '#gp-set-msg', /^The Honors bonus must be a number from 0 to 2, such as 0\.5\.$/],
     ['#gp-ap', '-1', '#gp-set-msg', /^The AP \/ IB bonus must be a number from 0 to 2, such as 1\.$/],
-    ['#gp-prev-gpa', '6', '#gp-prev-msg', /^Enter your GPA so far as a number from 0 to 5, such as 3\.2\.$/],
+    ['#gp-prev-gpa', '6', '#gp-prev-msg', /^Enter your GPA so far as a number from 0 to 4\.0, such as 3\.2\. A weighted GPA above that goes under Weighted GPA so far\.$/],
+    ['#gp-prev-w', '6', '#gp-prev-msg', /^Enter your weighted GPA so far as a number from 0 to 5\.0, such as 3\.6\.$/],
     ['#gp-prev-cr', '10000', '#gp-prev-msg', /^Enter the credits as a number from 0 to 9,999, such as 60\.$/],
     ['#gp-target', '4.5', '#gp-plan-msg', /^Enter a target GPA from 0 to 4\.0, such as 3\.5\.$/],
     ['#gp-left', '0', '#gp-plan-msg', /^Enter the credits still to take as a number above 0, up to 9,999, such as 30\.$/],
@@ -201,7 +238,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await tab(sel);
     assert.match(await text(msg), re, sel);
     assert.equal(await page.getAttribute(sel, 'aria-invalid'), 'true', sel);
-    assert.equal(await page.getAttribute(sel, 'aria-describedby'), msg.slice(1), sel);
+    assert.ok((await page.getAttribute(sel, 'aria-describedby')).split(' ').includes(msg.slice(1)), sel);
     await page.fill(sel, old);
     assert.equal(await page.getAttribute(sel, 'aria-invalid'), null, sel);
     assert.equal(await text(msg), '', sel);
@@ -222,7 +259,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---- A megabyte pasted into any box is refused or cut at once, without freezing. ----
   const big = 'a'.repeat(58) + '😀' + '9'.repeat(1e6);
-  for (const sel of ['#gp-hon', '#gp-ap', '#gp-prev-gpa', '#gp-prev-cr', '#gp-target', '#gp-left', '.gp-cr input', '.gp-name input']) {
+  for (const sel of ['#gp-hon', '#gp-ap', '#gp-prev-gpa', '#gp-prev-cr', '#gp-prev-w', '#gp-target', '#gp-left', '.gp-cr input', '.gp-name input']) {
     const ms = await page.evaluate(([sel, v]) => {
       const el = document.querySelector(sel), old = el.value, t0 = performance.now();
       el.value = v;
@@ -244,6 +281,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
   assert.equal(await f(0, 0).name.inputValue(), 'b'.repeat(59));
+  // A name pasted with a tab from a spreadsheet stays on one line, with a space.
+  await page.evaluate(() => {
+    const el = document.querySelector('.gp-name input');
+    el.value = 'Bio\tlogy';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  assert.equal(await f(0, 0).name.inputValue(), 'Bio logy');
   await f(0, 0).name.fill('Biology');
   assert.deepEqual(await results(), expect(X.two_sems_prev));
 
@@ -303,6 +347,28 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => document.querySelector('#gp-target').value === '3.7');
   assert.equal(await text('#gp-plan-out'), `You need an average GPA of ${X.default.plan.need} over your next 15 credits to reach 3.7. That is between an A− (3.7) and an A (4.0).`);
 
+  // ---- Just under a half: 3.42499 shows as 3.42, so the working must not say 3.4250. ----
+  await page.goto(url + '#v=1&s=std&h=0.5&a=1&p=3.42499,100&t=3.7,15,u&c=');
+  assert.equal(await text('#gp-gpa'), X.near_half.gpa);
+  assert.equal(await text('#gp-work'), `342.499 grade points ÷ 100 credits = ${X.near_half.work}; includes 3.42499 over 100 credits from earlier semesters`);
+  // The best result, 3.4999, misses 3.5; rounded it would read 3.50, as if it did not.
+  await page.goto(url + '#v=1&s=std&h=0.5&a=1&p=3.494899,100&t=3.5,1,u&c=');
+  const nb = X.best_near_target.plan;
+  assert.equal(nb.best, '3.4999');
+  assert.equal(await text('#gp-plan-out'), `Not reachable in 1 credit: you would need an average of ${nb.need}, and the most is 4.0. With ${nb.word} you would finish with ${nb.best}. To reach 3.5 with ${nb.word} you need at least ${nb.more} more credits.`);
+  // The best weighted grade on the 4.3 scale is an A+ in an AP / IB class; with a bigger
+  // Honors bonus it is an A in an Honors class.
+  for (const [hash, key, most, target] of [['s=s43&h=0.5&a=1&t=5.2,15,w&', 's43_w_out', '5.3', '5.2'], ['s=std&h=1.5&a=1&t=5.4,15,w&', 'hon_big_w_out', '5.5', '5.4']]) {
+    await page.goto(url + '#v=1&' + hash + ex);
+    const q = X[key].plan;
+    assert.equal(await text('#gp-plan-out'), `Not reachable in 15 credits: you would need an average of ${q.need}, and the most is ${most}. With ${q.word} you would finish with ${q.best}. To reach ${target} with ${q.word} you need at least ${q.more} more credits.`, key);
+  }
+  // A weighted GPA so far comes back from a link.
+  await page.goto(url + '#v=1&s=std&h=0.5&a=1&p=3.2,60,3.6&t=3.5,30,w&' + ex);
+  assert.equal(await page.inputValue('#gp-prev-w'), '3.6');
+  // (55.2 + 3.6 x 60) / 74 = 3.6649
+  assert.equal(await text('#gp-wgpa'), '3.66');
+
   // ---- Too much to keep in the address: the same 8,000-character limit when
   // writing and reading, and the visitor is told. ----
   // Four semesters of 29 courses with 60-letter names and a fifth of three
@@ -331,6 +397,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.goto(url + '#' + fits + ';' + longRow + ';' + longRow + ';' + longRow);
   assert.equal(await text('#gp-hash-note'), 'The page address holds more than 8,000 characters of courses, too much to read, so the example is shown instead.');
   assert.deepEqual(await results(), expect(X.default));
+  await open();
+  // 16 semesters is the most the page holds, and it says so.
+  for (let i = 1; i < 16; i++) await page.click('#gp-add-sem');
+  assert.equal(await page.locator('.gp-sem').count(), 16);
+  assert.equal(await page.isDisabled('#gp-add-sem'), true);
+  assert.equal(await page.isVisible('#gp-sem-max'), true);
   await open();
 
   // The guide links the two grade tools, which exist.
@@ -368,7 +440,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     // (49.7 + 6) / 16 = 3.48125, weighted (55.2 + 6) / 16 = 3.825.
     assert.equal(await p3.textContent('#gp-gpa'), '3.48');
     assert.equal(await p3.textContent('#gp-wgpa'), '3.83');
-    for (const w of [320, 390]) {
+    for (const w of [320, 360, 390, 480, 590, 610, 640]) {
       await p3.setViewportSize({ width: w, height: 800 });
       const probs = await p3.evaluate(() => {
         const out = [], c = document.createElement('canvas').getContext('2d');
@@ -385,6 +457,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
           }
           if (el.tagName === 'BUTTON' && el.scrollWidth > el.clientWidth + 1) out.push(`button ${el.textContent} is cut off`);
         }
+        for (const t of document.querySelectorAll('.tool-card .table-wrap')) if (t.scrollWidth > t.clientWidth + 1) out.push(`a table needs ${t.scrollWidth - t.clientWidth}px more`);
         return out;
       });
       assert.deepEqual(probs, [], `at ${w}px`);

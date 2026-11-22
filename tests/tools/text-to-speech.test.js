@@ -31,7 +31,9 @@ function fakeSpeech() {
       V('Google Deutsch', 'de-DE', false, { quiet: true }), V('Google français', 'fr-FR', false, { quiet: true }), V('Google 日本語', 'ja-JP', false, { quiet: true }),
       V('Microsoft Aria Online (Natural) - English (United States)', 'en-US', false)],
     B: [V('Google US English', 'en-US', false, { quiet: true }), V('Google UK English Female', 'en-GB', false, { quiet: true })],
-    C: ['Albert', 'Bad News', 'Bubbles', 'Samantha', 'Zarvox'].map(n => V(n, 'en-US', true, { default: true, voiceURI: 'com.apple.voice.' + n }))
+    // Apple names some voices with their language ("Eddy (English (US))") and translates the
+    // novelty ones on a French or Spanish Mac ("Bulles" is Bubbles).
+    C: ['Albert', 'Bad News', 'Bubbles', 'Bulles', 'Eddy (English (US))', 'Grandma (English (US))', 'Samantha', 'Zarvox'].map(n => V(n, 'en-US', true, { default: true, voiceURI: 'com.apple.voice.' + n }))
       .concat([V('Daniel', 'en-GB', true, { default: true }), V('Thomas', 'fr-FR', true, { default: true })]),
     D: [V('English United States', 'en_US', true), V('English United Kingdom', 'en_gb', true), V('English (Firefox)', 'eng-US-f000', true), V('Deutsch Deutschland', 'de_DE', true), V('Mystery voice', '', true)],
     F: [],
@@ -125,6 +127,9 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const tts = fn => page.evaluate(fn);
   const state = () => text('#tts-state');
   const saying = () => tts(() => __tts.say());
+  // The piece being spoken, once the voice has it: after cutting off speech in progress the
+  // page waits a moment before it speaks again (tested on its own with a fake clock below).
+  const said = async () => (await page.waitForFunction(() => __tts.say(), null, { timeout: 3000 })).jsonValue();
   const lastLog = () => tts(() => __tts.log[__tts.log.length - 1]);
   const hl = name => page.evaluate(n => { const h = CSS.highlights.get(n); const r = h && [...h][0]; return r ? r.toString() : null; }, name);
   const voiceRows = () => page.$$eval('#tts-vlist .tts-group', gs => gs.filter(g => !g.hidden).map(g => [g.querySelector('.tts-glabel').textContent,
@@ -138,12 +143,12 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await manual();
     if (setup) await setup();
     await page.click('#tts-play');
-    const out = [];
+    const out = [await said()];
     for (let i = 0; i < 400; i++) {
+      await tts(() => { __tts.start(); __tts.end(); });
       const s = await saying();
       if (s == null) break;
       out.push(s);
-      await tts(() => { __tts.start(); __tts.end(); });
     }
     assert.equal(await state(), 'Finished reading.');
     return out;
@@ -192,7 +197,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.fill('#tts-text', 'Hello world. Second sentence here.');
   await manual();
   await page.click('#tts-play');
-  assert.equal(await saying(), 'Hello world.');
+  assert.equal(await said(), 'Hello world.');
   assert.equal(await text('#tts-prog'), 'Sentence 1 of 2');
   assert.equal(await hl('tts-sentence'), 'Hello world.');
   await tts(() => { __tts.start(); __tts.word(0, 5); });
@@ -201,7 +206,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await tts(() => __tts.word(6));
   assert.equal(await hl('tts-word'), 'world');
   await tts(() => __tts.end());
-  assert.equal(await saying(), 'Second sentence here.');
+  assert.equal(await said(), 'Second sentence here.');
   assert.equal(await text('#tts-prog'), 'Sentence 2 of 2');
   assert.equal(await hl('tts-sentence'), 'Second sentence here.');
   assert.equal(await hl('tts-word'), '', 'no word is lit until the voice reports one');
@@ -216,19 +221,19 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.deepEqual(await tts(() => __tts.calls.slice(-1)), ['cancel']);
   assert.equal(await hl('tts-word'), 'sentence', 'the paused word stays lit');
   await page.click('#tts-play');
-  assert.equal(await saying(), 'sentence here.');
+  assert.equal(await said(), 'sentence here.');
   assert.equal(await state(), 'Reading with Microsoft David - English (United States).');
   // Next on the last sentence does nothing; Previous restarts the sentence, then goes back one.
   await tts(() => { __tts.start(); __tts.word(0, 8); __tts.word(9, 4); });
   await page.click('#tts-next');
   assert.equal(await saying(), 'sentence here.');
   await page.click('#tts-prev');
-  assert.equal(await saying(), 'Second sentence here.');
+  assert.equal(await said(), 'Second sentence here.');
   await page.click('#tts-prev');
-  assert.equal(await saying(), 'Hello world.');
+  assert.equal(await said(), 'Hello world.');
   assert.equal(await text('#tts-prog'), 'Sentence 1 of 2');
   await page.click('#tts-next');
-  assert.equal(await saying(), 'Second sentence here.');
+  assert.equal(await said(), 'Second sentence here.');
   // While paused, Previous and Next move the highlight without speaking.
   await page.click('#tts-play');
   await page.click('#tts-prev');
@@ -236,10 +241,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await hl('tts-sentence'), 'Hello world.');
   assert.equal(await state(), 'Paused.');
   await page.click('#tts-play');
-  assert.equal(await saying(), 'Hello world.');
+  assert.equal(await said(), 'Hello world.');
   // A cancel that fires "end" at once (as Chrome does) must not skip a sentence.
   await tts(() => { __tts.cancelEnd = true; __tts.log.length = 0; });
   await page.click('#tts-next');
+  assert.equal(await said(), 'Second sentence here.');
   assert.deepEqual(await tts(() => __tts.log.map(l => l.text)), ['Second sentence here.']);
   await tts(() => { __tts.cancelEnd = false; });
   // Stop goes back to the text box.
@@ -262,8 +268,21 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
   }, 'epsilon');
   await page.mouse.click(at.x, at.y);
-  assert.equal(await saying(), 'epsilon zeta.');
+  assert.equal(await said(), 'epsilon zeta.');
   assert.equal(await text('#tts-prog'), 'Sentence 2 of 2');
+  await page.click('#tts-stop');
+
+  // ---- In a long text the sentence being read stays in sight inside the box ----
+  await page.fill('#tts-text', Array.from({ length: 80 }, (_, i) => `Sentence number ${i + 1} is here.`).join('\n'));
+  await manual();
+  await page.click('#tts-play');
+  for (let i = 0; i < 60; i++) await page.click('#tts-next');
+  assert.equal(await said(), 'Sentence number 61 is here.');
+  const inBox = await page.evaluate(() => {
+    const v = document.querySelector('#tts-view').getBoundingClientRect(), r = [...CSS.highlights.get('tts-sentence')][0].getBoundingClientRect();
+    return r.top >= v.top && r.bottom <= v.bottom;
+  });
+  assert.ok(inBox, 'the sentence being read is scrolled out of the box');
   await page.click('#tts-stop');
 
   // ---- Sentences: the rules in the guide ----
@@ -274,6 +293,10 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.deepEqual(await pieces('"Quoted." Next sentence. The U.S. Army left.'), ['"Quoted."', 'Next sentence.', 'The U.S. Army left.']);
   assert.deepEqual(await pieces('Heading\nFirst line of text\ncarries on here.\n\n1. First item\n2. Second item'), ['Heading', 'First line of text\ncarries on here.', '1. First item', '2. Second item']);
   assert.deepEqual(await pieces('今日は晴れです。明日は雨でしょう。'), ['今日は晴れです。', '明日は雨でしょう。']);
+  // The full stops of other scripts end a sentence too: Armenian, Ethiopic, Devanagari.
+  assert.deepEqual(await pieces('Բարեւ։ Ինչպե՞ս ես։'), ['Բարեւ։', 'Ինչպե՞ս ես։']);
+  assert.deepEqual(await pieces('ሰላም። እንዴት ነህ።'), ['ሰላም።', 'እንዴት ነህ።']);
+  assert.deepEqual(await pieces('यह एक वाक्य है। यह दूसरा है।'), ['यह एक वाक्य है।', 'यह दूसरा है।']);
   assert.deepEqual(await pieces('Hello.\n\n***\n\n— — —\n\nWorld \u{1F44D}. Thanks!'), ['Hello.', 'World \u{1F44D}.', 'Thanks!']);
   // A long sentence goes in pieces of at most 300 characters, cut at the last space before the limit.
   let got = await pieces('word '.repeat(100).trim() + '.');
@@ -327,6 +350,23 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await text('#tts-online'), '');
   got = await pieces(long);
   assert.deepEqual(got, [join(0, 6, ','), join(6, 9, '.')]);
+  // Changing to an online voice while reading cuts what is left into the shorter pieces,
+  // from the word being read; back to a voice on this device, the long pieces return.
+  await page.fill('#tts-text', long);
+  await manual();
+  await page.click('#tts-play');
+  assert.equal(await said(), join(0, 6, ','));
+  await tts(() => { __tts.start(); __tts.word(4, 5); });
+  await pick('Google UK English Female');
+  await page.waitForFunction(() => __tts.log.length === 2);
+  assert.equal(await said(), 'quick brown fox jumps over the lazy dog, ' + join(1, 3, ','));
+  assert.equal((await lastLog()).voice, 'Google UK English Female');
+  await page.click('#tts-play');
+  assert.equal(await state(), 'Paused.');
+  await pick('Microsoft Hazel');
+  await page.click('#tts-play');
+  assert.equal(await said(), 'quick brown fox jumps over the lazy dog, ' + join(1, 6, ','));
+  await page.click('#tts-stop');
 
   // ---- Settings: shown, used, applied at once while reading, and reset ----
   await setRange('#tts-rate', '1.5');
@@ -337,6 +377,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.fill('#tts-text', 'One two three four. Five six.');
   await manual();
   await page.click('#tts-play');
+  assert.equal(await said(), 'One two three four.');
   assert.deepEqual(await lastLog(), { text: 'One two three four.', voice: 'Microsoft Hazel - English (Great Britain)', lang: 'en-GB', rate: 1.5, pitch: 0.5, volume: 0.4 });
   // Hazel reports no word lengths; the page finds the word itself.
   await tts(() => { __tts.start(); __tts.word(8); });
@@ -362,6 +403,19 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.deepEqual(await find('Deutsch online'), [['German (Germany)', ['Google DeutschOnline']]]);
   assert.equal(await text('#tts-vcount'), '1 of 12 voices matches.');
   assert.deepEqual(await find('ja-jp'), [['Japanese (Japan)', ['Kyoko', 'Google 日本語Online']]]);
+  // A word matches from the start of a word, so a language code finds that language only:
+  // "es" is not in "United States" or "Japanese", "it" not in "United", "de" not in "device",
+  // "fr" not in "Africa"; "UK" also finds the British voice whose name says Great Britain.
+  assert.deepEqual(await find('es'), []);
+  assert.deepEqual(await find('it'), []);
+  assert.deepEqual(await find('de'), [['German (Germany)', ['Google DeutschOnline']]]);
+  assert.deepEqual(await find('fr'), [['French (France)', ['Microsoft Hortense - French (France)', 'Google françaisOnline']]]);
+  assert.deepEqual(await find('UK'), [['English (United Kingdom)', ['Microsoft Hazel - English (Great Britain)', 'Google UK English FemaleOnline', 'Google UK English MaleOnline']]]);
+  assert.deepEqual(await find('usa'), [['English (United States)', ['Microsoft David - English (United States)', 'Microsoft Zira - English (United States)', 'Google US EnglishOnline', 'Microsoft Aria Online (Natural) - English (United States)Online']]]);
+  assert.deepEqual(await find('ited'), []);
+  // Scripts written without spaces match anywhere: 本語 is the end of 日本語.
+  assert.deepEqual(await find('本語'), [['Japanese (Japan)', ['Kyoko', 'Google 日本語Online']]]);
+  assert.deepEqual(await find('local french'), [['French (France)', ['Microsoft Hortense - French (France)']]]);
   assert.deepEqual(await find('zzz'), []);
   assert.equal(await text('#tts-vcount'), 'No voice matches your search. Try a language name, such as Spanish.');
   // The selection is kept while the filter hides it.
@@ -399,7 +453,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'tts-play');
   await page.keyboard.press('Enter');
-  assert.equal(await saying(), 'Keyboard test one.');
+  assert.equal(await said(), 'Keyboard test one.');
   await page.keyboard.press('Space');
   assert.equal(await state(), 'Paused.');
   await page.keyboard.press('Tab');
@@ -449,7 +503,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await state(), 'Stopped.');
   await page.evaluate(() => document.querySelector('#tts-text').setSelectionRange(0, 90));
   await page.click('#tts-play');
-  assert.equal(await saying(), 'The quick brown fox jumps over the lazy dog.');
+  assert.equal(await said(), 'The quick brown fox jumps over the lazy dog.');
   assert.equal(await text('#tts-prog'), 'Sentence 1 of 2');
   assert.equal(await page.getAttribute('#tts-text', 'aria-invalid'), null);
   await page.click('#tts-stop');
@@ -458,7 +512,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.waitForFunction(() => document.querySelector('#tts-count').textContent === '900,000 characters');
   t0 = Date.now();
   await page.click('#tts-play');
-  assert.equal(await saying(), 'The quick brown fox jumps over the lazy dog.');
+  assert.equal(await said(), 'The quick brown fox jumps over the lazy dog.');
   assert.ok(Date.now() - t0 < 2500, `900,000 characters took ${Date.now() - t0} ms to start`);
   assert.equal(await text('#tts-prog'), 'Sentence 1 of 20,000');
   await page.click('#tts-next');
@@ -475,7 +529,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await text('#tts-play'), 'Resume');
   await page.click('#tts-play');
   assert.equal(await text('#tts-error'), '');
-  assert.equal(await saying(), 'Second sentence.');
+  assert.equal(await said(), 'Second sentence.');
   await tts(() => __tts.error('not-allowed'));
   assert.equal(await text('#tts-error'), 'The browser did not let the page speak. Press Resume to try again.');
   await page.click('#tts-play');
@@ -542,7 +596,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // Opening a file while reading stops the reading first.
   await manual();
   await page.click('#tts-play');
-  assert.equal(await saying(), 'Dropped text, with a BOM.');
+  assert.equal(await said(), 'Dropped text, with a BOM.');
   await page.setInputFiles('#tts-file', path.join(fixtures, 'utf16-be.txt'));
   await page.waitForFunction(() => document.querySelector('#tts-file-ok').textContent === 'Opened utf16-be.txt: 16 characters.');
   assert.equal(await state(), 'Stopped.');
@@ -571,17 +625,8 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await text('#tts-count'), '24 characters');
   assert.equal(await text('#tts-rate-out'), '1.7×');
 
-  // ---- An online voice that goes quiet: after 20 seconds the page says so ----
+  // (Voices that go quiet, and the pause after cutting speech off, are tested with a fake clock below.)
   await page.evaluate(() => { document.querySelector('#tts-rate').value = '1'; document.querySelector('#tts-rate').dispatchEvent(new Event('input')); });
-  await pick('Google US English');
-  await tts(() => { __tts.manual = false; __tts.stallNext = true; });
-  await page.fill('#tts-text', 'This online voice will go quiet.');
-  await page.click('#tts-play');
-  assert.equal(await text('#tts-stall'), '');
-  await page.waitForFunction(() => document.querySelector('#tts-stall').textContent, null, { timeout: 25000 });
-  assert.equal(await text('#tts-stall'), 'The voice has not moved on for 20 seconds. Online voices sometimes stop without warning: press Next to carry on, or Stop and choose a voice without the Online label.');
-  await page.click('#tts-stop');
-  assert.equal(await text('#tts-stall'), '');
   await pick('Microsoft David');
 
   // ---- A text in a script the voice does not read: a hint naming voices that do ----
@@ -606,6 +651,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // ---- What the page says about itself ----
   const faq = async q => page.locator('.faq details', { hasText: q }).locator('.faq-answer').textContent();
   assert.match(await faq('Is my text uploaded or saved anywhere?'), /The one exception is a voice marked Online, for which your browser itself sends the text to Google or Microsoft/);
+  assert.match(await faq('Does it work offline?'), /voices without the Online label/);
   const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
   assert.match(guide, /up to 1,000,000 characters at a time/);
   assert.match(guide, /The page starts with a voice on your device when there is one, and shows a notice whenever an online voice is chosen\./);
@@ -620,6 +666,99 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.deepEqual(links, ['/image-to-text/', '/speaker-test/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
+
+  // ---- Timing, with the page's clock in the test's hands ----
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const p = await ctx.newPage();
+    const errors = [];
+    p.on('pageerror', e => errors.push(e.message));
+    await p.route('**/*', r => (r.request().url().startsWith(base) ? r.continue() : r.abort()));
+    await p.clock.install({ time: new Date('2026-03-02T10:00:00Z') });
+    await p.addInitScript(fakeSpeech);
+    await p.goto(url + '#voices=A');
+    await p.clock.pauseAt(new Date('2026-03-02T10:01:00Z'));
+    const run = ms => p.clock.runFor(ms);
+    const ev = fn => p.evaluate(fn);
+    const stall = () => p.textContent('#tts-stall');
+    await ev(() => { __tts.manual = true; window.addEventListener('click', () => { __tts.inClick = __tts.log.length; }); });
+    await p.fill('#tts-text', 'One sentence here. Another one there. A third one.');
+    // Play speaks inside the click itself: Safari on an iPhone or iPad starts speech only from a tap.
+    await p.click('#tts-play');
+    assert.equal(await ev(() => __tts.inClick), 1, 'Play did not speak inside the click');
+    assert.equal(await ev(() => __tts.say()), 'One sentence here.');
+    // Next while the voice speaks: cancel at once, and speak again only after a moment,
+    // because an utterance queued right after cancel() is dropped (Chrome) or plays
+    // without start, word and end events (Safari, WebKit bug 238189).
+    await ev(() => __tts.start());
+    await p.click('#tts-next');
+    assert.deepEqual(await ev(() => __tts.calls.slice(-1)), ['cancel']);
+    assert.equal(await ev(() => __tts.say()), null, 'the next sentence was queued straight after cancel()');
+    assert.equal(await p.textContent('#tts-prog'), 'Sentence 2 of 3', 'the highlight moves at once');
+    await run(100);
+    assert.equal(await ev(() => __tts.say()), null);
+    await run(60);
+    assert.equal(await ev(() => __tts.say()), 'Another one there.');
+    // A sentence that ends on its own is followed at once.
+    await ev(() => { __tts.start(); __tts.end(); });
+    assert.equal(await ev(() => __tts.say()), 'A third one.');
+    // Quick presses in a row speak once, from the sentence chosen last.
+    await ev(() => { __tts.start(); __tts.log.length = 0; });
+    await p.click('#tts-prev');
+    await run(40);
+    await p.click('#tts-prev');
+    await run(40);
+    await p.click('#tts-next');
+    await run(200);
+    assert.deepEqual(await ev(() => __tts.log.map(l => l.text)), ['Another one there.']);
+    await p.click('#tts-stop');
+    await run(200);
+    // A voice that reports words but never says it has started is not asked a second time.
+    await ev(() => { __tts.log.length = 0; });
+    await p.click('#tts-play');
+    await ev(() => __tts.word(0, 3));
+    await run(6000);
+    assert.deepEqual(await ev(() => __tts.log.map(l => l.text)), ['One sentence here.'], 'the sentence was started again');
+    assert.equal(await stall(), '');
+    await p.click('#tts-stop');
+    await run(200);
+    // A voice on this device that never starts: asked once more after 2.5 s, then a notice.
+    await ev(() => { __tts.log.length = 0; __tts.dropNext = 2; });
+    await p.click('#tts-play');
+    await run(2700);
+    assert.equal(await ev(() => __tts.log.length), 2);
+    assert.equal(await stall(), '');
+    await run(2500);
+    assert.equal(await stall(), 'The voice has not started yet. If nothing happens, press Stop and choose another voice.');
+    await p.click('#tts-stop');
+    assert.equal(await stall(), '');
+    await run(200);
+    // An online voice that never starts: 8 s, once more, 8 s, then a notice that says so,
+    // not that it stopped after 20 seconds.
+    await p.locator('#tts-vlist label', { hasText: 'Google US English' }).first().locator('input').check();
+    await ev(() => { __tts.log.length = 0; __tts.dropNext = 2; });
+    await p.click('#tts-play');
+    await run(8200);
+    assert.equal(await ev(() => __tts.log.length), 2);
+    await run(8000);
+    assert.equal(await stall(), 'The voice has not started yet. Online voices need an internet connection: check yours, or press Stop and choose a voice without the Online label.');
+    await p.click('#tts-stop');
+    await run(200);
+    // An online voice that started and then goes quiet: after 20 seconds the page says so,
+    // and the notice goes as soon as the voice moves on.
+    await ev(() => { __tts.log.length = 0; });
+    await p.click('#tts-play');
+    await ev(() => __tts.start());
+    await run(19500);
+    assert.equal(await stall(), '');
+    await run(600);
+    assert.equal(await stall(), 'The voice has not moved on for 20 seconds. Online voices sometimes stop without warning: press Next to carry on, or Stop and choose a voice without the Online label.');
+    await ev(() => __tts.word(4, 8));
+    assert.equal(await stall(), '');
+    await p.click('#tts-stop');
+    assert.deepEqual(errors, []);
+    await ctx.close();
   }
 
   // ---- Other browsers' voice lists ----
@@ -651,7 +790,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await o.p.$eval('#tts-vlist input:checked', i => i.closest('label').textContent), 'Google US EnglishOnline');
   assert.equal(await o.p.textContent('#tts-online'), 'Online voice: your browser sends the text to Google to be spoken. This browser offers no voice that runs on this device.');
   await o.ctx.close();
-  // Safari calls every voice the default: Samantha, not Albert or Bad News.
+  // Safari calls every voice the default: Samantha, not Albert, Bad News, Bulles or Eddy (English (US)).
   o = await other('#voices=C');
   assert.equal(await o.p.$eval('#tts-vlist input:checked', i => i.closest('label').textContent), 'Samantha');
   await o.ctx.close();
@@ -743,14 +882,14 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   for (const width of [320, 340, 390, 540]) {
     await pp.setViewportSize({ width, height: 800 });
     assert.ok(await pp.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `sideways scroll at ${width}px`);
-    // No button label is cut off or wrapped onto a second line.
-    const bad = await pp.$$eval('.tts .btn', bs => bs.filter(b => b.getClientRects().length).filter(b => {
+    // No button label, Online badge or slider value is cut off or wrapped onto a second line.
+    const bad = await pp.$$eval('.tts .btn, .tts-badge, .tts-sl output', bs => bs.filter(b => b.getClientRects().length).filter(b => {
       const r = document.createRange();
       r.selectNodeContents(b);
       const lines = new Set([...r.getClientRects()].map(x => Math.round(x.top))).size;
       return lines > 1 || b.scrollWidth > b.clientWidth + 1;
-    }).map(b => b.id));
-    assert.deepEqual(bad, [], `buttons cut off at ${width}px`);
+    }).map(b => b.id || b.className));
+    assert.deepEqual(bad, [], `labels cut off at ${width}px`);
     const fits = await pp.$eval('#tts-find', el => {
       const cs = getComputedStyle(el), c = document.createElement('canvas').getContext('2d');
       c.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;

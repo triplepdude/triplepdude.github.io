@@ -9,12 +9,13 @@ howto: |
   Type the number in figures. Every result updates as you type: the number in
   words, its ordinal, an amount of money and the wording for a cheque, each
   with a **Copy** button. Grouping marks are fine (1,234,567, 12,34,567 or
-  1 234 567), and so are a currency sign and 1.5e6. Which of the comma and the
-  dot is the decimal mark follows **Decimal mark**, which starts from your
-  browser's language, and the line under the box shows how the number was
-  read. A comma or dot that groups digits must stand before exactly three of
-  them, so 1,5 is never read as 15. Results are exact for up to 66 digits
-  before the decimal mark and 65 after it.
+  1 234 567), and so are 1.5e6 and a currency sign such as £ or ₹, which also
+  picks the currency. Which of the comma and the dot is the decimal mark
+  follows **Decimal mark**, which starts from your browser's language, and the
+  line under the box shows how the number was read. Commas or dots that group
+  digits must split them into threes, or into pairs before the last three as
+  in Indian numbers, so 1,5 is never read as 15. Results are exact for up to
+  66 digits before the decimal mark and 65 after it.
 
   ## Writing a cheque (check) amount
 
@@ -37,12 +38,20 @@ howto: |
   British English puts "and" after the hundreds and before the last part of a
   number: one hundred and five, two thousand and twenty-six. American English
   usually leaves it out and keeps "and" for the cents. Both write the numbers
-  from 21 to 99 with a hyphen. A billion is a thousand million in both. Older
-  British usage made it a million million (the long scale) until December
-  1974, when Prime Minister Harold Wilson told Parliament that ministers would
-  use the international meaning. Choose **Thousand million** to see the long
-  scale, or **Lakh, crore** for the Indian system, where 1,00,000 is one lakh
-  and 1,00,00,000 one crore.
+  from 21 to 99 with a hyphen. A billion is a thousand million in both. British
+  English once made it a million million (the long scale); in December 1974
+  Prime Minister Harold Wilson told Parliament that ministers would use the
+  international meaning, and British usage has followed. Choose **Thousand
+  million** to see the long scale, or **Lakh, crore** for the Indian system,
+  where 1,00,000 is one lakh and 1,00,00,000 one crore.
+
+  ## How to write a large number in words
+
+  Split the digits into groups of three from the right. Write each group as a
+  number from one to 999 followed by its name, and leave out groups of 000:
+  12,000,500,017 is twelve billion five hundred thousand seventeen ("and
+  seventeen" in British English). The **Group by group** table does this for
+  the number you type.
 
   ## What comes after a trillion?
 
@@ -272,14 +281,16 @@ faq:
   function figures(d, scale, sep) { return scale === 'indian' ? groupIndian(d, sep) : group3(d, sep); }
 
   // Digits of other scripts (Arabic-Indic, Persian, Devanagari, full-width and so on) are
-  // read as 0 to 9. Each number is the code of a zero.
+  // read as 0 to 9. Each number is the code of a zero. The full-width comma, full stop,
+  // plus and minus of East Asian keyboards are read as their plain forms.
   var ZEROS = [0x660, 0x6F0, 0x7C0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xBE6, 0xC66, 0xCE6, 0xD66, 0xE50, 0xED0, 0xF20, 0x1040, 0x17E0, 0x1810, 0xFF10];
+  var WIDE = { '\u{FF0C}': ',', '\u{FF0E}': '.', '\u{FF0B}': '+', '\u{FF0D}': '-' };
   function westernDigits(s) {
     var out = '';
     for (var i = 0; i < s.length; i++) {
       var c = s.charCodeAt(i), d = -1;
       if (c >= 0x660) for (var k = 0; k < ZEROS.length && d < 0; k++) if (c >= ZEROS[k] && c <= ZEROS[k] + 9) d = c - ZEROS[k];
-      out += d < 0 ? s[i] : d;
+      out += d < 0 ? WIDE[s[i]] || s[i] : d;
     }
     return out;
   }
@@ -291,12 +302,17 @@ faq:
     var cp = s.codePointAt(i), ch = String.fromCodePoint(cp);
     return /^[\p{C}\p{Z}\p{M}]$/u.test(ch) ? 'U+' + cp.toString(16).toUpperCase().padStart(4, '0') : '“' + ch + '”';
   }
-  var SIGN = '[+\\-\u{2212}]', MONEY = '(?:[$£€₹¥]|rs\\.?|inr|usd|gbp|eur)';
-  var LEAD = new RegExp('^(' + SIGN + '?)\\s*' + MONEY + '?\\s*(' + SIGN + '?)\\s*', 'iu');
-  var TRAIL = new RegExp('\\s*(?:' + MONEY + '|/-)$', 'iu');
+  // A minus sign may also be typed as a figure dash, an en dash (word processors turn a
+  // hyphen before a number into one) or a small hyphen-minus.
+  var MINUS = '\\-\u{2212}\u{2012}\u{2013}\u{FE63}', SIGN = '[+' + MINUS + ']', MONEY = '(?:[$£€₹¥]|rs\\.?|inr|usd|gbp|eur)';
+  var LEAD = new RegExp('^(' + SIGN + '?)\\s*(' + MONEY + '?)\\s*(' + SIGN + '?)\\s*', 'iu');
+  var TRAIL = new RegExp('\\s*(' + MONEY + '|/-)$', 'iu');
+  // The currency that a typed sign or code stands for (Rs. 500/- is Indian).
+  var CODES = { '$': 'usd', usd: 'usd', '£': 'gbp', gbp: 'gbp', '€': 'eur', eur: 'eur', '₹': 'inr', inr: 'inr', rs: 'inr', 'rs.': 'inr', '/-': 'inr' };
 
-  // A number typed in figures: { neg, int, frac } with int free of leading zeros, or
-  // { error }, or { empty }. `mark` is the decimal mark chosen: "." or ",".
+  // A number typed in figures: { neg, int, frac, note, cur } with int free of leading zeros
+  // and cur the currency of a typed sign ('' for none), or { error }, or { empty }. `mark`
+  // is the decimal mark chosen: "." or ",".
   function parse(raw, mark) {
     if (raw.length > MAX_INPUT) return { error: 'This is ' + fmt(raw.length) + ' characters long. A number here has up to ' + MAX_INT + ' digits before the decimal mark and ' + MAX_FRAC + ' after it.' };
     var s = westernDigits(raw).trim();
@@ -304,9 +320,11 @@ faq:
     var other = mark === '.' ? ',' : '.', markName = mark === '.' ? 'decimal point' : 'decimal comma';
     var switchTo = mark === '.' ? 'Comma (1.234,5)' : 'Point (1,234.5)';
     var lead = LEAD.exec(s);
-    if (lead[1] && lead[2]) return { error: 'This number has two signs. Type one minus sign at most.' };
-    var neg = /[-\u{2212}]/u.test(lead[1] + lead[2]);
-    s = s.slice(lead[0].length).replace(TRAIL, '');
+    if (lead[1] && lead[3]) return { error: 'This number has two signs. Type one minus sign at most.' };
+    var neg = new RegExp('[' + MINUS + ']', 'u').test(lead[1] + lead[3]);
+    s = s.slice(lead[0].length);
+    var trail = TRAIL.exec(s), money = lead[2] || (trail ? trail[1] : '');
+    if (trail) s = s.slice(0, trail.index);
     var exp = 0, e = /[eE]([+\-\u{2212}]?)(\d{1,4})$/u.exec(s);
     if (e && /\d/.test(s.slice(0, e.index))) {
       exp = +e[2] * (e[1] && e[1] !== '+' ? -1 : 1);
@@ -370,7 +388,7 @@ faq:
     if (int.length > MAX_INT) return { error: 'This number has ' + fmt(int.length) + ' digits before the decimal mark. Words go up to ' + MAX_INT + ' digits (999 vigintillion and so on).' };
     if (frac.length > MAX_FRAC) return { error: 'This number has ' + fmt(frac.length) + ' digits after the decimal mark. Words go up to ' + MAX_FRAC + '.' };
     if (int === '0' && !/[1-9]/.test(frac)) neg = false;
-    return { neg: neg, int: int, frac: frac, note: note };
+    return { neg: neg, int: int, frac: frac, note: note, cur: CODES[money.toLowerCase()] || '' };
   }
 
   // ---------- Money ----------
@@ -429,7 +447,8 @@ faq:
   function state() {
     return [input.value, styleSel.value, scaleSel.value, markSel.value, decSel.value, curSel.value, caseSel.value, commasBox.checked].join('\u{0}');
   }
-  function render(silent) {
+  // `about` is the result a change of option is announced with: 'money' or the words.
+  function render(silent, about) {
     rendered = state();
     var p = parse(input.value, markSel.value), uk = styleSel.value === 'uk', scale = scaleSel.value, commas = commasBox.checked;
     var mode = caseSel.value, placesWrap = $('#nw-places-wrap');
@@ -509,7 +528,9 @@ faq:
       });
       $('#nw-places').replaceChildren(frag);
     }
-    if (!silent) say(read + ' in words: ' + rows.words.text + '.');
+    if (silent) return;
+    if (about === 'money') say(rows.money.text ? 'Money: ' + rows.money.text + '.' : rows.money.out.textContent);
+    else say(read + ' in words: ' + rows.words.text + '.');
   }
 
   // One polite live region, written once typing pauses and only with a new sentence.
@@ -524,8 +545,15 @@ faq:
   // Before any action the results must match the box and the options as they are now.
   function flush() { if (state() !== rendered) render(true); }
 
-  input.addEventListener('input', function () { render(); });
-  [styleSel, scaleSel, markSel, decSel, curSel, caseSel, commasBox].forEach(function (el) { el.addEventListener('change', function () { render(); }); });
+  input.addEventListener('input', function () {
+    // A currency sign or code typed with the number (£, EUR, Rs.) chooses the currency.
+    var cur = parse(input.value, markSel.value).cur;
+    if (cur && curSel.value !== cur) curSel.value = cur;
+    render();
+  });
+  [styleSel, scaleSel, markSel, decSel, curSel, caseSel, commasBox].forEach(function (el) {
+    el.addEventListener('change', function () { render(false, el === curSel ? 'money' : 'words'); });
+  });
   $('#nw-results').addEventListener('click', function (e) {
     var btn = e.target.closest('.nw-copy');
     if (!btn) return;

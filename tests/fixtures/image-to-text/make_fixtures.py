@@ -32,6 +32,7 @@ SPANISH = ['El niño leyó una canción.', 'Mañana iré a la estación.']
 SMALL = ['Settings saved at 10:42', 'Battery health is 87 per cent']
 DARK = ['Dark mode screenshot text', 'White letters on black']
 SHADOW = ['A photo taken in poor light', 'still has words to read']
+FAINT = ['Faint print on a cheap receipt', 'fades a little more each year']
 TEXT_PDF = ['This PDF already has a text layer.', 'Copy it exactly from the file.']
 # The sample picture built into the page (its PNG is embedded as a data: URL).
 SAMPLE = ['Library opening hours', 'Monday to Friday: 9:00 to 18:30', 'Saturday: 10:00 to 16:00',
@@ -93,6 +94,83 @@ def text_pdf(lines):
     return out.getvalue()
 
 
+STAMP = 'ABC-000123'
+
+
+def text_layer_pdf(width, height, lines, invisible):
+    # One page that only holds text, written by hand like text_pdf(): (x, y, size, text)
+    # for each line; render mode 3 makes it invisible, as an OCR text layer is.
+    content = 'BT %d Tr ' % (3 if invisible else 0) + ' '.join(
+        '/F1 %d Tf 1 0 0 1 %.1f %.1f Tm (%s) Tj' % (s, x, y, t.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)'))
+        for x, y, s, t in lines) + ' ET'
+    content = content.encode('cp1252').decode('latin-1')
+    objs = [
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>' % (width, height),
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+        '<< /Length %d >>\nstream\n%s\nendstream' % (len(content), content),
+    ]
+    out = io.BytesIO()
+    out.write(b'%PDF-1.4\n')
+    offsets = []
+    for i, o in enumerate(objs):
+        offsets.append(out.tell())
+        out.write(('%d 0 obj\n%s\nendobj\n' % (i + 1, o)).encode('latin-1'))
+    xref = out.tell()
+    out.write(('xref\n0 %d\n0000000000 65535 f \n' % (len(objs) + 1)).encode())
+    for off in offsets:
+        out.write(('%010d 00000 n \n' % off).encode())
+    out.write(('trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n' % (len(objs) + 1, xref)).encode())
+    return out.getvalue()
+
+
+def scan_pdfs(para):
+    """Two scans that also hold some text (needs pypdf):
+    stamped.pdf    an A4 page that is one scanned picture (para at the top, 150 dpi) with
+                   only a reference number typed on it: the scan must still be read.
+    searchable.pdf para scanned at 150 dpi with an invisible text layer of its words, as
+                   a scanner's own OCR makes it: that text is copied, not read again."""
+    from pypdf import PdfReader, PdfWriter
+    a4 = Image.new('L', (1240, 1754), 255)
+    a4.paste(para, (100, 120))
+    buf = io.BytesIO()
+    a4.save(buf, 'PDF', resolution=150)
+    page = PdfReader(io.BytesIO(buf.getvalue())).pages[0]
+    w, h = float(page.mediabox.width), float(page.mediabox.height)
+    page.merge_page(PdfReader(io.BytesIO(text_layer_pdf(w, h, [(w - 110, 24, 9, STAMP)], False))).pages[0])
+    wr = PdfWriter()
+    wr.add_page(page)
+    with open(os.path.join(HERE, 'stamped.pdf'), 'wb') as f:
+        wr.write(f)
+
+    buf = io.BytesIO()
+    para.save(buf, 'PDF', resolution=150)
+    page = PdfReader(io.BytesIO(buf.getvalue())).pages[0]
+    w, h = float(page.mediabox.width), float(page.mediabox.height)
+    # text_image() puts line i at 40 + i * 52 pixels from the top (34 px Liberation Serif).
+    layer = [(40 * 0.48, h - (40 + i * 52 + 28) * 0.48, 16, line) for i, line in enumerate(PARA)]
+    page.merge_page(PdfReader(io.BytesIO(text_layer_pdf(w, h, layer, True))).pages[0])
+    wr = PdfWriter()
+    wr.add_page(page)
+    with open(os.path.join(HERE, 'searchable.pdf'), 'wb') as f:
+        wr.write(f)
+
+
+def many_pages_pdf():
+    """long.pdf: 101 small pages, each holding the text "Page <n>": one more than the page
+    adds from a PDF. tiny.pdf: one such page."""
+    from pypdf import PdfReader, PdfWriter
+    wr = PdfWriter()
+    for i in range(1, 102):
+        wr.add_page(PdfReader(io.BytesIO(text_layer_pdf(160, 60, [(12, 24, 14, 'Page %d' % i)], False))).pages[0])
+    with open(os.path.join(HERE, 'long.pdf'), 'wb') as f:
+        wr.write(f)
+    # One such page on its own, which the test adds 50 times next to long.pdf.
+    with open(os.path.join(HERE, 'tiny.pdf'), 'wb') as f:
+        f.write(text_layer_pdf(160, 60, [(12, 24, 14, 'Tiny page')], False))
+
+
 def main():
     expected = {}
 
@@ -142,6 +220,11 @@ def main():
     save(sh, 'shadow.png', optimize=True)
     expected['shadow'] = '\n'.join(SHADOW)
 
+    # Faint grey print (level 190 on white): turned black by Otsu's level, which falls
+    # between the letters and the paper; a fixed level of 128 would turn them white.
+    save(text_image(FAINT, size=34, fg=190), 'faint.png', optimize=True)
+    expected['faint'] = '\n'.join(FAINT)
+
     spa = text_image(SPANISH, size=36)
     save(spa, 'spanish.png', optimize=True)
     expected['spanish'] = '\n'.join(SPANISH)
@@ -165,6 +248,10 @@ def main():
     with open(os.path.join(HERE, 'text.pdf'), 'wb') as f:
         f.write(text_pdf(TEXT_PDF))
     expected['text_pdf'] = '\n'.join(TEXT_PDF)
+
+    scan_pdfs(para)
+    expected['stamp'] = STAMP
+    many_pages_pdf()
 
     # The page's sample: a bold heading and three lines, in 16 shades of grey.
     font_b = ImageFont.truetype(LSANS_BOLD, 26)

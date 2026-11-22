@@ -437,6 +437,21 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   list = all.filter(c => !c.cancelled).sort((a, b) => a.when - b.when);
   list.slice(1).forEach((c, i) => near(c.when - list[i].when, 0.25, 1e-9, `interval ${i + 1} across the sound change`));
   await stopPlay();
+  // At 300 BPM in sixteenth notes a cowbell rings on through several clicks;
+  // summed, the sounds would pass full scale (1.0) at 100% volume and clip. What
+  // reaches the speakers stays within it, and the accented clicks keep their peak.
+  await settings({ bpm: 300, time: '4-4', sub: 4, sound: 'cowbell' });
+  await page.fill('#mt-vol', '100');
+  await clear();
+  await startPlay();
+  await waitClicks(2);
+  const tLoud = (await played())[1].when;
+  await page.waitForFunction(t => window.__ctx.currentTime > t + 1.3, tLoud, { timeout: 5000 });
+  heard = await page.evaluate(([a, b]) => window.__heard(a, b), [tLoud, tLoud + 1.2]);
+  await stopPlay();
+  assert.ok(heard.covered && heard.covered[0] <= tLoud && heard.covered[1] >= tLoud + 1.2, `recorded ${heard.covered}`);
+  assert.ok(heard.max >= X.volume['100'] - 0.002 && heard.max <= 1, `cowbell at 300 BPM in sixteenths at 100%: output peaks at ${heard.max}`);
+  await page.fill('#mt-vol', '70');
   await settings({ bpm: 120, time: '4-4', sub: 1, sound: 'click' });
 
   // ---- Tap tempo (event times set exactly; a pause over 3 s starts again) ----
@@ -795,6 +810,146 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     else assert.equal(await p3.getAttribute('#mt-bpm', 'aria-invalid'), 'true', `de-DE "${s}" is 1 BPM, too slow`);
   }
   await ctxDe.close();
+
+  // ---- Long sounds at fast tempos: the summed output never passes full scale ----
+  // The page's own engine, rendered offline: its AudioContext is an
+  // OfflineAudioContext, and with the tab hidden and its timers stopped it books
+  // 2 s of clicks on Start and on each change, and nothing else. Every sound,
+  // time signature and subdivision the page offers plays for 1.6 s at 100%
+  // volume; each new setting goes into the address while the rendering is
+  // paused. The known answer is the same clicks rendered again and summed, with
+  // nothing changed but this: when a click starts while others still ring, and
+  // their loudest from then on (from a sample earlier, as a start between two
+  // samples is interpolated) plus its own peak pass 1.0, they fade out over the
+  // 3 ms before it.
+  const SR = 48000, SEG = 1.6;
+  const pairs = (await page.evaluate(() => {
+    const time = document.querySelector('#mt-time'), sub = document.querySelector('#mt-sub'), out = [], was = time.value;
+    [...time.options].forEach((o, ti) => {
+      time.value = o.value;
+      time.dispatchEvent(new Event('change'));
+      [...sub.options].forEach((s, si) => out.push({ time: o.value, sub: +s.value, si, ti }));
+    });
+    time.value = was;
+    time.dispatchEvent(new Event('change'));
+    return out;
+  })).sort((a, b) => a.si - b.si || a.ti - b.ti);
+  // In this order every new setting also changes the time signature, so each part starts a bar.
+  assert.equal(pairs.length, 7 * 4 + 3 * 3 + 2, 'time signatures and subdivisions');
+  assert.ok(pairs.every((p, i) => !i || p.time !== pairs[i - 1].time));
+  const offline = ({ SR, LEN }) => {
+    window.__clicks = [];
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (when, ...rest) {
+      this.__rec = { when, buf: this.buffer, cancelled: false, cutAt: 0 };
+      window.__clicks.push(this.__rec);
+      return start.call(this, when, ...rest);
+    };
+    for (const [proto, name] of [[AudioScheduledSourceNode.prototype, 'stop'], [AudioNode.prototype, 'disconnect']]) {
+      const f = proto[name];
+      proto[name] = function (...a) { if (this.__rec && this.context.currentTime < this.__rec.when) this.__rec.cancelled = true; return f.apply(this, a); };
+    }
+    const Off = window.OfflineAudioContext;
+    window.AudioContext = function () {
+      const c = new Off(1, LEN, SR);
+      Object.defineProperty(c, 'state', { get: () => 'running' });
+      c.resume = c.suspend = () => Promise.resolve();
+      window.__off = c;
+      return c;
+    };
+    delete window.webkitAudioContext;
+    delete window.Worker;
+    window.setInterval = () => 0;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  };
+  const renderOffline = async (bpm, sound) => {
+    const ctxOff = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const po = await ctxOff.newPage();
+    const errs = [];
+    po.on('pageerror', e => errs.push(e.message));
+    await po.addInitScript(offline, { SR, LEN: Math.round(pairs.length * SEG * SR) });
+    await po.goto(`${url}#bpm=${bpm}&time=${pairs[0].time}&sub=${pairs[0].sub}&sound=${sound}&accent=1`);
+    await po.fill('#mt-vol', '100');
+    await po.click('#mt-start');
+    const r = await po.evaluate(async ({ pairs, SEG, SR, bpm, sound }) => {
+      const off = window.__off, P = OfflineAudioContext.prototype, wrong = [];
+      pairs.forEach((p, i) => {
+        if (i) P.suspend.call(off, i * SEG).then(() => {
+          history.replaceState(null, '', `#bpm=${bpm}&time=${p.time}&sub=${p.sub}&sound=${sound}&accent=1`);
+          window.dispatchEvent(new HashChangeEvent('hashchange'));
+          const got = ['#mt-bpm', '#mt-time', '#mt-sub', '#mt-sound'].map(s => document.querySelector(s).value).join(' ');
+          if (got !== `${bpm} ${p.time} ${p.sub} ${sound}`) wrong.push(got);
+          P.resume.call(off);
+        });
+      });
+      const out = (await off.startRendering()).getChannelData(0);
+      const clicks = window.__clicks.filter(c => !c.cancelled).sort((a, b) => a.when - b.when);
+      const rests = new Map(), rest = b => {
+        if (!rests.has(b)) {
+          const d = b.getChannelData(0), r = new Float32Array(d.length);
+          for (let i = d.length - 1, m = 0; i >= 0; i--) r[i] = m = Math.max(m, Math.abs(d[i]));
+          rests.set(b, r);
+        }
+        return rests.get(b);
+      };
+      let cuts = 0;
+      clicks.forEach((k, j) => {
+        const ringing = [];
+        let sum = rest(k.buf)[0];
+        for (let i = 0; i < j; i++) {
+          const c = clicks[i], at = Math.floor((k.when - c.when) * SR) - 1;
+          if (!c.cutAt && at < c.buf.length) { sum += rest(c.buf)[Math.max(0, at)]; ringing.push(c); }
+        }
+        if (sum > 1) ringing.forEach(c => { c.cutAt = k.when; cuts++; });
+      });
+      // Channel 0: the known answer; channel 1: the same clicks with nothing cut.
+      // Sources are added 2 s ahead, as one waiting to start costs time on every block.
+      const ref = new OfflineAudioContext(2, out.length, SR), mix = ref.createChannelMerger(2);
+      mix.connect(ref.destination);
+      let n = 0;
+      const add = until => {
+        for (; n < clicks.length && clicks[n].when < until; n++) {
+          const c = clicks[n], g = ref.createGain(), a = ref.createBufferSource(), b = ref.createBufferSource();
+          a.buffer = b.buffer = c.buf;
+          a.connect(g).connect(mix, 0, 0);
+          b.connect(mix, 0, 1);
+          if (c.cutAt) { g.gain.setValueAtTime(1, c.cutAt - 0.003); g.gain.linearRampToValueAtTime(0, c.cutAt); }
+          a.start(c.when);
+          b.start(c.when);
+        }
+      };
+      add(2);
+      for (let t = 1; t < out.length / SR - 0.01; t++) ref.suspend(t).then(() => { add(t + 2); ref.resume(); });
+      const known = await ref.startRendering(), exp = known.getChannelData(0), plain = known.getChannelData(1);
+      let diff = 0, at = 0;
+      for (let f = 0; f < out.length; f++) { const x = Math.abs(out[f] - exp[f]); if (x > diff) { diff = x; at = f; } }
+      const peaks = pairs.map((p, i) => {
+        let m = 0, u = 0;
+        for (let f = Math.round(i * SEG * SR), e = Math.round((i + 1) * SEG * SR); f < e; f++) { m = Math.max(m, Math.abs(out[f])); u = Math.max(u, Math.abs(plain[f])); }
+        return { setting: `${p.time} ${p.sub}`, peak: m, uncut: u };
+      });
+      return { wrong, clicks: clicks.length, cuts, diff, at: at / SR, peaks };
+    }, { pairs, SEG, SR, bpm, sound });
+    await ctxOff.close();
+    assert.deepEqual(errs, [], `${sound} at ${bpm} BPM: page errors`);
+    assert.deepEqual(r.wrong, [], `${sound} at ${bpm} BPM: settings not applied`);
+    assert.ok(r.clicks >= pairs.length * SEG * bpm / 60, `${sound} at ${bpm} BPM: ${r.clicks} clicks`);
+    assert.ok(r.diff <= 1e-6, `${sound} at ${bpm} BPM: output differs from the known answer by ${r.diff} at ${r.at.toFixed(4)} s`);
+    const top = r.peaks.reduce((a, b) => (b.peak > a.peak ? b : a));
+    assert.ok(top.peak <= 1, `${sound} at ${bpm} BPM, ${top.setting}: output peaks at ${top.peak}`);
+    return r;
+  };
+  const uncut = {};
+  for (const sound of await page.$$eval('#mt-sound option', o => o.map(x => x.value))) {
+    // At 120 BPM nothing is cut: the output is the clicks' plain sum.
+    const slow = await renderOffline(120, sound);
+    assert.equal(slow.cuts, 0, `${sound} at 120 BPM: ${slow.cuts} sounds cut`);
+    const fast = await renderOffline(300, sound);
+    uncut[sound] = Math.max(...fast.peaks.map(p => p.uncut));
+  }
+  // Summed with nothing cut, beep and cowbell would pass full scale at 300 BPM.
+  assert.ok(uncut.beep > 1.05 && uncut.cowbell > 1.1, `uncut peaks at 300 BPM: ${JSON.stringify(uncut)}`);
 
   // ---- A phone with a touch screen ----
   const phone = await browser.newContext({ ...devices['Pixel 7'] });

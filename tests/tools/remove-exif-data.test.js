@@ -727,4 +727,16 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await idle();
   assert.equal(await page.textContent(`${card(0)} strong`), 'dropped.jpg');
   assert.ok((await table(0))['Location (GPS)']);
+
+  // ---------- Guide and FAQ links ----------
+  // The orientation options act only on a photo that still has its tag (Rotate the pixels turns
+  // only those), so a copy whose tag is already gone is sent to Flip Image, which turns or
+  // mirrors the pixels and adds no metadata. Every internal link is a tool page.
+  const faq = (await page.textContent('.faq')).replace(/\s+/g, ' ');
+  assert.match(faq, /and download it again\. If only a copy without the tag is left, Flip Image turns or mirrors its pixels and saves it with no metadata\./);
+  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
+  assert.deepEqual(links, ['/flip-image/']);
+  for (const href of links) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
+  }
 };

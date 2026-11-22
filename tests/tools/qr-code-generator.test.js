@@ -346,6 +346,56 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   // Floating time keeps the clock time with no Z.
   await page.selectOption('#qg-ev-tz', 'floating');
   assert.match(await payload(), /DTSTART:20261025T023000\r\nDTEND:20261025T050000\r\n/);
+  // Regression: an end equal to the start gave DTEND equal to DTSTART, which RFC 5545 section
+  // 3.8.2.2 forbids (DTEND must be later). An event with a date-time DTSTART and no DTEND ends
+  // when it starts (section 3.6.1), so the end is left out and the page says why.
+  const noEnd = 'The end is the same as the start, so the event has no end time.';
+  const startOnly = async (dtstart, label) => {
+    const p = await payload();
+    assert.ok(p.includes('\r\nDTSTART:' + dtstart + '\r\nLOCATION:'), `${label}: ${JSON.stringify(p)}`);
+    assert.ok(!p.includes('DTEND'), `${label}: no DTEND in ${JSON.stringify(p)}`);
+    assert.equal(await err(), '', label);
+  };
+  await page.fill('#qg-ev-etime', '02:30');
+  await startOnly('20261025T023000', 'floating, same end date and time');
+  assert.equal(await warn(), noEnd);
+  // With no end date the end time is on the start date.
+  await page.fill('#qg-ev-edate', '');
+  await startOnly('20261025T023000', 'floating, no end date');
+  assert.equal(await warn(), noEnd);
+  // With a time zone (Berlin in summer is UTC+2), with and without an end date.
+  await page.selectOption('#qg-ev-tz', 'Europe/Berlin');
+  await page.fill('#qg-ev-sdate', '2026-07-04');
+  await page.fill('#qg-ev-stime', '09:00');
+  assert.equal(await err(), 'The event ends before it starts.', 'an end time earlier on the same day is still refused');
+  await page.fill('#qg-ev-etime', '09:00');
+  await startOnly('20260704T070000Z', 'Berlin, no end date');
+  assert.equal(await warn(), noEnd);
+  await page.fill('#qg-ev-edate', '2026-07-04');
+  await startOnly('20260704T070000Z', 'Berlin, same end date and time');
+  assert.equal(await warn(), noEnd);
+  // A start and end both at 02:30 in the hour New York skips: one start, moved as before.
+  await page.selectOption('#qg-ev-tz', 'America/New_York');
+  await page.fill('#qg-ev-sdate', '2026-03-08');
+  await page.fill('#qg-ev-stime', '02:30');
+  await page.fill('#qg-ev-edate', '2026-03-08');
+  await page.fill('#qg-ev-etime', '02:30');
+  await startOnly('20260308T073000Z', 'New York, start and end in the skipped hour');
+  const gapWarn = await page.$$eval('#qg-warn li', lis => lis.map(li => li.textContent));
+  assert.equal(gapWarn.length, 2, `warnings: ${gapWarn}`);
+  assert.equal(gapWarn[0], noEnd);
+  assert.match(gapWarn[1], /^The start time does not exist in America\/New_York [\s\S]*phones will show 03:30\.$/);
+  // One minute later the end is kept, and the note goes.
+  await page.fill('#qg-ev-etime', '03:31');
+  assert.match(await payload(), /DTSTART:20260308T073000Z\r\nDTEND:20260308T073100Z\r\n/);
+  assert.ok(!(await warn()).includes(noEnd));
+  // Back to the floating event above.
+  await page.selectOption('#qg-ev-tz', 'floating');
+  await page.fill('#qg-ev-sdate', '2026-10-25');
+  await page.fill('#qg-ev-stime', '02:30');
+  await page.fill('#qg-ev-edate', '2026-10-25');
+  await page.fill('#qg-ev-etime', '05:00');
+  assert.match(await payload(), /DTSTART:20261025T023000\r\nDTEND:20261025T050000\r\n/);
   // All-day: DTEND is the day after the last day.
   await page.check('#qg-ev-allday');
   assert.equal(await page.isVisible('#qg-ev-stime'), false);
@@ -393,6 +443,11 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
   assert.equal(await page.inputValue('#qg-fg'), '#ffcc00');
   assert.match(await page.textContent('#qg-contrast'), /Contrast 36% \(too low\)/);
   assert.match(await warn(), /too similar \(contrast 36%\)/);
+  // A HEX code as the image colour picker writes it (capitals), which the guide sends readers
+  // to for a logo's colours, is taken as it is.
+  await page.fill('#qg-fg-hex', '#1F3A93');
+  assert.equal(await page.inputValue('#qg-fg'), '#1f3a93');
+  assert.match(await page.textContent('#qg-contrast'), /\(good\)/);
   await page.fill('#qg-fg-hex', '#1f3a93');
   assert.match(await page.textContent('#qg-contrast'), /\(good\)/);
   svg = (await download('#qg-svg')).buf.toString('utf8');
@@ -576,7 +631,10 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await pick('phone');   // back to what the test left on screen
     assert.match(await err(), /can only contain digits/);
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-    assert.deepEqual(links, ['/url-encode-decode/', '/wifi-qr-code-generator/', '/barcode-generator/', '/qr-code-scanner/']);
+    assert.deepEqual(links, ['/url-encode-decode/', '/wifi-qr-code-generator/', '/barcode-generator/', '/image-color-picker/', '/qr-code-scanner/']);
+    // Colours and contrast ends by sending a reader who wants the code in a logo's colours to
+    // the image colour picker, whose HEX codes the colour boxes here take.
+    assert.match(guide, /but not every scanner app reads them\. The image colour picker gives your logo’s colours as HEX codes\./);
     // The logo FAQ sends a desktop reader to the scanner, which takes a dropped PNG or SVG.
     const faq = (await page.locator('.faq').textContent()).replace(/\s+/g, ' ');
     assert.match(faq, /Always test the final file with more than one phone\. On a computer, drop the downloaded PNG or SVG on the QR code scanner to check that it scans\./);

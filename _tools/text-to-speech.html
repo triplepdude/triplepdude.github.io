@@ -23,8 +23,8 @@ howto: |
   | Device | Where the voices come from | Adding voices |
   |---|---|---|
   | Windows | Windows; Chrome adds Google voices and Edge adds Microsoft's natural voices, both online | Settings > Time & language > Speech > Manage voices > Add voices |
-  | Mac | macOS; Safari does not offer Siri voices, and often not downloaded ones, to web pages | System Settings > Accessibility > Read & Speak (Spoken Content in older versions), then the info button next to System voice |
-  | iPhone, iPad | iOS | Settings > Accessibility > Read & Speak or Spoken Content > Voices |
+  | Mac | macOS; Safari gives web pages no Siri voices and usually not the voices you download | System Settings > Accessibility > Read & Speak (Spoken Content in older versions), then the Info button next to System voice |
+  | iPhone, iPad | iOS; browsers there give web pages no Siri voices and usually not the voices you download | Settings > Accessibility > Read & Speak or Spoken Content > Voices, though web pages usually cannot use the voices added there |
   | Android | The phone's text-to-speech engine | Settings > Accessibility > Text-to-speech output, then Install voice data in the engine's settings |
 
   Restart the browser after adding a voice. The list is grouped by language:
@@ -71,8 +71,10 @@ faq:
     a: This page sends nothing and saves nothing, so there are no cookies and no stored copy of your text or settings. The one exception is a voice marked Online, for which your browser itself sends the text to Google or Microsoft to be spoken. For private text, keep to voices without that label.
   - q: Why does a voice stop after a sentence or two?
     a: This happens most often with Chrome's Google voices, which sometimes stop without telling the page that they have. When an online voice has not moved on for 20 seconds, the page says so. Press Next to carry on, or choose a voice without the Online label.
+  - q: Does it work offline?
+    a: Yes, with the voices without the Online label. They run on your device, and once the page has loaded it needs no connection. Voices marked Online need the internet, because your browser sends the text to Google or Microsoft to be spoken.
   - q: Why are no words highlighted with some voices?
-    a: The word highlight follows position reports that the voice sends while it speaks, and some voices, including Google's voices in Chrome, send none. With those voices the whole sentence is highlighted instead, and Pause and Resume carry on from the start of the sentence.
+    a: The word highlight follows position reports that the voice sends while it speaks, and some voices, including Google's voices in Chrome, send none. With those voices only the sentence is highlighted, and Resume starts again at the beginning of the sentence, or of the part being read when a long sentence is read in parts.
   - q: Why does a voice mispronounce names or read numbers oddly?
     a: Pronunciation comes from the voice, not from this page, so another voice may do better. You can also spell an unusual name the way it sounds, and write out dates, sums of money or abbreviations as you want them read.
 ---
@@ -118,7 +120,7 @@ faq:
 .tts-sliders > .field { flex: 1 1 180px; }
 .tts-sl { display: flex; align-items: center; gap: 10px; }
 .tts-sl input { flex: 1 1 auto; min-width: 0; }
-.tts-sl output { min-width: 4.5ch; text-align: right; font-variant-numeric: tabular-nums; }
+.tts-sl output { flex: none; min-width: 4.5ch; text-align: right; font-variant-numeric: tabular-nums; }
 .tts-foot { margin: 0; }
 @media (pointer: coarse) { .tts-voice { min-height: 44px; } }
 </style>
@@ -206,6 +208,7 @@ faq:
   var LOCAL_CAP = 300;          // longest piece sent to a voice on this device
   var ONLINE_CAP = 140;         // longest piece at 1x for an online voice (Chrome cuts them off after ~15 s)
   var STALL_MS = 20000;
+  var GAP_MS = 150;             // wait after cutting a voice off before speaking again
   var synth = 'speechSynthesis' in window ? window.speechSynthesis : null;
   var Utt = window.SpeechSynthesisUtterance;
   var canSpeak = !!(synth && typeof synth.speak === 'function' && typeof Utt === 'function');
@@ -238,7 +241,9 @@ faq:
   }
 
   // ---------- Splitting text into sentences and pieces ----------
-  var RE_ENDS = /[.!?\u2026\u203C\u2047-\u2049\u061F\u06D4\u0964\u0965\u3002\uFF01\uFF1F\uFF61]+|\n/g;
+  // Unicode's sentence terminators (. ! ? and those of other scripts, such as Armenian
+  // and Ethiopic full stops, the Devanagari danda and the Chinese full stop) and the ellipsis.
+  var RE_ENDS = /[\p{STerm}\u2026]+|\n/gu;
   var RE_CJK_END = /[\u3002\uFF01\uFF1F\uFF61]/;
   var RE_NOT_DOT = /[^.]/;
   var RE_CLOSER = /["'\u2019\u201D\u00BB\u203A)\]}\u300D\u300F\u3011\u3009\u300B\uFF09]/;
@@ -351,7 +356,16 @@ faq:
   var voices = [], cur = null, voiceTimer = 0, voiceTries = 0;
   var NOVELTY = new Set(['Albert', 'Bad News', 'Bahh', 'Bells', 'Boing', 'Bubbles', 'Cellos', 'Good News', 'Jester', 'Organ',
     'Superstar', 'Trinoids', 'Whisper', 'Wobble', 'Zarvox', 'Fred', 'Junior', 'Kathy', 'Ralph', 'Eddy', 'Flo', 'Grandma',
-    'Grandpa', 'Reed', 'Rocko', 'Sandy', 'Shelley']);
+    'Grandpa', 'Jacques', 'Reed', 'Rocko', 'Sandy', 'Shelley',
+    // The same voices on a French, Spanish or Italian Mac.
+    'Mauvaises nouvelles', 'Malas noticias', 'Brutte notizie', 'Cloches', 'Campanas', 'Campane', 'Bulles', 'Burbujas',
+    'Bollicine', 'Violoncelles', 'Violonchelos', 'Violoncelli', 'Bonnes nouvelles', 'Buenas noticias', 'Buone notizie',
+    'Bouffon', 'Buf\u00F3n', 'Giullare', 'Orgue', '\u00D3rgano', 'Organo', 'Superestrella', 'Trino\u00EFdes', 'Murmure',
+    'Susurro', 'Sussurro']);
+  // Apple adds the language to some names: "Eddy (English (US))".
+  function novelty(name) { return NOVELTY.has(name.replace(/\s*\(.*$/, '')); }
+  // Searched for as well as the names: "UK" finds en-GB voices, whose names may say Great Britain.
+  var REGION_ALIAS = { GB: 'uk', US: 'usa' };
   var names = null;
   try { names = new Intl.DisplayNames(['en'], { type: 'language', languageDisplay: 'standard' }); } catch (e) { names = null; }
 
@@ -408,13 +422,13 @@ faq:
     var defaults = list.filter(function (v) { return v.default; }).length;
     return list.map(function (v, i) {
       var tag = normLang(v.lang), online = v.localService === false, lab = langLabel(tag);
-      var name = String(v.name || 'Unnamed voice');
+      var name = String(v.name || 'Unnamed voice'), region = (/-([A-Z]{2})$/.exec(tag) || [])[1];
       return {
         v: v, i: i, name: name, tag: tag, label: lab.en, online: online,
         company: online ? (/^google\b/i.test(name) ? 'Google' : /^microsoft\b/i.test(name) ? 'Microsoft' : '') : '',
         isDefault: !!v.default && defaults < list.length,
         key: [v.voiceURI, name, v.lang].join('\u0001'),
-        hay: fold([name, v.lang, tag, lab.en, lab.own, online ? 'online' : 'offline local device'].join(' '))
+        hay: fold([name, v.lang, tag, lab.en, lab.own, online ? 'online' : 'offline local', REGION_ALIAS[region] || ''].join(' '))
       };
     });
   }
@@ -424,7 +438,7 @@ faq:
   function pickDefault(list) {
     var best = null, top = -Infinity;
     list.forEach(function (r) {
-      var score = (r.online ? 0 : 1000) + langRank(r.tag) + (r.isDefault ? 5 : 0) - (NOVELTY.has(r.name) ? 50 : 0) - r.i / 1e4;
+      var score = (r.online ? 0 : 1000) + langRank(r.tag) + (r.isDefault ? 5 : 0) - (novelty(r.name) ? 50 : 0) - r.i / 1e4;
       if (score > top) { top = score; best = r; }
     });
     return best;
@@ -522,10 +536,22 @@ faq:
       (online ? ', ' + fmt(online) + ' of them online' : '');
   }
 
+  // A search word matches from the start of a word, so a code such as "es" finds es-ES and
+  // not "United States"; in scripts written without spaces it matches anywhere.
+  var RE_WORDCH = /[\p{L}\p{N}]/u;
+  var RE_NOSPACE = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Thai}\p{sc=Lao}\p{sc=Khmer}\p{sc=Myanmar}]/u;
+  function hasWord(hay, w) {
+    for (var i = hay.indexOf(w); i >= 0; i = hay.indexOf(w, i + 1)) {
+      var before = hay[i - 1];
+      if (!i || !RE_WORDCH.test(before) || RE_NOSPACE.test(before) || RE_NOSPACE.test(w[0])) return true;
+    }
+    return false;
+  }
+
   function filterVoices() {
     var words = fold(findIn.value.slice(0, 100)).split(/\s+/).filter(Boolean), shown = [];
     voices.forEach(function (r) {
-      var ok = words.every(function (w) { return r.hay.indexOf(w) >= 0; });
+      var ok = words.every(function (w) { return hasWord(r.hay, w); });
       r.row.hidden = !ok;
       if (ok) shown.push(r);
     });
@@ -614,7 +640,7 @@ faq:
 
   // ---------- Reading ----------
   var S = { state: 'idle', text: '', from: 0, to: 0, chunks: [], idx: 0, pos: 0, cur: null, keep: [], sel: false, cap: 0, seg: null };
-  var stallTimer = 0, userScroll = 0, rSent = null, rWord = null, fb = null;
+  var stallTimer = 0, userScroll = 0, rSent = null, rWord = null, fb = null, cutAt = -Infinity;
 
   function capFor(r) { return r && r.online ? clamp(Math.round(ONLINE_CAP * rate()), 60, 280) : LOCAL_CAP; }
   function wordSegmenter(r) {
@@ -663,7 +689,11 @@ faq:
   }
 
   function stopSpeech() {
-    if (S.cur) clearTimeout(S.cur.startTimer);
+    var was = S.cur;
+    if (was) {
+      clearTimeout(was.startTimer);
+      clearTimeout(was.sendTimer);
+    }
     S.cur = null;
     clearTimeout(stallTimer);
     setText(stallEl, '');
@@ -673,6 +703,9 @@ faq:
       synth.cancel();
       if (synth.paused) synth.resume();
     } catch (e) { /* nothing to cancel */ }
+    // An utterance queued straight after cancel() can be dropped (Chrome) or play without its
+    // start, word and end events (Safari), so after a voice is cut off the next one waits.
+    if (was && was.sent && !was.done) cutAt = Date.now();
   }
 
   function armStall(me) {
@@ -681,9 +714,12 @@ faq:
   }
   function stalled(me) {
     if (S.cur !== me || S.state !== 'reading') return;
-    setText(stallEl, me.voice && me.voice.online
-      ? 'The voice has not moved on for 20 seconds. Online voices sometimes stop without warning: press Next to carry on, or Stop and choose a voice without the Online label.'
-      : 'The voice has not started yet. If nothing happens, press Stop and choose another voice.');
+    var online = me.voice && me.voice.online;
+    setText(stallEl, !me.started
+      ? 'The voice has not started yet. ' + (online
+        ? 'Online voices need an internet connection: check yours, or press Stop and choose a voice without the Online label.'
+        : 'If nothing happens, press Stop and choose another voice.')
+      : 'The voice has not moved on for 20 seconds. Online voices sometimes stop without warning: press Next to carry on, or Stop and choose a voice without the Online label.');
   }
   function heard(me) {
     if (stallEl.textContent) setText(stallEl, '');
@@ -706,21 +742,27 @@ faq:
     u.rate = rate();
     u.pitch = pitch();
     u.volume = volume();
-    var me = { u: u, k: k, off: pos, voice: r, started: false, startTimer: 0 };
+    var me = { u: u, k: k, off: pos, voice: r, retried: retried, started: false, sent: false, done: false, startTimer: 0, sendTimer: 0 };
     S.cur = me;
     S.idx = k;
     S.pos = pos;
     // Chrome can drop an utterance that nothing refers to before it ends.
     S.keep.push(u);
     if (S.keep.length > 6) S.keep.shift();
-    u.onstart = function () {
-      if (S.cur !== me) return;
+    function begun() {
+      if (me.started) return;
       me.started = true;
       clearTimeout(me.startTimer);
+    }
+    u.onstart = function () {
+      if (S.cur !== me) return;
+      begun();
       heard(me);
     };
     u.onboundary = function (e) {
       if (S.cur !== me) return;
+      // A voice that reports words is speaking, whether or not it said it had started.
+      begun();
       heard(me);
       if (e.name === 'sentence') return;
       var a = me.off + (e.charIndex | 0);
@@ -732,30 +774,41 @@ faq:
     };
     u.onend = function () {
       if (S.cur !== me) return;
+      me.done = true;
       clearTimeout(me.startTimer);
       if (k + 1 < S.chunks.length) speakChunk(k + 1, S.chunks[k + 1].s, false);
       else finish();
     };
     u.onerror = function (e) {
       if (S.cur !== me) return;
+      me.done = true;
       failed(e && e.error);
     };
     paint(k, -1, -1);
     progress(k);
+    var wait = cutAt + GAP_MS - Date.now();
+    if (wait > 0) me.sendTimer = setTimeout(function () { send(me); }, wait);
+    else send(me);
+  }
+
+  function send(me) {
+    if (S.cur !== me) return;
     try {
-      synth.speak(u);
+      synth.speak(me.u);
     } catch (err) {
       failed('synthesis-failed');
       return;
     }
+    me.sent = true;
+    if (S.cur !== me) return;
     armStall(me);
     // Some voices let an utterance go silently after a cancel; ask once more.
     me.startTimer = setTimeout(function () {
       if (S.cur !== me || me.started) return;
-      if (retried) { stalled(me); return; }
+      if (me.retried) { stalled(me); return; }
       stopSpeech();
-      speakChunk(k, pos, true);
-    }, r && r.online ? 8000 : 2500);
+      speakChunk(me.k, me.off, true);
+    }, me.voice && me.voice.online ? 8000 : 2500);
   }
 
   var ERRORS = {

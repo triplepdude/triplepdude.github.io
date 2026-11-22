@@ -7,8 +7,8 @@ howto: |
   ## How to use the spacebar counter
 
   Press the space bar and the number goes up. A press counts wherever you are
-  on this page, except while a button, a link or the FAQ has the focus, and
-  the page does not scroll while you press. On a phone or tablet, tap the
+  on this page, except while another button, a link or the FAQ has the focus,
+  and the page does not scroll while you press. On a phone or tablet, tap the
   large button instead: every tap counts, so two fingers can take turns.
 
   - **No limit** keeps counting until you press Reset, and shows how long you
@@ -58,7 +58,9 @@ howto: |
   clicks rather than key presses, try the [CPS test](/cps-test/).
 faq:
   - q: How many times can you press the space bar in 10 seconds?
-    a: About 50 with one finger. In a 2024 study where 370 healthy adults tapped a phone screen with one finger at top speed for 30 seconds, those aged 50 to 70 averaged 5.2 taps a second, which is 52 in 10 seconds, and the 18 to 30 group was faster with the index and middle fingers. Rates fall as the hand tires, so expect fewer per second in the 60-second test than in the 10-second one.
+    a: About 50 with one finger. That is the average in the finger tapping test, where you tap a key with your index finger for 10 seconds; 183 adults aged 19 to 60 averaged 49.5 taps with their dominant hand (Heaton and others, 2020). Screens give much the same. A 2024 study of 370 adults found that those aged 50 to 70 tapped a phone or tablet 5.2 times a second, and that people aged 18 to 30 were faster with the index and middle fingers.
+  - q: What is a good spacebar speed?
+    a: Over 10 seconds, 5 presses a second is average for one finger and 6 or more is fast. In the tapping study above, the quickest of the 183 adults averaged 62.6 taps in 10 seconds. Taking turns with two fingers or both thumbs can push past what one finger manages. Rates fall as the hand tires, so expect fewer per second in the 60-second test than in the 10-second one.
   - q: Why does my space bar type two spaces?
     a: Usually because the switch under the bar bounces, so one press closes its contacts twice; this is called key chatter. Dirt under the bar and worn switches are the common causes, so clean underneath first, and replace a mechanical switch that still does it. Keyboards running QMK firmware let you raise the debounce time, 5 ms by default, and on Windows the Filter keys settings (Settings > Accessibility > Keyboard) can ignore unintended keystrokes until the fault is fixed.
   - q: Does the spacebar counter work on a phone?
@@ -111,7 +113,6 @@ faq:
 .sb-bars.is-dense i { border-radius: 0; }
 .sb-h { margin: 24px 0 8px; font-size: 1.05rem; }
 .sb-rep { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-.sb-flag { color: var(--danger); font-weight: 600; }
 @media (max-width: 560px) {
   .sb-live { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .sb-live .stat { padding: 10px 12px; }
@@ -144,7 +145,7 @@ faq:
   <div class="stat"><b id="sb-best">0</b><span>Best second</span></div>
 </div>
 <div class="sb-under">
-  <p class="hint" id="sb-hint">Space counts anywhere on this page unless a button or link has the focus. Holding it down counts once.</p>
+  <p class="hint" id="sb-hint">Space counts anywhere on this page except when another button or a link has the focus. Holding it down counts once.</p>
   <button type="button" class="btn secondary small" id="sb-copy" hidden>Copy result</button>
   <button type="button" class="btn secondary small" id="sb-reset">Reset</button>
 </div>
@@ -185,6 +186,7 @@ faq:
 
   var phase = 'idle';   // idle, counting, closing, resting, done
   var run = null;       // the count or test in progress, or the last one
+  var last = null;      // the last timed test, as shown in the result panel
   var bestByLen = {};   // test length -> best score this session, in hundredths
   var hold = null;      // the Space key being held: { down, reps }
   var spaceDown = false;
@@ -358,6 +360,7 @@ faq:
     r.newBest = prev !== null && r.cents > prev;
     if (prev === null || r.cents > prev) bestByLen[r.len] = r.cents;
     r.sessionBest = bestByLen[r.len];
+    last = r;
     showCounts();
     rateEl.textContent = hundredths(r.cents);
     showResult(r);
@@ -392,17 +395,18 @@ faq:
     TT.$('#sb-session').textContent = r.first ? 'Your first ' + r.len + '-second test this session.'
       : 'Best ' + r.len + '-second result this session: ' + hundredths(r.sessionBest) + ' per second' + (r.newBest ? ', set just now.' : '.');
   }
+  // The count with no time limit up to now, or else the timed test in the
+  // result panel, with a link that opens a test of the same length.
   function copyText() {
     var url = location.origin + location.pathname;
-    if (!run || !run.times.length) return '';
-    if (run.len) {
-      if (phase === 'counting' || phase === 'closing') return '';
-      return 'Spacebar test: ' + presses(run.times.length) + ' in ' + secs(run.len) + ', ' + hundredths(run.cents) +
-        ' per second. Best second: ' + presses(run.best) + '.\n' + url;
+    if (run && !run.len && phase === 'counting' && run.times.length) {
+      var t = now(), el = Math.max(1000, Math.round(t - run.start));
+      return 'Spacebar counter: ' + presses(run.times.length) + ' in ' + elapsedText(t - run.start) + ', ' +
+        hundredths(rdiv(run.times.length * 100000, el)) + ' per second. Best second: ' + presses(run.best) + '.\n' + url;
     }
-    var t = now(), el = Math.max(1000, Math.round(t - run.start));
-    return 'Spacebar counter: ' + presses(run.times.length) + ' in ' + elapsedText(t - run.start) + ', ' +
-      hundredths(rdiv(run.times.length * 100000, el)) + ' per second. Best second: ' + presses(run.best) + '.\n' + url;
+    if (!last || TT.$('#sb-result').hidden) return '';
+    return 'Spacebar test: ' + presses(last.times.length) + ' in ' + secs(last.len) + ', ' + hundredths(last.cents) +
+      ' per second. Best second: ' + presses(last.best) + '.\n' + url + '#' + last.len + 's';
   }
 
   function stopAll(message) {
@@ -410,7 +414,8 @@ faq:
     clearTimers();
     phase = 'idle';
     run = null;
-    copyBtn.hidden = true;
+    // The result of the last timed test stays, and can still be copied.
+    copyBtn.hidden = !last || TT.$('#sb-result').hidden;
     idleView(false);
     if (was && message) say(message);
   }
@@ -489,9 +494,11 @@ faq:
   });
   TT.$('#sb-reset').addEventListener('click', function () {
     var was = phase === 'counting' || phase === 'closing' || !!run;
-    stopAll('');
     TT.$('#sb-result').hidden = true;
+    stopAll('');
     say(was ? 'Counter reset to 0.' : 'Nothing to reset yet.');
+    // Otherwise the next Space would press Reset again instead of counting.
+    pad.focus({ preventScroll: true });
   });
   copyBtn.addEventListener('click', function (e) {
     var text = copyText();

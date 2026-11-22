@@ -103,6 +103,13 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // Chemical formulas keep their capitals in subscript.
   await fill('H2O');
   assert.equal((await outs()).subscript.text, 'H₂O');
+  // A keycap emoji (digit, U+FE0F, U+20E3) stays whole: no styled digit, no line after it.
+  await fill('1\uFE0F\u20E3 #\uFE0F\u20E3 2');
+  got = await outs();
+  assert.equal(got.bold.text, '1\uFE0F\u20E3 #\uFE0F\u20E3 \u{1D7D0}');
+  assert.equal(got.strike.text, '1\uFE0F\u20E3 \u0336#\uFE0F\u20E3 \u03362\u0336');
+  assert.equal(got['upside-down'].text, 'ᄅ #\uFE0F\u20E3 1\uFE0F\u20E3');
+  assert.equal(got.italic.note, 'Left as typed: 2.');
 
   // ---- Empty: each style shows its own name as a sample, and nothing can be copied ----
   await fill('');
@@ -130,7 +137,9 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
       .observe(document.querySelector('#fg-status'), { childList: true, characterData: true, subtree: true });
   });
   await copied('fullwidth');
-  await page.waitForFunction(() => window.__fgSaid.filter(t => t === 'Full-width (vaporwave) copied to the clipboard.').length >= 1);
+  // The region is emptied first, so that the same words are announced again.
+  await page.waitForFunction(() => window.__fgSaid.join('|').endsWith('|Full-width (vaporwave) copied to the clipboard.'));
+  assert.deepEqual((await page.evaluate(() => window.__fgSaid)).slice(-2), ['', 'Full-width (vaporwave) copied to the clipboard.']);
 
   // ---- A long text is shown in part, and copied whole ----
   const bold = s => [...s].map(c => /[a-z]/.test(c) ? String.fromCodePoint(0x1D41A + c.charCodeAt(0) - 97) : c).join('');
@@ -145,6 +154,9 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(family.length, 19);
   await paste(family.repeat(500));
   await page.waitForFunction(f => document.querySelector('#fg-o-bold').textContent.startsWith(f), family);
+  // The spoken summary quotes whole characters only, and says that there is more.
+  await settles('#fg-status', `“${family.repeat(40)}…” is shown in 31 styles.`);
+  assert.equal(lone(await text('#fg-status')), false);
   got = await outs();
   same(got.backwards.text, family.repeat(378), 'backwards preview');
   same(got.bold.text, family.repeat(378), 'bold preview');
@@ -166,15 +178,29 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.ok((await page.getAttribute('#fg-input', 'aria-describedby')).split(' ').includes('fg-error'));
   await settles('#fg-status', 'This text is 1,048,576 characters long. Only the first 10,000 are styled below, so shorten it to style the rest.');
   same(await copied('bold'), '\u{1D41A}'.repeat(10000), 'bold copy');
-  // The cut never splits an emoji or an accent from its letter.
+  // Characters are counted as a reader sees them, so 6,000 emoji are styled whole, and
+  // the cut never splits an emoji or an accent from its letter.
+  await paste('😀'.repeat(6000));
+  same(await copied('bold'), '😀'.repeat(6000), 'emoji copy');
+  assert.equal(await text('#fg-error'), '');
   await paste('a'.repeat(9999) + '😀'.repeat(10));
-  await settles('#fg-error', 'This text is 10,019 characters long. Only the first 9,999 are styled below, so shorten it to style the rest.');
+  await settles('#fg-error', 'This text is 10,009 characters long. Only the first 10,000 are styled below, so shorten it to style the rest.');
   let c = await copied('bold');
   assert.equal(lone(c), false);
-  same(c, '\u{1D41A}'.repeat(9999), 'bold copy');
+  same(c, '\u{1D41A}'.repeat(9999) + '😀', 'bold copy');
   await paste('a'.repeat(9999) + 'e\u0301xyz');
   c = await copied('underline');
-  same(c, 'a\u0332'.repeat(9999), 'underline copy');
+  same(c, 'a\u0332'.repeat(9999) + 'e\u0301\u0332', 'underline copy');
+  // Long emoji sequences take 19 UTF-16 units each here; at most 40,000 units are styled.
+  await paste(family.repeat(3000));
+  await settles('#fg-error', 'This text is 3,000 characters long. Only the first 2,105 are styled below, so shorten it to style the rest.');
+  same(await copied('backwards'), family.repeat(2105), 'family copy');
+  // One character longer than the preview window (a long run of accents) is still shown.
+  await paste('a' + '\u0301'.repeat(8000) + 'b');
+  await page.waitForFunction(() => document.querySelector('#fg-o-bold').textContent.startsWith('\u{1D41A}\u0301'));
+  got = await outs();
+  same(got.bold.text, '\u{1D41A}' + '\u0301'.repeat(8000), 'preview of one long character');
+  assert.equal(got.bold.note, 'Showing the beginning. Copy takes the whole text.');
   // Back under the limit, the message and the red edge go.
   await fill('ok');
   assert.equal(await text('#fg-error'), '');
@@ -209,6 +235,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.keyboard.press('Enter');
   assert.equal(await page.inputValue('#fg-input'), '');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'fg-input');
+  // Clear empties every style too: the samples come back and nothing can be copied.
+  got = await outs();
+  assert.equal(got.italic.text, '\u{1D43C}\u{1D461}\u{1D44E}\u{1D459}\u{1D456}\u{1D450}');
+  assert.ok(ids.every(id => got[id].sample && got[id].disabled), 'samples and disabled buttons after Clear');
+  await settles('#fg-status', 'Type some text to see it in 31 styles.');
   // Every button is named after what it shows: "Copy Bold", "Copy Italic"...
   for (const name of ['Copy Bold', 'Copy Script (cursive)', 'Copy Upside down', 'Copy Overline', 'Clear']) {
     assert.equal(await page.getByRole('button', { name, exact: true }).count(), 1, name);

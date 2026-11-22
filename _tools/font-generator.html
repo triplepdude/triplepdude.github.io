@@ -68,9 +68,9 @@ faq:
   - q: How do I make text bold on Instagram?
     a: Instagram bios and captions have no bold or italic option, so bold text there is made of the Unicode bold letters on this page. Type your words, copy the Bold or Sans-serif bold style and paste it into Instagram. Keep it to a word or two, so that people who use screen readers can still follow.
   - q: Can I type these fonts with my phone's keyboard?
-    a: Not directly, because keyboards type plain letters. Copy the style from this page, or save it as a shortcut, on an iPhone under Settings > General > Keyboard > Text Replacement and in Gboard on Android under Settings > Dictionary > Personal dictionary. Typing the shortcut then inserts the styled text.
+    a: Not directly, because keyboards type plain letters. Copy the style from this page, or save it as a shortcut, on an iPhone under Settings > General > Keyboard > Text Replacement and in Gboard on Android under Settings > Dictionary > Personal dictionary. Typing the shortcut then puts in the styled text (iPhone) or offers it as a suggestion (Gboard).
   - q: Why does upside-down text use letters from other alphabets?
-    a: Unicode has turned versions of only some letters, such as ɐ, ǝ and ɹ. For the rest the generator uses look-alikes, such as ⅄ (a turned sans-serif Y) or Ԁ (a Cyrillic letter), so the result reads upside down but is not real text in any language.
+    a: Unicode has turned forms of only some letters and symbols, such as ɐ, ǝ, ɹ and ⅄ (a turned Y). For the rest the generator borrows look-alikes from other scripts, such as Ԁ (Cyrillic) for P and ㄣ (Bopomofo, used for Chinese) for 4, so the result reads upside down but is not real text in any language.
   - q: Is my text uploaded anywhere?
     a: No. The styles are made by JavaScript in your browser from tables on this page. Nothing you type is sent to a server or stored.
 ---
@@ -116,9 +116,10 @@ faq:
 (function () {
   'use strict';
   var $ = TT.$;
-  // The most that is styled at once (UTF-16 units), how much of each style is
-  // shown, and the length above which styles follow a pause in typing.
-  var MAX = 10000, PREVIEW = 600, LIVE = 2000;
+  // The most characters styled at once, counted as a reader sees them, and the most
+  // UTF-16 units they may take (one emoji takes 2 to 19 or more); how much of each style
+  // is shown; and the length (UTF-16 units) above which styles follow a pause in typing.
+  var MAX = 10000, MAX_UNITS = 40000, PREVIEW = 600, LIVE = 2000;
 
   var input = $('#fg-input'), errEl = $('#fg-error'), statusEl = $('#fg-status'), stylesEl = $('#fg-styles');
   function fmt(n) { return n.toLocaleString('en-GB'); }
@@ -131,6 +132,13 @@ faq:
     var out = [];
     for (var it = segmenter.segment(s)[Symbol.iterator](), r = it.next(); !r.done; r = it.next()) out.push(r.value.segment);
     return out;
+  }
+  // How many characters a reader sees in s.
+  function count(s) {
+    if (!segmenter) return Array.from(s).length;
+    var n = 0;
+    for (var it = segmenter.segment(s)[Symbol.iterator](); !it.next().done;) n++;
+    return n;
   }
 
   // ---------- Tables ----------
@@ -252,6 +260,9 @@ faq:
     for (var i = 0; i < text.length;) {
       var c = text.codePointAt(i), w = c > 0xFFFF ? 2 : 1, s = text.substr(i, w), m = t[c];
       i += w;
+      // A keycap emoji (1️⃣, #️⃣: a digit, # or *, then U+FE0F and U+20E3) stays whole.
+      var next = text.charCodeAt(i);
+      if (next === 0x20E3 || (next === 0xFE0F && text.charCodeAt(i + 1) === 0x20E3)) { out.push(s); continue; }
       if (m === undefined && c > 0x7F) {
         var d = decomposed.get(s);
         if (d === undefined) { d = s.normalize('NFD'); decomposed.set(s, d); }
@@ -266,9 +277,9 @@ faq:
     }
     return { text: out.join(''), left: left };
   }
-  // A line through or under every character but line breaks, tabs and emoji, spaces
-  // included, so the line runs on between words.
-  var NO_MARK = /^(?:\r\n|[\n\r\t\f\v\u2028\u2029])$|\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}]/u;
+  // A line through or under every character but line breaks, tabs and emoji (keycaps such
+  // as 1️⃣ included), spaces included, so the line runs on between words.
+  var NO_MARK = /^(?:\r\n|[\n\r\t\f\v\u2028\u2029])$|\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}\u20E3\uFE0F]/u;
   var BREAK = /^(?:\r\n|[\n\r\u2028\u2029])$/;
   function styleOf(st, text, parts) {
     if (st.mark) {
@@ -292,11 +303,13 @@ faq:
     return r;
   }
 
-  // The start of a long text, ending between two characters a reader sees as whole.
-  function cut(s, max) {
-    if (s.length <= max) return s;
-    var parts = graphemes(s.slice(0, max + 64)), n = 0;
-    for (var i = 0; i < parts.length && n + parts[i].length <= max; i++) n += parts[i].length;
+  // The start of a long text: MAX characters and MAX_UNITS UTF-16 units at most, ending
+  // between two characters a reader sees as whole.
+  function cut(s) {
+    if (s.length <= MAX) return s;
+    // The last part of the window may be cut short; it ends past MAX_UNITS, so it is never kept.
+    var parts = graphemes(s.slice(0, MAX_UNITS + 64)), n = 0;
+    for (var i = 0; i < parts.length && i < MAX && n + parts[i].length <= MAX_UNITS; i++) n += parts[i].length;
     return s.slice(0, n);
   }
   // What a style shows: all of it, or the first PREVIEW characters of a long result.
@@ -308,6 +321,8 @@ faq:
     if (end < s.length && (s.charCodeAt(end - 1) & 0xFC00) === 0xD800) end--;
     var parts = graphemes(s.slice(0, end));
     if (end < s.length) parts.pop();
+    // A first character longer than the window (a long run of accents) is shown whole.
+    if (!parts.length) parts = graphemes(s).slice(0, 1);
     var shown = parts.slice(0, PREVIEW).join('');
     return shown.length < s.length ? shown : null;
   }
@@ -364,9 +379,9 @@ faq:
   function render() {
     var full = input.value;
     rendered = full;
-    var text = cut(full, MAX), parts = graphemes(text);
+    var text = cut(full), parts = graphemes(text);
     setError(text.length < full.length
-      ? 'This text is ' + fmt(full.length) + ' characters long. Only the first ' + fmt(text.length) + ' are styled below, so shorten it to style the rest.'
+      ? 'This text is ' + fmt(count(full)) + ' characters long. Only the first ' + fmt(parts.length) + ' are styled below, so shorten it to style the rest.'
       : '');
     STYLES.forEach(function (st) {
       var row = rows[st.id], r = text ? styleOf(st, text, parts) : { text: '', left: [] };
@@ -387,10 +402,14 @@ faq:
     say(errEl.textContent || (!text ? 'Type some text to see it in ' + STYLES.length + ' styles.'
       : '“' + short(text) + '” is shown in ' + STYLES.length + ' styles.'));
   }
-  // The start of the text for a spoken sentence: 40 characters at most, on one line.
+  // The start of the text for a spoken sentence: 40 whole characters at most, on one line,
+  // and an ellipsis when there is more.
   function short(s) {
-    var parts = graphemes(s.slice(0, 400)).map(function (p) { return BREAK.test(p) || p === '\t' ? ' ' : p; });
-    return parts.length > 40 ? parts.slice(0, 40).join('').trim() + '…' : parts.join('').trim();
+    var end = Math.min(s.length, 800), parts = graphemes(s.slice(0, end)), more = end < s.length;
+    // The last character of the window may be cut short, so it is dropped.
+    if (more) parts.pop();
+    if (parts.length > 40) { parts = parts.slice(0, 40); more = true; }
+    return parts.map(function (p) { return BREAK.test(p) || p === '\t' ? ' ' : p; }).join('').trim() + (more ? '…' : '');
   }
 
   // One polite live region, written once typing pauses and only with a new sentence.

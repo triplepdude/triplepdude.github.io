@@ -123,10 +123,12 @@ function readPlate(arg) {
   pts.forEach((p, i) => ((v[i] > best.thr) === best.above ? F : B).push(p));
   const mean = (list, fn) => list.reduce((s, p) => s + fn(p), 0) / list.length;
   const diff = fn => mean(F, fn) - mean(B, fn);
+  const spread = list => { const m = mean(list, p => p.Y); return Math.sqrt(mean(list, p => (p.Y - m) ** 2)); };
   return {
     figure: best.name, iou: best.iou, second, feature: best.f, nF: F.length, nB: B.length,
     da: diff(p => p.L - p.M), db: diff(p => p.S - p.M), dc: diff(p => p.S - p.L),
     dL: diff(p => p.L), dM: diff(p => p.M), dS: diff(p => p.S),
+    sF: spread(F), sB: spread(B),
   };
 }
 
@@ -172,6 +174,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     // random dots vary by up to about 0.09 here; the averages below are tighter.
     const kept = { L: ['dM', 'dS'], M: ['dL', 'dS'], S: ['dL', 'dM'] }[kind];
     for (const k of kept) assert.ok(Math.abs(info[k]) < 0.2, `${where}: ${k} ${info[k].toFixed(3)} gives the figure away to a dichromat`);
+    // That needs a wide spread of dot brightness, the same in figure and
+    // background: 0.65 to 1.35 times the plate's colour, a spread (standard
+    // deviation) of 0.21 in natural logs; half that range would give 0.10. Without it the lightness that comes with a cone contrast would show.
+    assert.ok(info.sF > 0.14 && info.sB > 0.14 && Math.abs(info.sF - info.sB) < 0.07,
+      `${where}: dot brightness spreads ${info.sF.toFixed(3)} (figure) and ${info.sB.toFixed(3)} (background)`);
     return { kind, level, m, sign, figure: info.figure, cue: (info[kept[0]] + info[kept[1]]) / 2 };
   }
 
@@ -235,7 +242,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // Normal colour vision, answering with the mouse: every plate seen.
   let plates = await run({ via: 'click', observer: p => p.figure });
   assert.deepEqual(await verdict(), ['No sign of a colour vision deficiency', 'You saw all 14 plates, including the faintest of each kind.']);
-  assert.deepEqual(await scores(), ['Control (light and dark) 2 of 2', 'Red-green, L cones (protan) 4 of 4', 'Red-green, M cones (deutan) 4 of 4', 'Blue-yellow, S cones (tritan) 4 of 4']);
+  assert.deepEqual(await scores(), ['Control (everyone should see) 2 of 2', 'Red-green, L cones (protan) 4 of 4', 'Red-green, M cones (deutan) 4 of 4', 'Blue-yellow, S cones (tritan) 4 of 4']);
   const rows = await page.$$eval('#cbt-plates tbody tr', trs => trs.map(tr => [...tr.cells].map(c => c.textContent)));
   assert.equal(rows.length, 14);
   rows.forEach((r, i) => {
@@ -253,7 +260,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     'Colour vision screening (a screen test, not a diagnosis)',
     'No sign of a colour vision deficiency',
     'You saw all 14 plates, including the faintest of each kind.',
-    'Control (light and dark): 2 of 2 seen',
+    'Control (everyone should see): 2 of 2 seen',
     'Red-green, L cones (protan): 4 of 4 seen',
     'Red-green, M cones (deutan): 4 of 4 seen',
     'Blue-yellow, S cones (tritan): 4 of 4 seen',
@@ -272,6 +279,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.evaluate(() => document.activeElement.id), 'cbt-start');
   await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('data-answer')), '1', 'focus moves to the answers');
+  assert.deepEqual(await page.$$eval('#cbt-pad button', bs => bs.map(b => b.getAttribute('aria-keyshortcuts'))), ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'N 0']);
   await page.click('#cbt-stop');
   assert.equal(await page.isVisible('#cbt-setup'), true);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'cbt-start');
@@ -290,6 +298,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await run({ observer: sees('S') });
   assert.equal((await verdict())[0], 'Signs of a blue-yellow colour vision deficiency');
   assert.match((await verdict())[1], /^Likely type: tritan \(the blue-sensitive S cones\)\. Severity hint: strong\. Inherited blue-yellow deficiency is rare/);
+  await again();
+
+  // A milder blue-yellow loss: the two faintest S-cone plates missed.
+  await run({ observer: p => (p.kind === 'S' && p.level >= 2 ? 'none' : p.figure) });
+  assert.equal((await verdict())[0], 'Signs of a blue-yellow colour vision deficiency');
+  assert.match((await verdict())[1], /^Likely type: tritan \(the blue-sensitive S cones\)\. Severity hint: mild\./);
   await again();
 
   // Mild deuteranomaly: the two faintest M plates and the faintest L plate
@@ -339,10 +353,16 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(await verdict(), ['No clear sign of a colour vision deficiency', 'You missed one of the 12 coloured plates, which a mistap or a dim or tinted screen can cause. Take the test again to check.']);
   await again();
 
+  // The faintest L-cone and S-cone plates missed: one of each kind is still no
+  // clear sign, and the message counts both misses.
+  await run({ observer: p => ((p.kind === 'L' || p.kind === 'S') && p.level === 3 ? 'none' : p.figure) });
+  assert.deepEqual(await verdict(), ['No clear sign of a colour vision deficiency', 'You missed 2 of the 12 coloured plates, but no more than one of each kind. A mistap or a dim or tinted screen can cause that, so take the test again to check.']);
+  await again();
+
   // A missed control plate makes the result unreliable, whatever else.
   await run({ observer: (p, i) => (i === 0 ? wrong(p.figure) : p.figure) });
   assert.deepEqual(await verdict(), ['Result not reliable', 'You missed one of the two control plates, which everyone should see, colour blind or not. Check the screen settings under Before you start and take the test again.']);
-  assert.deepEqual((await scores())[0], 'Control (light and dark) 1 of 2');
+  assert.deepEqual((await scores())[0], 'Control (everyone should see) 1 of 2');
   await again();
 
   // Shapes for children, answered with keys 1 to 4, 15 seconds per plate.
@@ -352,6 +372,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
       if (i !== 0) return;
       assert.equal(await text('#cbt-q'), 'What shape do you see?');
       assert.deepEqual(await page.$$eval('#cbt-pad button', bs => bs.map(b => b.textContent)), ['Circle1', 'Square2', 'Triangle3', 'Star4', 'I see no shape']);
+      // The key shown on a button is its shortcut, not part of its name.
+      assert.deepEqual(await page.$$eval('#cbt-pad button', bs => bs.map(b => b.getAttribute('aria-keyshortcuts'))), ['1', '2', '3', '4', 'N 0']);
+      assert.equal(await page.getByRole('button', { name: 'Circle', exact: true }).count(), 1, 'the circle button is named "Circle"');
       assert.equal(await text('#cbt-left'), '15 seconds left');
       await page.clock.runFor(14000);
       assert.equal(await text('#cbt-count'), 'Plate 1 of 14', '15 seconds is 15 seconds');
@@ -430,6 +453,24 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.ok(await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no sideways scroll on the phone');
   } finally {
     await ctx.close();
+  }
+  // While the clock runs, the whole plate, its clock and the answers are in
+  // view, on a small phone and on a phone turned sideways.
+  for (const opts of [devices['iPhone SE'], { ...devices['Pixel 7'], viewport: { width: 863, height: 360 } }]) {
+    const small = await page.context().browser().newContext(opts);
+    try {
+      const p2 = await small.newPage();
+      await p2.goto(url);
+      await p2.tap('#cbt-start');
+      await p2.waitForFunction(() => Math.abs(document.getElementById('cbt-run').getBoundingClientRect().top - 12) < 2, null, { timeout: 3000 });
+      const r = await p2.evaluate(() => {
+        const b = s => document.querySelector(s).getBoundingClientRect();
+        return { vh: innerHeight, plate: b('#cbt-plate').top, clock: b('#cbt-timer').bottom, answers: b('.cbt-none').bottom };
+      });
+      assert.ok(r.plate >= 0 && r.clock <= r.vh && r.answers <= r.vh, `plate, clock and answers in view at ${opts.viewport.width}x${opts.viewport.height}: ${JSON.stringify(r)}`);
+    } finally {
+      await small.close();
+    }
   }
 
   // Leave a finished result on screen for the runner's layout checks.

@@ -39,6 +39,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await blur();
   await watchSpace();
   const y0 = await page.evaluate(() => window.scrollY);
+  const t0 = await page.evaluate(() => performance.now());
   for (let i = 0; i < 3; i++) await page.keyboard.press('Space');
   assert.equal(await count(), '3');
   assert.equal(await text('#sb-pad-count'), '3');
@@ -53,9 +54,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.up('Space');
   assert.equal(await count(), '4');
   assert.equal(await text('#sb-ignored'), '2');
+  assert.ok((await text('#sb-rep-note')).startsWith('Measured from 2 repeats while Space was held for '), await text('#sb-rep-note'));
+  // The window losing the focus while Space is held (no key-up will come)
+  // ends the hold and measures the repeats so far.
+  for (let i = 0; i < 4; i++) await page.keyboard.down('Space');
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  assert.ok((await text('#sb-rep-note')).startsWith('Measured from 3 repeats'), await text('#sb-rep-note'));
+  await page.keyboard.up('Space');
+  assert.equal(await count(), '5');
+  assert.equal(await text('#sb-ignored'), '5');
   // The clock runs from the first press.
   await page.waitForTimeout(1200);
-  assert.ok(/^1\.\d s$/.test(await text('#sb-time')), `time after 1.2 s: ${await text('#sb-time')}`);
+  const shown = parseFloat(await text('#sb-time'));
+  const since = (await page.evaluate(() => performance.now()) - t0) / 1000;
+  assert.ok(shown >= 1.2 && shown <= since + 0.05, `time shown ${shown} s, ${since.toFixed(2)} s after the first press`);
 
   // ---- Space on a button presses the button; on a link or the FAQ it is left alone ----
   await page.focus('#sb-reset');
@@ -97,6 +109,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.evaluate(() => document.activeElement.id), 'sb-pad');
   await page.keyboard.press('Enter');
   assert.equal(await count(), '0', 'Enter is not a press');
+  // Space on a length that is not chosen yet chooses it, as on any radio
+  // button, and is not a press.
+  await page.focus('input[name="sb-len"][value="30"]');
+  await page.keyboard.press('Space');
+  assert.equal(await checkedVal(), '30');
+  assert.equal(await count(), '0');
+  assert.equal(await text('#sb-time'), '30.0 s');
 
   // ---- A mouse click is not a press, and the counter says why ----
   await page.click('#sb-pad');
@@ -106,6 +125,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.evaluate(() => document.activeElement.id), 'sb-pad');
   await page.keyboard.press('Space');
   assert.equal(await count(), '1', 'after a click, Space counts');
+  await page.click('#sb-reset');
+  assert.equal(await count(), '0');
+  // After Reset, Space counts again rather than pressing Reset once more.
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'sb-pad');
+  await page.keyboard.press('Space');
+  assert.equal(await count(), '1', 'after Reset, Space counts');
   await page.click('#sb-reset');
 
   // ---- The address ----
@@ -183,7 +208,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await text('#sb-reprate', f), T.repeat.rate);
   assert.equal(await text('#sb-rep-note', f), T.repeat.note);
   await f.click('#sb-copy');
-  assert.equal(await f.evaluate(() => navigator.clipboard.readText()), T.copy + '\n' + url);
+  // The link opens a test of the same length.
+  assert.equal(await f.evaluate(() => navigator.clipboard.readText()), T.copy + '\n' + url + '#10s');
   // Presses straight after the end neither count nor start a new test.
   await blur(f);
   await f.keyboard.press('Space');
@@ -208,6 +234,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // No time limit: the average runs from the first press until now.
   await f.check('input[name="sb-len"][value="0"]');
   assert.equal(await hash(f), '');
+  // The last result stays on screen, and can still be copied, while the
+  // counter is back at 0.
+  assert.equal(await count(f), '0');
+  assert.equal(await f.locator('#sb-result').isVisible(), true);
+  assert.equal(await f.locator('#sb-copy').isVisible(), true);
+  await f.click('#sb-copy');
+  assert.equal(await f.evaluate(() => navigator.clipboard.readText()), A.copy + '\n' + url + '#10s');
   await blur(f);
   const F = ex.free;
   at = 0;
@@ -218,6 +251,11 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await f.clock.runFor(F.at - at);
   assert.equal(await count(f), F.count);
   assert.equal(await text('#sb-best', f), F.best);
+  assert.equal(await f.locator('#sb-result').isVisible(), false, 'a new count hides the last result');
+  // The live figures, brought up to date on every frame (16 ms).
+  assert.ok(['5.9 s', '6.0 s'].includes(await text('#sb-time', f)), `time at 6 s: ${await text('#sb-time', f)}`);
+  const liveRate = Number(await text('#sb-rate', f));
+  assert.ok(Math.abs(liveRate - Number(F.rate)) <= 0.011, `live rate ${liveRate}, expected ${F.rate}`);
   await f.click('#sb-copy');
   assert.equal(await f.evaluate(() => navigator.clipboard.readText()), F.copy + '\n' + url);
   await f.clock.runFor(5000);
@@ -225,6 +263,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await f.click('#sb-reset');
   assert.equal(await count(f), '0');
   assert.equal(await text('#sb-time', f), '0.0 s');
+  assert.equal(await f.locator('#sb-copy').isVisible(), false);
+  assert.equal(await f.locator('#sb-result').isVisible(), false);
 
   // Taps on a touch screen: two fingers 10 ms apart are two presses, not chatter.
   await f.check('input[name="sb-len"][value="5"]');
@@ -242,6 +282,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(await result(), want(P));
   assert.equal(await text('#sb-detail', f), P.detail);
   assert.equal(await text('#sb-session', f), P.session);
+  await f.click('#sb-copy');
+  assert.equal(await f.evaluate(() => navigator.clipboard.readText()), P.copy + '\n' + url + '#5s');
 
   // 60 seconds on a 320 px screen: every second's bar fits.
   await f.setViewportSize({ width: 320, height: 700 });

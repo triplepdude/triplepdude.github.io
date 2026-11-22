@@ -136,6 +136,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(o.HSL, 'hsla(10.6, 100%, 60%, 0.5)');
   assert.equal(o['ARGB HEX'], '#80FF5733');
   assert.equal(o['Short HEX'], undefined);
+  // A short code needs every pair doubled, the alpha too: #FF553380 has none, #FF553388 is #F538.
+  await typeIn('#FF553380');
+  assert.equal((await out())['Short HEX'], undefined);
+  await typeIn('#FF553388');
+  assert.equal((await out())['Short HEX'], '#F538');
+  await typeIn('#FF573380');
   assert.deepEqual((await work())[3], ['Alpha', '80', '8 × 16 + 0', '128 ÷ 255 = 0.5 (50%)']);
   assert.match(await text('#hx-best'), /Contrast is measured with the colour fully opaque/);
   assert.equal((await fields())[3], '50');
@@ -165,7 +171,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     ['cmyk(0%, 66%, 80%, 0%)', '#FF5733'], ['device-cmyk(0 0.66 0.8 0)', '#FF5733'],
     // With black ink: 0.8 x 0.7, 0.6 x 0.7 and 0.4 x 0.7 of 255 are 142.8, 107.1 and 71.4.
     ['cmyk(20%, 40%, 60%, 30%)', '#8F6B47'], ['device-cmyk(0.2 0.4 0.6 0.3)', '#8F6B47'], ['hsv(10.6, 80%, 100%)', '#FF5733'], ['hwb(10.6 20% 0%)', '#FF5733'],
-    ['REBECCAPURPLE', '#663399'], ['333', '#333333'], ['hsl(10.6 100 60)', '#FF5733'], ['rgb(none 87 51)', '#005733']]) {
+    ['REBECCAPURPLE', '#663399'], ['333', '#333333'], ['hsl(10.6 100 60)', '#FF5733'],
+    // Custom properties with digits, Sass and Less variables, a line of JSON or a JavaScript object.
+    ['--blue-500: #3b82f6;', '#3B82F6'], ['  --color-primary-2:#3B82F6 !important ;', '#3B82F6'], ['$brand-1: #3b82f6;', '#3B82F6'],
+    ['@brand: rgb(59 130 246);', '#3B82F6'], ['"primary": "#3b82f6",', '#3B82F6'], ["primary: '#3b82f6',", '#3B82F6'],
+    // hwb() with whiteness and blackness adding up to more than 100% is a grey: 60 / (60 + 60) of 255 is 127.5.
+    ['hwb(0 60% 60%)', '#808080'], ['hwb(120 80% 40%)', '#AAAAAA'],
+    // In oklab() and oklch(), 100% of a, b or chroma is 0.4.
+    ['oklab(60% 25% -25%)', X['oklab(0.6 0.1 -0.1)'].hex8.slice(0, 7)], ['oklch(70% 25% 145)', X['oklch(70% 0.1 145)'].hex8.slice(0, 7)],
+    ['rgb(none 87 51)', '#005733']]) {
     await typeIn(v);
     assert.equal(await text('#hx-msg'), '', v);
     const o2 = await out();
@@ -190,6 +204,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     ['lab(50% 40 59)', 'lab() is not converted here. Use HEX, rgb(), hsl(), hwb(), oklch() or oklab().'],
     ['rgb(from red r g b)', 'Relative colours (with from) are not converted here. Use HEX, rgb(), hsl(), hwb(), oklch() or oklab().'],
     ['tomatoes', 'Not a colour code or a CSS colour name. Try #FF5733, rgb(255, 87, 51), hsl(11, 100%, 60%) or tomato.'],
+    ['constructor', 'Not a colour code or a CSS colour name. Try #FF5733, rgb(255, 87, 51), hsl(11, 100%, 60%) or tomato.'],
+    ['__proto__', 'Not a colour code or a CSS colour name. Try #FF5733, rgb(255, 87, 51), hsl(11, 100%, 60%) or tomato.'],
+    ['color: hasOwnProperty', 'Not a colour code or a CSS colour name. Try #FF5733, rgb(255, 87, 51), hsl(11, 100%, 60%) or tomato.'],
     ['5², 3, 4', 'Red, green and blue must be numbers from 0 to 255, or percentages. Try #FF5733, rgb(255, 87, 51), hsl(11, 100%, 60%) or tomato.'],
     ['255, 87', 'Three numbers are read as red, green and blue; this has 2. Try #FF5733, rgb(255, 87, 51), hsl(11, 100%, 60%) or tomato.'],
     ['x'.repeat(101), 'That is too long for a colour code (100 characters at most).'],
@@ -263,6 +280,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.equal(await page.getAttribute(sel, 'aria-invalid'), null, sel);
     assert.equal(await text(msgSel), '', sel);
   }
+  // Two wrong boxes, the alpha and then the hue: the hue's message shows in the HSL group it belongs to.
+  await fill('#hx-a', '150');
+  assert.equal(await text('#hx-rgb-msg'), 'Alpha must be a number from 0 to 100 (%).');
+  await fill('#hx-h', 'abc');
+  assert.equal(await text('#hx-hsl-msg'), 'Enter the hue in degrees, such as 11.');
+  assert.equal(await text('#hx-rgb-msg'), '');
+  assert.equal(await page.getAttribute('#hx-h', 'aria-invalid'), 'true');
+  await fill('#hx-a', '100');
+  assert.equal(await page.inputValue('#hx-in'), '#803FC0');
   // An error in one group goes away once another box sets the colour.
   await fill('#hx-h', 'abc');
   await typeIn('#123456');
@@ -335,6 +361,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => document.querySelector('#hx-in').value === 'rebeccapurple');
   assert.equal((await out())['CSS name'], 'rebeccapurple');
   await page.goto('about:blank');
+  await page.goto(url + '#constructor');
+  assert.equal(await page.inputValue('#hx-in'), 'constructor');
+  assert.equal(await text('#hx-msg'), 'Not a colour code or a CSS colour name. Try #FF5733, rgb(255, 87, 51), hsl(11, 100%, 60%) or tomato.');
+  assert.equal((await out()).HEX, '–');
+  await page.goto('about:blank');
   await page.goto(url + '#' + 'a'.repeat(101));
   assert.equal(await text('#hx-note'), 'The colour in the page address is longer than 100 characters, so it was not read.');
   assert.equal(await page.inputValue('#hx-in'), '#FF5733');
@@ -388,6 +419,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.uncheck('#hx-lower');
   await page.waitForTimeout(1300);
   assert.equal(await page.evaluate(() => window.__changes), 1);
+  // A transparent colour is announced with its alpha, not as the opaque HEX.
+  await page.fill('#hx-in', '#00ff7f80');
+  await page.waitForFunction(() => document.querySelector('#hx-status').textContent === '#00FF7F80 is rgba(0, 255, 127, 0.5).', null, { timeout: 4000 });
+  await page.fill('#hx-in', '#00ff7f');
 
   // ---- Keyboard: from the colour box to the boxes and a copy button. ----
   await page.focus('#hx-in');
@@ -404,6 +439,23 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => document.querySelector('.hx-out button[data-copy-target="#hx-o-hex"]').textContent === 'Copied!');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '#0AFF7F');
 
+  // The guide promises a round trip only for the lines the converter reads back. Each of
+  // them, pasted in again, gives the same colour; ARGB, Decimal and a nearest name do not.
+  const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
+  assert.doesNotMatch(guide, /Every line of the result/);
+  assert.match(guide, /The HEX, RGB, HSL, HWB, OKLCH and OKLab lines convert back to exactly the same colour when you paste them in again; so do HSV and CMYK, which leave out the alpha\./);
+  await typeIn('#FF573380');
+  const lines = await out();
+  for (const k of ['HEX with alpha', 'RGB', 'HSL', 'HWB', 'OKLCH', 'OKLab']) {
+    await typeIn(lines[k]);
+    assert.equal((await out())['HEX with alpha'], '#FF573380', `${k} ${lines[k]}`);
+  }
+  await typeIn('#FF5733');
+  const opaque = await out();
+  for (const k of ['HSV / HSB', 'CMYK', 'Short HEX', 'HEX'].filter(k => opaque[k])) {
+    await typeIn(opaque[k]);
+    assert.equal((await out()).HEX, '#FF5733', `${k} ${opaque[k]}`);
+  }
   // Guide links go to pages of this site that exist.
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
   assert.deepEqual(links, ['/binary-translator/', '/image-color-picker/']);
@@ -438,6 +490,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await p3.locator('#hx-names > summary').tap();
     await p3.locator('#hx-n-body button', { hasText: /^tomato$/ }).tap();
     assert.equal(await p3.textContent('#hx-o-hex'), '#FF6347');
+    assert.notEqual(await p3.evaluate(() => document.activeElement.id), 'hx-in');
+    // The page scrolls smoothly unless the visitor asks for reduced motion, so wait for it.
+    await p3.waitForFunction(() => { const r = document.querySelector('#hx-sw').getBoundingClientRect(); return r.top > -1 && r.bottom < innerHeight + 1; }, null, { timeout: 5000 });
     for (const w of [320, 390]) {
       await p3.setViewportSize({ width: w, height: 800 });
       const probs = await p3.evaluate(() => {
@@ -451,6 +506,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
           if (r.right > document.documentElement.clientWidth + 1 && !el.closest('.table-wrap')) out.push(`${el.id || el.textContent} sticks out`);
         }
         for (const l of document.querySelectorAll('.hx-fs label')) if (l.scrollWidth > l.clientWidth + 1) out.push(`label ${l.textContent} is cut off`);
+        for (const b of document.querySelectorAll('#hx-n-body button')) {
+          const r = document.createRange();
+          r.selectNodeContents(b);
+          if (new Set([...r.getClientRects()].map(x => Math.round(x.top))).size > 1) out.push(`name ${b.textContent} is broken over two lines`);
+        }
         return out;
       });
       assert.deepEqual(probs, [], `at ${w}px`);

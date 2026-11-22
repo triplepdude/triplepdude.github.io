@@ -9,7 +9,8 @@ howto: |
   Pick your school's grading scale, then give each course its letter grade,
   its credits and its type. Add a semester for each term on your transcript.
   If your transcript already shows a GPA, enter it with the credits it covers
-  under **Earlier semesters** instead of typing every old course again.
+  under **Earlier semesters** instead of typing every old course again, and
+  its weighted GPA too if it shows one.
   Choose **No grade** for pass/fail, withdrawn or audited courses, which
   usually leave the GPA alone. The page address keeps everything you enter,
   so a reload or a bookmark brings it back.
@@ -100,6 +101,9 @@ faq:
 .output.gp-plan-out { font-family: inherit; font-size: 15px; }
 table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .gp-note { margin: -6px 0 16px; }
+/* "Unweighted GPA" needs about 175 px with the arrow, so the select moves to its own
+   line before the three fields get narrower than that. */
+.gp-plan > #gp-basis-f { flex-basis: 200px; }
 /* On wide screens the first course's labels head their columns; the labels of
    the other courses stay for screen readers only. On a phone every course is a
    small card with its own visible labels. */
@@ -112,6 +116,9 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
   .gp-row .gp-name { grid-column: 1 / -1; }
   .gp-row .gp-del { justify-self: end; }
   table.data.gp-scale-t th, table.data.gp-scale-t td { padding: 8px 5px; }
+}
+@media (max-width: 360px) {
+  table.data.gp-scale-t th, table.data.gp-scale-t td { padding: 8px 3px; }
 }
 </style>
 
@@ -153,8 +160,12 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
     <label for="gp-prev-cr">Credits it covers</label>
     <input type="text" id="gp-prev-cr" inputmode="decimal" autocomplete="off" placeholder="e.g. 60" aria-describedby="gp-prev-msg">
   </div>
+  <div class="field">
+    <label for="gp-prev-w">Weighted GPA so far</label>
+    <input type="text" id="gp-prev-w" inputmode="decimal" autocomplete="off" placeholder="e.g. 3.6" aria-describedby="gp-prev-msg gp-prev-note">
+  </div>
 </div>
-<p class="hint gp-note">From your transcript, for courses not listed above. It is added to the unweighted and the weighted result alike.</p>
+<p class="hint gp-note" id="gp-prev-note">From your transcript, for courses not listed above. The weighted GPA is optional: without it, your GPA so far counts in the unweighted and the weighted result alike.</p>
 <p class="msg error" id="gp-prev-msg"></p>
 
 <hr class="gp-sep">
@@ -246,8 +257,12 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
   function short(a) { return fixed(a, 6).replace(/\.?0+$/, ''); }
   // Grade points always show a decimal: 4.0, 3.7, 4.33.
   function pt(a) { var t = short(a); return t.indexOf('.') === -1 ? t + '.0' : t; }
-  // Up to 4 decimals, with an ellipsis when the exact value goes on.
-  function exact4(a) { var t = fixed(a, 4).replace(/\.?0+$/, ''); return cmp(dec(fixed(a, 4)), a) === 0 ? t : fixed(a, 4) + '…'; }
+  // Up to 4 decimals, cut with an ellipsis when the exact value goes on. Never
+  // rounded up: 3.42499 reads 3.4249… beside its GPA of 3.42, not 3.4250….
+  function exact4(a) {
+    var s = 10000n, v = a.n * s / a.d, t = units(v, 4);
+    return v * a.d === a.n * s ? t.replace(/\.?0+$/, '') : t + '…';
+  }
   function intCeil(a) { var q = a.n / a.d; if (a.n % a.d !== 0n && a.n > 0n) q += 1n; return q; }
 
   // ----- Typed numbers -----
@@ -380,17 +395,24 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
     });
     m.newC = C; m.newP = P; m.newW = W;
     // Earlier semesters, from a transcript.
-    var pg = parse($('#gp-prev-gpa').value), pc = parse($('#gp-prev-cr').value);
+    // A GPA so far above the top of the scale is a weighted one: added to the
+    // unweighted figure it would give, say, 4.32 on a 4.0 scale. A weighted GPA
+    // so far has its own box and counts in the weighted figure only.
+    var pg = parse($('#gp-prev-gpa').value), pc = parse($('#gp-prev-cr').value), pw = parse($('#gp-prev-w').value);
     var maxG = add(m.top, cmp(m.hon, m.ap) > 0 ? m.hon : m.ap);
+    var okG = inRange(pg, ZERO, m.top), okC = inRange(pc, ZERO, Q(9999n)), okW = inRange(pw, ZERO, maxG);
     m.prev = null;
-    if (pg !== null && !inRange(pg, ZERO, maxG)) err($('#gp-prev-gpa'), $('#gp-prev-msg'), 'Enter your GPA so far as a number from 0 to ' + short(maxG) + ', such as 3.2.');
-    if (pc !== null && !inRange(pc, ZERO, Q(9999n))) err($('#gp-prev-cr'), $('#gp-prev-msg'), 'Enter the credits as a number from 0 to 9,999, such as 60.');
-    // Half of the pair is a prompt, not an error: nothing is wrong yet.
-    m.prevHint = pg !== null && pc === null && inRange(pg, ZERO, maxG) ? 'Your GPA so far is left out until you enter the credits it covers.'
-      : pc !== null && pg === null && inRange(pc, ZERO, Q(9999n)) ? 'Your earlier credits are left out until you enter the GPA they gave you.' : '';
-    if (inRange(pg, ZERO, maxG) && inRange(pc, ZERO, Q(9999n))) {
-      m.prev = { gpa: pg, C: pc, P: mul(pg, pc) };
-      C = add(C, pc); P = add(P, m.prev.P); W = add(W, m.prev.P);
+    if (pg !== null && !okG) err($('#gp-prev-gpa'), $('#gp-prev-msg'), 'Enter your GPA so far as a number from 0 to ' + pt(m.top) + ', such as 3.2. A weighted GPA above that goes under Weighted GPA so far.');
+    if (pc !== null && !okC) err($('#gp-prev-cr'), $('#gp-prev-msg'), 'Enter the credits as a number from 0 to 9,999, such as 60.');
+    if (pw !== null && !okW) err($('#gp-prev-w'), $('#gp-prev-msg'), 'Enter your weighted GPA so far as a number from 0 to ' + pt(maxG) + ', such as 3.6.');
+    // Part of the set is a prompt, not an error: nothing is wrong yet.
+    m.prevHint = okG && pc === null ? 'Your GPA so far is left out until you enter the credits it covers.'
+      : okC && pg === null ? (okW ? 'Your earlier semesters are left out until you enter their unweighted GPA under GPA so far.' : 'Your earlier credits are left out until you enter the GPA they gave you.')
+      : okW && pg === null && pc === null ? 'Your weighted GPA so far is left out until you enter your GPA so far and the credits it covers.' : '';
+    if (okG && okC) {
+      m.prev = { gpa: pg, wgpa: okW ? pw : null, C: pc, P: mul(pg, pc), W: mul(okW ? pw : pg, pc) };
+      C = add(C, pc); P = add(P, m.prev.P); W = add(W, m.prev.W);
+      if (okW) m.weighted = true;
     }
     m.C = C; m.P = P; m.W = W;
     m.ok = !m.bad.length;
@@ -401,18 +423,18 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
     return m;
   }
 
-  function letterNear(v, pts) {
+  function letterNear(v, pts, weighted) {
     // The grades just above and below an average, on the unweighted points.
-    var above = null, below = null;
+    var above = null, below = null, where = weighted ? ' in regular classes' : '';
     for (var i = GRADES.length - 1; i >= 0; i--) {
       var g = GRADES[i], p = pts[g];
       if (g === 'A+' && cmp(p, pts.A) === 0) continue;
-      if (cmp(p, v) === 0) return 'That is ' + article(g) + ' ' + show(g) + ' average (' + pt(p) + ').';
+      if (cmp(p, v) === 0) return 'That is ' + article(g) + ' ' + show(g) + ' average (' + pt(p) + ')' + where + '.';
       if (cmp(p, v) < 0) below = g;
       else if (!above) above = g;
     }
     if (!above) return 'That is above ' + article(GRADES[cmp(pts['A+'], pts.A) === 0 ? 1 : 0]) + ' ' + show(GRADES[cmp(pts['A+'], pts.A) === 0 ? 1 : 0]) + ' in every course, so it needs Honors or AP / IB classes.';
-    return 'That is between ' + article(below) + ' ' + show(below) + ' (' + pt(pts[below]) + ') and ' + article(above) + ' ' + show(above) + ' (' + pt(pts[above]) + ').';
+    return 'That is between ' + article(below) + ' ' + show(below) + ' (' + pt(pts[below]) + ') and ' + article(above) + ' ' + show(above) + ' (' + pt(pts[above]) + ')' + where + '.';
   }
   function article(g) { return /^[AF]/.test(g) ? 'an' : 'a'; }
 
@@ -428,14 +450,20 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
     var C = m.C, P = weighted ? m.W : m.P, all = add(C, R), kind = weighted ? 'weighted ' : '';
     var need = div(sub(mul(t, all), P), R), T = short(t), Rs = short(R);
     var credits = Rs + (cmp(R, ONE) === 0 ? ' credit' : ' credits');
-    var topWord = weighted ? 'straight A’s in AP / IB classes' : cmp(m.top, m.pts.A) > 0 ? 'straight A+ grades' : 'straight A’s';
+    // The grade the most needs: an A+ where it counts more than an A, in the class
+    // type with the bigger bonus when the plan is for the weighted GPA.
+    var grade = cmp(m.top, m.pts.A) > 0 ? 'straight A+ grades' : 'straight A’s';
+    var topWord = weighted ? grade + ' in ' + (cmp(m.hon, m.ap) > 0 ? 'Honors' : 'AP / IB') + ' classes' : grade;
     if (cmp(need, ZERO) <= 0) {
       out.state = 'safe';
       out.text = 'You keep a ' + kind + 'GPA of at least ' + T + ' whatever you get: even an F in every remaining course leaves ' + fixed(div(P, all), 2) + '.';
     } else if (cmp(need, max) > 0) {
       out.state = 'out';
-      var best = div(add(P, mul(max, R)), all);
-      out.text = 'Not reachable in ' + credits + ': you would need an average of ' + ceilFixed(need, 2) + ', and the most is ' + pt(max) + '. With ' + topWord + ' you would finish with ' + fixed(best, 2) + '.';
+      // Rounded, a best result just under the target (3.4999 for 3.5) would read
+      // as the target itself, so it gets more digits.
+      var best = div(add(P, mul(max, R)), all), bestT = fixed(best, 2);
+      if (cmp(dec(bestT), t) >= 0) bestT = exact4(best);
+      out.text = 'Not reachable in ' + credits + ': you would need an average of ' + ceilFixed(need, 2) + ', and the most is ' + pt(max) + '. With ' + topWord + ' you would finish with ' + bestT + '.';
       if (cmp(t, max) < 0) {
         var more = intCeil(div(sub(mul(t, C), P), sub(max, t)));
         out.text += ' To reach ' + T + ' with ' + topWord + ' you need at least ' + more + ' more credits.';
@@ -444,7 +472,7 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
       }
     } else {
       out.state = 'need';
-      out.text = 'You need an average ' + kind + 'GPA of ' + ceilFixed(need, 2) + ' over your next ' + credits + ' to reach ' + T + '. ' + letterNear(dec(ceilFixed(need, 2)), m.pts);
+      out.text = 'You need an average ' + kind + 'GPA of ' + ceilFixed(need, 2) + ' over your next ' + credits + ' to reach ' + T + '. ' + letterNear(dec(ceilFixed(need, 2)), m.pts, weighted);
     }
     return out;
   }
@@ -456,7 +484,7 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
     var m = model(), all = m.bad.concat(m.plan.bad || []);
     // Field states and messages. A field keeps its red edge once shown, until fixed.
     var flagged = [];
-    $$('#gp-hon, #gp-ap, #gp-prev-gpa, #gp-prev-cr, #gp-target, #gp-left, .gp-cr input').forEach(function (input) {
+    $$('#gp-hon, #gp-ap, #gp-prev-gpa, #gp-prev-cr, #gp-prev-w, #gp-target, #gp-left, .gp-cr input').forEach(function (input) {
       var e = all.filter(function (x) { return x.input === input; })[0];
       var on = e && (showErrors || input.getAttribute('aria-invalid') === 'true');
       if (on) { input.setAttribute('aria-invalid', 'true'); flagged.push(e); } else input.removeAttribute('aria-invalid');
@@ -513,7 +541,7 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
       wgpa.textContent = fixed(m.wgpa, 2);
       var w = (m.weighted ? 'Unweighted: ' : '') + short(m.P) + ' grade points ÷ ' + credText(m.C) + ' = ' + exact4(m.gpa);
       if (m.weighted) w += '; weighted: ' + short(m.W) + ' ÷ ' + short(m.C) + ' = ' + exact4(m.wgpa);
-      if (m.prev) w += '; includes ' + short(m.prev.gpa) + ' over ' + credText(m.prev.C) + ' from earlier semesters';
+      if (m.prev) w += '; includes ' + short(m.prev.gpa) + (m.prev.wgpa ? ' (weighted ' + short(m.prev.wgpa) + ')' : '') + ' over ' + credText(m.prev.C) + ' from earlier semesters';
       work.textContent = m.prevHint ? w + (w.slice(-1) === '…' ? ' ' : '. ') + m.prevHint : w;
     }
     $('#gp-credits').textContent = m.ok ? short(m.C) : '–';
@@ -559,8 +587,8 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
   function enc(s, max) { return encodeURIComponent(Array.from(String(s)).slice(0, max || 40).join('')); }
   function stateString() {
     var parts = ['v=1', 's=' + $('#gp-scale').value, 'h=' + enc($('#gp-hon').value), 'a=' + enc($('#gp-ap').value)];
-    var pg = $('#gp-prev-gpa').value, pc = $('#gp-prev-cr').value;
-    if (pg || pc) parts.push('p=' + enc(pg) + ',' + enc(pc));
+    var pg = $('#gp-prev-gpa').value, pc = $('#gp-prev-cr').value, pw = $('#gp-prev-w').value;
+    if (pg || pc || pw) parts.push('p=' + enc(pg) + ',' + enc(pc) + (pw ? ',' + enc(pw) : ''));
     parts.push('t=' + enc($('#gp-target').value) + ',' + enc($('#gp-left').value) + ',' + $('#gp-basis').value);
     parts.push('c=' + sems().map(function (sec) {
       return $$('.gp-row', sec).map(function (row) {
@@ -612,13 +640,13 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
     box.textContent = '';
     if (!st) {
       $('#gp-scale').value = 'std'; $('#gp-hon').value = '0.5'; $('#gp-ap').value = '1';
-      $('#gp-prev-gpa').value = ''; $('#gp-prev-cr').value = '';
+      $('#gp-prev-gpa').value = ''; $('#gp-prev-cr').value = ''; $('#gp-prev-w').value = '';
       $('#gp-target').value = '3.7'; $('#gp-left').value = '15'; $('#gp-basis').value = 'u';
       EXAMPLE.forEach(function (rows) { box.appendChild(makeSem(rows)); });
       return;
     }
     $('#gp-scale').value = st.s; $('#gp-hon').value = st.h; $('#gp-ap').value = st.a;
-    $('#gp-prev-gpa').value = (st.p[0] || '').slice(0, 40); $('#gp-prev-cr').value = (st.p[1] || '').slice(0, 40);
+    $('#gp-prev-gpa').value = (st.p[0] || '').slice(0, 40); $('#gp-prev-cr').value = (st.p[1] || '').slice(0, 40); $('#gp-prev-w').value = (st.p[2] || '').slice(0, 40);
     $('#gp-target').value = (st.t[0] || '').slice(0, 40); $('#gp-left').value = (st.t[1] || '').slice(0, 40);
     $('#gp-basis').value = st.t[2] === 'w' ? 'w' : 'u';
     (st.c.length ? st.c : [[]]).forEach(function (rows) { box.appendChild(makeSem(rows)); });
@@ -681,7 +709,7 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
         out.push('  ' + (r.name || 'Course ' + r.n) + ': ' + (r.grade ? show(r.grade) : 'no grade') + (r.crRaw ? ', ' + (r.credits && !Number.isNaN(r.credits) ? credText(r.credits) : r.crRaw + ' credits (not a number)') : '') + (r.level !== 'r' ? ', ' + LEVELS[r.level] : ''));
       });
     });
-    if (m.prev) out.push('Earlier semesters: GPA ' + short(m.prev.gpa) + ' over ' + credText(m.prev.C));
+    if (m.prev) out.push('Earlier semesters: GPA ' + short(m.prev.gpa) + (m.prev.wgpa ? ', weighted ' + short(m.prev.wgpa) + ',' : '') + ' over ' + credText(m.prev.C));
     out.push((m.cumulative ? 'Cumulative GPA: ' : 'GPA: ') + (m.ok && m.gpa ? fixed(m.gpa, 2) + (m.weighted ? ' (weighted ' + fixed(m.wgpa, 2) + ')' : '') + ', ' + credText(m.C) : '–'));
     if (m.plan.text) out.push('Target: ' + m.plan.text);
     out.push('Scale: ' + $('#gp-scale').selectedOptions[0].textContent + (m.weighted ? '; Honors +' + short(m.hon) + ', AP / IB +' + short(m.ap) : ''));
@@ -702,6 +730,9 @@ table.data.gp-scale-t .num { text-align: right; font-variant-numeric: tabular-nu
           r.counted ? short(mul(r.gp, r.credits)) : '', r.counted ? short(mul(r.wp, r.credits)) : '']);
       });
     });
+    // The .csv is the copy to keep when the address cannot hold everything, so the
+    // earlier semesters go in too.
+    if (m.prev) rows.push(['earlier', 'Earlier semesters', 'GPA ' + short(m.prev.gpa) + (m.prev.wgpa ? ', weighted ' + short(m.prev.wgpa) : ''), short(m.prev.C), '', short(m.prev.P), short(m.prev.W)]);
     TT.download('gpa.csv', '\uFEFF' + rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
   });
   $('#gp-link').addEventListener('click', function () {

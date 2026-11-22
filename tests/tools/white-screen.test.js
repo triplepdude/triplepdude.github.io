@@ -19,6 +19,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
         window.__wake.push('request:' + type);
         const l = new EventTarget();
         l.release = () => { window.__wake.push('release'); return Promise.resolve(); };
+        window.__lock = l;
         return Promise.resolve(l);
       },
     } });
@@ -34,6 +35,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     }
     let el = null;
     const fire = () => setTimeout(() => document.dispatchEvent(new Event('fullscreenchange')), 10);
+    // The browser leaving full screen without an event, as on a Back visit.
+    window.__drop = () => { el = null; };
     Object.defineProperty(Document.prototype, 'fullscreenElement', { configurable: true, get: () => el });
     Element.prototype.requestFullscreen = function (opts) {
       window.__fs.push(['request', this.id, opts && opts.navigationUI]);
@@ -210,6 +213,37 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.evaluate(() => { location.hash = '#green&b=10'; });
   await page.waitForFunction(() => document.getElementById('ws-name').textContent === 'Green');
   assert.equal(await bg(), rgb(dim([0, 255, 0], 0.1)));
+  // A link opened afresh keeps its message: the page tidies the address at
+  // once, and reading it again when the page is shown must not clear it.
+  for (const [h, want, msg] of [
+    ['#zzz&b=40', '#white&b=40', 'Part of this link could not be read (“zzz”), so white is shown.'],
+    // A single word could name a heading, so it is read once the page is complete.
+    ['#zzz', '', 'Part of this link could not be read (“zzz”), so white is shown.'],
+    ['#' + 'a'.repeat(65), '', 'The colour in this link is too long to read, so white is shown.'],
+  ]) {
+    await page.goto('about:blank');
+    await visit(h);
+    await hashIs(want);
+    await page.waitForTimeout(300);
+    assert.equal(await text('#ws-msg'), msg, `fresh visit to ${h.slice(0, 12)}`);
+  }
+  // A link to a section of the guide is no colour: no message, the address
+  // keeps it, and the browser scrolls to the heading.
+  await page.goto('about:blank');
+  await visit('#brightness');
+  await page.waitForTimeout(400);
+  assert.deepEqual([await text('#ws-msg'), await hash(), await text('#ws-name')], ['', '#brightness', 'White']);
+  const [headTop, vh, sy] = await page.evaluate(() => [document.getElementById('brightness').getBoundingClientRect().top, innerHeight, scrollY]);
+  assert.ok(sy > 0 && headTop > -2 && headTop < vh / 2, `scrolled to the Brightness heading (top ${headTop}, scrollY ${sy})`);
+  // Followed from the page itself, it leaves the colour alone until the next change.
+  await visit('#red&b=50');
+  await page.evaluate(() => { location.hash = '#colour-temperature'; });
+  await page.waitForTimeout(400);
+  assert.deepEqual([await text('#ws-msg'), await hash(), await text('#ws-name'), await bg()], ['', '#colour-temperature', 'Red', 'rgb(188, 0, 0)']);
+  await page.click('.ws-sw:text-is("Blue")');
+  await hashIs('#blue&b=50');
+  // Back to the top: the stubbed full screen below leaves the colour in place.
+  await page.evaluate(() => window.scrollTo(0, 0));
 
   // After Back, the address wins over whatever the browser restores.
   await page.goto(url + '#purple&b=60');
@@ -252,6 +286,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.getAttribute('#ws-stage', 'role'), 'application');
   assert.match(await page.getAttribute('#ws-stage', 'aria-label'), /^Full-screen colour: White, 6500 K, 100% brightness\./);
   await page.waitForFunction(() => window.__wake.length === 1);
+  // The browser drops the lock while the page is hidden; it is asked for
+  // again when the page is back in view.
+  await page.evaluate(() => { window.__lock.dispatchEvent(new Event('release')); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.waitForFunction(() => window.__wake.length === 2, null, { timeout: 3000 });
   assert.deepEqual(await page.$eval('#ws-stage', e => { const s = getComputedStyle(e); return [s.borderTopWidth, s.borderTopLeftRadius]; }), ['0px', '0px']);
   // Arrows change the colour and the brightness in steps of 5%.
   await page.keyboard.press('ArrowRight');
@@ -292,7 +330,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => !document.getElementById('ws-stage').classList.contains('is-active'));
   assert.deepEqual((await page.evaluate(() => window.__fs)).map(c => c[0]), ['request', 'exit']);
   assert.equal(await active(), 'ws-full');
-  assert.deepEqual(await page.evaluate(() => window.__wake), ['request:screen', 'release']);
+  assert.deepEqual(await page.evaluate(() => window.__wake), ['request:screen', 'request:screen', 'release']);
+  // Arrow steps land on multiples of 5 from any brightness, never below 1%.
+  await page.focus('#ws-stage');
+  for (const [from, key, want] of [[37, 'ArrowUp', '40%'], [37, 'ArrowDown', '35%'], [3, 'ArrowDown', '1%'], [1, 'ArrowUp', '5%'], [99, 'ArrowUp', '100%']]) {
+    await slide('#ws-b', from);
+    await page.keyboard.press(key);
+    assert.equal(await text('#ws-b-out'), want, `${key} from ${from}%`);
+  }
+  await slide('#ws-b', 100);
   // From the focused preview: Enter and F start it, F ends it, and the
   // browser leaving full screen by itself ends it too.
   await page.focus('#ws-stage');
@@ -311,6 +357,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => document.getElementById('ws-stage').classList.contains('is-active'));
   await page.click('#ws-bar-exit');
   await page.waitForFunction(() => !document.getElementById('ws-stage').classList.contains('is-active'));
+  // Back to the page after the browser left full screen without a word: the
+  // colour returns to the page, so the keyboard is not kept on it.
+  await page.focus('#ws-stage');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.getElementById('ws-stage').classList.contains('is-active'));
+  await page.evaluate(() => { window.__drop(); window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
+  assert.equal(await has('is-active'), false, 'not left in full screen after a Back visit');
+  await page.keyboard.press('Tab');
+  assert.notEqual(await active(), 'ws-stage', 'Tab leaves the colour again');
   // F typed into the colour code field is just a letter.
   await page.fill(hexIn, '#ff');
   await page.focus(hexIn);

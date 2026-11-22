@@ -631,6 +631,21 @@ async function siteChecks(browser, base, problems) {
   await context.close();
 }
 
+
+// The first four lines of an error's stack, plus the first line that points
+// into a test file when those lines do not reach one. An assertion message
+// with a diff can fill the first four lines, and the failing line of the test
+// is what is needed to find the fault.
+function failureText(e) {
+  if (!e || !e.stack) return String(e);
+  const lines = e.stack.split('\n');
+  const head = lines.slice(0, 4);
+  const at = lines.find(l => /^\s*at .*[\\/]tests[\\/]tools[\\/]/.test(l)) ||
+    lines.find(l => /^\s*at .*[\\/]tests[\\/]run\.js:/.test(l));
+  if (at && !head.includes(at)) head.push(at);
+  return head.join('\n');
+}
+
 async function main() {
   const only = process.argv.slice(2);
   const testFiles = (only.length ? only : fs.readdirSync(TESTS).filter(f => f.endsWith('.test.js')).map(f => f.replace(/\.test\.js$/, '')))
@@ -679,7 +694,7 @@ async function main() {
       await phone.context.close();
       await zoomed.context.close();
     } catch (e) {
-      problems.push(`test failed: ${e && e.stack ? e.stack.split('\n').slice(0, 4).join('\n') : e}`);
+      problems.push(`test failed: ${failureText(e)}`);
     }
     if (problems.length) {
       failed++;
@@ -695,7 +710,7 @@ async function main() {
     try {
       await siteChecks(browser, server.base, problems);
     } catch (e) {
-      problems.push(`site checks failed: ${e && e.stack ? e.stack.split('\n').slice(0, 4).join('\n') : e}`);
+      problems.push(`site checks failed: ${failureText(e)}`);
     }
     if (problems.length) {
       failed++;

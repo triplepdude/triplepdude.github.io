@@ -6,6 +6,12 @@ rotation formulas worked out with Python's math module, and expected JPEG tables
 from the IJG quality scaling in libjpeg's jcparam.c, never from the page.
 quadrants.heic is a copy of tests/fixtures/resize-image/quadrants.heic: 240 x 160,
 quadrants (220,40,40) (40,180,60) / (40,60,200) (240,240,240).
+
+The files the decoder warns about or refuses are copies:
+  cut.jpg (ends 40% into its scan data), early.jpg   from tests/fixtures/jpg-to-png/
+  cut.webp                                           from tests/fixtures/webp-to-png/
+  cut.avif, damaged.avif, pq.avif (HDR, PQ)          from tests/fixtures/avif-to-jpg/
+  hdr-pq.heic (HDR, PQ; libheif decodes it)          from tests/fixtures/heic-to-jpg/
 """
 import json
 import math
@@ -73,6 +79,23 @@ def crop(w, h, deg):
 expected['sizes'] = {str(d): {'expand': expand(SW, SH, d), 'crop': crop(SW, SH, d)} for d in (10, -2.5, 30, 45, -45, 315, 100, 135, -135)}
 # The page's 900 x 600 sample picture turned 12.5 degrees.
 expected['sample_12_5'] = expand(900, 600, 12.5)
+
+# ---------- big.png 2000 x 1500 and mid.png 1600 x 1200: the same quadrants, no centre dot ----------
+# For a browser that cannot draw on canvases over 2 megapixels (the test makes Chrome's canvases behave
+# like Safari's over its limit): big.png is over it, mid.png under it until it is turned 30 degrees.
+QUAD = [(220, 40, 40), (40, 180, 60), (40, 60, 200), (240, 200, 0)]  # top left, top right, bottom left, bottom right
+for name, (qw, qh) in (('big.png', (2000, 1500)), ('mid.png', (1600, 1200))):
+    q = np.zeros((qh, qw, 3), np.uint8)
+    q[:qh // 2, :qw // 2], q[:qh // 2, qw // 2:], q[qh // 2:, :qw // 2], q[qh // 2:, qw // 2:] = QUAD
+    Image.fromarray(q, 'RGB').save(name, optimize=True)
+expected['quad'] = QUAD
+expected['mid_30'] = expand(1600, 1200, 30)
+# dot.png 2000 x 1500: transparent but for an 8 x 8 square in the middle, so a copy of it that fits under
+# the cap is almost all transparent and must not be taken for a blank one.
+dot = np.zeros((1500, 2000, 4), np.uint8)
+dot[746:754, 996:1004] = (200, 30, 30, 255)
+Image.fromarray(dot, 'RGBA').save('dot.png', optimize=True)
+expected['dot'] = [200, 30, 30]
 
 # ---------- photo.jpg: 64 x 48 at libjpeg quality 75; rot6.jpg with EXIF Orientation 6 ----------
 yy, xx = np.mgrid[0:48, 0:64]
