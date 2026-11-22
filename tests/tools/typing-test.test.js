@@ -126,7 +126,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.press(w[0][0]);
   assert.equal(await active(), 'tt-input');
   assert.equal(await value(), w[0][0]);
+  assert.equal(await text('#tt-sr'), 'Test 1 started: 1 minute.');
+  // Esc starts again when nothing has the focus too, and from the tool's buttons.
+  await page.evaluate(() => document.activeElement.blur());
   await page.keyboard.press('Escape');
+  assert.equal(await value(), '');
+  assert.equal(await text('#tt-sr'), 'Test stopped. A new test is ready.');
+  assert.equal(await active(), 'tt-input');
+  w = await words();
+  await page.keyboard.type(w[0]);
+  await page.focus('#tt-clear');
+  await page.keyboard.press('Escape');
+  assert.equal(await value(), '');
+  assert.equal(await text('#tt-time'), '1:00');
+  assert.equal(await active(), 'tt-input');
 
   // ---- Paste is refused, even a megabyte of it ----
   await page.evaluate(() => navigator.clipboard.writeText('paste '.repeat(175000)));
