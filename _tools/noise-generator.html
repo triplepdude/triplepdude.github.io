@@ -246,7 +246,8 @@ faq:
   // ---------- The sound engine ----------
   // Self-contained: its source text also runs inside the AudioWorklet, where
   // there is no page and no crypto. Left and right take turns drawing from one
-  // random stream (xoshiro128**, period 2^128 - 1), so the noise never repeats.
+  // random stream (xoshiro128**, period 2^128 - 1), so the noise never repeats;
+  // while colours cross-fade each draws its own, so they are independent.
   function ngEngine(sr, seed) {
     'use strict';
     const TAU = 2 * Math.PI;
@@ -320,21 +321,39 @@ faq:
     function toneCoef(t) {
       return t < 0 ? coef('hs', 800, t, Math.SQRT1_2) : t > 0 ? coef('ls', 800, -t, Math.SQRT1_2) : [1, 0, 0, 0, 0];
     }
-    const XF = 1 / Math.round(0.4 * sr), GS = 1 - Math.exp(-1 / (0.02 * sr)), TSTEP = 24 * 128 / (0.05 * sr);
+    const XF = 1 / Math.round(0.4 * sr), GS = 1 - Math.exp(-1 / (0.001 * sr)), TSTEP = 24 * 128 / (0.2 * sr);
     const tk = [1, 0, 0, 0, 0], tL = biquad(tk), tR = biquad(tk);
     let voices = [], main = null, tone = 0, toneT = 0;
-    // A colour change cross-fades for 0.4 s: the new colour's weight rises
-    // while the others share what is left, so the weights always add up to 1.
+    // A colour's level at the tone reached so far in a glide: in dB, a straight
+    // line from where the glide started (ta, ga) to the target (g1), bending
+    // at tone 0 (gz) if it crosses it, as the loudness of a tone does.
+    function along(v) {
+      const a = v.ta, b = toneT;
+      if (tone === b || a === b || !(v.ga > 0 && v.gz > 0)) return v.g1;
+      if (a * b < 0) return tone * a > 0 ? v.ga * Math.pow(v.gz / v.ga, 1 - tone / a) : v.gz * Math.pow(v.g1 / v.gz, tone / b);
+      return v.ga * Math.pow(v.g1 / v.ga, (tone - a) / (b - a));
+    }
+    // A colour change cross-fades for 0.4 s: the new colour's share of the
+    // power rises while the others share what is left, so the power (and,
+    // the colours being equally loud and independent, the loudness) stays put.
     function set(m) {
-      if (typeof m.tone === 'number' && m.tone === m.tone) toneT = Math.max(-12, Math.min(12, m.tone));
-      if (typeof m.colour !== 'string') return;
       let v = null;
       for (let i = 0; i < voices.length; i++) if (voices[i].name === m.colour) v = voices[i];
-      if (!v) {
-        v = { name: m.colour, l: make(m.colour), r: make(m.colour), g: m.gain, gt: m.gain, w: voices.length ? 0 : 1 };
-        voices.push(v);
+      if (typeof m.tone === 'number' && m.tone === m.tone) {
+        const t = Math.max(-12, Math.min(12, m.tone));
+        if (t !== toneT) {
+          // A new glide starts from here; colours fading out keep their level.
+          for (let i = 0; i < voices.length; i++) { const u = voices[i]; u.ta = tone; u.ga = u.gb; if (u !== v) u.g1 = u.gz = u.gb; }
+          toneT = t;
+        }
       }
-      if (typeof m.gain === 'number' && m.gain >= 0) v.gt = m.gain;
+      if (typeof m.colour !== 'string') return;
+      const g = typeof m.gain === 'number' && m.gain >= 0 ? m.gain : v ? v.g1 : 0;
+      const gz = typeof m.gain0 === 'number' && m.gain0 >= 0 ? m.gain0 : g;
+      if (!v) {
+        v = { name: m.colour, l: make(m.colour), r: make(m.colour), g: g, gb: g, ga: g, ta: tone, g1: g, gz: gz, w: voices.length ? 0 : 1 };
+        voices.push(v);
+      } else { v.g1 = g; v.gz = gz; }
       main = v;
     }
     function render(L, R, n) {
@@ -345,6 +364,7 @@ faq:
           const k = toneCoef(tone);
           for (let j = 0; j < 5; j++) tk[j] = k[j];
         }
+        for (let j = 0; j < voices.length; j++) voices[j].gb = along(voices[j]);
         for (let i = i0; i < i1; i++) {
           if (main.w < 1) {
             main.w = Math.min(1, main.w + XF);
@@ -353,13 +373,12 @@ faq:
             const f = rest > 0 ? (1 - main.w) / rest : 0;
             for (let j = 0; j < voices.length; j++) if (voices[j] !== main) voices[j].w *= f;
           }
-          const wl = rnd(), wr = rnd();
           let yl = 0, yr = 0;
           for (let j = 0; j < voices.length; j++) {
             const v = voices[j];
-            v.g += (v.gt - v.g) * GS;
-            const a = v.w * v.g;
-            yl += a * v.l(wl); yr += a * v.r(wr);
+            v.g += (v.gb - v.g) * GS;
+            const a = (v.w < 1 ? Math.sqrt(v.w) : 1) * v.g;
+            yl += a * v.l(rnd()); yr += a * v.r(rnd());
           }
           L[i] = tL(yl); R[i] = tR(yr);
         }
@@ -549,7 +568,8 @@ faq:
     return ctx.audioWorklet.addModule(url).then(function () { return 'worklet'; }, function () { return 'buffers'; })
       .then(function (kind) { URL.revokeObjectURL(url); return kind; });
   }
-  function settings() { return { colour: st.colour, tone: st.tone, gain: gainFor(st.colour, st.tone) }; }
+  // The level at tone 0 too, which a tone glide passes through.
+  function settings() { return { colour: st.colour, tone: st.tone, gain: gainFor(st.colour, st.tone), gain0: gainFor(st.colour, 0) }; }
   function buildSource(kind) {
     if (au.src) return;
     if (kind === 'worklet') {
