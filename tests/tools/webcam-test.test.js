@@ -329,7 +329,7 @@ module.exports = async ({ page, open, assert }) => {
   // snapshot follows the Mirror setting, which is on by default, so one saved mirrored is sent
   // to Flip Image to be flipped back. A reader whose camera drops frames in low light is
   // offered the white screen as a soft lamp.
-  assert.deepEqual(links, ['/mic-test/', '/qr-code-scanner/', '/white-screen/', '/flip-image/']);
+  assert.deepEqual(links, ['/mic-test/', '/qr-code-scanner/', '/white-screen/', '/flip-image/', '/video-to-gif/', '/mp4-to-mp3/']);
   assert.match((await text('.prose')).replace(/\s+/g, ' '), /cannot deliver more than 15 frames per second\. More light fixes it: a white screen on a second monitor or a tablet makes a soft lamp for your face\./);
   assert.match((await text('.prose')).replace(/\s+/g, ' '), /use the mic test; to read a QR code with your webcam, use the QR code scanner\./);
   assert.match((await text('.prose')).replace(/\s+/g, ' '), /so they show what other people see\. A snapshot saved mirrored can be flipped back to that view with Flip Image\./);
