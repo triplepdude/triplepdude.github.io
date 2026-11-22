@@ -10,8 +10,6 @@ The other files of the damaged-file, WebP and AVIF checks are copies:
   cut.webp, rotated.webp, anim.webp   from tests/fixtures/webp-to-png/
   cut.jpg, early.jpg, motion.jpg   from tests/fixtures/jpg-to-png/
   cut.png   tests/fixtures/image-converter/cut-big.png
-  pq.avif   from tests/fixtures/avif-to-jpg/ (HDR, PQ transfer)
-  hdr-pq.heic   from tests/fixtures/heic-to-jpg/ (HDR, PQ transfer)
 """
 import os
 

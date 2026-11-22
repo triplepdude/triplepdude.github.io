@@ -341,38 +341,18 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // data and cut.png (160 x 120, top 20 rows (200,40,90)) 60% into it: the browser draws the
   // rows before the cut and leaves the rest transparent, so they open with a note. At 100% the
   // shorter side spans the circle: output y = image y * 128 / 90 and * 128 / 120.
-  // The note goes in #circ-note, a polite live region outside the file input's label, so a
-  // screen reader announces it once, when the image opens, and not again as part of the
-  // input's name. An observer records the text of every live region on the page as it changes.
   const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
   const opened = name => page.waitForFunction(n => document.querySelector('#circ-drop-title').textContent === n, name, { timeout: 20000 });
-  await page.evaluate(() => {
-    window.said = [];
-    const LIVE = '[aria-live], [role="status"], [role="alert"], [role="log"]';
-    const mo = new MutationObserver(ms => ms.forEach(m => {
-      const el = m.target.nodeType === 1 ? m.target : m.target.parentElement, r = el && el.closest(LIVE);
-      if (r && r.textContent.trim()) window.said.push(r.textContent);
-    }));
-    document.querySelectorAll(LIVE).forEach(r => mo.observe(r, { childList: true, characterData: true, subtree: true }));
-  });
-  const said = re => page.evaluate(src => window.said.filter(t => new RegExp(src).test(t)).length, re.source);
-  const inLabel = () => page.$eval('#circ-file', el => Array.from(el.labels).map(l => l.textContent).join(' '));
-  assert.equal(await page.$eval('#circ-note', el => el.closest('[aria-live="polite"], [role="status"]') === el && !el.closest('label')), true, 'the note is a polite live region outside the label');
   await page.setInputFiles('#circ-file', path.join(fixtures, 'cut.jpg'));
   await opened('cut.jpg');
-  assert.equal(await page.textContent('#circ-note'), CUT);
-  assert.equal(await page.isVisible('#circ-note'), true);
-  assert.equal(await page.textContent('#circ-drop-hint'), '120 × 90 px. Choose or drop another image to replace it.');
-  assert.doesNotMatch(await inLabel(), /cut off/, 'the input\'s name does not repeat the note');
-  assert.equal(await said(/cut off/), 1, 'the note is announced once');
+  assert.equal(await page.textContent('#circ-drop-hint'), `120 × 90 px. ${CUT} Choose or drop another image to replace it.`);
   assert.equal(await page.textContent('#circ-error'), '');
   png = await download();
   assert.ok(near(png.px(64, 20), [40, 90, 200, 255], 10), `cut.jpg before the cut ${png.px(64, 20)}`);
   assert.deepEqual(png.px(64, 100), [0, 0, 0, 0], 'cut.jpg after the cut: blank');
   await page.setInputFiles('#circ-file', path.join(fixtures, 'cut.png'));
   await opened('cut.png');
-  assert.equal(await page.textContent('#circ-note'), CUT);
-  assert.equal(await page.textContent('#circ-drop-hint'), '160 × 120 px. Choose or drop another image to replace it.');
+  assert.equal(await page.textContent('#circ-drop-hint'), `160 × 120 px. ${CUT} Choose or drop another image to replace it.`);
   png = await download();
   assert.ok(near(png.px(64, 10), [200, 40, 90, 255], 4), `cut.png before the cut ${png.px(64, 10)}`);
   assert.deepEqual(png.px(64, 120), [0, 0, 0, 0], 'cut.png after the cut: blank');
@@ -381,28 +361,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.setInputFiles('#circ-file', path.join(fixtures, 'motion.jpg'));
   await opened('motion.jpg');
   assert.equal(await page.textContent('#circ-drop-hint'), '120 × 90 px. Choose or drop another image to replace it.');
-  assert.equal(await page.textContent('#circ-note'), '');
-  assert.equal(await page.isVisible('#circ-note'), false, 'an empty note takes no space');
-  // pq.avif (128 x 16) is an HDR (PQ) AVIF that the browser maps into standard range;
-  // hdr-pq.heic (240 x 160) an HDR HEIC that libheif decodes without tone mapping. Each opens
-  // with the note the other image tools give, announced once. A file that cannot be opened
-  // leaves the note of the image that stays.
-  const MAPPED = 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.';
-  const FLAT = 'This is an HDR photo. It is shown and saved without tone mapping, so it may look flat or washed out compared with an HDR screen.';
-  await page.setInputFiles('#circ-file', path.join(fixtures, 'pq.avif'));
-  await opened('pq.avif');
-  assert.equal(await page.textContent('#circ-note'), MAPPED);
-  assert.equal(await page.textContent('#circ-drop-hint'), '128 × 16 px. Choose or drop another image to replace it.');
-  assert.equal(await said(/mapped it into standard range/), 1, 'the HDR note is announced once');
-  await page.setInputFiles('#circ-file', path.join(fixtures, 'hdr-pq.heic'));
-  await opened('hdr-pq.heic');
-  assert.equal(await page.textContent('#circ-note'), FLAT);
-  assert.match(await page.textContent('#circ-drop-hint'), /^240 × 160 px\. Choose/);
-  assert.doesNotMatch(await inLabel(), /HDR/);
-  assert.equal(await said(/without tone mapping/), 1, 'the HDR note is announced once');
-  await page.setInputFiles('#circ-file', path.join(fixtures, 'cut.avif'));
-  await errIs('The AVIF file is incomplete: it ends before all of its image data. Download or copy it again.', 'cut.avif after hdr-pq.heic');
-  assert.equal(await page.textContent('#circ-note'), FLAT, 'the image that stays keeps its note');
 
   // ---------- WebP and AVIF through the shared decoder ----------
   // rotated.webp is stored 120 x 80 with a (220,30,30) band along the top 20 rows, (235,235,235)
@@ -576,17 +534,4 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(dropped, { over: true, drop: true });
   await page.waitForFunction(() => /dropped\.png/.test(document.querySelector('#circ-drop-title').textContent));
   assert.match(await page.textContent('#circ-drop-hint'), /^400 × 200 px/);
-
-  // ---------- Guide links ----------
-  // Matching the border or background to a colour in the photo needs its code, which the image
-  // colour picker gives; a selfie to mirror or a tilted photo to straighten goes to Flip Image
-  // first (this page only turns by 90°). Every internal link is a tool page.
-  const prose = (await page.textContent('.prose')).replace(/\s+/g, ' ');
-  assert.match(prose, /To match a colour in the photo, get its HEX code from the image colour picker\./);
-  assert.match(prose, /Rotate 90° turns a photo that is still on its side; to mirror a selfie or straighten a tilted photo, use Flip Image first\./);
-  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/image-color-picker/', '/flip-image/', '/resize-image/']);
-  for (const href of links) {
-    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
-  }
 };

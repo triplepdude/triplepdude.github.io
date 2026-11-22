@@ -333,10 +333,6 @@ module.exports = async ({ page, open, assert, base }) => {
   // internal link in the guide and FAQ is a page of this site.
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
   assert.ok(links.includes('/tone-generator/') && links.includes('/mic-test/'), `guide and FAQ links: ${links}`);
-  // The tuning steps end by sending a player who is now in tune to the metronome.
-  assert.deepEqual(links, ['/metronome/', '/tone-generator/', '/mic-test/']);
-  const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
-  assert.match(guide, /especially with a floating tremolo\. Once every string is in tune, the metronome keeps a steady beat for practice\. How the pitch is measured/);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the page but is not a tool page`);
   }

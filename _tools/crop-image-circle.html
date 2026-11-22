@@ -13,9 +13,7 @@ howto: |
      focused, the arrow keys move it (hold Shift for bigger steps), + and −
      zoom, and 0 resets.
   3. Choose the shape, the output size and format, and optionally a border
-     and a background colour. To match a colour in the photo, get its HEX
-     code from the [image colour picker](/image-color-picker/). The small
-     preview shows the exact file.
+     and a background colour. The small preview shows the exact file.
   4. Press **Download**, or **Copy image** to paste it straight into
      another app.
 
@@ -52,9 +50,7 @@ howto: |
   If the crop covers fewer source pixels than the output size, the image
   has to be enlarged and will look soft; the tool tells you when that
   happens. The photo's EXIF rotation is applied first, and no metadata,
-  such as the GPS location, is copied to the new file. **Rotate 90°** turns
-  a photo that is still on its side; to mirror a selfie or straighten a
-  tilted photo, use [Flip Image](/flip-image/) first.
+  such as the GPS location, is copied to the new file.
 
   ## Choosing a size
 
@@ -116,7 +112,6 @@ faq:
 .circ-out-info { margin: 0 0 4px; font-weight: 600; }
 .circ-out .hint { margin: 0; }
 .circ-status { margin-bottom: 0; }
-.circ-note { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
 @media (max-width: 400px) {
   .circ-out { align-items: flex-start; gap: 10px; }
   .circ-preview { width: 96px; height: 96px; }
@@ -131,7 +126,6 @@ faq:
   </label>
 </div>
 <p class="msg error" id="circ-error" role="alert"></p>
-<p class="msg circ-note" id="circ-note" aria-live="polite"></p>
 
 <div class="cols circ-cols">
   <div>
@@ -232,7 +226,7 @@ faq:
   const editor = $('#circ-editor'), preview = $('#circ-preview'), zoomEl = $('#circ-zoom'), zoomOut = $('#circ-zoom-out');
   const sizeSel = $('#circ-size'), borderEl = $('#circ-border'), borderColor = $('#circ-border-color'), fmtSel = $('#circ-format');
   const shapeSel = $('#circ-shape'), radiusEl = $('#circ-radius'), dlBtn = $('#circ-download');
-  const bgSel = $('#circ-bg'), bgColor = $('#circ-bg-color'), errEl = $('#circ-error'), okEl = $('#circ-status'), noteEl = $('#circ-note');
+  const bgSel = $('#circ-bg'), bgColor = $('#circ-bg-color'), errEl = $('#circ-error'), okEl = $('#circ-status');
   const FMT = { png: { mime: 'image/png', ext: 'png', label: 'PNG' }, webp: { mime: 'image/webp', ext: 'webp', label: 'WebP' }, jpeg: { mime: 'image/jpeg', ext: 'jpg', label: 'JPG' } };
   const SHAPE = { circle: 'circle', rounded: 'rounded square', square: 'square' };
   // Crop state. cx/cy: image centre relative to the shape centre, in shape widths.
@@ -468,12 +462,7 @@ faq:
       return img.naturalWidth && img.naturalHeight ? img : null;
     } catch (e) { return null; } finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
   }
-  // What the shared decoder found in the file itself, in the image converter's words.
   const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
-  const HDR = {
-    hdr: 'This is an HDR photo. It is shown and saved without tone mapping, so it may look flat or washed out compared with an HDR screen.',
-    'hdr-mapped': 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.'
-  };
   async function load(file) {
     if (!file) return;
     const run = ++st.loadRun;
@@ -537,11 +526,7 @@ faq:
     const again = fmt !== 'svg' && (!dec || (dec.decoder === 'browser' && dec.orientation === 1 && !cut));
     setImage(src, view, again ? file : null, w, h, (file.name || 'image').replace(/\.[^.]+$/, '') || 'image', false, dec);
     $('#circ-drop-title').textContent = file.name || 'Pasted image';
-    $('#circ-drop-hint').textContent = (fmt === 'svg' ? 'SVG, drawn at ' : '') + w + ' × ' + h + ' px. Choose or drop another image to replace it.';
-    // The notes stay out of the file input's label, so a screen reader announces them once, from
-    // this live region, when the image opens, and not again as part of the input's name. A file
-    // that fails to open leaves them, as it leaves the image they describe.
-    noteEl.textContent = (cut ? [CUT] : []).concat((dec && dec.warnings || []).filter(x => HDR[x]).map(x => HDR[x])).join(' ');
+    $('#circ-drop-hint').textContent = (fmt === 'svg' ? 'SVG, drawn at ' : '') + w + ' × ' + h + ' px. ' + (cut ? CUT + ' ' : '') + 'Choose or drop another image to replace it.';
   }
   function sample() {
     const c = document.createElement('canvas');

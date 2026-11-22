@@ -405,10 +405,7 @@ faq:
         bufs[sound] = [0, 1, 2, 3].map(function (level) {
           const d = voice(sound, level, ctx.sampleRate), b = ctx.createBuffer(1, d.length, ctx.sampleRate);
           b.getChannelData(0).set(d);
-          // rest[i] is the loudest the sound gets from sample i to its end.
-          const rest = new Float32Array(d.length);
-          for (let i = d.length - 1, m = 0; i >= 0; i--) rest[i] = m = Math.max(m, Math.abs(d[i]));
-          return { b: b, rest: rest };
+          return b;
         });
       }
       return bufs[sound];
@@ -424,33 +421,11 @@ faq:
       if (k === 0) { level = api.levels[inBar]; if (level === 0 && !st.accent) level = 1; }
       // In 6/8, 9/8 and 12/8 a sixteenth note between two eighth notes is quieter still.
       else if (api.fine && k % 2 === 1) level = 3;
-      const v = buffers(st.sound)[level], src = ctx.createBufferSource(), amp = ctx.createGain();
-      src.buffer = v.b;
-      src.connect(amp);
-      amp.connect(bus);
+      const src = ctx.createBufferSource();
+      src.buffer = buffers(st.sound)[level];
+      src.connect(bus);
       src.start(t);
-      choke(t, v.rest[0]);
-      api.queue.push({ src: src, amp: amp, rest: v.rest, cutAt: 0, time: t, x: n / api.sub, beat: beat, k: k, level: level, inBar: inBar, bar: api.barBase + Math.floor(rel / api.bpb) });
-    }
-    // At fast tempos the long sounds still ring when the next click starts. The new
-    // click's peak plus the loudest each ringing sound gets from then on bounds
-    // their sum; if that bound passes full scale, the ringing sounds fade out over
-    // the 3 ms before the click, so the output never clips. Onsets and peaks stay as
-    // they are, and where the bound stays within full scale nothing changes.
-    function choke(t, peak) {
-      const ringing = [];
-      let sum = peak;
-      api.queue.forEach(function (c) {
-        // From a sample early, as a start between two samples is interpolated.
-        const i = Math.floor((t - c.time) * ctx.sampleRate) - 1;
-        if (!c.cutAt && i < c.rest.length) { sum += c.rest[Math.max(0, i)]; ringing.push(c); }
-      });
-      if (sum <= 1) return;
-      ringing.forEach(function (c) {
-        c.cutAt = t;
-        c.amp.gain.setValueAtTime(1, t - 0.003);
-        c.amp.gain.linearRampToValueAtTime(0, t);
-      });
+      api.queue.push({ src: src, time: t, x: n / api.sub, beat: beat, k: k, level: level, inBar: inBar, bar: api.barBase + Math.floor(rel / api.bpb) });
     }
     function pump() {
       if (!api.running) return;
@@ -468,7 +443,6 @@ faq:
     function cancel(c) {
       try { c.src.stop(0); } catch (e) { /* not started */ }
       c.src.disconnect();
-      c.amp.disconnect();
     }
     function ticker(on) {
       if (on && !worker && !noWorker && window.Worker && window.Blob && window.URL) {
@@ -572,11 +546,6 @@ faq:
         if (c.time < cut) { last = c; return true; }
         cancel(c);
         return false;
-      });
-      // A cancelled click no longer cuts off the sounds before it. It was due 4 ms or
-      // more from now, so its 3 ms fade has not begun.
-      api.queue.forEach(function (c) {
-        if (c.cutAt >= cut) { c.amp.gain.cancelScheduledValues(0); c.cutAt = 0; }
       });
       const xNow = api.posAt(now), dur = 60 / st.bpm;
       // The beat keeps its phase: halfway between two beats stays halfway.

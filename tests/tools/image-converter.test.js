@@ -157,12 +157,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     assert.ok(guideLinks.includes(`/${s}/`), `the guide links to /${s}/`);
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', s + '.html')), `_tools/${s}.html exists`);
   }
-  // A converted photo is only turned upright from its orientation tag: any other turn, or a
-  // mirror image, is Flip Image's, which the orientation note names.
-  assert.match((await page.textContent('.prose')).replace(/\s+/g, ' '),
-    /Orientation\. A photo tagged as rotated is saved upright, so it looks the same everywhere; Flip Image turns or mirrors pictures any other way\./);
-  assert.ok(guideLinks.includes('/flip-image/'), 'the guide links to /flip-image/');
-  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', 'flip-image.html')), '_tools/flip-image.html exists');
 
   const summary = () => page.textContent('#imc-summary');
   const rows = page.locator('.imc-item');

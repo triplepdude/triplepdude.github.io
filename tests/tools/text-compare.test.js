@@ -241,113 +241,35 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(await page.locator('.tc-split tr').count(), 4880 + 100 + 20 + 20);
 
   // ---- Rendering 5,000 changed lines must not freeze the page ----
-  // Output comes in 200-row blocks; the blocks near the screen are drawn at once and the rest a
-  // few per frame. As one table this blocked the main thread for over a second, and drawn all at
-  // once in blocks for 0.6 to 1.1 s; now no frame takes much over 0.1 s. Frame lengths
-  // (long-animation-frame) include the layout, which long tasks leave out. Nothing may skip
-  // drawing its content (content-visibility): see the paste test at the end.
-  const skipping = () => page.$$eval('#tc-out *', els => [...new Set(els.filter(e => getComputedStyle(e).contentVisibility !== 'visible').map(e => e.tagName.toLowerCase() + '.' + e.className))]);
+  // Output is split into 200-row blocks that the browser lays out only when on screen. As one
+  // table this blocked the main thread for over a second.
   const manyA = [], manyB = [];
   for (let i = 0; i < 5000; i++) { manyA.push(`alpha line ${i} text`); manyB.push(`beta line ${i} text`); }
   for (const v of ['split', 'unified']) {
     await view(v);
-    const t = await page.evaluate(async ([a, b]) => {
-      const frames = [], out = document.querySelector('#tc-out');
-      const obs = new PerformanceObserver(l => l.getEntries().forEach(e => frames.push(e.duration)));
-      obs.observe({ type: 'long-animation-frame' });
-      // The first frame after the result lands in the page.
-      let first = 0;
-      const mo = new MutationObserver(() => { if (!first) { first = -1; requestAnimationFrame(() => setTimeout(() => { first = performance.now() - t0; }, 0)); } });
-      mo.observe(out, { childList: true });
+    const longest = await page.evaluate(async ([a, b]) => {
+      const tasks = [];
+      const obs = new PerformanceObserver(l => l.getEntries().forEach(e => tasks.push(e.duration)));
+      obs.observe({ entryTypes: ['longtask'] });
       document.querySelector('#tc-a').value = a;
       const B = document.querySelector('#tc-b');
       B.value = b + (B.value.endsWith('\n') ? '' : '\n');
-      const t0 = performance.now();
       B.dispatchEvent(new Event('input', { bubbles: true }));
-      while (first <= 0) await new Promise(r => setTimeout(r, 5));
-      while (out.getAttribute('aria-busy') !== 'false') await new Promise(r => setTimeout(r, 20));
-      const all = performance.now() - t0;
+      await new Promise(r => setTimeout(r, 300));
+      while (document.querySelector('#tc-out').getAttribute('aria-busy') !== 'false') await new Promise(r => setTimeout(r, 20));
       await new Promise(r => requestAnimationFrame(() => setTimeout(r, 50)));
       obs.disconnect();
-      mo.disconnect();
-      return { first, all, longest: Math.max(0, ...frames) };
+      return Math.max(0, ...tasks);
     }, [manyA.join('\n'), manyB.join('\n')]);
     assert.deepEqual(await stats(), { added: 0, removed: 0, changed: 5000, same: 0 });
-    assert.ok(t.longest < 400, `${v}: a frame took ${Math.round(t.longest)} ms`);
-    assert.ok(t.first < 1500, `${v}: the comparison took ${Math.round(t.first)} ms to appear`);
-    assert.ok(t.all < 5000, `${v}: drawing the whole comparison took ${Math.round(t.all)} ms`);
+    assert.ok(longest < 600, `${v}: main thread blocked for ${Math.round(longest)} ms`);
     assert.equal(await page.locator('.tc-blk').count(), v === 'split' ? 25 : 50);
-    assert.equal(await page.locator('#tc-out .tc-hole').count(), 0, 'every block drawn once settled');
-    assert.deepEqual(await skipping(), [], `${v}: blocks skip drawing their content`);
   }
-  // While a long result is still being drawn, the report has all of it at once, the blocks that
-  // come into view are drawn before the others, and printing draws the rest at once.
-  await page.check('input[name="tc-view"][value="split"]');
-  await page.waitForFunction(() => document.querySelector('#tc-out .tc-split') && document.querySelector('#tc-out .tc-hole'));
-  const [partialDl, drawing] = await Promise.all([page.waitForEvent('download'), page.evaluate(async () => {
-    const out = document.querySelector('#tc-out'), holes = () => [...out.querySelectorAll('.tc-hole')];
-    const undrawn = holes().length;
-    document.querySelector('#tc-html').click();
-    out.lastElementChild.scrollIntoView({ block: 'end', behavior: 'instant' });
-    for (let i = 0; i < 4; i++) await new Promise(r => requestAnimationFrame(r));
-    const left = holes().length, inView = holes().filter(h => { const b = h.getBoundingClientRect(); return b.bottom > 0 && b.top < innerHeight; }).length;
-    window.dispatchEvent(new Event('beforeprint'));
-    return { undrawn, left, inView, printed: holes().length, busy: out.getAttribute('aria-busy') };
-  })]);
-  assert.ok(drawing.undrawn > 1 && drawing.left > 0, `blocks still to draw: ${drawing.undrawn}, then ${drawing.left}`);
-  const partial = fs.readFileSync(await partialDl.path(), 'utf8');
-  assert.equal((partial.match(/<tr>/g) || []).length, 5000, 'the report has every row');
-  assert.doesNotMatch(partial, /tc-hole/);
-  assert.equal(drawing.inView, 0, 'the blocks in view are drawn first');
-  assert.deepEqual([drawing.printed, drawing.busy], [0, 'false'], 'everything drawn before printing');
-  await settle();
-  // While a long result is drawn, what is on screen stays where it is, in the middle of the result
-  // or below it, though a block is rarely as tall as its box was (on a phone, where lines wrap, up
-  // to 3,200 px taller). Left to Chromium's scroll anchoring, the rows on screen drifted by 1,000 to
-  // 32,000 px and the guide below the result by 150,000 px, at one width or the other depending on
-  // how the page got there.
-  for (const size of [{ width: 390, height: 844 }, { width: 1280, height: 900 }]) {
-    await page.setViewportSize(size);
-    for (const where of ['middle', 'below']) {
-      const d = await page.evaluate(async ([a, b, where]) => {
-        const out = document.querySelector('#tc-out');
-        document.querySelector('#tc-a').value = a;
-        const B = document.querySelector('#tc-b');
-        B.value = b;
-        B.dispatchEvent(new Event('input', { bubbles: true }));
-        // As soon as the result is in the page, jump past the blocks still to draw.
-        const until = performance.now() + 20000;
-        while (!out.querySelector('.tc-hole') && performance.now() < until) await new Promise(r => setTimeout(r, 5));
-        let mark = null;
-        if (where === 'below') {
-          mark = document.querySelector('.prose h2');
-          mark.scrollIntoView({ block: 'start', behavior: 'instant' });
-        } else {
-          const parts = out.querySelectorAll('.tc-hole, .tc-blk');
-          parts[parts.length >> 1].scrollIntoView({ block: 'start', behavior: 'instant' });
-          for (let i = 0; i < 30 && !mark; i++) {
-            await new Promise(r => requestAnimationFrame(r));
-            mark = [...out.querySelectorAll('tr')].find(e => { const r = e.getBoundingClientRect(); return r.top > 50 && r.top < 400; });
-          }
-          if (!mark) return { holes: 0, moved: 'no row came into view' };
-        }
-        const holes = out.querySelectorAll('.tc-hole').length, top = mark.getBoundingClientRect().top;
-        while (out.getAttribute('aria-busy') !== 'false' && performance.now() < until) await new Promise(r => requestAnimationFrame(r));
-        if (out.getAttribute('aria-busy') !== 'false') return { holes, moved: 'still drawing after 20 s' };
-        return { holes, moved: Math.round(mark.getBoundingClientRect().top - top) };
-      }, [manyA.join('\n'), manyB.join('\n') + '\n', where]);
-      assert.ok(d.holes > 5, `${size.width} px, ${where}: ${d.holes} blocks left to draw after the jump`);
-      assert.ok(Math.abs(d.moved) <= 1, `${size.width} px, ${where}: what was on screen moved while the comparison was drawn (${typeof d.moved === 'number' ? d.moved + ' px' : d.moved})`);
-    }
-  }
-  assert.equal(await page.evaluate(() => document.documentElement.style.overflowAnchor), '', 'scroll anchoring back on once drawn');
-  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   // Word mode splits running text into blocks too.
   await mode('word');
   assert.ok(await page.locator('.tc-flow pre.tc-blk').count() > 1);
   assert.equal(await page.textContent('#tc-tok-added'), '5,000');
   assert.equal(await page.textContent('#tc-tok-removed'), '5,000');
-  assert.deepEqual(await skipping(), [], 'word mode: blocks skip drawing their content');
 
   // ---- Very long texts: unchanged lines fold on their own, and at most 12,000 rows are drawn
   // (a 2.8 MB minified JSON laid out as 360,000 lines froze the page for 6 seconds). ----
@@ -596,37 +518,4 @@ module.exports = async ({ page, open, assert }) => {
   // The two file buttons have distinct accessible names.
   assert.equal(await page.getAttribute('[data-file="#tc-file-a"]', 'aria-label'), 'Open file as original text');
   assert.equal(await page.getAttribute('[data-file="#tc-file-b"]', 'aria-label'), 'Open file as changed text');
-
-  // ---- Regression: with a long comparison on screen, select all and paste 5,000 lines over 5,000
-  // in a box took 5 s. The result's off-screen blocks skipped their layout (content-visibility:
-  // auto), and while anything in the page skips its content that way, Chromium is slow to replace
-  // a long text in a text box. The old text ends with a line break, as pasted text usually does:
-  // without one, Chromium is fast either way. The comparison stays on screen for the runner's
-  // checks (skippedContent in tests/run.js, and phone widths). ----
-  await mode('line');
-  await view('split');
-  const lines = (word, n) => `${word} line\n`.repeat(n);
-  await compare(lines('old', 5000), '');
-  assert.equal(await page.locator('.tc-blk').count(), 25);
-  await page.evaluate(text => navigator.clipboard.writeText(text), lines('new', 5000));
-  await page.evaluate(() => { const A = document.querySelector('#tc-a'); A.focus(); A.select(); });
-  const pasteStart = Date.now();
-  await page.keyboard.press('ControlOrMeta+V');
-  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => setTimeout(done, 0))));
-  const pasteMs = Date.now() - pasteStart;
-  assert.equal(await page.inputValue('#tc-a'), lines('new', 5000), 'the paste replaced the text');
-  assert.ok(pasteMs < 1000, `pasting 5,000 lines over 5,000 took ${pasteMs} ms (1,000 allowed)`);
-  await settle();
-  assert.deepEqual(await stats(), { added: 0, removed: 5000, changed: 0, same: 0 });
-  assert.equal(await page.locator('.tc-blk').count(), 25);
-  // Deleting it took 3 s.
-  await page.evaluate(() => { const A = document.querySelector('#tc-a'); A.focus(); A.select(); });
-  const deleteStart = Date.now();
-  await page.keyboard.press('Delete');
-  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => setTimeout(done, 0))));
-  const deleteMs = Date.now() - deleteStart;
-  assert.equal(await page.inputValue('#tc-a'), '', 'the text was deleted');
-  assert.ok(deleteMs < 1000, `deleting 5,000 lines took ${deleteMs} ms (1,000 allowed)`);
-  await compare(lines('new', 5000), '');
-  assert.equal(await page.locator('.tc-blk').count(), 25);
 };

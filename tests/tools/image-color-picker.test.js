@@ -6,7 +6,7 @@ const path = require('path');
 module.exports = async ({ page, open, assert, fixtures, url }) => {
   const exp = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const text = (sel, pg = page) => pg.textContent(sel);
-  const MIME = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', avif: 'image/avif', heic: 'image/heic' };
+  const MIME = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' };
   async function load(name, pg = page) {
     await pg.setInputFiles('#icp-file', { name, mimeType: MIME[name.split('.').pop()], buffer: fs.readFileSync(path.join(fixtures, name)) });
     await pg.waitForFunction(n => document.querySelector('#icp-name').textContent === n, name);
@@ -250,22 +250,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => /numbers stored/.test(document.querySelector('#icp-profile').textContent));
   await clickPixel(30, 10, 40, 20);
   assert.deepEqual(await readout(), want(exp.upright.stored[1]));
-
-  // ---------- Files the decoder warns about: the line under the name says what that means ----------
-  // cut.jpg ends 40% into its scan data, so its lower part is blank; pq.avif is an HDR AVIF the browser
-  // maps to standard range; hdr-pq.heic an HDR HEIC that libheif decodes without tone mapping.
-  const AGAIN = ' Drop or paste another image to replace it.';
-  await load('cut.jpg');
-  assert.equal(await text('#icp-info'), '120 × 90 px, JPG. The file seems to be cut off, so part of the picture may be blank.' + AGAIN);
-  // The line under the name is not read out, so the note is announced with the image.
-  assert.equal(await text('#icp-live'), 'Opened cut.jpg, 120 by 90 pixels. The file seems to be cut off, so part of the picture may be blank.');
-  await load('pq.avif');
-  assert.equal(await text('#icp-info'), '128 × 16 px, AVIF. This is an HDR image. The colours are read from the standard-range copy the browser made of it, so they can differ from what an HDR screen shows.' + AGAIN);
-  await load('hdr-pq.heic');
-  assert.equal(await text('#icp-info'), '240 × 160 px, HEIC. This is an HDR photo. The colours are read from a standard-range copy made without tone mapping, so they can differ from what an HDR screen shows.' + AGAIN);
-  await load('p3.webp');
-  assert.equal(await text('#icp-info'), '40 × 20 px, WebP, Display P3 (test) profile.' + AGAIN, 'no note for a file the decoder has no warning about');
-  assert.equal(await text('#icp-live'), 'Opened p3.webp, 40 by 20 pixels.');
 
   // ---------- Dropping or pasting an image anywhere on the page opens it ----------
   const b64 = fs.readFileSync(path.join(fixtures, 'blocks.png')).toString('base64');

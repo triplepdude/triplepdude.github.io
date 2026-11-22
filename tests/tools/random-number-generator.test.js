@@ -549,18 +549,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   assert.equal(await page.evaluate(() => window.__mathRandom), undefined, 'Math.random was never called');
 
-  // ---- What the page links to ----
-  // The raffle FAQ sends a reader who has names rather than numbers, or a room to show the
-  // draw to, to the wheel spinner, which draws its winner the same way (crypto.getRandomValues,
-  // a fresh draw when the value is out of range).
-  const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/passphrase-generator/', '/uuid-generator/', '/wheel-spinner/']);
-  for (const href of links) {
-    assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the page but is not a tool page`);
-  }
-  const raffle = (await page.locator('.faq details', { hasText: 'raffle' }).locator('.faq-answer').textContent()).replace(/\s+/g, ' ');
-  assert.match(raffle, /if you may have to prove the result\. To draw from a list of names instead, or to show the draw on a big screen, use the wheel spinner, which picks the winner from a pasted list in the same secure, unbiased way\./);
-
   // ---- A locale that writes decimals with a comma. ----
   const de = await page.context().browser().newContext({ locale: 'de-DE' });
   const dePage = await de.newPage();

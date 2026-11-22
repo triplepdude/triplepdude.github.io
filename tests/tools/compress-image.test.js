@@ -698,13 +698,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // A PNG photo is better as JPG: for a plain conversion without a KB target the guide
   // sends it to the PNG to JPG converter. It says "no target size", the guide's own term,
   // because "without a size limit" also reads as a converter with no maximum file size.
-  // This page only turns photos upright from their EXIF tag, so any other turn or a mirror image
-  // is sent to Flip Image. Every internal link is a tool page.
+  // Every internal link is a tool page.
   const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
   assert.match(guide, /For photos, JPG or WebP keeps far more detail at the same size\. To convert PNG photos to JPG with no target size, use the PNG to JPG converter, which shows how much smaller each file gets\./);
-  assert.match(guide, /Rotation: the turn a phone recorded is applied to the pixels, so the photo stays upright\. To turn or mirror a picture yourself, use Flip Image\./);
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/resize-image/', '/png-to-jpg/', '/remove-exif-data/', '/flip-image/']);
+  assert.deepEqual(links, ['/resize-image/', '/png-to-jpg/', '/remove-exif-data/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }

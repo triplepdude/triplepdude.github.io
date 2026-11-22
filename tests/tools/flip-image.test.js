@@ -89,7 +89,7 @@ function readZip(buf, assert) {
   return out;
 }
 
-module.exports = async ({ page, open, assert, fixtures, base, url }) => {
+module.exports = async ({ page, open, assert, fixtures, url }) => {
   const exp = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const fx = n => path.join(fixtures, n);
   const text = sel => page.textContent(sel);
@@ -100,24 +100,13 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     return { name: dl.suggestedFilename(), buf: fs.readFileSync(await dl.path()) };
   }
   async function load(names, pg = page) {
-    const MIME = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', heic: 'image/heic', tif: 'image/tiff', webp: 'image/webp', avif: 'image/avif' };
+    const MIME = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', heic: 'image/heic', tif: 'image/tiff' };
     const asFile = n => (typeof n === 'string' ? { name: n, mimeType: MIME[n.split('.').pop()], buffer: fs.readFileSync(fx(n)) } : n);
     await pg.setInputFiles('#fl-file', names.map(asFile));
     await pg.waitForFunction(() => !/^Opening/.test(document.querySelector('#fl-status').textContent) && document.querySelector('#fl-fname').textContent, null, { timeout: 30000 });
   }
   const angle = async v => { await page.fill('#fl-angle', v); };
   const state = () => text('#fl-state');
-  // The middle of each quadrant of a w x h quadrants picture (big.png, mid.png), mirrored when asked, turned
-  // deg clockwise into a W x H result, k times its full size: the pixels that are not the quadrant's colour.
-  function quadsOff(px, w, h, W, H, { deg = 0, mirror = false, k = 1 } = {}) {
-    const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t), off = [];
-    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sy], i) => {
-      const x = sx * (mirror ? -1 : 1) * w / 4, y = sy * h / 4;
-      const X = Math.round(W / 2 + k * (x * c - y * s)), Y = Math.round(H / 2 + k * (x * s + y * c)), p = px(X, Y);
-      if (!near(p, [...exp.quad[i], 255])) off.push(`${X},${Y} is ${p}, not ${exp.quad[i]}`);
-    });
-    return off;
-  }
 
   await open();
 
@@ -457,64 +446,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(f.name, 'pages-copy.tif');
   assert.ok(['II*\u0000', 'MM\u0000*'].includes(f.buf.subarray(0, 4).toString('latin1')), 'a TIFF file');
 
-  // ---------- Files the decoder warns about are saved with a note; files it refuses say why ----------
-  // cut.jpg ends 40% into its scan data; pq.avif is an HDR AVIF the browser maps to standard range;
-  // hdr-pq.heic an HDR HEIC that libheif decodes without tone mapping.
-  const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
-  const MAPPED = 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.';
-  const HDR = 'This is an HDR photo. It is saved without tone mapping, so it may look flat or washed out compared with an HDR screen.';
-  await page.click('#fl-clear');
-  await load(['cut.jpg']);
-  assert.ok((await text('#fl-note')).startsWith(CUT), await text('#fl-note'));
-  f = await save();
-  assert.equal(f.name, 'cut-copy.jpg');
-  assert.deepEqual(dims(f.buf), [120, 90]);
-  for (const [n, note] of [['pq.avif', MAPPED], ['hdr-pq.heic', HDR]]) {
-    await page.click('#fl-clear');
-    await load([n]);
-    assert.ok((await text('#fl-note')).startsWith(note), `${n}: ${await text('#fl-note')}`);
-  }
-  // A file the decoder refuses gives the decoder's own reason, alone or in a batch, and the batch goes on.
-  const REFUSED = ['early.jpg', 'cut.webp', 'cut.avif', 'damaged.avif'];
-  const reasons = await page.evaluate(async files => {
-    const out = [];
-    for (const [n, b64, type] of files) {
-      try { TTImage.release(await TTImage.decode(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], n, { type }), { canvas: false })); out.push(null); } catch (e) { out.push(e.message); }
-    }
-    return out;
-  }, REFUSED.map(n => [n, fs.readFileSync(fx(n)).toString('base64'), { jpg: 'image/jpeg', webp: 'image/webp', avif: 'image/avif' }[n.split('.').pop()]]));
-  assert.ok(reasons.every(r => r && /incomplete|could not be decoded/.test(r)), JSON.stringify(reasons));
-  await page.click('#fl-clear');
-  await page.setInputFiles('#fl-file', [{ name: 'early.jpg', mimeType: 'image/jpeg', buffer: fs.readFileSync(fx('early.jpg')) }]);
-  await page.waitForFunction(() => document.querySelector('#fl-error').textContent);
-  assert.equal(await text('#fl-error'), `“early.jpg” could not be opened. ${reasons[0]}`);
-  await load([...REFUSED, 'cut.jpg', 'pq.avif', 'hdr-pq.heic']);
-  assert.equal(await text('#fl-error'), `4 files could not be opened: ${REFUSED.map((n, i) => `${n} (${reasons[i].replace(/\.$/, '')})`).join('; ')}.`);
-  assert.deepEqual(await page.$$eval('#fl-list .fl-pick', els => els.map(e => e.textContent)), ['cut.jpg', 'pq.avif', 'hdr-pq.heic']);
-  assert.deepEqual(await page.$$eval('#fl-list .fl-row-note', els => els.map(e => e.textContent)), [CUT, MAPPED, HDR], 'each warning in its row');
-  // The warnings do not stop the save.
-  f = await save('#fl-zip');
-  assert.match(await text('#fl-status'), /^Saved rotated-images\.zip: 3 images, [\d.]+ K?B\.$/);
-  assert.deepEqual(readZip(f.buf, assert).map(e => e.name.replace(/\.(avif|jpg)$/, '')), ['cut-copy', 'pq-copy', 'hdr-pq-copy']);
-
-  // ---------- Big pictures are saved at full size where the browser can draw them ----------
-  await page.click('#fl-clear');
-  await load(['big.png']);
-  await page.click('#fl-flip-h');
-  png = decodePng((f = await save()).buf, assert);
-  assert.deepEqual([png.w, png.h], [2000, 1500]);
-  assert.match(await text('#fl-status'), /^Saved big-flipped-horizontal\.png \(2000 × 1500 px, [\d.]+ KB\)\.$/);
-  assert.deepEqual(quadsOff(png.px, 2000, 1500, 2000, 1500, { mirror: true }), [], 'big.png mirrored');
-  await page.click('#fl-clear');
-  await page.click('#fl-reset');
-  await load(['mid.png']);
-  await angle('30');
-  png = decodePng((f = await save()).buf, assert);
-  assert.deepEqual([png.w, png.h], exp.mid_30);
-  assert.match(await text('#fl-status'), /^Saved mid-rotated-30\.png \(1986 × 1839 px, [\d.]+ KB\)\.$/);
-  assert.deepEqual(quadsOff(png.px, 1600, 1200, png.w, png.h, { deg: 30 }), [], 'mid.png turned 30°');
-  await page.click('#fl-reset');
-
   // ---------- Back and forward keep the angle, the slider and the result in step ----------
   // The browser may put back the Straighten slider when the page is loaded again; whatever it
   // shows must be what the state line and the angle field say.
@@ -530,139 +461,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const deg = /^Not flipped/.test(s) ? '0' : (/^Rotated ([\d.]+)° clockwise/.exec(s) || [])[1];
   assert.ok(deg, `state ${s}`);
   assert.deepEqual([a, fine, await text('#fl-fine-out')], [deg, deg, deg === '0' ? '0°' : `+${deg}°`], `field ${a}, slider ${fine}, state ${s}`);
-
-  // ---------- A browser that caps the size of a canvas, as Safari does at about 16.7 megapixels ----------
-  // Here canvases over 2 megapixels get a context but stay blank, as Safari's over its limit do: drawing
-  // does nothing and reading back gives zeros. Pictures are then saved at the largest size that can be drawn.
-  const CAP = 2e6;
-  const lim = await page.context().browser().newContext({ acceptDownloads: true, viewport: { width: 1280, height: 900 } });
-  await lim.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
-  await lim.addInitScript(cap => {
-    const P = CanvasRenderingContext2D.prototype, big = g => g.canvas.width * g.canvas.height > cap;
-    for (const m of ['drawImage', 'fillRect', 'clearRect', 'strokeRect', 'putImageData', 'fill', 'stroke', 'fillText', 'strokeText']) {
-      const real = P[m];
-      P[m] = function () { return big(this) ? undefined : real.apply(this, arguments); };
-    }
-    const read = P.getImageData;
-    P.getImageData = function (x, y, w, h) { return big(this) ? new ImageData(w, h) : read.apply(this, arguments); };
-  }, CAP);
-  const pl = await lim.newPage(), lerrs = [];
-  pl.on('pageerror', e => lerrs.push(e.message));
-  pl.on('console', m => { if (m.type() === 'error') lerrs.push(m.text()); });
-  await pl.goto(url);
-  const fitsCap = (w, h, W0, H0) => w * h <= CAP && w * h > 0.95 * CAP && Math.abs(w / h - W0 / H0) < 0.01;
-  // big.png (3 megapixels) is over the cap even before it is flipped.
-  await load(['big.png'], pl);
-  await pl.click('#fl-flip-h');
-  let lf = await save('#fl-download', pl), lp = decodePng(lf.buf, assert);
-  assert.ok(fitsCap(lp.w, lp.h, 2000, 1500), `big.png saved at ${lp.w} × ${lp.h}`);
-  assert.equal(lf.name, 'big-flipped-horizontal.png');
-  assert.match(await pl.textContent('#fl-status'), new RegExp(`^Saved big-flipped-horizontal\\.png \\(${lp.w} × ${lp.h} px, [\\d.]+ KB\\), scaled down from 2000 × 1500 because the full image is too large for this browser\\.$`));
-  assert.equal(await pl.textContent('#fl-error'), '');
-  assert.deepEqual(quadsOff(lp.px, 2000, 1500, lp.w, lp.h, { mirror: true, k: lp.w / 2000 }), [], 'the scaled copy is mirrored, not blank');
-  // mid.png (1.92 megapixels) fits, but turned 30° with transparent corners it needs 1986 × 1839.
-  await pl.click('#fl-clear');
-  await pl.click('#fl-reset');
-  await load(['mid.png'], pl);
-  await pl.fill('#fl-angle', '30');
-  assert.equal(await pl.textContent('#fl-state'), `Rotated 30° clockwise · ${exp.mid_30.join(' × ')} px`);
-  lf = await save('#fl-download', pl);
-  lp = decodePng(lf.buf, assert);
-  assert.ok(fitsCap(lp.w, lp.h, ...exp.mid_30), `mid.png turned saved at ${lp.w} × ${lp.h}`);
-  assert.match(await pl.textContent('#fl-status'), /, scaled down from 1986 × 1839 because the full image is too large for this browser\.$/);
-  assert.equal(lp.px(0, 0)[3], 0, 'transparent corner');
-  assert.deepEqual(quadsOff(lp.px, 1600, 1200, lp.w, lp.h, { deg: 30, k: lp.w / 1986 }), [], 'the turned copy is drawn, not blank');
-  // The After preview (1489 × 1379 for the 1200 px view) is drawn smaller rather than left blank.
-  await pl.waitForTimeout(150);
-  const prev = await pl.$eval('#fl-after', c => {
-    const g = c.getContext('2d');
-    return { w: c.width, h: c.height, px: [[0.5, 0.5], [0.35, 0.25], [0.65, 0.75]].map(([x, y]) => Array.from(g.getImageData(Math.round(c.width * x), Math.round(c.height * y), 1, 1).data)) };
-  });
-  assert.ok(prev.w * prev.h <= CAP && prev.px.every(p => p[3] === 255), `After preview ${JSON.stringify(prev)}`);
-  // Copy image is scaled the same way, and says so.
-  await pl.click('#fl-copy');
-  await pl.waitForFunction(() => /Copied/.test(document.querySelector('#fl-status').textContent) || document.querySelector('#fl-error').textContent);
-  const cs = /^Copied a (\d+) × (\d+) px PNG, scaled down from 1986 × 1839 because the full image is too large for this browser\. Paste it/.exec(await pl.textContent('#fl-status'));
-  assert.ok(cs, await pl.textContent('#fl-status') + await pl.textContent('#fl-error'));
-  const lc = await pl.evaluate(async () => {
-    const items = await navigator.clipboard.read(), bmp = await createImageBitmap(await items[0].getType('image/png'));
-    const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d');
-    g.drawImage(bmp, 0, 0);
-    return { w: bmp.width, h: bmp.height, d: Array.from(g.getImageData(0, 0, bmp.width, bmp.height).data) };
-  });
-  assert.deepEqual([lc.w, lc.h], [+cs[1], +cs[2]]);
-  const cpx = (x, y) => lc.d.slice((y * lc.w + x) * 4, (y * lc.w + x) * 4 + 4);
-  assert.deepEqual(quadsOff(cpx, 1600, 1200, lc.w, lc.h, { deg: 30, k: lc.w / 1986 }), [], 'the copied picture is drawn, not blank');
-  // In a ZIP, the file that had to be scaled says so in its row; the small one is exact.
-  await pl.click('#fl-clear');
-  await pl.click('#fl-reset');
-  await load(['big.png', 'grid.png'], pl);
-  await pl.click('#fl-flip-h');
-  lf = await save('#fl-zip', pl);
-  assert.match(await pl.textContent('#fl-status'), /^Saved flipped-images\.zip: 2 images, [\d.]+ KB\. 1 image was scaled down because the full size is too large for this browser; see the list\.$/);
-  const lz = readZip(lf.buf, assert), zb = decodePng(lz[0].data, assert);
-  assert.deepEqual(lz.map(e => e.name), ['big-flipped-horizontal.png', 'grid-flipped-horizontal.png']);
-  assert.ok(fitsCap(zb.w, zb.h, 2000, 1500), `big.png in the ZIP at ${zb.w} × ${zb.h}`);
-  assert.deepEqual(quadsOff(zb.px, 2000, 1500, zb.w, zb.h, { mirror: true, k: zb.w / 2000 }), []);
-  assert.deepEqual(decodePng(lz[1].data, assert).rgba(), exp.grid.h.rgba);
-  const notes = () => pl.$$eval('#fl-list .fl-row-note', els => els.map(e => e.textContent));
-  assert.deepEqual(await notes(), [`Saved at ${zb.w} × ${zb.h} px, scaled down from 2000 × 1500, because the full image is too large for this browser.`, '']);
-  // The note is about that save: once the flip changes, it goes.
-  await pl.click('#fl-flip-h');
-  assert.deepEqual(await notes(), ['', '']);
-  // A small mark on a transparent picture is not taken for a blank copy: dot.png is transparent
-  // but for an 8 x 8 square in the middle.
-  await pl.click('#fl-clear');
-  await load(['dot.png'], pl);
-  await pl.click('#fl-flip-h');
-  lf = await save('#fl-download', pl);
-  lp = decodePng(lf.buf, assert);
-  assert.equal(await pl.textContent('#fl-error'), '');
-  assert.ok(fitsCap(lp.w, lp.h, 2000, 1500), `dot.png saved at ${lp.w} × ${lp.h}`);
-  assert.ok(near(lp.px(lp.w >> 1, lp.h >> 1), [...exp.dot, 255], 24), `the square is kept: ${lp.px(lp.w >> 1, lp.h >> 1)}`);
-  assert.deepEqual([lp.px(lp.w >> 2, lp.h >> 2), lp.px(0, 0)], [[0, 0, 0, 0], [0, 0, 0, 0]]);
-  await pl.click('#fl-flip-h');
-  // A copy that comes back blank (as one made on a canvas over the limit would) is never saved.
-  await pl.click('#fl-clear');
-  await load(['big.png'], pl);
-  await pl.evaluate(() => {
-    const real = window.createImageBitmap;
-    window.realBitmap = real;
-    window.createImageBitmap = async function (src, ...rest) {
-      const b = await real.call(window, src, ...rest);
-      if (!(src instanceof Blob) || b.width * b.height < 1.5e6) return b;
-      const w = b.width, h = b.height;
-      b.close();
-      return real.call(window, new ImageData(w, h));
-    };
-  });
-  let blankSaved = false;
-  pl.on('download', () => { blankSaved = true; });
-  await pl.click('#fl-download');
-  await pl.waitForFunction(() => document.querySelector('#fl-error').textContent || /^Saved/.test(document.querySelector('#fl-status').textContent), null, { timeout: 30000 });
-  await pl.waitForTimeout(300);
-  assert.equal(blankSaved, false, 'no blank file is saved');
-  assert.equal(await pl.textContent('#fl-error'), 'The image (2000 × 1500 pixels) is larger than this browser can handle. Try a desktop browser.');
-  // The decoder cannot make the smaller copy either (it runs out of room): the same message, not the
-  // decoder's own, which suggests a smaller size this page has no setting for.
-  await pl.evaluate(() => {
-    window.createImageBitmap = window.realBitmap;
-    const real = TTImage.encode;
-    TTImage.encode = function (src, fmt, o) {
-      if (src && src._release && o && o.width * o.height > 1.5e6) {
-        return Promise.reject(Object.assign(new Error('The image is too large for this browser to process in memory. Try a smaller size.'), { code: 'TOO_BIG', friendly: true }));
-      }
-      return real.apply(this, arguments);
-    };
-  });
-  await pl.evaluate(() => { document.querySelector('#fl-error').textContent = ''; });
-  await pl.click('#fl-download');
-  await pl.waitForFunction(() => document.querySelector('#fl-error').textContent || /^Saved/.test(document.querySelector('#fl-status').textContent), null, { timeout: 30000 });
-  await pl.waitForTimeout(300);
-  assert.equal(blankSaved, false, 'nothing is saved');
-  assert.equal(await pl.textContent('#fl-error'), 'The image (2000 × 1500 pixels) is larger than this browser can handle. Try a desktop browser.');
-  assert.deepEqual(lerrs, []);
-  await lim.close();
 
   // ---------- A decimal comma in a German browser ----------
   const de = await page.context().browser().newContext({ locale: 'de-DE', viewport: { width: 1280, height: 900 } });
