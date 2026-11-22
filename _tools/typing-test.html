@@ -310,6 +310,9 @@ faq:
   var AHEAD = 60, CHUNK = 150;   // common words: words kept ready past the caret
   var SHOW_ERRS = 50;            // rows in the error table
   var CUT = 40;                  // characters of a typed word shown in the table
+  // Extra letters drawn after a word. A held key can add thousands, which still
+  // count, but drawing every one on each key press would slow the page down.
+  var EXTRA_SHOWN = 20;
 
   var box = TT.$('#tt-box'), textEl = TT.$('#tt-text'), input = TT.$('#tt-input');
   var promptEl = TT.$('#tt-prompt'), srEl = TT.$('#tt-sr'), noteEl = TT.$('#tt-note'), errEl = TT.$('#tt-error');
@@ -459,7 +462,8 @@ faq:
       return;
     }
     var t = tcp(i), w = cps(typed[i]), committed = i < cur, n = Math.max(t.length, w.length), h = '';
-    for (var j = 0; j < n; j++) {
+    var m = Math.min(n, t.length + EXTRA_SHOWN);
+    for (var j = 0; j < m; j++) {
       var cls, ch;
       if (j < t.length) {
         ch = t[j];
@@ -471,6 +475,7 @@ faq:
       if (!committed && j === w.length) cls += ' tt-car';
       h += '<span class="tt-l ' + cls + '">' + esc(ch) + '</span>';
     }
+    if (n > m) h += '<span class="tt-l tt-extra">…</span>';
     if (!committed && w.length >= n) h += '<span class="tt-l tt-car" aria-hidden="true"></span>';
     el.innerHTML = h;
   }
