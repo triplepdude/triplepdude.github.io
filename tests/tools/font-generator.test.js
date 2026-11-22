@@ -130,7 +130,10 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.waitForFunction(() => document.querySelector('#fg-c-bold').textContent === 'Copy', null, { timeout: 3000 });
   for (const id of ['upside-down', 'strike', 'black-circled', 'fullwidth']) assert.equal(await copied(id), exp('hello', id), `copy ${id}`);
   assert.equal(exp('hello', 'upside-down'), 'ollǝH');
-  // Copying the same style again is confirmed again.
+  // Copying the same style again is confirmed again. The confirmation of the
+  // copy just made, which the page writes 50 ms later, is waited for first:
+  // on a busy machine it could otherwise arrive after the observer starts.
+  await settles('#fg-status', 'Full-width (vaporwave) copied to the clipboard.');
   await page.evaluate(() => {
     window.__fgSaid = [];
     new MutationObserver(() => window.__fgSaid.push(document.querySelector('#fg-status').textContent))

@@ -476,7 +476,7 @@ faq:
       work = { n: N, re: new Float64Array(N), im: new Float64Array(N), pr: new Float64Array(N), pi: new Float64Array(N), sq: new Float64Array(N + 1), d: new Float64Array(W), dp: new Float64Array(W) };
     }
     const re = work.re, im = work.im, pr = work.pr, pi = work.pi, sq = work.sq, d = work.d, dp = work.dp;
-    let mean = 0, peak = 0;
+    let mean = 0, peak = 0, zeros = 0, gap = 0;
     for (let i = 0; i < N; i++) mean += x[i];
     mean /= N;
     sq[0] = 0;
@@ -485,10 +485,17 @@ faq:
       im[i] = v; re[i] = i < W ? v : 0;
       sq[i + 1] = sq[i] + v * v;
       if (Math.abs(x[i]) > peak) peak = Math.abs(x[i]);
+      if (x[i] === 0) { if (++zeros > gap) gap = zeros; } else zeros = 0;
     }
     const rms = Math.sqrt(sq[N] / N);
     const out = { f: 0, rms: rms, peak: peak };
     if (!(rms > 0) || 20 * Math.log10(rms) < GATE_DB) return out;
+    // A run of exact zeros in a sounding window is a dropout: on a busy device
+    // the browser can lose a 10 ms block of the microphone's sound and play
+    // silence instead. Read through, it would pull the note several cents flat
+    // for as long as the gap stays in the window (about 85 ms), so such a
+    // window gives no reading and the needle holds where it was.
+    if (gap >= 64) return out;
     // One complex FFT carries both the first half-window (real part) and the
     // whole buffer (imaginary part); their cross-correlation gives the
     // difference function d(t) = sum (x[j] - x[j+t])^2 for every lag at once.
