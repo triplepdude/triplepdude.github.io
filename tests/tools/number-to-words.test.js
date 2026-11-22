@@ -379,7 +379,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
 
   // ---- The guide links to tools of this site, and the FAQ ends with privacy ----
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/invoice-generator/', '/binary-translator/']);
+  assert.deepEqual(links, ['/invoice-generator/', '/binary-translator/', '/roman-numerals-converter/']);
   for (const href of links) assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), href);
   const faqs = await page.locator('.faq summary').allTextContents();
   assert.match(faqs[faqs.length - 1], /sent anywhere/);

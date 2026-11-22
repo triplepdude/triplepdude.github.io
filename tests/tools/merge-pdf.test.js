@@ -57,7 +57,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await open();
   assert.equal(await page.isVisible('#mpdf-drop'), true);
   assert.equal(await page.isVisible('#mpdf-work'), false);
-  assert.deepEqual(await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/image-to-pdf/', '/split-pdf/', '/pdf-to-jpg/']);
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/image-to-pdf/', '/split-pdf/', '/pdf-to-jpg/', '/unlock-pdf/']);
 
   // Reads a PDF with pdf.js: page texts, rotations, sizes, annotations (link targets as page
   // numbers, with the annotation ids) and whether it is encrypted.
