@@ -549,12 +549,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.keyboard.press('3');
   assert.equal(await text('#ng-big'), 'Violet noise', 'a key changed the colour while the tool was scrolled away');
   await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' }));
-  // Tab reaches Play with a visible focus ring, and Enter presses it.
-  await page.focus('#ng-tone');
+  // Play comes first, right under the colour's name, so it is on a phone's
+  // first screen. Tab reaches it with a visible focus ring, and Enter presses it.
+  assert.ok(await page.evaluate(() => document.querySelector('#ng-play').compareDocumentPosition(document.querySelector('input[name="ng-colour"]')) & Node.DOCUMENT_POSITION_FOLLOWING), 'Play comes before the colours');
+  await page.focus('#ng-night');
   await page.keyboard.press('Shift+Tab');
-  await page.keyboard.press('Tab');
-  let guard = 0;
-  while (await page.evaluate(() => document.activeElement.id) !== 'ng-play' && guard++ < 10) await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'ng-play');
   assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), 'none');
   await page.keyboard.press('Enter');
@@ -789,6 +788,9 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   {
     const { ctx, p } = await extraPage({ ...devices['Pixel 7'] });
     await p.goto(url);
+    // Play is on the first screen, without scrolling.
+    const playBottom = await p.evaluate(() => document.getElementById('ng-play').getBoundingClientRect().bottom);
+    assert.ok(playBottom <= await p.evaluate(() => innerHeight), `Play ends ${playBottom} px down, below the first screen`);
     await p.tap('label.ng-col:has(input[value="brown"])');
     assert.equal(await p.isChecked('input[value="brown"]'), true);
     await p.tap('#ng-play');
