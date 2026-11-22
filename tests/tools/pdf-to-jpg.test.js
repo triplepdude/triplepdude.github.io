@@ -468,14 +468,43 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(await text('#p2j-status'), /^Saved huge-page-1\.jpg: 5000 × 5000 pixels, [\d.]+\u00a0[KM]B\. Page 1 is too large for 600 DPI, so it was converted at 25 DPI, the most pixels one image can have here\.$/);
 
   // ---- Fonts that are not embedded: the CMap and the Dingbats font come from this site ----
-  const fetched = [];
-  page.on('response', r => { if (/pdfjs-resources/.test(r.url())) fetched.push(r.status() + ' ' + r.url().replace(/^.*pdfjs-resources\//, '')); });
+  // The PDF.js worker fetches them; each response is awaited, so the check does not depend on when the
+  // worker's network events reach the test.
+  const fontFiles = ['cmaps/UniJIS-UCS2-H.bcmap', 'standard_fonts/FoxitDingbats.pfb'];
+  const fontResponses = fontFiles.map(f => page.waitForResponse(r => r.url().endsWith('/pdfjs-resources/' + f)).then(r => r.status() + ' ' + f, () => 'no response for ' + f));
+  // Convert pressed while a newly chosen PDF is still being checked or opened does nothing. It used to
+  // convert the PDF still on screen (huge.pdf, also one page) and, once the new one had opened, save
+  // the old page under the new name. Both reads of fonts.pdf, its first kilobyte (is it a PDF?) and
+  // then the whole file, are held back here until Convert has been pressed.
+  await page.evaluate(() => {
+    const slice = Blob.prototype.slice, read = Blob.prototype.arrayBuffer;
+    window.__held = [];
+    Blob.prototype.slice = function (...a) { const b = slice.apply(this, a); if (this.name === 'fonts.pdf') b.__fonts = true; return b; };
+    Blob.prototype.arrayBuffer = function () {
+      if (this.name !== 'fonts.pdf' && !this.__fonts) return read.call(this);
+      if (this.name === 'fonts.pdf') { Blob.prototype.slice = slice; Blob.prototype.arrayBuffer = read; }
+      return new Promise(resolve => window.__held.push(() => resolve(read.call(this))));
+    };
+  });
+  // Waits for read n to be held, presses Convert, notes whether a conversion started, lets the read go on.
+  const pressWhileReading = async n => {
+    await page.waitForFunction(n => window.__held.length === n, n);
+    return page.evaluate(n => {
+      document.getElementById('p2j-go').click();
+      const seen = { converting: !document.getElementById('p2j-progress').hidden, status: document.getElementById('p2j-status').textContent };
+      window.__held[n - 1]();
+      return seen;
+    }, n);
+  };
   await page.setInputFiles('#p2j-file', fx('fonts.pdf'));
-  await page.waitForFunction(() => document.querySelectorAll('.p2j-page').length === 1);
+  assert.equal((await pressWhileReading(1)).converting, false, 'Convert waits while the chosen file is checked');
+  assert.deepEqual(await pressWhileReading(2), { converting: false, status: 'Opening fonts.pdf…' }, 'Convert waits for the PDF being opened');
+  // Waiting for one page would not do: huge.pdf has one page too.
+  await page.waitForFunction(() => document.getElementById('p2j-status').textContent === 'fonts.pdf is open: 1 page.');
   await page.selectOption('#p2j-dpi', '72');
   out = await save();
-  assert.ok(fetched.includes('200 cmaps/UniJIS-UCS2-H.bcmap'), fetched.join());
-  assert.ok(fetched.includes('200 standard_fonts/FoxitDingbats.pfb'), fetched.join());
+  assert.equal(out.name, 'fonts-page-1.jpg');
+  assert.deepEqual(await Promise.all(fontResponses), fontFiles.map(f => '200 ' + f));
   img = await look(out.buf, 'image/jpeg');
   // Row 2 of the 12 x 12 grid holds the Japanese line (8 characters, about 5 cells wide), row 4 the
   // Dingbats; without the CMap or the font file they would stay blank.
@@ -615,8 +644,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(await p2.evaluate(() => document.documentElement.scrollWidth <= 320), 'the password prompt fits at 320px');
   await p2.fill('#p2j-pw', 'open sesame');
   await p2.press('#p2j-pw', 'Enter');
-  await p2.waitForFunction(() => !document.getElementById('p2j-work').hidden);
-  await Promise.all([p2.waitForEvent('download'), p2.tap('#p2j-go')]);
+  // By its name: the pages of huge.pdf are still on screen until this PDF is open.
+  await p2.waitForFunction(name => document.getElementById('p2j-name').textContent === name, longName + '.pdf');
+  const [dlLong] = await Promise.all([p2.waitForEvent('download'), p2.tap('#p2j-go')]);
+  assert.equal(dlLong.suggestedFilename(), longName + '-page-1.jpg');
   assert.ok(await p2.evaluate(() => document.documentElement.scrollWidth <= 320), 'the results fit at 320px');
   assert.deepEqual(errors, []);
   await phone.close();

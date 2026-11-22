@@ -150,6 +150,8 @@ faq:
 .cmpi-item-main strong { overflow-wrap: anywhere; font-size: 15px; }
 .cmpi-item-main .hint { overflow-wrap: anywhere; }
 .cmpi-item[data-state="error"] .cmpi-item-main .hint { color: var(--danger); }
+.cmpi-item-note { margin-top: 2px; font-size: 13px; overflow-wrap: anywhere; }
+.cmpi-item-note:empty { display: none; }
 .cmpi-item-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .cmpi-item-actions .btn.small { min-height: 36px; }
 .cmpi-item-actions [aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
@@ -320,6 +322,12 @@ faq:
   const batch = $('#cmpi-batch'), list = $('#cmpi-list'), zipBtn = $('#cmpi-zip');
   const HINT = dropHint.textContent, TITLE = dropTitle.innerHTML;
   const CANCEL = { cancelled: true };
+  // What the decoder found in the file itself, in the image converter's words.
+  const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
+  const HDR = {
+    hdr: 'This is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.',
+    'hdr-mapped': 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.'
+  };
   const cache = new Map(); // item id -> TTImage decode result (pixels kept in a worker)
   const can = { webp: true, avif: false };
   let items = [], nextId = 1, gen = 0, running = false, selected = null, pngCache = { key: '', blob: null };
@@ -748,7 +756,7 @@ faq:
       throw it.decodeError;
     }
     if (items.indexOf(it) < 0) { TTImage.release(d); throw CANCEL; }
-    Object.assign(it, { w: d.width, h: d.height, inFmt: d.format, hasAlpha: d.hasAlpha });
+    Object.assign(it, { w: d.width, h: d.height, inFmt: d.format, hasAlpha: d.hasAlpha, cut: (d.warnings || []).indexOf('truncated') >= 0 });
     remember(it.id, d);
     if (it === selected) showBefore(it);
     return d;
@@ -931,10 +939,12 @@ faq:
     }
     if (g !== gen) throw CANCEL;
     if (fmt === 'jpeg' && d.hasAlpha) notes.unshift('This image has transparent areas. JPG cannot store transparency, so they are filled with white. Choose WebP or PNG to keep them.');
+    if (it.cut) notes.unshift(CUT);
     if (best.exact) notes.push('This image has only ' + plural(best.colours, 'colour', 'colours') + ', so the PNG is pixel-exact.');
     else if (fmt === 'png' && !best.lossless && !d.hasAlpha && (best.q <= PNG_MIN || best.s < scale)) notes.push('This looks like a photo: JPG or WebP keeps far more detail at this file size.');
     if (d.animated) notes.push('Only the first frame of this animation was kept.');
     if (d.colorProfile === 'converted') notes.push('Colours were converted from the photo’s wide-gamut profile to sRGB.');
+    (d.warnings || []).forEach(w => { if (HDR[w]) notes.push(HDR[w]); });
     if (s.meta !== 'strip') {
       if (fmt !== 'jpeg' && fmt !== 'webp') notes.push('Photo details (EXIF) are kept only in JPG and WebP files.');
       else if (!d.exif) notes.push('The original has no photo details (EXIF) to keep.');
@@ -1023,7 +1033,8 @@ faq:
   }
   function makeRow(it) {
     const li = el('li', 'cmpi-item'), main = el('div', 'cmpi-item-main'), acts = el('div', 'cmpi-item-actions');
-    main.append(el('strong', '', it.name), el('span', 'hint'));
+    // A cut-off file is named in its row too, so it stands out in a batch without a preview.
+    main.append(el('strong', '', it.name), el('span', 'hint'), el('span', 'cmpi-item-note'));
     const show = el('button', 'btn secondary small', 'Preview');
     show.type = 'button';
     show.setAttribute('data-act', 'show');
@@ -1046,6 +1057,7 @@ faq:
     if (it.row) {
       it.row.setAttribute('data-state', it.state);
       it.row.querySelector('.hint').textContent = rowText(it);
+      it.row.querySelector('.cmpi-item-note').textContent = it.cut && it.state !== 'error' ? CUT : '';
       it.row.querySelector('[data-act="dl"]').disabled = it.state !== 'done';
       const on = it === selected;
       if (on) it.row.setAttribute('aria-current', 'true'); else it.row.removeAttribute('aria-current');

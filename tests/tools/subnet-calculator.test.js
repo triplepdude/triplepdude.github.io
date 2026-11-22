@@ -52,7 +52,15 @@ const RANDOM = [
 ];
 
 module.exports = async ({ page, open, assert, fixtures }) => {
+  // The page's timers run on Playwright's clock, so the announcement checks below can stop it.
+  await page.clock.install();
   await open();
+  // Speed budgets are in main-thread CPU time (Chrome's ThreadTime metric), not wall time: on a busy
+  // machine the page waits for a CPU, which once stretched a 40 ms recalculation to 927 ms.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Performance.enable');
+  const threadMs = async () => (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'ThreadTime').value * 1000;
+  const cpuMs = async action => { const t0 = await threadMs(); await action(); return (await threadMs()) - t0; };
   // First text node of a cell (cells for /31 and /32 broadcast carry an explanatory <small>).
   const cell = id => page.$eval('#sc-' + id, el => (el.firstChild ? el.firstChild.textContent : ''));
   const text = sel => page.locator(sel).textContent();
@@ -241,15 +249,18 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   r = await rows();
   assert.equal(r.length, 512);
   assert.equal(r[511][1], '10.1.255.0/24');
-  // Recalculating with the big table stays well under a frame budget of ~100 ms.
-  const ms = await page.evaluate(() => {
-    const el = document.querySelector('#sc-ip');
-    const t0 = performance.now();
-    el.value = '10.0.0.1/8'; el.dispatchEvent(new Event('input'));
-    void document.body.offsetHeight;
-    return performance.now() - t0;
-  });
-  assert.ok(ms < 150, `recalculation took ${ms} ms`);
+  // Recalculating with the big table, layout included, takes well under 150 ms (about 40 here; drawing
+  // all 65,536 rows takes about 5 s). The least of three runs.
+  const recalc = [];
+  for (const ip of ['10.0.0.3/8', '10.0.0.2/8', '10.0.0.1/8']) {
+    recalc.push(await cpuMs(() => page.evaluate(ip => {
+      const el = document.querySelector('#sc-ip');
+      el.value = ip; el.dispatchEvent(new Event('input'));
+      void document.body.offsetHeight;
+    }, ip)));
+  }
+  assert.equal((await rows()).length, 512);
+  assert.ok(Math.min(...recalc) < 150, `recalculation took ${recalc.map(t => t.toFixed(1)).join(', ')} ms of CPU time`);
   const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('#sc-csv')]);
   const big = fs.readFileSync(await dl2.path(), 'utf8').trim().split(/\r\n/);
   assert.equal(big.length, 65537);
@@ -285,9 +296,16 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.fill('#sc-ip', '8.8.8.8/32');
   assert.match(await text('#sc-split-msg'), /can't be split/);
 
-  // Copy results.
+  // Copy results. The clipboard is written asynchronously, so it is read once the button has said "Copied!"
+  // (an observer notes it, as the word shows for only 1.4 s).
   await page.fill('#sc-ip', '192.168.1.10/24');
+  await page.evaluate(() => {
+    const b = document.querySelector('#sc-copy');
+    window.__copied = false;
+    new MutationObserver(() => { if (b.textContent === 'Copied!') window.__copied = true; }).observe(b, { childList: true, characterData: true, subtree: true });
+  });
   await page.click('#sc-copy');
+  await page.waitForFunction(() => window.__copied);
   const clip = await page.evaluate(() => navigator.clipboard.readText());
   assert.ok(clip.includes('Network address: 192.168.1.0') && clip.includes('Wildcard mask: 0.0.0.255'), clip);
 
@@ -432,27 +450,27 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.waitForFunction(() => document.querySelector('#sc-agg-info').textContent.startsWith('300 entries'));
   await aggCheck(V.aggRandom.res, 'random IPv4');
   assert.match(await text('#sc-agg-info'), /host bits cleared in \d+/);
+  await page.waitForFunction(() => /^Summarised 300 entries into [\d,]+ blocks\./.test(document.querySelector('#sc-status').textContent));
   await page.fill('#sc-agg-in', V.aggRandom6.items.join(', '));
   await page.waitForFunction(() => document.querySelector('#sc-agg-info').textContent.startsWith('120 entries'));
   await aggCheck(V.aggRandom6.res, 'random IPv6');
   await page.fill('#sc-agg-in', '10.0.0.0/24\nbanana\n10.0.1.0/24\n10.0.0.0/33');
   await page.waitForFunction(() => document.querySelector('#sc-agg-out').textContent === '10.0.0.0/23');
   assert.match(await text('#sc-agg-msg'), /^Skipped "banana": .* "10\.0\.0\.0\/33": \/33 is too long for IPv4\./);
-  // Long lists summarize without long tasks: 2,000 entries in well under 100 ms, 20,000 in under 500 ms
-  // (python: collapse_addresses of 10.(i >> 8).(i & 255).0/24).
+  // Long lists are summarised quickly: 2,000 entries in well under 100 ms of main-thread CPU time, from
+  // the input event to the result on screen, 20,000 in under 500 ms (python: collapse_addresses of
+  // 10.(i >> 8).(i & 255).0/24). The list is put in the box first, outside the time measured.
   for (const [n, want, limit] of [[2000, '10.0.0.0/14 10.4.0.0/15 10.6.0.0/16 10.7.0.0/17 10.7.128.0/18 10.7.192.0/20', 100], [20000, '10.0.0.0/10 10.64.0.0/13 10.72.0.0/14 10.76.0.0/15 10.78.0.0/19', 500]]) {
     await page.evaluate(n => {
-      window.__long = 0;
-      new PerformanceObserver(l => l.getEntries().forEach(e => { window.__long = Math.max(window.__long, e.duration); })).observe({ type: 'longtask' });
-      const el = document.querySelector('#sc-agg-in');
-      el.value = Array.from({ length: n }, (_, i) => '10.' + (i >> 8) + '.' + (i & 255) + '.0/24').join('\n');
-      el.dispatchEvent(new Event('input'));
+      document.querySelector('#sc-agg-in').value = Array.from({ length: n }, (_, i) => '10.' + (i >> 8) + '.' + (i & 255) + '.0/24').join('\n');
+      void document.body.offsetHeight;
     }, n);
-    await page.waitForFunction(n => document.querySelector('#sc-agg-info').textContent.startsWith(n.toLocaleString('en-US') + ' entries'), n);
+    const cpu = await cpuMs(async () => {
+      await page.evaluate(() => document.querySelector('#sc-agg-in').dispatchEvent(new Event('input')));
+      await page.waitForFunction(n => document.querySelector('#sc-agg-info').textContent.startsWith(n.toLocaleString('en-US') + ' entries'), n);
+    });
     assert.equal((await text('#sc-agg-out')).split('\n').join(' '), want);
-    await page.waitForTimeout(100);
-    const long = await page.evaluate(() => window.__long);
-    assert.ok(long < limit, `${n} entries: longest task ${long} ms`);
+    assert.ok(cpu < limit, `${n} entries: summarised in ${cpu.toFixed(1)} ms of CPU time`);
   }
 
   // Screen readers: the results, the split table and the error messages are redrawn on every
@@ -460,8 +478,12 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // #sc-status announces one short summary once typing pauses.
   for (const sel of ['#sc-out', '#sc-split-out']) assert.equal(await page.getAttribute(sel, 'aria-live'), null, sel);
   for (const sel of ['#sc-msg', '#sc-split-msg']) assert.equal(await page.getAttribute(sel, 'role'), null, sel);
-  await page.fill('#sc-split-num', '4');
-  await page.waitForTimeout(800);
+  // The keys are pressed 40 ms apart on the page's clock, which stands still in between: on a busy
+  // machine keys sent 40 ms apart can reach the page 700 ms apart, which it rightly takes as a pause.
+  // The clock stops a minute ahead of the page's time: a second ahead can already be past when this
+  // call arrives late, and Playwright refuses to move the clock back.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 60000);
+  await page.clock.runFor(1000); // what earlier input still has to announce is said first
   await page.evaluate(() => {
     window.__live = [];
     new MutationObserver(ms => ms.forEach(m => {
@@ -470,16 +492,18 @@ module.exports = async ({ page, open, assert, fixtures }) => {
       if (reg && reg.textContent) window.__live.push(reg.id + ':' + reg.textContent);
     })).observe(document.body, { subtree: true, childList: true, characterData: true });
   });
-  const heard = async () => { await page.waitForTimeout(1000); const l = await page.evaluate(() => window.__live); await page.evaluate(() => { window.__live = []; }); return l; };
-  await page.fill('#sc-ip', '');
-  await page.type('#sc-ip', '10.20.30.40/16', { delay: 40 });
-  assert.deepEqual(await heard(), ['sc-status:10.20.0.0/16: 65,534 usable hosts. 4 subnets of /18.']);
-  await page.fill('#sc-split-num', '');
-  await page.type('#sc-split-num', '16', { delay: 40 });
-  assert.deepEqual(await heard(), ['sc-status:16 subnets of /20.']);
-  await page.fill('#sc-ip', '');
-  await page.type('#sc-ip', '10.20', { delay: 40 });
-  assert.deepEqual(await heard(), ['sc-status:An IPv4 address has four numbers separated by dots, like 192.168.1.10. "10.20" has 2.']);
+  // What the live regions say while a field is cleared and typed into, and in the second after.
+  const heard = async (sel, keys) => {
+    await page.fill(sel, '');
+    for (const key of keys) { await page.clock.runFor(40); await page.press(sel, key); }
+    await page.clock.runFor(1000);
+    return page.evaluate(() => window.__live.splice(0));
+  };
+  assert.deepEqual(await heard('#sc-split-num', '4'), ['sc-status:4 subnets of /26.']);
+  assert.deepEqual(await heard('#sc-ip', '10.20.30.40/16'), ['sc-status:10.20.0.0/16: 65,534 usable hosts. 4 subnets of /18.']);
+  assert.deepEqual(await heard('#sc-split-num', '16'), ['sc-status:16 subnets of /20.']);
+  assert.deepEqual(await heard('#sc-ip', '10.20'), ['sc-status:An IPv4 address has four numbers separated by dots, like 192.168.1.10. "10.20" has 2.']);
+  await page.clock.resume();
   await page.fill('#sc-ip', '192.168.1.10/24');
 
   // Reflow (WCAG 1.4.10): no sideways scrolling at 320 CSS pixels.
@@ -510,10 +534,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // freezing the page in BigInt loops.
   await page.fill('#sc-ip', '10.0.0.0/8');
   await page.selectOption('#sc-split-mode', 'count');
-  const t0 = Date.now();
-  await page.evaluate(() => { const e = document.querySelector('#sc-split-num'); e.value = '9'.repeat(100000); e.dispatchEvent(new Event('input')); });
-  assert.ok(Date.now() - t0 < 1000, 'huge count handled in ' + (Date.now() - t0) + ' ms');
+  const huge = await cpuMs(() => page.evaluate(() => { const e = document.querySelector('#sc-split-num'); e.value = '9'.repeat(100000); e.dispatchEvent(new Event('input')); }));
+  assert.ok(huge < 1000, `huge count handled in ${huge.toFixed(1)} ms of CPU time`);
   assert.match(await page.textContent('#sc-split-msg'), /can be split into at most 16,777,216 subnets/);
+  await cdp.detach();
 
   // ----- Guide: it names the Binary rows of the results, gives a mask octet in binary and
   // links the binary translator for converting one number. Every link points at a tool page. -----
@@ -529,6 +553,22 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     const mask = page.locator('#sc-bin dd').nth(rows.indexOf('Netmask'));
     assert.equal((await mask.textContent()).split('.')[3], m[2], 'the /26 netmask ends in ' + m[2]);
     assert.equal((await mask.locator('.sc-n').textContent()).replace(/\./g, ''), '1'.repeat(26), 'the network part is bold');
+    // British spelling in all the page shows and says, the FAQ answers included (innerText leaves out
+    // a closed <details>; the search keywords are not shown), and the guide names the summary tool by
+    // its heading.
+    const { said, answers } = await page.evaluate(() => {
+      const shut = [...document.querySelectorAll('details:not([open])')];
+      shut.forEach(d => { d.open = true; });
+      const said = [document.title, document.body.innerText, document.querySelector('meta[name="description"]').content]
+        .concat([...document.querySelectorAll('[aria-label], [placeholder], [title]')].flatMap(e => ['aria-label', 'placeholder', 'title'].map(a => e.getAttribute(a) || ''))).join('\n');
+      const answers = [...document.querySelectorAll('.faq-answer')].map(a => a.innerText.trim());
+      shut.forEach(d => { d.open = false; });
+      return { said, answers };
+    });
+    assert.ok(answers.length && answers.every(a => a && said.includes(a)), 'the FAQ answers are read');
+    assert.doesNotMatch(said, /summariz|recogniz/i, 'American spelling: ' + (said.match(/.{0,40}(summariz|recogniz).{0,40}/i) || [''])[0]);
+    assert.ok(guide.includes('Summarise merges a list of networks'), 'the guide names the tool as its heading does');
+    assert.equal(await page.textContent('h2:has(+ .field #sc-agg-in)'), 'Summarise networks');
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
     assert.deepEqual(links, ['/binary-translator/']);
     for (const href of links) {

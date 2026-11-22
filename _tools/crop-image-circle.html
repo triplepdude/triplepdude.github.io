@@ -445,19 +445,24 @@ faq:
     reset();
   }
   // The browser's own decoder: fast, and the export worker can decode the same file again.
-  async function decodeNative(file) {
-    if (typeof createImageBitmap === 'function') {
-      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* try <img> */ }
-    }
+  // null when the browser refuses the file, as Chrome does a cut-off one.
+  async function bitmapOf(file) {
+    if (typeof createImageBitmap !== 'function') return null;
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { return null; }
+  }
+  // An <img> takes files that createImageBitmap refuses, such as a cut-off JPG or PNG, which it
+  // draws only up to the cut, leaving the rest blank, without an error. So it is used only where
+  // the shared decoder, which checks for that, is missing or cannot hold the image.
+  async function imgOf(file) {
     const url = URL.createObjectURL(file);
     try {
       const img = new Image();
       img.src = url;
       await img.decode();
-      if (!img.naturalWidth || !img.naturalHeight) throw new Error('empty');
-      return img;
-    } finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
+      return img.naturalWidth && img.naturalHeight ? img : null;
+    } catch (e) { return null; } finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
   }
+  const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
   async function load(file) {
     if (!file) return;
     const run = ++st.loadRun;
@@ -478,20 +483,30 @@ faq:
         if (run === st.loadRun) errEl.textContent = e && e.friendly ? e.message : 'This SVG file could not be drawn.';
         return;
       }
-    }
-    // HEIC and TIFF (and anything the browser refuses) go to the shared decoder, which also
-    // explains what is wrong with a file that is not an image.
-    else if (fmt !== 'heic' && fmt !== 'tiff') { try { src = await decodeNative(file); } catch (e) { src = null; } }
-    if (!src) {
-      if (!window.TTImage) { if (run === st.loadRun) errEl.textContent = 'This file could not be opened as an image.'; return; }
-      if (run === st.loadRun && (fmt === 'heic' || fmt === 'tiff')) okEl.textContent = 'Opening the ' + TTImage.formats[fmt].label + ' image…';
-      try {
-        dec = await TTImage.decode(file);
-        src = dec.canvas;
-      } catch (e) {
-        if (run === st.loadRun) { okEl.textContent = ''; errEl.textContent = e && e.friendly ? e.message : 'This file could not be opened as an image.'; }
-        return;
-      }
+    } else {
+      // The browser's own decoder first, but not for the formats it gets wrong without an error:
+      // Chrome draws a damaged AVIF or a cut-off WebP as a blank picture, Chrome and Firefox ignore
+      // the EXIF orientation of a WebP, and most browsers cannot open HEIC or TIFF. Those, and any
+      // file the browser refuses, go to the shared decoder: it turns the picture upright, refuses a
+      // file that would come out blank (saying what is wrong with it) and reports one drawn only in
+      // part.
+      if (!window.TTImage || ['avif', 'webp', 'heic', 'tiff'].indexOf(fmt) < 0) src = await bitmapOf(file);
+      if (!src && window.TTImage) {
+        if (run === st.loadRun && (fmt === 'heic' || fmt === 'tiff')) okEl.textContent = 'Opening the ' + TTImage.formats[fmt].label + ' image…';
+        try {
+          dec = await TTImage.decode(file);
+          src = dec.canvas;
+        } catch (e) {
+          // Over the decoder's 100 megapixels, or bigger than this browser allows a canvas to be (16.7
+          // megapixels in Safari on iPhone before iOS 18): the browser's own decoder may still hold it.
+          if (e && e.code === 'TOO_BIG') src = await bitmapOf(file) || await imgOf(file);
+          if (!src) {
+            if (run === st.loadRun) { okEl.textContent = ''; errEl.textContent = e && e.friendly ? e.message : 'This file could not be opened as an image.'; }
+            return;
+          }
+        }
+      } else if (!src) src = await imgOf(file);
+      if (!src) { if (run === st.loadRun) errEl.textContent = 'This file could not be opened as an image.'; return; }
     }
     if (run !== st.loadRun) { if (src.close) src.close(); if (dec) TTImage.release(dec); return; }
     const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
@@ -504,10 +519,14 @@ faq:
     }
     if (run !== st.loadRun) { if (src.close) src.close(); if (view !== src && view.close) view.close(); if (dec) TTImage.release(dec); return; }
     okEl.textContent = '';
-    // Only files the browser decodes itself can be decoded again in the export worker.
-    setImage(src, view, dec || fmt === 'svg' ? null : file, w, h, (file.name || 'image').replace(/\.[^.]+$/, '') || 'image', false, dec);
+    // The export worker decodes the file again, at the scale the output needs. That gives the same
+    // picture only where the browser decoded the whole file itself and the shared decoder did not
+    // turn it (it applies a WebP's EXIF orientation); otherwise the page draws the export itself.
+    const cut = !!dec && dec.warnings.indexOf('truncated') >= 0;
+    const again = fmt !== 'svg' && (!dec || (dec.decoder === 'browser' && dec.orientation === 1 && !cut));
+    setImage(src, view, again ? file : null, w, h, (file.name || 'image').replace(/\.[^.]+$/, '') || 'image', false, dec);
     $('#circ-drop-title').textContent = file.name || 'Pasted image';
-    $('#circ-drop-hint').textContent = (fmt === 'svg' ? 'SVG, drawn at ' : '') + w + ' × ' + h + ' px. Choose or drop another image to replace it.';
+    $('#circ-drop-hint').textContent = (fmt === 'svg' ? 'SVG, drawn at ' : '') + w + ' × ' + h + ' px. ' + (cut ? CUT + ' ' : '') + 'Choose or drop another image to replace it.';
   }
   function sample() {
     const c = document.createElement('canvas');

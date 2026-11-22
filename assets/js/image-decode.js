@@ -1806,7 +1806,7 @@
           // IDAT chunk that is complete, or at least 4 KB of it).
           var idat = null;
           pngChunks(head, function (t, st, len) { if (t === 'IDAT') { idat = st + len <= file.size || file.size - st >= 4096; return false; } });
-          if (idat === false || (idat === null && head.length >= file.size)) throw fail('CORRUPT', 'The PNG file is incomplete: it ends before its image data, so there is nothing to convert.');
+          if (idat === false || (idat === null && head.length >= file.size)) throw fail('CORRUPT', 'The PNG file is incomplete: it ends before its image data, so there is no picture in it. Download or copy it again.');
           res.warnings.push('truncated');
         }
         if (fmt === 'webp' && u32le(head, 4) + 8 > file.size) res.warnings.push('truncated');

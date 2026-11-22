@@ -16,13 +16,17 @@
  * 200% zoom, no text field under 16px on a touch screen,
  * nothing saved in cookies or browser storage, empty .msg live regions still
  * rendered, no button that a quick second tap would zoom instead of pressing,
- * and valid JSON-LD with no blog-post markup.
+ * nothing that skips drawing its content (content-visibility) on a page with
+ * a text box, after the test and as served, and valid JSON-LD with no
+ * blog-post markup.
  *
  * A full run (no slugs) also runs siteChecks: the homepage, About, Privacy and
  * 404 pages, the sitemap, related-tool links, the shared colour tokens, the
  * icon and theme colours in the head, reduced motion, keyboard scrolling of a
- * guide table that is too wide for a phone, and a long line in a guide's code
- * block on a phone (on a sample page that only a full run builds).
+ * guide table that is too wide for a phone, a long line in a guide's code
+ * block on a phone (on a sample page that only a full run builds), the
+ * time a paste over a long text takes on Word Counter, and a link to a quoted
+ * FAQ answer on a page without a text box.
  *
  * Needs `jekyll` (or $JEKYLL) and the `playwright` package on the module path.
  */
@@ -155,6 +159,39 @@ async function newPage(browser, base, viewport, problems, options = {}) {
 // the second one, so _includes/style.css gives them touch-action: manipulation.
 const TAP_TARGETS = 'button, .btn, .check, label, summary, [role="button"], input[type="checkbox"], input[type="radio"], input[type="button"], input[type="submit"], input[type="reset"]';
 
+// Chromium takes seconds, and minutes for longer texts, to replace or delete a
+// long text in a textarea or contenteditable while the page has an element
+// that skips drawing its content: content-visibility hidden (which
+// hidden="until-found" also sets) or auto (once off screen), or a closed
+// <details> as the browser draws it. _includes/style.css hides closed details
+// with display: none instead. Lists such elements on a page with a text box.
+async function skippedContent(page) {
+  return page.evaluate(() => {
+    if (!document.querySelector('textarea, [contenteditable]:not([contenteditable="false"])')) return [];
+    const skips = v => v === 'hidden' || v === 'auto';
+    const name = e => e.tagName === 'DETAILS' && !e.id
+      ? `<details> "${((e.querySelector('summary') || {}).textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40)}"`
+      : e.tagName.toLowerCase() + (e.id ? '#' + e.id : [...e.classList].map(c => '.' + c).join(''));
+    const found = new Set();
+    for (const e of document.querySelectorAll('body *')) {
+      const cv = getComputedStyle(e).contentVisibility;
+      // An element without a box (display: none, or inside one) skips nothing.
+      if (skips(cv) && e.getClientRects().length) {
+        found.add(`${name(e)} (content-visibility: ${cv}${e.getAttribute('hidden') === 'until-found' ? ', from hidden="until-found"' : ''})`);
+      }
+      if (e.tagName === 'DETAILS' && !e.open && e.getClientRects().length) {
+        const content = getComputedStyle(e, '::details-content');
+        if (content.display !== 'none' && skips(content.contentVisibility)) found.add(`${name(e)} (closed, its ::details-content has content-visibility: ${content.contentVisibility})`);
+      }
+    }
+    return [...found];
+  });
+}
+
+function skippedProblem(found, prefix = '') {
+  return `${prefix}on a page with a text box, these elements skip drawing their content with content-visibility, which makes pasting over or deleting a long text in the box take seconds in Chromium (hide content with display: none instead): ${found.slice(0, 4).join(', ')}${found.length > 4 ? ` and ${found.length - 4} more` : ''}`;
+}
+
 async function commonChecks(page, problems) {
   const h1s = await page.locator('h1').count();
   if (h1s !== 1) problems.push(`expected exactly one <h1>, found ${h1s}`);
@@ -178,6 +215,9 @@ async function commonChecks(page, problems) {
     .map(e => (e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map(c => '.' + c).join(''))))]);
   if (zoomable.length) problems.push(`controls where a quick second tap zooms the page on iPhone instead of pressing again (touch-action: auto): ${zoomable.slice(0, 5).join(', ')}${zoomable.length > 5 ? ` and ${zoomable.length - 5} more` : ''}`);
 
+  const skipped = await skippedContent(page);
+  if (skipped.length) problems.push(skippedProblem(skipped));
+
   // Structured data must parse, and a tool page is not a blog post.
   for (const text of await page.$$eval('script[type="application/ld+json"]', els => els.map(e => e.textContent))) {
     try {
@@ -200,6 +240,7 @@ async function commonChecks(page, problems) {
   if (stored && (stored.local.length || stored.session.length || stored.cookie || stored.idb.length || stored.cache.length)) {
     problems.push(`page stored data in the browser, which privacy.md says never happens: ${JSON.stringify(stored)}`);
   }
+  return { skipped };
 }
 
 // No page may scroll sideways on a phone, down to 320px, the width at which
@@ -272,6 +313,62 @@ function luminance(rgb) {
 function contrast(a, b) {
   const [x, y] = [luminance(a), luminance(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+// What skippedContent guards against, in practice: on Word Counter as served,
+// every FAQ item closed, select all and paste 5,000 lines over 5,000 through
+// the clipboard. That takes about 0.1 s, and 3 to 5 s while a closed <details>
+// skips drawing its content. The old text ends with a line break, as pasted
+// and typed text usually does: without one, Chromium is fast either way.
+async function pasteOverLongText(page, base, problems) {
+  const p = '/word-counter/';
+  const lines = (word, n) => `${word} line\n`.repeat(n);
+  await page.goto(base + p, { waitUntil: 'load' });
+  const box = page.locator('main textarea').first();
+  const before = await page.evaluate(() => ({ boxes: document.querySelectorAll('main textarea').length, closed: document.querySelectorAll('details:not([open])').length }));
+  if (!before.boxes || !before.closed) {
+    problems.push(`${p}: expected a text box and closed <details> (the FAQ), found ${before.boxes} and ${before.closed}, so pasting over a long text is not tested`);
+    return;
+  }
+  await box.evaluate((t, text) => { t.value = text; t.dispatchEvent(new Event('input', { bubbles: true })); }, lines('old', 5000));
+  await page.waitForTimeout(300);
+  await page.evaluate(text => navigator.clipboard.writeText(text), lines('new', 5000));
+  await box.evaluate(t => { t.focus(); t.select(); });
+  const start = Date.now();
+  await page.keyboard.press('ControlOrMeta+V');
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => setTimeout(done, 0))));
+  const ms = Date.now() - start;
+  if (!(await box.evaluate((t, text) => t.value === text, lines('new', 5000)))) problems.push(`${p}: select all and paste through the clipboard did not replace the text in the box, so pasting over a long text is not tested`);
+  else if (ms > 1000) problems.push(`${p}: pasting 5,000 lines over 5,000 took ${ms} ms (1,000 allowed): something skips drawing its content (see skippedContent in tests/run.js)`);
+}
+
+// The other side of has-text-box (_layouts/tool.html): on a tool page without
+// a text box, closed <details> keep the browser's way of hiding their content,
+// so a link to a quoted passage of an FAQ answer (#:~:text=, as search results
+// use) and find in page open the item. Checked on the first such tool by name.
+async function quotedAnswerOpens(page, base, slugs, problems) {
+  const textBox = /textarea|contenteditable/;
+  const slug = slugs.slice().sort().find(s => {
+    const file = ['.html', '.md'].map(e => path.join(ROOT, '_tools', s + e)).find(f => fs.existsSync(f));
+    const src = fs.readFileSync(file, 'utf8');
+    return !textBox.test(src.replace(/^---[\s\S]*?\n---/, '')) && /\nfaq:/.test(src);
+  });
+  if (!slug) { problems.push('no tool page without a text box has an FAQ, so a link to a quoted FAQ answer is not tested'); return; }
+  const p = `/${slug}/`;
+  await page.goto(base + p, { waitUntil: 'load' });
+  const info = await page.evaluate(() => {
+    const answer = document.querySelector('.faq details .faq-answer');
+    return {
+      marked: !!document.querySelector('.has-text-box'),
+      quote: answer ? answer.textContent.trim().split(/\s+/).slice(0, 5).join(' ') : '',
+    };
+  });
+  if (info.marked) problems.push(`${p}: has no text box but is marked has-text-box`);
+  if (!info.quote) { problems.push(`${p}: expected an FAQ answer to quote`); return; }
+  await page.goto('about:blank');
+  await page.goto(`${base}${p}#:~:text=${encodeURIComponent(info.quote).replace(/-/g, '%2D')}`, { waitUntil: 'load' });
+  const opened = await page.waitForFunction(() => document.querySelector('.faq details').open, null, { timeout: 3000 }).then(() => true, () => false);
+  if (!opened) problems.push(`${p}: a link to a quoted FAQ answer (#:~:text=${info.quote}) did not open the closed item; only pages with a text box should hide closed <details> with display: none`);
 }
 
 // Checks of the shared pages and files, run once on a full build.
@@ -470,6 +567,9 @@ async function siteChecks(browser, base, problems) {
   if (onDesktop.some(t => t.scrolls || t.tabindex !== null)) problems.push(`/case-converter/ at 1280px: the guide tables should fit and have no tabindex: ${JSON.stringify(onDesktop)}`);
   if (await tabReaches(page, '.prose table')) problems.push('/case-converter/ at 1280px: a guide table that fits is a tab stop');
 
+  await pasteOverLongText(page, base, problems);
+  await quotedAnswerOpens(page, base, slugs, problems);
+
   // About and Privacy agree on whether the site shows ads, and the ad-blocker
   // promise only appears when there are ads.
   const text = async p => { await page.goto(base + p); return page.textContent('main'); };
@@ -557,7 +657,7 @@ async function main() {
         assert.equal(resp.status(), 200, `GET ${url} returned ${resp.status()}`);
       };
       await require(t.file)({ page, open, assert, base: server.base, url, fixtures: path.join(__dirname, 'fixtures', t.slug) });
-      await commonChecks(page, problems);
+      const { skipped } = await commonChecks(page, problems);
       // With whatever the test left on screen (results, messages, tables) the
       // page must still fit a phone. The pause lets scripts that follow the
       // window size, such as a canvas being redrawn, catch up.
@@ -572,6 +672,10 @@ async function main() {
       const phone = await newPage(browser, server.base, PHONES[0], problems, TOUCH);
       const zoomed = await newPage(browser, server.base, ZOOMED, problems);
       await narrowChecks(phone.page, zoomed.page, url, problems);
+      // Also as served, every <details> closed, in case the test opened or
+      // removed something that skipped its content.
+      const served = (await skippedContent(zoomed.page)).filter(s => !skipped.includes(s));
+      if (served.length) problems.push(skippedProblem(served, 'as served: '));
       await phone.context.close();
       await zoomed.context.close();
     } catch (e) {
