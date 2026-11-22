@@ -7,6 +7,8 @@ Needs reportlab and pikepdf (libqpdf). Every encrypted file is written by qpdf
 from the same two-page document, which has a bookmark per page, a filled-in
 text field, an attached file (notes.txt), the title "Unlock test", XMP metadata
 on the catalogue and on page 1, and the markers UNLOCK-MARK-01 and -02. The
+title and the field's value are indirect objects that are strings themselves
+("/Title 4 0 R"), which a handler must decrypt and encrypt like any other. The
 encryption uses random salts, so the files differ from run to run; the values
 in expected.json do not.
 
@@ -27,6 +29,8 @@ in expected.json do not.
                        low-quality printing only
   r2.pdf               RC4 40-bit (R2), open "open sesame" and no permissions password, so the
                        open password is both (ISO 32000-1 Algorithm 3); no printing
+  r2-owner.pdf         RC4 40-bit (R2), open "open sesame", permissions "owner pass": no comments,
+                       which in R2 also means no form filling (an AES-256 copy must clear bit 9)
   signed.pdf           AES-256, no open password, permissions "owner pass": no changes; a
                        signature field whose /Contents is never encrypted
   r6-objstm.pdf        AES-256 with object streams and a cross-reference stream, as most PDF
@@ -66,8 +70,10 @@ def base(signed=False):
     c.save()
     pdf = pikepdf.open(io.BytesIO(buf.getvalue()))
     page = pdf.pages[0].obj
+    pdf.docinfo[Name.Title] = pdf.make_indirect(String('Unlock test'))
     field = pdf.make_indirect(Dictionary(Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx, T=String('name'),
-                                         V=String('Ada Lovelace'), Rect=Array([72, 600, 300, 630]), F=4, P=page))
+                                         V=pdf.make_indirect(String('Ada Lovelace')), Rect=Array([72, 600, 300, 630]),
+                                         F=4, P=page))
     fields = [field]
     if signed:
         sig = pdf.make_indirect(Dictionary(Type=Name.Sig, Filter=Name('/Adobe.PPKLite'), SubFilter=Name('/adbe.pkcs7.detached'),
@@ -106,6 +112,7 @@ CASES = {
     'r4-rc4': dict(user='open sesame', owner='other owner', R=4, aes=False, metadata=False, allow=ALL),
     'r3': dict(user='é€', owner='owner pass', R=3, aes=False, metadata=False, allow=allow(print_highres=1)),
     'r2': dict(user='open sesame', owner='', R=2, aes=False, metadata=False, allow=allow(print_lowres=1, print_highres=1)),
+    'r2-owner': dict(user='open sesame', owner='owner pass', R=2, aes=False, metadata=False, allow=allow(modify_annotation=1)),
     'signed': dict(user='', owner='owner pass', R=6, allow=allow(modify_other=1)),
     'r6-objstm': dict(user='open sesame', owner='owner pass', R=6, allow=allow(print_lowres=1, print_highres=1), objstm=True),
     'r4-objstm': dict(user='open sesame', owner='owner pass', R=4, aes=True, allow=allow(extract=1), objstm=True),
@@ -144,6 +151,15 @@ def opens(path, pw):
         except pikepdf.PasswordError:
             pass
     return None
+
+
+def r6_p(q):
+    """/P that qpdf writes for an AES-256 (R6) file with the same permissions as q, as qpdf reads them
+    (for R2, form filling follows comments, assembly follows changes, high-quality printing follows printing)."""
+    buf = io.BytesIO()
+    q.save(buf, encryption=Encryption(user='', owner='x', R=6, allow=q.allow), fix_metadata_version=False)
+    with pikepdf.open(io.BytesIO(buf.getvalue())) as r:
+        return int(r.encryption.P)
 
 
 def cipher(e):
@@ -203,6 +219,7 @@ def main():
                 'encrypt_metadata': bool(raw_enc.get('/EncryptMetadata', True)),
                 'O_hex': bytes(raw_enc.O).hex(),
                 'user': user, 'owner': owner,
+                'P6': r6_p(q),
                 'empty_opens_as': opens(p, ''),
                 'user_opens_as': opens(p, user) if user else None,
                 'owner_opens_as': opens(p, owner) if owner else None,

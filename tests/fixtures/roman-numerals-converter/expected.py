@@ -53,5 +53,7 @@ E = {
     'feb_days': {str(y): (date(y, 3, 1) - date(y, 2, 1)).days for y in [1900, 2000, 2024, 2027]},
 }
 E['standard_of_likely'] = {s: big(v) for s, v in E['likely'].items()}
+# Numerals whose likely value is below 1, which no Roman numeral can stand for.
+E['likely_low'] = {s: likely(s) for s in ['IIIIIV', 'IIIIIIV', 'IIIIIIIIIIX']}
 json.dump(E, sys.stdout, ensure_ascii=False, indent=0)
 print()

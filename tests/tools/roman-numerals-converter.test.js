@@ -72,11 +72,23 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#rn-num', '4000');
   await page.click('#rn-copy');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), `I${BAR}V${BAR}`);
-  assert.equal(await text('#rn-copy-us'), 'Copy as _I_V');
+  assert.equal(await text('#rn-copy-us'), 'Copy with underscores');
   await page.click('#rn-copy-us');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '_I_V');
   await page.click('#rn-copy-num');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '4000');
+  // Text put in a box without an input event (a restored form, autofill) is read before copying.
+  await page.$eval('#rn-num', el => { el.value = '42'; });
+  await page.click('#rn-copy-num');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '42');
+  await page.$eval('#rn-num', el => { el.value = '43'; });
+  await page.click('#rn-copy');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'XLIII');
+  await page.fill('#rn-num', '4000');
+  await page.fill('#rn-num', '3888888');
+  await page.setViewportSize({ width: 320, height: 800 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'the longest numeral and its buttons fit 320 px');
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.fill('#rn-num', '3999');
   assert.equal(await page.isHidden('#rn-copy-us'), true, 'no underscore form without bars');
   // The status line is written after a pause, and only when it changes.
@@ -87,7 +99,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#rn-status'), '4,500 is IV with a bar, D.');
 
   // ---- Numbers: separators the same in every language, and mistakes explained ----
-  for (const v of ['1,994', '1.994', '1 994', '1 994', "1'994", '١٬٩٩٤', '１９９４', ' 1994 ', '+1994', '01994']) {
+  for (const [v, r] of [['12,34,567', E.big['1234567']], ['1,00,000', E.big['100000']], ['39,99,999', E.big['3999999']]]) {
+    await page.fill('#rn-num', v);
+    assert.equal(await page.inputValue('#rn-rom'), r, `${v}: Indian grouping`);
+    await valid('#rn-num');
+  }
+  for (const v of ['1,994', '1.994', '1 994', '1 994', "1'994", '١٬٩٩٤', '۱۹۹۴', '१९९४', '১৯৯৪', '１９９４', ' 1994 ', '+1994', '01994']) {
     await page.fill('#rn-num', v);
     assert.equal(await page.inputValue('#rn-rom'), 'MCMXCIV', v);
     await valid('#rn-num');
@@ -98,6 +115,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     ['0,500', /^0,500 is not a number: digits before a thousands separator cannot start with 0\.$/],
     ['12.5', /^Roman numerals are whole numbers, and 12\.5 has a fraction\.$/],
     ['1,5', /^Roman numerals are whole numbers, and 1,5 has a fraction\.$/],
+    ['3.14159', /^Roman numerals are whole numbers, and 3\.14159 has a fraction\.$/],
     ['١٫٥', /has a fraction/],
     ['5²', /^“²” is not a digit\./],
     ['1994\t2027', /^This looks like more than one number\./],
@@ -141,6 +159,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.match(note, /non-standard rather than wrong/);
     await valid('#rn-rom');
   }
+  // A numeral that comes to less than 1 is refused, never shown as 0 or -1.
+  for (const [s, v] of Object.entries(E.likely_low)) {
+    await page.fill('#rn-rom', s);
+    assert.equal(await text('#rn-rom-error'), `${s} comes to ${v.toLocaleString('en-GB').replace('-', '−')} when the smaller numerals before a larger one are subtracted, and Roman numerals start at 1.`, s);
+    await describedBy('#rn-rom', 'rn-rom-error');
+    assert.equal(await page.inputValue('#rn-num'), '', s);
+    assert.equal(await text('#rn-big'), '', s);
+    assert.equal(await page.isHidden('#rn-note'), true, s);
+  }
   await page.fill('#rn-rom', 'IIII');
   assert.match(await text('#rn-note'), /Clock faces often use IIII for four\./);
   await page.fill('#rn-rom', 'IIX');
@@ -153,6 +180,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#rn-rom', `MV${BAR}`);
   assert.equal(await page.inputValue('#rn-num'), '4000');
   assert.match(await text('#rn-note'), new RegExp(`^MV${BAR} is 4,000, written I${BAR}V${BAR} here: M and I with a bar both stand for 1,000`));
+  await page.fill('#rn-rom', `V${BAR}MM`);
+  assert.equal(await page.inputValue('#rn-num'), '7000');
+  assert.match(await text('#rn-note'), new RegExp(`^V${BAR}MM is 7,000, written V${BAR}I${BAR}I${BAR} here: M and I with a bar both stand for 1,000`), 'every M is matched with a barred I');
   for (const [s, msg] of [
     ['ABC', /^“A” is not a Roman numeral\. Use I, V, X, L, C, D and M\.$/],
     ['MO', /^“O” is not a Roman numeral\. Use I, V, X, L, C, D and M \(there is no Roman numeral for zero\)\.$/],
@@ -198,6 +228,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(await page.$$eval('#rn-list-out tfoot td', ts => ts.map(t => t.textContent)), ['4,126', 'IV with a bar,CXXVI', '']);
   assert.equal(await text('#rn-list-error'), '2 lines could not be read; see the notes in the table.');
   await describedBy('#rn-list', 'rn-list-error');
+  await page.fill('#rn-list', '+5\nIIIIIV\nX');
+  await page.clock.runFor(300);
+  assert.deepEqual(await page.$$eval('#rn-list-out tbody tr', rs => rs.map(r => [...r.cells].map(c => c.textContent))), [
+    ['+5', '5', 'V', ''], ['IIIIIV', '', '', 'Not read: IIIIIV comes to 0 when the smaller numerals before a larger one are subtracted, and Roman numerals start at 1.'], ['X', '10', 'X', ''],
+  ]);
+  assert.deepEqual(await page.$$eval('#rn-list-out tfoot td', ts => ts.map(t => t.textContent)), ['15', 'XV', '']);
   // Copy brings the table up to date first, even straight after typing.
   await page.fill('#rn-list', 'XL\nII');
   await page.click('#rn-list-copy');
@@ -223,6 +259,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#rn-date', '2027-05-04');
   assert.equal(await text('#rn-date-big'), 'IV·V·MMXXVII');
   assert.equal(await text('#rn-date-note'), 'Careful: read in the US order (month first), the same numerals mean 5 April 2027.');
+  await page.fill('#rn-date', '2027-05-12');
+  assert.equal(await text('#rn-date-note'), 'Careful: read in the US order (month first), the same numerals mean 5 December 2027.', 'day 12 is also a month');
+  await page.fill('#rn-date', '2027-05-04');
   await page.click('#rn-date-copy');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'IV·V·MMXXVII');
   await page.selectOption('#rn-year', '2');
@@ -251,6 +290,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(await rdate('XIV·IV·LXXX'), ['XIV·IV·LXXX = Monday 14 April 1980. The two-digit year 80 is read as 1980.', '']);
   assert.deepEqual(await rdate('XIV·IIII·MMXXVII'), ['XIV·IIII·MMXXVII = Wednesday 14 April 2027. Non-standard: IIII (4, standard IV).', '']);
   assert.deepEqual(await rdate('XIV·IV'), ['', 'A date needs three numerals, such as XIV·IV·MMXXVII; this has 2.']);
+  assert.deepEqual(await rdate(`I·I·X${BAR}`), ['', 'The year 10,000 is past 9999, the last year a date here can have.']);
+  assert.deepEqual(await rdate('XIV·IV·IIIIIV'), ['', 'Part 3 (IIIIIV): IIIIIV comes to 0 when the smaller numerals before a larger one are subtracted, and Roman numerals start at 1.']);
   await page.fill('#rn-rdate', '');
   await valid('#rn-rdate');
 
@@ -278,7 +319,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.dblclick('#rn-svg');
   await page.waitForTimeout(300);
   assert.equal(downloads.length, 1, 'a double click saves one file');
-  assert.equal(downloads[0].suggestedFilename(), 'roman--I-VD.svg');
+  assert.equal(downloads[0].suggestedFilename(), 'roman-4500.svg');
   const svg = fs.readFileSync(await downloads[0].path(), 'utf8');
   assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="[-\d. ]+" width="[\d.]+" height="[\d.]+">\n<rect [^>]*fill="#ffffff"\/>\n<path fill="#000000" d="M[^"]+"\/>\n<rect fill="#000000" [^>]+\/>\n<\/svg>\n$/);
   assert.ok(!/<text|font-family/.test(svg), 'the SVG has outlines, not text');
@@ -290,7 +331,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.click('#rn-png');
   for (let i = 0; i < 50 && downloads.length < 2; i++) await page.waitForTimeout(100);
   assert.equal(downloads.length, 2);
-  assert.equal(downloads[1].suggestedFilename(), 'roman--I-VD.png');
+  assert.equal(downloads[1].suggestedFilename(), 'roman-4500.png');
   const png = fs.readFileSync(await downloads[1].path());
   assert.equal(png.toString('latin1', 1, 4), 'PNG');
   const [pw, ph] = [png.readUInt32BE(16), png.readUInt32BE(20)];
@@ -325,6 +366,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.goto(url + '#n=' + '1'.repeat(2000));
   assert.equal(await text('#rn-num-error'), 'The link is too long to read, so the page starts with this year.');
   assert.equal(await page.inputValue('#rn-num'), '2026');
+  // A numeral whose characters would make the address too long is kept there as its value.
+  await page.$eval('#rn-rom', el => { el.value = 'Ⅿ'.repeat(200); el.dispatchEvent(new Event('input', { bubbles: true })); });
+  assert.equal(await page.inputValue('#rn-num'), '200000');
+  assert.match(await page.evaluate(() => location.hash), /^#n=200000&/);
+  await page.reload();
+  assert.equal(await page.inputValue('#rn-num'), '200000');
 
   // ---- A phone with touch: a number keypad, large text, no sideways scroll ----
   const phone = await page.context().browser().newContext({ ...devices['Pixel 7'] });

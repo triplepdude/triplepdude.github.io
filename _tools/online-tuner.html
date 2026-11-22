@@ -697,6 +697,21 @@ faq:
   // ---------- Microphone ----------
   const mic = { stream: null, src: null, an: null, buf: null, raf: 0, starting: false, gen: 0 };
   let ctx = null;
+  // A running audio context renders silence for as long as the page is
+  // open, so it is suspended a moment after the tone and the microphone have
+  // stopped; the next start resumes it.
+  const IDLE_MS = 2000;
+  let idleTimer = 0, asleep = false;
+  function rest(after) {
+    clearTimeout(idleTimer);
+    if (!ctx) return;
+    idleTimer = setTimeout(function () {
+      if (ctx.state !== 'running') return;
+      if (ref.osc || mic.stream || mic.starting) { rest(0); return; }
+      asleep = true;
+      ctx.suspend().catch(function () {});
+    }, after * 1000 + IDLE_MS);
+  }
 
   function audioCtx() {
     if (!ctx) {
@@ -704,7 +719,11 @@ faq:
       if (!AC) throw new Error('This browser does not support the Web Audio API.');
       ctx = new AC();
     }
-    if (ctx.state === 'suspended') ctx.resume().catch(function () { /* resumed by the next gesture */ });
+    if (asleep || ctx.state !== 'running') {
+      asleep = false;
+      ctx.resume().catch(function () { /* resumed by the next gesture */ });
+    }
+    rest(0);
     return ctx;
   }
 
@@ -731,6 +750,7 @@ faq:
     render(true);
     if (!silent) statusEl.textContent = 'Tuner stopped. The microphone is released.';
     announced = '';
+    rest(0);
   }
 
   async function startMic() {
@@ -836,6 +856,7 @@ faq:
     osc.stop(t + 0.08);
     osc.onended = function () { osc.disconnect(); g.disconnect(); };
     ref.osc = null; ref.gain = null;
+    rest(0.08);
     playBtn.setAttribute('aria-pressed', 'false');
     refChanged();
   }

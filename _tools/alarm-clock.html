@@ -45,11 +45,12 @@ howto: |
   alarm is started straight from your click, and in its last minutes the sound
   is scheduled ahead on the sound card's clock, which keeps time in a
   background tab. To save memory, Chrome's Memory Saver may discard tabs you
-  are not using, though never pinned tabs or the selected tab of a window, and
-  Edge puts background tabs to sleep after two hours. So pin the alarm's tab
-  or give it its own window, or add this site under "Always keep these sites
-  active" (Chrome: Settings > Performance; Edge: Settings > System and
-  performance > Performance).
+  are not using, though never pinned tabs or the selected tab of a window.
+  Edge puts background tabs to sleep after two hours, or after 5 to 30
+  minutes when it saves energy on battery, pinned or not. So give the alarm
+  its own window, and add this site under "Always keep these sites active"
+  (Chrome: Settings > Performance; Edge: Settings > System and performance >
+  Performance).
 
   ## Does it work on a phone, or in silent mode?
 
@@ -75,16 +76,16 @@ howto: |
   [online timer](/online-timer/#30m); for work sessions with breaks, the
   [focus timer](/pomodoro-timer/).
 faq:
+  - q: How do I make sure I hear the alarm?
+    a: "Press Test sound with the volume set as it will be at night: the computer's own volume and mute count too, and the sound plays through the speakers or headphones in use, so unplug headphones before you go to sleep. Do not mute the tab. The ready check under the settings shows whether the sound is on, the screen is kept on and the charger is plugged in."
   - q: Is anything uploaded or saved?
-    a: "No. The alarms run in your browser. Their times, labels and settings are kept only in the page address after the # sign, which browsers never send to a server, so a reload keeps them; nothing goes into cookies or browser storage. A sound file you choose stays in the page's memory and is gone when the page closes."
+    a: "No. The alarms run in your browser. Their times, labels and settings are kept only in the page address after the # sign, which browsers never send to a server, so a reload keeps them; nothing goes into cookies or browser storage. Once loaded, the page needs no connection, so Wi-Fi that drops overnight does not stop it. A sound file you choose stays in the page's memory and is gone when the page closes."
   - q: What happens if I close the tab by mistake?
-    a: A closed page cannot ring. Reopen it from your history, or with Ctrl+Shift+T (Cmd+Shift+T on a Mac), and the alarms come back from the page address, still set; one whose time passed while the tab was closed shows that it was missed.
-  - q: Does the alarm clock work offline?
-    a: Yes, once the page has loaded. It makes no requests while it runs, as the clock, the alarms and the sounds are all made in your browser, so a Wi-Fi connection that drops overnight does not stop it.
+    a: A closed page cannot ring. Reopen it with Ctrl+Shift+T (Cmd+Shift+T on a Mac) and the alarms come back from the page address, still set; one whose time passed while the tab was closed shows that it was missed. A bookmark of the page sets its alarms again for their next time.
   - q: Why is snooze 9 minutes?
-    a: Nobody knows for sure. The popular story that the gears of 1950s clocks could not count to ten is not true, and early snooze clocks used other lengths, such as the five or ten minutes of the 1959 Westclox Drowse. Nine minutes probably spread from General Electric's popular clocks in the US; the iPhone uses it too unless you change it, which iOS 26 allows.
+    a: Nobody knows for sure. The popular story that the gears of 1950s clocks could not count to ten is not true, and early snooze clocks used other lengths, such as the five or ten minutes of the 1959 Westclox Drowse. Nine minutes probably spread from General Electric's popular digital clock radios of the 1980s; the iPhone uses it too unless you change it, which iOS 26 allows.
   - q: Is snoozing bad for you?
-    a: Not necessarily. In a 2023 study of 31 people who snooze every morning, 30 minutes of snoozing cost them about 6 minutes of sleep and did not harm their thinking, mood or sleepiness after waking (Sundelin and colleagues, Journal of Sleep Research). If you snooze because you are tired, more sleep helps more; the CDC advises adults up to 60 to sleep 7 or more hours a night, and the NHS around 7 to 9.
+    a: Not necessarily. In a 2023 study of 31 people who usually snooze, 30 minutes of snoozing cost them about 6 minutes of sleep and did not harm their thinking, mood or sleepiness after waking (Sundelin and colleagues, Journal of Sleep Research). If you snooze because you are tired, more sleep helps more; the CDC advises adults up to 60 to sleep 7 or more hours a night, and the NHS around 7 to 9.
 ---
 <style>
 .ac-face { margin: 0 0 12px; padding: 14px 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); text-align: center; }
@@ -389,14 +390,15 @@ faq:
   // ---------- When an alarm rings ----------
   // The next moment after `now` at which the clock shows h:m. A time the
   // clocks skip when they go forward rings when the browser places it, an
-  // hour later (02:30 becomes 03:30), unless the jump has passed; a time
-  // that comes twice when they go back rings at the next of the two.
-  function nextRing(h, m, now) {
+  // hour later (02:30 becomes 03:30), unless the jump had passed when the
+  // alarm was set; `keep`, the moment it was set for, stays after the jump.
+  // A time that comes twice when they go back rings at the next of the two.
+  function nextRing(h, m, now, keep) {
     var d = new Date(now), wall = d.getHours() * 60 + d.getMinutes();
     for (var k = 0; k < 3; k++) {
       var t = new Date(d.getFullYear(), d.getMonth(), d.getDate() + k, h, m, 0, 0), ms = t.getTime();
       if (t.getHours() !== h || t.getMinutes() !== m) {
-        if ((k > 0 || wall < h * 60 + m) && ms > now) return { at: ms, gap: true };
+        if ((k > 0 || wall < h * 60 + m || ms === keep) && ms > now) return { at: ms, gap: true };
         continue;
       }
       var times = [ms];
@@ -415,8 +417,13 @@ faq:
   // !s<when> snoozed until, !r<since> ringing, !m<when> missed, !o off
   // (times as Date.now() values), then ~<label>. Settings follow as
   // sound=, vol=, fade=, snooze= and clock= when they are not the default.
+  // `own`: the page wrote this history entry (a reload, Back, a restored or
+  // reopened tab), so an alarm whose time passed meanwhile shows as missed.
+  // A bookmark or a link has no such mark: its alarms are set again for
+  // their next time, unless one is ringing right now.
   var SOUND_KEYS = ['bell', 'beeps', 'chime', 'clock', 'soft'];
-  function readHash(raw) {
+  function ownEntry() { return !!(history.state && history.state.acAlarms); }
+  function readHash(raw, own) {
     var h = raw.charAt(0) === '#' ? raw.slice(1) : raw;
     var out = { items: [], settings: {}, error: '' };
     if (!h) return out;
@@ -447,16 +454,16 @@ faq:
       if (kind === 'o') item.state = 'off';
       else if (kind && v2 > now + 26 * 3600000) { bad.push(head); return; }
       else if (kind === 'a' || kind === 's') {
-        if (v2 > now) { if (kind === 's') { item.state = 'snoozed'; item.at = v2; } }
+        if (v2 > now) { if (kind === 's') { item.state = 'snoozed'; item.at = v2; } else item.keep = v2; }
         else if (now - v2 <= LATE) { item.state = 'ringing'; item.since = v2; }
-        else if (now - v2 <= STALE) { item.state = 'off'; item.note = { kind: 'missed', at: v2 }; }
+        else if (own && now - v2 <= STALE) { item.state = 'off'; item.note = { kind: 'missed', at: v2 }; }
       } else if (kind === 'r') {
         if (v2 > now + LATE) { bad.push(head); return; }
-        if (now - v2 < RING_MAX) { item.state = 'ringing'; item.since = Math.min(v2, now); }
-        else if (now - v2 <= STALE) { item.state = 'off'; item.note = { kind: 'rang', at: v2 }; }
+        if (now - v2 < (own ? RING_MAX : LATE)) { item.state = 'ringing'; item.since = Math.min(v2, now); }
+        else if (own && now - v2 <= STALE) { item.state = 'off'; item.note = { kind: 'rang', at: v2 }; }
       } else if (kind === 'm') {
         if (v2 > now) { bad.push(head); return; }
-        if (now - v2 <= STALE) { item.state = 'off'; item.note = { kind: 'missed', at: v2 }; }
+        if (own && now - v2 <= STALE) { item.state = 'off'; item.note = { kind: 'missed', at: v2 }; }
       }
       out.items.push(item);
     });
@@ -706,14 +713,14 @@ faq:
     a.typedLabel = a.label;
     renderTime(a);
     var now = Date.now();
-    if (item.state === 'on') setAt(a, now);
+    if (item.state === 'on') setAt(a, now, item.keep);
     else if (item.state === 'snoozed') { a.state = 'snoozed'; a.at = item.at; }
     else if (item.state === 'ringing') { a.state = 'ringing'; a.since = item.since; }
     wire(a);
     return a;
   }
-  function setAt(a, now) {
-    var r = nextRing(a.h, a.m, now);
+  function setAt(a, now, keep) {
+    var r = nextRing(a.h, a.m, now, keep);
     a.state = 'on';
     a.at = r.at;
     a.gap = !!r.gap;
@@ -731,12 +738,23 @@ faq:
     if (text) { c.time.setAttribute('aria-invalid', 'true'); c.time.setAttribute('aria-describedby', c.err.id); }
     else { c.time.removeAttribute('aria-invalid'); c.time.removeAttribute('aria-describedby'); }
   }
+  // True for the start of a time still being typed, such as 7: or 7:3 on
+  // the way to 7:30, or 73 on the way to 730.
+  function unfinished(raw) {
+    if (raw.length > 20) return false;
+    var s = raw.trim();
+    if (!s) return false;
+    var w = s.toLowerCase();
+    if (['noon', 'midday', 'midnight'].some(function (x) { return x.indexOf(w) === 0; })) return true;
+    return ['0', '00', ':00', 'm', 'm.'].some(function (x) { return !readTime(s + x).error; });
+  }
   // Reads the time box: true when it holds a time (now the alarm's), false
-  // with the problem shown. An empty box is only wrong when setting.
+  // with the problem shown. An empty box, or the start of a time, is only
+  // wrong when setting: while typing 7:30 nothing flashes at 7: and 7:3.
   function readBox(a, setting) {
-    var r = readTime(a.el.time.value);
+    var raw = a.el.time.value, r = readTime(raw);
     if (r.error) {
-      setError(a, r.empty && !setting ? '' : r.error);
+      setError(a, setting || !(r.empty || unfinished(raw)) ? r.error : '');
       return false;
     }
     setError(a, '');
@@ -929,6 +947,10 @@ faq:
     }, Math.max(0, at - Date.now()) + 1);
   }
 
+  // The ring scheduled ahead for this alarm has started on the audio clock,
+  // which stops while a computer sleeps: so it is ringing, however late a
+  // background tab that the browser held back gets to this check.
+  function sounding(a) { return !!pre && !pre.cancelled && pre.for === a.at && audio.ready() && pre.at <= audio.now(); }
   var lastShift = 0;
   function tick() {
     var now = Date.now(), began = [], missed = [], long = [], changed = false;
@@ -936,11 +958,11 @@ faq:
       // Recomputed from the local time at every check, so a change of time
       // zone moves the alarm to the new 7:00.
       if (a.state === 'on' && a.at > now) {
-        var r = nextRing(a.h, a.m, now);
-        if (r.at !== a.at) { setAt(a, now); changed = true; }
+        var r = nextRing(a.h, a.m, now, a.at);
+        if (r.at !== a.at) { setAt(a, now, a.at); changed = true; }
       }
       if ((a.state === 'on' || a.state === 'snoozed') && a.at <= now) {
-        if (now - a.at <= LATE) { a.state = 'ringing'; a.since = a.at; a.note = null; began.push(a); }
+        if (now - a.at <= LATE || sounding(a)) { a.state = 'ringing'; a.since = a.at; a.note = null; began.push(a); }
         else { a.note = { kind: 'missed', at: a.at }; a.state = 'off'; missed.push(a); }
         changed = true;
       } else if (a.state === 'ringing' && now - a.since >= RING_MAX) {
@@ -1073,7 +1095,7 @@ faq:
       if (e.key !== 'Enter' || e.isComposing) return;
       e.preventDefault();
       if (a.state === 'off') turnOn(a);
-      else onTimeDone(a);
+      else if (readBox(a, true)) onTimeDone(a);
     });
     c.label.addEventListener('input', function () { onLabel(a); });
     c.go.addEventListener('click', function (e) {
@@ -1090,11 +1112,16 @@ faq:
     sync(a);
     paint(Date.now());
   }
-  // Leaving the box writes the time out in full. An empty box is not
-  // flagged here: a message appearing as the box loses the focus would move
-  // the Set alarm button away from a click that has already begun.
+  // Leaving the box writes the time out in full. An empty box, or the start
+  // of a time, is not flagged here: a message appearing as the box loses the
+  // focus would move the buttons away from a click that has already begun.
+  // A set alarm keeps its time then, and its box shows that time again.
   function onTimeDone(a) {
-    if (!readBox(a, false)) return;
+    var raw = a.el.time.value;
+    if (!readBox(a, false)) {
+      if (a.state !== 'off' && (!raw.trim() || unfinished(raw))) renderTime(a);
+      return;
+    }
     renderTime(a);
     sync(a);
     if (a.state === 'on') {
@@ -1544,7 +1571,7 @@ faq:
     // Back or Forward to an address this page wrote while alarms are set:
     // the alarms on screen are newer, so the address is brought up to date.
     if (anySet && history.state && history.state.acAlarms) { showMsg(''); writeHash(); return; }
-    var r = readHash(location.hash);
+    var r = readHash(location.hash, ownEntry());
     hashError(r.error);
     keepAddress = !!r.error;
     applySettings(r.settings, false);
@@ -1564,7 +1591,7 @@ faq:
     armTimer(true);
   });
 
-  var first = readHash(location.hash);
+  var first = readHash(location.hash, ownEntry());
   hashError(first.error);
   keepAddress = !!first.error;
   applySettings(first.settings, true);

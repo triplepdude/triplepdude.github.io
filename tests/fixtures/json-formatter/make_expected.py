@@ -15,6 +15,10 @@
    stand for according to ast.literal_eval; the page's Fix must arrive at the same value.
 5. big.json: a 150 KB document for the background-thread path, with the SHA-256 of its
    formatted and minified forms.
+6. "numbers": numbers and whether the double nearest to each, which is what JSON.parse reads
+   (Python's float reads the same), keeps it: every digit of a whole number, and the significant
+   digits any other number is written with, worked out with Python's decimal module. The page
+   notes the first number that is not kept.
 """
 import ast
 import hashlib
@@ -22,6 +26,7 @@ import json
 import os
 import random
 import re
+from decimal import Context, Decimal, ROUND_HALF_UP
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -127,6 +132,32 @@ def verdict(text):
         return {'valid': False, 'why': str(e)}
 
 
+NUMBERS = [
+    '9007199254740991', '-9007199254740991', '9007199254740992', '9007199254740993', '12345678901234567890',
+    '100000000000000000000000000000', '1e308', '1e309', '-1E400', '0.1', '0.30000000000000004',
+    '0.10000000000000001', '0.1000000000000000055511151231257827', '1.2345000000000001e-05',
+    '1.7976931348623157e308', '2.2250738585072014e-308', '4.9e-324', '4.5e-324', '1e-310', '5e-400', '2e-324',
+    '-1e-400', '-0.0', '0e5', '1.000000000000000000000', '6.02214076e23', '123456789012345678.5',
+    '1234567890123456.7', '9007199254740993.0', '1.00000000000000000001', '3.14159265358979323846',
+    '12345678901234567890e0',
+]
+
+
+def kept(text):
+    """Whether the double nearest to a JSON number keeps it: every digit of a whole number, and the
+    significant digits of any other, or the shortest digits that give the double back."""
+    value = float(text)
+    if value in (float('inf'), float('-inf')):
+        return False
+    if re.fullmatch(r'-?\d+', text):
+        return int(text) == int(value)
+    digits = re.sub(r'[eE].*', '', text).lstrip('-').replace('.', '').strip('0')
+    if not digits:
+        return True
+    rounded = Context(prec=len(digits), rounding=ROUND_HALF_UP).plus(Decimal(value))
+    return rounded == Decimal(text) or Decimal(repr(value)) == Decimal(text)
+
+
 PYTHON = [
     "{'name': 'Ada', 'tags': ['a', 'b',], 'ok': True, 'off': False, 'none': None,}",
     "[{'its': \"mixed\"}, 'xy', -1.5e3, 0x1F, {'k': [None, True]},]",
@@ -169,6 +200,7 @@ def main():
         'python': [{'input': t, 'value': ast.literal_eval(t)} for t in PYTHON],
         'big': {'chars': len(big_text), 'bytes': len(big_text.encode('utf-8')), 'indent2': {'sha256': sha(dumps(big, 2)), 'bytes': len(dumps(big, 2).encode('utf-8'))},
                 'min': {'sha256': sha(big_text)}, 'sorted4': {'sha256': sha(dumps(big, 4, True))}},
+        'numbers': [{'text': t, 'kept': kept(t)} for t in NUMBERS],
     }
     assert all(not c['valid'] for c in out['invalid']), [c['input'] for c in out['invalid'] if c['valid']]
     with open(os.path.join(HERE, 'expected.json'), 'w', encoding='utf-8') as f:

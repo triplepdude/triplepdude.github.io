@@ -132,5 +132,35 @@ E['overlap_awake'] = overlap(zs, 'America/New_York', 2026, 11, 24, 7 * 60, 22 * 
 # AoE: 23:59 on 15 May 2027 at UTC-12.
 E['aoe'] = datetime(2027, 5, 15, 23, 59, tzinfo=timezone(timedelta(hours=-12))).astimezone(UTC).strftime('%Y-%m-%d %H:%M')
 
+# Typed questions: zones named in words, dates after the places, "in X to Y", GMT in summer.
+def at(zone, y, mo, d, h, mi, zones):
+    u = wall(zone, y, mo, d, h, mi)[0]
+    return {z: local(u, z) for z in zones}
+E['ask'] = {
+    'pacific_london': at('America/Los_Angeles', 2026, 11, 24, 10, 0, ['America/Los_Angeles', 'Europe/London']),
+    'alaska_hawaii': at('America/Anchorage', 2026, 11, 24, 9, 0, ['America/Anchorage', 'Pacific/Honolulu']),
+    'est_tomorrow': at('America/New_York', 2026, 11, 25, 15, 0, ['America/New_York', 'Asia/Kolkata']),
+    'sydney_april': at('Australia/Sydney', 2027, 4, 1, 10, 0, ['Australia/Sydney', 'Europe/London']),
+    'paris_sydney': at('Europe/Paris', 2026, 11, 24, 18, 0, ['Europe/Paris', 'Australia/Sydney']),
+    'gmt_summer': {z: local(datetime(2027, 7, 14, 15, 0, tzinfo=UTC), z) for z in ['America/New_York', 'Europe/London']},
+}
+
+# A weekly meeting typed as 02:30 New York time from 14 March 2027, a time skipped that day: the
+# first is shown at the moment 02:30 would have been (03:30 EDT), the later ones at 02:30.
+weeks = []
+first = datetime(2027, 3, 14, 7, 30, tzinfo=UTC)  # 02:30 at EST, the offset before the change
+weeks.append(first)
+for k in range(1, 4):
+    d = datetime(2027, 3, 14) + timedelta(days=7 * k)
+    weeks.append(wall('America/New_York', d.year, d.month, d.day, 2, 30)[0])
+E['skipped_weekly'] = [{'utc': u.strftime('%Y%m%dT%H%M%SZ'), 'ny': local(u, 'America/New_York')['time'], 'london': local(u, 'Europe/London')['time']} for u in weeks]
+
+# Abbreviations before the 2026 changes, and the changed zones after 2040 (past the dated table).
+E['abbr_before'] = {i.strftime('%Y-%m-%dT%H:%M'): {z: local(i, z) for z in ['America/Vancouver', 'America/Edmonton', 'America/Inuvik', 'America/Winnipeg']}
+                    for i in [datetime(2026, 1, 15, 12, 0, tzinfo=UTC), datetime(2026, 7, 1, 12, 0, tzinfo=UTC)]}
+E['after_2040'] = {i.strftime('%Y-%m-%dT%H:%M'): {z: local(i, z) for z in ['America/Vancouver', 'America/Edmonton', 'America/Winnipeg', 'Africa/Casablanca', 'Africa/El_Aaiun', 'Europe/Chisinau']}
+                   for i in [datetime(2041, 7, 1, 12, 0, tzinfo=UTC), datetime(2045, 1, 15, 12, 0, tzinfo=UTC),
+                             datetime(2041, 3, 31, 0, 30, tzinfo=UTC), datetime(2099, 10, 25, 0, 30, tzinfo=UTC)]}
+
 json.dump(E, sys.stdout, indent=1, sort_keys=True, default=str)
 print()

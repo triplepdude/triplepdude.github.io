@@ -12,7 +12,8 @@ howto: |
   numeral is built: 1994 = M + CM + XC + IV = 1000 + 900 + 90 + 4. Commas,
   dots, spaces and apostrophes between groups of three digits are read as
   thousands separators whatever your language, so 1,994, 1.994 and 1 994 are
-  all 1994; Roman numerals have no fractions.
+  all 1994, and Indian grouping such as 12,34,567 works too; Roman numerals
+  have no fractions.
 
   | I | V | X | L | C | D | M |
   |---|---|---|---|---|---|---|
@@ -139,7 +140,7 @@ faq:
     <div class="rn-note" id="rn-note" hidden></div>
     <div class="actions">
       <button class="btn" type="button" id="rn-copy">Copy</button>
-      <button class="btn secondary" type="button" id="rn-copy-us" hidden>Copy as _V</button>
+      <button class="btn secondary" type="button" id="rn-copy-us" hidden>Copy with underscores</button>
       <button class="btn secondary" type="button" id="rn-copy-num">Copy number</button>
     </div>
   </div>
@@ -354,6 +355,7 @@ MMXXVII − MCMXCIV</textarea>
     var v = 0;
     runs.forEach(function (r, k) { var next = runs[k + 1]; v += (next && next.v > r.v ? -1 : 1) * r.v * r.n; });
     if (v > MAX) return { error: 'That is ' + fmt(v) + '. With single bars, Roman numerals go up to 3,999,999.', big: true };
+    if (v < 1) return { error: withBars(t) + ' comes to ' + fmt(v).replace('-', '\u2212') + ' when the smaller numerals before a larger one are subtracted, and Roman numerals start at 1.' };
     return { t: t, v: v, old: old };
   }
   // The rules a non-standard numeral breaks, with the part of it that breaks each.
@@ -395,8 +397,9 @@ MMXXVII − MCMXCIV</textarea>
     });
   }
   // A number as typed -> { v } or { error } or { zero } or { empty }. Separators between groups of
-  // three digits are thousands separators in every language (1,994 = 1.994 = 1 994); a group may
-  // not start with 0 (0,500), and a decimal mark followed by other digits is a fraction.
+  // three digits are thousands separators in every language (1,994 = 1.994 = 1 994), as are the
+  // commas of Indian grouping (12,34,567); a group may not start with 0 (0,500), and a decimal mark
+  // followed by other digits is a fraction.
   function parseNumber(raw) {
     var s = String(raw);
     if (s.length > MAX_NUM) return { error: 'This is ' + fmt(s.length) + ' characters long. Type a whole number from 1 to 3,999,999.' };
@@ -406,7 +409,7 @@ MMXXVII − MCMXCIV</textarea>
     s = s.replace(/^\+/, '');
     var digits;
     if (/^\d+$/.test(s)) digits = s;
-    else if (/^\d{1,3}([,.'’ \u00a0\u202f٬])\d{3}(?:\1\d{3})*$/.test(s)) {
+    else if (/^\d{1,3}([,.'’ \u00a0\u202f٬])\d{3}(?:\1\d{3})*$/.test(s) || /^\d{1,2}(?:,\d{2})+,\d{3}$/.test(s)) { // or Indian grouping, 12,34,567
       if (s[0] === '0') return { error: s + ' is not a number: digits before a thousands separator cannot start with 0.' };
       digits = s.replace(/\D/g, '');
     } else if (/^\d*[.,٫]\d+$/.test(s)) return { error: 'Roman numerals are whole numbers, and ' + s + ' has a fraction.' };
@@ -458,8 +461,7 @@ MMXXVII − MCMXCIV</textarea>
     }
     if (parsed && parsed.old) notes.push('CIↃ (1,000) and IↃ (500) are the old apostrophus forms of M and D, and ↀ, ↁ and ↂ stand for 1,000, 5,000 and 10,000.');
     setNote(noteEl, notes);
-    copyUs.hidden = !hasBars(std);
-    copyUs.textContent = 'Copy as ' + underscored(std);
+    copyUs.hidden = !hasBars(std); // labelled in words: a label holding the numeral itself could be wider than a phone
     announce(fmt(v) + ' is ' + spoken(std) + (notes.length && typedToks && !sameExceptM(typedToks, std) ? '. ' + withBars(typedToks) + ' is non-standard.' : '.'));
   }
   // For screen readers: barred runs are named, as in "IV with a bar, D".
@@ -625,6 +627,7 @@ MMXXVII − MCMXCIV</textarea>
       yNote = ' The two-digit year ' + y + ' is read as ' + full + '.';
       y = full;
     }
+    if (y > 9999) { setError(rdErr, rdIn, 'The year ' + fmt(y) + ' is past 9999, the last year a date here can have.'); return; }
     if (m < 1 || m > 12) {
       var swap = (o === 'dmy' || o === 'mdy') && d >= 1 && d <= 12 && m <= daysInMonth(y, d);
       setError(rdErr, rdIn, 'There is no month ' + m + '.' + (swap ? ' Read in the ' + (o === 'dmy' ? 'US' : 'UK') + ' order it is ' + words(y, d, m) + '; change Order above.' : ''));
@@ -736,7 +739,11 @@ MMXXVII − MCMXCIV</textarea>
   }
   TT.$$('input[name="rn-src"]').forEach(function (r) { r.addEventListener('change', function () { started = true; drawPreview(); writeHash(); }); });
   inkSel.addEventListener('change', function () { started = true; drawPreview(); writeHash(); });
-  function fileBase(t) { return 'roman-' + (t.some(function (x) { return x.sep != null; }) ? (dcur ? isoOf(dcur) : 'date') : underscored(t).replace(/_/g, '-')).slice(0, 60); }
+  // roman-MCMXCIV, roman-4500 (bars cannot be written in a file name) or roman-2027-04-14.
+  function fileBase(t) {
+    if (t.some(function (x) { return x.sep != null; })) return 'roman-' + (dcur ? isoOf(dcur) : 'date');
+    return 'roman-' + (hasBars(t) ? String(parseRoman(withBars(t)).v) : key(t));
+  }
   var lastSave = Object.create(null);
   function save(kind) {
     if (Date.now() - (lastSave[kind] || 0) < 1000) return; // a double click saves one file
@@ -766,7 +773,7 @@ MMXXVII − MCMXCIV</textarea>
     return { v: r.v, odd: key(r.t) !== key(toRoman(r.v)) && !sameExceptM(r.t, toRoman(r.v)) ? withBars(r.t) + ' read as ' + fmt(r.v) : '' };
   }
   function evalLine(line) {
-    var parts = line.trim().split(/\s*([+\-−–×*÷\/])\s*/);
+    var parts = line.trim().replace(/^\+\s*/, '').split(/\s*([+\-−–×*÷\/])\s*/);
     if (parts[0] === '') return { error: 'a line cannot start with a sign; Roman numerals have no negative numbers' };
     var vals = [], ops = [], notes = [];
     for (var i = 0; i < parts.length; i += 2) {
@@ -845,10 +852,12 @@ MMXXVII − MCMXCIV</textarea>
 
   // ---------- Address ----------
   var lastHash = null;
-  function hashNow() {
+  function hashNow(asValue) {
     var parts = [];
-    // What was typed, unless it is longer than a box takes (then it is an error, and not kept).
-    if (cur.from === 'r') { if (romIn.value && romIn.value.length <= MAX_ROMAN) parts.push('r=' + encodeURIComponent(romIn.value)); }
+    // What was typed, unless it is longer than a box takes (then it is an error, and not kept). A
+    // numeral whose characters make the address too long is kept as its value instead.
+    if (cur.from === 'r' && asValue) { if (cur.v) parts.push('n=' + cur.v); }
+    else if (cur.from === 'r') { if (romIn.value && romIn.value.length <= MAX_ROMAN) parts.push('r=' + encodeURIComponent(romIn.value)); }
     else if (numIn.value && numIn.value.length <= MAX_NUM) parts.push('n=' + encodeURIComponent(numIn.value));
     if (dateIn.value) parts.push('d=' + dateIn.value);
     parts.push('o=' + orderSel.value, 's=' + sepSel.value, 'y=' + yearSel.value);
@@ -862,6 +871,7 @@ MMXXVII − MCMXCIV</textarea>
   function writeHash() {
     if (!userChanged) return;
     var h = hashNow();
+    if (h.length > MAX_HASH) h = hashNow(true);
     if (h.length > MAX_HASH || h === lastHash) return;
     lastHash = h;
     try { history.replaceState(null, '', location.pathname + location.search + '#' + h); } catch (e) { /* a sandboxed page */ }

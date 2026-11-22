@@ -14,8 +14,8 @@ howto: |
   a minute.
 
   The presets set focus and short breaks to 25 and 5, 50 and 10 or 52 and 17
-  minutes, and you can type any whole number of minutes up to 240. Sessions
-  start only when you press Start, as the technique asks; tick **Start breaks
+  minutes, or type any whole number of minutes up to 240. Sessions start
+  only when you press Start, as the technique asks; tick **Start breaks
   automatically** or **Start focus sessions automatically** if you prefer.
 
   | Key | What it does |
@@ -28,7 +28,7 @@ howto: |
 
   The tab title shows the time left. **Mini timer** opens a small window that
   stays on top (Chrome and Edge 116 or later, Firefox 151 or later, on a
-  computer). Copy or download the session log before you close the page.
+  computer). Copy or download the log before you close the page.
 
   ## What is the Pomodoro Technique?
 
@@ -67,13 +67,16 @@ howto: |
   In another tab, yes: each end sound, and the next session's when that starts
   by itself, is scheduled ahead on the sound card's clock, which keeps time
   while the browser slows down background tabs. With ticking on, the tab plays
-  sound, so Chrome neither slows nor discards it. On a phone keep the page in
-  front: Safari on an iPhone pauses it when the screen locks or you switch
+  sound, so Chrome neither slows nor discards it. Edge on battery may put a
+  quiet background tab to sleep after 5 minutes: add this site under
+  "Always keep these sites active" in its Performance settings. On a phone
+  keep the page in front: Safari on an iPhone pauses it when the screen locks or you switch
   apps, and Chrome on Android freezes a hidden tab after 5 minutes. The timer
   cannot block websites, ring from a closed tab or keep your history.
 
   For one countdown use the [online timer](/online-timer/), to time a task the
-  [stopwatch](/stopwatch/), and to wake up the [alarm clock](/alarm-clock/).
+  [stopwatch](/stopwatch/), to wake up the [alarm clock](/alarm-clock/), and
+  for background sound the [noise generator](/noise-generator/).
 faq:
   - q: Is anything uploaded or saved?
     a: "No, and there is no account. The timer runs in your browser. Its lengths, settings and the session in progress are kept only in the page address after the # sign, which browsers never send to a server, so a reload keeps them. The session log stays in the page's memory and is gone when you close or reload the page; nothing goes into cookies or browser storage."
@@ -130,6 +133,16 @@ faq:
 .pt-card.is-full .pt-time.is-long { font-size: min(18vw, 32vh); }
 .pt-card.is-full .pt-meta { font-size: min(5vw, 4.5vh, 1.6rem); }
 :root.pt-noscroll, :root.pt-noscroll body { overflow: hidden; }
+/* On a short screen, such as a phone on its side, the buttons come straight
+   after the time in full screen, so they show without scrolling. */
+@media (max-height: 560px) {
+  .pt-card.is-full { padding-top: 12px; padding-bottom: 12px; }
+  .pt-card.is-full .pt-time { font-size: min(22vw, 30vh); }
+  .pt-card.is-full .pt-time.is-long { font-size: min(16vw, 26vh); }
+  .pt-card.is-full .pt-actions { order: 1; }
+  .pt-card.is-full .pt-last, .pt-card.is-full .pt-set, .pt-card.is-full .pt-task { order: 2; }
+  .pt-card.is-full .pt-last { margin-top: 12px; }
+}
 @media (max-width: 480px) {
   .pt-actions .btn { flex: 1 1 40%; min-width: auto; padding: 0 8px; }
   .pt-modes .btn { flex: 1 1 auto; min-width: auto; padding: 0 6px; white-space: nowrap; }
@@ -703,11 +716,15 @@ faq:
     if (phase === 'focus') st.done = Math.min(st.done + 1, cfg.every);
     else if (phase === 'long') st.done = 0;
     var next = nextPhase(phase, st.done);
-    // The sound scheduled ahead for this end, if it has started.
+    // The sound scheduled ahead for this end, if it has started. Started on
+    // the audio clock, which stops while a computer sleeps, it rang on time,
+    // however late a background tab the browser held back gets here.
     var mine = pre.filter(function (p) { return p.kind === 'ring' && p.at === endAt; })[0];
     if (mine) pre.splice(pre.indexOf(mine), 1);
-    var ring = late <= RING_LATE && audio.ready(), h = null;
-    if (mine && ring && !mine.h.cancelled && mine.h.at <= audio.now() + 0.5) h = mine.h;
+    var begun = !!mine && !mine.h.cancelled && audio.ready() && mine.h.at <= audio.now() + 0.5;
+    var missed = late > RING_LATE && !begun;
+    var ring = !missed && audio.ready(), h = null;
+    if (mine && ring && begun) h = mine.h;
     else {
       if (mine) audio.cancel(mine.h);
       if (ring) h = audio.ring(endSound(phase), audio.now() + 0.02, ringSeconds());
@@ -720,7 +737,7 @@ faq:
       // computer sleeps, which would leave a short ring sounding after it.
       h.wallEnd = ringSeconds() === Infinity ? 0 : (h === (mine && mine.h) ? wallAt(endAt) : Date.now()) + ringSeconds() * 1000;
     }
-    st.last = { phase: phase, n: n, at: wallAt(endAt), late: late > RING_LATE };
+    st.last = { phase: phase, n: n, at: wallAt(endAt), late: missed };
     st.phase = next;
     st.total = lenOf(next);
     st.left = 0;
@@ -731,7 +748,7 @@ faq:
       st.runFrom = endAt;
       st.end = endAt + st.total;
     } else st.state = 'ready';
-    return { phase: phase, n: n, next: next, late: late };
+    return { phase: phase, n: n, next: next, late: late, missed: missed };
   }
   var raf = 0, ticker = 0, lastSync = 0;
   function tick() {
@@ -743,7 +760,7 @@ faq:
     if (ended.length) {
       var e = ended[ended.length - 1], what = nameOf(e.phase, e.n);
       var text = (e.phase === 'focus' ? what + ' done. ' : what + ' over. ') + (st.state === 'running' ? NAMES[st.phase] + ' started.' : 'Next: ' + nameOf(st.phase, sessionNo()).toLowerCase() + '.');
-      if (e.late > RING_LATE) say(what + ' ended at ' + fmtTime(st.last.at) + ', while the page was paused or asleep.');
+      if (e.missed) say(what + ' ended at ' + fmtTime(st.last.at) + ', while the page was paused or asleep.');
       else { shout(text); notify(e, text); }
       arm();
       commit();
@@ -894,6 +911,8 @@ faq:
   // session that never started leaves no note (choosing another tab).
   function leave(result, to, quiet) {
     var n = sessionNo(), phase = st.phase, started = st.state !== 'ready';
+    // Moving on means the alarm was heard: it stops.
+    if (st.ringing) { audio.cancel(ringH); ringH = null; st.ringing = false; shout(''); }
     if (started) addLog(phase, n, result, st.started, Date.now(), ranSoFar());
     clearTimeout(timeout);
     clearPre();

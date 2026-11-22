@@ -9,12 +9,11 @@ howto: |
   Choose whether you want to wake up at a set time, go to bed at a set time or
   go to sleep now, and type the time: *6:30*, *630a*, *18:30* and *noon* all
   work. On a 12-hour clock a bedtime without AM or PM, such as *11*, is read
-  as night, and the line under the box shows how the time was read. The times
-  update as you type and are rounded to the nearest 5 minutes.
+  as night, and the line under the box shows the reading. Times are rounded
+  to the nearest 5 minutes.
 
-  Each option counts back (or forward) whole sleep cycles plus the minutes you
-  take to fall asleep. To wake up at 6:30 AM with 90-minute cycles and 15
-  minutes to fall asleep:
+  Each option adds whole sleep cycles to the minutes you take to fall asleep.
+  To wake up at 6:30 AM with 90-minute cycles and 15 minutes to fall asleep:
 
   | Cycles | Sleep | In bed | Asleep |
   |---|---|---|---|
@@ -24,8 +23,9 @@ howto: |
   | 3 | 4 hours 30 minutes | 1:45 AM | 2:00 AM |
 
   The times are for the coming night on your device's clock, so on the night
-  the clocks change they still give the full sleep shown. To count how long
-  you actually slept, use the [hours calculator](/hours-calculator/).
+  the clocks change they still give the full sleep shown, and a time in the
+  hour that comes twice names its zone (1:30 AM EDT or EST). To count how
+  long you actually slept, use the [hours calculator](/hours-calculator/).
 
   ## How much sleep do I need?
 
@@ -46,8 +46,8 @@ howto: |
   | 65 and older | 7 to 8 |
 
   Options with less sleep than your age group's minimum are marked. The box
-  above them gives the bedtime or wake-up window from the hours alone, which
-  is how the AASM's own bedtime calculator works. Under 6 the page plans by
+  above them gives the bedtime or wake-up window from the hours alone, as the
+  AASM's own bedtime calculator does. Under 6 the page plans by
   hours only, because naps count towards the total and a baby's cycle is
   about 50 minutes at 3 months.
 
@@ -73,11 +73,12 @@ howto: |
   A web page cannot tell which stage of sleep you are in, wake you in light
   sleep or reliably ring on a locked phone, so set the time in your phone's
   alarm: on Android in the Clock app's Bedtime tab, on an iPhone as a sleep
-  schedule in the Health app (its wake-up alarm can be changed in Clock). For
+  schedule in the Health app. For
   a short nap, the [online timer](/online-timer/) rings in an open tab. The
   NHS advises seeing a GP if changing your sleep habits has not helped, you
-  have had trouble sleeping for months, you always feel very tired during the
-  day, or your breathing stops and starts while you sleep.
+  have slept badly for months, or you have signs of sleep apnoea, such as
+  breathing that stops and starts in your sleep, gasping or choking noises,
+  or always feeling very tired during the day.
 faq:
   - q: Is 7.5 hours of sleep better than 8?
     a: Not for any reason a calculator can know. Cycles vary from about 70 to 120 minutes, so 7.5 hours is not reliably five whole cycles, and 8 hours gives you half an hour more sleep. If you wake up rested after 8 hours, keep the 8.
@@ -281,15 +282,38 @@ faq:
   function h12() { return clockSel.value !== '24'; }
   // min: minutes after midnight. Midnight and noon are named, as 12:00 AM and
   // 12:00 PM are easily mixed up.
-  function fmtMin(min, plain) {
+  function fmtMin(min, plain, zone) {
     var h = Math.floor(min / 60), m = min % 60;
     var t = h12() ? ((h % 12) || 12) + ':' + pad2(m) + (h < 12 ? ' AM' : ' PM') : pad2(h) + ':' + pad2(m);
+    if (zone) t += ' ' + zone;
     if (!plain && min === 0) t += ' (midnight)';
     else if (!plain && min === 720) t += ' (noon)';
     return t;
   }
   function clockMin(ms) { var d = new Date(ms); return d.getHours() * 60 + d.getMinutes(); }
-  function fmt(ms) { return fmtMin(clockMin(ms)); }
+  // On the night the clocks go back, an hour of clock times comes twice, so a
+  // time in it names its zone: 1:30 AM EDT, then 1:30 AM EST. zoneUsed says
+  // whether a shown time did.
+  var zoneFmt = null, zoneUsed = false;
+  function zoneOf(ms) {
+    try {
+      if (!zoneFmt) zoneFmt = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' });
+      var z = zoneFmt.formatToParts(new Date(ms)).filter(function (x) { return x.type === 'timeZoneName'; })[0];
+      return z ? z.value : '';
+    } catch (e) { return ''; }
+  }
+  function twice(ms) {
+    var c = clockMin(ms), k = dayKey(ms);
+    for (var d = 15; d <= 180; d += 15) {
+      if ((clockMin(ms - d * MIN) === c && dayKey(ms - d * MIN) === k) || (clockMin(ms + d * MIN) === c && dayKey(ms + d * MIN) === k)) return true;
+    }
+    return false;
+  }
+  function fmt(ms) {
+    var zone = twice(ms) ? zoneOf(ms) : '';
+    if (zone) zoneUsed = true;
+    return fmtMin(clockMin(ms), false, zone);
+  }
   function fmtDay(ms) {
     var d = new Date(ms);
     return DAYS[d.getDay()] + (MDY ? ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate() : ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()]);
@@ -310,9 +334,13 @@ faq:
   // for an empty box, { err } for anything else that is not a time, or
   // { min, plain }: plain when the hour could be either half of the day
   // (no AM or PM, no leading zero, 1 to 12).
+  // A raised or lowered digit (as in 6:3⁰) is not read as a digit, although
+  // NFKC would make it one.
+  var RAISED = /[\u00B2\u00B3\u00B9\u2070-\u209F]/;
   function parseTime(raw) {
     var s = String(raw == null ? '' : raw);
     if (s.length > MAX_LEN) return { err: 'long' };
+    if (RAISED.test(s)) return { err: 'nan' };
     s = digits(s.normalize('NFKC')).trim().toLowerCase().replace(/\s+/g, ' ');
     if (!s) return null;
     if (/^(12(:00)? ?)?noon$/.test(s)) return { min: 720 };
@@ -344,7 +372,7 @@ faq:
   }
   function readInt(el, lo, hi) {
     var s = String(el.value);
-    if (s.length > MAX_LEN) return { err: true };
+    if (s.length > MAX_LEN || RAISED.test(s)) return { err: true };
     s = digits(s.normalize('NFKC')).trim().replace(/\s*(min|mins|minutes|m)\.?$/i, '');
     if (!s) return null;
     if (!/^\d{1,4}$/.test(s) || +s < lo || +s > hi) return { err: true };
@@ -415,7 +443,7 @@ faq:
     }
     p.rows.forEach(function (r) {
       r.short = r.sleep < lo;
-      r.passed = s.mode === 'wake' && r.bed < nowMin;
+      r.passed = s.mode === 'wake' ? r.bed < nowMin : r.wake < nowMin;
     });
     // A clock change during the night: the times are counted in real time, so
     // they already allow for it, but the visitor should know.
@@ -503,6 +531,7 @@ faq:
     $('#sl-cycle-field').hidden = !!g.naps;
     $('#sl-naps-field').hidden = !g.naps || g.id === 'n0';
     setText($('#sl-now-line'), 'It is ' + fmt(nowMs) + ' on ' + fmtDay(nowMs) + '.');
+    zoneUsed = false;
     var say = trigger ? function (t) { speak(t, trigger === 'click'); } : function () {};
     if (s.empty || s.bad) {
       var prompt = s.shown ? 'Correct the box marked in red to see the times.' : s.bad ? 'Finish typing to see the times.'
@@ -516,14 +545,13 @@ faq:
     var key = m === 'wake' ? 'bed' : 'wake';
     var head = g.id === 'n0' ? 'Sleep for babies of 0 to 3 months' : m === 'wake' ? 'Bedtimes for waking up at ' + fmt(p.anchor)
       : m === 'bed' ? 'Wake-up times for going to bed at ' + fmt(p.anchor) : 'Wake-up times for going to bed now';
-    var sub = m === 'wake' ? 'Waking up on ' + fmtDay(p.anchor) + '.' : (m === 'bed' ? 'Bedtime on ' + fmtDay(p.anchor) + '.' : 'It is ' + fmt(p.anchor) + ' on ' + fmtDay(p.anchor) + '.');
-    if (m !== 'wake' && g.id !== 'n0') sub += ' Allowing ' + hm(s.fall) + ' to fall asleep, you will be asleep by ' + fmt(p.asleep) + nextDay(p.asleep, p.anchor) + '.';
+    // In "now" mode the time is in the line above, so it is not repeated here.
+    var sub = m === 'wake' ? 'Waking up on ' + fmtDay(p.anchor) + '.' : m === 'bed' ? 'Bedtime on ' + fmtDay(p.anchor) + '.' : '';
+    if (m !== 'wake' && g.id !== 'n0') sub += (sub ? ' ' : '') + 'Allowing ' + hm(s.fall) + ' to fall asleep, you will be asleep by ' + fmt(p.asleep) + nextDay(p.asleep, p.anchor) + '.';
     else if (p.cycles) sub += ' Each bedtime allows ' + hm(s.fall) + ' to fall asleep.';
     if (p.gap !== null) sub += ' There is no ' + fmtMin(p.gap, true) + ' that day because the clocks go forward, so the page uses ' + fmt(p.anchor) + '.';
     setText($('#sl-head'), head);
     setText($('#sl-sub'), sub);
-    setText($('#sl-dst'), p.dst ? 'The clocks go ' + (p.dst.shift > 0 ? 'forward ' : 'back ') + hm(Math.abs(p.dst.shift)) + ' at ' + fmtMin(p.dst.before, true) + ' on ' + fmtDay(p.dst.at) +
-      '. These times allow for it, so each gives the full sleep shown.' : '');
     var win = windowText(p);
     setText($('#sl-window'), win);
     setText($('#sl-list-head'), p.cycles ? (m === 'wake' ? 'Or go to bed so that you wake up at the end of a cycle:' : 'Or wake up at the end of a cycle:') : '');
@@ -534,6 +562,16 @@ faq:
     var rows = p.rows.map(function (r) {
       return { r: r, key: fmt(r[key]) + nextDay(r[key], r.bed), bed: fmt(r.bed), asleep: fmt(r.asleep) + nextDay(r.asleep, r.bed), wake: fmt(r.wake) + nextDay(r.wake, r.bed) };
     });
+    var dst = '';
+    if (p.dst) {
+      dst = 'The clocks go ' + (p.dst.shift > 0 ? 'forward ' : 'back ') + hm(Math.abs(p.dst.shift)) + ' at ' + fmtMin(p.dst.before, true) + ' on ' + fmtDay(p.dst.at) +
+        '. These times allow for it, so each gives the full sleep shown.';
+      if (p.dst.shift < 0 && zoneUsed) {
+        dst += ' From ' + fmtMin(p.dst.before + p.dst.shift, true) + ' to ' + fmtMin(p.dst.before - 1, true) + ' each clock time comes twice, so a time in that hour names its zone: ' +
+          zoneOf(p.dst.at - MIN) + ' before the change, ' + zoneOf(p.dst.at) + ' after.';
+      }
+    }
+    setText($('#sl-dst'), dst);
     var lk = JSON.stringify([m, rows.map(function (x) { return [x.key, x.bed, x.asleep, x.wake, x.r.short, x.r.passed, x.r.sleep]; }), g.id]);
     if (lk !== listKey) {
       listKey = lk;
@@ -565,8 +603,8 @@ faq:
     }
 
     // Plain text for Copy, and one line for screen readers.
-    var lines = [head + ' (' + (m === 'wake' ? 'waking up on ' : m === 'bed' ? 'bedtime on ' : 'now, ') + fmtDay(p.anchor) + ')'];
-    if (p.dst) lines.push($('#sl-dst').textContent);
+    var lines = [head + ' (' + (m === 'wake' ? 'waking up on ' : m === 'bed' ? 'bedtime on ' : 'at ' + fmt(p.anchor) + ' on ') + fmtDay(p.anchor) + ')'];
+    if (dst) lines.push(dst);
     lines.push(win);
     rows.forEach(function (x) {
       var r = x.r;
@@ -652,15 +690,16 @@ faq:
   // On a change of clock the times in the boxes are rewritten in the new
   // style, so a bare "11" keeps the meaning it had.
   var clockWas = clockSel.value;
-  clockSel.addEventListener('change', function () {
+  function restyle() {
     var now = clockSel.value;
+    if (now === clockWas) return;
     clockSel.value = clockWas;
     var keep = [wakeIn, bedIn].map(function (el) { var t = readTime(el); return t && !t.err ? t.min : null; });
     clockSel.value = now;
     clockWas = now;
     [wakeIn, bedIn].forEach(function (el, i) { if (keep[i] !== null) el.value = fmtMin(keep[i], true); });
-    render('click', false);
-  });
+  }
+  clockSel.addEventListener('change', function () { restyle(); render('click', false); });
   [ageSel, napsSel].forEach(function (el) { el.addEventListener('change', function () { render('click', false); }); });
   $('#sl-copy').addEventListener('click', function () {
     render(null, true);
@@ -675,11 +714,12 @@ faq:
   window.addEventListener('hashchange', function () { if (location.hash !== written && readHash()) render('click', true); });
   // Browsers can put typed values back after the Back button once the script
   // has run; "now" also moves on while the page is hidden.
-  window.addEventListener('pageshow', function () { render(null, false); });
+  // The clock menu can come back without the time boxes (they are never
+  // restored), which hold times written in the clock style of the first load.
+  window.addEventListener('pageshow', function () { restyle(); render(null, false); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) render(null, false); });
 
   if (!readHash() && !H12_DEFAULT) { wakeIn.value = fmtMin(DEF.wake, true); bedIn.value = fmtMin(DEF.bed, true); }
-  clockWas = clockSel.value;
   render(null, false);
   // A fresh count at the start of every minute: "now" and the times already passed.
   (function tick() {

@@ -13,6 +13,28 @@ module.exports = async ({ page, open, assert, base }) => {
   await page.addInitScript(() => {
     window.__gum = [];
     window.__oscs = [];
+    // The page's own audio context (not the one that fakes the microphone,
+    // marked __gen): its sound sources with when they end, and every suspend
+    // with the latest end scheduled before it.
+    window.__srcs = new Set();
+    window.__sleeps = [];
+    const ours = c => !c.__gen;
+    const sStart = AudioScheduledSourceNode.prototype.start, sStop = AudioScheduledSourceNode.prototype.stop;
+    AudioScheduledSourceNode.prototype.start = function () {
+      if (ours(this.context)) { window.__ctx = this.context; this.__end = Infinity; window.__srcs.add(this); }
+      return sStart.apply(this, arguments);
+    };
+    AudioScheduledSourceNode.prototype.stop = function (when) {
+      this.__end = arguments.length && when > this.context.currentTime ? when : this.context.currentTime;
+      return sStop.apply(this, arguments);
+    };
+    const analyser = BaseAudioContext.prototype.createAnalyser;
+    BaseAudioContext.prototype.createAnalyser = function () { if (ours(this)) window.__ctx = this; return analyser.apply(this, arguments); };
+    const suspend = AudioContext.prototype.suspend;
+    AudioContext.prototype.suspend = function () {
+      if (ours(this)) window.__sleeps.push({ at: this.currentTime, lastEnd: Math.max(0, ...[...window.__srcs].map(x => x.__end)) });
+      return suspend.apply(this, arguments);
+    };
     const create = BaseAudioContext.prototype.createOscillator;
     BaseAudioContext.prototype.createOscillator = function () { const o = create.call(this); window.__oscs.push(o); return o; };
     window.__gumFail = null;
@@ -20,6 +42,7 @@ module.exports = async ({ page, open, assert, base }) => {
       window.__gum.push(JSON.parse(JSON.stringify(c)));
       if (window.__gumFail) throw new DOMException(window.__gumFail[1], window.__gumFail[0]);
       const ac = new AudioContext();
+      ac.__gen = true;
       const osc = new OscillatorNode(ac, { type: 'sine', frequency: 440 });
       const g = new GainNode(ac, { gain: 0.3 });
       const dest = ac.createMediaStreamDestination();
@@ -100,6 +123,16 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.equal(await page.getAttribute('#otn-play', 'aria-pressed'), 'false');
   assert.equal(await text('#otn-play'), 'Play A5 (884.00 Hz)');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'otn-play');
+  // A running audio context renders silence for as long as the page is
+  // open: a moment after the tone stops (after its fade-out) the page
+  // suspends it, and the next tone starts it again.
+  const asleep = () => page.waitForFunction(() => window.__ctx.state === 'suspended', null, { timeout: 6000 });
+  await asleep();
+  await page.click('#otn-play');
+  await page.waitForFunction(() => window.__ctx.state === 'running' && document.getElementById('otn-play').getAttribute('aria-pressed') === 'true');
+  await page.click('#otn-play');
+  assert.equal(await text('#otn-play'), 'Play A5 (884.00 Hz)');
+  await asleep();
   await page.click('#otn-a4-down');
   await page.click('#otn-a4-down');
   assert.equal(await page.inputValue('#otn-a4'), '440');
@@ -262,6 +295,11 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.equal(await page.evaluate(() => window.__gen.stream.getTracks().every(t => t.readyState === 'ended')), true);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'otn-toggle');
   assert.match(await text('#otn-verdict'), /Press Start tuner/);
+  // With the microphone off and no tone, the audio context is suspended too.
+  await asleep();
+  const sleeps = await page.evaluate(() => window.__sleeps);
+  assert.ok(sleeps.length >= 3, `the sound was switched off ${sleeps.length} times`);
+  for (const z of sleeps) assert.ok(z.at >= z.lastEnd, `the sound was switched off at ${z.at.toFixed(3)} s, before a tone ending at ${z.lastEnd} s`);
 
   // ---- Permission errors ----
   const cases = [

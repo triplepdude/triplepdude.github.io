@@ -49,10 +49,11 @@ howto: |
   JavaScript value into JSON text and `JSON.parse` reads it back.
 
   Reading JSON into JavaScript can change it. Whole numbers beyond
-  9,007,199,254,740,991 (2^53 − 1) can be rounded, `1.0` becomes `1`, keys
-  that look like whole numbers move to the front, and of two equal keys only
-  the last survives. This page reads the text itself, so none of that happens
-  here, and it tells you when a number or a repeated key is at risk.
+  9,007,199,254,740,991 (2^53 − 1) can be rounded, as can any number with
+  more than 15 significant digits; `1e-400` becomes `0`, `1.0` becomes `1`,
+  keys that look like whole numbers move to the front, and of two equal keys
+  only the last survives. This page reads the text itself, so none of that
+  happens here, and it tells you when a number or a repeated key is at risk.
 
   ## Escape and unescape
 
@@ -84,13 +85,22 @@ faq:
     a: 'The text handed to the parser is not JSON at all. It starts with `<`, so it is almost always an HTML page, such as an error or login page, that a server returned where JSON was expected. Current Chrome words it as `Unexpected token ''<'', "<!DOCTYPE "... is not valid JSON`. "Unexpected end of JSON input" means the text was empty or cut off.'
   - q: What is the difference between JSON and JSON Lines?
     a: A JSON text holds exactly one value, usually an object or an array. JSON Lines (.jsonl, also called NDJSON) puts one complete JSON value on each line, which suits logs and exports because a program can read it one record at a time. A JSON parser rejects such a file as a whole. Here, Fix wraps the lines in one array so that you can format and browse them.
+  - q: How do I format JSON in VS Code?
+    a: 'Open the file and run Format Document, from the right-click menu or with Shift+Alt+F on Windows, Shift+Option+F on a Mac or Ctrl+Shift+I on Linux. VS Code formats files that end in .json with its built-in JSON support. For text in a new tab, or a file with another ending, first set the language mode to JSON: click the language name at the bottom right of the window and choose JSON.'
 ---
 <style>
 .tool-card { --jf-num: #1d4ed8; }
 @media (prefers-color-scheme: dark) { .tool-card { --jf-num: #93c5fd; } }
-.jf-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; }
-.jf-head > label { font-size: 14px; font-weight: 600; }
+.jf-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.jf-head > label { margin-right: auto; font-size: 14px; font-weight: 600; }
 .jf-head-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+/* On a narrow screen the buttons have a line of their own and Undo waits beside the label, on a
+   line as tall as a button, so the box below stays put when Undo comes and goes. */
+@media (max-width: 520px) {
+  .jf-head > label { display: flex; align-items: center; min-height: 44px; }
+  #jf-undo { order: 1; }
+  .jf-head-btns { order: 2; flex-basis: 100%; }
+}
 .jf textarea { min-height: 200px; }
 .jf-in.is-over textarea, .jf-in.is-over .jf-held { outline: 2px dashed var(--accent); outline-offset: 2px; background: var(--accent-soft); }
 .jf-held { padding: 14px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--bg); font-size: 15px; }
@@ -140,8 +150,8 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
         <button class="btn secondary small" type="button" id="jf-open">Open file…</button>
         <button class="btn secondary small" type="button" id="jf-example">Example</button>
         <button class="btn secondary small" type="button" id="jf-clear">Clear</button>
-        <button class="btn secondary small" type="button" id="jf-undo" hidden>Undo</button>
       </span>
+      <button class="btn secondary small" type="button" id="jf-undo" hidden>Undo</button>
       <input type="file" id="jf-file" hidden accept=".json,.jsonl,.ndjson,.geojson,.har,.map,.webmanifest,.ipynb,.txt,.log,application/json,text/plain">
     </div>
     <textarea id="jf-input" class="mono" rows="8" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste JSON here…" aria-describedby="jf-hint jf-error">{"id":1042,"customer":{"name":"Ada Lovelace","email":"ada@example.com"},"items":[{"sku":"TEA-200","qty":2,"price":4.5},{"sku":"MUG-01","qty":1,"price":12}],"paid":true,"notes":null}</textarea>
@@ -310,6 +320,42 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
       var c = src.charCodeAt(j);
       return c === 34 || c === 123 || c === 91 || c === 45 || isDigit(c) || quoteKind(c) > 0 || (isWordStart(c) && wordValue(src.slice(j, wordEnd(j))) !== null);
     }
+    // The significant digits of a number written without a sign, and the power of ten that goes
+    // with them: "0.0120e5" gives "12" and 4, for 0.12 × 10^4.
+    function sig(t) {
+      var m = /^(\d*)\.?(\d*)(?:[eE]([+-]?\d+))?$/.exec(t), all = m[1] + m[2], a = 0, b = all.length;
+      while (a < b && all.charCodeAt(a) === 48) a++;
+      while (b > a && all.charCodeAt(b - 1) === 48) b--;
+      return { d: all.slice(a, b), e: m[1].length - a + (m[3] ? +m[3] : 0) };
+    }
+    // Whether the double k read from t loses some of the significant digits t was written with.
+    // Written back with as many digits as t has, it must give them back: so 0.1 and 0.10000000000000001
+    // (the same double written with 17 digits) pass, and 1.000000000000000001 and 5e-400 do not.
+    function inexact(t, k) {
+      var s = String(k), x = t.indexOf('e'), dot = t.indexOf('.'), f, y, a, b;
+      // Quick answers first, for the usual ways of writing a number: JavaScript's own shortest
+      // digits, or as many decimals or digits as the text has, like C's %.17f, %.17g and %.16e.
+      if (s === t) return false;
+      if (x < 0) x = t.indexOf('E');
+      if (x < 0) {
+        f = dot < 0 ? 0 : t.length - dot - 1;
+        if (f <= 100 && k < 1e21 && k.toFixed(f) === t) return false;
+      } else if (dot < 0 ? x === 1 : dot === 1) {
+        f = dot < 0 ? 0 : x - dot - 1;
+        b = f <= 100 ? k.toExponential(f) : '';
+        y = b.indexOf('e');
+        if (y > 0 && t.slice(0, x) === b.slice(0, y) && +t.slice(x + 1) === +b.slice(y + 1)) return false;
+      }
+      // Then by the digits themselves, however they are laid out (12.5e-6 or 0.0000125): the
+      // shortest that give k back, which JavaScript writes, or as many as the text has.
+      a = sig(t);
+      if (!a.d) return false;
+      b = sig(s);
+      if (a.d === b.d && a.e === b.e) return false;
+      if (a.d.length > 100) return true;
+      b = sig(k.toPrecision(a.d.length));
+      return a.d !== b.d || a.e !== b.e;
+    }
 
     // ---------- Reading ----------
     // Reads the text leniently: whatever strict JSON forbids but has one obvious meaning is noted
@@ -322,7 +368,7 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
       var ks = -1, ke = -1, commaPos = -1, prevEnd = 0, afterColon = false;
       var roots = 0, firstRoot = -1, lastTop = -1, topComma = -1, multi = false;
       var edits = [], kinds = {}, total = 0, first = null, fatal = null, width;
-      var dupes = { n: 0, p: -1, key: '' }, big = { n: 0, p: -1, text: '' };
+      var dupes = { n: 0, p: -1, key: '' }, big = { n: 0, p: -1, text: '', read: '' };
       // States: a value is needed; first value or ]; first key or }; key; colon; comma or closer; after the root value.
       var V = 0, AV = 1, OK = 2, K = 3, C = 4, SEP = 5, END = 6, st = V;
 
@@ -435,7 +481,7 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
 
       // A number that starts at j0. Returns the index after it.
       function num(j0) {
-        var j = j0, ch = src.charCodeAt(j), plus = ch === 43, d0, k, whole = true;
+        var j = j0, ch = src.charCodeAt(j), plus = ch === 43, d0, k, whole = true, digits;
         if (plus || ch === 45) j++;
         ch = src.charCodeAt(j);
         if ((ch === 73 && src.substr(j, 8) === 'Infinity') || (ch === 78 && src.substr(j, 3) === 'NaN')) {
@@ -456,10 +502,12 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
         if (j - d0 > 1 && src.charCodeAt(d0) === 48) return fail('zero', d0, j - d0);
         if (plus) { issue('plus', j0, 1); edit(j0, j0 + 1, ''); }
         if (j === d0) { issue('dot', j, 1); edit(j, j + 1, '0.'); }
+        digits = j - d0;
         if (src.charCodeAt(j) === 46) {
           whole = false;
           k = ++j;
           while (isDigit(src.charCodeAt(j))) j++;
+          digits += j - k;
           if (j === k) { issue('dot', j - 1, 1); edit(j - 1, j, '.0'); }
         }
         ch = src.charCodeAt(j);
@@ -473,11 +521,14 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
           j = k;
         }
         if (!delimiter(src.charCodeAt(j))) return fail('junk', j, 1, src.slice(j0, j));
-        // Noted for the reader: a whole number a double cannot hold exactly, or one beyond its range.
+        // Noted for the reader: a number that JSON.parse, like any reader that uses a double, would
+        // change. A whole number must keep every digit; any other must keep the significant digits
+        // it was written with, which a double always does for up to 15 of them in its normal range.
         // Beyond the range there is nothing to compare with: BigInt refuses Infinity.
         k = Number(src.slice(d0, j));
-        if (!isFinite(k) || (whole && j - d0 > 15 && BigInt(src.slice(d0, j)) !== BigInt(k))) {
-          if (!big.n++) { big.p = j0; big.text = src.slice(j0, j); }
+        if (!isFinite(k) || (whole ? digits > 15 && BigInt(src.slice(d0, j)) !== BigInt(k)
+          : (digits > 15 || k < 2.2250738585072014e-308) && inexact(src.slice(d0, j), k))) {
+          if (!big.n++) { big.p = j0; big.text = src.slice(j0, j); big.read = (src.charCodeAt(j0) === 45 ? '-' : '') + k; }
         }
         return j;
       }
@@ -488,7 +539,9 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
         while (k >= 0) {
           key = src.slice(KS[k], KE[k]);
           if (key.indexOf('\\') >= 0) { try { key = JSON.stringify(JSON.parse(key)); } catch (e) { /* compared as written */ } }
-          if (seen.has(key)) { if (!dupes.n++) { dupes.p = KS[k]; dupes.key = key; } } else seen.add(key);
+          // An inner object closes before the object around it, so the first duplicate in the
+          // text is the one nearest its start, not the first found.
+          if (seen.has(key)) { dupes.n++; if (dupes.p < 0 || KS[k] < dupes.p) { dupes.p = KS[k]; dupes.key = key; } } else seen.add(key);
           k = NX[k];
         }
       }
@@ -916,6 +969,17 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
       if (req.mode === 'unescape') {
         res = unescape(text);
         if (res.err) { out.err = res.err; return out; }
+        // Half of a surrogate pair, which a text cut in the middle of an emoji ends with, is not a
+        // character, and UTF-8 cannot hold it: Copy and Download would turn it into U+FFFD, so the
+        // result shows that too, and says so.
+        out.lone = 0;
+        if (typeof res.out.isWellFormed !== 'function' || !res.out.isWellFormed()) {
+          res.out = res.out.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, function (s) {
+            if (s.length > 1) return s;
+            out.lone++;
+            return '\uFFFD';
+          });
+        }
         out.text = res.out;
         out.changed = res.out !== text;
         out.bytes = utf8Length(res.out);
@@ -939,7 +1003,7 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
       out.stats = counts();
       out.inBytes = utf8Length(text);
       if (d.dupes.n) { res = lineCol(d.dupes.p); out.dupes = { n: d.dupes.n, key: clip(d.dupes.key), line: res.line, col: res.col }; }
-      if (d.big.n) { res = lineCol(d.big.p); out.big = { n: d.big.n, text: clip(d.big.text), line: res.line, col: res.col }; }
+      if (d.big.n) { res = lineCol(d.big.p); out.big = { n: d.big.n, text: clip(d.big.text), read: d.big.read, line: res.line, col: res.col }; }
       out.root = row(0, null);
       try {
         out.text = write(req.mode === 'minify' ? '' : req.indent, req.sort);
@@ -1230,7 +1294,8 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
       if (r.err) showError(r);
       showOut('', false);
     } else if (!json) {
-      setText(noteBox, '');
+      setText(noteBox, !r.lone ? '' : (r.lone === 1 ? 'A lone half of a surrogate pair, as left when an emoji is cut in two, is not a character, so it was'
+        : fmt(r.lone) + ' lone halves of surrogate pairs, as left when an emoji is cut in two, are not characters, so they were') + ' written as U+FFFD (\uFFFD).');
       setText(okBox, m === 'escape' ? (r.escaped ? 'Escaped: ' + plural(r.escaped, 'character') + ' needed a backslash.' : 'Escaped: no character needed a backslash.')
         : !r.changed ? 'Nothing to unescape: the text has no backslash escapes.'
         : 'Unescaped.' + (r.nested ? ' The result is valid JSON: choose Use as input to format it.' : ''));
@@ -1249,8 +1314,10 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
           '. That is still valid JSON, but many parsers keep only the last value and some refuse the text.');
       }
       if (r.big) {
-        notes.push('Large number: ' + r.big.text + ' (l' + place(r.big) + ')' + (r.big.n > 1 ? ' and ' + plural(r.big.n - 1, 'more number') : '') +
-          ' cannot be held exactly by a double-precision number, which is what JavaScript and many other JSON parsers use. Every digit is kept here; put such values in a string if other programs must read them exactly.');
+        notes.push('Number changed by JavaScript: JSON.parse reads ' + r.big.text + ' (l' + place(r.big) + ') as ' + r.big.read +
+          (r.big.n > 1 ? ', and ' + plural(r.big.n - 1, 'more number') + ' change' + (r.big.n === 2 ? 's' : '') + ' too' : '') +
+          '. A double-precision number, which JavaScript and many other JSON parsers use, cannot hold ' + (r.big.n > 1 ? 'them' : 'it') +
+          ' exactly. Every digit is kept here; put such values in a string if other programs must read them exactly.');
       }
       setText(noteBox, notes.join(' '));
       saved = (1 - r.bytes / r.inBytes) * 100;
@@ -1473,7 +1540,8 @@ pre.jf-out:empty::before { content: "The result appears here."; color: var(--mut
   dlBtn.addEventListener('click', function () { whenCurrent(saveFile); });
   function saveFile() {
     if (!full) return;
-    var m = mode(), base = fileName.replace(/\.[^.]*$/, '').replace(/[\\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 80), name;
+    // Cut by code points, so an emoji is never split (half of one is saved as a replacement character).
+    var m = mode(), base = Array.from(fileName.replace(/\.[^.]*$/, '').replace(/[\\\/:*?"<>|\u0000-\u001f]/g, '_')).slice(0, 80).join(''), name;
     if (m === 'escape') name = (base || 'json') + '.escaped.txt';
     else if (m === 'unescape') name = (base || 'json') + '.unescaped.' + (last && last.nested ? 'json' : 'txt');
     else name = base ? base + (m === 'minify' ? '.min.json' : '.formatted.json') : m === 'minify' ? 'minified.json' : 'formatted.json';

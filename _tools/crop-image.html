@@ -19,12 +19,12 @@ howto: |
 
   ## Cropping to an exact size such as 1080 × 1350
 
-  For a crop without resizing, type the width and height, here 1080 and
-  1350, and move the box over the part you want: the file then holds exactly
-  those pixels of your photo. When the photo is much larger, choose the 4:5
-  ratio instead, make the box as big as you like and set the output size to
-  1080 × 1350, and the crop is scaled down smoothly. A box smaller than the
-  output size has to be enlarged and looks soft; the page tells you when.
+  Type the width and height, here 1080 and 1350, and move the box over the
+  part you want: the file then holds exactly those pixels of your photo. To
+  keep more of a large photo, pick **Instagram 4:5** under Ready-made size:
+  the box keeps that shape at any size and the crop is scaled to 1080 × 1350.
+  A box smaller than the output size is enlarged and looks soft; the page
+  says so.
 
   ## Sizes for social media and prints
 
@@ -55,9 +55,9 @@ howto: |
   The pixels inside the box are copied unchanged, but the file is saved
   again. PNG, TIFF, BMP and GIF are saved without loss. A JPG is compressed
   again at the quality estimated from the original, which loses a little
-  more detail: tools such as jpegtran can crop a JPG without saving it again,
-  but only along its 8- or 16-pixel block grid, and this page does not.
-  Colours are saved in sRGB, so the most saturated colours of a wide-gamut
+  more detail. (jpegtran can crop a JPG without compressing it again, but it
+  moves the top-left corner onto the 8- or 16-pixel block grid; this page
+  does not.) Colours are saved in sRGB, so the most saturated colours of a wide-gamut
   (Display P3) photo are slightly muted. Animated GIF, PNG and WebP files
   keep only their first frame, and camera RAW files are not supported:
   export a JPG or TIFF from your photo app first.
@@ -72,9 +72,8 @@ howto: |
 
   Tap the box at the top to pick a photo from your library, iPhone HEIC
   photos included. Drag the box or a handle with one finger and pinch with
-  two to zoom. The file goes to Downloads on Android and to the Files app
-  on an iPhone, or tap **Copy image** and paste the crop into a chat or a
-  post.
+  two to zoom. Saved files go to Downloads on Android and to the Files app
+  on an iPhone.
 faq:
   - q: Is my photo uploaded anywhere?
     a: No. Your pictures are opened, cropped and saved by your browser on this page. Nothing is sent to a server, and the page keeps no copy once you close it.
@@ -130,13 +129,15 @@ faq:
 .crp-batch li { overflow-wrap: anywhere; }
 @media (max-width: 560px) {
   .crp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
   .crp-out { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .crp-out .crp-dpi { grid-column: 1 / -1; }
+  .crp-out .crp-size, .crp-out .crp-dpi { grid-column: 1 / -1; }
 }
 </style>
 
 <div class="crp-pick">
-  <input class="crp-input" type="file" id="crp-file" multiple>
+  <input class="crp-input" type="file" id="crp-file" multiple aria-describedby="crp-error">
   <label class="crp-drop" for="crp-file" id="crp-drop">
     <strong id="crp-drop-title"><span>Choose images</span> or drop them here</strong>
     <span class="hint" id="crp-drop-hint">Showing a sample picture. JPG, PNG, WebP, HEIC, AVIF, GIF, TIFF, BMP, ICO or SVG; you can also paste one with Ctrl+V.</span>
@@ -206,7 +207,7 @@ faq:
 <p class="msg error" id="crp-box-error" aria-live="polite"></p>
 
 <div class="crp-out">
-  <div class="field">
+  <div class="field crp-size">
     <label for="crp-size">Output size</label>
     <select id="crp-size" autocomplete="off">
       <option value="crop" selected>Same as the crop</option>
@@ -375,7 +376,9 @@ faq:
   // split by one kind of separator (comma, point, space, no-break or thin space, apostrophe or the
   // Arabic thousands mark). NaN for anything else, including decimals such as 12.5.
   function parseWhole(raw) {
-    var s = asciiDigits(String(raw)).trim().replace(/\s*px$/i, '');
+    raw = String(raw);
+    if (raw.length > 40) return NaN; // before any pattern runs: a long paste is refused at once
+    var s = asciiDigits(raw).trim().replace(/\s*px$/i, '');
     if (!s || s.length > 15) return NaN;
     if (/^\d+$/.test(s)) return Number(s);
     if (/^[1-9]\d{0,2}([,.   '’٬])\d{3}(?:\1\d{3})*$/.test(s)) return Number(s.replace(/\D/g, ''));
@@ -383,8 +386,9 @@ faq:
   }
   // A ratio such as 16:9, 16x9, 16/9 or 1.91:1 (a point or a comma for decimals).
   function parseRatio(raw) {
-    var s = asciiDigits(String(raw)).trim();
-    if (s.length > 40) return null;
+    raw = String(raw);
+    if (raw.length > 40) return null;
+    var s = asciiDigits(raw).trim();
     var m = /^(\d{1,6}(?:[.,]\d{1,4})?)\s*[:x×/]\s*(\d{1,6}(?:[.,]\d{1,4})?)$/i.exec(s);
     if (!m) return null;
     var a = Number(m[1].replace(',', '.')), b = Number(m[2].replace(',', '.'));
@@ -758,9 +762,11 @@ faq:
     }
     setText(statusEl, '');
     if (!it) {
+      fileInput.setAttribute('aria-invalid', 'true');
       errEl.textContent = skipped.length === 1 ? skipped[0].why : 'None of these files could be opened: ' + skipped.map(function (s) { return s.name; }).join(', ') + '.';
       return;
     }
+    fileInput.removeAttribute('aria-invalid');
     rest = rest.filter(function (f) {
       if (RAW.test(f.name || '')) { skipped.push({ name: f.name, why: 'camera RAW files are not supported' }); return false; }
       return true;
@@ -769,7 +775,7 @@ faq:
     st.extra = rest.map(function (f) { return { file: f, name: baseName(f.name || 'pasted-image') }; });
     $('#crp-drop-title').textContent = (it.file.name || 'Pasted image') + (st.extra.length ? ' and ' + st.extra.length + ' more' : '');
     $('#crp-drop-hint').textContent = fmtN(it.iw) + ' × ' + fmtN(it.ih) + ' px ' + (TTImage.formats[it.fmt] || { label: '' }).label + '. Choose or drop other images to replace ' + (st.extra.length ? 'them' : 'it') + '.';
-    noteEl.textContent = notesFor(it);
+    setText(noteEl, notesFor(it));
     if (skipped.length) errEl.textContent = 'Skipped ' + skipped.map(function (s) { return s.name + ' (' + s.why.replace(/\.$/, '') + ')'; }).join('; ') + '.';
     renderBatch();
   }
@@ -1160,8 +1166,9 @@ faq:
     return true;
   }
   function failText(e) { return e && (e.friendly || e.code) && e.message ? e.message : 'The image could not be created.'; }
-  dlBtn.addEventListener('click', async function () {
-    if (st.busy || !st.item || !fieldsReady()) return;
+  // The second click of a double click (detail 2) is ignored, so it saves one file.
+  dlBtn.addEventListener('click', async function (e) {
+    if (e.detail > 1 || st.busy || !st.item || !fieldsReady()) return;
     st.busy = true;
     errEl.textContent = '';
     var it = st.item;
@@ -1178,7 +1185,7 @@ faq:
   });
   copyBtn.addEventListener('click', async function (e) {
     var btn = e.currentTarget;
-    if (st.busy || !st.item || !fieldsReady()) return;
+    if (e.detail > 1 || st.busy || !st.item || !fieldsReady()) return;
     errEl.textContent = '';
     if (!navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem !== 'function') {
       errEl.textContent = 'Your browser cannot copy images to the clipboard. Use Download instead.';
@@ -1197,8 +1204,8 @@ faq:
       errEl.textContent = perr ? failText(perr) : 'The browser blocked copying the image. Use Download instead.';
     } finally { st.busy = false; }
   });
-  zipBtn.addEventListener('click', async function () {
-    if (st.busy || !st.item || !fieldsReady()) return;
+  zipBtn.addEventListener('click', async function (e) {
+    if (e.detail > 1 || st.busy || !st.item || !fieldsReady()) return;
     st.busy = true;
     errEl.textContent = '';
     var all = [st.item].concat(st.extra), files = [], bad = [];

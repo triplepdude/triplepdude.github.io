@@ -9,8 +9,11 @@ time minus whole cycles minus the minutes to fall asleep; computed times are
 rounded to the nearest 5 minutes; "next day" marks a time on a later date than
 the bedtime of its row. Which night is meant: a wake-up time is the next one
 from which the latest bedtime on offer is still ahead; a bedtime is the next
-one from 6 hours ago. Hours per age group are the CDC's (15 May 2024).
-Nothing here is taken from the page.
+one from 6 hours ago. An option is "passed" when its bedtime (or, going to bed
+at a set time, its wake-up time) is before the current minute. On the night
+the clocks go back, a clock time that comes twice is followed by its zone's
+short name as an en-US browser gives it (EDT and EST; GMT+1 and GMT). Hours
+per age group are the CDC's (15 May 2024). Nothing here is taken from the page.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -37,10 +40,33 @@ def clock_at(tz, day, minutes):
     return naive.replace(tzinfo=tz, fold=0).astimezone(UTC)
 
 
+def twice(t, tz):
+    """Whether the clock reading of t comes twice that night (the clocks go back)."""
+    wall = t.astimezone(tz).replace(tzinfo=None)
+    return tz.utcoffset(wall.replace(fold=0)) != tz.utcoffset(wall.replace(fold=1))
+
+
+def zone_name(t, tz):
+    """The short zone name of an en-US browser: EDT/EST in the US, else GMT+1 and the like."""
+    loc = t.astimezone(tz)
+    if tz.key.startswith('America/'):
+        return loc.tzname()
+    m = int(loc.utcoffset().total_seconds() // 60)
+    if m == 0:
+        return 'GMT'
+    return f'GMT{"+" if m > 0 else "-"}{abs(m) // 60}' + (f':{abs(m) % 60:02d}' if m % 60 else '')
+
+
+USED = []  # zone names put on times, for the clock-change note
+
+
 def fmt(t, tz, h12):
     loc = t.astimezone(tz)
     h, m = loc.hour, loc.minute
     s = f'{(h % 12) or 12}:{m:02d} {"AM" if h < 12 else "PM"}' if h12 else f'{h:02d}:{m:02d}'
+    if twice(t, tz):
+        s += ' ' + zone_name(t, tz)
+        USED.append(s)
     if h == 0 and m == 0:
         s += ' (midnight)'
     elif h == 12 and m == 0:
@@ -68,6 +94,7 @@ def later_day(t, base, tz):
 
 def case(name, tz_name, now, mode, time=None, fall=15, cycle=90, age='a18', naps=0, h12=True, mdy=True):
     tz = ZoneInfo(tz_name)
+    USED.clear()
     now_utc = datetime.fromisoformat(now).astimezone(UTC)
     now_min = now_utc.replace(second=0, microsecond=0)
     lo_h, hi_h, nap_group = GROUPS[age]
@@ -123,7 +150,7 @@ def case(name, tz_name, now, mode, time=None, fall=15, cycle=90, age='a18', naps
         tags = []
         if later_day(key, bed, tz):
             tags.append('next day')
-        passed = mode == 'wake' and bed < now_min
+        passed = bed < now_min if mode == 'wake' else wake < now_min
         if passed:
             tags.append('passed')
         out['rows'].append({'n': n, 'sleep': n * cycle, 'key': fmt(key, tz, h12), 'tag': ', '.join(tags),
@@ -142,7 +169,11 @@ def case(name, tz_name, now, mode, time=None, fall=15, cycle=90, age='a18', naps
             t += timedelta(minutes=1)
         before = (t - timedelta(minutes=1)).astimezone(tz)
         bmin = (before.hour * 60 + before.minute + 1) % 1440
-        out['dst'] = {'shift': int((o2 - o1).total_seconds() // 60), 'before': plain(bmin, h12), 'day': day_text(t, tz, mdy)}
+        shift = int((o2 - o1).total_seconds() // 60)
+        out['dst'] = {'shift': shift, 'before': plain(bmin, h12), 'day': day_text(t, tz, mdy)}
+        if shift < 0 and USED:
+            out['dst']['twice'] = {'from': plain(bmin + shift, h12), 'to': plain(bmin - 1, h12),
+                                   'zones': [zone_name(t - timedelta(minutes=1), tz), zone_name(t, tz)]}
     return out
 
 
@@ -163,5 +194,7 @@ cases = [
     case('61 to 64, bedtime after midnight', 'America/Los_Angeles', '2026-11-22T12:00:00-08:00', 'bed', 75, age='a61', fall=0, cycle=70),
     case('bedtime 40 minutes ago is tonight', 'America/New_York', '2026-11-22T23:40:00-05:00', 'bed', 1380),
     case('24-hour clock chosen, London', 'Europe/London', '2026-11-22T12:00:00+00:00', 'bed', 1380, h12=False),
+    case('bedtime 5 hours 30 minutes ago: the first wake-up time has passed', 'America/New_York', '2026-11-23T04:30:00-05:00', 'bed', 1380),
+    case('clocks go back, New York: bedtimes in the hour that comes twice', 'America/New_York', '2026-10-31T21:00:00-04:00', 'wake', 360, cycle=80, fall=10),
 ]
 print(json.dumps({'cases': cases}, indent=1, ensure_ascii=False))

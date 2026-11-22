@@ -198,6 +198,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.click('#gp-link');
   await page.waitForFunction(() => document.querySelector('#gp-link').textContent === 'Copied!');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), await page.evaluate(() => location.href));
+  // The link holds the courses and grades, and the hint beside the button says so.
+  assert.equal(await page.getAttribute('#gp-link', 'aria-describedby'), 'gp-link-hint');
+  assert.equal(await text('#gp-link-hint'), 'Copy link puts your courses and grades in the link, so anyone you send it to can see them.');
   // Back from another page shows results for what the boxes hold.
   await f(0, 3).cr.fill('5');
   await page.waitForFunction(() => location.hash.includes('History,B,5,r'));
@@ -362,6 +365,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await page.goto(url + '#v=1&' + hash + ex);
     const q = X[key].plan;
     assert.equal(await text('#gp-plan-out'), `Not reachable in 15 credits: you would need an average of ${q.need}, and the most is ${most}. With ${q.word} you would finish with ${q.best}. To reach ${target} with ${q.word} you need at least ${q.more} more credits.`, key);
+  }
+  // A scale named after something every object has, such as constructor, is unknown: the
+  // menu shows the standard scale instead of going blank.
+  for (const s of ['constructor', '__proto__', 'toString']) {
+    await page.goto('about:blank');
+    await page.goto(url + '#v=1&s=' + s + '&c=A%2C3%2C');
+    assert.equal(await page.inputValue('#gp-scale'), 'std', s);
   }
   // A weighted GPA so far comes back from a link.
   await page.goto(url + '#v=1&s=std&h=0.5&a=1&p=3.2,60,3.6&t=3.5,30,w&' + ex);

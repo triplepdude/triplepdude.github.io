@@ -36,7 +36,7 @@ howto: |
   | Pink | Falls 3 dB per octave | Rain |
   | Brown | Falls 6 dB per octave | A waterfall |
   | Green | Pink, centred on 500 Hz | A softer, mid-pitched rush |
-  | Grey | Inverse 40-phon contour | Even at every pitch |
+  | Grey | 40-phon equal-loudness contour | Even at every pitch |
   | Blue | Rises 3 dB per octave | A sharp hiss |
   | Violet | Rises 6 dB per octave | A thin, high hiss |
 
@@ -45,9 +45,10 @@ howto: |
   Green noise has no standard definition. Sleep sites use the name for noise
   concentrated around 500 Hz. Here it is pink noise through a broad band-pass
   filter centred on 500 Hz, which rolls off the deep bass and the high treble.
-  Grey noise follows the inverse of the ISO 226 equal-loudness contour at 40
-  phon, so every pitch sounds about as loud; an exact inverse would boost 20
-  Hz by 60 dB, so its bass boost stops at 20 dB.
+  Grey noise follows the ISO 226 equal-loudness contour at 40 phon, louder
+  where the ear is less sensitive, so every pitch sounds about as loud.
+  Following it exactly would boost 20 Hz by 60 dB, so the bass boost stops at
+  20 dB.
 
   ## Sleep timer
 
@@ -74,7 +75,7 @@ howto: |
   The page cannot measure the level at your ear. Sounds at or below 70 dBA are
   unlikely to harm hearing even after long exposure (NIDCD), and if you have
   to raise your voice to talk over the noise, turn it down. Phone and laptop
-  speakers produce little below about 200 Hz, which costs brown noise about 10
+  speakers produce little below about 200 Hz, which costs brown noise about 9
   dB, pink 3 dB and white almost nothing, so use headphones or a speaker for
   the deep colours rather than turning them up. Check yours with the [speaker
   test](/speaker-test/), and plan your night with the [sleep
@@ -244,8 +245,8 @@ faq:
 
   // ---------- The sound engine ----------
   // Self-contained: its source text also runs inside the AudioWorklet, where
-  // there is no page and no crypto. Each channel has its own random stream
-  // (xoshiro128**, period 2^128 - 1), so the noise never repeats.
+  // there is no page and no crypto. Left and right take turns drawing from one
+  // random stream (xoshiro128**, period 2^128 - 1), so the noise never repeats.
   function ngEngine(sr, seed) {
     'use strict';
     const TAU = 2 * Math.PI;
@@ -687,6 +688,8 @@ faq:
   function start() {
     if (st.mode === 'playing' || st.mode === 'starting') return;
     if (!ensureAudio()) return;
+    // Resume after an interruption keeps the sleep timer's end; Play starts the countdown.
+    const keepEnd = st.mode === 'interrupted' && tm.endAt > Date.now();
     const my = ++st.token, ctx = au.ctx;
     st.mode = 'starting';
     st.intShown = false;
@@ -708,7 +711,8 @@ faq:
       anchor(au.fader.gain, ctx.currentTime, 1);
       fadeIn(FADE_IN);
       au.src.start();
-      armTimer();
+      // (A timer changed while this was starting has cleared tm.endAt, so it starts afresh.)
+      if (keepEnd && tm.endAt) { bookFade(false); ticker(); renderTimer(); } else armTimer();
       ui();
       msSync();
       drawSoon();
@@ -778,7 +782,7 @@ faq:
     if (au.src) au.src.start();
     // The audio clock stood still while the context was stopped: book the
     // fade again from the wall clock (or arm the timer if Play never got that far).
-    if (tm.endAt) bookFade(); else armTimer();
+    if (tm.endAt) bookFade(false); else armTimer();
     ui();
     msSync();
     drawSoon();
@@ -919,21 +923,26 @@ faq:
     ticker();
     if (au && had) rampTo(au.fader.gain, 1, 0.5);
   }
+  // Starts the countdown from now. While the sound is interrupted the
+  // countdown runs on, and its fade is booked once the sound is back.
   function armTimer() {
     disarm();
     tm.done = '';
-    if (st.mode !== 'playing') { renderTimer(); return; }
-    const end = computeEnd(Date.now());
-    if (end) {
-      tm.endAt = end;
-      bookFade();
-    } else atError();
+    if (st.mode === 'playing' || st.mode === 'interrupted') {
+      const end = computeEnd(Date.now());
+      if (end) {
+        tm.endAt = end;
+        if (st.mode === 'playing') bookFade(true);
+      } else atError();
+    }
     ticker();
     renderTimer();
   }
+  // A change of timer applies at once, unless nothing is playing.
+  function retime() { if (st.mode === 'stopped') renderTimer(); else armTimer(); }
   // The fade is booked on the audio clock, so it happens on time even when
   // the page's timers are slowed down; tick() then stops playback.
-  function bookFade() {
+  function bookFade(fresh) {
     if (!au || !tm.endAt) return;
     const p = au.fader.gain, now = au.ctx.currentTime, left = (tm.endAt - Date.now()) / 1000;
     if (left <= 0.05) { rampTo(p, 0, 0.05); return; }
@@ -942,6 +951,10 @@ faq:
       anchor(p, now);
       p.linearRampToValueAtTime(1, now + Math.min(0.5, left - TIMER_FADE));
       p.setValueAtTime(1, end - TIMER_FADE);
+    } else if (fresh) {
+      // A new timer that ends within 2 minutes fades out over the time left.
+      anchor(p, now);
+      p.linearRampToValueAtTime(1, now + 0.05);
     } else {
       // Booked again inside the last 2 minutes (after an interruption): carry
       // on from where the fade should be by now.
@@ -955,18 +968,18 @@ faq:
     if (Date.now() >= tm.endAt) { stop('timer'); return; }
     renderTimer();
   }
-  const atLater = TT.debounce(function () { atError(); if (st.mode === 'playing') armTimer(); else renderTimer(); }, 900);
+  const atLater = TT.debounce(function () { atError(); retime(); }, 900);
   timerSel.addEventListener('change', function () {
     $('#ng-at-field').hidden = timerSel.value !== 'clock';
     tm.done = '';
     atError();
-    if (st.mode === 'playing') armTimer(); else renderTimer();
+    retime();
     ticker();
   });
   // A cleared or half-typed time is called wrong after a pause (or when the
   // field loses focus); a valid one clears the message and applies at once.
   function atChanged() {
-    if (nextAt(atIn.value, Date.now())) { atError(); if (st.mode === 'playing') armTimer(); else renderTimer(); } else atLater();
+    if (nextAt(atIn.value, Date.now())) { atError(); retime(); } else atLater();
   }
   atIn.addEventListener('input', atChanged);
   atIn.addEventListener('change', atChanged);
@@ -1027,7 +1040,7 @@ faq:
   function describe(curve) {
     const at = function (f) { return curve[Math.round(Math.log(f / 20) / Math.log(1000) * 240)]; };
     const fmt = function (d) { const r = Math.round(d); return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r) + ' dB'; };
-    return 'Expected spectrum of ' + NAMES.get(st.colour).toLowerCase() + ' noise, tone ' + toneText(st.tone).toLowerCase() + ': ' + fmt(at(100)) + ' at 100 Hz, 0 dB at 1 kHz and ' + fmt(at(10000)) + ' at 10 kHz.';
+    return 'Expected spectrum of ' + NAMES.get(st.colour).toLowerCase() + ' noise, tone ' + (st.tone ? toneText(st.tone) : 'neutral') + ': ' + fmt(at(100)) + ' at 100 Hz, 0 dB at 1 kHz and ' + fmt(at(10000)) + ' at 10 kHz.';
   }
   function draw() {
     const w = canvas.clientWidth, h = canvas.clientHeight;

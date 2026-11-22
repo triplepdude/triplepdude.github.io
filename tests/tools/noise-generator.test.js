@@ -244,6 +244,10 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     assert.equal(await page.inputValue('#ng-vol'), '20', `${hash} leaves the volume at 20%`);
     assert.equal(await text('#ng-play'), 'Play');
     assert.equal(await contexts(), 0, `${hash} started the audio engine`);
+    // The graph's text names the tone as the slider does ("dB", not "db").
+    const tv = +tone, toneWords = tv ? `${Math.abs(tv)} dB ${tv < 0 ? 'darker' : 'brighter'}` : 'neutral';
+    await page.waitForFunction(w => document.getElementById('ng-canvas').getAttribute('aria-label').includes(w), `, tone ${toneWords}: `, { timeout: 3000 })
+      .catch(async () => assert.fail(`graph label for ${hash}: ${await attr('#ng-canvas', 'aria-label')}`));
   }
   assert.equal(await attr('#ng-tone', 'aria-valuetext'), '12 dB brighter');
   // Junk, words that are properties of every object, bad escapes and a
@@ -494,6 +498,16 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.waitForTimeout(2000); // a 1 s fade-in, then a whole block
   m = await measure(1);
   near(m.rmsL, R.colours.white.rms_db, 1, 'white back after the interruption');
+  // A call on an iPhone stops the audio context and pauses the keep-alive too:
+  // when the context comes back by itself, the keep-alive plays again (or the
+  // lock screen would lose its controls).
+  await page.evaluate(() => { const c = window.__log.contexts[0]; c.resume = () => new Promise(() => {}); c.suspend(); });
+  await page.waitForFunction(() => document.getElementById('ng-live').textContent !== 'Playing');
+  await page.evaluate(() => new Promise(done => { const k = document.getElementById('ng-keep'); k.addEventListener('pause', done, { once: true }); k.pause(); }));
+  await page.evaluate(() => { const c = window.__log.contexts[0]; c.resume = window.__resume; return c.resume(); });
+  await playing();
+  assert.equal(await page.evaluate(() => document.getElementById('ng-keep').paused), false, 'the keep-alive stayed paused after the context came back');
+  assert.equal(await text('#ng-play'), 'Stop');
 
   // ---- Keyboard ----
   await blur();
@@ -523,6 +537,18 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await text('#ng-big'), 'Violet noise');
   assert.match(await page.inputValue('#ng-at'), /^(06|18):30$/, 'the digits went into the field (AM or PM as it was)');
   await page.selectOption('#ng-timer', '0');
+  // Keys pressed on a link in the guide, or with the tool scrolled away, are
+  // not the tool's.
+  await page.focus('.prose a[href="/speaker-test/"]');
+  await page.keyboard.press('3');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await text('#ng-big'), 'Violet noise', 'a key pressed on a link in the guide changed the colour');
+  await blur();
+  await page.evaluate(() => document.querySelector('.faq').scrollIntoView({ behavior: 'instant' }));
+  assert.ok(await page.evaluate(() => document.querySelector('.ng').getBoundingClientRect().bottom < 0), 'the tool is scrolled away');
+  await page.keyboard.press('3');
+  assert.equal(await text('#ng-big'), 'Violet noise', 'a key changed the colour while the tool was scrolled away');
+  await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' }));
   // Tab reaches Play with a visible focus ring, and Enter presses it.
   await page.focus('#ng-tone');
   await page.keyboard.press('Shift+Tab');
@@ -573,6 +599,13 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.waitForFunction(t => window.__tap.ctx.currentTime >= t + 3, t0, { timeout: 15000 });
   const used = await cpu() - c0;
   assert.ok(used < 0.6, `main thread busy for ${used.toFixed(2)} s of CPU in 3 s of playing`);
+
+  // ---- Leaving the page stops the sound and gives the phone's audio back ----
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+  assert.equal(await text('#ng-play'), 'Play');
+  assert.deepEqual(await page.evaluate(() => [document.getElementById('ng-keep').paused, window.__log.session.slice(-1)[0], navigator.mediaSession.playbackState]), [true, 'auto', 'paused']);
+  await page.click('#ng-play');
+  await playing();
 
   // ---- Stop ----
   await page.click('#ng-play');
@@ -630,6 +663,74 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await p.waitForFunction(() => document.getElementById('ng-play').textContent === 'Play', null, { timeout: 5000 });
     assert.equal(await p.locator('#ng-tinfo').textContent(), 'Stopped by the sleep timer at 06:30.');
     assert.deepEqual(await p.evaluate(() => [document.getElementById('ng-keep').paused, navigator.mediaSession.playbackState]), [true, 'paused']);
+    await ctx.close();
+  }
+
+  // ---- Resume after an interruption keeps the sleep timer; a timer chosen meanwhile applies ----
+  {
+    const { ctx, p } = await extraPage({ timezoneId: 'Europe/London', locale: 'en-GB' });
+    await p.clock.install({ time: new Date('2026-06-01T21:00:00Z') }); // 22:00 BST
+    await p.goto(url);
+    const info = async () => (await p.locator('#ng-tinfo').textContent()).replace(/\s/g, ' ');
+    const playingP = () => p.waitForFunction(() => document.getElementById('ng-live').textContent === 'Playing');
+    // The device pauses the keep-alive (headphones out, another app), so Resume appears.
+    const interruptP = async () => {
+      await p.evaluate(() => document.getElementById('ng-keep').pause());
+      await p.clock.runFor(1500);
+      assert.equal(await p.locator('#ng-play').textContent(), 'Resume');
+    };
+    const resumeP = async () => { await p.click('#ng-play'); await playingP(); };
+    // The last fade booked on the sleep-timer fader: the value it is anchored at,
+    // the call after the anchor, and how far ahead (audio clock) it ends.
+    const fade = () => p.evaluate(() => {
+      const f = window.__calls('fader'), k = f.map(x => x[0]).lastIndexOf('exponentialRampToValueAtTime');
+      let j = k;
+      while (j >= 0 && f[j][0] !== 'cancelScheduledValues') j--;
+      return { anchor: f[j + 1][1], next: [f[j + 2][0], f[j + 2][1]], left: f[k][2] - window.__tap.ctx.currentTime };
+    });
+    await p.selectOption('#ng-timer', '30');
+    await p.click('#ng-play');
+    await playingP();
+    assert.equal(await info(), 'Stops at 22:30 (in 30 min), after fading out over the last 2 minutes.');
+    await p.clock.fastForward(10 * 60000);
+    await interruptP();
+    await resumeP();
+    assert.equal(await info(), 'Stops at 22:30 (in 20 min), after fading out over the last 2 minutes.', 'Resume restarted the sleep timer');
+    let f = await fade();
+    near(f.left, 20 * 60, 5, 'fade end after Resume (s ahead on the audio clock)');
+    // Interrupted inside the last 2 minutes: the fade carries on from where it
+    // should be (about 1 minute left of a 2-minute fade from 1 to 1e-4: 0.01).
+    await p.clock.fastForward(19 * 60000);
+    await interruptP();
+    await resumeP();
+    f = await fade();
+    assert.ok(f.left > 50 && f.left < 62, `fade end after a late Resume: ${f.left.toFixed(1)} s`);
+    near(Math.log10(f.anchor), -4 * (1 - f.left / 120), 0.15, 'fade level after a Resume in the last 2 minutes (log10 of the gain)');
+    // A timer chosen while the sound is interrupted applies at once, and Off
+    // cancels the old one.
+    await interruptP();
+    await p.selectOption('#ng-timer', '15');
+    assert.match(await info(), /^Stops at \d\d:\d\d \(in 15 min\), after fading out/, 'a timer chosen while interrupted');
+    await resumeP();
+    assert.match(await info(), /\(in 15 min\)/);
+    near((await fade()).left, 15 * 60, 5, 'fade end of the timer chosen while interrupted (s)');
+    await interruptP();
+    await p.selectOption('#ng-timer', '0');
+    assert.equal(await info(), '');
+    await p.clock.fastForward(16 * 60000);
+    assert.equal(await p.locator('#ng-play').textContent(), 'Resume', 'a timer turned off while interrupted still stopped the sound');
+    await resumeP();
+    assert.equal(await info(), '');
+    // A clock time less than 2 minutes away fades out over the time left, from full level.
+    await p.selectOption('#ng-timer', 'clock');
+    const soon = await p.evaluate(() => { const d = new Date(Date.now() + 90000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); });
+    await p.fill('#ng-at', soon);
+    f = await fade();
+    assert.ok(f.left > 25 && f.left < 95, `fade end for ${soon}: ${f.left.toFixed(1)} s`);
+    assert.deepEqual(f.next, ['linearRampToValueAtTime', 1], `a timer ending within 2 minutes starts its fade at full level: ${JSON.stringify(f)}`);
+    await p.clock.fastForward(100000);
+    await p.waitForFunction(() => document.getElementById('ng-play').textContent === 'Play', null, { timeout: 5000 });
+    assert.equal(await info(), `Stopped by the sleep timer at ${soon}.`);
     await ctx.close();
   }
   {

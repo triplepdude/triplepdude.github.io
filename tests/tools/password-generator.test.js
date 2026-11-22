@@ -172,7 +172,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.press('#pg-own', 'Tab');
   assert.deepEqual(await fieldError('pg-own'), { text: 'Type the symbols to use, or untick Symbols.', invalid: 'true', linked: true });
   await page.fill('#pg-own', '!!a1€ -😀');
-  assert.equal(await text('#pg-own-hint'), 'Using 2 symbols: !-. Ignored: a 1 € 😀.');
+  // The symbols are listed apart, with no full stop that could be read as one of them.
+  assert.equal(await page.$eval('#pg-own-hint', el => el.innerText), 'Using 2 symbols: ! -\nIgnored: a 1 € 😀');
+  await page.fill('#pg-own', '-_.');
+  assert.equal(await page.$eval('#pg-own-hint', el => el.innerText), 'Using 3 symbols: - _ .');
+  await page.fill('#pg-own', '!!a1€ -😀');
   await noError();
   await expectStats('own-16');
   for (const p of await pws()) { assert.match(p, /^[A-Za-z0-9!-]{16}$/); assert.ok(kindsOf(p).s); }
@@ -332,6 +336,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---- PIN mode ----
   await setRange(20);
+  // Avoid look-alikes belongs to passwords: a PIN still uses 0 and 1 when it is ticked.
+  await page.check('#pg-alike');
   await page.check('input[name="pg-type"][value="pin"]');
   assert.equal(await page.inputValue('#pg-len'), '6');
   assert.equal(await status(), 'New PIN: 6 digits, 19.9 bits, weak, average time to crack less than a second.');
@@ -351,6 +357,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   }
   await setRange(128);
   await expectStats('pin-128');
+  await page.selectOption('#pg-count', '50');
+  const pinDigits = new Set((await pws()).join(''));
+  assert.ok(pinDigits.has('0') && pinDigits.has('1'), 'PINs use 0 and 1');
+  await page.selectOption('#pg-count', '1');
   await setRange(6);
   // 10 digits: values at or above 4294967290 are thrown away.
   await page.evaluate(() => window.__queue.push(9, 10, 4294967295, 4294967289, 0, 5, 7));
@@ -363,6 +373,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.check('input[name="pg-type"][value="password"]');
   assert.equal(await page.inputValue('#pg-len'), '20', 'the password length comes back');
   assert.equal((await pws())[0].length, 20);
+  await page.uncheck('#pg-alike');
+
+  // ---- Every action first brings the passwords up to date ----
+  // A field changed without an event (autofill, a restored form): Copy makes a matching password first.
+  await page.$eval('#pg-len', el => { el.value = '24'; });
+  await page.click('#pg-copy');
+  assert.equal((await page.evaluate(() => navigator.clipboard.readText())).length, 24, 'Copy acts on the options on screen');
+  assert.equal((await pws())[0].length, 24);
+  await setRange(20);
 
   // ---- Options in the address, never the password ----
   await setRange(24);
@@ -397,6 +416,35 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.goto(url + '#symbols=own&own=' + encodeURIComponent('!-a1'));
   assert.equal(await page.inputValue('#pg-own'), '!-');
   await expectStats('own-16');
+  // The kinds and the look-alike box make the round trip too.
+  const boxes = () => page.evaluate(() => ['lower', 'upper', 'digits', 'symbols', 'alike'].map(k => document.getElementById('pg-' + k).checked));
+  await page.goto('about:blank');
+  await page.goto(url);
+  await page.uncheck('#pg-upper');
+  await page.uncheck('#pg-symbols');
+  await page.check('#pg-alike');
+  await setRange(10);
+  const h2 = await page.evaluate(() => location.hash);
+  assert.equal(h2, '#length=10&use=ld&lookalikes=no');
+  await page.goto('about:blank');
+  await page.goto(url + h2);
+  assert.deepEqual(await boxes(), [true, false, true, false, true]);
+  for (const p of await pws()) assert.match(p, /^[a-km-np-z2-9]{10}$/);
+  // An address without "use" means all four kinds, also when only the part after # changes,
+  // and the address is left as it was typed.
+  await page.goto(url + '#length=20');
+  assert.deepEqual(await boxes(), [true, true, true, true, false]);
+  await expectStats('all-20');
+  assert.equal(await page.evaluate(() => location.hash), '#length=20');
+  await page.goto(url + '#');
+  await expectStats('all-16');
+  // Changing the speed while the length is wrong never writes the wrong length into the address.
+  await page.fill('#pg-len', 'abc');
+  await page.selectOption('#pg-rate', '1e14');
+  assert.doesNotMatch(await page.evaluate(() => location.hash), /length/);
+  await page.fill('#pg-len', '16');
+  assert.equal(await page.evaluate(() => location.hash), '#speed=1e14');
+  await page.selectOption('#pg-rate', '1e11');
 
   // ---- Fields put back by the browser after the script ran (Back button) ----
   await page.goto(url);
@@ -462,10 +510,22 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // 100 passwords of 128 characters wrap inside their rows; nothing is cut off at common widths.
   await p2.selectOption('#pg-count', '100');
   await p2.$eval('#pg-len-range', el => { el.value = '128'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  // A label's words wrap as one block of text beside its box, not as columns of separate pieces.
+  assert.deepEqual(await p2.$$eval('.pg .check', l => l.filter(e => [...e.childNodes].filter(n => n.nodeName !== 'INPUT' && (n.nodeType === 1 || n.textContent.trim())).length !== 1).map(e => e.textContent.trim())), []);
   for (const width of [320, 340, 360, 390, 414, 480, 540]) {
     await p2.setViewportSize({ width, height: 800 });
     const cut = await p2.$$eval('.pg button, .pg .check', l => l.filter(e => e.getClientRects().length && (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1)).map(e => e.textContent.trim()));
     assert.deepEqual(cut, [], `nothing cut off at ${width}px`);
+    // Placeholders fit their boxes.
+    const longPh = await p2.$$eval('.pg input[placeholder]', l => {
+      const ctx = document.createElement('canvas').getContext('2d');
+      return l.filter(e => e.getClientRects().length).filter(e => {
+        const cs = getComputedStyle(e);
+        ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        return ctx.measureText(e.placeholder).width > e.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      }).map(e => e.placeholder);
+    });
+    assert.deepEqual(longPh, [], `placeholders fit at ${width}px`);
     // A select box shows the chosen option's text: every option must fit beside the arrow.
     const tight = await p2.$$eval('.pg select', l => {
       const ctx = document.createElement('canvas').getContext('2d');

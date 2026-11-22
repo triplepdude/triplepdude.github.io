@@ -614,24 +614,45 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await t7.clock.runFor(24100);
   await t7.waitForFunction(() => !document.getElementById('tt-result').hidden);
   // The field has let go of the focus, which closes the keyboard, and the
-  // result's heading has it; the result scrolls into view (smoothly: wait).
+  // result's heading has it; the result is scrolled into view at once (a
+  // smooth scroll still under way would carry on past an Esc, see below).
   assert.equal(await active(t7), 'tt-r-h');
   assert.equal(await text('#tt-r-h', t7), 'Your result');
   const scoreShown = () => t7.evaluate(() => { const r = document.getElementById('tt-r-wpm').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
-  for (const t0 = Date.now(); !(await scoreShown()) && Date.now() - t0 < 5000;) await t7.waitForTimeout(50);
   assert.equal(await scoreShown(), true, 'the score is on screen');
-  // For a second, keys and taps from fingers still typing do nothing...
+  // For a second, taps and keys from fingers still typing do nothing, and keys
+  // typed on (a keyboard plugged into a tablet) stay quiet until none has come
+  // for a second: Space here 0.1, 0.7 and 1.3 seconds after the end...
   await t7.evaluate(() => { window.__keys = []; window.addEventListener('keydown', e => window.__keys.push(e), true); });
-  await t7.keyboard.press('Space');
   await t7.locator('#tt-clear').click();
+  for (let i = 0; i < 3; i++) {
+    if (i) await t7.clock.runFor(600);
+    await t7.keyboard.press('Space');
+  }
   const lateKeys = await t7.evaluate(() => window.__keys.map(e => e.key + ' ' + e.defaultPrevented + ' ' + (e.target.id || e.target.nodeName) + ' ' + Math.round(performance.now())));
-  assert.deepEqual(lateKeys.map(k => k.split(' ').slice(0, 3).join(' ')), ['  true'], 'keys seen: ' + JSON.stringify(lateKeys));
+  assert.deepEqual(lateKeys.map(k => k.split(' ').slice(0, 3).join(' ')), ['  true', '  true', '  true'], 'keys seen: ' + JSON.stringify(lateKeys));
   assert.equal((await rows('#tt-hist', t7)).length, 1, 'a stray tap did not clear the session');
   assert.equal(await t7.locator('#tt-result').isVisible(), true);
   // ...and then they work again.
-  await t7.clock.runFor(1000);
+  await t7.clock.runFor(1100);
   await t7.locator('#tt-clear').click();
   assert.equal(await text('#tt-hist', t7), 'No tests yet.');
+  // With a keyboard plugged in, Esc just after the end starts a new test that
+  // takes keys at once, with the text box brought back on screen.
+  await ready(t7);
+  const tw2 = await words(t7);
+  await t7.locator('#tt-box').tap();
+  for (let i = 0; i < 6; i++) { await t7.keyboard.insertText(tw2[i] + ' '); await t7.clock.runFor(1000); }
+  await t7.clock.runFor(24100);
+  await t7.waitForFunction(() => document.activeElement && document.activeElement.id === 'tt-r-h');
+  await t7.keyboard.press('Escape');
+  assert.equal(await active(t7), 'tt-input');
+  const boxShown = () => t7.evaluate(() => { const r = document.getElementById('tt-box').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+  for (const t0 = Date.now(); !(await boxShown()) && Date.now() - t0 < 5000;) await t7.waitForTimeout(50);
+  assert.equal(await boxShown(), true, 'the text box is on screen');
+  const tw3 = await words(t7);
+  await t7.keyboard.type(tw3[0]);
+  assert.equal(await value(t7), tw3[0], 'keys typed just after Esc count');
   assert.deepEqual(terrors, []);
   await touch.close();
 

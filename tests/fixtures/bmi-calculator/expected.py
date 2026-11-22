@@ -184,6 +184,9 @@ for sex, y, m, h_cm, w_kg in [
     ('1', 19, 6, '180', '115'),     # BMI 35.5 but under 120% of the 95th: severe by BMI
     ('2', 19, 0, '165', '110'),     # BMI 40.4, under 140%: class 3 by BMI
     ('1', 9, 0, '135', '95'), ('2', 4, 9, '105', '13.9'), ('1', 15, 0, '170', '102'), ('2', 12, 0, '150', '80'),
+    ('1', 2, 9, '85.5', '28'),      # BMI 38.3 at 2 years 9 months: z above the CDC's cap of 8.21
+    ('2', 18, 0, '163', '61'),      # 18 exactly: the adult category is shown too
+    ('1', 17, 11, '175', '64'),     # a month short of 18: not yet
 ]:
     months = y * 12 + m
     q = F(w_kg) / (F(h_cm) / 100) ** 2

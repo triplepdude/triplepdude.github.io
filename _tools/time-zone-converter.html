@@ -8,8 +8,9 @@ howto: |
 
   Type a question such as `3pm EST to IST` or `10:30 London to Tokyo and
   Sydney`, or set the date and time of the first place and add others by
-  city, country, zone name (Europe/London), UTC offset (UTC+5:30) or
-  abbreviation (EST, IST, AoE). Up to 12 places are compared. Each shows its
+  city, country, zone name (Europe/London), UTC offset (UTC+5:30),
+  abbreviation (EST, IST, AoE) or name (Pacific Time). Up to 12 places are
+  compared. Each shows its
   UTC offset, whether its date differs, its next clock change and any change
   in the time difference over the next 12 months. When an abbreviation, a
   country or a city name could mean places in different time zones, the page
@@ -74,6 +75,8 @@ howto: |
   each reader's own zone on Discord, use the
   [Discord timestamp generator](/discord-timestamp-generator/).
 faq:
+  - q: Is EST the same as ET?
+    a: "Not quite. EST, Eastern Standard Time, is UTC−5, which New York keeps from the first Sunday of November to the second Sunday of March. ET, Eastern Time, means whatever New York's clocks show: EST in winter and EDT, UTC−4, in summer. A summer time written as EST usually means ET, and this page reads it that way unless you pick fixed UTC−5."
   - q: Is UTC the same as GMT?
     a: "On a clock, yes: both are UTC+00:00. UTC is the world's reference time scale, kept by atomic clocks, while GMT is also the name of the UK's winter time. From the last Sunday of March to the last Sunday of October the UK is on BST, UTC+01:00, so a summer time given in GMT is an hour behind UK clocks."
   - q: What does AoE mean in a deadline?
@@ -388,11 +391,29 @@ faq:
     'America/Havana': 'Havana (Cuba)', 'Africa/Casablanca': 'Casablanca (Morocco)',
     'Africa/El_Aaiun': 'El Aaiún (Western Sahara)', 'Europe/Chisinau': 'Chișinău (Moldova)'
   });
+  // After the table (from 2041), older data goes on applying the old rules. Six zones then have one
+  // offset in tz 2026f where older data gives it or another: [the other, the tz 2026f offset].
+  // Moldova's older data changes the clocks an hour early, at 00:00 UTC on the last Sundays of
+  // March and October; those hours are added to its list up to 2100, the last year the page takes.
+  var STALE_END = 37343520; // 2041-01-01 00:00 UTC, in minutes
+  var STALE_TAIL = table({
+    'America/Vancouver': [-480, -420], 'America/Edmonton': [-420, -360], 'America/Inuvik': [-420, -360],
+    'America/Winnipeg': [-360, -300], 'Africa/Casablanca': [60, 0], 'Africa/El_Aaiun': [60, 0]
+  });
+  (function () {
+    for (var y = 2041; y <= 2100; y++) {
+      [[3, 180, 120], [10, 120, 180]].forEach(function (x) {
+        var d = daysFromCivil(y, x[0], 31), sun = d - civil(d).dow;
+        STALE['Europe/Chisinau'].push([sun * 1440, sun * 1440 + 60, x[1], x[2]]);
+      });
+    }
+  })();
   function staleList(tz) { return STALE[STALE_LINKS[tz] || tz] || null; }
   function staleFix(tz, ms, raw) { // corrected offset in seconds, or null
     var list = staleList(tz);
     if (!list) return null;
-    var m = ms / MIN;
+    var m = ms / MIN, tail = STALE_TAIL[STALE_LINKS[tz] || tz];
+    if (tail && m >= STALE_END) return raw === tail[0] * 60 ? tail[1] * 60 : null;
     for (var i = 0; i < list.length; i++) {
       if (m < list[i][0]) return null;
       if (m < list[i][1]) return raw === list[i][2] * 60 ? list[i][3] * 60 : null;
@@ -531,9 +552,18 @@ faq:
     k.split(',').forEach(function (x) { var i = x.indexOf(' '); map.set(+x.slice(0, i) * 60, x.slice(i + 1)); });
     ABBR_DATA[k].split(' ').forEach(function (z) { ABBR.set(z, map); });
   });
-  function abbrOf(p, off) {
+  // Until their 2026 changes these zones' offsets had other names: [the change, in minutes since
+  // 1970 UTC, and the names before it].
+  var ABBR_BEFORE = new Map();
+  [['America/Vancouver', 29892060, '-480 PST,-420 PDT'], ['America/Edmonton', 29892000, '-420 MST,-360 MDT'],
+    ['America/Inuvik', 29892000, '-420 MST,-360 MDT'], ['America/Winnipeg', 29891940, '-360 CST,-300 CDT']].forEach(function (x) {
+    var map = new Map();
+    x[2].split(',').forEach(function (y) { var i = y.indexOf(' '); map.set(+y.slice(0, i) * 60, y.slice(i + 1)); });
+    ABBR_BEFORE.set(x[0], [x[1] * MIN, map]);
+  });
+  function abbrOf(p, off, t) { // the name of a place's offset at the instant t
     if (p.off != null) return p.ab || (p.off === 0 ? 'UTC' : '');
-    var m = ABBR.get(p.zone);
+    var b = ABBR_BEFORE.get(p.zone), m = b && t < b[0] ? b[1] : ABBR.get(p.zone);
     return (m && m.get(off)) || '';
   }
 
@@ -615,6 +645,24 @@ faq:
     return { zone: modern(e[2]), name: e[4], sub: e[1], from: e[0] };
   }
   function fixedFromAbbr(e) { return { off: e[3], name: e[0] + ' (fixed)', sub: e[1] + ', ' + fmtOff(e[3] * 60) + ' all year', ab: e[0] }; }
+  // Zones named in words, as people in North America say them ("Pacific time", "Eastern"), and the
+  // meanings above typed in full ("Eastern Standard Time"). Never a zone of the Pacific region.
+  var ZONE_WORDS = table({
+    eastern: 'ET', central: 'CT', mountain: 'MT', pacific: 'PT',
+    atlantic: ['America/Halifax', 'Halifax', 'Atlantic Time'], alaska: ['America/Anchorage', 'Anchorage', 'Alaska Time'],
+    hawaii: ['Pacific/Honolulu', 'Honolulu', 'Hawaii Time'], newfoundland: ['America/St_Johns', 'St. John’s', 'Newfoundland Time'],
+    arizona: ['America/Phoenix', 'Phoenix', 'Arizona, on Mountain Standard Time all year']
+  });
+  function namedZone(raw) { // a place, or null
+    var f = fold(raw).replace(/^(?:the|us|u s) /, ''), timed = / time$| time zone$| timezone$/.test(f);
+    f = f.replace(/ time zone$| timezone$| time$| zone$/, '');
+    var w = ZONE_WORDS[f];
+    if (typeof w === 'string') { var e = abbrEntries(w)[0]; return e ? placeFromAbbr(e) : null; }
+    if (w) return validZone(w[0]) ? { zone: w[0], name: w[1], sub: w[2] } : null;
+    if (!f || !(timed || / (?:standard|daylight|summer)$/.test(f))) return null; // "Eastern Daylight", its "time" cut off
+    var hit = ABBR_LIST.filter(function (x) { return fold(x[1]).replace(/ time$/, '') === f && (!x[2] || validZone(modern(x[2]))); })[0];
+    return hit ? placeFromAbbr(hit) : null;
+  }
   // The entry a zone row stands for, when it was made from an abbreviation.
   function abbrEntryOf(p) {
     if (!p.from || p.off != null) return null;
@@ -782,11 +830,14 @@ faq:
     try { z = Intl.supportedValuesOf('timeZone').map(modern); } catch (e) { z = []; }
     return z.filter(function (x, i, a) { return a.indexOf(x) === i; }).sort();
   })();
-  function zoneMatches(raw, limit) {
+  function zoneMatches(raw, limit, strict) { // strict: the words must match after the region (not "Europe" alone)
     var q = fold(raw);
     if (q.length < 3) return [];
     var exact = ZONES.filter(function (z) { return fold(z) === q; });
-    var part = ZONES.filter(function (z) { var f = ' ' + fold(z); return exact.indexOf(z) < 0 && f.indexOf(' ' + q) >= 0; });
+    var part = ZONES.filter(function (z) {
+      var f = ' ' + fold(strict ? z.replace(/^[^\/]+\//, '') : z);
+      return exact.indexOf(z) < 0 && f.indexOf(' ' + q) >= 0;
+    });
     return exact.concat(part).slice(0, limit);
   }
 
@@ -842,15 +893,20 @@ faq:
     return { t: r.t, r: r, w: wallAt(p, r.t) };
   }
   // Fix the shown instant in the first place's wall time (after a reorder or a planner pick).
+  // Returns false, and says why, when that moment falls outside the dates the page takes.
+  var RANGE_MSG = 'This page works with dates from 1 January 1900 to 31 December 2100.';
   function setInstant(t, p) {
     p = p || home();
     anchor(p, t);
     var w = wallAt(p, t);
+    if (w.y < 1900 || w.y > 2100) { setError(whenErr, null, RANGE_MSG); return false; }
+    if (whenErr.textContent) setError(whenErr, [dateIn, timeIn], '');
     state.live = false;
     state.date = isoDate(w);
     state.time = pad(w.h) + ':' + pad(w.mi);
     var r = fromWall(p, w.y, w.m, w.d, w.h, w.mi, 0);
     state.rep = r.repeated && r.both[1] === t ? 1 : 0;
+    return true;
   }
 
   // ---------- Elements ----------
@@ -933,7 +989,7 @@ faq:
 
   function rowInfo(p, cur) {
     var t = cur.t, w = wallAt(p, t), hw = cur.w;
-    return { p: p, w: w, ab: abbrOf(p, w.off), shift: w.days - hw.days };
+    return { p: p, w: w, ab: abbrOf(p, w.off, t), shift: w.days - hw.days };
   }
   function summary(cur) {
     var parts = state.places.slice(0, 4).map(function (p, i) {
@@ -956,7 +1012,7 @@ faq:
     if (!ch) return 'Fixed offset: its clock never changes.';
     if (ch.none) return 'No clock change in the next 12 months.';
     var before = wallFromOff(ch.at, ch.from), after = wallFromOff(ch.at, ch.to), d = ch.to - ch.from;
-    var ab = abbrOf(p, ch.to);
+    var ab = abbrOf(p, ch.to, ch.at);
     return 'Next clock change: ' + fmtDate(before) + ' at ' + fmtTime(before.h, before.mi) + ', ' + (d > 0 ? 'forward ' : 'back ') +
       fmtAmount(d) + ' to ' + fmtTime(after.h, after.mi) + ' (' + (ab ? ab + ', ' : '') + fmtOff(ch.to) + ').';
   }
@@ -988,7 +1044,7 @@ faq:
     if (!r.repeated) return '';
     var first = r.both[0] === t;
     return fmtTime(w.h, w.mi) + ' happens twice in ' + p.name + ' on ' + fmtDate(w) + ', as clocks go back; this is the ' +
-      (first ? 'first' : 'second') + ' time, ' + (abbrOf(p, w.off) || fmtOff(w.off)) + '.';
+      (first ? 'first' : 'second') + ' time, ' + (abbrOf(p, w.off, t) || fmtOff(w.off)) + '.';
   }
 
   function renderRows(cur) {
@@ -1019,7 +1075,7 @@ faq:
           ', the moment ' + esc(fmtTime(tm.h, tm.mi)) + ' would have been before the change.</p>');
       }
       if (!i && cur.r && cur.r.repeated) {
-        var other = cur.r.both[1 - cur.r.rep], ow = wallAt(p, other), oab = abbrOf(p, ow.off) || fmtOff(ow.off);
+        var other = cur.r.both[1 - cur.r.rep], ow = wallAt(p, other), oab = abbrOf(p, ow.off, other) || fmtOff(ow.off);
         notes.push('<p class="tzc-note is-warn">' + esc(fmtTime(w.h, w.mi)) + ' happens twice in ' + esc(p.name) + ' on ' + esc(fmtDate(w)) +
           ', as clocks go back. Showing the ' + (cur.r.rep ? 'second' : 'first') + ' time, ' + esc(r.ab || fmtOff(w.off)) + ' (' + esc(fmtOff(w.off)) + ').' +
           '<br><button class="btn secondary small" type="button" data-act="rep">Use the ' + (cur.r.rep ? 'first' : 'second') + ' time (' + esc(oab) + ')</button></p>');
@@ -1133,11 +1189,8 @@ faq:
   }
   function pickColumn(i) {
     if (!planCols.length) return;
-    if (i < 0 || i >= planCols.length) {
-      var t = i < 0 ? planCols[0] - HOUR : planCols[planCols.length - 1] + HOUR;
-      setInstant(t);
-    } else setInstant(planCols[i]);
-    render({ syncFields: true });
+    var t = i < 0 ? planCols[0] - HOUR : i >= planCols.length ? planCols[planCols.length - 1] + HOUR : planCols[i];
+    if (setInstant(t)) render({ syncFields: true });
   }
 
   // ---------- When everyone can meet ----------
@@ -1191,11 +1244,20 @@ faq:
   }
 
   // ---------- Every week ----------
+  // The first place's date and time a weekly series repeats: as typed, even when that time is
+  // skipped on the first date (02:30 on 14 March 2027 in New York is shown as 03:30, but the
+  // meeting is at 02:30 on the dates after).
+  function seriesStart(cur) {
+    var d = !state.live && cur.r && parseDateStr(state.date), tm = d && parseTimeStr(state.time);
+    if (!tm) return { days: cur.w.days, dow: cur.w.dow, w: cur.w, h: cur.w.h, mi: cur.w.mi };
+    var days = daysFromCivil(d.y, d.m, d.d), c = civil(days);
+    return { days: days, dow: c.dow, w: { y: d.y, m: d.m, d: d.d, dow: c.dow }, h: tm.h, mi: tm.mi };
+  }
   function series(n, cur) {
-    var p0 = home(), w = cur.w, base = w.days, out = [];
+    var p0 = home(), st = seriesStart(cur), out = [];
     for (var k = 0; k < n; k++) {
-      var c = civil(base + 7 * k);
-      var r = k === 0 && cur.r ? cur.r : fromWall(p0, c.y, c.m, c.d, w.h, w.mi, k === 0 ? state.rep : 0);
+      var c = civil(st.days + 7 * k);
+      var r = k === 0 && cur.r ? cur.r : fromWall(p0, c.y, c.m, c.d, st.h, st.mi, k === 0 ? state.rep : 0);
       if (k === 0 && !cur.r) r = { t: cur.t };
       out.push({ t: r.t, skipped: !!r.skipped });
     }
@@ -1210,8 +1272,9 @@ faq:
       if (last && last.key === key) { last.b = hw; last.n++; return; }
       runs.push({ key: key, cells: cells, a: hw, b: hw, n: 1 });
     });
-    weekHint.textContent = 'A meeting at ' + fmtTime(cur.w.h, cur.w.mi) + ' in ' + p0.name + ' every ' + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][cur.w.dow] +
-      ' for 52 weeks from ' + fmtDate(cur.w) + (runs.length > 1 ? '. Rows start where a clock change moves the local time somewhere; changed times are in bold.' : '. No clock change moves it anywhere.');
+    var st = seriesStart(cur);
+    weekHint.textContent = 'A meeting at ' + fmtTime(st.h, st.mi) + ' in ' + p0.name + ' every ' + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][st.dow] +
+      ' for 52 weeks from ' + fmtDate(st.w) + (runs.length > 1 ? '. Rows start where a clock change moves the local time somewhere; changed times are in bold.' : '. No clock change moves it anywhere.');
     var head = '<thead><tr><th scope="col">Weeks</th>' + state.places.map(function (p) { return '<th scope="col">' + esc(p.name) + '</th>'; }).join('') + '</tr></thead>';
     var body = runs.map(function (r, i) {
       var prev = runs[i - 1];
@@ -1293,51 +1356,71 @@ faq:
   var WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   function parseAsk(text) {
     var s = text.replace(/[−–—]/g, '-').replace(/→/g, ' to ').replace(/\s+/g, ' ').trim();
-    s = s.replace(/[?!]+$/, '').trim()
+    s = s.replace(/[?!.]+$/, '').trim()
       .replace(/^(?:what(?:'s|’s| is)|whats|convert|show(?: me)?|when is)\s+/i, '')
       .replace(/^(?:what\s+)?(?:the\s+)?(?:current\s+)?time\s+(?:is\s+it\s+|now\s+)?(?=in\b|at\b)/i, '')
-      .replace(/\s+(?:time|times)$/i, '');
+      .replace(/\s+(?:(?:time\s+)?(?:converter|conversion|difference)|times?)$/i, '');
+    // "time difference between London and Tokyo"
+    var between = /^(?:the\s+)?(?:time\s+)?(?:difference|gap)(?:\s+(?:between|from|in))?\s+(.+?)\s+(?:and|to|&|vs\.?)\s+(.+)$/i.exec(s);
+    if (between) s = between[1] + ' to ' + between[2];
     var sep = /\s+(?:to|in|into|=|->|vs\.?|versus)\s+|^(?:in)\s+/i.exec(s), left = s, right = '';
-    if (sep) { left = s.slice(0, sep.index); right = s.slice(sep.index + sep[0].length); }
+    if (sep) {
+      left = s.slice(0, sep.index); right = s.slice(sep.index + sep[0].length);
+      // "6pm in Paris to Sydney": an "in" before another separator belongs to the first place.
+      var sep2 = /^in$/i.test(sep[0].trim()) && /\s+(?:to|into|=|->|vs\.?|versus)\s+/i.exec(right);
+      if (sep2) { left = left + ' ' + right.slice(0, sep2.index); right = right.slice(sep2.index + sep2[0].length); }
+    }
     var out = { time: null, date: null, from: '', to: [] };
-    // Dates first, so that the day of the month is not read as an hour.
-    var m;
-    left = ' ' + left + ' ';
-    if ((m = /\s(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})(?=\s)/.exec(left))) {
-      return { error: 'Write the date as 14 Mar 2027 or 2027-03-14: ' + m[0].trim() + ' is a different day in the UK and the US.' };
-    }
-    if ((m = /\s(\d{4})-(\d{1,2})-(\d{1,2})(?=\s)/.exec(left))) { out.date = { y: +m[1], m: +m[2], d: +m[3] }; left = left.replace(m[0], ' '); }
-    else if ((m = new RegExp('\\s(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?' + MONTH_RE + '(?:,?\\s+(\\d{4}))?(?=\\s)', 'i').exec(left))) {
-      out.date = { d: +m[1], m: MONTHS.indexOf(m[2].slice(0, 3).toLowerCase()) + 1, y: m[3] ? +m[3] : null }; left = left.replace(m[0], ' ');
-    } else if ((m = new RegExp('\\s' + MONTH_RE + '\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?(?=\\s)', 'i').exec(left))) {
-      out.date = { d: +m[2], m: MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) + 1, y: m[3] ? +m[3] : null }; left = left.replace(m[0], ' ');
-    } else if ((m = /\s(today|tonight|tomorrow|yesterday)(?=\s)/i.exec(left))) {
-      out.date = { rel: { today: 0, tonight: 0, tomorrow: 1, yesterday: -1 }[m[1].toLowerCase()] }; left = left.replace(m[0], ' ');
-    } else if ((m = /\s(?:on\s+|next\s+)?(sun|mon|tue|wed|thu|fri|sat)(?:day|s|nday|sday|nesday|rsday|urday|ues|urs|hurs)?(?=\s)/i.exec(left))) {
-      out.date = { dow: WEEKDAYS.indexOf(m[1].toLowerCase()), next: /next/i.test(m[0]) }; left = left.replace(m[0], ' ');
-    }
-    if ((m = /\s(?:at\s+)?(noon|midday|midnight|now|(\d{1,2})(?:[:.h](\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?)(?=\s)/i.exec(left))) {
-      var word = m[1].toLowerCase();
-      if (word === 'noon' || word === 'midday') out.time = { h: 12, mi: 0 };
-      else if (word === 'midnight') out.time = { h: 0, mi: 0 };
-      else if (word === 'now') out.time = 'now';
-      else if (m[3] != null || m[4]) {
-        var h = +m[2], mi = m[3] != null ? +m[3] : 0, ap = (m[4] || '').replace(/\./g, '').toLowerCase();
-        if (ap) { if (h < 1 || h > 12) return { error: m[1].trim() + ' is not a time: with am or pm the hour runs from 1 to 12.' }; h = h % 12 + (ap === 'pm' ? 12 : 0); }
-        if (h > 23 || mi > 59) return { error: m[1].trim() + ' is not a time of day.' };
-        out.time = { h: h, mi: mi };
+    // The date and the time are looked for before the places they are compared with, then after
+    // them ("3pm EST to IST tomorrow"); dates first, so that the day of the month is not read as an hour.
+    function grab(str) {
+      var m;
+      str = ' ' + str + ' ';
+      if ((m = /\s(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})(?=\s)/.exec(str))) {
+        return { error: 'Write the date as 14 Mar 2027 or 2027-03-14: ' + m[0].trim() + ' is a different day in the UK and the US.' };
       }
-      if (out.time) left = left.replace(m[0], ' ');
+      if (out.date) { /* already found */ }
+      else if ((m = /\s(\d{4})-(\d{1,2})-(\d{1,2})(?=\s)/.exec(str))) { out.date = { y: +m[1], m: +m[2], d: +m[3] }; str = str.replace(m[0], ' '); }
+      else if ((m = new RegExp('\\s(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?' + MONTH_RE + '(?:,?\\s+(\\d{4}))?(?=\\s)', 'i').exec(str))) {
+        out.date = { d: +m[1], m: MONTHS.indexOf(m[2].slice(0, 3).toLowerCase()) + 1, y: m[3] ? +m[3] : null }; str = str.replace(m[0], ' ');
+      } else if ((m = new RegExp('\\s' + MONTH_RE + '\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?(?=\\s)', 'i').exec(str))) {
+        out.date = { d: +m[2], m: MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) + 1, y: m[3] ? +m[3] : null }; str = str.replace(m[0], ' ');
+      } else if ((m = /\s(today|tonight|tomorrow|yesterday)(?=\s)/i.exec(str))) {
+        out.date = { rel: { today: 0, tonight: 0, tomorrow: 1, yesterday: -1 }[m[1].toLowerCase()] }; str = str.replace(m[0], ' ');
+      } else if ((m = /\s(?:on\s+|next\s+)?(sun|mon|tue|wed|thu|fri|sat)(?:day|s|nday|sday|nesday|rsday|urday|ues|urs|hurs)?(?=\s)/i.exec(str))) {
+        out.date = { dow: WEEKDAYS.indexOf(m[1].toLowerCase()), next: /next/i.test(m[0]) }; str = str.replace(m[0], ' ');
+      }
+      if (!out.time && (m = /\s(?:at\s+)?(noon|midday|midnight|now|(\d{1,2})(?:[:.h](\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?)(?=\s)/i.exec(str))) {
+        var word = m[1].toLowerCase();
+        if (word === 'noon' || word === 'midday') out.time = { h: 12, mi: 0 };
+        else if (word === 'midnight') out.time = { h: 0, mi: 0 };
+        else if (word === 'now') out.time = 'now';
+        else if (m[3] != null || m[4]) {
+          var h = +m[2], mi = m[3] != null ? +m[3] : 0, ap = (m[4] || '').replace(/\./g, '').toLowerCase();
+          if (ap) { if (h < 1 || h > 12) return { error: m[1].trim() + ' is not a time: with am or pm the hour runs from 1 to 12.' }; h = h % 12 + (ap === 'pm' ? 12 : 0); }
+          if (h > 23 || mi > 59) return { error: m[1].trim() + ' is not a time of day.' };
+          out.time = { h: h, mi: mi };
+        }
+        if (out.time) str = str.replace(m[0], ' ');
+      }
+      return { s: str };
     }
-    out.from = left.replace(/\s+(?:at|on)\s*$/i, '').replace(/^\s*(?:at|on)\s+/i, '').trim();
-    out.to = right ? right.split(/\s*(?:,|;|&|\band\b|\bplus\b)\s*/i).map(function (x) { return x.trim(); }).filter(Boolean) : [];
+    function clean(x) { return x.replace(/\s+(?:at|on)\s*$/i, '').replace(/^\s*(?:at|on)\s+/i, '').trim(); }
+    var g = grab(left);
+    if (g.error) return g;
+    left = g.s;
+    if (right) { g = grab(right); if (g.error) return g; right = g.s; }
+    out.from = clean(left);
+    out.to = right ? right.split(/\s*(?:,|;|&|\band\b|\bplus\b)\s*/i).map(clean).filter(Boolean) : [];
     return out;
   }
   // A place named in text -> { place, alts, lead } or { error }.
   function resolvePlace(str) {
+    var named = namedZone(str);
+    if (named) return Promise.resolve({ place: named });
     var s = str.trim().replace(/^the\s+/i, '').replace(/\s+(?:time zone|timezone|time)$/i, '');
     var off = parseOffset(s);
-    if (off != null) return Promise.resolve({ place: fixedPlace(off) });
+    if (off != null && !/^gmt$/i.test(s)) return Promise.resolve({ place: fixedPlace(off) }); // GMT is read below, with its note on UK time
     if (/^(?:utc|gmt)\s*[+\-]/i.test(s)) return Promise.resolve({ error: s + ' is not an offset between UTC−12:00 and UTC+14:00.' });
     var ab = abbrEntries(s);
     if (ab.length) return Promise.resolve({ place: placeFromAbbr(ab[0]) });
@@ -1353,7 +1436,7 @@ faq:
       }
       var cs = cityMatches(s, 40);
       if (!cs.length) {
-        var zs = zoneMatches(s, 1);
+        var zs = zoneMatches(s, 1, true);
         if (zs.length) return { place: zonePlace(zs[0]) };
         return { error: 'No place called “' + cut(s, 40) + '” was found. Try a larger city nearby, the country, a zone such as Europe/Paris or an offset such as UTC+2.' };
       }
@@ -1419,6 +1502,14 @@ faq:
         state.date = d.y + '-' + pad(d.m) + '-' + pad(d.d);
         state.time = pad(tm.h) + ':' + pad(tm.mi);
         state.rep = 0;
+        // A time that happens twice, typed with the abbreviation of one of them ("1:30 EST" on the
+        // night clocks go back), is that one.
+        var en = abbrEntryOf(state.places[0]);
+        if (en && en[3] != null) {
+          anchor(state.places[0], utcMs(d.y, d.m, d.d, tm.h, tm.mi, 0));
+          var fw = fromWall(state.places[0], d.y, d.m, d.d, tm.h, tm.mi, 0);
+          if (fw.repeated && offAt(state.places[0], fw.both[1]).off === en[3] * 60) state.rep = 1;
+        }
       }
       setError(whenErr, [dateIn, timeIn], '');
       render({ syncFields: true, announce: true });
@@ -1466,15 +1557,15 @@ faq:
     var t = shown.t, focusAct = null, focusI = i;
     if (act === 'remove') {
       if (state.places.length < 2) return;
+      if (i === 0 && !state.live && !setInstant(t, state.places[1])) return; // the next place's date is out of range
       state.places.splice(i, 1);
-      if (i === 0 && !state.live) setInstant(t, state.places[0]);
       announceAfter = p.name + ' removed.';
       focusI = Math.min(i, state.places.length - 1);
       focusAct = 'remove';
     } else if (act === 'first') {
+      if (!state.live && !setInstant(t, p)) return;
       state.places.splice(i, 1);
       state.places.unshift(p);
-      if (!state.live) setInstant(t, p);
       announceAfter = p.name + ' is now the first place.';
       focusI = 0; focusAct = 'remove';
     } else if (act === 'rep') {
@@ -1520,6 +1611,8 @@ faq:
       out.push({ place: p, detail: detail });
     }
     function detailOf(p) { return [p.sub, p.zone, fmtOff(offAt(p, t).off)].filter(Boolean).join(' · '); }
+    var named = namedZone(q);
+    if (named) add(named, (named.from ? named.from + ': ' : '') + [named.sub, named.zone, fmtOff(offAt(named, t).off) + ' now'].filter(Boolean).join(' · '));
     var off = parseOffset(q);
     if (off != null) add(fixedPlace(off), 'Fixed offset from UTC');
     abbrEntries(q).forEach(function (e) {
@@ -1622,8 +1715,7 @@ faq:
     if (e.key === 'PageDown' || e.key === 'PageUp') {
       e.preventDefault();
       var p0 = home(), w = wallAt(p0, planCols[sel]), c = civil(w.days + (e.key === 'PageDown' ? 1 : -1));
-      setInstant(fromWall(p0, c.y, c.m, c.d, w.h, w.mi, 0).t);
-      render({ syncFields: true });
+      if (setInstant(fromWall(p0, c.y, c.m, c.d, w.h, w.mi, 0).t)) render({ syncFields: true });
     }
   });
   for (var hh = 0; hh <= 24; hh++) {
@@ -1668,7 +1760,7 @@ faq:
   function timesText(t, withDate) {
     var p0 = home(), h = wallAt(p0, t);
     return state.places.map(function (p) {
-      var w = wallAt(p, t), ab = abbrOf(p, w.off);
+      var w = wallAt(p, t), ab = abbrOf(p, w.off, t);
       return p.name + ': ' + (withDate || w.days !== h.days ? fmtDate(w) + ', ' : '') + fmtTime(w.h, w.mi) + ' (' + (ab ? ab + ', ' : '') + fmtOff(w.off) + ')';
     }).join('\n');
   }

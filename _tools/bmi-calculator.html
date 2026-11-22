@@ -66,11 +66,11 @@ howto: |
   BMI is a screening measure, not a diagnosis (CDC). It cannot tell muscle
   from fat, and NICE advises caution in interpreting it for people with a lot
   of muscle and for people aged 65 and over. NICE's other check for adults
-  with a BMI under 35 is the waist-to-height ratio: a waist under half your
-  height (below 0.5) carries no increased health risk, 0.5 to 0.59 an
-  increased risk and 0.6 or more a further increased risk. Enter your waist to
-  see yours. The NHS adult BMI calculator is not for use in pregnancy, and
-  neither is this one. If you are worried about your weight or eating, talk to
+  with a BMI under 35, and for children from 5, is the waist-to-height ratio:
+  0.4 to 0.49 (a waist under half your height) means no increased health
+  risk, 0.5 to 0.59 an increased risk and 0.6 or more a further increased
+  risk. Enter your waist to see yours. The NHS adult BMI calculator is not
+  for use in pregnancy, and neither is this one. If you are worried about your weight or eating, talk to
   a doctor; the NHS page on
   [eating disorders](https://www.nhs.uk/mental-health/feelings-symptoms-behaviours/behaviours/eating-disorders/overview/)
   lists where to get help.
@@ -78,9 +78,9 @@ faq:
   - q: Is BMI different for women?
     a: Not for adults. The CDC uses the same categories for everyone of 20 and over, whatever their age, sex or race. For children and teenagers the BMI is compared with others of the same sex and age, which is why the calculator asks for sex only under 20.
   - q: What does a child's BMI percentile mean?
-    a: It shows how the child's BMI compares with children of the same sex and age in the CDC reference data. In the CDC's own example, at the 75th percentile, 75% of children of the same sex and age had a lower BMI. It is a screening measure, not a target or a diagnosis, so ask a doctor what it means for your child.
+    a: It shows how the child's BMI compares with children of the same sex and age in the CDC reference data. In the CDC's own example, a 12-year-old girl at the 96th percentile has a BMI the same as or higher than that of 96% of girls her age, which is in the obesity range. It is a screening measure, not a target or a diagnosis, so ask a doctor what it means for your child.
   - q: Is BMI accurate for muscular, older or Asian people?
-    a: It is least reliable for them. BMI cannot distinguish fat from muscle and bone (CDC), and NICE asks for caution with people who have a lot of muscle and people aged 65 and over. The American Medical Association (2023) says BMI does not account for differences across ethnic groups, sexes and ages, which is why NICE uses lower thresholds for some family backgrounds.
+    a: Less than for most people. BMI cannot distinguish fat from lean mass such as muscle (CDC), and NICE advises caution in reading it for people with a lot of muscle and for people aged 65 and over. The American Medical Association (2023) says BMI does not account for differences across race and ethnic groups, sexes, genders and ages. In the UK, NICE uses lower thresholds for people with a South Asian, Chinese, other Asian, Middle Eastern, Black African or African-Caribbean family background, which the box under the age switches on.
   - q: Why does my GP's chart give a different result for my child?
     a: The CDC charts used here are a US reference. In the UK, GPs and the NHS child calculator use the UK growth charts (UK-WHO to age 4, UK90 after), and NICE puts overweight at the 91st centile, clinical obesity at the 98th and severe obesity at the 99.6th, so the same child can land in a different group.
   - q: Is my height, weight or age sent anywhere?
@@ -181,7 +181,7 @@ faq:
           <div class="field"><label for="bm-dom">Date measured</label><input type="date" id="bm-dom" min="1900-01-01" aria-describedby="bm-age-msg"></div>
         </div>
         <label class="check"><input type="checkbox" id="bm-usedates"> Work out the age from dates</label>
-        <span class="hint" id="bm-age-hint">Leave it empty for an adult. Under 20, months count too.</span>
+        <span class="hint" id="bm-age-hint">Leave it empty for an adult. Under 20, months count too, or give months alone.</span>
         <p class="msg error" id="bm-age-msg"></p>
       </fieldset>
       <fieldset class="bm-set" id="bm-sex-set" hidden>
@@ -290,13 +290,13 @@ faq:
   function strip(s, re) { var m = re.exec(s); return m ? m[1] : s; }
   var RE = {
     cm: /^(.*?) ?(?:cm|cms|centimet(?:re|er)s?)$/, m: /^(.*?) ?(?:m|metres?|meters?)$/,
-    ft: /^(.*?) ?(?:'|’|ft|feet|foot)$/, inch: /^(.*?) ?(?:"|”|''|’’|in|ins|inch|inches)$/,
+    ft: /^(.*?) ?(?:'|’|′|ft|feet|foot)$/, inch: /^(.*?) ?(?:"|”|''|’’|′′|in|ins|inch|inches)$/,
     kg: /^(.*?) ?(?:kg|kgs|kilos?|kilograms?)$/, lb: /^(.*?) ?(?:lb|lbs|pounds?)$/, st: /^(.*?) ?(?:st|stones?)$/,
     years: /^(.*?) ?(?:y|yr|yrs|years?)$/, months: /^(.*?) ?(?:m|mo|mos|months?)$/
   };
-  function ftIn(inches) { // inches as a fraction: "5 ft 9 in", "5 ft 9.5 in"
-    var ft = inches.n / (12n * inches.d), rest = add(inches, Q(-12n * ft));
-    return fixed(ft, 0) + ' ft ' + dec(rest, 1) + ' in';
+  function ftIn(inches) { // inches as a fraction: "5 ft 9 in", "5 ft 9.5 in"; 71.96 in is "6 ft 0 in"
+    var t = roundQ(inches, 1), ft = t / 120n;
+    return fixed(ft, 0) + ' ft ' + fixed(t - ft * 120n, 1) + ' in';
   }
   function stLb(lb, k) { // pounds as a fraction: "10 st 5 lb"
     var whole = roundQ(lb, k), unit = 10n ** BigInt(k), st = whole / (14n * unit);
@@ -310,7 +310,7 @@ faq:
       var c = clean(cmText), s = c.s, metres = false;
       if (c.long) return { err: 'long', at: ['cm'] };
       if (!s) return null;
-      if (/['’"”]|\b(?:ft|feet|foot|in|inch|inches)\b/.test(s)) return { err: 'feet', at: ['cm'] };
+      if (/['’′"”]|\b(?:ft|feet|foot|in|inch|inches)\b/.test(s)) return { err: 'feet', at: ['cm'] };
       if (RE.cm.test(s)) s = strip(s, RE.cm);
       else if (RE.m.test(s)) { s = strip(s, RE.m); metres = true; }
       var q = decimal(s);
@@ -325,8 +325,8 @@ faq:
     if (a.long || b.long) return { err: 'long', at: a.long ? ['ft'] : ['in'] };
     var fs = a.s, is = b.s, read = '', mm;
     if (!fs && !is) return null;
-    // 5'9", 5 ft 9 in or 5ft9 typed in the feet box.
-    mm = /^(\d{1,2}) ?(?:'|’|ft|feet|foot) ?(\d{1,3}(?:[.,]\d{1,3})?) ?(?:"|”|''|’’|in|ins|inch|inches)?$/.exec(fs);
+    // 5'9", 5′9″, 5 ft 9 in or 5ft9 typed in the feet box (NFKC has made ″ into ′′).
+    mm = /^(\d{1,2}) ?(?:'|’|′|ft|feet|foot) ?(\d{1,3}(?:[.,]\d{1,3})?) ?(?:"|”|''|’’|′′|in|ins|inch|inches)?$/.exec(fs);
     if (mm && !is) { fs = mm[1]; is = mm[2]; read = 'combined'; }
     fs = strip(fs, RE.ft);
     is = strip(is, RE.inch);
@@ -667,9 +667,10 @@ faq:
         else age = { months: monthsBetween(b, m) };
       } else if (b || m) age = { partial: true };
     } else {
-      var y = readWhole(el.years.value, 0, 120, RE.years), mo = readWhole(el.months.value, 0, 11, RE.months);
+      // Months alone (a toddler's 30 months) are allowed up to 239, as on the CDC's calculator.
+      var y = readWhole(el.years.value, 0, 120, RE.years), mo = readWhole(el.months.value, 0, y ? 11 : 239, RE.months);
       if (y && y.err) { ageMsg = y.err === 'long' ? 'That is too long for an age.' : 'Enter the age in whole years, from 0 to 120.'; ageBad = [el.years]; }
-      else if (mo && mo.err) { ageMsg = mo.err === 'long' ? 'That is too long for a number of months.' : 'Enter the extra months as a whole number from 0 to 11.'; ageBad = [el.months]; }
+      else if (mo && mo.err) { ageMsg = mo.err === 'long' ? 'That is too long for a number of months.' : y ? 'Enter the extra months as a whole number from 0 to 11.' : 'Enter the age in months, from 0 to 239, or in years and months.'; ageBad = [el.months]; }
       else if (y || mo) age = { months: (y ? y.v : 0) * 12 + (mo ? mo.v : 0) };
     }
     if (mark($('#bm-age-msg'), ageEls, ageBad, ageMsg, showAll)) f.shown.push(ageMsg);
@@ -690,7 +691,44 @@ faq:
   }
   function frame(W, ml, mr) {
     var H = Math.round(Math.min(400, Math.max(250, W * 0.58)));
-    return { W: W, H: H, l: ml, r: W - mr, t: 22, b: H - 40 };
+    return { W: W, H: H, l: ml, r: W - mr, t: 24, b: H - 40 };
+  }
+  // Keeping the chart's words apart. A box is where a 12 px label would be
+  // drawn (x and y as in SVG, y on the baseline), with a little room around it.
+  var measureCtx = null;
+  function textW(text, weight) {
+    try {
+      if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+      measureCtx.font = weight + ' 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      return measureCtx.measureText(text).width;
+    } catch (e) { return text.length * 7.5; }
+  }
+  function tbox(text, x, y, anchor, weight) {
+    var w = textW(text, weight), l = anchor === 'end' ? x - w : anchor === 'middle' ? x - w / 2 : x;
+    return { l: l - 2, r: l + w + 2, t: y - 14, b: y + 5 };
+  }
+  function clash(p, q) { return p.l < q.r && q.l < p.r && p.t < q.b && q.t < p.b; }
+  function inPlot(b, f) { return b.l >= f.l && b.r <= f.r && b.t >= f.t && b.b <= f.b; }
+  // Places for the point's label, best first: beside the point, towards the
+  // middle if it can, above or below it, and inside the plot.
+  function labelSpots(text, px, py, f) {
+    var out = [], sides = px > (f.l + f.r) / 2 ? [-1, 1] : [1, -1];
+    for (var i = 0; i < 4; i++) {
+      var side = sides[i >> 1], sp = { x: px + side * 10, y: py + (i & 1 ? 20 : -10), anchor: side < 0 ? 'end' : 'start' };
+      sp.box = tbox(text, sp.x, sp.y, sp.anchor, 700);
+      if (inPlot(sp.box, f)) out.push(sp);
+    }
+    if (!out.length) {
+      sp = { x: px + sides[0] * 10, y: py + (py - 30 < f.t ? 20 : -10), anchor: sides[0] < 0 ? 'end' : 'start' };
+      sp.box = tbox(text, sp.x, sp.y, sp.anchor, 700);
+      out.push(sp);
+    }
+    return out;
+  }
+  // The smallest step in the list that keeps ticks at least gap pixels apart.
+  function tickStep(range, px, gap, list) {
+    for (var i = 0; i < list.length; i++) if (px * list[i] / range >= gap) return list[i];
+    return list[list.length - 1];
   }
   function svgOpen(f, title, desc) {
     var id = 'bm-svg' + (++chartSeq);
@@ -703,7 +741,7 @@ faq:
 
   // Weight against height for adults, with a band for each category.
   function hwChart(W, a) {
-    var f = frame(W, 48, 14), metric = a.hu === 'cm';
+    var f = frame(W, 48, 20), metric = a.hu === 'cm';
     var x0 = metric ? 140 : 55, x1 = metric ? 210 : 83; // cm or inches
     var hx = metric ? a.hM * 100 : a.hM / 0.0254;
     if (hx < x0 + 2) x0 = Math.floor((hx - 5) / 5) * 5;
@@ -727,16 +765,31 @@ faq:
       }
       s += '<polygon class="b' + k + '" points="' + poly(top.concat(bot.reverse())) + '"/>';
     }
-    // Grid lines.
-    var xs = metric ? 10 : 4, ys = a.wu === 'kg' ? 20 : a.wu === 'lb' ? 50 : 2, v;
+    // Grid lines, never closer than their labels allow.
+    var xs = tickStep(x1 - x0, f.r - f.l, textW(metric ? '000' : '8\u20328\u2033', 400) + 8, metric ? [10, 20, 50] : [4, 6, 12, 24]);
+    var ys = tickStep(y1 - y0, f.b - f.t, 18, a.wu === 'kg' ? [20, 50, 100, 200] : a.wu === 'lb' ? [50, 100, 200, 500] : [2, 5, 10, 20, 50]), v;
     for (v = Math.ceil(x0 / xs) * xs; v <= x1; v += xs) s += '<line class="ax" x1="' + r1(X(v)) + '" x2="' + r1(X(v)) + '" y1="' + f.t + '" y2="' + f.b + '"/>';
     for (v = Math.ceil(y0 / ys) * ys; v <= y1; v += ys) s += '<line class="ax" x1="' + f.l + '" x2="' + f.r + '" y1="' + r1(Y(v)) + '" y2="' + r1(Y(v)) + '"/>';
-    // Band names, where the band is wide enough at the right-hand side.
-    var lx = x0 + (x1 - x0) * 0.72, lm2 = Math.pow(toM(lx), 2);
-    for (k = 0; k < 4; k++) {
-      var lo = edges[k] * lm2 / unitW, hi = k === 3 ? y1 : Math.min(edges[k + 1] * lm2 / unitW, y1), mid = (Math.max(lo, y0) + hi) / 2;
-      if (Y(Math.max(lo, y0)) - Y(hi) > 18 && mid > y0 && mid < y1) s += '<text class="bl" x="' + r1(X(lx)) + '" y="' + r1(Y(mid) + 4) + '" text-anchor="middle">' + names[k] + '</text>';
-    }
+    // Your point's label goes where it leaves room for the most band names;
+    // each name goes where its band is tall enough and it clashes with nothing.
+    var px = X(hx), py = Y(wy), you = 'You: BMI ' + a.bmiText, dot = { l: px - 8, r: px + 8, t: py - 8, b: py + 8 }, spot = null, named = null;
+    labelSpots(you, px, py, f).forEach(function (sp) {
+      var taken = [dot, sp.box], out = [];
+      for (var b = 0; b < 4; b++) {
+        [0.72, 0.5, 0.86, 0.28, 0.14].some(function (fr) {
+          var lx = x0 + (x1 - x0) * fr, lm2 = Math.pow(toM(lx), 2);
+          var lo = Math.max(edges[b] * lm2 / unitW, y0), hi = b === 3 ? y1 : Math.min(edges[b + 1] * lm2 / unitW, y1), mid = (lo + hi) / 2;
+          if (!(Y(lo) - Y(hi) > 18 && mid > y0 && mid < y1)) return false;
+          var bx = tbox(names[b], X(lx), Y(mid) + 4, 'middle', 600);
+          if (!inPlot(bx, f) || taken.some(function (t) { return clash(t, bx); })) return false;
+          taken.push(bx);
+          out.push('<text class="bl" x="' + r1(X(lx)) + '" y="' + r1(Y(mid) + 4) + '" text-anchor="middle">' + names[b] + '</text>');
+          return true;
+        });
+      }
+      if (!named || out.length > named.length) { spot = sp; named = out; }
+    });
+    s += named.join('');
     s += '</g><rect class="frame" x="' + f.l + '" y="' + f.t + '" width="' + (f.r - f.l) + '" height="' + (f.b - f.t) + '"/>';
     for (v = Math.ceil(x0 / xs) * xs; v <= x1; v += xs) {
       var lab = metric ? String(v) : Math.floor(v / 12) + '′' + (v % 12) + '″';
@@ -744,10 +797,9 @@ faq:
     }
     for (v = Math.ceil(y0 / ys) * ys; v <= y1; v += ys) s += '<text class="tk" x="' + (f.l - 6) + '" y="' + r1(Y(v) + 4) + '" text-anchor="end">' + v + '</text>';
     s += '<text class="ttl" x="' + r1((f.l + f.r) / 2) + '" y="' + (f.H - 4) + '" text-anchor="middle">Height (' + (metric ? 'cm' : 'ft and in') + ')</text>';
-    s += '<text class="ttl" x="' + (f.l - 6) + '" y="' + (f.t - 9) + '" text-anchor="end">' + (a.wu === 'kg' ? 'kg' : a.wu === 'lb' ? 'lb' : 'st') + '</text>';
-    var px = X(hx), py = Y(wy), right = px > (f.l + f.r) / 2;
+    s += '<text class="ttl" x="' + (f.l - 6) + '" y="' + (f.t - 12) + '" text-anchor="end">' + (a.wu === 'kg' ? 'kg' : a.wu === 'lb' ? 'lb' : 'st') + '</text>';
     s += '<circle class="pt" cx="' + r1(px) + '" cy="' + r1(py) + '" r="6"/>';
-    s += '<text class="pl" x="' + r1(px + (right ? -10 : 10)) + '" y="' + r1(py - 10) + '" text-anchor="' + (right ? 'end' : 'start') + '">You: BMI ' + esc(a.bmiText) + '</text>';
+    s += '<text class="pl" x="' + r1(spot.x) + '" y="' + r1(spot.y) + '" text-anchor="' + spot.anchor + '">' + esc(you) + '</text>';
     return s + '</svg>';
   }
 
@@ -757,7 +809,8 @@ faq:
     for (var k in DATA) if (k.indexOf(a.sex + ':') === 0) rows.push(DATA[k]);
     rows.sort(function (p, q) { return p.age - q.age; });
     rows = rows.filter(function (r) { return r.age >= 24 && r.age <= 240; });
-    var y0 = 10, y1 = Math.max(40, Math.min(80, Math.ceil((a.bmi + 3) / 5) * 5));
+    var y0 = a.bmi < 11 ? Math.max(0, Math.floor((a.bmi - 1) / 5) * 5) : 10, y1 = Math.max(40, Math.min(80, Math.ceil((a.bmi + 3) / 5) * 5));
+    var ys = tickStep(y1 - y0, f.b - f.t, 18, [5, 10, 20]);
     var X = function (m) { return f.l + (m / 12 - 2) / 18 * (f.r - f.l); }, Y = function (v) { return f.b - (v - y0) / (y1 - y0) * (f.b - f.t); };
     var curves = [
       { c: 'p5', label: '5th', v: function (r) { return bmiAt(r, -1.6448536269514722); } },
@@ -775,20 +828,25 @@ faq:
     for (var b = 0; b < 4; b++) s += '<polygon class="b' + b + '" points="' + poly(bandsPts[b].concat(bandsPts[b + 1].slice().reverse())) + '"/>';
     var v;
     for (v = 2; v <= 20; v += 2) s += '<line class="ax" x1="' + r1(X(v * 12)) + '" x2="' + r1(X(v * 12)) + '" y1="' + f.t + '" y2="' + f.b + '"/>';
-    for (v = y0; v <= y1; v += 5) s += '<line class="ax" x1="' + f.l + '" x2="' + f.r + '" y1="' + r1(Y(v)) + '" y2="' + r1(Y(v)) + '"/>';
+    for (v = Math.ceil(y0 / ys) * ys; v <= y1; v += ys) s += '<line class="ax" x1="' + f.l + '" x2="' + f.r + '" y1="' + r1(Y(v)) + '" y2="' + r1(Y(v)) + '"/>';
     pts.forEach(function (p, i) { s += '<polyline class="cv ' + curves[i].c + '" points="' + poly(p) + '"/>'; });
     s += '</g><rect class="frame" x="' + f.l + '" y="' + f.t + '" width="' + (f.r - f.l) + '" height="' + (f.b - f.t) + '"/>';
     // Curve names at the right-hand end, moved apart where they would touch.
     var ends = pts.map(function (p, i) { return { y: p[p.length - 1][1], label: curves[i].label }; }).sort(function (p, q) { return q.y - p.y; });
-    for (var i = 1; i < ends.length; i++) if (ends[i - 1].y - ends[i].y < 15) ends[i].y = ends[i - 1].y - 15;
-    ends.forEach(function (e) { if (e.y - 4 > f.t + 10 && e.y < f.b) s += '<text class="cl" x="' + (f.r - 4) + '" y="' + r1(e.y - 4) + '" text-anchor="end">' + e.label + '</text>'; });
+    for (var i = 1; i < ends.length; i++) if (ends[i - 1].y - ends[i].y < 16) ends[i].y = ends[i - 1].y - 16;
+    ends.forEach(function (e) { e.box = tbox(e.label, f.r - 4, e.y - 4, 'end', 400); });
+    ends = ends.filter(function (e) { return inPlot(e.box, f); });
+    // The point's label keeps clear of the curve names if it can; a name it
+    // would cover, or that the point covers, is left out.
+    var px = X(a.months + 0.5), py = Y(Math.max(y0, Math.min(a.bmi, y1))), you = 'BMI ' + a.bmiText, dot = { l: px - 8, r: px + 8, t: py - 8, b: py + 8 };
+    var spots = labelSpots(you, px, py, f), spot = spots.filter(function (sp) { return !ends.some(function (e) { return clash(e.box, sp.box); }); })[0] || spots[0];
+    ends.forEach(function (e) { if (!clash(e.box, spot.box) && !clash(e.box, dot)) s += '<text class="cl" x="' + (f.r - 4) + '" y="' + r1(e.y - 4) + '" text-anchor="end">' + e.label + '</text>'; });
     for (v = 2; v <= 20; v += 2) s += '<text class="tk" x="' + r1(X(v * 12)) + '" y="' + (f.b + 16) + '" text-anchor="middle">' + v + '</text>';
-    for (v = y0; v <= y1; v += 5) s += '<text class="tk" x="' + (f.l - 6) + '" y="' + r1(Y(v) + 4) + '" text-anchor="end">' + v + '</text>';
+    for (v = Math.ceil(y0 / ys) * ys; v <= y1; v += ys) s += '<text class="tk" x="' + (f.l - 6) + '" y="' + r1(Y(v) + 4) + '" text-anchor="end">' + v + '</text>';
     s += '<text class="ttl" x="' + r1((f.l + f.r) / 2) + '" y="' + (f.H - 4) + '" text-anchor="middle">Age (years)</text>';
-    s += '<text class="ttl" x="' + (f.l - 6) + '" y="' + (f.t - 9) + '" text-anchor="end">BMI</text>';
-    var px = X(a.months + 0.5), py = Y(Math.min(a.bmi, y1)), right = px > (f.l + f.r) / 2;
+    s += '<text class="ttl" x="' + (f.l - 6) + '" y="' + (f.t - 12) + '" text-anchor="end">BMI</text>';
     s += '<circle class="pt" cx="' + r1(px) + '" cy="' + r1(py) + '" r="6"/>';
-    s += '<text class="pl" x="' + r1(px + (right ? -10 : 10)) + '" y="' + r1(py - 10) + '" text-anchor="' + (right ? 'end' : 'start') + '">BMI ' + esc(a.bmiText) + '</text>';
+    s += '<text class="pl" x="' + r1(spot.x) + '" y="' + r1(spot.y) + '" text-anchor="' + spot.anchor + '">' + esc(you) + '</text>';
     return s + '</svg>';
   }
   if (window.ResizeObserver) {
@@ -805,9 +863,11 @@ faq:
     if (hu === 'cm') for (v = 145; v <= 200; v += 5) hs.push({ m: Q(v, 100), text: v + ' cm' });
     else for (v = 58; v <= 78; v += 2) hs.push({ m: mul(Q(v), M_PER_IN), text: ftIn(Q(v)) });
     if (you) {
-      var at = hs.findIndex(function (h) { return cmp(h.m, you.m) >= 0; });
-      if (at >= 0 && cmp(hs[at].m, you.m) === 0) hs[at].you = true;
-      else hs.splice(at < 0 ? hs.length : at, 0, { m: you.m, text: you.text, you: true });
+      // Your height takes the place of a listed one that reads the same
+      // (170.04 cm is "170 cm"), so no height is listed twice.
+      var mine = { m: you.m, text: you.text, you: true }, same = hs.findIndex(function (h) { return h.text === you.text; });
+      if (same >= 0) hs[same] = mine;
+      else { var at = hs.findIndex(function (h) { return cmp(h.m, you.m) > 0; }); hs.splice(at < 0 ? hs.length : at, 0, mine); }
     }
     var body = $('#bm-tbody');
     body.textContent = '';
@@ -885,7 +945,8 @@ faq:
     var waistLine = '';
     if (f.waist && !f.waist.err && !(months !== null && months < 60)) {
       var ratio = div(f.waist.m, f.h.m), r100 = Number(roundQ(ratio, 2)), rText = fixed(BigInt(r100), 2, true);
-      waistLine = 'Waist-to-height ratio ' + rText + ': ' + (b10 >= 350 && !child ? 'NICE uses the ratio only for a BMI under 35.'
+      // NICE's bands: for adults (18 and over) only with a BMI under 35; from 5 to 17 at any BMI.
+      waistLine = 'Waist-to-height ratio ' + rText + ': ' + (b10 >= 350 && !(months !== null && months < 216) ? 'NICE uses the ratio only for a BMI under 35.'
         : r100 < 40 ? 'below the bands NICE uses, which start at 0.4.' : r100 < 50 ? 'healthy, no increased health risk (0.4 to 0.49).'
           : r100 < 60 ? 'increased health risk (0.5 to 0.59).' : 'further increased health risk (0.6 or more).');
     }

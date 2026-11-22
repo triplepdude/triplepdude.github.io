@@ -5,7 +5,11 @@
 
 times: how a typed time is read, by a separate implementation of the rules the
   guide states (digits of every script through unicodedata, full-width forms,
-  am/pm, noon and midnight), with the message the page shows for each problem.
+  am/pm, noon and midnight), with the message the page shows for each problem
+  when the alarm is set. A third item, true, marks a problem that is only the
+  start of a time still being typed (7: on the way to 7:30): the page shows
+  nothing for it while typing. That is found by listing every way of writing
+  every time and looking for one that begins with what was typed.
 rings: when an alarm rings, from the IANA time zone database (zoneinfo): the
   first instant after `now` at which the local clock shows h:m. A time that is
   skipped when the clocks go forward is placed as ECMAScript places it, with
@@ -111,11 +115,34 @@ TIMES = [
     '７：３０　ｐｍ', '19:30 pm', '13 pm', '0 am', '0:30 am', '25:00', '24:30', '7:60',
     '1260', '7:5', '7:5 pm', '7,30', '7:30:00', '5²', '7\t30', '7 30', '-7:00', '+7:00', '7::30', 'abc',
     '1 000', '12345', '7:30 pmx', '７ｈ', '', '1' * 21, '1' * 20,
+    '7:', '6:4', '73', '25', '99', '7:6', '7:30 p.', '7 a.', 'noo', 'midn', '7h3', '19:', '١٢:٣', '12:3 ', '12:3 p',
 ]
+
+# Every way of writing every time, as the guide describes them.
+WRITTEN = {'noon', 'midday', 'midnight'}
+for h in range(25):
+    for m in range(60):
+        if h == 24 and m:
+            break
+        for hh in {str(h), '%02d' % h}:
+            WRITTEN.update({hh + sep + '%02d' % m for sep in ':.h'})
+            WRITTEN.add(hh + '%02d' % m)
+            if m == 0:
+                WRITTEN.update({hh, hh + 'h'})
+        if 1 <= h <= 12:
+            plain_forms = [str(h) + sep + '%02d' % m for sep in ':.h'] + [str(h) + '%02d' % m] + ([str(h), str(h) + 'h'] if m == 0 else [])
+            for f in plain_forms:
+                for ap in AMPM:
+                    WRITTEN.update({f + ap, f + ' ' + ap})
+STARTS = {w[:i] for w in WRITTEN for i in range(1, len(w))}
+
 times = []
 for t in TIMES:
     r = read(t)
-    times.append([t, r if isinstance(r, list) else MESSAGES[r]])
+    if isinstance(r, list):
+        times.append([t, r])
+    else:
+        times.append([t, MESSAGES[r]] + ([True] if r != 'empty' and len(t) <= 20 and plain(t) in STARTS else []))
 
 
 def iso(dt):

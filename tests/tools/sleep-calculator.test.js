@@ -17,7 +17,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const read = () => page.evaluate(() => {
     const t = id => document.getElementById(id).textContent;
     return {
-      head: t('sl-head'), sub: t('sl-sub'), dst: t('sl-dst'), win: t('sl-window'), listHead: t('sl-list-head'), note: t('sl-cnote'),
+      head: t('sl-head'), sub: t('sl-sub'), dst: t('sl-dst'), win: t('sl-window'), listHead: t('sl-list-head'), note: t('sl-cnote'), nowLine: t('sl-now-line'),
       rows: [...document.querySelectorAll('#sl-list li')].map(li => ({
         key: li.querySelector('.sl-key').firstChild.textContent, tag: (li.querySelector('.sl-key small') || {}).textContent || '',
         dur: li.querySelector('.sl-dur').textContent, more: li.querySelector('.sl-more').textContent,
@@ -62,11 +62,16 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     assert.equal(r.head, head, `heading, ${label}`);
     if (c.mode === 'wake') assert.ok(r.sub.startsWith(`Waking up on ${c.anchorDay}.`), `${label}: ${r.sub}`);
     else if (c.mode === 'bed') assert.ok(r.sub.startsWith(`Bedtime on ${c.anchorDay}.`), `${label}: ${r.sub}`);
-    else assert.ok(r.sub.startsWith(`It is ${c.anchor} on ${c.anchorDay}.`), `${label}: ${r.sub}`);
+    else {
+      // The time is in the line under the menu, and the summary does not repeat it.
+      assert.equal(r.nowLine, `It is ${c.anchor} on ${c.anchorDay}.`, label);
+      assert.ok(r.sub.startsWith('Allowing '), `${label}: ${r.sub}`);
+    }
     if (c.mode !== 'wake' && c.age !== 'n0') assert.ok(r.sub.includes(`, you will be asleep by ${c.asleep}.`), `${label}: ${r.sub}`);
     assert.equal(r.sub.includes('because the clocks go forward'), !!c.gap, `gap note, ${label}`);
     assert.equal(r.win, windowText(c), `hours window, ${label}`);
-    assert.equal(r.dst, c.dst ? `The clocks go ${c.dst.shift > 0 ? 'forward' : 'back'} ${hm(Math.abs(c.dst.shift))} at ${c.dst.before} on ${c.dst.day}. These times allow for it, so each gives the full sleep shown.` : '', `clock change, ${label}`);
+    const twice = c.dst && c.dst.twice ? ` From ${c.dst.twice.from} to ${c.dst.twice.to} each clock time comes twice, so a time in that hour names its zone: ${c.dst.twice.zones[0]} before the change, ${c.dst.twice.zones[1]} after.` : '';
+    assert.equal(r.dst, c.dst ? `The clocks go ${c.dst.shift > 0 ? 'forward' : 'back'} ${hm(Math.abs(c.dst.shift))} at ${c.dst.before} on ${c.dst.day}. These times allow for it, so each gives the full sleep shown.${twice}` : '', `clock change, ${label}`);
     assert.equal(r.rows.length, c.rows.length, `number of options, ${label}`);
     c.rows.forEach((e, i) => {
       const got = r.rows[i];
@@ -135,7 +140,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.check('input[name="sl-mode"][value="bed"]');
   const bedReads = [['11', '11:00 PM'], ['12', '12:00 AM (midnight)'], ['12:30', '12:30 AM'], ['5', '5:00 AM'], ['6', '6:00 PM'], ['10:45', '10:45 PM'],
     ['06:30', '6:30 AM'], ['630a', '6:30 AM'], ['1830', '6:30 PM'], ['11.30 p.m.', '11:30 PM'], ['9h30', '9:30 PM'], ['noon', '12:00 PM (noon)'],
-    ['Midnight', '12:00 AM (midnight)'], ['24:00', '12:00 AM (midnight)'], ['0:15', '12:15 AM'], ['２３：１５', '11:15 PM'], ['٢٣:١٥', '11:15 PM'], ['  10 pm ', '10:00 PM'],
+    ['Midnight', '12:00 AM (midnight)'], ['24:00', '12:00 AM (midnight)'], ['0:15', '12:15 AM'], ['２３：１５', '11:15 PM'], ['٢٣:١٥', '11:15 PM'], ['۲۳:۱۵', '11:15 PM'], ['२३:१५', '11:15 PM'], ['  10 pm ', '10:00 PM'],
     ['22:30:00', '10:30 PM'], ['12 am', '12:00 AM (midnight)'], ['12p', '12:00 PM (noon)']];
   for (const [typed, want] of bedReads) {
     await page.fill('#sl-bed', typed);
@@ -172,7 +177,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.deepEqual([r.head, r.sub, r.win, r.rows.length, r.copy], ['Bedtimes', 'Correct the box marked in red to see the times.', '', 0, true]);
   await page.clock.runFor(800);
   assert.equal(await text('#sl-status'), 'Type a time such as 6:30 AM, 630a or 18:30.');
-  for (const bad of ['25:00', '6:60', '13 pm', '0 pm', 'abc', '6:30:15', '1:2', '6:30 am pm']) {
+  for (const bad of ['25:00', '6:60', '13 pm', '0 pm', 'abc', '6:30:15', '1:2', '6:30 am pm', '6:3⁰', '6:30\t7:00']) {
     await page.fill('#sl-wake', bad);
     await page.press('#sl-wake', 'Enter');
     assert.equal(await text('#sl-wake-msg'), 'Type a time such as 6:30 AM, 630a or 18:30.', `"${bad}" is not a time`);
@@ -185,10 +190,17 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.locator('#sl-fall').blur();
   assert.equal(await text('#sl-fall-msg'), 'Enter whole minutes from 0 to 120.');
   assert.deepEqual(await aria('#sl-fall'), ['sl-fall-msg', 'true']);
+  // The limits themselves are allowed: 0 to 120 minutes to fall asleep, cycles of 70 to 120.
+  for (const [id, v, ok] of [['#sl-fall', '120', true], ['#sl-fall', '0', true], ['#sl-fall', '121', false], ['#sl-cycle', '70', true], ['#sl-cycle', '120', true], ['#sl-cycle', '69', false]]) {
+    await page.fill(id, v);
+    await page.press(id, 'Enter');
+    assert.equal(await page.getAttribute(id, 'aria-invalid'), ok ? null : 'true', `${id} ${v}`);
+  }
+  await page.fill('#sl-cycle', '90');
   await page.fill('#sl-fall', '20 min');
   assert.deepEqual([await text('#sl-fall-msg'), await page.getAttribute('#sl-fall', 'aria-invalid')], ['', null]);
   assert.match(await text('#sl-sub'), /allows 20 minutes to fall asleep/);
-  for (const bad of ['60', '121', '9.5', '-90', '90 hours']) {
+  for (const bad of ['60', '121', '9.5', '-90', '90 hours', '9⁰']) {
     await page.fill('#sl-cycle', bad);
     await page.press('#sl-cycle', 'Enter');
     assert.equal(await text('#sl-cycle-msg'), 'Enter whole minutes from 70 to 120.', `cycle "${bad}"`);
@@ -281,6 +293,9 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await reload('#now');
   assert.equal(await text('#sl-now-line'), 'It is 10:47 PM on Sunday, November 22.');
   assert.equal((await read()).rows[0].key, '8:00 AM'); // 10:47 + 15 = 11:02, rounded 11:00, + 9 h
+  assert.equal(await text('#sl-sub'), 'Allowing 15 minutes to fall asleep, you will be asleep by 11:00 PM.');
+  await page.click('#sl-copy');
+  assert.equal((await clipboard()).split('\n')[0], 'Wake-up times for going to bed now (at 10:47 PM on Sunday, November 22)');
   await page.clock.runFor(3 * 60000);
   assert.equal(await text('#sl-now-line'), 'It is 10:50 PM on Sunday, November 22.');
   assert.equal((await read()).rows[0].key, '8:05 AM');
@@ -292,6 +307,20 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await reload();
   await page.$eval('#sl-wake', el => { el.value = '8:00 AM'; window.dispatchEvent(new Event('pageshow')); });
   assert.equal(await text('#sl-head'), 'Bedtimes for waking up at 8:00 AM');
+  // Back from another page: the browser puts back the clock menu but not the
+  // time boxes, which the address fills in; the boxes follow the menu.
+  await reload();
+  await page.check('input[value="bed"]');
+  await page.fill('#sl-bed', '11');
+  await page.selectOption('#sl-clock', '24');
+  assert.equal(await page.evaluate(() => location.hash), '#bed=23:00');
+  await page.goto(base + '/');
+  await page.goBack({ waitUntil: 'load' });
+  await page.waitForFunction(() => document.getElementById('sl-head').textContent !== '');
+  const back = await page.evaluate(() => [document.getElementById('sl-clock').value, document.getElementById('sl-bed').value, document.getElementById('sl-head').textContent]);
+  assert.deepEqual(back.slice(1), back[0] === '24' ? ['23:00', 'Wake-up times for going to bed at 23:00'] : ['11:00 PM', 'Wake-up times for going to bed at 11:00 PM'], back.join(' | '));
+  await page.selectOption('#sl-clock', back[0] === '24' ? '12' : '24');
+  assert.equal(await page.inputValue('#sl-bed'), back[0] === '24' ? '11:00 PM' : '23:00', 'a bedtime keeps its meaning when the clock changes after Back');
 
   // ---- Keyboard only ----
   await reload();
@@ -326,6 +355,12 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await gbPage.check('input[value="bed"]');
   await gbPage.fill('#sl-bed', '11');
   assert.equal(await gbPage.locator('#sl-bed-read').textContent(), 'Read as 11:00.');
+  // The night the clocks go back: the hour that comes twice is told apart as BST and GMT.
+  await gbPage.clock.setSystemTime(new Date('2026-10-24T19:00:00+01:00'));
+  await gbPage.goto(url + '#wake=06:30', { waitUntil: 'load' });
+  assert.deepEqual(await gbPage.$$eval('#sl-list .sl-key', ks => ks.map(k => k.firstChild.textContent)), ['22:15', '23:45', '01:15 BST', '01:45 GMT']);
+  assert.equal(await gbPage.locator('#sl-dst').textContent(), 'The clocks go back 1 hour at 02:00 on Sunday 25 October. These times allow for it, so each gives the full sleep shown. ' +
+    'From 01:00 to 01:59 each clock time comes twice, so a time in that hour names its zone: BST before the change, GMT after.');
   await gb.close();
 
   // ---- A phone with a touch screen ----

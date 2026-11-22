@@ -62,6 +62,19 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(s.other, 0, 'no opacity, stroke, desc, image or text');
   let px = await pixels(svg.text, 480, 320, [[60, 160], [240, 80], [240, 200], [300, 98], [10, 10], [240, 232], [240, 252]]);
   assert.deepEqual(px.px, [[31, 111, 74, 255], [244, 236, 216, 255], [224, 122, 46, 255], [192, 57, 43, 255], [0, 0, 0, 0], [31, 111, 74, 255], [244, 236, 216, 255]]);
+  // The colours are stacked, so no see-through seams appear where shapes of different colours touch.
+  const seams = await page.evaluate(async text => {
+    const img = new Image();
+    img.src = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+    await img.decode();
+    const c = Object.assign(document.createElement('canvas'), { width: 480, height: 320 }), g = c.getContext('2d');
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(90, 40, 300, 240).data;
+    let n = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] < 255) n++;
+    return n;
+  }, svg.text);
+  assert.equal(seams, 0, 'no see-through pixels inside the badge');
 
   // ---------- A transparent logo: a ring with a hole, a tiny accent, alpha either side of 50% ----------
   await openFile('logo.png');
@@ -130,6 +143,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowLeft');
   assert.equal(await page.$eval('#p2s-stage', el => el.style.getPropertyValue('--cut')), '45%');
   assert.equal(await page.getAttribute('#p2s-cut', 'aria-valuetext'), '45%: original on the left, SVG on the right');
+  // Each side shows only its own picture, so transparent parts of the SVG look transparent.
+  assert.deepEqual(await page.evaluate(() => [getComputedStyle(document.querySelector('#p2s-orig')).clipPath, getComputedStyle(document.querySelector('#p2s-svg')).clipPath]),
+    ['inset(0px 55% 0px 0px)', 'inset(0px 0px 0px 45%)']);
   await page.focus('#p2s-view');
   await page.keyboard.press('Equal');
   assert.doesNotMatch(await page.textContent('#p2s-zoom-val'), /Fit/);
@@ -225,6 +241,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.getAttribute('#p2s-error a', 'href'), '/svg-to-png/');
   assert.equal(await page.getAttribute('#p2s-file', 'aria-invalid'), 'true');
   assert.equal(await page.getAttribute('#p2s-file', 'aria-describedby'), 'p2s-error');
+  // A trace that finishes after the refusal leaves the message in place.
+  await setRange('#p2s-speck', 9);
+  await page.setInputFiles('#p2s-file', { name: 'again.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') });
+  await page.waitForFunction(() => /^again\.svg/.test(document.querySelector('#p2s-error').textContent));
+  await downloadSvg();
+  assert.match(await page.textContent('#p2s-error'), /^again\.svg is already an SVG/);
   await page.setInputFiles('#p2s-file', { name: 'notes.png', mimeType: 'image/png', buffer: Buffer.from('just some text') });
   await page.waitForFunction(() => /not a supported image/.test(document.querySelector('#p2s-error').textContent));
   assert.equal(await page.getAttribute('#p2s-file', 'aria-invalid'), 'true');

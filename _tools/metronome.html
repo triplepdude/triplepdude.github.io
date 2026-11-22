@@ -229,7 +229,7 @@ faq:
       <label for="mt-vol">Volume</label>
       <div class="mt-vol">
         <input type="range" id="mt-vol" min="0" max="100" step="1" value="70" aria-valuetext="70%">
-        <output id="mt-vol-out" for="mt-vol">70%</output>
+        <output id="mt-vol-out" for="mt-vol" aria-hidden="true">70%</output>
       </div>
     </div>
   </div>
@@ -814,7 +814,21 @@ faq:
     info.textContent = raw > MAX ? 'Your taps were faster than 300 BPM, so the tempo is 300 BPM.' : v + ' BPM from ' + n + ' taps.';
     sayLater('Tap tempo: ' + v + ' BPM', 700);
   }
-  tapBtn.addEventListener('pointerdown', function (e) { if (e.button === 0 || e.pointerType !== 'mouse') tap(e.timeStamp); });
+  // A mouse press taps at once. A finger or a pen counts when it lifts, timed from when it
+  // went down: until then the browser may still turn the touch into a scroll or a zoom
+  // (pointercancel), and a touch that became a scroll is no tap.
+  const presses = new Map();
+  tapBtn.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'mouse') presses.set(e.pointerId, e.timeStamp);
+    else if (e.button === 0) tap(e.timeStamp);
+  });
+  document.addEventListener('pointerup', function (e) {
+    if (!presses.has(e.pointerId)) return;
+    const t = presses.get(e.pointerId);
+    presses.delete(e.pointerId);
+    tap(t);
+  }, true);
+  document.addEventListener('pointercancel', function (e) { presses.delete(e.pointerId); }, true);
   // Enter or Space on the focused button.
   tapBtn.addEventListener('click', function (e) { if (e.detail === 0) tap(e.timeStamp); });
 

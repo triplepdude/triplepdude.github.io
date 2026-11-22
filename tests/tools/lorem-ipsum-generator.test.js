@@ -184,6 +184,15 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.goto(url + '#n=3&unit=evil&len=huge&start=7&html=1&seed=zz' + '&x=' + 'a'.repeat(300));
   assert.equal(await page.inputValue('#li-count'), '5');
   assert.equal(await page.inputValue('#li-unit'), 'paragraphs');
+  // So is a name that every object has, such as constructor: the menus keep their default
+  // instead of going blank.
+  for (const h of ['unit=constructor', 'len=__proto__', 'unit=toString&len=hasOwnProperty']) {
+    await page.goto('about:blank');
+    await page.goto(url + '#n=3&' + h);
+    assert.equal(await page.inputValue('#li-unit'), 'paragraphs', h);
+    assert.equal(await page.inputValue('#li-length'), 'medium', h);
+    assert.equal(await page.inputValue('#li-count'), '3', h);
+  }
   await page.goto('about:blank');
   await page.goto(url + '#n=3&unit=evil&seed=1f');
   assert.equal(await page.inputValue('#li-count'), '3');

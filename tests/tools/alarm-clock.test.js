@@ -148,21 +148,36 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // ---- How typed times are read. ----
   await page.fill('#ac-1-time', '6:00');
   assert.equal(await hash(), '#6:00!o', 'the address follows the time typed');
-  for (const [typed, want] of X.times) {
+  for (const [typed, want, typing] of X.times) {
     await page.fill('#ac-1-time', typed);
     const err = await text('#ac-1-err'), inv = await page.getAttribute('#ac-1-time', 'aria-invalid');
     if (Array.isArray(want)) {
       assert.equal(err, '', JSON.stringify(typed));
       assert.equal(inv, null, JSON.stringify(typed));
       assert.equal(await hash(), `#${want[0]}:${String(want[1]).padStart(2, '0')}!o`, JSON.stringify(typed));
-    } else if (typed === '') {
-      // An empty box is not an error until the alarm is set.
-      assert.equal(err, '');
-      assert.equal(inv, null);
+    } else if (typed === '' || typing) {
+      // An empty box, or the start of a time still being typed (7: on the
+      // way to 7:30), is not an error until the alarm is set: Enter shows it.
+      assert.equal(err, '', JSON.stringify(typed));
+      assert.equal(inv, null, JSON.stringify(typed));
+      if (typing) {
+        await page.press('#ac-1-time', 'Enter');
+        assert.equal(await text('#ac-1-err'), want, JSON.stringify(typed));
+        assert.equal(await page.getAttribute('#ac-1-time', 'aria-invalid'), 'true', JSON.stringify(typed));
+        assert.equal(await goText(1), 'Set alarm', JSON.stringify(typed));
+      }
     } else {
       assert.equal(err, want, JSON.stringify(typed));
       assert.equal(inv, 'true', JSON.stringify(typed));
       assert.equal(await page.getAttribute('#ac-1-time', 'aria-describedby'), 'ac-1-err');
+    }
+  }
+  // Typed a key at a time, a time shows no message on the way.
+  for (const word of ['6:45', '19:30', '7.30 pm', '730', '12:05 a.m.', 'noon']) {
+    await page.fill('#ac-1-time', '');
+    for (const ch of word) {
+      await page.type('#ac-1-time', ch);
+      assert.equal(await text('#ac-1-err'), '', `typing ${word}, at ${await page.inputValue('#ac-1-time')}`);
     }
   }
   // Setting with an empty box shows the problem and keeps the focus there.
@@ -200,6 +215,24 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(r1[0][1], 'Sound is on. Press Test sound to check the volume.');
   assert.equal(r1[1][1], 'The screen stays on while an alarm is set.');
   assert.equal(r1[3][1], 'The charger is plugged in.');
+  // The start of a time left in the box of a set alarm, or an empty box:
+  // the alarm keeps its time and the box shows it again; Enter names the problem.
+  for (const left of ['7:', '']) {
+    await page.fill('#ac-1-time', left);
+    assert.equal(await text('#ac-1-err'), '');
+    await blur();
+    assert.equal(await page.inputValue('#ac-1-time'), '7:00 AM', JSON.stringify(left));
+    assert.equal(await hash(), `#7:00!a${R0.at}`);
+  }
+  await page.fill('#ac-1-time', '7:');
+  await page.press('#ac-1-time', 'Enter');
+  assert.equal(await text('#ac-1-err'), 'Type a time such as 7:30, 7:30 pm or 1930.');
+  assert.equal(await goText(1), 'Turn off');
+  await page.fill('#ac-1-time', '7:00');
+  await blur();
+  assert.equal(await text('#ac-1-err'), '');
+  assert.equal(await page.inputValue('#ac-1-time'), '7:00 AM');
+  await page.focus('#ac-1-time');
   // The minutes to go count down; under a minute, the seconds.
   await page.clock.runFor(30000);
   assert.equal(await meta(1), 'Rings at 7:00 AM tomorrow (Monday), in 8 h 12 min');
@@ -551,8 +584,16 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     ['#7:00!o', '#7:00!o', 'Off'],
     ['#0:00', `#0:00!a${est(2026, 11, 23, 0, 0)}`, 'Rings at 12:00 AM tomorrow (Monday), in 1 h 13 min'],
   ];
+  // A reload, Back or a restored tab finds the mark the page leaves on its
+  // own history entry, and shows what happened meanwhile.
+  const restore = async h => {
+    await page.goto('about:blank');
+    await page.goto(url);
+    await page.evaluate(h => history.replaceState({ acAlarms: 1 }, '', h), h);
+    await page.reload();
+  };
   for (const [h, canon, m] of cases) {
-    await reopen(h);
+    await restore(h);
     assert.equal(await text('#ac-msg'), '', h);
     assert.equal(await hash(), canon, h);
     assert.equal(await meta(1), m, h);
@@ -561,6 +602,24 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
       // Started without a click, which this test browser allows.
       await page.waitForFunction(() => document.querySelector('#ac-sound-note').textContent === '');
     }
+  }
+  // A bookmark or a link has no mark: an alarm whose moment has passed is set
+  // again for its next time, never shown as missed (unless it rang moments ago).
+  const again = [`#7:00!a${A7}`, `Rings at 7:00 AM tomorrow (Monday), in ${R0.left}`];
+  const asBookmark = {
+    [`#7:00!a${now0 - 30 * 60000}`]: again,
+    [`#7:00!s${now0 - 2 * 3600000}`]: again,
+    [`#7:00!r${now0 - 300000}`]: again,
+    [`#7:00!r${now0 - 660000}`]: again,
+    [`#7:00!m${now0 - 3600000}`]: again,
+  };
+  for (const [h, canon, m] of cases) {
+    const [bc, bm] = asBookmark[h] || [canon, m];
+    await reopen(h);
+    assert.equal(await text('#ac-msg'), '', `bookmark ${h}`);
+    assert.equal(await hash(), bc, `bookmark ${h}`);
+    assert.equal(await meta(1), bm, `bookmark ${h}`);
+    assert.equal(await isRinging(), bc.includes('!r'), `bookmark ${h}`);
   }
   await reopen('#6:30~Gym,7:15');
   assert.equal(await page.locator('.ac-card').count(), 2);
@@ -659,6 +718,59 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
       else if (r.twice) assert.ok(m.endsWith(` as the clocks go back; the alarm rings the ${r.second ? 'second' : 'first'} time.`), `${what}: ${m}`);
       else assert.ok(!/clocks go/.test(m), `${what}: ${m}`);
     }
+    // Set before the clocks go forward, an alarm in the hour they skip keeps
+    // the time it showed after the jump, and after a reload, and rings then.
+    const g = rs.find(r => r.gap && r.m === 30 && r.at - r.now > 30 * 60000);
+    if (g) {
+      const hm = `${g.h}:${String(g.m).padStart(2, '0')}`, what = `${tz} ${hm} set at ${g.nowIso}`;
+      await p.clock.setSystemTime(g.now);
+      await p.goto('about:blank');
+      await p.goto(`${url}#${hm}`);
+      await p.clock.setSystemTime(g.at - 20 * 60000);
+      await p.clock.runFor(1100);
+      let m = await p.textContent('#ac-1-meta');
+      assert.ok(m.startsWith(`Rings at ${H12(g.local)} today, in 20 min`) && m.includes('when the clocks go forward'), `${what}, after the jump: ${m}`);
+      assert.equal(await p.evaluate(() => location.hash), `#${hm}!a${g.at}`, what);
+      await p.reload();
+      m = await p.textContent('#ac-1-meta');
+      assert.ok(m.startsWith(`Rings at ${H12(g.local)} today, in 20 min`), `${what}, reloaded after the jump: ${m}`);
+      await p.clock.setSystemTime(g.at + 500);
+      await p.clock.runFor(1100);
+      assert.equal(await p.$eval('#ac-face', f => f.classList.contains('is-ringing')), true, `${what}: rings at ${g.local}`);
+      assert.equal(await p.textContent('#ac-1-meta'), `Ringing since ${H12(g.local)}`, what);
+    }
+    await ctx.close();
+  }
+
+  // ---- A background tab the browser held back: the ring scheduled ahead
+  // started on time on the audio clock, so the alarm rings and says so,
+  // however late the page's own check comes. ----
+  {
+    const ctx = await browser.newContext({ timezoneId: 'America/New_York', locale: 'en-US' });
+    const p = await ctx.newPage();
+    watch(p, problems);
+    await p.addInitScript(INIT);
+    await p.clock.install({ time: T0 - 1000 });
+    await p.clock.pauseAt(T0);
+    await p.goto(url);
+    await p.click('#ac-1 .ac-go');
+    const at = R0.at;
+    await p.clock.setSystemTime(at - 3000);
+    const k0 = await p.evaluate(() => window.__osc.length);
+    await p.clock.runFor(1100);
+    const sched = await p.evaluate(k => window.__osc.slice(k), k0);
+    assert.ok(sched.length > 0, 'the ring is scheduled ahead');
+    await p.waitForTimeout(Math.ceil((sched[0].when - sched[0].now) * 1000) + 300);
+    const k1 = await p.evaluate(() => window.__osc.length);
+    await p.clock.setSystemTime(at + 90000);
+    await p.clock.runFor(1100);
+    assert.equal(await p.$eval('#ac-face', f => f.classList.contains('is-ringing')), true, 'rings, not missed');
+    assert.equal(await p.textContent('#ac-1-meta'), 'Ringing since 7:00 AM');
+    assert.equal(await p.textContent('#ac-alert'), 'Alarm: 7:00 AM.');
+    assert.equal(await p.evaluate(() => window.__osc.length), k1, 'the ring scheduled ahead goes on; no second one starts');
+    assert.ok((await p.evaluate(k => window.__osc.slice(k), k0)).every(r => r.stops.length <= 1), 'nothing scheduled is cut off');
+    await p.keyboard.press('Escape');
+    assert.equal(await p.textContent('#ac-1-meta'), 'Rang at 7:00 AM today. Off until you set it again.');
     await ctx.close();
   }
 

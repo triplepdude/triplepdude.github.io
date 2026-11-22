@@ -401,6 +401,15 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     assert.equal(await status(), `Playing the ${label} sound.`);
     if (key === 'beeps') assert.deepEqual(got.map(r => Math.round((r.when - got[0].when) * 100) / 100), [0, 0.12, 0.24, 0.36]);
   }
+  // The audio is suspended only once the test sound has died away, never
+  // cutting it short (the alarm, which stops by itself, is checked below).
+  await page.selectOption('#ot-sound', 'beeps');
+  const kT = await oscCount();
+  await page.click('#ot-test');
+  const testEnd = Math.max(...(await oscFrom(kT)).map(r => r.stops[r.stops.length - 1].when));
+  assert.equal(await untilSuspended(), 'suspended');
+  assert.ok(await page.evaluate(() => window.__master.context.currentTime) >= testEnd, 'the test sound is not cut short');
+  await page.click('#ot-test');
   await untilRunning();
   await page.focus('#ot-vol');
   for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowLeft');
@@ -498,6 +507,10 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.locator('.ot-card').count(), 10);
   assert.match(await text('#ot-msg'), /^Only the first 10 timers/);
   assert.equal(await page.getAttribute('#ot-add', 'aria-disabled'), 'true');
+  // Clicked before the focus moves below: a focus scrolls the page smoothly,
+  // and a forced click during that scroll lands on another element.
+  await page.click('#ot-add', { force: true });
+  assert.match(await text('#ot-msg'), /10 timers is the most/);
   // Dimmed by colour, not opacity, which would fade its focus ring too.
   await page.focus('#ot-add');
   await page.keyboard.press('Shift+Tab');
@@ -515,8 +528,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const [fullInk, addInk] = await page.$$eval('#ot-1 .ot-full, #ot-add', els => els.map(e => getComputedStyle(e).color)); // page order
   assert.notEqual(addInk, fullInk, 'Add a timer still looks unavailable in a contrast theme');
   await page.emulateMedia({ forcedColors: 'none' });
-  await page.click('#ot-add', { force: true });
-  assert.match(await text('#ot-msg'), /10 timers is the most/);
   await reopen('#' + '1m,'.repeat(1500));
   assert.match(await text('#ot-msg'), /longer than 4,000 characters/);
   assert.equal(await page.locator('.ot-card').count(), 1);
@@ -631,23 +642,28 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // The key hint is for keyboards; a touch screen does not show it.
   assert.equal(await pp.$eval('.ot-keys', el => getComputedStyle(el).display), 'none');
   // When the alarm starts, no button appears or moves under a finger and
-  // nothing shifts (412 px wide: two buttons a row).
-  await pp.goto('about:blank');
-  await pp.goto(url + '#1s');
-  await pp.tap('#ot-1 .ot-go');
-  await pp.evaluate(() => {
-    window.__shift = 0;
-    new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__shift += e.value; }).observe({ type: 'layout-shift' });
-  });
+  // nothing shifts: 412 px wide, two buttons a row; at 360 px and below, the
+  // line under the clock takes two lines once it reads "Time’s up at …".
   const spots = () => pp.$$eval('#ot-1 .ot-actions .btn, .ot-more, .ot-settings', els => els.filter(e => e.getClientRects().length).map(e => {
     const r = e.getBoundingClientRect();
     return [e.className, Math.round(r.x), Math.round(r.y + scrollY), Math.round(r.width)];
   }));
-  const spotsRunning = await spots();
-  await pp.waitForSelector('#ot-1.is-ringing', { timeout: 5000 });
-  assert.equal(await pp.textContent('#ot-1 .ot-go'), 'Stop alarm');
-  assert.deepEqual(await spots(), spotsRunning);
-  assert.equal(await pp.evaluate(() => window.__shift), 0, 'no layout shift when the alarm starts');
+  const ringsInPlace = async what => {
+    await pp.tap('#ot-1 .ot-go');
+    await pp.evaluate(() => {
+      window.__shift = 0;
+      new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__shift += e.value; }).observe({ type: 'layout-shift' });
+    });
+    const running = await spots();
+    await pp.waitForSelector('#ot-1.is-ringing', { timeout: 5000 });
+    assert.equal(await pp.textContent('#ot-1 .ot-go'), 'Stop alarm', what);
+    assert.deepEqual(await spots(), running, what);
+    await pp.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+    assert.equal(await pp.evaluate(() => window.__shift), 0, `no layout shift when the alarm starts, ${what}`);
+  };
+  await pp.goto('about:blank');
+  await pp.goto(url + '#1s');
+  await ringsInPlace('412 px');
   // No label breaks over two lines, down to 320 px and with several timers.
   const twoLines = () => pp.$$eval('#ot-list .btn', bs => bs.filter(b => b.getClientRects().length).map(b => {
     const r = document.createRange(); r.selectNodeContents(b.firstChild);
@@ -655,12 +671,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   }).filter(x => x[1] > 1 || x[2]));
   for (const width of [320, 360, 390]) {
     await pp.setViewportSize({ width, height: 700 });
-    for (const h of ['#10m', '#10m~Eggs,3m~Tea', '#1s~Eggs,3m~Tea']) {
+    for (const h of ['#10m', '#10m~Eggs,3m~Tea', '#1s', '#1s~Eggs,3m~Tea']) {
       // A fresh load: going to an address that differs only after the #
       // would add these timers to the ones on the page.
       await pp.goto('about:blank');
       await pp.goto(url + h);
-      if (h.startsWith('#1s')) { await pp.tap('#ot-1 .ot-go'); await pp.waitForSelector('#ot-1.is-ringing', { timeout: 5000 }); }
+      if (h.startsWith('#1s')) await ringsInPlace(`${width} px, ${h}`);
       assert.deepEqual(await twoLines(), [], `${width} px, ${h}`);
       assert.ok(await pp.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no sideways scroll at ${width} px, ${h}`);
     }

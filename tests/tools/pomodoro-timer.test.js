@@ -37,6 +37,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
       if (this.__rec) this.__rec.stops.push({ when, now: this.context.currentTime });
       return stop.call(this, when);
     };
+    window.__resumes = 0;
+    const resume = AudioContext.prototype.resume;
+    AudioContext.prototype.resume = function () { window.__resumes++; return resume.call(this); };
     const connect = AudioNode.prototype.connect;
     AudioNode.prototype.connect = function (dest, ...rest) {
       if (dest instanceof AudioDestinationNode) window.__master = this;
@@ -89,7 +92,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const reopen = async h => { await page.goto('about:blank'); await page.goto(url + h); };
   const oscCount = () => page.evaluate(() => window.__osc.length);
   const oscFrom = n => page.evaluate(n => window.__osc.slice(n), n);
-  const press = async key => { await blur(); await page.keyboard.press(key); };
+  // The page ignores keys while the timer is scrolled out of sight (Space
+  // then scrolls the page), so the timer is brought into view first.
+  const press = async key => {
+    await blur();
+    await page.$eval('#pt-card', el => { const r = el.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight) el.scrollIntoView({ block: 'nearest', behavior: 'instant' }); });
+    await page.keyboard.press(key);
+  };
   const logRows = () => page.$$eval('#pt-log-body tr', trs => trs.map(tr => [...tr.cells].map(c => c.textContent.replace(/ /g, ' '))));
   const dots = () => page.getAttribute('#pt-dots', 'aria-label');
   const pressed = () => page.$$eval('#pt-modes [aria-pressed="true"]', bs => bs.map(b => b.textContent));
@@ -158,6 +167,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.ok(cpu < 1000, `a megabyte paste took ${cpu} ms of CPU`);
   await page.fill('#pt-long', '15');
   assert.equal(await hash(), '');
+  // ...and into the label, which keeps its first 60 characters, never half an emoji.
+  cpu = await cpuMs(() => page.$eval('#pt-label', el => { el.value = 'x'.repeat(59) + '🍝' + 'y'.repeat(1 << 20); el.dispatchEvent(new Event('input', { bubbles: true })); }));
+  assert.ok(cpu < 1000, `a megabyte label took ${cpu} ms of CPU`);
+  assert.equal(await hash(), `#f1~${'x'.repeat(59)}`);
+  await page.fill('#pt-label', '');
+  assert.equal(await hash(), '');
 
   // ---- Start: the end sound is scheduled ahead on the audio clock. ----
   let n0 = await oscCount();
@@ -188,10 +203,16 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await hash(), `#f1!p1499000~${ENC}`);
   assert.equal(await page.title(), `24:59 paused · ${baseTitle}`);
   assert.ok((await oscFrom(n0)).every(r => r.stops.length > 1), 'pausing cancels the sound scheduled ahead');
+  // While paused, a sound card the browser suspended waits for the next
+  // click or key, and the page asks for one.
+  await page.evaluate(() => window.__master.context.suspend());
+  await page.waitForFunction(() => document.querySelector('#pt-sound-note').textContent === 'Click or tap anywhere on this page so the timer can sound.');
   await page.clock.runFor(60000);
   assert.equal(await text('#pt-time'), '24:59');
+  assert.equal(await page.evaluate(() => window.__master.context.state), 'suspended');
   await press('Space');
   assert.equal(await status(), 'Focus 1 resumed with 24 minutes 59 seconds left.');
+  await page.waitForFunction(() => window.__master.context.state === 'running' && document.querySelector('#pt-sound-note').textContent === '');
   let w = await wall();
   n0 = await oscCount();
   await page.click('#pt-plus');
@@ -201,11 +222,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await hash(), `#f1!r${E1b}~${ENC}`);
   pre = await oscFrom(n0);
   assert.ok(pre.length > 0 && Math.abs(off(pre[0], E1b)) < 0.05, 'the sound moves with the end');
-  // A sound card the browser suspended meanwhile is asked to resume.
+  // While a session runs, a sound card the browser suspended is asked to
+  // resume straight away (the note may show for a moment).
+  const resumes = await page.evaluate(() => window.__resumes);
   await page.evaluate(() => window.__master.context.suspend());
-  await page.waitForFunction(() => /^Click or tap anywhere/.test(document.querySelector('#pt-sound-note').textContent));
   await page.clock.runFor(5100);
-  await page.waitForFunction(() => window.__master.context.state === 'running' && document.querySelector('#pt-sound-note').textContent === '');
+  await page.waitForFunction(r => window.__master.context.state === 'running' && window.__resumes > r && document.querySelector('#pt-sound-note').textContent === '', resumes);
 
   // ---- The session ends: it rings, counts, and the short break is next.
   // Long stretches jump the test clock, firing what falls due once, as a
@@ -393,6 +415,38 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.uncheck('#pt-auto-focus');
   await page.fill('#pt-label', '');
 
+  // ---- A background tab the browser held back: the ring scheduled ahead
+  // started on time on the audio clock, so the session rang, and the page
+  // says so however late its own check comes. ----
+  await page.fill('#pt-label', '-1 draft');
+  n0 = await oscCount();
+  await page.click('#pt-go');
+  const endH = (await wall()) + 60000;
+  await page.clock.fastForward(57000);
+  const live = (await oscFrom(n0)).filter(r => r.f === 880 && r.stops.length === 1);
+  assert.ok(live.length > 0 && Math.abs(off(live[0], endH)) < 0.05, `re-timed just before the end, ${live.length && off(live[0], endH)} s off`);
+  await page.waitForTimeout(Math.ceil((live[0].when - live[0].now) * 1000) + 300);
+  await page.clock.fastForward(64000);
+  assert.equal(await alertText(), 'Focus 1 done. Next: short break.');
+  assert.match(sp(await text('#pt-last')), /^Focus 1 ended at \d{1,2}:\d\d [AP]M\.$/);
+  assert.equal(await page.$eval('#pt-last', el => el.classList.contains('is-missed')), false);
+  await page.keyboard.press('Escape');
+  // A label that a spreadsheet would take for a formula (- + = @) is copied
+  // as text.
+  await page.click('#pt-copy');
+  assert.equal((await page.evaluate(() => navigator.clipboard.readText())).split('\n').pop().split('\t')[2], "'-1 draft");
+  await page.fill('#pt-label', '');
+  await page.click('#pt-newset');
+  // Skip while the alarm rings stops it too.
+  await page.click('#pt-go');
+  await page.clock.fastForward(60020);
+  assert.equal(await text('#pt-go'), 'Stop alarm');
+  await press('s');
+  assert.equal(await status(), 'Skipped short break. Next: focus 2.');
+  assert.equal(await text('#pt-go'), 'Start');
+  assert.equal(await page.title(), baseTitle);
+  await page.click('#pt-newset');
+
   // ---- Notifications, while the page is in the background. ----
   await page.click('#pt-notify');
   await page.waitForFunction(() => window.__notes.length === 1);
@@ -418,9 +472,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await press('f');
   await page.waitForFunction(() => !document.fullscreenElement);
   const popup = page.context().waitForEvent('page');
-  await page.click('#pt-pip');
+  await page.dblclick('#pt-pip');
   const pip = await popup;
   await pip.waitForSelector('.pt-pip-time');
+  await page.waitForTimeout(300);
+  assert.equal(page.context().pages().filter(p => !p.isClosed()).length, 2, 'a double click opens one mini timer');
+  assert.equal(await text('#pt-msg'), '');
   assert.equal(await status(), 'Mini timer open.');
   assert.equal(await text('#pt-pip'), 'Close mini timer');
   assert.equal(await pip.textContent('.pt-pip-phase'), 'Short break');
@@ -576,6 +633,21 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     await pp.tap('#pt-full');
     assert.deepEqual(await twoLines(), [], `full screen at ${width} px`);
     assert.ok(await pp.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `full screen at ${width} px`);
+    await pp.tap('#pt-full');
+    await pp.waitForFunction(() => !document.fullscreenElement);
+  }
+  // A phone on its side: full screen still shows the main button without
+  // scrolling.
+  for (const [w, h] of [[915, 412], [844, 390], [667, 320]]) {
+    await pp.setViewportSize({ width: w, height: h });
+    await pp.goto('about:blank');
+    await pp.goto(url);
+    await pp.tap('#pt-go');
+    await pp.tap('#pt-full');
+    const r = await pp.$eval('#pt-go', el => el.getBoundingClientRect().toJSON());
+    const t = await pp.$eval('#pt-time', el => el.getBoundingClientRect().toJSON());
+    assert.ok(r.top >= 0 && r.bottom <= h && t.top >= 0, `${w}x${h}: time at ${t.top}, the main button at ${r.top} to ${r.bottom}`);
+    assert.deepEqual(await twoLines(), [], `full screen at ${w}x${h}`);
     await pp.tap('#pt-full');
     await pp.waitForFunction(() => !document.fullscreenElement);
   }

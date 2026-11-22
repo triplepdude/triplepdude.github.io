@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const { devices } = require('playwright');
 
 // Independent PNG decoder (ISO/IEC 15948): 8-bit RGB or RGBA, non-interlaced, all five filters.
 function decodePng(buf, assert) {
@@ -157,19 +158,31 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await type('#crp-w', '301');
   assert.deepEqual(await errOf('#crp-w'), { invalid: 'true', msg: 'The width can be at most 300 px, the width of the picture.' });
   assert.equal(await fields(), '7,3,301,55', 'the box is unchanged while the field is wrong');
-  await type('#crp-w', '0,500');
-  assert.equal((await errOf('#crp-w')).invalid, 'true', '"0,500" is not 500');
+  await type('#crp-w', '0,050');
+  assert.deepEqual(await errOf('#crp-w'), { invalid: 'true', msg: 'Enter the width as a whole number of pixels, 1 or more.' }, '"0,050" is not 50: a group of thousands never starts with 0');
   await type('#crp-w', '12.5');
   assert.equal((await errOf('#crp-w')).msg, 'Enter the width as a whole number of pixels, 1 or more.');
   await type('#crp-w', '5²');
   assert.equal((await errOf('#crp-w')).invalid, 'true', 'a raised 2 is not a digit');
   await type('#crp-w', '');
   assert.equal((await errOf('#crp-w')).invalid, 'true');
-  // A megabyte pasted into a field is refused at once.
-  const t0 = Date.now();
-  await type('#crp-x', '9'.repeat(1 << 20));
-  assert.equal((await errOf('#crp-x')).invalid, 'true');
-  assert.ok(Date.now() - t0 < 5000, 'a megabyte in a field is handled quickly');
+  // A megabyte pasted into a field, with a long run of spaces inside (which once made a pattern
+  // slow), is refused at once. Budgets are main-thread CPU time, not wall time.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Performance.enable');
+  const threadMs = async () => (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'ThreadTime').value * 1000;
+  const big = '1' + ' '.repeat(1 << 20) + '0 px';
+  for (const sel of ['#crp-dpi', '#crp-custom', '#crp-x']) {
+    const t0 = await threadMs();
+    await type(sel, big);
+    const ms = (await threadMs()) - t0;
+    assert.equal((await errOf(sel)).invalid, 'true', `${sel}: a megabyte is refused`);
+    assert.ok(ms < 1500, `${sel}: a megabyte took ${Math.round(ms)} ms of CPU`);
+  }
+  await type('#crp-dpi', '');
+  await type('#crp-custom', '');
+  assert.deepEqual(await errOf('#crp-dpi'), { invalid: null, msg: '' });
+  assert.deepEqual(await errOf('#crp-custom'), { invalid: null, msg: '' });
   // Saving with a wrong field focuses it.
   await page.click('#crp-download');
   assert.equal(await page.textContent('#crp-error'), 'Correct the highlighted field first.');
@@ -474,4 +487,84 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.waitForFunction(() => /RAW/.test(document.querySelector('#crp-error').textContent));
   assert.equal(await page.textContent('#crp-error'), 'IMG_0001.CR2 is a camera RAW file, which is not supported. Export it as a JPG or TIFF from your photo app first.');
   assert.match(await page.textContent('#crp-drop-title'), /^grid\.png/, 'the pictures already open stay');
+  assert.equal(await page.getAttribute('#crp-file', 'aria-invalid'), 'true');
+  assert.equal(await page.getAttribute('#crp-file', 'aria-describedby'), 'crp-error');
+
+  // ---------- A print size on a portrait photo turns with it ----------
+  await openFile('photo.jpg');
+  assert.equal(await page.getAttribute('#crp-file', 'aria-invalid'), null);
+  await page.selectOption('#crp-preset', 'print-4x6');
+  assert.deepEqual([await page.inputValue('#crp-ow'), await page.inputValue('#crp-oh'), await page.inputValue('#crp-dpi')], ['1200', '1800', '300']);
+  assert.equal(await fields(), '0,0,80,120', 'the largest 2:3 box');
+  assert.equal(await info(), 'Crop 80 × 120 px (2:3) at 0, 0. Saves as a 1200 × 1800 px JPG.');
+  d = await download();
+  px = await pixels(d.buf, [[300, 450]]);
+  assert.deepEqual([px.w, px.h], [1200, 1800]);
+  assert.ok(near(px.px[0], expected.photo_upright.top_left.concat(255), 12), `scaled crop keeps the colours: ${px.px[0]}`);
+  // pHYs/JFIF: 300 dpi in the JFIF header (units 1 = dots per inch)
+  const jfif = d.buf.indexOf(Buffer.from('JFIF\0'));
+  assert.ok(jfif > 0 && d.buf[jfif + 7] === 1 && d.buf.readUInt16BE(jfif + 8) === 300 && d.buf.readUInt16BE(jfif + 10) === 300, '300 dpi recorded');
+
+  // ---------- The keyboard alone ----------
+  await page.selectOption('#crp-preset', 'none');
+  await page.selectOption('#crp-size', 'crop');
+  await type('#crp-dpi', '');
+  await page.focus('#crp-editor');
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'crp-zoom-in', 'Tab goes from the picture to the zoom buttons');
+  await page.keyboard.press('Enter');
+  assert.doesNotMatch(await page.textContent('#crp-zoom-val'), /Fit/);
+  await page.focus('#crp-download');
+  const [kd] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
+  assert.equal(kd.suggestedFilename(), 'photo-cropped.jpg');
+  // A double click saves one file.
+  let saves = 0;
+  const onSave = () => saves++;
+  page.on('download', onSave);
+  await page.dblclick('#crp-download');
+  await page.waitForFunction(() => /^Saved/.test(document.querySelector('#crp-status').textContent));
+  await page.waitForTimeout(1000);
+  page.off('download', onSave);
+  assert.equal(saves, 1, 'a double click downloads once');
+
+  // ---------- Back to the page: menus the browser restores after the script ran are read again ----------
+  await page.evaluate(() => {
+    document.querySelector('#crp-ratio').value = '1:1';
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  });
+  const sq = (await fields()).split(',').map(Number);
+  assert.equal(sq[2], sq[3], `pageshow applies the restored 1:1 ratio: ${sq}`);
+  assert.match(await info(), /\(1:1\)/);
+
+  // ---------- A phone: drag a handle with a finger, pinch to zoom ----------
+  const ctx = await page.context().browser().newContext({ ...devices['Pixel 7'] });
+  const phone = await ctx.newPage();
+  await phone.goto(url);
+  await phone.waitForFunction(() => document.querySelector('#crp-x').value === '120');
+  await phone.locator('#crp-editor').scrollIntoViewIfNeeded();
+  const pc = await ctx.newCDPSession(phone);
+  const g = await phone.evaluate(() => {
+    const e = document.querySelector('#crp-editor'), r = e.getBoundingClientRect();
+    return { x: r.left + e.clientLeft, y: r.top + e.clientTop, w: e.clientWidth, h: e.clientHeight };
+  });
+  const sc = Math.min((g.w - 28) / 1200, (g.h - 28) / 800);
+  const P = (x, y) => ({ x: g.x + g.w / 2 + (x - 600) * sc, y: g.y + g.h / 2 + (y - 400) * sc });
+  const touch = (type, pts) => pc.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((q, i) => ({ x: q.x, y: q.y, id: i })) });
+  const from = P(1080, 720), to = P(980, 620);
+  await touch('touchStart', [from]);
+  for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: from.x + (to.x - from.x) * i / 6, y: from.y + (to.y - from.y) * i / 6 }]);
+  await touch('touchEnd', []);
+  const pf = (await phone.evaluate(() => ['x', 'y', 'w', 'h'].map(k => document.querySelector('#crp-' + k).value))).map(Number);
+  assert.deepEqual(pf.slice(0, 2), [120, 80], 'the opposite corner stays');
+  assert.ok(Math.abs(pf[2] - 860) <= 8 && Math.abs(pf[3] - 540) <= 8, `the south-east handle followed the finger: ${pf}`);
+  const mid = P(600, 400);
+  await touch('touchStart', [{ x: mid.x - 20, y: mid.y }, { x: mid.x + 20, y: mid.y }]);
+  for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: mid.x - 20 - 12 * i, y: mid.y }, { x: mid.x + 20 + 12 * i, y: mid.y }]);
+  await touch('touchEnd', []);
+  assert.doesNotMatch(await phone.textContent('#crp-zoom-val'), /Fit/, 'a pinch zooms in');
+  const after = (await phone.evaluate(() => ['x', 'y', 'w', 'h'].map(k => document.querySelector('#crp-' + k).value))).map(Number);
+  assert.deepEqual(after, pf, 'a pinch does not move the box');
+  const small = await phone.$$eval('.crp-bar .btn', l => Math.min(...l.map(b => b.getBoundingClientRect().height)));
+  assert.ok(small >= 44, `buttons are at least 44 px tall on a touch screen: ${small}`);
+  await ctx.close();
 };

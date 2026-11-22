@@ -30,16 +30,17 @@ howto: |
   remove it; to drop a background, press **Pick a colour to remove** and
   click it. Transparent parts of a PNG stay transparent, and edge pixels that
   are at least half opaque count as solid. Big pictures are traced at up to
-  2 megapixels (photos at 0.5), and icons under 300 pixels are first
-  enlarged 2 to 4 times, so their curves come out smooth.
+  2 megapixels (photos at 0.5); pictures under half a megapixel are first
+  enlarged 2 to 4 times, except in Photo mode, so their curves come out
+  smooth.
 
   ## SVG cut files for Cricut and other cutting machines
 
   Choose **Black and white**. The page splits dark from light at the
   threshold that Otsu's method finds for your picture; move the slider to
-  change it, or tick **Invert** to cut the light parts instead. Only the dark
-  parts are drawn, as one black layer, and holes such as the middle of an O
-  stay open. A logo traced in Logo mode gives one layer per colour: as the
+  change it, or tick **Invert** to cut the light parts instead. Transparent
+  parts count as white paper. Only the dark parts are drawn, as one black
+  layer, and holes such as the middle of an O stay open. A logo traced in Logo mode gives one layer per colour: as the
   colours are stacked, each layer is a whole piece that the colours above it
   cover. Crop away what you do not need first with
   [Crop Image](/crop-image/).
@@ -53,14 +54,15 @@ howto: |
   size, and the [image converter](/image-converter/) changes between bitmap
   formats.
 
-  ## What vectorising can and cannot do
+  ## Vectorising: what an SVG converter can and cannot do
 
   A converter that traces, like this one, redraws the outline of each area
   of colour as lines and curves. The SVG then stays sharp at any size and
   can be cut, but it is a new drawing, not a lossless copy: fine detail,
   gradients and shadows become flat shapes, and text becomes outlines that
-  can no longer be edited as text. Photos need many colours and thousands of
-  shapes, so their SVG files are often larger than the JPG and slow to open.
+  can no longer be edited as text. A photo can be traced in Photo mode, but
+  it needs many colours and thousands of shapes, so its SVG is often larger
+  than the JPG and slow to open.
   A PNG that is only wrapped in an SVG file is still a grid of pixels: it is
   not a vector, and a cutting machine cannot follow it. Tracing someone
   else's logo does not give you the right to use it.
@@ -104,6 +106,9 @@ faq:
 .p2s-stage { position: relative; flex: none; margin: auto; cursor: ew-resize; user-select: none; -webkit-user-select: none; }
 .p2s-stage > canvas, .p2s-stage > img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; -webkit-user-drag: none; }
 .p2s-stage.is-pixel > canvas { image-rendering: pixelated; }
+/* Left of the divider only the original shows, right of it only the SVG (over the checks, so its
+   transparent parts look transparent). */
+.p2s-stage > canvas { clip-path: inset(0 calc(100% - var(--cut, 50%)) 0 0); }
 .p2s-svg { clip-path: inset(0 0 0 var(--cut, 50%)); }
 .p2s-line { position: absolute; top: 0; bottom: 0; left: var(--cut, 50%); width: 2px; margin-left: -1px; background: #ffffff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); pointer-events: none; }
 .p2s-knob {
@@ -115,15 +120,18 @@ faq:
 .p2s-tag { position: absolute; top: 8px; padding: 2px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.7); color: #ffffff; font-size: 13px; pointer-events: none; }
 .p2s-tag.is-l { left: 8px; }
 .p2s-tag.is-r { right: 8px; }
-.p2s-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin: 0 0 16px; }
+.p2s-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; margin: 0 0 16px; }
 .p2s-bar .p2s-cmp { flex: 1 1 220px; margin: 0; }
-.p2s-zoom { min-width: 7ch; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--muted); align-self: center; }
+.p2s-zooms { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.p2s-zoom { min-width: 7ch; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .p2s-pal-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
 .p2s-btn-on { background: var(--accent-soft); border-color: var(--accent); }
 .p2s-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 .p2s-list li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
-.p2s-list .p2s-hex { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 14px; overflow-wrap: anywhere; }
-.p2s-list .p2s-hex small { display: block; font-family: inherit; color: var(--muted); font-size: 12px; }
+.p2s-list .p2s-hex { flex: 1 1 auto; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.p2s-list .p2s-mono { font-family: var(--mono); }
+.p2s-list .p2s-hex small { display: block; color: var(--muted); font-size: 12px; }
+#p2s-list { max-height: 360px; overflow: auto; }
 .p2s-list.is-removed li { border-style: dashed; }
 .p2s-sw { width: 28px; height: 28px; flex: none; border-radius: 6px; border: 1px solid var(--field-border); }
 .p2s-info { margin: 0 0 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -133,6 +141,7 @@ faq:
 .p2s-details summary { cursor: pointer; font-weight: 600; padding: 10px 0; }
 @media (max-width: 640px) {
   .p2s-set { grid-template-columns: minmax(0, 1fr); }
+  .p2s-bar .p2s-cmp { flex-basis: 100%; }
 }
 </style>
 
@@ -196,10 +205,12 @@ faq:
     <label for="p2s-cut">Compare</label>
     <input type="range" id="p2s-cut" min="0" max="100" step="1" value="50" autocomplete="off">
   </div>
-  <button class="btn secondary small" type="button" id="p2s-zoom-out">Zoom out</button>
-  <button class="btn secondary small" type="button" id="p2s-zoom-in">Zoom in</button>
-  <button class="btn secondary small" type="button" id="p2s-fit">Fit</button>
-  <span class="p2s-zoom" id="p2s-zoom-val">Fit</span>
+  <div class="p2s-zooms">
+    <button class="btn secondary small" type="button" id="p2s-zoom-out">Zoom out</button>
+    <button class="btn secondary small" type="button" id="p2s-zoom-in">Zoom in</button>
+    <button class="btn secondary small" type="button" id="p2s-fit">Fit</button>
+    <span class="p2s-zoom" id="p2s-zoom-val">Fit</span>
+  </div>
 </div>
 
 <div class="p2s-pal-head">
@@ -252,7 +263,7 @@ faq:
   var st = {
     src: null, work: null, mode: 'logo', vals: {}, removed: [], recolour: new Map(),
     res: null, svg: '', shapes: 0, url: null, job: 0, worker: null, wait: null, release: null, timer: 0, svgTimer: 0,
-    zoom: 1, cut: 50, picking: false, loadRun: 0, palKey: ''
+    zoom: 1, cut: 50, picking: false, loadRun: 0, palKey: '', errKind: ''
   };
   Object.keys(MODES).forEach(function (k) {
     var m = MODES[k];
@@ -260,6 +271,7 @@ faq:
   });
 
   function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  var coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
   function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function hex(c) { return '#' + c.map(function (v) { return (v < 16 ? '0' : '') + v.toString(16); }).join(''); }
   function bytes(n) { return n < 1000 ? fmtN(n) + ' bytes' : n < 1e6 ? (n / 1000).toFixed(1) + ' KB' : (n / 1e6).toFixed(2) + ' MB'; }
@@ -567,10 +579,12 @@ faq:
     setText($('#p2s-thr-out'), t + (auto ? ' (automatic)' : ''));
     thrIn.setAttribute('aria-valuetext', t + (auto ? ', automatic' : ''));
   }
+  // Speck size is in pixels of the picture as opened; the trace may run on an enlarged or reduced
+  // copy, and a speck s pixels across has an outline of about 4 s points there.
   function jobOptions() {
-    var v = st.vals[st.mode], s = v.speck;
+    var v = st.vals[st.mode], s = v.speck, k = st.work && st.src ? st.work.w / st.src.w0 : 1;
     return {
-      mode: st.mode, colours: v.colours, pathomit: s ? 4 * s + 1 : 0,
+      mode: st.mode, colours: v.colours, pathomit: s ? Math.max(1, Math.round(4 * s * k)) + 1 : 0,
       ltres: LINE_ERR[v.smooth], qtres: CURVE_ERR[v.smooth], corners: v.smooth <= 5,
       threshold: st.mode === 'bw' && !v.auto ? v.threshold : null, invert: !!v.invert
     };
@@ -623,6 +637,8 @@ faq:
     if (st.svgTimer) { clearTimeout(st.svgTimer); st.svgTimer = 0; buildSvg(); }
     return !!st.res && !!st.svg;
   }
+  // Errors about a file stay until another file is opened; others go with the next good result.
+  function showErr(msg, kind) { errEl.textContent = msg; st.errKind = kind; }
   function failTrace(msg) {
     setText(progressEl, '');
     st.res = null; st.svg = ''; st.shapes = 0;
@@ -632,7 +648,7 @@ faq:
     setText(warnEl, '');
     codeEl.textContent = '';
     renderColours();
-    errEl.textContent = msg;
+    showErr(msg, 'trace');
   }
   // A new picture or image type: the trace still running is for the old one.
   function dropJob() {
@@ -671,8 +687,7 @@ faq:
   }
   function finish(r) {
     st.res = r;
-    errEl.textContent = '';
-    fileInput.removeAttribute('aria-invalid');
+    if (st.errKind !== 'file') errEl.textContent = '';
     setText(progressEl, '');
     if (st.mode === 'bw' && r.threshold != null && autoBox.checked) { thrIn.value = r.threshold; st.vals.bw.threshold = r.threshold; labels(); }
     buildSvg();
@@ -698,13 +713,15 @@ faq:
       });
       li.appendChild(inp);
     }
-    var txt = document.createElement('span');
-    txt.className = 'p2s-hex';
-    txt.appendChild(document.createTextNode(removed ? h : colourOf(p)));
+    var txt = document.createElement('span'), code = document.createElement('span');
+    txt.className = 'p2s-hex'; code.className = 'p2s-mono';
+    code.textContent = removed ? h : colourOf(p);
+    txt.appendChild(code);
     var small = document.createElement('small');
     small.textContent = share + '% of the picture' + (!removed && colourOf(p) !== h ? ', was ' + h : '');
     txt.appendChild(small);
     li.appendChild(txt);
+    if (st.mode === 'bw' && !removed) return li; // the one ink layer can be recoloured, not removed
     var btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'btn secondary small';
     btn.textContent = removed ? 'Restore' : 'Remove';
@@ -722,7 +739,7 @@ faq:
     shown.forEach(function (p) { listEl.appendChild(swatchItem(p, false)); });
     gone.forEach(function (p) { removedEl.appendChild(swatchItem(p, true)); });
     removedEl.hidden = removedLabel.hidden = !gone.length;
-    pickBtn.disabled = !shown.length;
+    pickBtn.disabled = !shown.length || st.mode === 'bw';
     if (!shown.length && st.picking) setPicking(false);
   }
   function sameRgb(a, b) { return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]; }
@@ -828,7 +845,7 @@ faq:
     pickBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
     pickBtn.classList.toggle('p2s-btn-on', on);
     view.classList.toggle('is-picking', on);
-    setText(pickBtn, on ? 'Click a colour on the picture' : 'Pick a colour to remove');
+    setText(pickBtn, on ? (coarse ? 'Tap' : 'Click') + ' a colour on the picture' : 'Pick a colour to remove');
   }
   pickBtn.addEventListener('click', function () { setPicking(!st.picking); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && st.picking) setPicking(false); });
@@ -901,13 +918,13 @@ faq:
     if (w.w > s.w0) notes.push('Enlarged ' + Math.round(w.w / s.w0 * 10) / 10 + ' times, to ' + fmtN(w.w) + ' × ' + fmtN(w.h) + ' px, so the curves come out smooth.');
     else if (w.w < s.w0) notes.push('Traced at ' + fmtN(w.w) + ' × ' + fmtN(w.h) + ' px, reduced from ' + fmtN(s.w0) + ' × ' + fmtN(s.h0) + ' px; the SVG keeps the original size.');
     if (s.fmt === 'jpeg' && st.mode === 'logo') notes.push('A JPG has no transparency: remove the background colour if you do not want it.');
-    noteEl.textContent = notes.join(' ');
+    setText(noteEl, notes.join(' '));
     schedule(0);
   }
   async function openFile(file) {
     if (!file) return;
     var run = ++st.loadRun, name = file.name || 'pasted image';
-    errEl.textContent = '';
+    errEl.textContent = ''; st.errKind = '';
     fileInput.removeAttribute('aria-invalid');
     setText(progressEl, 'Opening ' + name + '…');
     try {
@@ -925,7 +942,7 @@ faq:
       if (run !== st.loadRun) return;
       setText(progressEl, '');
       fileInput.setAttribute('aria-invalid', 'true');
-      errEl.textContent = '';
+      errEl.textContent = ''; st.errKind = 'file';
       if (e && e.svg) {
         errEl.appendChild(document.createTextNode((file.name || 'This file') + ' is already an SVG, so there is nothing to trace. To turn an SVG into a PNG, use the '));
         var a = document.createElement('a');
@@ -933,7 +950,7 @@ faq:
         errEl.appendChild(a);
         errEl.appendChild(document.createTextNode('.'));
       } else {
-        errEl.textContent = (e && (e.code || e.friendly) && e.message) ? e.message : (file.name || 'This file') + ' could not be opened as an image.';
+        showErr((e && (e.code || e.friendly) && e.message) ? e.message : (file.name || 'This file') + ' could not be opened as an image.', 'file');
       }
     }
   }
@@ -976,7 +993,7 @@ faq:
     dlBtn.dataset.busy = '1';
     try {
       if (!(await current())) return;
-      if (!st.shapes) { errEl.textContent = 'There is nothing in the SVG to save yet.'; return; }
+      if (!st.shapes) { showErr('There is nothing in the SVG to save: ' + infoEl.textContent.replace(/^Nothing to draw: /, ''), 'save'); return; }
       TT.download(st.src.name + '.svg', new Blob([st.svg], { type: 'image/svg+xml' }));
       setText(progressEl, 'Saved ' + st.src.name + '.svg (' + bytes(st.svg.length) + ').');
     } finally { delete dlBtn.dataset.busy; }

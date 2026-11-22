@@ -29,7 +29,7 @@ howto: |
   locked with a new random permissions password, so to lift them later start
   from the original file. A blank permissions password counts as known.
 
-  Restrictions are kept by PDF readers, not by the encryption itself, and
+  Restrictions are enforced by PDF readers, not by the encryption itself, and
   Firefox's built-in viewer ignores them by default. Lift them only with the
   permissions password or the owner's consent.
 
@@ -48,7 +48,9 @@ howto: |
   The whole document is saved again as it was: pages, bookmarks, links,
   form fields, attachments, metadata and document properties. A digital
   signature no longer validates, because the file's bytes change, so keep
-  the signed original. To work on the pages afterwards, use
+  the signed original. A copy that keeps its restrictions is stored less
+  compactly, so a file with many links, bookmarks or form fields can come
+  out several times larger. To work on the pages afterwards, use
   [split PDF](/split-pdf/), [merge PDF](/merge-pdf/) or
   [PDF to JPG](/pdf-to-jpg/).
 
@@ -58,8 +60,9 @@ howto: |
   PDF** also gives a copy without a password, but Chrome refuses to print a
   file that forbids printing, prints pages as pictures without selectable
   text when only low-quality printing is allowed, and the copy loses
-  bookmarks, attachments and form fields. On a Mac, Preview changes a PDF's
-  password settings under **File > Edit Permissions** once it is open.
+  bookmarks, attachments and form fields. On a Mac, open the PDF in Preview
+  with its password, choose **File > Edit Permissions**, untick **Require
+  Password To Open Document** and click **Apply**.
 faq:
   - q: Is my PDF uploaded to a server?
     a: No. The file is read, decrypted and saved again by JavaScript in this page, on your own device, and nothing is kept after you close the tab. Online unlockers such as Smallpdf, iLovePDF, PDF24 and Sejda upload the file and delete it after one or two hours, and Adobe's needs a subscription or a trial.
@@ -151,6 +154,7 @@ faq:
   var MAX_FILE = 1024 * 1024 * 1024, MAX_FILES = 100, BIG_FILE = 100 * 1024 * 1024;
   var NUM = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 });
   var files = [], nextId = 1, busy = false, generation = 0;
+  var checks = Promise.resolve();   // settles once every file added so far has been checked
 
   // Standard security handler (ISO 32000-1 7.6.3, ISO 32000-2 7.6.4) for pdf-lib, copied from the
   // Split PDF tool and extended: it reports what protects a file, tells the open (user) password
@@ -628,7 +632,10 @@ faq:
           if (ref === metaRef && !e.encryptMetadata) continue;      // EncryptMetadata false: only the catalogue's
           obj.contents = await decryptData(e, key, ref, obj.contents, tname === 'EmbeddedFile' ? e.eff : e.stm);
         } else {
-          await mapStrings(obj, decrypt(ref));
+          // An indirect object can be a string itself (a /Title or a field value kept as "12 0 R"):
+          // mapStrings returns a new object for it, which must replace the old one.
+          var plain = await mapStrings(obj, decrypt(ref));
+          if (plain !== obj) context.assign(ref, plain);
         }
       }
       // The old dictionary would otherwise be written out as an orphan, and its /O and /U let
@@ -642,7 +649,10 @@ faq:
       var doc = new PDFLib.PDFDocument(context, true, false);
       var kept = access === 'user' ? restrictions(e) : [];
       if (kept.length) await encryptR6(doc, e, metaRef);
-      var out = await doc.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
+      // A plain copy keeps object streams when the original had them: without them, a file with many
+      // small objects (links, a tagged structure tree) can come out several times larger. The AES-256
+      // writer encrypts each string on its own, which object streams do not allow, so it never uses them.
+      var out = await doc.save({ useObjectStreams: !kept.length && state.inner.size > 0, addDefaultPage: false, updateFieldAppearances: false });
       return { access: access, kept: kept, signed: hasSignature(context), bytes: out };
     }
 
@@ -674,7 +684,8 @@ faq:
         } else if (obj instanceof PDFLib.PDFStream) {
           throw new Error('unexpected stream');
         } else {
-          await mapStrings(obj, enc);
+          var sealed = await mapStrings(obj, enc);
+          if (sealed !== obj) ctx.assign(ref, sealed);
         }
       }
       var dict = {
@@ -732,11 +743,12 @@ faq:
     workerReady = new Promise(function (resolve, reject) {
       var src = pdfUnlocker.toString() + '\n(' + workerMain.toString() + ')(self);';
       var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-      try { worker = new Worker(url); } catch (e) { workerReady = null; reject(new Error('START')); return; }
+      // Rejections carry a code like the worker's own errors, so a row can say what went wrong.
+      try { worker = new Worker(url); } catch (e) { workerReady = null; reject({ code: 'START' }); return; }
       worker.onmessage = function (e) {
         var m = e.data;
         if (m.type === 'ready') { URL.revokeObjectURL(url); resolve(worker); return; }
-        if (m.type === 'fatal') { stopWorker({ code: 'LOAD' }); reject(new Error('LOAD')); return; }
+        if (m.type === 'fatal') { stopWorker({ code: 'LOAD' }); reject({ code: 'LOAD' }); return; }
         var w = waiting[m.id];
         if (!w) return;
         delete waiting[m.id];
@@ -745,7 +757,7 @@ faq:
       worker.onerror = function (e) {
         if (e && e.preventDefault) e.preventDefault();
         stopWorker({ code: 'CRASH' });
-        reject(new Error('CRASH'));
+        reject({ code: 'CRASH' });
       };
       worker.postMessage({ type: 'init', lib: PDFLIB_URL });
     });
@@ -864,7 +876,7 @@ faq:
     zipBtn.hidden = outputs.length < 2;
     var checking = files.filter(function (f) { return f.status === 'checking' || f.status === 'working'; }).length;
     zipBtn.disabled = busy;
-    goBtn.disabled = busy || checking > 0;
+    goBtn.disabled = busy;
     clearBtn.disabled = busy;
     progressEl.hidden = !checking;
     progressEl.textContent = checking ? (busy ? 'Unlocking… ' : 'Checking… ') + plural(checking, 'file', 'files') + ' left.' : '';
@@ -894,7 +906,7 @@ faq:
     f.output = null;
     if (err && err.code === 'UNSUPPORTED') { f.status = 'unsupported'; f.text = REASONS[err.reason] || REASONS.revision; return; }
     if (err && err.code === 'GONE') { f.status = 'error'; f.text = 'The file could not be read. It may have been moved or deleted.'; return; }
-    if (err && (err.code === 'LOAD' || err.code === 'START')) { f.status = 'error'; f.text = 'The PDF tools could not load. Check your connection and try again.'; return; }
+    if (err && (err.code === 'LOAD' || err.code === 'START')) { f.status = 'error'; f.text = 'The PDF tools could not load. Check your connection, then add the file again.'; return; }
     if (err && err.code === 'CRASH') { f.status = 'error'; f.text = 'The browser ran out of memory. Try this file on a computer.'; return; }
     f.status = 'error';
     f.text = err && err.code === 'DAMAGED' ? 'This file is damaged or is not a valid PDF.' : 'This file could not be read as a PDF.';
@@ -973,12 +985,14 @@ faq:
         }, function () { failText(f, { code: 'GONE' }); });
       }).then(function () { if (gen === generation) { row(f); refreshUi(); } });
     });
-    return chain.then(function () {
+    var done = chain.then(function () {
       if (gen !== generation) return;
       refreshUi();
       say(summary(), true);
       if (!unlockBox.hidden && document.activeElement !== pwIn && (document.activeElement === document.body || root.contains(document.activeElement))) pwIn.focus();
     });
+    checks = Promise.all([checks, done]).then(function () {}, function () {});
+    return done;
   }
 
   function summary() {
@@ -1006,12 +1020,18 @@ faq:
     if (t) pwIn.setAttribute('aria-invalid', 'true'); else pwIn.removeAttribute('aria-invalid');
   }
   function unlockAll() {
-    if (busy) return;
-    var pw = pwIn.value, targets = files.filter(needsPassword);
-    if (!targets.length) return;
+    if (busy || !files.some(needsPassword)) return;
+    var pw = pwIn.value;
     if (!pw) { showPwError('Type the password first.'); pwIn.focus(); say('Type the password first.', true); return; }
     showPwError('');
     busy = true;
+    refreshUi();
+    // Files still being checked share the password too: wait for them, then unlock every one.
+    return checks.then(function () { return unlockTargets(pw); });
+  }
+  function unlockTargets(pw) {
+    var targets = files.filter(needsPassword);
+    if (!targets.length) { busy = false; refreshUi(); return; }
     targets.forEach(function (f) { f.prevKept = f.status === 'kept'; f.status = 'working'; f.text = 'Unlocking…'; f.mood = ''; row(f); });
     refreshUi();
     say('Unlocking ' + plural(targets.length, 'file', 'files') + '…');

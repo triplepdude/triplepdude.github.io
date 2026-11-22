@@ -229,6 +229,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await errorCase([['#bm-years', '121']], '#bm-age-msg', 'Enter the age in whole years, from 0 to 120.', 'bm-years');
   await errorCase([['#bm-years', '3.5']], '#bm-age-msg', 'Enter the age in whole years, from 0 to 120.', 'bm-years');
   await errorCase([['#bm-years', '3'], ['#bm-months', '12']], '#bm-age-msg', 'Enter the extra months as a whole number from 0 to 11.', 'bm-months');
+  // A toddler's age in months alone, as the CDC's own calculator allows: 30 months is 2 years 6 months.
+  await page.fill('#bm-years', '');
+  await page.fill('#bm-months', '30');
+  assert.deepEqual([await text('#bm-age-msg'), await text('#bm-k')], ['', 'BMI for a girl aged 2 years 6 months']);
+  await errorCase([['#bm-years', ''], ['#bm-months', '240']], '#bm-age-msg', 'Enter the age in months, from 0 to 239, or in years and months.', 'bm-months');
   await page.fill('#bm-years', '');
   await page.fill('#bm-months', '');
   await page.selectOption('#bm-hu', 'ftin');
@@ -350,6 +355,105 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const faqs = await page.locator('.faq summary').allTextContents();
   assert.ok(/sent anywhere/i.test(faqs[faqs.length - 1]), faqs.join(' | '));
   assert.ok(faqs.some(q => /women/.test(q)) && faqs.some(q => /percentile/.test(q)));
+
+  // ---- Typed heights that need care ----
+  await page.setChecked('#bm-nice', false);
+  await page.selectOption('#bm-hu', 'ftin');
+  await page.selectOption('#bm-wu', 'lb');
+  await page.fill('#bm-lb', '145');
+  await page.fill('#bm-ft', '5');
+  await page.fill('#bm-in', '11.96'); // rounds up to a whole foot, never "5 ft 12 in"
+  assert.equal((await read()).facts[0], 'Healthy weight for 6 ft 0 in: 136 to 183 lb (BMI 18.5 to 24.9).');
+  // It takes the place of the chart's own 6 ft 0 in row (137 to 183 lb), so no height is listed twice.
+  assert.deepEqual(await tableRow('6 ft 0 in (your height)'), ['6 ft 0 in (your height)', '136 to 183 lb', '184 lb', '221 lb']);
+  assert.deepEqual([await tableRow('6 ft 0 in'), await page.$$eval('#bm-tbody tr', t => t.length)], [null, 11]);
+  await page.selectOption('#bm-hu', 'cm');
+  await page.fill('#bm-cm', '170.04');
+  assert.deepEqual([await tableRow('170 cm'), await page.$$eval('#bm-tbody tr.is-you th', t => t.map(c => c.textContent)), await page.$$eval('#bm-tbody tr', t => t.length)],
+    [null, ['170 cm (your height)'], 12]);
+  await page.selectOption('#bm-hu', 'ftin');
+  // Typographic primes, as on the chart's own axis, mean feet and inches.
+  await page.fill('#bm-in', '');
+  await page.fill('#bm-ft', '5′9″');
+  assert.deepEqual([await text('#bm-h-read'), await text('#bm-bmi')], ['Read as 5 ft 9 in.', '21.4']);
+  await page.fill('#bm-ft', '5′');
+  await page.fill('#bm-in', '9″');
+  assert.deepEqual([await text('#bm-h-msg'), await text('#bm-bmi')], ['', '21.4']);
+  await page.fill('#bm-in', '');
+  await page.selectOption('#bm-hu', 'cm');
+  // A tall height in metres is still metres: 2,05 is 205 cm.
+  await page.fill('#bm-cm', '2,05');
+  assert.deepEqual([await text('#bm-h-read'), await text('#bm-bmi')], ['Read as 2.05 m, 205 cm.', '15.7']);
+  await page.fill('#bm-cm', '5′9″');
+  await page.press('#bm-cm', 'Enter');
+  assert.equal(await text('#bm-h-msg'), 'That looks like feet and inches: choose ft and in as the unit.');
+  // NICE limits the waist bands to a BMI under 35 from 18 on; under 18 they apply at any BMI.
+  await page.fill('#bm-cm', '165');
+  await page.selectOption('#bm-wu', 'kg');
+  await page.fill('#bm-kg', '100'); // BMI 36.7
+  await page.fill('#bm-waist', '99');
+  await page.fill('#bm-years', '18');
+  await page.fill('#bm-months', '');
+  await page.check('input[name="bm-sex"][value="2"]');
+  await page.waitForFunction(() => /percentile/.test(document.getElementById('bm-says').textContent));
+  assert.equal((await read()).facts.find(f => f.startsWith('Waist')), 'Waist-to-height ratio 0.60: NICE uses the ratio only for a BMI under 35.');
+  await page.fill('#bm-years', '17');
+  assert.equal((await read()).facts.find(f => f.startsWith('Waist')), 'Waist-to-height ratio 0.60: further increased health risk (0.6 or more).');
+  // NICE's bands start at 5 years.
+  await page.fill('#bm-years', '5');
+  assert.equal((await read()).facts.find(f => f.startsWith('Waist')), 'Waist-to-height ratio 0.60: further increased health risk (0.6 or more).');
+  await page.fill('#bm-years', '4');
+  await page.fill('#bm-months', '11');
+  assert.equal((await read()).facts.find(f => f.startsWith('Waist')), undefined, 'no waist bands under 5');
+  await page.fill('#bm-months', '');
+  await page.fill('#bm-waist', '');
+  await page.fill('#bm-years', '');
+
+  // ---- The charts: no two words overlap and none leaves the chart, at any width ----
+  const chartClashes = () => page.$eval('#bm-chart svg', svg => {
+    const vb = svg.viewBox.baseVal, out = [];
+    const items = [...svg.querySelectorAll('text, circle.pt')].map(e => { const b = e.getBBox(); return { t: e.textContent || 'the point', l: b.x, r: b.x + b.width, top: b.y, bot: b.y + b.height }; });
+    for (const a of items) if (a.l < -0.5 || a.top < -0.5 || a.r > vb.width + 0.5 || a.bot > vb.height + 0.5) out.push(`${a.t} leaves the chart`);
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.top < b.bot - 0.5 && b.top < a.bot - 0.5) out.push(`${a.t} / ${b.t}`);
+    }
+    return out;
+  });
+  const chartCases = [
+    ['adult example', { hu: 'ftin', ft: '5', in: '7', wu: 'lb', lb: '145' }],
+    ['short', { hu: 'ftin', ft: '3', in: '2', wu: 'lb', lb: '40' }],
+    ['heavy, stones', { hu: 'ftin', ft: '5', in: '7', wu: 'stlb', st: '50', stlb: '0' }],
+    ['tall and heavy', { hu: 'cm', cm: '205', wu: 'kg', kg: '190' }],
+    ['the heaviest weight', { hu: 'cm', cm: '140', wu: 'kg', kg: '454' }],
+    ['very light', { hu: 'cm', cm: '180', wu: 'kg', kg: '30', nice: true }],
+    ['boy of 19 years 11 months', { hu: 'ftin', ft: '5', in: '7', wu: 'lb', lb: '145', years: '19', months: '11', sex: '1' }],
+    ['girl of 2', { hu: 'cm', cm: '80', wu: 'kg', kg: '19', years: '2', months: '0', sex: '2' }],
+    ['girl of 9', { hu: 'cm', cm: '140', wu: 'kg', kg: '41.552', years: '9', months: '6', sex: '2' }],
+  ];
+  for (const [name, c] of chartCases) {
+    await page.selectOption('#bm-hu', c.hu);
+    await page.selectOption('#bm-wu', c.wu);
+    await page.setChecked('#bm-nice', !!c.nice);
+    for (const k of ['cm', 'ft', 'in', 'kg', 'lb', 'st', 'stlb']) if (c[k] !== undefined) await page.fill('#bm-' + k, c[k]);
+    await page.fill('#bm-years', c.years || '');
+    await page.fill('#bm-months', c.months || '');
+    if (c.sex) {
+      await page.check(`input[name="bm-sex"][value="${c.sex}"]`);
+      await page.waitForFunction(() => /percentile/.test(document.getElementById('bm-says').textContent));
+    }
+    for (const width of [320, 390, 640, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForFunction(() => { const s = document.querySelector('#bm-chart svg'); return s && Math.abs(+s.getAttribute('width') - Math.max(260, Math.floor(document.getElementById('bm-chart').clientWidth))) < 3; });
+      assert.deepEqual(await chartClashes(), [], `chart words, ${name}, ${width}px`);
+      // The example keeps all four band names and its own label at every width.
+      if (name === 'adult example') {
+        assert.deepEqual(await page.$$eval('#bm-chart svg text.bl, #bm-chart svg text.pl', ts => ts.map(t => t.textContent)),
+          ['Underweight', 'Healthy weight', 'Overweight', 'Obesity', 'You: BMI 22.7'], `band names at ${width}px`);
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   const browser = page.context().browser();
   // ---- A British browser: feet, inches, stones and pounds ----

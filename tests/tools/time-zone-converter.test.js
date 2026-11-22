@@ -14,6 +14,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const rows = () => page.$$eval('#tzc-rows > li', ls => ls.map(l => ({
     name: l.querySelector('.tzc-name').textContent, time: l.querySelector('.tzc-t').textContent,
     date: l.querySelector('.tzc-d').textContent, tags: [...l.querySelectorAll('.tzc-tag')].map(t => t.textContent),
+    ab: (l.querySelector('.tzc-line b') || {}).textContent || '',
     text: l.textContent.replace(/\s+/g, ' '),
   })));
   const ask = async q => {
@@ -89,6 +90,46 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
 
   r = await ask('What is 3 pm EST in UK and India time?');
   assert.deepEqual(r.map(x => [x.name, x.time]), [['New York', '15:00'], ['United Kingdom', E.est_winter['Europe/London'].time], ['India', E.est_winter['Asia/Kolkata'].time]]);
+  // Zones named in words, as people in North America say them; "Pacific" is never a Pacific island.
+  const A = E.ask, hm = (k, z) => [A[k][z].time, day(A[k][z].date)];
+  r = await ask('10am pacific time to london');
+  assert.deepEqual(r.map(x => [x.name, x.time, x.date]), [['Los Angeles', ...hm('pacific_london', 'America/Los_Angeles')], ['London', ...hm('pacific_london', 'Europe/London')]]);
+  r = await ask('9am Alaska time to Hawaii');
+  assert.deepEqual(r.map(x => [x.name, x.time, x.date]), [['Anchorage', ...hm('alaska_hawaii', 'America/Anchorage')], ['Honolulu', ...hm('alaska_hawaii', 'Pacific/Honolulu')]]);
+  r = await ask('eastern time to central and mountain');
+  assert.deepEqual(r.map(x => x.name), ['New York', 'Chicago', 'Denver']);
+  r = await ask('Pacific Standard Time to Eastern Daylight Time');
+  assert.deepEqual(r.map(x => x.name), ['Los Angeles', 'New York']);
+  assert.match(r[1].text, /EDT is read as New York time: on Tue 24 Nov 2026 New York is on EST/);
+  await ask('3pm Europe');
+  assert.match(await text('#tzc-ask-error'), /^No place called “Europe” was found\./, 'a region alone is not read as its first zone');
+  // A date or time after the places, and "in" before the first place.
+  r = await ask('3pm EST to IST tomorrow');
+  assert.deepEqual(r.map(x => [x.name, x.time, x.date]), [['New York', ...hm('est_tomorrow', 'America/New_York')], ['New Delhi', ...hm('est_tomorrow', 'Asia/Kolkata')]]);
+  r = await ask('10am Sydney to London on 1 April 2027');
+  assert.deepEqual(r.map(x => [x.name, x.time, x.date]), [['Sydney', ...hm('sydney_april', 'Australia/Sydney')], ['London', ...hm('sydney_april', 'Europe/London')]]);
+  r = await ask('6pm in Paris to Sydney');
+  assert.deepEqual(r.map(x => [x.name, x.time, x.date]), [['Paris', ...hm('paris_sydney', 'Europe/Paris')], ['Sydney', ...hm('paris_sydney', 'Australia/Sydney')]]);
+  r = await ask("What's the time difference between London and Tokyo?");
+  assert.deepEqual(r.map(x => x.name), ['London', 'Tokyo']);
+  r = await ask('time difference Sydney and Paris');
+  assert.deepEqual(r.map(x => x.name), ['Sydney', 'Paris']);
+  // AoE is UTC-12; a weekday is the next one, today included, unless "next" is said.
+  r = await ask('23:59 AoE on 15 May 2027 to UTC');
+  assert.deepEqual(r.map(x => [x.name, x.time, x.date]), [['AoE', '23:59', 'Sat 15 May 2027'], ['UTC', E.aoe.slice(11), day(E.aoe.slice(0, 10))]]);
+  r = await ask('9am London on Tuesday to Tokyo');
+  assert.equal(r[0].date, 'Tue 24 Nov 2026');
+  r = await ask('9am London next Tuesday to Tokyo');
+  assert.equal(r[0].date, 'Tue 1 Dec 2026');
+  r = await ask('est to ist converter');
+  assert.deepEqual(r.map(x => x.name), ['New York', 'New Delhi']);
+  // GMT typed in a question is GMT, with the note that UK clocks are on BST in summer.
+  r = await ask('3pm GMT on 14 July 2027 to New York');
+  assert.deepEqual(r.map(x => [x.name, x.time]), [['GMT', '15:00'], ['New York City', A.gmt_summer['America/New_York'].time]]);
+  assert.match(r[0].text, /GMT is UTC\+00:00 all year; on this date UK clocks are on BST \(UTC\+01:00\)\.Use UK time/);
+  await page.click('#tzc-rows button:has-text("Use UK time")');
+  r = await rows();
+  assert.deepEqual(r.map(x => [x.name, x.time]), [['London', '15:00'], ['New York City', '10:00']], 'the typed 15:00 is now read as UK time');
 
   // A summer EST is read as New York time, said so, and one tap gives fixed UTC-5.
   r = await ask('3pm EST on 14 July 2027 to IST');
@@ -115,6 +156,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.match(r[0].text, /EST · UTC−05:00/);
   assert.match(await page.evaluate(() => location.hash), /&t=2027-11-07T01:30-2&/);
   assert.ok(!/Other places called/.test(r[1].text), 'much smaller namesakes (London, Ontario) are not offered');
+  // Typed with the abbreviation of one of the two, the repeated time is that one.
+  r = await ask('1:30 EST on 7 Nov 2027 to London');
+  assert.deepEqual(r.map(x => x.time), [E.repeated[1]['America/New_York'].time, E.repeated[1]['Europe/London'].time]);
+  assert.match(r[0].text, /Showing the second time, EST/);
+  assert.ok(!/is read as New York time/.test(r[0].text), 'no note that EST is read as EDT');
+  r = await ask('1:30 EDT on 7 Nov 2027 to London');
+  assert.deepEqual(r.map(x => x.time), [E.repeated[0]['America/New_York'].time, E.repeated[0]['Europe/London'].time]);
   // A city name shared by places in other zones: the larger is used and the others are offered.
   r = await ask('9am Hyderabad to London');
   assert.deepEqual(r.map(x => [x.name, x.time]), [['Hyderabad', '09:00'], ['London', '03:30']]);
@@ -146,6 +194,21 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.goto(url + '#p=UTC,America/Havana&t=2027-12-01T12:00');
   await page.waitForFunction(() => document.querySelectorAll('#tzc-rows > li').length === 2);
   assert.equal((await rows())[1].time, E.havana_2027_12.time);
+  // After 2040, past the dated table, and with the names these zones had before their changes.
+  const zoneRows = async (zones, t) => {
+    await page.goto('about:blank');
+    await page.goto(url + '#p=UTC,' + zones.join(',') + '&t=' + t + '&c=24');
+    await page.waitForFunction(n => document.querySelectorAll('#tzc-rows > li').length === n, zones.length + 1);
+    return (await rows()).slice(1).map(x => [x.time, x.ab]);
+  };
+  for (const [t, zs] of Object.entries(E.after_2040)) {
+    const names = Object.keys(zs);
+    assert.deepEqual((await zoneRows(names, t)).map(x => x[0]), names.map(z => zs[z].time), `${t}: tz 2026f times after 2040`);
+  }
+  for (const [t, zs] of Object.entries(E.abbr_before)) {
+    const names = Object.keys(zs);
+    assert.deepEqual((await zoneRows(names, t)).map(x => x[1]), names.map(z => zs[z].abbr), `${t}: abbreviations before the 2026 changes`);
+  }
 
   // Mistakes are explained next to the field.
   for (const [q, msg] of [
@@ -275,6 +338,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.getAttribute('#tzc-ws', 'aria-invalid'), null);
   assert.match(await page.evaluate(() => location.hash), /&w=8-17$/);
   await page.selectOption('#tzc-ws', '9');
+  // Working hours come back from a link.
+  await page.goto('about:blank');
+  await page.goto(url + '#p=America/New_York:New%20York,Europe/London:London&t=2026-11-24T10:00&c=24&w=10-18');
+  await page.waitForFunction(() => document.querySelectorAll('#tzc-rows > li').length === 2);
+  assert.deepEqual([await page.inputValue('#tzc-ws'), await page.inputValue('#tzc-we')], ['10', '18']);
+  assert.match(await text('#tzc-overlap-sum'), /\(10:00 to 18:00 local time\)/);
 
   // ---- A weekly meeting across a year: rows start where a clock change moves a time ----
   await page.goto(url + '#p=America/New_York:New%20York,Europe/London:London,Asia/Kolkata:New%20Delhi&t=2027-03-02T10:00&c=24&w=9-17');
@@ -324,12 +393,51 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   r = await rows();
   assert.deepEqual(r.map(x => x.name + ' ' + x.time), ['New York 10:00 am', 'London 3:00 pm', 'New Delhi 8:30 pm']);
   assert.equal(await page.isChecked('#tzc-c12'), true);
+  // Midnight and noon on a 12-hour clock are 12 am and 12 pm.
+  await page.fill('#tzc-time', '00:30');
+  assert.deepEqual((await rows()).map(x => x.time), ['12:30 am', '5:30 am', '11:00 am'].map(x => x.replace(' ', '\u00a0')));
+  await page.fill('#tzc-time', '12:00');
+  assert.equal((await rows())[0].time, '12:00\u00a0pm');
+  await page.fill('#tzc-time', '10:00');
   // Back to a page restored from the cache: the fields and the rows agree.
   await page.goto('about:blank');
   await page.goBack();
   await page.waitForFunction(() => document.querySelectorAll('#tzc-rows > li').length === 3);
   assert.equal(await page.inputValue('#tzc-time'), '10:00');
   assert.equal((await rows())[1].time, '3:00 pm');
+  // A field the browser fills back in after the page has run is put right on pageshow.
+  await page.evaluate(() => { document.querySelector('#tzc-date').value = '2030-01-01'; window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false })); });
+  assert.equal(await page.inputValue('#tzc-date'), '2027-03-02');
+  assert.equal((await rows())[1].time, '3:00 pm');
+
+  // ---- A weekly meeting typed at a time skipped on its first date keeps that time afterwards ----
+  await page.goto('about:blank');
+  await page.goto(url + '#p=America/New_York:New%20York,Europe/London:London&t=2027-03-14T02:30&c=24&w=9-17');
+  await page.waitForFunction(() => document.querySelectorAll('#tzc-rows > li').length === 2);
+  assert.match(await text('#tzc-week-hint'), /^A meeting at 02:30 in New York every Sunday for 52 weeks from Sun 14 Mar 2027\./);
+  const skipWeek = await page.$$eval('#tzc-week tbody tr', trs => trs.slice(0, 3).map(tr => [...tr.cells].slice(1).map(c => c.textContent.replace(' (changed)', '')).join(' ')));
+  assert.deepEqual(skipWeek, E.skipped_weekly.slice(0, 3).map(w => w.ny + ' ' + w.london));
+  await page.selectOption('#tzc-rep', '4');
+  await page.clock.runFor(1500);
+  const [skipIcs] = await Promise.all([page.waitForEvent('download'), page.click('#tzc-ics')]);
+  const skipLines = fs.readFileSync(await skipIcs.path(), 'utf8').replace(/\r\n /g, '').split('\r\n');
+  assert.deepEqual(skipLines.filter(l => l.startsWith('DTSTART')), E.skipped_weekly.map(w => 'DTSTART:' + w.utc));
+
+  // ---- The ends of the range: a step past 2100 or before 1900 is refused with a message ----
+  await page.goto('about:blank');
+  await page.goto(url + '#p=America/New_York:New%20York,Asia/Tokyo:Tokyo&t=2100-12-31T23:00&c=24');
+  await page.waitForFunction(() => document.querySelectorAll('#tzc-rows > li').length === 2);
+  await page.click('#tzc-rows li[data-i="1"] button[data-act="first"]');
+  assert.equal(await text('#tzc-when-error'), 'This page works with dates from 1 January 1900 to 31 December 2100.');
+  assert.deepEqual((await rows()).map(x => x.name), ['New York', 'Tokyo'], 'the order stays when the new first place would be in 2101');
+  await page.focus('#tzc-plan');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('PageDown');
+  assert.deepEqual([await page.inputValue('#tzc-date'), await page.inputValue('#tzc-time')], ['2100-12-31', '23:00']);
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.inputValue('#tzc-time'), '22:00');
+  assert.equal(await text('#tzc-when-error'), '', 'a step within the range clears the message');
 
   // ---- Links that cannot be read ----
   await page.goto(url + '#p=Mars/Olympus_Mons,Europe/Paris:Paris&t=2026-11-24T10:00');

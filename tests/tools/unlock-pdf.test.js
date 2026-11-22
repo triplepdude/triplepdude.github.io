@@ -5,7 +5,8 @@ const crypto = require('crypto');
 
 // Fixtures (tests/fixtures/unlock-pdf, made by make_fixtures.py with reportlab and pikepdf/qpdf):
 // one two-page document with bookmarks, a filled-in field, an attachment, XMP on the catalogue
-// and on page 1, encrypted every way PDF allows (R2 to R6, both kinds of password, one password
+// and on page 1, a title and a field value that are indirect string objects of their own,
+// encrypted every way PDF allows (R2 to R6, both kinds of password, one password
 // for both, a blank permissions password, EncryptMetadata false, a signature), plus files this
 // page must refuse. expected.json holds what qpdf reads in each. Outputs are checked with pdf.js
 // (an independent reader) and, for AES-256 copies, with ISO 32000-2 Algorithm 2.B written below
@@ -161,7 +162,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---- Every fixture at once ----
   const names = fs.readdirSync(fixtures).filter(n => n.endsWith('.pdf')).sort();
-  assert.equal(names.length, 21);
+  assert.equal(names.length, 22);
   await page.setInputFiles('#ul-file', names.map(fx));
   await idle();
   assert.ok(requests.some(u => /pdf-lib\.min\.js/.test(u)), 'pdf-lib loads once there is a file');
@@ -193,7 +194,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     }
   }
   assert.equal((await rowOf('signed.pdf')).note, 'It is digitally signed: the signature will not validate in an unlocked copy, so keep the original.');
-  assert.equal(await status(), '2 files are unlocked, 11 files need a password to open, 2 files need the permissions password to lift restrictions, 1 file is not protected, 5 files cannot be unlocked here.');
+  assert.equal(await status(), '2 files are unlocked, 12 files need a password to open, 2 files need the permissions password to lift restrictions, 1 file is not protected, 5 files cannot be unlocked here.');
   assert.equal(await page.isVisible('#ul-unlock'), true);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'ul-pw', 'the password box takes the focus');
   // The blank permissions password: unlocked straight away, all of it kept.
@@ -251,6 +252,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     'r6-open.pdf': 'Unlocked: password removed.',
     'r4-rc4.pdf': 'Unlocked: password removed.',
     'r2.pdf': 'Unlocked: password and restrictions removed.',          // no permissions password: the open one is both
+    'r2-owner.pdf': KEPT.replace('%', 'comments and form filling'),     // R2 has one bit for both
     'r6-both.pdf': KEPT.replace('%', 'printing and copying'),
     'r5.pdf': KEPT.replace('%', 'printing'),
     'r4-aes-nometa.pdf': KEPT.replace('%', 'copying'),
@@ -263,7 +265,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   };
   for (const [n, s] of Object.entries(expectState)) assert.equal((await rowOf(n)).state, s, n);
   assert.equal((await rowOf('r6-both.pdf')).note, 'The copy keeps these restrictions under a new random permissions password, so to lift them later start from the original file.');
-  assert.equal(await status(), 'Unlocked 8 of 13 files. 5 files are unlocked, 5 files have the open password removed but restrictions kept, 3 files need a password to open, 2 files need the permissions password to lift restrictions, 1 file is not protected, 5 files cannot be unlocked here.');
+  assert.equal(await status(), 'Unlocked 9 of 14 files. 5 files are unlocked, 6 files have the open password removed but restrictions kept, 3 files need a password to open, 2 files need the permissions password to lift restrictions, 1 file is not protected, 5 files cannot be unlocked here.');
 
   // Plain copies: no encryption left, and no trace of the old encryption dictionary.
   for (const n of ['r6-open', 'r4-rc4', 'r2']) {
@@ -283,9 +285,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     const streams = streamsText(out.buf);
     assert.ok(streams.includes('ROOT-XMP-MARK') && streams.includes('PAGE-XMP-MARK'), `${n}: XMP decrypted`);
   }
-  // Copies that keep the restrictions: AES-256 (R6), no open password, the same /P, a new permissions password.
+  // Copies that keep the restrictions: AES-256 (R6), no open password, the same permissions, a new
+  // permissions password. P6 is the /P qpdf writes for an R6 file with the permissions qpdf reads in
+  // the original (for R2: form filling from comments, assembly from changes, high quality from printing).
   const keptCopies = {};
-  for (const n of ['r6-both', 'r5', 'r4-aes-nometa', 'r6-objstm', 'r4-objstm']) {
+  for (const n of ['r6-both', 'r5', 'r4-aes-nometa', 'r6-objstm', 'r4-objstm', 'r2-owner']) {
     out = await save(n + '.pdf');
     keptCopies[n] = out.buf;
     pdf = await inspect(out.buf);
@@ -295,8 +299,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.equal(r6.V, 5);
     assert.equal(r6.R, 6);
     assert.equal(r6.userOk, true, `${n}: opens with no password`);
-    assert.equal(r6.P, exp[n].P, `${n}: same permissions`);
-    assert.equal(r6.permsP, exp[n].P, `${n}: /Perms holds /P`);
+    assert.equal(r6.P, exp[n].P6, `${n}: same permissions`);
+    assert.equal(r6.permsP, exp[n].P6, `${n}: /Perms holds /P`);
     assert.equal(r6.permsTag, (exp[n].encrypt_metadata ? 'T' : 'F') + 'adb');
     assert.equal(r6.origOwnerWorks, false, `${n}: the original permissions password does not open the copy`);
     const all = streamsText(out.buf, r6.fileKey);
@@ -310,6 +314,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(!pdf.perms.includes(4) && !pdf.perms.includes(16) && !pdf.perms.includes(2048) && pdf.perms.includes(8));
   pdf = await inspect(keptCopies['r4-aes-nometa']);
   assert.ok(pdf.perms.includes(4) && !pdf.perms.includes(16));
+  // 32 = comments, 256 = form filling, 1024 = assembly: an R2 file's one bit blocks both in the copy.
+  pdf = await inspect(keptCopies['r2-owner']);
+  assert.ok(!pdf.perms.includes(32) && !pdf.perms.includes(256) && pdf.perms.includes(1024) && pdf.perms.includes(2048), 'R2 permissions mapped');
   // EncryptMetadata false is kept: only the catalogue's XMP is in the clear.
   const nometa = streamsText(keptCopies['r4-aes-nometa']);
   assert.ok(nometa.includes('ROOT-XMP-MARK'), 'catalogue XMP left unencrypted');
@@ -328,7 +335,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // ---- The permissions password lifts everything, also on files already partly unlocked ----
   await unlockWith('owner pass');
   assert.equal((await rowOf('r3.pdf')).state, 'Unlocked: password and restrictions removed.');
-  for (const n of ['r6-both.pdf', 'r5.pdf', 'r4-aes-nometa.pdf', 'r6-objstm.pdf', 'r4-objstm.pdf']) assert.equal((await rowOf(n)).state, 'Unlocked: password and restrictions removed.', n);
+  for (const n of ['r6-both.pdf', 'r5.pdf', 'r4-aes-nometa.pdf', 'r6-objstm.pdf', 'r4-objstm.pdf', 'r2-owner.pdf']) assert.equal((await rowOf(n)).state, 'Unlocked: password and restrictions removed.', n);
   assert.equal((await rowOf('r6-restricted.pdf')).state, 'Unlocked: restrictions removed.');
   assert.equal((await rowOf('signed.pdf')).state, 'Unlocked: restrictions removed.');
   assert.equal((await rowOf('signed.pdf')).note, 'It was digitally signed: the signature will not validate in the copy, so keep the original.');
@@ -340,6 +347,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.equal(pdf.encrypted, false, n);
     assert.equal(pdf.perms, null, n);
     assert.ok(streamsText(out.buf).includes('PAGE-XMP-MARK'), `${n}: a page's XMP is decrypted too`);
+    // Object streams are kept when the original had them (a file with many small objects is
+    // otherwise several times larger), and not added when it had none.
+    assert.equal(/\/Type\s*\/ObjStm/.test(out.buf.toString('latin1')), n.endsWith('objstm'), `${n}: object streams as in the original`);
   }
   // A signature's /Contents is never encrypted, so it comes out byte for byte.
   out = await save('signed.pdf');
@@ -355,7 +365,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   pdf = await inspect((await save('r6-cyrillic.pdf')).buf);
   assertWhole(pdf, 'cyrillic');
   assert.equal(await page.isVisible('#ul-unlock'), false, 'nothing left that needs a password');
-  assert.equal(await status(), 'Unlocked. 15 files are unlocked, 1 file is not protected, 5 files cannot be unlocked here.');
+  assert.equal(await status(), 'Unlocked. 16 files are unlocked, 1 file is not protected, 5 files cannot be unlocked here.');
 
   // ---- Download all as a ZIP; a double click saves one file ----
   let downloads = 0;
@@ -413,6 +423,44 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.focus('#ul-choose').then(() => page.keyboard.press('Enter'))]);
   assert.equal(chooser.isMultiple(), true);
   await page.click('#ul-clear');
+
+  // ---- Unlock pressed while files are still being checked: every file that shares the password is unlocked ----
+  const batch = [];
+  for (let i = 0; i < 12; i++) for (const n of ['r6-open', 'r6-both']) batch.push({ name: `${i}-${n}.pdf`, mimeType: 'application/pdf', buffer: fs.readFileSync(fx(n + '.pdf')) });
+  await page.setInputFiles('#ul-file', batch);
+  await page.waitForFunction(() => !document.querySelector('#ul-unlock').hidden);
+  assert.ok(await page.$$eval('.ul-state', l => l.some(e => e.textContent === 'Checking…')), 'some files are still being checked');
+  await page.fill('#ul-pw', 'open sesame');
+  await page.press('#ul-pw', 'Enter');
+  await idle();
+  const batchStates = await page.$$eval('.ul-file', l => l.filter(e => !e.querySelector('button').hidden).length);
+  assert.equal(batchStates, 24, 'all 24 files unlocked by one Enter');
+  assert.equal(await page.isEnabled('#ul-go'), true);
+  await page.click('#ul-clear');
+
+  // ---- A PDF without /ID: the AES-256 copy gets one (ISO 32000-1 Table 15: required with /Encrypt) ----
+  // R6 does not use /ID for its keys, so blanking it in the trailer leaves a file that still opens.
+  const noIdSrc = fs.readFileSync(fx('r6-both.pdf'));
+  const noId = Buffer.from(noIdSrc.toString('latin1').replace(/\/ID \[<[0-9a-f]+><[0-9a-f]+>\]/i, m => ' '.repeat(m.length)), 'latin1');
+  assert.ok(!/\/ID/.test(noId.toString('latin1').slice(noId.toString('latin1').lastIndexOf('trailer'))), 'the fixture copy has no /ID');
+  await page.setInputFiles('#ul-file', [{ name: 'no-id.pdf', mimeType: 'application/pdf', buffer: noId }]);
+  await idle();
+  await unlockWith('open sesame');
+  out = await save('no-id.pdf');
+  const noIdTrailer = out.buf.toString('latin1').slice(out.buf.toString('latin1').lastIndexOf('trailer'));
+  assert.match(noIdTrailer, /\/ID \[ ?<[0-9A-Fa-f]{32}> ?<[0-9A-Fa-f]{32}> ?\]/, 'the copy has an /ID');
+  assert.equal(checkR6(out.buf, 'owner pass').userOk, true);
+  await page.click('#ul-clear');
+
+  // ---- The PDF tools cannot load (offline after the page opened): say so, not that the file is broken ----
+  const offline = await page.context().browser().newContext();
+  const p4 = await offline.newPage();
+  await p4.route(/pdf-lib\.min\.js/, r => r.abort());
+  await p4.goto(url);
+  await p4.setInputFiles('#ul-file', [fx('r6-open.pdf')]);
+  await p4.waitForFunction(() => document.querySelector('#ul-progress').hidden && document.querySelector('.ul-state').textContent !== 'Checking…');
+  assert.equal(await p4.textContent('.ul-state'), 'The PDF tools could not load. Check your connection, then add the file again.');
+  await offline.close();
 
   // ---- Guide links point at tools of this site ----
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
