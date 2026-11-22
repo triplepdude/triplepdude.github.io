@@ -490,6 +490,16 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.getAttribute('#crp-file', 'aria-invalid'), 'true');
   assert.equal(await page.getAttribute('#crp-file', 'aria-describedby'), 'crp-error');
 
+  // ---------- Files the decoder warns about ----------
+  // A PNG damaged half way (from the image converter's fixtures) and a Display P3 JPG.
+  const otherFile = (dir, n, type) => ({ name: n, mimeType: type, buffer: fs.readFileSync(path.join(fixtures, '..', dir, n)) });
+  await page.setInputFiles('#crp-file', otherFile('image-converter', 'damaged.png', 'image/png'));
+  await page.waitForFunction(() => /^damaged\.png/.test(document.querySelector('#crp-drop-title').textContent));
+  assert.match(await page.textContent('#crp-note'), /The file seems to be damaged, so part of the picture may be blank\./);
+  await page.setInputFiles('#crp-file', otherFile('jpg-to-png', 'p3.jpg', 'image/jpeg'));
+  await page.waitForFunction(() => /^p3\.jpg/.test(document.querySelector('#crp-drop-title').textContent));
+  assert.match(await page.textContent('#crp-note'), /Colours were converted to sRGB from the picture’s wide-gamut profile\./);
+
   // ---------- A print size on a portrait photo turns with it ----------
   await openFile('photo.jpg');
   assert.equal(await page.getAttribute('#crp-file', 'aria-invalid'), null);

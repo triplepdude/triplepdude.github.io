@@ -688,7 +688,7 @@ faq:
       if (!w) throw friendly('This image (' + fmtN(W) + ' × ' + fmtN(H) + ' px) is larger than this browser can handle. Try a desktop browser.');
       var bm = await createImageBitmap(await TTImage.encode(res, 'png', { width: w, height: h }));
       var it = { file: file, name: name, fmt: res.format, res: res, src: bm, iw: W, ih: H, k: w / W, exif: res.exif, hasAlpha: !!res.hasAlpha,
-        animated: !!res.animated, pages: res.images || 1, warnings: res.warnings || [], orientation: res.orientation || 1, jpegQ: null };
+        animated: !!res.animated, pages: res.images || 1, warnings: res.warnings || [], colorProfile: res.colorProfile || null, orientation: res.orientation || 1, jpegQ: null };
       it.view = await makeView(bm, W, H);
       return it;
     } catch (e) { TTImage.release(res); throw e; }
@@ -713,7 +713,7 @@ faq:
     }
     try {
       var it = { file: file, name: name, fmt: res.format, res: res, src: res.canvas, iw: res.width, ih: res.height, k: 1, exif: res.exif, hasAlpha: !!res.hasAlpha,
-        animated: !!res.animated, pages: res.images || 1, warnings: res.warnings || [], orientation: res.orientation || 1, jpegQ: null };
+        animated: !!res.animated, pages: res.images || 1, warnings: res.warnings || [], colorProfile: res.colorProfile || null, orientation: res.orientation || 1, jpegQ: null };
       if (it.fmt === 'jpeg') it.jpegQ = jpegQuality(new Uint8Array(await file.slice(0, 262144).arrayBuffer()));
       it.view = await makeView(it.src, it.iw, it.ih);
       return it;
@@ -724,6 +724,8 @@ faq:
     if (it.animated) n.push('This ' + (TTImage.formats[it.fmt] || { label: 'image' }).label + ' is animated: only its first frame is cropped and saved.');
     if (it.pages > 1) n.push('This file holds ' + it.pages + ' images; the first one is shown and cropped.');
     if (it.warnings.indexOf('truncated') >= 0) n.push('The file seems to be cut off, so part of the picture may be blank.');
+    if (it.warnings.indexOf('damaged') >= 0) n.push('The file seems to be damaged, so part of the picture may be blank.');
+    if (it.colorProfile === 'converted') n.push('Colours were converted to sRGB from the picture’s wide-gamut profile.');
     if (it.warnings.indexOf('hdr') >= 0 || it.warnings.indexOf('hdr-mapped') >= 0) n.push('This is an HDR picture. It is saved in standard range, so highlights may look flatter than on an HDR screen.');
     if (it.orientation > 1) n.push('The photo’s rotation tag was applied, so it is shown and cropped upright.');
     if (it.k < 1 && !it.svg) n.push('This picture (' + fmtN(it.iw) + ' × ' + fmtN(it.ih) + ' px) is larger than this browser can edit at full size, so it is cropped from a ' + fmtN(it.src.width) + ' × ' + fmtN(it.src.height) + ' px copy.');

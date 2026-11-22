@@ -255,6 +255,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await downloadSvg();
   assert.equal(await page.textContent('#p2s-error'), '');
   assert.equal(await page.getAttribute('#p2s-file', 'aria-invalid'), null);
+  // A file the decoder warns about is traced with a note: a PNG damaged half way
+  // and one cut off (from the image converter's fixtures).
+  for (const [n, re] of [['damaged.png', /seems to be damaged/], ['cut-big.png', /seems to be cut off/]]) {
+    await page.setInputFiles('#p2s-file', { name: n, mimeType: 'image/png', buffer: fs.readFileSync(path.join(fixtures, '..', 'image-converter', n)) });
+    await page.waitForFunction(name => document.querySelector('#p2s-drop-title').textContent === name, n);
+    await page.waitForFunction(r => new RegExp(r).test(document.querySelector('#p2s-note').textContent), re.source);
+  }
+  await openFile('logo.png');
 
   // ---------- Back to the page: the browser may restore the radios after the script ran ----------
   await page.evaluate(() => {
