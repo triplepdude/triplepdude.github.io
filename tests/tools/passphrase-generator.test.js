@@ -412,12 +412,13 @@ module.exports = async ({ page, open, assert }) => {
   }
   await page.setViewportSize({ width: 1280, height: 900 });
 
-  // ----- Guide links: the strength checker for passwords already in use, and the
-  // random number generator for numbers from the same secure source -----
+  // ----- Guide links: the strength checker for passwords already in use, the
+  // random number generator for numbers from the same secure source, and (in the
+  // FAQ on random passwords) the password generator -----
   {
     const guide = (await text('.prose')).replace(/\s+/g, ' ');
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-    assert.deepEqual(links, ['/random-number-generator/', '/password-strength-checker/']);
+    assert.deepEqual(links, ['/random-number-generator/', '/password-strength-checker/', '/password-generator/']);
     for (const href of links) {
       assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
     }

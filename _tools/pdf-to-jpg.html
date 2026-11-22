@@ -2,7 +2,7 @@
 title: "PDF to JPG Converter: Save Pages as Images"
 description: Convert PDF pages to JPG or PNG images at 72 to 600 DPI, pick pages and JPG quality, and save them all in a ZIP. It runs in your browser; nothing is uploaded.
 category: Image & PDF
-keywords: [pdf to jpg, convert pdf to jpg, pdf to image, pdf to jpeg, pdf to png, save pdf as jpg, pdf page to jpg, high resolution pdf to jpg]
+keywords: [pdf to jpg, convert pdf to jpg, pdf to image, pdf to jpeg, pdf to png, save pdf as jpg, pdf page to jpg, high resolution pdf to jpg, pdf to pictures, pdf to photos]
 howto: |
   ## How to convert a PDF to JPG
 
@@ -14,7 +14,16 @@ howto: |
 
   To convert only some pages, type them, such as `1-3, 5`, or click the
   thumbnails: drag across several, or on a touch screen touch and hold a
-  page and then drag. Page numbers count from the start of the file.
+  page and then drag. Page numbers count from the start of the file. To
+  keep some pages as a PDF rather than as images, the
+  [PDF splitter](/split-pdf/) saves the pages you pick as a new PDF file.
+
+  ## On an iPhone or iPad
+
+  Safari saves the image, or the ZIP file of several pages, to
+  **Downloads** in the Files app. Tap a ZIP file there to unpack it into a
+  folder. To put a page in Photos, open its image, tap **Share** and then
+  **Save Image**; to save several pages at once, select them first.
 
   ## Which resolution to choose
 
@@ -128,6 +137,11 @@ faq:
 .p2j.is-sweeping, .p2j.is-sweeping * { cursor: cell !important; }
 @media (max-width: 480px) {
   .p2j-pages { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+/* On a phone the status line is two lines high, so the longer message written when a conversion
+   ends ("Saved … with 3 JPG images, …") does not push the form down. */
+@media (max-width: 600px) {
+  #p2j-status:not(:empty) { display: flex; align-items: center; min-height: calc(3.2em + 20px); }
 }
 </style>
 
@@ -258,6 +272,10 @@ faq:
   }
   function plural(n, one, many) { return NUM.format(n) + ' ' + (n === 1 ? one : many); }
   function setError(t) { errBox.textContent = t || ''; }
+  // An error whose message is written for visitors. Other messages, such as PDF.js's "Invalid page
+  // request.", are written for programmers and are never shown.
+  function friendly(text) { var e = new Error(text); e.friendly = true; return e; }
+  var REPAIR = 'It may be damaged; try saving it again from the app that made it.';
   function say(t, again) {
     t = t || '';
     if (statusBox.textContent !== t) { statusBox.textContent = t; return; }
@@ -426,7 +444,7 @@ faq:
       return lib;
     }, function () {
       pdfjsLoading = null;
-      throw new Error('The PDF reader could not load. Check your connection and try again.');
+      throw friendly('The PDF reader could not load. Check your connection and try again.');
     });
     return pdfjsLoading;
   }
@@ -452,10 +470,12 @@ faq:
     }
     return false;
   }
-  function chooseFiles(list) {
+  function chooseFiles(list, how) {
     var all = Array.prototype.slice.call(list || []);
-    if (!all.length || busy) return Promise.resolve();
+    if (!all.length) return Promise.resolve();
     var file = all[0];
+    // The PDF on screen is being converted; the message is cleared when that ends.
+    if (busy) { setError('Wait until the conversion finishes, or press Cancel, then ' + (how || 'choose') + ' ' + file.name + ' again.'); return Promise.resolve(); }
     var note = all.length > 1 ? 'This tool converts one PDF at a time, so only ' + file.name + ' was opened.' : '';
     setError('');
     if (file.size > MAX_FILE) { setError(file.name + ' is larger than 1 GB.'); return Promise.resolve(); }
@@ -471,11 +491,27 @@ faq:
       return tryOpen(d, '').then(function () { if (note && doc === d) setError(note); });
     }, function () { checking--; setError(file.name + ' could not be read.'); });
   }
+  function failOpen(d, text) {
+    pending = null;
+    hideUnlock();
+    say('');
+    setError(text);
+  }
+  // PDF.js's message is read to tell the cause, never shown.
+  function openError(d, err) {
+    var why = err ? (err.name || '') + ' ' + (err.message || '') : '';
+    if (err && err.friendly) return err.message;
+    if (/Invalid PDF|FormatError|Invalid XRef|InvalidPDF/i.test(why)) return d.name + ' is damaged or is not a valid PDF.';
+    if (/encryption|security handler/i.test(why)) return d.name + ' uses a kind of encryption this tool cannot open.';
+    return d.name + ' could not be opened. ' + REPAIR;
+  }
   function tryOpen(d, password) {
     opening = d;
     function settled() { if (opening === d) opening = null; }
     return openPdf(d, password).then(function (pdf) {
       if (pending !== d) { pdf.loadingTask.destroy(); return; }
+      // Some broken exporters write a PDF whose page tree is empty (PDF.js reads a /Count of -1 as is).
+      if (!(pdf.numPages >= 1)) { pdf.loadingTask.destroy(); failOpen(d, d.name + ' has no pages, so there is nothing to convert. ' + REPAIR); return; }
       var info = {};
       return pdf.getMetadata().then(function (meta) { info = meta && meta.info || {}; }, function () { /* metadata is optional */ })
         // The first page's size is known before the summary is first written, so it is announced once.
@@ -487,17 +523,12 @@ faq:
           showDoc(d, pdf, first);
         }).catch(function (err) {
           if (pending !== d) return;
-          pending = null;
-          say('');
-          setError(d.name + ' could not be opened: ' + (err && err.message || err));
+          failOpen(d, openError(d, err));
         });
     }, function (err) {
       if (pending !== d) return;
       if (err && err.name === 'PasswordException') { showUnlock(d, !!password); return; }
-      pending = null;
-      say('');
-      setError(err && /Invalid PDF|FormatError|Invalid XRef|InvalidPDF/i.test((err.name || '') + ' ' + (err.message || '')) ?
-        d.name + ' is damaged or is not a valid PDF.' : d.name + ' could not be opened: ' + (err && err.message || err));
+      failOpen(d, openError(d, err));
     }).then(settled, function (err) { settled(); throw err; });
   }
   function showUnlock(d, wrong) {
@@ -805,7 +836,7 @@ faq:
         if (smaller < 1) break;
         px = { w: Math.max(1, Math.round(size.w * smaller / 72)), h: Math.max(1, Math.round(size.h * smaller / 72)), dpi: smaller };
       }
-      if (!ctx) throw new Error('this browser cannot make an image that large');
+      if (!ctx) throw friendly('this browser cannot make an image that large');
       var vp = page.getViewport({ scale: px.dpi / 72 });
       var task = page.render({
         canvasContext: ctx, canvas: canvas, viewport: vp,
@@ -820,7 +851,7 @@ faq:
         var type = st.format === 'png' ? 'image/png' : 'image/jpeg';
         return new Promise(function (resolve) { canvas.toBlob(resolve, type, st.quality / 100); }).then(function (blob) {
           canvas.width = canvas.height = 0;
-          if (!blob) throw new Error('the image could not be encoded');
+          if (!blob) throw friendly('the image could not be encoded');
           return withDpi(blob, type, px.dpi);
         }).then(function (blob) { return { key: st.key, blob: blob, w: px.w, h: px.h, dpi: px.dpi }; });
       }, function (err) {
@@ -844,7 +875,9 @@ faq:
     if (s.pk.error) { pagesIn.focus(); return; }
     var st = s.st, pages = s.pk.pages, d = doc, job = current = { cancelled: false }, fails = [], reduced = [];
     var todo = pages.filter(function (p) { return !(done[p - 1] && done[p - 1].key === st.key); });
-    say('');
+    // The status line keeps its place while converting: emptied, it would move the whole form up,
+    // and down again when the result is written.
+    say('Converting ' + (pages.length === 1 ? 'page ' + pages[0] : plural(pages.length, 'page', 'pages')) + ' to ' + st.format.toUpperCase() + '…');
     setBusy(true);
     var k = 0;
     function step() {
@@ -866,7 +899,7 @@ faq:
       }, function (err) {
         c.working = false;
         if (job.cancelled) return null;
-        fails.push({ page: p, message: err && err.message || String(err) });
+        fails.push({ page: p, message: err && err.friendly ? err.message : 'it may be damaged' });
         k++;
         render();
         return step();
@@ -885,6 +918,7 @@ faq:
       if (job.cancelled || !r) return;
       current = null;
       setBusy(false);
+      setError('');
       if (r.files.length) {
         TT.download(r.name, r.blob);
         var fmt = st.format.toUpperCase();
@@ -892,14 +926,16 @@ faq:
           'Saved ' + r.name + ': ' + done[r.files[0] - 1].w + ' × ' + done[r.files[0] - 1].h + ' pixels, ' + fmtBytes(r.blob.size) + '.';
         if (reduced.length) msg += ' ' + (reduced.length === 1 ? 'Page ' + reduced[0] + ' is' : 'Pages ' + listText(reduced) + ' are') + ' too large for ' + st.dpi + ' DPI, so ' + (reduced.length === 1 ? 'it was' : 'they were') + ' converted at ' + (reduced.length === 1 ? done[reduced[0] - 1].dpi + ' DPI' : 'a lower DPI') + ', the most pixels one image can have here.';
         say(msg, true);
-      }
+      } else say('');
       if (fails.length) setError((fails.length === 1 ? 'Page ' + fails[0].page + ' could not be converted: ' + fails[0].message + '.' : 'Pages ' + listText(fails.map(function (f) { return f.page; })) + ' could not be converted.') + (r.files.length ? (r.files.length === 1 ? ' The other page was saved.' : ' The other pages were saved.') : ''));
       goBtn.focus();
     }, function (err) {
       if (job.cancelled) return;
       current = null;
       setBusy(false);
-      setError('The images could not be saved: ' + (err && err.message || err));
+      say('');
+      // The ZIP maker explains its own limits (65,535 files, 4 GB); anything else is memory running out.
+      setError('The images could not be saved. ' + (err && err.name === 'Error' && err.message ? err.message : 'The device may have run out of memory; try fewer pages or a lower DPI.'));
     });
   }
   function cancel() {
@@ -909,6 +945,7 @@ faq:
     if (doc && doc.renderTask) { try { doc.renderTask.cancel(); } catch (e) { /* already finished */ } }
     cards.forEach(function (c) { c.working = false; });
     setBusy(false);
+    setError('');
     var have = done.filter(Boolean).length;
     say('Cancelled. ' + (have ? plural(have, 'page is', 'pages are') + ' ready to download one by one below.' : 'Nothing was saved.'), true);
     goBtn.focus();
@@ -1058,15 +1095,16 @@ faq:
   document.addEventListener('dragover', function (e) {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = busy ? 'none' : 'copy';
-    dropZone.classList.add('is-over');
+    // A drop while converting is taken and answered with a message, so the drop area is not shown.
+    e.dataTransfer.dropEffect = 'copy';
+    if (!busy) dropZone.classList.add('is-over');
   });
   document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) dropZone.classList.remove('is-over'); });
   document.addEventListener('drop', function (e) {
     if (!hasFiles(e)) return;
     e.preventDefault();
     dropZone.classList.remove('is-over');
-    chooseFiles(e.dataTransfer.files);
+    chooseFiles(e.dataTransfer.files, 'drop');
   });
   // After Back or Forward the browser may put earlier values back into the controls once this
   // script has run, so everything shown is worked out from them again.

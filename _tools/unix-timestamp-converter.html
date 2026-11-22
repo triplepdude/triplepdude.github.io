@@ -89,7 +89,7 @@ faq:
   - q: How can I tell seconds from milliseconds?
     a: Count the digits. A current timestamp in seconds has 10 digits and one in milliseconds has 13. The converter checks the size for you and shows which unit it used.
   - q: Why is my converted time off by a few hours?
-    a: The timestamp itself is always UTC-based. An offset of whole hours usually means the date was read or written in the wrong time zone. Check the UTC row and the time zone selector.
+    a: The timestamp itself is always UTC-based. An offset of whole hours usually means the date was read or written in the wrong time zone. Check the UTC row and the time zone selector. To see one moment in several places at once, use the [time zone converter](/time-zone-converter/).
   - q: How do I convert a Unix timestamp to a date in Excel or Google Sheets?
     a: Spreadsheets count days rather than seconds, so divide by 86,400 and add the epoch with `=A2/86400 + DATE(1970,1,1)`, then format the cell as a date and time. For milliseconds, divide by 86,400,000 instead. The result is UTC; for a local time add the offset in days, such as `-5/24` for UTC−5. The reverse is `=(A2 - DATE(1970,1,1)) * 86400`. Google Sheets also has `=EPOCHTODATE(A2)`, which returns the UTC date and time directly.
   - q: Is anything I paste sent to a server?
@@ -1085,7 +1085,28 @@ table.data.ut-results th, table.data.ut-results td { vertical-align: middle; }
   timeEl.value = pad(p.h) + ':' + pad(p.mi) + ':' + pad(p.s);
   convert();
   toTimestamp();
-  tick();
-  setInterval(tick, 50);
+  // The clock runs only as fast as someone can see it change: ten times a second while it is on
+  // screen, on each new second while only the rest of the page is (the relative time in the
+  // results counts seconds), and not at all while the page is hidden. Every change of the text
+  // costs the browser a new layout of the page.
+  var clock = $('.ut-now'), clockSeen = true, clockTimer = 0;
+  function runClock() {
+    clearTimeout(clockTimer);
+    clockTimer = 0;
+    if (document.hidden) return;
+    tick();
+    var n = Date.now();
+    clockTimer = setTimeout(runClock, clockSeen ? 100 - n % 100 : 1000 - n % 1000);
+  }
+  if (window.IntersectionObserver) {
+    new IntersectionObserver(function (entries) {
+      var seen = entries[entries.length - 1].isIntersecting;
+      if (seen !== clockSeen) { clockSeen = seen; runClock(); }
+    }).observe(clock);
+  }
+  document.addEventListener('visibilitychange', runClock);
+  // A copy of the clock gives the time of the press, not of the last tick.
+  TT.$$('[data-copy-target^="#ut-now"]').forEach(function (b) { b.addEventListener('click', tick); });
+  runClock();
 })();
 </script>

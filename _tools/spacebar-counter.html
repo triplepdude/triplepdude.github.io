@@ -58,7 +58,7 @@ howto: |
   clicks rather than key presses, try the [CPS test](/cps-test/).
 faq:
   - q: How many times can you press the space bar in 10 seconds?
-    a: About 50 with one finger. That is the average in the finger tapping test, where you tap a key with your index finger for 10 seconds; 183 adults aged 19 to 60 averaged 49.5 taps with their dominant hand (Heaton and others, 2020). Screens give much the same. A 2024 study of 370 adults found that those aged 50 to 70 tapped a phone or tablet 5.2 times a second, and that people aged 18 to 30 were faster with the index and middle fingers.
+    a: About 50 with one finger. That is the average in the finger tapping test, where you tap a key with your index finger for 10 seconds; 183 adults aged 20 to 55 averaged 49.5 taps with their dominant hand (Heaton and others, 2020). Screens give much the same. A 2024 study of 370 adults found that those aged 50 to 70 tapped a phone or tablet 5.2 times a second, and that people aged 18 to 30 were faster with the index and middle fingers.
   - q: What is a good spacebar speed?
     a: Over 10 seconds, 5 presses a second is average for one finger and 6 or more is fast. In the tapping study above, the quickest of the 183 adults averaged 62.6 taps in 10 seconds. Taking turns with two fingers or both thumbs can push past what one finger manages. Rates fall as the hand tires, so expect fewer per second in the 60-second test than in the 10-second one.
   - q: Why does my space bar type two spaces?
@@ -179,6 +179,7 @@ faq:
   var DOUBLE_MS = 30;                 // a press this soon after the last one is flagged
   var GRACE_MS = 50;                  // presses made before the end may still be arriving
   var REST_MS = 800;                  // after a test, presses are ignored for this long
+  var HOLD_MS = 500;                  // the longest a result waits for a finger still on the key
 
   var pad = TT.$('#sb-pad'), padCount = TT.$('#sb-pad-count'), padSub = TT.$('#sb-pad-sub');
   var timeEl = TT.$('#sb-time'), timeLabel = TT.$('#sb-time-label'), countEl = TT.$('#sb-count');
@@ -191,6 +192,10 @@ faq:
   var hold = null;      // the Space key being held: { down, reps }
   var spaceDown = false;
   var endTimer = 0, graceTimer = 0, restTimer = 0, rafId = 0;
+  // Counted taps whose finger is still on the key: the browser may yet turn
+  // one into a scroll or a zoom, and a touch that scrolled the page is no
+  // press. Pointer id -> { run, t }.
+  var touches = new Map();
 
   function now() { return performance.now(); }
   // When the key went down or the finger touched, as the browser stamped it;
@@ -270,9 +275,13 @@ faq:
   }
 
   // ---- Counting ----
+  var shown = [padCount, padSub, timeEl, countEl, rateEl, bestEl, TT.$('#sb-ignored'), TT.$('#sb-doubles')];
   function begin(t) {
+    // How things stood, in case this first press was a tap that scrolls.
+    var before = { phase: phase, run: run, result: TT.$('#sb-result').hidden, copy: copyBtn.hidden,
+      texts: shown.map(function (el) { return el.textContent; }) };
     clearTimers();
-    run = { len: getLen(), start: t, times: [], left: 0, best: 0, doubles: 0, ignored: 0, lastKey: null, minGap: null };
+    run = { len: getLen(), start: t, times: [], left: 0, best: 0, doubles: 0, ignored: 0, lastKey: null, minGap: null, before: before };
     phase = 'counting';
     pad.classList.remove('is-resting');
     pad.classList.add('is-counting');
@@ -318,23 +327,58 @@ faq:
     while (times[run.left] <= t - 1000) run.left++;
     run.best = Math.max(run.best, times.length - run.left);
     showCounts();
+    return t;
   }
+  // Returns the time the press was counted at, or null if it did not count.
   function press(t, key) {
-    if (phase === 'resting') return;
-    if (phase === 'closing') {
-      if (t < endAt()) { add(t, key); }
-      return;
-    }
+    if (phase === 'resting') return null;
+    if (phase === 'closing') return t < endAt() ? add(t, key) : null;
     if (phase === 'counting') {
-      if (run.len && t >= endAt()) { closeTest(); return; }
-      add(t, key);
+      if (run.len && t >= endAt()) { closeTest(); return null; }
+      t = add(t, key);
       liveRate(Math.max(t, now()));
-      return;
+      return t;
     }
     begin(t);
-    add(t, key);
+    t = add(t, key);
     liveRate(t);
     copyBtn.hidden = getLen() !== 0;
+    return t;
+  }
+  // A counted tap became a scroll or a zoom: take it off again. If it was
+  // the only press, counting never began; if it was the first, the clock
+  // runs from the next one.
+  function untap(e) {
+    var p = touches.get(e.pointerId);
+    if (!p) return;
+    touches.delete(e.pointerId);
+    if (p.run !== run || (phase !== 'counting' && phase !== 'closing')) return;
+    var times = run.times, i = times.lastIndexOf(p.t);
+    if (i < 0) return;
+    times.splice(i, 1);
+    if (!times.length) {
+      var b = run.before;
+      clearTimers();
+      touches.clear();
+      phase = b.phase;
+      run = b.run;
+      pad.classList.remove('is-counting', 'is-resting');
+      shown.forEach(function (el, k) { el.textContent = b.texts[k]; });
+      TT.$('#sb-result').hidden = b.result;
+      copyBtn.hidden = b.copy;
+      say('');
+      return;
+    }
+    if (phase === 'counting') run.start = times[0];
+    // Best second and shortest gap again, without the tap.
+    run.left = 0; run.best = 0; run.minGap = null;
+    for (var k = 0; k < times.length; k++) {
+      if (k) { var gap = times[k] - times[k - 1]; if (run.minGap === null || gap < run.minGap) run.minGap = gap; }
+      while (times[run.left] <= times[k] - 1000) run.left++;
+      run.best = Math.max(run.best, k + 1 - run.left);
+    }
+    showCounts();
+    if (phase === 'counting') liveRate(now());
   }
   // The time is up: the display stops at once, then late presses made
   // before the end are let in for a moment.
@@ -350,6 +394,9 @@ faq:
   }
   function finishTest() {
     if (phase !== 'closing') return;
+    if (touches.size && now() - endAt() < HOLD_MS) { graceTimer = setTimeout(finishTest, 20); return; }
+    touches.clear();
+    run.before = null;
     var r = run, n = r.times.length;
     r.cents = rdiv(100 * n, r.len);
     r.bins = [];
@@ -412,6 +459,7 @@ faq:
   function stopAll(message) {
     var was = phase === 'counting' || phase === 'closing';
     clearTimers();
+    touches.clear();
     phase = 'idle';
     run = null;
     // The result of the last timed test stays, and can still be copied.
@@ -483,10 +531,15 @@ faq:
       }
       return;
     }
-    press(stamp(e), false);
+    var t = press(stamp(e), false);
+    if (t !== null) touches.set(e.pointerId, { run: run, t: t });
   });
   // Keep the focus on the button after a tap or click, so Space goes on counting.
-  pad.addEventListener('pointerup', function () { if (document.activeElement !== pad) pad.focus({ preventScroll: true }); });
+  pad.addEventListener('pointerup', function (e) {
+    touches.delete(e.pointerId);
+    if (document.activeElement !== pad) pad.focus({ preventScroll: true });
+  });
+  pad.addEventListener('pointercancel', untap);
   pad.addEventListener('click', function (e) { e.preventDefault(); });
 
   TT.$$('input[name="sb-len"]').forEach(function (r) {

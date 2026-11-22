@@ -691,6 +691,22 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await load(['grid.png', 'photo.jpg'], pp);
   const small = await pp.$$eval('.fl-ops .btn, #fl-download, #fl-copy, #fl-zip, #fl-angle, #fl-fine, #fl-format, .fl-pick, .fl-row .btn', els => els.filter(e => e.getBoundingClientRect().height < 44).map(e => e.id || e.className));
   assert.deepEqual(small, []);
+  // Each file's remove button is a full 44 px wide and kept apart from its Download button, so a
+  // tap on the edge of Download does not throw the file away.
+  const acts = await pp.$$eval('.fl-row', rows => rows.map(r => {
+    const d = r.querySelector('.fl-dl').getBoundingClientRect(), x = r.querySelector('.fl-x').getBoundingClientRect();
+    return { w: x.width, h: x.height, gap: x.left - d.right, sameLine: Math.abs(x.top - d.top) < 1 };
+  }));
+  assert.equal(acts.length, 3, 'grid.png, then grid.png and photo.jpg');
+  for (const a of acts) assert.ok(a.w >= 44 && a.h >= 44 && a.sameLine && a.gap >= 8, `remove button ${a.w}x${a.h}, ${a.gap}px from Download`);
+  // The angle takes negative numbers, and the decimal and numeric keypads of an iPhone (and of
+  // several Android keyboards) have no minus key, so the field asks for the full keyboard.
+  assert.equal(await pp.$eval('#fl-angle', el => el.inputMode), 'text');
+  await pp.tap('#fl-angle');
+  await pp.keyboard.press('Control+A');
+  await pp.keyboard.type('-30');
+  // (The vertical flip pressed above is a mirror plus a 180° turn: the typed angle replaces the turn.)
+  assert.match(await pp.textContent('#fl-state'), /^Flipped horizontally, then rotated 30° anticlockwise · \d+ × \d+ px$/);
   assert.deepEqual(errs, []);
   await ph.close();
 };

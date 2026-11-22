@@ -2,7 +2,7 @@
 title: "White Screen: Full-Screen White and Colours"
 description: A full-screen white, black or any colour, with colour temperature and brightness controls, for lighting, tracing or cleaning. Runs in your browser.
 category: Device Tests
-keywords: [white screen, bright white screen, blank white screen, white screen online, full screen white, black screen, white light screen, screen light for video calls, color screen]
+keywords: [white screen, bright white screen, blank white screen, white screen online, full screen white, black screen, white light screen, screen light for video calls, color screen, green screen, red screen, blue screen, ring light, light box for tracing, lightbox, screen flashlight]
 howto: |
   ## How to use the white screen
 
@@ -178,7 +178,7 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
 
 <div class="ws-controls">
   <div class="field">
-    <div class="ws-head"><label for="ws-k">Colour temperature of white</label><output id="ws-k-out" for="ws-k">6500 K</output></div>
+    <div class="ws-head"><label for="ws-k">Colour temperature of white</label><output id="ws-k-out" for="ws-k" aria-hidden="true">6500 K</output></div>
     <input type="range" id="ws-k" min="1900" max="10000" step="100" value="6500" autocomplete="off">
     <div class="ws-presets" role="group" aria-label="Common temperatures">
       <button class="btn secondary small" type="button" data-k="1900">1900 K</button>
@@ -189,7 +189,7 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
     </div>
   </div>
   <div class="field">
-    <div class="ws-head"><label for="ws-b">Brightness</label><output id="ws-b-out" for="ws-b">100%</output></div>
+    <div class="ws-head"><label for="ws-b">Brightness</label><output id="ws-b-out" for="ws-b" aria-hidden="true">100%</output></div>
     <input type="range" id="ws-b" min="1" max="100" step="1" value="100" autocomplete="off">
   </div>
   <div class="field">
@@ -220,7 +220,8 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
     { id: 'grey', name: 'Grey', hex: '808080' },
     { id: 'custom', name: 'Custom', hex: '' }
   ];
-  var BY_ID = {};
+  // No prototype: a link such as #constructor must not find a colour here.
+  var BY_ID = Object.create(null);
   PRESETS.forEach(function (p, i) { p.index = i; BY_ID[p.id] = p; });
   var K_MIN = 1900, K_MAX = 10000, HASH_MAX = 64;
   var DEFAULT = { id: 'white', custom: 'ff8800', kelvin: 6500, bright: 100 };
@@ -334,9 +335,28 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
     render();
     if (byUser) say(BY_ID[id].name + ', ' + describe());
   }
+  // The colour changes at most once every 350 ms, so quick presses or taps
+  // can never flash the screen more than three times a second (WCAG 2.3.1);
+  // the key handler also ignores the repeats of a held key. A press that
+  // comes sooner waits for its turn, and presses meanwhile only change its
+  // direction. A single press after a pause changes the colour at once.
+  var STEP_GAP = 350, lastStep = -Infinity, stepTimer = null, stepLater = 0, stepFrom = '';
   function step(dir) {
-    choose(PRESETS[(BY_ID[st.id].index + dir + PRESETS.length) % PRESETS.length].id, true);
     if (active) showBar();
+    if (stepTimer || performance.now() - lastStep < STEP_GAP) {
+      if (!stepTimer) { stepFrom = st.id; stepTimer = setTimeout(stepNow, lastStep + STEP_GAP - performance.now()); }
+      stepLater = Math.max(-1, Math.min(1, stepLater + dir));
+      return;
+    }
+    lastStep = performance.now();
+    choose(PRESETS[(BY_ID[st.id].index + dir + PRESETS.length) % PRESETS.length].id, true);
+  }
+  // Left out when another colour was chosen in the meantime.
+  function stepNow() {
+    var d = stepLater;
+    stepTimer = null;
+    stepLater = 0;
+    if (d && st.id === stepFrom) step(d);
   }
   function brighter(delta) {
     var b = delta > 0 ? Math.min(100, Math.floor(st.bright / 5) * 5 + 5) : Math.max(1, Math.ceil(st.bright / 5) * 5 - 5);
@@ -620,8 +640,9 @@ html.ws-lock, html.ws-lock body { overflow: hidden; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!active && document.activeElement !== stage) return;
     switch (e.key) {
-      case 'ArrowRight': step(1); break;
-      case 'ArrowLeft': step(-1); break;
+      // Holding the key changes the colour once: its repeats would strobe.
+      case 'ArrowRight': if (!e.repeat) step(1); break;
+      case 'ArrowLeft': if (!e.repeat) step(-1); break;
       case 'ArrowUp': brighter(1); break;
       case 'ArrowDown': brighter(-1); break;
       case 'Enter': case ' ': case 'Spacebar': if (active) showBar(); else start(); break;

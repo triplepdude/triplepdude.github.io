@@ -12,7 +12,7 @@ import json
 from decimal import Decimal, ROUND_HALF_UP
 from fractions import Fraction
 
-CASES = [(12, 1), (8, 1), (14, 1), (6, 1), (5, 1), (37, 5), (7, 15), (2, 1), (7, 100), (2, 60)]
+CASES = [(12, 1), (8, 1), (14, 1), (6, 1), (5, 1), (37, 5), (7, 15), (2, 1), (7, 100), (2, 60), (3, 5), (1, 5)]
 RANKS = [(14, 'Extreme'), (11, 'Very fast'), (8, 'Fast'), (6, 'Quick'), (4, 'Steady'), (0, 'Warming up')]
 
 out = {}

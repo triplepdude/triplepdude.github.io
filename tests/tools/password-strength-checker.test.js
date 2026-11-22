@@ -267,10 +267,11 @@ module.exports = async ({ page, open, assert, base }) => {
     // for every vector above), and says what a score cannot tell.
     assert.ok(answer.includes(`A score of 3 (${LABELS[3]}) or 4 (${LABELS[4]}) means it is hard to guess`), answer);
     assert.match(answer, /must also be used on one site only and must never have leaked, which a score cannot tell you\.$/);
-    // The guide links to the passphrase generator and not to the random number generator,
-    // whose own guide sends people who need a password to the passphrase generator.
+    // The guide's tips link to the password generator and the passphrase generator, and
+    // not to the random number generator, whose own guide sends people who need a
+    // password to the passphrase generator.
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-    assert.deepEqual(links, ['/passphrase-generator/']);
+    assert.deepEqual(links, ['/password-generator/', '/passphrase-generator/']);
     // Homepage search (index.html): every typed word must be a substring of the tool's
     // title, description and keywords.
     const home = await (await page.request.get(base + '/')).text();

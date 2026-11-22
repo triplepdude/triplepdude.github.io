@@ -832,7 +832,13 @@ faq:
     hidePassword();
     // Clear all was pressed while the file opened.
     if (gen !== addGen) { try { pdf.loadingTask.destroy(); } catch (e) { /* closed */ } return null; }
-    const n = pdf.numPages, use = Math.min(n, MAX_PDF_PAGES), doc = { pdf, name, left: use };
+    const n = pdf.numPages;
+    if (!(n >= 1)) {
+      try { pdf.loadingTask.destroy(); } catch (e) { /* closed */ }
+      errors.push(clip(name, 60) + ' has no pages, so there is nothing to read. It may be damaged; try saving it again from the app that made it.');
+      return null;
+    }
+    const use = Math.min(n, MAX_PDF_PAGES), doc = { pdf, name, left: use };
     if (n > use) errors.push('Only the first ' + MAX_PDF_PAGES + ' of the ' + NUM.format(n) + ' pages of ' + clip(name, 60) + ' were added. To read others, take them out first with Split PDF.');
     let first = null;
     for (let no = 1; no <= use; no++) {
@@ -1075,7 +1081,11 @@ faq:
   }
 
   const SCAN_NOTE = 'This page is a scan with little text stored in the file, so the picture was read.';
-  const TURN_HINT = 'If the text is sideways or upside down, press Rotate page.';
+  // Gibberish read with little confidence: read with the data of another language, or sideways.
+  function unsureHint(langs) {
+    return 'If the text is not in ' + langs.map(l => LANGS[l][0]).join(' or ') + ', choose its language under Language of the text. ' +
+      'If it is sideways or upside down, press Rotate page.';
+  }
   async function readPage(pg, s, n, total) {
     // (The rotation as it is now: Rotate page may be pressed while this page is read.)
     const rot = pg.rotation, notes = [];
@@ -1155,7 +1165,8 @@ faq:
     if (enlarged && (why !== 'none' || result.lines.length)) notes.push(enlarged);
     if (prep.inverted) notes.push('Light text on a dark background: the picture was inverted before reading.');
     if (Math.abs(result.rot) >= 0.005) notes.push('Straightened by ' + NUM.format(Math.round(Math.abs(result.rot) * 1800 / Math.PI) / 10) + '\u00b0.');
-    if (uncertain(result)) notes.push('Little of this page was read with confidence. ' + TURN_HINT);
+    result.langs = s.langs;
+    if (uncertain(result)) notes.push('Little of this page was read with confidence. ' + unsureHint(s.langs));
     finishPage(pg, key, result, notes);
   }
   // Without the data that tells which way up a page is, a sideways page comes out as
@@ -1238,7 +1249,7 @@ faq:
       }
       say('Read ' + plural(r.lines.length, 'line') + ' from ' + clip(pg.label, 60) + ', average confidence ' + r.conf + '%' +
         (r.lines.some(l => l.conf < LOW) ? '; ' + plural(r.lines.filter(l => l.conf < LOW).length, 'line') + ' to check.' : '.') +
-        (uncertain(r) ? ' ' + TURN_HINT : ''));
+        (uncertain(r) ? ' ' + unsureHint(r.langs) : ''));
       return;
     }
     const ocr = pages.filter(p => p.result && p.result.method === 'ocr'), lines = ocr.reduce((a, p) => a + p.result.lines.length, 0);
@@ -1584,11 +1595,22 @@ faq:
   }
   function camUi() {
     const live = !!cam.stream;
+    // Capture, Cancel or a picture added while the camera is on hide the bar: the keyboard focus
+    // goes back to Take photo instead of dropping to the top of the page.
+    const refocus = !live && camBar.contains(document.activeElement);
     camBtn.textContent = cam.starting ? 'Starting camera\u2026' : 'Take photo';
     video.hidden = !live;
     camBar.hidden = !live;
     stage.classList.toggle('is-live', live);
     showSelected();
+    if (refocus) camBtn.focus();
+  }
+  // The preview and the Capture row together on screen, where they fit; else the row at the
+  // bottom. (Focusing Capture alone left the top of the preview above a phone held sideways.)
+  function cameraInView() {
+    const top = stage.getBoundingClientRect().top, bottom = camBar.getBoundingClientRect().bottom, h = window.innerHeight;
+    if (top >= 0 && bottom <= h) return;
+    window.scrollBy(0, top < 0 && bottom - top <= h ? top : bottom - h);
   }
   function stopCamera() {
     if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
@@ -1623,7 +1645,9 @@ faq:
     if (p && p.catch) p.catch(() => {});
     camUi();
     say('Camera on. Hold the text steady and fill the frame, then press Capture.');
-    $('#i2t-capture').focus();
+    $('#i2t-capture').focus({ preventScroll: true });
+    cameraInView();
+    if (!video.videoWidth) video.addEventListener('loadedmetadata', () => { if (cam.stream === stream) cameraInView(); }, { once: true });
   });
   $('#i2t-capture').addEventListener('click', async e => {
     // One photo per press, also for a double click or a key held down.

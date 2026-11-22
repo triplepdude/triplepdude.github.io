@@ -2,7 +2,7 @@
 title: "Split PDF: Extract Pages or Split into Files"
 description: Split a PDF into several files by page ranges, every few pages or one file per page, or extract chosen pages. It runs in your browser; nothing is uploaded.
 category: Image & PDF
-keywords: [split pdf, extract pages from pdf, split pdf into separate pages, separate pdf pages, split pdf every 2 pages, pdf splitter, split pdf into multiple files, extract pdf pages]
+keywords: [split pdf, extract pages from pdf, split pdf into separate pages, separate pdf pages, split pdf every 2 pages, pdf splitter, split pdf into multiple files, extract pdf pages, remove pages from pdf, delete pages from pdf, cut pdf, pdf page extractor]
 howto: |
   ## How to split a PDF
 
@@ -35,14 +35,19 @@ howto: |
   document into a single file, in the order you typed them. A page can be in
   more than one range.
 
-  ## Extracting chosen pages
+  ## Extracting or deleting pages
 
   In **Select pages** mode, click a thumbnail to pick it, or drag across
   several. On a touch screen, tap a page, or touch and hold one and then
   drag. Shift+click picks every page between the last click and this one,
   and the buttons pick all, none, odd or even pages, or invert the choice.
-  You can also type the page numbers. The pages are saved in their original order, as one PDF or
-  as one PDF each.
+  You can also type the page numbers. The pages are saved in their
+  original order, as one PDF or as one PDF each.
+
+  To delete pages from a PDF, pick the pages to remove and press
+  **Invert**, then **Extract**: the other pages are saved as one PDF. The
+  [PDF merger](/merge-pdf/) can also remove, rotate and reorder pages one
+  by one.
 
   ## Does splitting reduce quality?
 
@@ -51,9 +56,9 @@ howto: |
   carries the fonts and images its own pages use, which is why the parts of
   a split can add up to more than the original. Web links are kept, and so
   are links between two pages that end up in the same file. Bookmarks,
-  digital signatures and attachments belong to the whole document and are
-  not carried over, and form fields keep their look but may no longer be
-  fillable.
+  digital signatures, attachments and document properties such as the
+  title and author belong to the whole document and are not carried over,
+  and form fields keep their look but may no longer be fillable.
 
   ## Password-protected PDFs
 
@@ -65,6 +70,8 @@ howto: |
   [image to PDF converter](/image-to-pdf/), and single pages can be saved as
   pictures with the [PDF to JPG converter](/pdf-to-jpg/).
   [Image to text](/image-to-text/) copies the words out of a scanned PDF.
+  To take the password off a whole PDF without splitting it, use
+  [Unlock PDF](/unlock-pdf/).
 faq:
   - q: Are my PDFs uploaded to a server?
     a: No. The PDF is read, previewed and split by JavaScript in this page, on your own device. Nothing is sent over the network, so you can split confidential documents safely.
@@ -148,6 +155,11 @@ faq:
 @media (max-width: 420px) {
   .spl-pages { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .spl-page { padding: 7px 4px 4px; }
+}
+/* On a phone the status line is two lines high, so the longer message written when a split ends
+   ("Saved … with 2 PDFs, …") does not push the form down. */
+@media (max-width: 600px) {
+  #spl-status:not(:empty) { display: flex; align-items: center; min-height: calc(3.2em + 20px); }
 }
 </style>
 
@@ -285,6 +297,10 @@ faq:
   }
   function plural(n, one, many) { return NUM.format(n) + ' ' + (n === 1 ? one : many); }
   function setError(t) { errBox.textContent = t || ''; }
+  // An error whose message is written for visitors. Other messages, such as PDF.js's "Invalid page
+  // request.", are written for programmers and are never shown.
+  function friendly(text) { var e = new Error(text); e.friendly = true; return e; }
+  var REPAIR = 'It may be damaged; try saving it again from the app that made it.';
   // A live region is written only when its text changes; a repeated result is written again after a pause.
   function say(t, again) {
     t = t || '';
@@ -544,7 +560,7 @@ faq:
       return lib;
     }, function () {
       pdfjsLoading = null;
-      throw new Error('The PDF reader could not load. Check your connection and try again.');
+      throw friendly('The PDF reader could not load. Check your connection and try again.');
     });
     return pdfjsLoading;
   }
@@ -1049,7 +1065,8 @@ faq:
     // 3 to 4 times slower to make, and could only drop what no page uses, which the source holds
     // too. (Merge PDF's buildJob does the same; a fix in one belongs in the other.)
     async function buildPart(L, c, list) {
-      var N = L.PDFName, out = await L.PDFDocument.create();
+      // No creation or modification date: pdf-lib would stamp the time the file was made.
+      var N = L.PDFName, out = await L.PDFDocument.create({ updateMetadata: false });
       var copier = L.PDFObjectCopier.for(c.doc.context, out.context), map = copier.traversedObjects;
       var i, k, sctx = c.doc.context, whole = new Set(list).size === c.pages.length;
       for (i = 0; i < c.pages.length; i++) map.set(c.pages[i].ref, L.PDFNull);
@@ -1091,12 +1108,9 @@ faq:
         done.add(list[k]);
         out.addPage(L.PDFPage.of(node, refs[k], out));
       }
-      var info = c.info;
-      if (info.title) out.setTitle(info.title);
-      if (info.author) out.setAuthor(info.author);
-      if (info.subject) out.setSubject(info.subject);
-      if (info.keywords) out.setKeywords([info.keywords]);
-      out.setCreator(info.creator || 'TripleP Tools Split PDF');
+      // As in Merge PDF, the original's title, author, subject, keywords and creator are not copied:
+      // a page sent on would carry them.
+      out.setCreator('TripleP Tools Split PDF');
       out.setProducer('TripleP Tools (pdf-lib)');
       return out.save({ useObjectStreams: true, objectsPerTick: 200 });
     }
@@ -1124,10 +1138,9 @@ faq:
             return;
           }
           src = null;
-          var d = opened.doc, pages = d.getPages(), info = {};
-          try { info = { title: d.getTitle(), author: d.getAuthor(), subject: d.getSubject(), keywords: d.getKeywords(), creator: d.getCreator() }; } catch (metaErr) { info = {}; }
+          var d = opened.doc, pages = d.getPages();
           resolveNamed(L, d, pages);
-          cache = { key: msg.key, doc: d, pages: pages, info: info, prepared: [] };
+          cache = { key: msg.key, doc: d, pages: pages, prepared: [] };
         }
         scope.postMessage({ type: 'progress', id: id, value: 0.1 });
         var total = 0, doneN = 0, outputs = [];
@@ -1153,11 +1166,11 @@ faq:
     builderReady = new Promise(function (resolve, reject) {
       var src = pdfUnlocker.toString() + '\n(' + workerMain.toString() + ')(self);';
       var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-      try { builder = new Worker(url); } catch (e) { builderReady = null; reject(new Error('This browser cannot run the PDF splitter.')); return; }
+      try { builder = new Worker(url); } catch (e) { builderReady = null; reject(friendly('This browser cannot run the PDF splitter.')); return; }
       builder.onmessage = function (e) {
         var m = e.data;
         if (m.type === 'ready') { URL.revokeObjectURL(url); resolve(builder); return; }
-        if (m.type === 'fatal') { builderReady = null; builder.terminate(); reject(new Error('The PDF splitter could not load. Check your connection and try again.')); return; }
+        if (m.type === 'fatal') { builderReady = null; builder.terminate(); reject(friendly('The PDF splitter could not load. Check your connection and try again.')); return; }
         var w = waiting[m.id];
         if (!w) return;
         if (m.type === 'progress') w.progress(m.value);
@@ -1166,7 +1179,7 @@ faq:
       builder.onerror = function (e) {
         if (e && e.preventDefault) e.preventDefault();
         stopBuilder({ code: 'CRASH' });
-        reject(new Error('The PDF splitter could not start.'));
+        reject(friendly('The PDF splitter could not start.'));
       };
       builder.postMessage({ type: 'init', lib: PDFLIB_URL });
     });
@@ -1198,10 +1211,12 @@ faq:
     }
     return false;
   }
-  function chooseFiles(list) {
+  function chooseFiles(list, how) {
     var all = Array.prototype.slice.call(list || []);
-    if (!all.length || busy) return Promise.resolve();
+    if (!all.length) return Promise.resolve();
     var file = all[0];
+    // The PDF on screen is being split; the message is cleared when that ends.
+    if (busy) { setError('Wait until the split finishes, or press Cancel, then ' + (how || 'choose') + ' ' + file.name + ' again.'); return Promise.resolve(); }
     var note = all.length > 1 ? 'This tool splits one PDF at a time, so only ' + file.name + ' was opened.' : '';
     setError('');
     if (file.size > MAX_FILE) { setError(file.name + ' is larger than 1 GB.'); return Promise.resolve(); }
@@ -1215,16 +1230,30 @@ faq:
       return tryOpen(d, '').then(function () { if (note && doc === d) setError(note); });
     }, function () { setError(file.name + ' could not be read.'); });
   }
+  function failOpen(d, text) {
+    pending = null;
+    hideUnlock();
+    say('');
+    setError(text);
+  }
+  // PDF.js's message is read to tell the cause, never shown: it is written for programmers.
+  function openError(d, err) {
+    var why = err ? (err.name || '') + ' ' + (err.message || '') : '';
+    if (err && err.friendly) return err.message;
+    if (/Invalid PDF|FormatError|Invalid XRef|InvalidPDF/i.test(why)) return d.name + ' is damaged or is not a valid PDF.';
+    if (/encryption|security handler/i.test(why)) return d.name + ' uses a kind of encryption this tool cannot open.';
+    return d.name + ' could not be opened. ' + REPAIR;
+  }
   function tryOpen(d, password) {
     return openPdf(d, password).then(function (pdf) {
       if (pending !== d) { pdf.loadingTask.destroy(); return; }
+      // Some broken exporters write a PDF whose page tree is empty (PDF.js reads a /Count of -1 as is).
+      if (!(pdf.numPages >= 1)) { pdf.loadingTask.destroy(); failOpen(d, d.name + ' has no pages, so there is nothing to split. ' + REPAIR); return; }
       return pdf.getMetadata().then(function (meta) { return meta && meta.info || {}; }, function () { return {}; }).then(function (info) {
         if (pending !== d) { pdf.loadingTask.destroy(); return; }
         if (info.EncryptFilterName && info.EncryptFilterName !== 'Standard') {
           pdf.loadingTask.destroy();
-          pending = null;
-          say('');
-          setError(d.name + ' uses ' + info.EncryptFilterName + ' (certificate) encryption, which this tool cannot remove.');
+          failOpen(d, d.name + ' uses ' + info.EncryptFilterName + ' (certificate) encryption, which this tool cannot remove.');
           return;
         }
         pending = null;
@@ -1233,17 +1262,12 @@ faq:
         showDoc(d, pdf);
       }).catch(function (err) {
         if (pending !== d && pending !== null) return;
-        pending = null;
-        say('');
-        setError(d.name + ' could not be opened: ' + (err && err.message || err));
+        failOpen(d, openError(d, err));
       });
     }, function (err) {
       if (pending !== d) return;
       if (err && err.name === 'PasswordException') { showUnlock(d, !!password); return; }
-      pending = null;
-      say('');
-      setError(err && /Invalid PDF|FormatError|Invalid XRef|InvalidPDF/i.test((err.name || '') + ' ' + (err.message || '')) ?
-        d.name + ' is damaged or is not a valid PDF.' : d.name + ' could not be opened: ' + (err && err.message || err));
+      failOpen(d, openError(d, err));
     });
   }
   function showUnlock(d, wrong) {
@@ -1511,8 +1535,7 @@ faq:
     if (err && err.code === 'GONE') return name + ' could not be read again. It may have been moved or changed since you opened it; choose it again.';
     if (err && err.code === 'UNSUPPORTED') return name + ' uses a kind of encryption this tool cannot remove.';
     if (err && err.code === 'CRASH') return 'The splitter stopped, probably because the device ran out of memory. Try fewer pages at a time, or use a computer.';
-    if (err && err.code) return name + ' could not be split. It may be damaged; opening it in a PDF viewer and printing it to a new PDF usually repairs it.';
-    return 'The PDF could not be split: ' + (err && err.message || err);
+    return name + ' could not be split. It may be damaged; opening it in a PDF viewer and printing it to a new PDF usually repairs it.';
   }
   function split() {
     if (busy || !doc) return;
@@ -1524,7 +1547,9 @@ faq:
       return;
     }
     var jobs = jobsFor(p), d = doc, key = planKey(p), job = current = { cancelled: false };
-    say('');
+    // The status line keeps its place while splitting: emptied, it would move the whole form up,
+    // and down again when the result is written.
+    say('Splitting ' + d.name + '…');
     setBusy(true);
     runSplit(jobs, function (v) {
       if (job.cancelled) return;
@@ -1542,6 +1567,7 @@ faq:
       if (job.cancelled || !r) return;
       current = null;
       setBusy(false);
+      setError('');
       if (doc !== d) return;
       TT.download(r.name, r.zip || r.outs[0].blob);
       showResults(r.outs, r.zip, r.name, key);
@@ -1552,7 +1578,10 @@ faq:
       if (job.cancelled) return;
       current = null;
       setBusy(false);
-      setError(err && err.code ? explain(err) : (err && err.message) || 'The PDF could not be split.');
+      say('');
+      // The ZIP maker explains its own limits (65,535 files, 4 GB); anything else is memory running out.
+      setError(err && err.code ? explain(err) : err && err.friendly ? err.message : 'The PDF could not be split. ' +
+        (err && err.name === 'Error' && err.message ? err.message : 'The device may have run out of memory; try fewer pages at a time, or use a computer.'));
     });
   }
   // Stopping the worker is the only way to stop pdf-lib mid-file; a new one starts for the next split.
@@ -1562,6 +1591,7 @@ faq:
     current = null;
     stopBuilder({ code: 'CANCEL' });
     setBusy(false);
+    setError('');
     say('Cancelled. Nothing was saved.', true);
     splitBtn.focus();
   }
@@ -1723,15 +1753,16 @@ faq:
   document.addEventListener('dragover', function (e) {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = busy ? 'none' : 'copy';
-    dropZone.classList.add('is-over');
+    // A drop while splitting is taken and answered with a message, so the drop area is not shown.
+    e.dataTransfer.dropEffect = 'copy';
+    if (!busy) dropZone.classList.add('is-over');
   });
   document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) dropZone.classList.remove('is-over'); });
   document.addEventListener('drop', function (e) {
     if (!hasFiles(e)) return;
     e.preventDefault();
     dropZone.classList.remove('is-over');
-    chooseFiles(e.dataTransfer.files);
+    chooseFiles(e.dataTransfer.files, 'drop');
   });
   // After Back or Forward the browser may put earlier values back into the fields once this
   // script has run, so the state is read from them again.

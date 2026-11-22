@@ -52,6 +52,17 @@ function pngInfo(b) {
   return info;
 }
 
+// A PDF written by hand from its objects (numbered from 1), for files no app would write.
+function rawPdf(objs, trailer = '') {
+  let body = '%PDF-1.4\n';
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(body.length); body += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+  const xref = body.length;
+  body += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  return Buffer.from(body + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R' + trailer + ' >>\nstartxref\n' + xref + '\n%%EOF\n', 'latin1');
+}
+const CATALOG = '<< /Type /Catalog /Pages 2 0 R >>', A_PAGE = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] >>';
+
 module.exports = async ({ page, open, assert, fixtures, url }) => {
   const fx = n => path.join(fixtures, n);
   const exp = JSON.parse(fs.readFileSync(fx('expected.json'), 'utf8'));
@@ -135,6 +146,23 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => /notes\.txt is not a PDF file/.test(document.getElementById('p2j-error').textContent));
   await page.setInputFiles('#p2j-file', fx('damaged.pdf'));
   await page.waitForFunction(() => /damaged\.pdf is damaged or is not a valid PDF/.test(document.getElementById('p2j-error').textContent));
+  // PDFs that PDF.js opens but this tool cannot use are explained in plain words; PDF.js's own messages
+  // ("Invalid page request.", "unknown encryption method") are never shown. A page tree with no pages
+  // (some broken exporters write one; PDF.js takes a /Count of -1 as it is), a first page that is a
+  // number instead of a page, and an encryption the reader does not know.
+  const REPAIR = 'It may be damaged; try saving it again from the app that made it.';
+  for (const [name, buf, want] of [
+    ['no-pages.pdf', rawPdf([CATALOG, '<< /Type /Pages /Kids [] /Count 0 >>']), 'no-pages.pdf has no pages, so there is nothing to convert. ' + REPAIR],
+    ['minus-one.pdf', rawPdf([CATALOG, '<< /Type /Pages /Kids [3 0 R] /Count -1 >>', A_PAGE]), 'minus-one.pdf has no pages, so there is nothing to convert. ' + REPAIR],
+    ['bad-first.pdf', rawPdf([CATALOG, '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>', '42', A_PAGE]), 'bad-first.pdf could not be opened. ' + REPAIR],
+    ['odd-lock.pdf', rawPdf([CATALOG, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', A_PAGE, '<< /Filter /OddLock /V 1 >>'], ' /Encrypt 4 0 R /ID [<00> <00>]'), 'odd-lock.pdf uses a kind of encryption this tool cannot open.']
+  ]) {
+    await page.setInputFiles('#p2j-file', { name, mimeType: 'application/pdf', buffer: buf });
+    await page.waitForFunction(n => document.getElementById('p2j-error').textContent.startsWith(n + ' '), name);
+    assert.equal(await text('#p2j-error'), want);
+    assert.equal(await text('#p2j-status'), '', name + ': "Opening" is not left on screen');
+    assert.equal(await page.isVisible('#p2j-work'), false, name + ': no form for a PDF that cannot be converted');
+  }
   await page.setInputFiles('#p2j-file', fx('locked.pdf'));
   await page.waitForSelector('#p2j-unlock:not([hidden])');
   assert.equal(await text('#p2j-error'), '');
@@ -551,6 +579,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(out.name, 'twelve-page-01.jpg');
   assert.equal(await text('#p2j-error'), 'Page 2 could not be converted: the image could not be encoded. The other page was saved.');
   assert.deepEqual(await page.$$eval('.p2j-dl', l => l.slice(0, 3).map(b => b.hidden)), [false, true, true]);
+  // A page PDF.js cannot read (its entry in the page tree is a number) is named in plain words, with
+  // one full stop: not "Page dictionary kid reference points to wrong type of object..".
+  await page.setInputFiles('#p2j-file', { name: 'bad-page.pdf', mimeType: 'application/pdf', buffer: rawPdf([CATALOG, '<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>', A_PAGE, '42', A_PAGE]) });
+  await page.waitForFunction(() => /^bad-page\.pdf is open/.test(document.getElementById('p2j-status').textContent));
+  out = await save();
+  assert.match(out.name, /^bad-page-(page-1\.jpg|jpg\.zip)$/);
+  assert.equal(await text('#p2j-error'), 'Page 2 could not be converted: it may be damaged. ' + (out.name.endsWith('.zip') ? 'The other pages were saved.' : 'The other page was saved.'));
 
   // ---- Dropped files: one PDF at a time; a page with /UserUnit 2 is twice as big ----
   const drop = list => page.evaluate(files => {
@@ -574,6 +609,61 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(await infos(), ['200 × 100 px'], '100 × 50 units of 2/72 inch');
   out = await save();
   assert.deepEqual([jpegInfo(out.buf).w, jpegInfo(out.buf).h], [200, 100]);
+
+  // ---- A PDF dropped while converting is refused with a message, which goes when the conversion ends ----
+  // The conversion is held at its page image (its encoding waits) so that the drop lands while it runs.
+  // The status line is not emptied meanwhile: emptied, it moved the whole form up, and down again at the end.
+  const hold = () => page.evaluate(() => {
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    window.__go = null;
+    HTMLCanvasElement.prototype.toBlob = function (...a) {
+      if (this.width <= 400 || window.__go) return toBlob.apply(this, a);
+      window.__go = () => { HTMLCanvasElement.prototype.toBlob = toBlob; toBlob.apply(this, a); };
+    };
+  });
+  const top = id => page.$eval('#' + id, el => Math.round(el.getBoundingClientRect().top + scrollY));
+  await page.selectOption('#p2j-dpi', '150');
+  const goTop = await top('p2j-go');
+  await hold();
+  await page.click('#p2j-go');
+  await page.waitForFunction(() => window.__go);
+  assert.equal(await text('#p2j-status'), 'Converting page 1 to JPG…');
+  assert.equal(await top('p2j-go'), goTop, 'the Convert button stays where it was');
+  // A real drop reaches the page only if dragover leaves a drop effect other than none; the drop area,
+  // which invites a drop, does not show.
+  const second = [['second.pdf', tinyPdf('')]];
+  const over = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    let effect = 'not set';
+    dt.items.add(new File(['%PDF-1.4'], 'second.pdf'));
+    // Outside a real drag the browser ignores what is written to dropEffect, so it is caught here.
+    Object.defineProperty(dt, 'dropEffect', { get: () => effect, set: v => { effect = v; } });
+    const ev = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.dispatchEvent(ev);
+    return { taken: ev.defaultPrevented, effect, shown: document.getElementById('p2j-drop').classList.contains('is-over') };
+  });
+  assert.deepEqual(over, { taken: true, effect: 'copy', shown: false });
+  await drop(second);
+  assert.equal(await text('#p2j-error'), 'Wait until the conversion finishes, or press Cancel, then drop second.pdf again.');
+  assert.equal(await text('#p2j-name'), 'big-unit.pdf', 'the PDF being converted stays open');
+  const [dlHeld] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => window.__go())]);
+  assert.equal(dlHeld.suggestedFilename(), 'big-unit-page-1.jpg');
+  assert.equal(await text('#p2j-error'), '', 'the message goes when the conversion ends');
+  assert.match(await text('#p2j-status'), /^Saved big-unit-page-1\.jpg: 417 × 208 pixels/);
+  assert.equal(await top('p2j-go'), goTop);
+  // Cancel clears it too; the dropped file is then opened as usual.
+  await page.selectOption('#p2j-dpi', '200');
+  await hold();
+  await page.click('#p2j-go');
+  await page.waitForFunction(() => window.__go);
+  await drop(second);
+  assert.match(await text('#p2j-error'), /^Wait until the conversion finishes/);
+  await page.click('#p2j-cancel');
+  assert.equal(await text('#p2j-error'), '');
+  assert.equal(await text('#p2j-status'), 'Cancelled. Nothing was saved.');
+  await page.evaluate(() => window.__go());
+  await drop(second);
+  await page.waitForFunction(() => document.getElementById('p2j-name').textContent === 'second.pdf');
 
   // ---- A phone with a touch screen, set to German: a decimal comma does not change how lists or DPI are read ----
   const browser = page.context().browser();
@@ -629,8 +719,28 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await p2.inputValue('#p2j-pages'), '', 'touch and hold on a picked page, then drag, clears pages 1 to 3');
   assert.equal(await p2.evaluate(() => scrollY), before, 'the page did not scroll during the drag');
   await p2.tap('.p2j-page:nth-child(3) .p2j-thumb');
-  const [dlPhone] = await Promise.all([p2.waitForEvent('download'), p2.tap('#p2j-go')]);
+  // The form does not move when a conversion starts or ends. The status line keeps two lines' height
+  // on a phone, so the one-line "is open" and "Converting" give way to the two-line "Saved" in place
+  // (the Convert button used to jump 58 px up and 81 px down: a layout shift of 0.08 a conversion).
+  // Where the status line starts and ends, and where the Convert button and the pages start.
+  const spots = () => p2.evaluate(() => {
+    const at = id => document.getElementById(id).getBoundingClientRect(), s = at('p2j-status');
+    return [s.top + scrollY, s.bottom + scrollY, at('p2j-go').top + scrollY, at('p2j-grid').top + scrollY].map(Math.round);
+  });
+  const lines = () => p2.$eval('#p2j-status', el => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map(c => Math.round(c.top))).size; });
+  const rest = await spots();
+  assert.equal(await p2.textContent('#p2j-status'), 'pages.pdf is open: 3 pages.');
+  assert.equal(await lines(), 1);
+  const [dlPhone, moved] = await Promise.all([p2.waitForEvent('download'), p2.evaluate(() => {
+    document.getElementById('p2j-go').click();
+    const at = id => document.getElementById(id).getBoundingClientRect(), s = at('p2j-status');
+    return [document.getElementById('p2j-status').textContent].concat([s.top + scrollY, s.bottom + scrollY, at('p2j-go').top + scrollY].map(Math.round));
+  })]);
+  assert.deepEqual(moved, ['Converting page 3 to JPG…'].concat(rest.slice(0, 3)), 'nothing above the Convert button moves when it is pressed');
   assert.equal(dlPhone.suggestedFilename(), 'pages-page-3.jpg');
+  await p2.waitForFunction(() => /^Saved/.test(document.getElementById('p2j-status').textContent));
+  assert.equal(await lines(), 2, 'the message that ends the conversion takes two lines here');
+  assert.deepEqual(await spots(), rest, 'nothing moves when the conversion ends');
   // A touch screen device gets at most 36 million pixels a page: 6,000 a side, 30 DPI for the poster.
   await p2.setInputFiles('#p2j-file', fx('huge.pdf'));
   await p2.waitForFunction(() => document.querySelectorAll('.p2j-page').length === 1 && document.querySelector('.p2j-info').textContent);

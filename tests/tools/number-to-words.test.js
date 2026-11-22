@@ -379,10 +379,20 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
 
   // ---- The guide links to tools of this site, and the FAQ ends with privacy ----
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/invoice-generator/', '/binary-translator/']);
+  assert.deepEqual(links, ['/invoice-generator/', '/binary-translator/', '/roman-numerals-converter/']);
   for (const href of links) assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), href);
   const faqs = await page.locator('.faq summary').allTextContents();
   assert.match(faqs[faqs.length - 1], /sent anywhere/);
+  assert.ok(faqs.includes('How do I convert numbers to words in Excel?'), faqs.join(' | '));
+  assert.match((await page.locator('.faq details', { hasText: 'in Excel?' }).locator('.faq-answer').textContent()).replace(/\s+/g, ' '),
+    /no built-in function .*SpellNumber macro.*=SpellNumber\(A1\).*macro-enabled \.xlsm file.*Excel for the web cannot run it/);
+  // Homepage search (index.html) matches every typed word against title, description and keywords.
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = (home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/number-to-words\/"/) || [])[1] || '';
+  assert.ok(hay, 'the homepage lists the page');
+  for (const q of ['number to words', 'amount in words in rupees', 'lakh crore converter', 'dollars in words', 'indian number system', 'cheque amount', 'check amount in words', 'ordinal']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
 
   // ---- Every option at once: random numbers against the rules in expected.py ----
   for (const c of data.combos) {

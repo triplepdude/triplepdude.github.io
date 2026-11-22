@@ -50,6 +50,17 @@ function unzip(buf) {
   return out;
 }
 
+// A PDF written by hand from its objects (numbered from 1), for files no app would write.
+function rawPdf(objs, trailer = '') {
+  let body = '%PDF-1.4\n';
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(body.length); body += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+  const xref = body.length;
+  body += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  return Buffer.from(body + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R' + trailer + ' >>\nstartxref\n' + xref + '\n%%EOF\n', 'latin1');
+}
+const CATALOG = '<< /Type /Catalog /Pages 2 0 R >>', A_PAGE = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] >>';
+
 module.exports = async ({ page, open, assert, fixtures, url }) => {
   const fx = n => path.join(fixtures, n);
   const expectedAll = JSON.parse(fs.readFileSync(fx('expected.json'), 'utf8'));
@@ -83,7 +94,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
       pages.push({ mark: (text.match(/[A-Z]+-MARK-\d+/) || [''])[0].replace(/^SPLIT-MARK-/, ''), rotate: pg.rotate, size: Math.round(pg.view[2] - pg.view[0]) + 'x' + Math.round(pg.view[3] - pg.view[1]), anns, ids });
     }
     await task.destroy();
-    return { encrypted: !!meta.info.EncryptFilterName, title: meta.info.Title, producer: meta.info.Producer, pages };
+    const info = {};
+    for (const k of ['Title', 'Author', 'Subject', 'Keywords', 'Creator', 'Producer', 'CreationDate', 'ModDate']) if (meta.info[k] !== undefined) info[k] = meta.info[k];
+    return { encrypted: !!meta.info.EncryptFilterName, info, pages };
   }, buf.toString('base64'));
   const marks = async buf => (await inspect(buf)).pages.map(p => p.mark);
   const save = async (sel = '#spl-split') => {
@@ -120,6 +133,21 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.setInputFiles('#spl-file', fx('damaged.pdf'));
   await page.waitForFunction(() => /damaged\.pdf is damaged or is not a valid PDF/.test(document.getElementById('spl-error').textContent));
   assert.equal(await page.isVisible('#spl-work'), false);
+  // A page tree with no pages (some broken exporters write one; PDF.js takes a /Count of -1 as it is)
+  // gets no form to split "0 pages" with, and PDF.js's own messages ("unknown encryption method") are
+  // never shown.
+  const REPAIR = 'It may be damaged; try saving it again from the app that made it.';
+  for (const [name, buf, want] of [
+    ['no-pages.pdf', rawPdf([CATALOG, '<< /Type /Pages /Kids [] /Count 0 >>']), 'no-pages.pdf has no pages, so there is nothing to split. ' + REPAIR],
+    ['minus-one.pdf', rawPdf([CATALOG, '<< /Type /Pages /Kids [3 0 R] /Count -1 >>', A_PAGE]), 'minus-one.pdf has no pages, so there is nothing to split. ' + REPAIR],
+    ['odd-lock.pdf', rawPdf([CATALOG, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', A_PAGE, '<< /Filter /OddLock /V 1 >>'], ' /Encrypt 4 0 R /ID [<00> <00>]'), 'odd-lock.pdf uses a kind of encryption this tool cannot open.']
+  ]) {
+    await page.setInputFiles('#spl-file', { name, mimeType: 'application/pdf', buffer: buf });
+    await page.waitForFunction(n => document.getElementById('spl-error').textContent.startsWith(n + ' '), name);
+    assert.equal(await text('#spl-error'), want);
+    assert.equal(await text('#spl-status'), '', name + ': "Opening" is not left on screen');
+    assert.equal(await page.isVisible('#spl-work'), false, name + ': no form for a PDF that cannot be split');
+  }
 
   // ---- A password to open: missing, wrong, right ----
   await page.setInputFiles('#spl-file', fx('locked.pdf'));
@@ -204,8 +232,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   pdf = await inspect(entries[0].data);
   assert.deepEqual(pdf.pages.map(p => p.mark), ['01', '02', '03']);
   assert.deepEqual(pdf.pages.map(p => p.anns), [[], ['Link https://example.com/split'], ['Text "Note on page 3"']]);
-  assert.equal(pdf.title, 'Ten pages');
-  assert.match(pdf.producer, /TripleP Tools/);
+  // ten.pdf's title, author, subject, creator and dates are not passed on to the parts, and no date is
+  // stamped on them: a page sent on carries nothing of the original's document properties.
+  assert.deepEqual(pdf.info, { Creator: 'TripleP Tools Split PDF', Producer: 'TripleP Tools (pdf-lib)' });
+  assert.doesNotMatch(allText(entries[0].data), /Ten pages|Fixture|unspecified|anonymous|\/CreationDate|\/ModDate/);
   assert.ok(entries[0].data.length > pictures([1, 2, 3]) && entries[0].data.length < pictures([1, 2, 3]) + 6000, `pages 1-3 hold their own pictures only (${entries[0].data.length} bytes)`);
   assert.ok(entries[1].data.length < pictures([10]) + 6000, `page 10 alone is small (${entries[1].data.length} bytes)`);
   assert.deepEqual((await inspect(entries[1].data)).pages.map(p => p.size), ['792x612']);
@@ -448,6 +478,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.focus('#spl-pick');
   const [dlEnter] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
   assert.deepEqual(await marks(fs.readFileSync(await dlEnter.path())), ['01', '03', '04', '07', '08']);
+  // Deleting pages, as the guide tells: pick the pages to remove, press Invert, then Extract.
+  await page.fill('#spl-pick', '2, 5');
+  await page.click('[data-pick="invert"]');
+  assert.equal(await text('#spl-split'), 'Extract 8 pages');
+  out = await save();
+  assert.equal(out.name, 'ten-extracted.pdf');
+  assert.deepEqual(await marks(out.buf), ['01', '03', '04', '06', '07', '08', '09', '10']);
   await page.click('[data-pick="none"]');
   await page.click('#spl-split');
   assert.deepEqual(await fieldError('spl-pick'), { text: 'Select at least one page: click it below or type its number.', invalid: 'true', linked: true });
@@ -481,6 +518,58 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     for (const [name, b64] of files) dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], name));
     document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
   }, list);
+  // A PDF dropped while splitting is refused with a message, which goes when the split ends. The split
+  // is held (its request to the splitter waits) so that the drop lands while it runs. The status line
+  // is not emptied meanwhile: emptied, it moved the whole form up, and down again at the end.
+  const holdSplit = () => page.evaluate(() => {
+    const post = Worker.prototype.postMessage;
+    window.__go = null;
+    Worker.prototype.postMessage = function (msg, ...rest) {
+      if (!(msg && msg.type === 'split') || window.__go) return post.call(this, msg, ...rest);
+      window.__go = () => { Worker.prototype.postMessage = post; post.call(this, msg, ...rest); };
+    };
+  });
+  const top = id => page.$eval('#' + id, el => Math.round(el.getBoundingClientRect().top + scrollY));
+  const second = [['second.pdf', fs.readFileSync(fx('restricted.pdf')).toString('base64')]];
+  const splitTop = await top('spl-split');
+  await holdSplit();
+  await page.click('#spl-split');
+  await page.waitForFunction(() => window.__go);
+  assert.equal(await text('#spl-status'), 'Splitting ten.pdf…');
+  assert.equal(await top('spl-split'), splitTop, 'the Split button stays where it was');
+  // A real drop reaches the page only if dragover leaves a drop effect other than none; the drop area,
+  // which invites a drop, does not show.
+  const over = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    let effect = 'not set';
+    dt.items.add(new File(['%PDF-1.4'], 'second.pdf'));
+    // Outside a real drag the browser ignores what is written to dropEffect, so it is caught here.
+    Object.defineProperty(dt, 'dropEffect', { get: () => effect, set: v => { effect = v; } });
+    const ev = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+    document.dispatchEvent(ev);
+    return { taken: ev.defaultPrevented, effect, shown: document.getElementById('spl-drop').classList.contains('is-over') };
+  });
+  assert.deepEqual(over, { taken: true, effect: 'copy', shown: false });
+  await drop(second);
+  assert.equal(await text('#spl-error'), 'Wait until the split finishes, or press Cancel, then drop second.pdf again.');
+  const [dlHeld] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => window.__go())]);
+  assert.equal(dlHeld.suggestedFilename(), 'ten-split.zip');
+  assert.equal(await text('#spl-error'), '', 'the message goes when the split ends');
+  assert.equal(await text('#spl-name'), 'ten.pdf', 'the dropped file was not opened');
+  assert.equal(await top('spl-split'), splitTop);
+  // Cancel clears it too; the dropped file is then opened as usual.
+  await holdSplit();
+  await page.click('#spl-split');
+  await page.waitForFunction(() => window.__go);
+  await drop(second);
+  assert.match(await text('#spl-error'), /^Wait until the split finishes/);
+  await page.click('#spl-cancel');
+  assert.equal(await text('#spl-error'), '');
+  assert.equal(await text('#spl-status'), 'Cancelled. Nothing was saved.');
+  await page.evaluate(() => window.__go());
+  await drop(second);
+  await page.waitForFunction(() => /^second\.pdf is open/.test(document.getElementById('spl-status').textContent));
+  await open10();
   await drop([['first.txt', Buffer.from('plain text').toString('base64')]]);
   await page.waitForFunction(() => /first\.txt is not a PDF file/.test(document.getElementById('spl-error').textContent));
   assert.equal(await page.$$eval('.spl-page', l => l.length), 10, 'the open PDF stays open');
@@ -663,8 +752,24 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await touch('touchEnd');
   await p2.waitForTimeout(600);
   assert.equal(await p2.inputValue('#spl-pick'), '3-6');
-  const [dlPhone] = await Promise.all([p2.waitForEvent('download'), p2.tap('#spl-split')]);
+  // Nothing above the Split button moves when a split starts or ends: the status line is never emptied
+  // and keeps two lines' height on a phone, whichever message it shows.
+  const spots = () => p2.evaluate(() => {
+    const at = id => document.getElementById(id).getBoundingClientRect(), s = at('spl-status');
+    return [document.getElementById('spl-status').textContent].concat([s.top + scrollY, s.bottom + scrollY, at('spl-split').top + scrollY].map(Math.round));
+  });
+  const rest = await spots();
+  assert.equal(rest[0], 'ten.pdf is open: 10 pages.');
+  const [dlPhone, moved] = await Promise.all([p2.waitForEvent('download'), p2.evaluate(() => {
+    document.getElementById('spl-split').click();
+    const at = id => document.getElementById(id).getBoundingClientRect(), s = at('spl-status');
+    return [document.getElementById('spl-status').textContent].concat([s.top + scrollY, s.bottom + scrollY, at('spl-split').top + scrollY].map(Math.round));
+  })]);
+  assert.deepEqual(moved, ['Splitting ten.pdf…'].concat(rest.slice(1)), 'nothing moves when Split is pressed');
   assert.deepEqual(await marks(fs.readFileSync(await dlPhone.path())), ['03', '04', '05', '06']);
+  await p2.waitForFunction(() => /^Saved/.test(document.getElementById('spl-status').textContent));
+  const after = await spots();
+  assert.deepEqual(after.slice(1), rest.slice(1), 'nothing moves when the split ends: ' + after[0]);
   // A long file name wraps at 320 px: in the password prompt, the summary and the list of results.
   const longName = 'Quarterly_report_final_version_with_all_appendices_and_signatures_reviewed_by_legal';
   await p2.setViewportSize({ width: 320, height: 640 });

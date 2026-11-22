@@ -82,7 +82,7 @@ faq:
   - q: Are my images uploaded to a server?
     a: No. The images are read and the PDF is assembled by JavaScript running in this page, on your own device. Nothing is sent over the network, so the tool keeps working even if you go offline after the page has loaded.
   - q: Does the PDF include my photos' location or camera details?
-    a: No. The EXIF, XMP and IPTC metadata of a photo, such as GPS coordinates, the camera model and serial number and the date taken, is removed before the photo is placed in the PDF, as are comments and any extra data such as a motion photo's video. The PDF itself only records the title and author you enter, its creation date and the name of this tool.
+    a: No. The EXIF, XMP and IPTC metadata of a photo, such as GPS coordinates, the camera model and serial number and the date taken, is removed before the photo is placed in the PDF, as are comments and any extra data such as a motion photo's video. The PDF itself only records a title (the file name, unless you type one), the author if you type one, and the name of this tool. It does not record when it was made.
   - q: How do I make the PDF smaller?
     a: Turn compression on, pick 150 or 100 ppi and a JPEG quality around 70 to 80. The estimated size updates as you change them. Text in scans stays readable at 150 ppi; photos meant for print look better at 200 to 300 ppi.
   - q: Can I convert HEIC photos from an iPhone?
@@ -807,10 +807,6 @@ faq:
     for (var i = 0; i < s.length; i++) hex += ('000' + s.charCodeAt(i).toString(16).toUpperCase()).slice(-4);
     return hex + '>';
   }
-  function pdfDate(d) {
-    function p(n) { return (n < 10 ? '0' : '') + n; }
-    return 'D:' + d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()) + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + 'Z';
-  }
   function randomHex(n) {
     var a = new Uint8Array(n);
     crypto.getRandomValues(a);
@@ -879,9 +875,9 @@ faq:
       // A title typed in is shown by readers in place of the file name (DisplayDocTitle, PDF 1.4).
       w.obj(1, '<< /Type /Catalog /Pages 2 0 R' + (ownTitle ? ' /ViewerPreferences << /DisplayDocTitle true >>' : '') + ' >>');
       w.obj(2, '<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + n + ' >>');
-      var now = pdfDate(new Date());
+      // No /CreationDate or /ModDate: anyone given the file would see when it was made, to the second.
       w.obj(3, '<< /Title ' + pdfTextString(ownTitle || name.replace(/\.pdf$/i, '')) + (author ? ' /Author ' + pdfTextString(author) : '') +
-        ' /Producer (TripleP Tools Image to PDF) /CreationDate (' + now + ') /ModDate (' + now + ') >>');
+        ' /Producer (TripleP Tools Image to PDF) >>');
       for (var i = 0; i < n; i++) {
         makeBtn.textContent = 'Creating page ' + (i + 1) + ' of ' + n + '…';
         await nextFrame();

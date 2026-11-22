@@ -40,8 +40,10 @@ keyboard.
 ## Everything runs in your browser
 
 The tools are plain JavaScript that runs on your own device. Text you paste,
-files you open, and numbers you enter are never uploaded to a server, and the
-tools keep nothing once you close the page. The
+files you open, and numbers you enter are never uploaded to this site, and
+nothing is saved in your browser's storage. Some tools keep their settings in
+the page address, so that a bookmark brings them back, and Text to Speech can
+use online voices, to which your browser sends the text. The
 [privacy policy]({{ '/privacy/' | relative_url }}) has the details.
 
 ## How the tools are tested
