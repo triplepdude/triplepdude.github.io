@@ -1,0 +1,1421 @@
+---
+title: Focus Timer for the Pomodoro Technique®
+description: Time 25-minute focus sessions with short and long breaks, as the Pomodoro Technique® suggests, with end sounds, a session log and keys. Runs in your browser.
+category: Date & Time
+keywords: [pomodoro timer, pomodoro technique timer, focus timer, study timer, 25 minute timer, work timer, 52 17 timer, 50 10 timer]
+howto: |
+  ## How to use the focus timer
+
+  Press **Start** or Space to begin a 25-minute focus session. When it ends,
+  the timer rings and a 5-minute short break comes up; start it when you are
+  ready. Every fourth focus session you finish is followed by a 15-minute long
+  break, and the dots show how many of the four are done. **Skip** moves on
+  without counting the session, **Reset** starts it again and **+1 min** adds
+  a minute.
+
+  The presets set focus and short breaks to 25 and 5, 50 and 10 or 52 and 17
+  minutes, or type any whole number of minutes up to 240. Sessions start
+  only when you press Start, as the technique asks; tick **Start breaks
+  automatically** or **Start focus sessions automatically** if you prefer.
+
+  | Key | What it does |
+  |---|---|
+  | Space | Start, pause or resume; stop the alarm |
+  | S | Skip to the next session |
+  | R | Reset the session |
+  | F | Full screen on or off |
+  | Esc | Stop the alarm; leave full screen |
+
+  The tab title shows the time left. **Mini timer** opens a small window that
+  stays on top (Chrome and Edge 116 or later, Firefox 151 or later, on a
+  computer). Copy or download the log before you close the page.
+
+  ## What is the Pomodoro Technique?
+
+  Francesco Cirillo worked it out in the late 1980s as a university student,
+  timing his study with a kitchen timer shaped like a tomato (pomodoro in
+  Italian). Choose one task, work on it for 25 minutes, then take a break of 3
+  to 5 minutes; after four sessions, take 15 to 30. A session cannot be split:
+  if an interruption ends it, it does not count and you start a new one. He
+  wrote that sessions of 20 to 35 minutes work best, 40 at most, so 25 is a
+  starting point rather than a rule. Pomodoro® and Pomodoro Technique® are
+  registered trademarks of Francesco Cirillo; this site is not affiliated with
+  him.
+
+  ## Is 50/10 or 52/17 better than 25/5?
+
+  Nobody has shown that. 52/17 comes from 2014 data on the most productive
+  users of the time tracker DeskTime, which found 112/26 in 2021; neither was
+  peer reviewed, and 50/10 has no study behind it. Two small trials at
+  Maastricht University compared fixed breaks with breaks students chose
+  themselves. In one, with 87 students, those on fixed breaks felt less tired
+  and more focused, and got as much done in less time; in the other, with 94
+  students, tiredness rose faster on 25/5, but overall tiredness and the work
+  done did not differ. So choose the length you can keep up.
+
+  ## What should I do in a break, and how many sessions a day?
+
+  Cirillo suggests standing up, walking about or having a drink of water, and
+  keeping away from work talk and email. The NHS advises breaking up long
+  periods of sitting, and the American Academy of Ophthalmology's 20-20-20
+  rule is to look at something 20 feet (6 metres) away for 20 seconds every 20
+  minutes. For sessions, Cirillo suggests starting with one uninterrupted
+  session a day and building up to 10 to 12.
+
+  ## Does it keep running in another tab or on a locked phone?
+
+  In another tab, yes: each end sound, and the next session's when that starts
+  by itself, is scheduled ahead on the sound card's clock, which keeps time
+  while the browser slows down background tabs. With ticking on, the tab plays
+  sound, so Chrome neither slows nor discards it. Edge on battery may put a
+  quiet background tab to sleep after 5 minutes: add this site under
+  "Always keep these sites active" in its Performance settings. On a phone
+  keep the page in front: Safari on an iPhone pauses it when the screen locks or you switch
+  apps, and Chrome on Android freezes a hidden tab after 5 minutes. The timer
+  cannot block websites, ring from a closed tab or keep your history.
+
+  For one countdown use the [online timer](/online-timer/), to time a task the
+  [stopwatch](/stopwatch/), to wake up the [alarm clock](/alarm-clock/), and
+  for background sound the [noise generator](/noise-generator/).
+faq:
+  - q: Is anything uploaded or saved?
+    a: "No, and there is no account. The timer runs in your browser. Its lengths, settings and the session in progress are kept only in the page address after the # sign, which browsers never send to a server, so a reload keeps them. The session log stays in the page's memory and is gone when you close or reload the page; nothing goes into cookies or browser storage."
+  - q: What if I finish my task before the timer rings?
+    a: The technique's answer is to keep going until it rings, using the rest of the session to review, check or improve what you have done, and to start the next task after the break. If you would rather move on, press Skip; the session is logged as skipped and does not count towards the long break.
+  - q: Why would a focus timer tick?
+    a: Cirillo's paper asks for a timer that ticks while it runs, as a way to feel time passing and stay focused. Many people find ticking distracting, so it is off here; tick "Tick quietly during focus sessions" under Sounds to hear a soft click every second.
+  - q: Does the Pomodoro Technique help with ADHD?
+    a: We could find no trial of the technique in people with ADHD, so whether it helps them is not known. If 25 minutes feels too long, set shorter sessions, such as 10 or 15 minutes, and lengthen them as they get easier.
+---
+<style>
+.pt-card { text-align: center; min-width: 0; }
+.pt-modes { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 12px; }
+.pt-modes .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+.pt-time { display: inline-block; padding: 0 0.12em; border-radius: 12px; font-size: clamp(3rem, 17vw, 7rem); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) {
+  .pt-card.is-ringing .pt-time { animation: pt-blink 1s steps(1, end) infinite; }
+}
+@keyframes pt-blink { 50% { background: var(--danger-soft); } }
+.pt-bar { max-width: 32rem; height: 6px; margin: 8px auto 0; overflow: hidden; border-radius: 999px; background: var(--border); }
+.pt-bar span { display: block; width: 0; height: 100%; background: var(--accent); }
+.pt-meta { min-height: 1.6em; margin: 8px 0 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pt-last { min-height: 1.5em; margin: 0 0 6px; color: var(--muted); font-size: 14px; }
+.pt-last.is-missed { color: var(--danger); }
+.pt-set { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; margin: 4px 0 12px; }
+.pt-dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.pt-dot { width: 16px; height: 16px; border: 2px solid var(--muted); border-radius: 50%; }
+.pt-dot.is-done { border-color: var(--accent); background: var(--accent); }
+.pt-dot.is-now { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pt-task { max-width: 26rem; margin: 0 auto 12px; text-align: left; }
+.pt-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.pt-actions .btn { min-width: 6.5em; white-space: nowrap; }
+.pt-actions .pt-go { min-width: 8em; min-height: 52px; font-size: 1.05rem; }
+.pt .btn { touch-action: manipulation; }
+.pt .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.pt-keys { margin: 12px 0 0; text-align: center; }
+.pt-keys kbd { padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); color: var(--text); font: 12px/1.6 var(--mono); }
+.pt-note { border-left: 3px solid var(--accent); background: var(--surface-2); color: var(--text); }
+.pt-h { margin: 22px 0 10px; font-size: 1.15rem; }
+.pt-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.pt-presets .btn[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pt-settings .row { align-items: flex-end; }
+.pt-settings .row > .field { flex: 1 1 150px; }
+.pt-num { font-variant-numeric: tabular-nums; }
+.pt-vol-row { display: flex; align-items: center; gap: 10px; }
+.pt-vol-row output { min-width: 3em; font-variant-numeric: tabular-nums; }
+.pt-tests { display: flex; flex-wrap: wrap; gap: 8px; }
+.pt-log-empty { margin: 0 0 12px; }
+.pt .table-wrap { margin-bottom: 10px; }
+.pt table.data td, .pt table.data th { white-space: nowrap; }
+.pt table.data td.pt-what { min-width: 8em; white-space: normal; overflow-wrap: anywhere; }
+.pt-card.is-full { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; justify-content: center; justify-content: safe center; overflow: auto; overscroll-behavior: contain; margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text); }
+.pt-card.is-full .pt-time { font-size: min(26vw, 40vh); }
+.pt-card.is-full .pt-time.is-long { font-size: min(18vw, 32vh); }
+.pt-card.is-full .pt-meta { font-size: min(5vw, 4.5vh, 1.6rem); }
+:root.pt-noscroll, :root.pt-noscroll body { overflow: hidden; }
+/* On a short screen, such as a phone on its side, the buttons come straight
+   after the time in full screen, so they show without scrolling. */
+@media (max-height: 560px) {
+  .pt-card.is-full { padding-top: 12px; padding-bottom: 12px; }
+  .pt-card.is-full .pt-time { font-size: min(22vw, 30vh); }
+  .pt-card.is-full .pt-time.is-long { font-size: min(16vw, 26vh); }
+  .pt-card.is-full .pt-actions { order: 1; }
+  .pt-card.is-full .pt-last, .pt-card.is-full .pt-set, .pt-card.is-full .pt-task { order: 2; }
+  .pt-card.is-full .pt-last { margin-top: 12px; }
+}
+@media (max-width: 480px) {
+  .pt-actions .btn { flex: 1 1 40%; min-width: auto; padding: 0 8px; }
+  .pt-modes .btn { flex: 1 1 auto; min-width: auto; padding: 0 6px; white-space: nowrap; }
+  .pt-presets .btn { flex: 1 1 28%; min-width: auto; padding: 0 6px; }
+}
+</style>
+
+<div class="pt" id="pt">
+  <p class="msg error" id="pt-msg" role="alert"></p>
+  <p class="msg pt-note" id="pt-sound-note" role="status"></p>
+
+  <section class="pt-card" id="pt-card" aria-label="Focus timer">
+    <div class="pt-modes" id="pt-modes" role="group" aria-label="Session">
+      <button type="button" class="btn secondary small" data-phase="focus" aria-pressed="true">Focus</button>
+      <button type="button" class="btn secondary small" data-phase="short" aria-pressed="false">Short break</button>
+      <button type="button" class="btn secondary small" data-phase="long" aria-pressed="false">Long break</button>
+    </div>
+    <div class="pt-time" id="pt-time" role="timer" aria-label="Time left"></div>
+    <div class="pt-bar" aria-hidden="true"><span id="pt-bar"></span></div>
+    <p class="pt-meta" id="pt-meta"></p>
+    <p class="pt-last" id="pt-last"></p>
+    <div class="pt-set">
+      <div class="pt-dots" id="pt-dots" role="img"></div>
+      <button type="button" class="btn secondary small" id="pt-newset">New set</button>
+    </div>
+    <div class="field pt-task">
+      <label for="pt-label">Working on</label>
+      <input type="text" id="pt-label" maxlength="60" autocomplete="off" placeholder="Optional">
+    </div>
+    <div class="pt-actions">
+      <button type="button" class="btn pt-go" id="pt-go">Start</button>
+      <button type="button" class="btn secondary" id="pt-skip">Skip</button>
+      <button type="button" class="btn secondary" id="pt-reset" aria-disabled="true">Reset</button>
+      <button type="button" class="btn secondary" id="pt-plus" aria-disabled="true">+1 min</button>
+      <button type="button" class="btn secondary" id="pt-full">Full screen</button>
+      <button type="button" class="btn secondary" id="pt-pip" hidden>Mini timer</button>
+    </div>
+  </section>
+  <p class="hint pt-keys">Keys: <kbd>Space</kbd> start or pause, <kbd>S</kbd> skip, <kbd>R</kbd> reset, <kbd>F</kbd> full screen, <kbd>Esc</kbd> stop the alarm</p>
+
+  <div class="pt-settings">
+    <h2 class="pt-h">Lengths</h2>
+    <div class="pt-presets" role="group" aria-label="Presets for focus and short breaks">
+      <button type="button" class="btn secondary small" data-preset="25-5" aria-pressed="false">25 / 5</button>
+      <button type="button" class="btn secondary small" data-preset="50-10" aria-pressed="false">50 / 10</button>
+      <button type="button" class="btn secondary small" data-preset="52-17" aria-pressed="false">52 / 17</button>
+    </div>
+    <div class="row">
+      <div class="field"><label for="pt-focus">Focus (minutes)</label><input type="text" class="pt-num" id="pt-focus" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="pt-short">Short break (minutes)</label><input type="text" class="pt-num" id="pt-short" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="pt-long">Long break (minutes)</label><input type="text" class="pt-num" id="pt-long" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="pt-every">Long break after (sessions)</label><input type="text" class="pt-num" id="pt-every" inputmode="numeric" autocomplete="off"></div>
+    </div>
+    <p class="msg error" id="pt-len-err"></p>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="pt-auto-break"> Start breaks automatically</label>
+      <label class="check"><input type="checkbox" id="pt-auto-focus"> Start focus sessions automatically</label>
+    </div>
+
+    <h2 class="pt-h">Sounds</h2>
+    <div class="row">
+      <div class="field">
+        <label for="pt-snd-focus">End of focus</label>
+        <select id="pt-snd-focus">
+          <option value="bell" selected>Bell</option>
+          <option value="beeps">Beeps</option>
+          <option value="chime">Chime</option>
+          <option value="clock">Alarm clock</option>
+          <option value="soft">Soft</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="pt-snd-break">End of break</label>
+        <select id="pt-snd-break">
+          <option value="bell">Bell</option>
+          <option value="beeps">Beeps</option>
+          <option value="chime" selected>Chime</option>
+          <option value="clock">Alarm clock</option>
+          <option value="soft">Soft</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="pt-ring">Ring for</label>
+        <select id="pt-ring">
+          <option value="5" selected>5 seconds</option>
+          <option value="15">15 seconds</option>
+          <option value="30">30 seconds</option>
+          <option value="0">Until stopped</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="pt-vol">Volume</label>
+        <div class="pt-vol-row"><input type="range" id="pt-vol" min="0" max="100" step="5" value="70" aria-valuetext="70%"><output id="pt-vol-out" for="pt-vol" aria-hidden="true">70%</output></div>
+      </div>
+    </div>
+    <div class="pt-tests">
+      <button type="button" class="btn secondary small" id="pt-test-focus">Test focus sound</button>
+      <button type="button" class="btn secondary small" id="pt-test-break">Test break sound</button>
+    </div>
+    <div class="checks" style="margin-top: 12px">
+      <label class="check"><input type="checkbox" id="pt-tick"> Tick quietly during focus sessions</label>
+      <label class="check"><input type="checkbox" id="pt-notify"> Show a notification when a session ends</label>
+      <label class="check" id="pt-wake-row"><input type="checkbox" id="pt-wake" checked> Keep the screen on while a session runs</label>
+    </div>
+    <p class="msg error" id="pt-notify-msg"></p>
+    <p class="hint" id="pt-wake-note"></p>
+  </div>
+
+  <h2 class="pt-h">Session log</h2>
+  <p class="hint pt-log-empty" id="pt-log-empty">Each session you finish, skip or reset is listed here until you close or reload the page.</p>
+  <div class="table-wrap" id="pt-log-wrap" hidden>
+    <table class="data" id="pt-log">
+      <thead><tr><th scope="col">#</th><th scope="col">Session</th><th scope="col">Working on</th><th scope="col">Start</th><th scope="col">End</th><th scope="col">Minutes</th><th scope="col">Result</th></tr></thead>
+      <tbody id="pt-log-body"></tbody>
+    </table>
+  </div>
+  <div class="actions" id="pt-log-actions" hidden>
+    <button type="button" class="btn secondary small" id="pt-copy">Copy log</button>
+    <button type="button" class="btn secondary small" id="pt-csv">Download CSV</button>
+    <button type="button" class="btn secondary small" id="pt-clear">Clear log</button>
+  </div>
+  <p class="visually-hidden" id="pt-status" role="status"></p>
+  <p class="visually-hidden" id="pt-alert" role="alert"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var MAX_MIN = 240, MAX_EVERY = 12, LABEL_MAX = 60, MAX_LOG = 500;
+  // One limit for writing and reading the page address.
+  var MAX_HASH = 2000;
+  var RING_LATE = 60000;    // a session found over a minute late does not ring
+  var CHAIN_LATE = 150000;  // ...nor start the next one by itself
+  var STALE = 12 * 3600000; // an address older than this is a bookmark
+  var DEF = { focus: 25, short: 5, long: 15, every: 4 };
+  var NAMES = { focus: 'Focus', short: 'Short break', long: 'Long break' };
+  var PRESETS = [[25, 5], [50, 10], [52, 17]];
+
+  var root = $('#pt'), card = $('#pt-card'), timeEl = $('#pt-time'), barEl = $('#pt-bar'), metaEl = $('#pt-meta'), lastEl = $('#pt-last');
+  var dotsEl = $('#pt-dots'), labelIn = $('#pt-label'), goBtn = $('#pt-go'), skipBtn = $('#pt-skip');
+  var resetBtn = $('#pt-reset'), plusBtn = $('#pt-plus'), fullBtn = $('#pt-full'), pipBtn = $('#pt-pip'), newSetBtn = $('#pt-newset');
+  var statusEl = $('#pt-status'), alertEl = $('#pt-alert'), msgEl = $('#pt-msg'), soundNote = $('#pt-sound-note');
+  var lenIns = { focus: $('#pt-focus'), short: $('#pt-short'), long: $('#pt-long'), every: $('#pt-every') }, lenErr = $('#pt-len-err');
+  var autoBreakBox = $('#pt-auto-break'), autoFocusBox = $('#pt-auto-focus'), tickBox = $('#pt-tick');
+  var sndFocus = $('#pt-snd-focus'), sndBreak = $('#pt-snd-break'), ringSel = $('#pt-ring'), volIn = $('#pt-vol'), volOut = $('#pt-vol-out');
+  var notifyBox = $('#pt-notify'), notifyMsg = $('#pt-notify-msg'), wakeBox = $('#pt-wake'), wakeNote = $('#pt-wake-note');
+  var logBody = $('#pt-log-body'), logWrap = $('#pt-log-wrap'), logEmpty = $('#pt-log-empty'), logActions = $('#pt-log-actions');
+  var baseTitle = document.title;
+
+  // ---------- Clock ----------
+  // Milliseconds since the page opened. performance.now() is precise but
+  // stops while most computers and phones sleep; Date.now() keeps going but
+  // jumps when the clock is set. Each reading adds the performance.now()
+  // step, or the Date.now() step when that is more than a second longer
+  // (the device slept), and never goes backwards.
+  var clock = (function () {
+    var p0 = performance.now(), w0 = Date.now(), t = 0;
+    return function () {
+      var p = performance.now(), w = Date.now(), dp = p - p0, dw = w - w0;
+      t += dw - dp > 1000 ? dw : (dp > 0 ? dp : 0);
+      p0 = p; w0 = w;
+      return t;
+    };
+  })();
+  function wallAt(at) { return Date.now() + (at - clock()); }
+
+  // ---------- Text ----------
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  // 24:59, or 1:04:59 for an hour or more (whole seconds, rounded up)
+  function fmtClock(ms, hours) {
+    var s = Math.ceil(ms / 1000 - 1e-9), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    return (hours || h ? h + ':' + pad(m) : pad(m)) + ':' + pad(s % 60);
+  }
+  function spoken(ms) {
+    var s = Math.ceil(ms / 1000 - 1e-9), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, out = [];
+    s %= 60;
+    if (h) out.push(h + (h === 1 ? ' hour' : ' hours'));
+    if (m) out.push(m + (m === 1 ? ' minute' : ' minutes'));
+    if (s || !out.length) out.push(s + (s === 1 ? ' second' : ' seconds'));
+    return out.join(' ');
+  }
+  var timeFmt = null;
+  function fmtTime(wall) {
+    timeFmt = timeFmt || new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+    return timeFmt.format(new Date(wall));
+  }
+  function iso(wall) { return new Date(wall).toISOString().replace(/\.\d{3}Z$/, 'Z'); }
+  // 2026-11-22 10:25:00 in local time, as spreadsheets read it.
+  function stamp(wall) {
+    var d = new Date(wall);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+  function clip(s, n) {
+    if (s.length <= n) return s;
+    var cut = s.slice(0, n);
+    if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+    return cut + '…';
+  }
+  function cleanLabel(s) {
+    if (s.length > 1000) s = s.slice(0, 1000);
+    s = s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
+    if (s.length > LABEL_MAX) { s = s.slice(0, LABEL_MAX); if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1); }
+    return s;
+  }
+  function say(text) { if (statusEl.textContent !== text) statusEl.textContent = text; }
+  function shout(text) { if (alertEl.textContent !== text) alertEl.textContent = text; }
+  function showMsg(text) { if (msgEl.textContent !== text) msgEl.textContent = text; }
+
+  // ---------- Whole numbers typed in the boxes ----------
+  // The zero of every set of decimal digits in Unicode 14, so digits typed
+  // on any keyboard (Arabic, Persian, Devanagari, full-width...) count.
+  var ZEROS = [0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66, 0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90, 0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0, 0xff10, 0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0, 0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x16a60, 0x16ac0, 0x16b50, 0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e950, 0x1fbf0];
+  function asciiDigits(s) {
+    return s.replace(/\p{Nd}/gu, function (ch) {
+      var c = ch.codePointAt(0);
+      for (var i = ZEROS.length - 1; i >= 0; i--) if (ZEROS[i] <= c) return c - ZEROS[i] <= 9 ? String(c - ZEROS[i]) : ch;
+      return ch;
+    });
+  }
+  // Whole minutes (or sessions) only: a decimal point or comma, a sign or
+  // a space is refused rather than guessed.
+  function readWhole(raw, max, eg) {
+    if (raw.length > 20) return { error: 'too long for a number.' };
+    var s = asciiDigits(raw.trim());
+    if (s === '') return { error: 'type a number.' };
+    if (!/^\d+$/.test(s)) return { error: /^\d*[.,٫]\d*$/.test(s) ? 'use a whole number, such as ' + eg + '.' : 'use digits only, such as ' + eg + '.' };
+    var n = Number(s);
+    if (n < 1 || n > max) return { error: 'use a number from 1 to ' + max + '.' };
+    return { n: n };
+  }
+
+  // ---------- Settings and the session ----------
+  var cfg = { focus: DEF.focus, short: DEF.short, long: DEF.long, every: DEF.every, autoBreak: false, autoFocus: false, tick: false };
+  // phase: focus, short or long. done: focus sessions finished in this set.
+  // state: ready, running (to `end` on clock()) or paused (with `left`).
+  var st = { phase: 'focus', done: 0, state: 'ready', end: 0, left: 0, total: 0, started: 0, ran: 0, runFrom: 0, ringing: false, last: null };
+  function lenOf(phase) { return cfg[phase] * 60000; }
+  function nextPhase(phase, done) { return phase === 'focus' ? (done >= cfg.every ? 'long' : 'short') : 'focus'; }
+  function autoFor(phase) { return phase === 'focus' ? cfg.autoFocus : cfg.autoBreak; }
+  function endSound(phase) { return phase === 'focus' ? sndFocus.value : sndBreak.value; }
+  function sessionNo() { return Math.min(st.done + 1, cfg.every); }
+  function nameOf(phase, n) { return phase === 'focus' ? 'Focus ' + n : NAMES[phase]; }
+  function leftNow(now) {
+    if (st.state === 'running') return Math.max(0, st.end - now);
+    if (st.state === 'paused') return st.left;
+    return lenOf(st.phase);
+  }
+
+  // ---------- Page address ----------
+  // 25-5-15-4 (focus, short, long, sessions per set), then the session: f2
+  // (focus 2), s2 (the short break after focus 2) or l4 (the long break),
+  // with !r<end> while it runs (a Date.now() time) or !p<ms left> when
+  // paused, and ~<what you are working on>; then auto=b, auto=f or auto=bf,
+  // tick, sound=<focus>-<break>, vol= and ring= when not the default.
+  var SOUND_KEYS = ['bell', 'beeps', 'chime', 'clock', 'soft'];
+  var RINGS = ['5', '15', '30', '0'];
+  function readHash(raw) {
+    var h = raw.charAt(0) === '#' ? raw.slice(1) : raw;
+    var out = { error: '', opts: {} };
+    if (!h) return out;
+    if (h.length > MAX_HASH) { out.error = 'The page address is longer than 2,000 characters, too long to read, so the timer in it was not loaded.'; return out; }
+    var bad = [];
+    h.split(',').forEach(function (part) {
+      if (!part) return;
+      var tilde = part.indexOf('~'), label = null, head = tilde < 0 ? part : part.slice(0, tilde);
+      try {
+        head = decodeURIComponent(head);
+        if (tilde >= 0) label = cleanLabel(decodeURIComponent(part.slice(tilde + 1)));
+      } catch (err) { bad.push(part); return; }
+      var m;
+      if ((m = /^(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d{1,2})$/.exec(head)) && !out.lengths && label === null) {
+        var L = { focus: +m[1], short: +m[2], long: +m[3], every: +m[4] };
+        if (L.focus < 1 || L.focus > MAX_MIN || L.short < 1 || L.short > MAX_MIN || L.long < 1 || L.long > MAX_MIN || L.every < 1 || L.every > MAX_EVERY) { bad.push(head); return; }
+        out.lengths = L;
+      } else if ((m = /^([fsl])(\d{1,2})(?:!([rp])(\d{1,15}))?$/.exec(head)) && !out.pos) {
+        out.pos = { phase: { f: 'focus', s: 'short', l: 'long' }[m[1]], n: +m[2], kind: m[3] || '', v: Number(m[4]) };
+        if (label !== null) out.label = label;
+      } else if (/^auto=(b|f|bf|fb)$/.test(head) && label === null) {
+        out.opts.autoBreak = head.indexOf('b', 5) > 0;
+        out.opts.autoFocus = head.indexOf('f', 5) > 0;
+      } else if (head === 'tick' && label === null) out.opts.tick = true;
+      else if ((m = /^sound=([a-z]+)-([a-z]+)$/.exec(head)) && SOUND_KEYS.indexOf(m[1]) >= 0 && SOUND_KEYS.indexOf(m[2]) >= 0 && label === null) out.opts.sounds = [m[1], m[2]];
+      else if ((m = /^vol=(\d{1,3})$/.exec(head)) && +m[1] <= 100 && +m[1] % 5 === 0 && label === null) out.opts.vol = +m[1];
+      else if ((m = /^ring=(\d{1,2})$/.exec(head)) && RINGS.indexOf(m[1]) >= 0 && label === null) out.opts.ring = m[1];
+      else bad.push(head);
+    });
+    if (bad.length) out.error = 'Part of the page address could not be read: “' + clip(bad[0], 40) + '”.';
+    return out;
+  }
+  function posText() {
+    var p = st.phase, s = p === 'focus' ? 'f' + sessionNo() : (p === 'short' ? 's' : 'l') + st.done;
+    if (st.state === 'running') s += '!r' + Math.round(wallAt(st.end));
+    else if (st.state === 'paused') s += '!p' + Math.max(1, Math.round(st.left));
+    return s;
+  }
+  var written = location.hash, retry = 0, keepAddress = false;
+  function writeHash() {
+    if (keepAddress) return;
+    var parts = [];
+    var L = [cfg.focus, cfg.short, cfg.long, cfg.every].join('-');
+    if (L !== [DEF.focus, DEF.short, DEF.long, DEF.every].join('-')) parts.push(L);
+    var pos = posText(), label = cleanLabel(labelIn.value);
+    if (pos !== 'f1' || label) parts.push(label ? pos + '~' + encodeURIComponent(label) : pos);
+    if (cfg.autoBreak || cfg.autoFocus) parts.push('auto=' + (cfg.autoBreak ? 'b' : '') + (cfg.autoFocus ? 'f' : ''));
+    if (cfg.tick) parts.push('tick');
+    if (sndFocus.value !== 'bell' || sndBreak.value !== 'chime') parts.push('sound=' + sndFocus.value + '-' + sndBreak.value);
+    if (volIn.value !== '70') parts.push('vol=' + volIn.value);
+    if (ringSel.value !== '5') parts.push('ring=' + ringSel.value);
+    var h = parts.join(',');
+    if (h.length > MAX_HASH) { showMsg('These settings are too long to keep in the page address, so a reload would lose them.'); return; }
+    // The mark tells Back and Forward apart from a link to new settings.
+    try { history.replaceState({ ptTimer: 1 }, '', location.pathname + location.search + (h ? '#' + h : '')); } catch (err) {
+      // Safari refuses more than 100 address changes in 30 (newer versions: 10) seconds; try again shortly.
+      if (!retry) retry = setTimeout(function () { retry = 0; writeHash(); }, 1000);
+      return;
+    }
+    written = location.hash;
+  }
+
+  // ---------- Sound ----------
+  // Short decaying partials and beeps, scheduled on the audio clock.
+  function ping(ctx, out, t, f, peak, tau, nodes) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.005);
+    g.gain.setTargetAtTime(0, t + 0.005, tau);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.005 + 7 * tau);
+    nodes.push(o);
+  }
+  function beep(ctx, out, t, f, type, peak, len, nodes) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.004);
+    g.gain.setValueAtTime(peak, t + len - 0.006);
+    g.gain.linearRampToValueAtTime(0, t + len);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + len + 0.01);
+    nodes.push(o);
+  }
+  // A lookup table keyed by what the address says, so it has no prototype.
+  var SOUNDS = Object.create(null);
+  // Two strikes; partials at 1, 2.76, 5.40 and 8.93 times 880 Hz, the
+  // modes of a struck bar, dying away faster the higher they are.
+  SOUNDS.bell = { name: 'Bell', cycle: 1.6, tail: 3.9, play: function (ctx, out, t, nodes) {
+    [0, 0.4].forEach(function (d) {
+      [[880, 0.3, 0.5], [2428.8, 0.13, 0.22], [4752, 0.06, 0.12], [7858.4, 0.03, 0.07]].forEach(function (p) { ping(ctx, out, t + d, p[0], p[1], p[2], nodes); });
+    });
+  } };
+  SOUNDS.beeps = { name: 'Beeps', cycle: 1, tail: 0.45, play: function (ctx, out, t, nodes) {
+    for (var i = 0; i < 4; i++) beep(ctx, out, t + i * 0.12, 1760, 'triangle', 0.45, 0.07, nodes);
+  } };
+  SOUNDS.chime = { name: 'Chime', cycle: 2.2, tail: 4.3, play: function (ctx, out, t, nodes) {
+    [[0, 1318.51], [0.45, 1046.5]].forEach(function (n) {
+      ping(ctx, out, t + n[0], n[1], 0.32, 0.55, nodes);
+      ping(ctx, out, t + n[0], n[1] * 2, 0.07, 0.25, nodes);
+    });
+  } };
+  SOUNDS.clock = { name: 'Alarm clock', cycle: 1.4, tail: 0.95, play: function (ctx, out, t, nodes) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle';
+    o.frequency.value = 2349.32;
+    g.gain.setValueAtTime(0, t);
+    for (var i = 0; i < 18; i++) {
+      g.gain.setValueAtTime(0.4, t + i * 0.05);
+      g.gain.setTargetAtTime(0, t + i * 0.05 + 0.002, 0.012);
+    }
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.95);
+    nodes.push(o);
+  } };
+  SOUNDS.soft = { name: 'Soft', cycle: 2.4, tail: 2.8, play: function (ctx, out, t, nodes) {
+    [523.25, 659.26, 783.99].forEach(function (f, i) { ping(ctx, out, t + i * 0.18, f, 0.3, 0.35, nodes); });
+  } };
+  var AHEAD = 65;   // seconds of ringing scheduled at a time
+
+  var audio = (function () {
+    var api = { ctx: null, master: null, tickBuf: null, supported: !!(window.AudioContext || window.webkitAudioContext) };
+    api.ready = function () { return !!api.ctx && api.ctx.state === 'running'; };
+    api.now = function () { return api.ctx ? api.ctx.currentTime : 0; };
+    // Called from a click, tap or key press, which browsers require before
+    // a page may play sound.
+    api.unlock = function () {
+      if (!api.supported) return false;
+      try {
+        if (!api.ctx) {
+          var AC = window.AudioContext || window.webkitAudioContext;
+          api.ctx = new AC();
+          api.master = api.ctx.createGain();
+          api.master.gain.value = volume();
+          api.master.connect(api.ctx.destination);
+          api.ctx.onstatechange = onAudioState;
+        }
+        if (api.ctx.state !== 'running') {
+          var p = api.ctx.resume();
+          if (p && p.then) p.then(onAudioState, function () {});
+          // Older iPhones also want a sound started in the same tap.
+          var src = api.ctx.createBufferSource();
+          src.buffer = api.ctx.createBuffer(1, 1, api.ctx.sampleRate);
+          src.connect(api.master);
+          src.start(0);
+        }
+      } catch (err) { return false; }
+      return true;
+    };
+    function extend(h, upto) {
+      var s = SOUNDS[h.key];
+      while (h.until < upto - 1e-6 && h.until < h.end - 1e-6) {
+        s.play(api.ctx, h.bus, h.until, h.nodes);
+        h.last = h.until + s.tail;
+        h.until += s.cycle;
+      }
+    }
+    // Rings `key` from audio time `at` for `seconds` (Infinity: until stopped).
+    api.ring = function (key, at, seconds) {
+      if (!api.ctx) return null;
+      var bus = api.ctx.createGain();
+      bus.connect(api.master);
+      var h = { key: SOUNDS[key] ? key : 'bell', at: at, end: at + seconds, seconds: seconds, until: at, last: at, bus: bus, nodes: [] };
+      extend(h, Math.min(h.end, at + AHEAD));
+      return h;
+    };
+    // A quiet click on every second from audio time `from` to `to`: one
+    // second of sound with a click at its start, played in a loop.
+    api.ticks = function (from, to) {
+      if (!api.ctx || to - from < 0.05) return null;
+      if (!api.tickBuf) {
+        var rate = api.ctx.sampleRate, b = api.ctx.createBuffer(1, rate, rate), d = b.getChannelData(0);
+        for (var i = 0; i < rate * 0.012; i++) d[i] = Math.exp(-i / (rate * 0.0015)) * (0.6 * Math.sin(2 * Math.PI * 1900 * i / rate) + 0.4 * Math.sin(2 * Math.PI * 700 * i / rate));
+        api.tickBuf = b;
+      }
+      var bus = api.ctx.createGain(), src = api.ctx.createBufferSource();
+      bus.gain.value = 0.3;
+      bus.connect(api.master);
+      src.buffer = api.tickBuf;
+      src.loop = true;
+      src.connect(bus);
+      src.start(from);
+      src.stop(to);
+      return { tick: true, at: from, end: to, bus: bus, nodes: [src] };
+    };
+    api.extend = function (h) { if (h && !h.cancelled && h.end === Infinity && h.until - api.now() < AHEAD / 2) extend(h, api.now() + AHEAD); };
+    api.finished = function (h) { return !h || h.cancelled || (h.end !== Infinity && api.now() > h.last + 0.05); };
+    api.cancel = function (h) {
+      if (!h || h.cancelled || !api.ctx) return;
+      h.cancelled = true;
+      var t = api.now();
+      try {
+        h.bus.gain.cancelScheduledValues(t);
+        h.bus.gain.setValueAtTime(h.bus.gain.value, t);
+        h.bus.gain.linearRampToValueAtTime(0, t + 0.03);
+      } catch (err) { /* the nodes are stopped below anyway */ }
+      h.nodes.forEach(function (n) { try { n.stop(t + 0.04); } catch (err) { /* already stopped */ } });
+      h.nodes = [];
+      setTimeout(function () { try { h.bus.disconnect(); } catch (err) { /* gone */ } }, 200);
+    };
+    return api;
+  })();
+  function volume() { var v = Number(volIn.value) / 100; return v * v; }
+  // Only after a click on the page; without one a browser refuses anyway.
+  function mayResume() { return !!audio.ctx && !audio.ready() && (!navigator.userActivation || navigator.userActivation.hasBeenActive); }
+  function ringSeconds() { var v = Number(ringSel.value); return v > 0 ? v : Infinity; }
+  function onAudioState() { prearm(); updateSoundNote(); }
+  function updateSoundNote() {
+    var text = '';
+    if (st.state !== 'ready') {
+      if (!audio.supported) text = 'This browser cannot play sound, so the timer can only show that a session has ended.';
+      else if (!audio.ready()) text = 'Click or tap anywhere on this page so the timer can sound.';
+    }
+    if (soundNote.textContent !== text) soundNote.textContent = text;
+  }
+  ['pointerdown', 'pointerup', 'keydown', 'click'].forEach(function (type) {
+    document.addEventListener(type, function () { if (st.state !== 'ready' && !audio.ready()) audio.unlock(); }, true);
+  });
+
+  // The end of this session and, when the next starts by itself, the end of
+  // that one (and the ticking in between) are scheduled ahead on the audio
+  // clock, which keeps time while the browser slows down a background tab's
+  // code, and re-timed every few seconds.
+  var pre = [];
+  function audioAt(at) { return audio.now() + (at - clock()) / 1000; }
+  function plan() {
+    // A session already over is finish()'s to ring, or not.
+    if (st.state !== 'running' || !audio.ready() || st.end <= clock()) return [];
+    var out = [], ph = st.phase, t0 = st.end;
+    out.push({ kind: 'ring', at: t0, key: endSound(ph), secs: ringSeconds() });
+    if (cfg.tick && ph === 'focus') out.push({ kind: 'tick', from: clock(), at: t0 });
+    var done = ph === 'focus' ? st.done + 1 : ph === 'long' ? 0 : st.done, nx = nextPhase(ph, done);
+    if (autoFor(nx)) {
+      var t1 = t0 + lenOf(nx);
+      out.push({ kind: 'ring', at: t1, key: endSound(nx), secs: ringSeconds() });
+      if (cfg.tick && nx === 'focus') out.push({ kind: 'tick', from: t0, at: t1 });
+    }
+    return out;
+  }
+  function prearm() {
+    // A sound card the browser suspended since the last click is asked to
+    // resume, which Chrome and Firefox allow once the page has had a click.
+    if (st.state === 'running' && mayResume()) audio.unlock();
+    var want = plan(), keep = [];
+    pre.forEach(function (p) {
+      var w = want.filter(function (x) { return !x.have && x.kind === p.kind && x.at === p.at && x.key === p.key && x.secs === p.secs; })[0];
+      var target = w ? audioAt(w.at) : 0;
+      var actual = p.kind === 'tick' ? p.h.end + 0.05 : p.h.at;
+      if (w && !p.h.cancelled && (Math.abs(actual - target) < 0.03 || (p.kind === 'ring' && (w.at - clock()) < 500))) { w.have = true; keep.push(p); }
+      else audio.cancel(p.h);
+    });
+    want.forEach(function (w) {
+      if (w.have) return;
+      var h;
+      if (w.kind === 'ring') h = audio.ring(w.key, audioAt(w.at), w.secs);
+      else {
+        // Ticks fall on the whole seconds before the end, as the digits change.
+        var from = Math.max(w.from, clock());
+        var first = w.at - Math.floor((w.at - from) / 1000) * 1000;
+        h = audio.ticks(audioAt(first), audioAt(w.at) - 0.05);
+      }
+      if (h) keep.push({ kind: w.kind, at: w.at, key: w.key, secs: w.secs, h: h });
+    });
+    pre = keep;
+  }
+  function clearPre() { pre.forEach(function (p) { audio.cancel(p.h); }); pre = []; }
+  var ringH = null;
+  function stopRinging() {
+    if (!st.ringing) return false;
+    audio.cancel(ringH);
+    ringH = null;
+    st.ringing = false;
+    shout('');
+    sync();
+    updateTitle(clock());
+    say('Alarm stopped.');
+    return true;
+  }
+
+  // ---------- Running ----------
+  // The end check is a single timeout started from the visitor's action, so
+  // it is never one of the repeating timers that Chrome slows to once a
+  // minute in a background tab.
+  var timeout = 0;
+  function arm() {
+    clearTimeout(timeout);
+    if (st.state !== 'running') return;
+    timeout = setTimeout(function fire() {
+      if (st.state !== 'running') return;
+      var left = st.end - clock();
+      if (left > 0) timeout = setTimeout(fire, left + 1);
+      else tick();
+    }, Math.max(0, st.end - clock()) + 1);
+  }
+  function addLog(phase, n, result, startWall, endWall, ms) {
+    log.push({ phase: phase, n: n, label: cleanLabel(labelIn.value), result: result, start: startWall, end: endWall, ms: Math.max(0, ms) });
+    if (log.length > MAX_LOG) log.shift();
+    logNo++;
+    log[log.length - 1].no = logNo;
+    renderLog();
+  }
+  // The session reached its end. With the next one set to start by itself,
+  // it starts at that moment, not when the page noticed.
+  function finish(now) {
+    var endAt = st.end, late = now - endAt, phase = st.phase, n = sessionNo();
+    clearTimeout(timeout);
+    addLog(phase, n, 'Completed', st.started, wallAt(endAt), st.ran + (endAt - st.runFrom));
+    if (phase === 'focus') st.done = Math.min(st.done + 1, cfg.every);
+    else if (phase === 'long') st.done = 0;
+    var next = nextPhase(phase, st.done);
+    // The sound scheduled ahead for this end, if it has started. Started on
+    // the audio clock, which stops while a computer sleeps, it rang on time,
+    // however late a background tab the browser held back gets here.
+    var mine = pre.filter(function (p) { return p.kind === 'ring' && p.at === endAt; })[0];
+    if (mine) pre.splice(pre.indexOf(mine), 1);
+    var begun = !!mine && !mine.h.cancelled && audio.ready() && mine.h.at <= audio.now() + 0.5;
+    var missed = late > RING_LATE && !begun;
+    var ring = !missed && audio.ready(), h = null;
+    if (mine && ring && begun) h = mine.h;
+    else {
+      if (mine) audio.cancel(mine.h);
+      if (ring) h = audio.ring(endSound(phase), audio.now() + 0.02, ringSeconds());
+    }
+    if (h) {
+      if (ringH && ringH !== h) audio.cancel(ringH);
+      ringH = h;
+      st.ringing = true;
+      // It also ends by the wall clock: the audio clock stops while a
+      // computer sleeps, which would leave a short ring sounding after it.
+      h.wallEnd = ringSeconds() === Infinity ? 0 : (h === (mine && mine.h) ? wallAt(endAt) : Date.now()) + ringSeconds() * 1000;
+    }
+    st.last = { phase: phase, n: n, at: wallAt(endAt), late: missed };
+    st.phase = next;
+    st.total = lenOf(next);
+    st.left = 0;
+    if (autoFor(next) && late <= CHAIN_LATE) {
+      st.state = 'running';
+      st.started = wallAt(endAt);
+      st.ran = 0;
+      st.runFrom = endAt;
+      st.end = endAt + st.total;
+    } else st.state = 'ready';
+    return { phase: phase, n: n, next: next, late: late, missed: missed };
+  }
+  var raf = 0, ticker = 0, lastSync = 0;
+  function tick() {
+    var now = clock(), ended = [];
+    // A session found far too late (the computer slept) still ends, but
+    // nothing starts by itself after it; one found late by a slow background
+    // tab hands on to the next as scheduled, which may have ended too.
+    for (var guard = 0; st.state === 'running' && now >= st.end && guard < 50; guard++) ended.push(finish(now));
+    if (ended.length) {
+      var e = ended[ended.length - 1], what = nameOf(e.phase, e.n);
+      var text = (e.phase === 'focus' ? what + ' done. ' : what + ' over. ') + (st.state === 'running' ? NAMES[st.phase] + ' started.' : 'Next: ' + nameOf(st.phase, sessionNo()).toLowerCase() + '.');
+      if (e.missed) say(what + ' ended at ' + fmtTime(st.last.at) + ', while the page was paused or asleep.');
+      else { shout(text); notify(e, text); }
+      arm();
+      commit();
+    }
+    if (st.ringing) {
+      audio.extend(ringH);
+      if (audio.finished(ringH) || (ringH.wallEnd && Date.now() > ringH.wallEnd + 1000)) { audio.cancel(ringH); ringH = null; st.ringing = false; sync(); }
+    }
+    if (now - lastSync > 5000) { lastSync = now; prearm(); }
+    paint(now);
+    updateTitle(now);
+    if (pip) paintPip();
+    loop();
+  }
+  // Every frame while the session runs or rings; once a second otherwise
+  // (and in a background tab, where frames stop).
+  function busy() { return st.state === 'running' || st.ringing; }
+  function frame() { raf = 0; tick(); }
+  function loop() {
+    if (busy() && !document.hidden && !raf) raf = requestAnimationFrame(frame);
+    var on = st.state === 'running' || st.ringing;
+    if (on && !ticker) ticker = setInterval(function () { if (document.hidden || !raf) tick(); }, 1000);
+    if (!on && ticker) { clearInterval(ticker); ticker = 0; }
+  }
+
+  // ---------- Showing it ----------
+  var shown = {};
+  function paint(now) {
+    var left = leftNow(now), total = st.state === 'ready' ? lenOf(st.phase) : st.total;
+    var text = fmtClock(left, total >= 3600000);
+    if (shown.time !== text) { shown.time = text; timeEl.textContent = text; timeEl.classList.toggle('is-long', text.length > 5); }
+    var frac = st.state === 'ready' ? 0 : total ? 1 - left / total : 1;
+    var w = Math.round(Math.min(1, Math.max(0, frac)) * 1000) / 10 + '%';
+    if (shown.bar !== w) { shown.bar = w; barEl.style.width = w; }
+    var head = st.phase === 'focus' ? 'Focus ' + sessionNo() + ' of ' + cfg.every : NAMES[st.phase];
+    var key = head + st.state + lenOf(st.phase) + (st.state === 'running' ? Math.round(wallAt(st.end) / 60000) : '');
+    if (shown.meta !== key) {
+      shown.meta = key;
+      metaEl.textContent = head;
+      if (st.state === 'running') {
+        metaEl.appendChild(document.createTextNode(' · ends at '));
+        var tm = document.createElement('time'), endWall = Math.round(wallAt(st.end) / 1000) * 1000;
+        tm.dateTime = iso(endWall);
+        tm.textContent = fmtTime(endWall);
+        metaEl.appendChild(tm);
+      } else if (st.state === 'paused') metaEl.appendChild(document.createTextNode(' · paused'));
+      else metaEl.appendChild(document.createTextNode(' · ' + spoken(lenOf(st.phase))));
+    }
+  }
+  function lastText() {
+    var l = st.last;
+    if (!l) return '';
+    var what = l.phase === 'focus' ? 'Focus ' + l.n : 'The ' + NAMES[l.phase].toLowerCase();
+    if (l.skipped) return 'Skipped ' + (l.phase === 'focus' ? 'focus ' + l.n : 'the ' + NAMES[l.phase].toLowerCase()) + '.';
+    if (l.reset) return what + ' was reset.';
+    return what + ' ended at ' + fmtTime(l.at) + (l.late ? ', while the page was paused or asleep, so it did not ring.' : '.');
+  }
+  function sync() {
+    var s = st.state;
+    card.classList.toggle('is-ringing', st.ringing);
+    // The buttons keep their places, so the second click of a double click
+    // lands where the first did: while the alarm rings, the main button
+    // stops it, and Reset and +1 min are there but off until a session starts.
+    goBtn.textContent = st.ringing ? 'Stop alarm' : s === 'running' ? 'Pause' : s === 'paused' ? 'Resume' : 'Start';
+    resetBtn.setAttribute('aria-disabled', s === 'ready' ? 'true' : 'false');
+    plusBtn.setAttribute('aria-disabled', s === 'ready' ? 'true' : 'false');
+    [].forEach.call($('#pt-modes').children, function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-phase') === st.phase ? 'true' : 'false'); });
+    var dots = '';
+    for (var i = 0; i < cfg.every; i++) dots += '<span class="pt-dot' + (i < st.done ? ' is-done' : (i === st.done && st.phase === 'focus' ? ' is-now' : '')) + '"></span>';
+    if (shown.dots !== dots) { shown.dots = dots; dotsEl.innerHTML = dots; }
+    dotsEl.setAttribute('aria-label', st.done + ' of ' + cfg.every + ' focus sessions done in this set');
+    var lt = lastText();
+    if (lastEl.textContent !== lt) lastEl.textContent = lt;
+    lastEl.classList.toggle('is-missed', !!(st.last && st.last.late));
+    shown.meta = '';
+    paint(clock());
+    // A control that was just hidden hands the focus to the main button.
+    var a = document.activeElement;
+    if (a && card.contains(a) && !a.getClientRects().length) goBtn.focus();
+  }
+  function updateTitle(now) {
+    var head = '';
+    if (st.ringing && st.state !== 'running') head = st.phase === 'focus' ? 'Break over' : 'Time for a break';
+    else if (st.state === 'running') head = fmtClock(st.end - now, false).replace(/^0(\d:)/, '$1') + ' ' + NAMES[st.phase];
+    else if (st.state === 'paused') head = fmtClock(st.left, false).replace(/^0(\d:)/, '$1') + ' paused';
+    var title = head ? head + ' · ' + baseTitle : baseTitle;
+    if (document.title !== title) document.title = title;
+  }
+  function commit() {
+    sync();
+    writeHash();
+    prearm();
+    updateTitle(clock());
+    loop();
+    updateWake();
+    updateSoundNote();
+    if (pip) paintPip();
+  }
+
+  // ---------- Actions ----------
+  function begin(how) {
+    st.state = 'running';
+    st.total = st.total || lenOf(st.phase);
+    st.end = clock() + st.total;
+    st.started = Date.now();
+    st.ran = 0;
+    st.runFrom = clock();
+    arm();
+    commit();
+    say(nameOf(st.phase, sessionNo()) + ' ' + how + ': ' + spoken(st.total) + '.');
+  }
+  function start() {
+    audio.unlock();
+    if (!readLengths(true)) return;
+    st.total = lenOf(st.phase);
+    begin('started');
+  }
+  function pause() {
+    var now = clock(), left = st.end - now;
+    // Pressed in the very millisecond the time ran out: it has ended.
+    if (left <= 0) { tick(); return; }
+    st.left = Math.max(1, left);
+    st.ran += now - st.runFrom;
+    st.state = 'paused';
+    clearTimeout(timeout);
+    clearPre();
+    commit();
+    say(nameOf(st.phase, sessionNo()) + ' paused with ' + spoken(st.left) + ' left.');
+  }
+  function resume() {
+    audio.unlock();
+    st.state = 'running';
+    st.end = clock() + st.left;
+    st.runFrom = clock();
+    arm();
+    commit();
+    say(nameOf(st.phase, sessionNo()) + ' resumed with ' + spoken(st.left) + ' left.');
+  }
+  function primary(e) {
+    if (e && e.detail > 1) return;
+    if (stopRinging()) return;
+    if (st.state === 'ready') start();
+    else if (st.state === 'running') pause();
+    else resume();
+  }
+  function ranSoFar() { return st.ran + (st.state === 'running' ? clock() - st.runFrom : 0); }
+  // Ends the session without counting it, and moves to `to`. `quiet`: a
+  // session that never started leaves no note (choosing another tab).
+  function leave(result, to, quiet) {
+    var n = sessionNo(), phase = st.phase, started = st.state !== 'ready';
+    // Moving on means the alarm was heard: it stops.
+    if (st.ringing) { audio.cancel(ringH); ringH = null; st.ringing = false; shout(''); }
+    if (started) addLog(phase, n, result, st.started, Date.now(), ranSoFar());
+    clearTimeout(timeout);
+    clearPre();
+    if (started || !quiet) st.last = { phase: phase, n: n, skipped: result === 'Skipped', reset: result === 'Reset' };
+    if (phase === 'long' && to !== 'long' && result === 'Skipped') st.done = 0;
+    st.phase = to || phase;
+    st.total = lenOf(st.phase);
+    st.state = 'ready';
+    st.left = 0;
+  }
+  function skip() {
+    tick();
+    var was = nameOf(st.phase, sessionNo()), next = nextPhase(st.phase, st.done);
+    if (st.phase === 'long') st.done = 0;
+    leave('Skipped', next);
+    if (autoFor(st.phase)) { audio.unlock(); begin('started'); }
+    else commit();
+    say('Skipped ' + was.toLowerCase() + '. Next: ' + nameOf(st.phase, sessionNo()).toLowerCase() + '.');
+  }
+  function reset() {
+    if (st.state === 'ready') return;
+    tick();
+    var was = nameOf(st.phase, sessionNo());
+    leave('Reset', st.phase);
+    commit();
+    say(was + ' reset to ' + spoken(st.total) + '.');
+  }
+  function plusMinute() {
+    if (st.state === 'running') { st.end += 60000; st.total += 60000; arm(); }
+    else if (st.state === 'paused') { st.left += 60000; st.total += 60000; }
+    else return;
+    commit();
+    say('Added 1 minute: ' + spoken(leftNow(clock())) + ' left.');
+  }
+  function choosePhase(phase) {
+    if (phase === st.phase) return;
+    tick();
+    leave('Skipped', phase, true);
+    commit();
+    say(nameOf(phase, sessionNo()) + ', ' + spoken(st.total) + '. Press Start when you are ready.');
+  }
+  function newSet() {
+    tick();
+    leave('Skipped', 'focus');
+    st.done = 0;
+    st.last = null;
+    commit();
+    say('New set: focus 1 of ' + cfg.every + '.');
+  }
+  goBtn.addEventListener('click', primary);
+  skipBtn.addEventListener('click', function (e) { if (e.detail > 1) return; skip(); });
+  resetBtn.addEventListener('click', function (e) { if (e.detail > 1) return; reset(); });
+  plusBtn.addEventListener('click', plusMinute);
+  newSetBtn.addEventListener('click', newSet);
+  $('#pt-modes').addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-phase]');
+    if (b) choosePhase(b.getAttribute('data-phase'));
+  });
+  labelIn.addEventListener('input', function () { writeHash(); });
+
+  // ---------- Lengths ----------
+  var LEN_NAMES = { focus: 'Focus', short: 'Short break', long: 'Long break', every: 'Long break after' };
+  // Reads the four boxes into cfg; shows the first problem. While a session
+  // runs, a new length counts from the next session on.
+  function readLengths(showEmpty) {
+    var text = '', badIn = null;
+    ['focus', 'short', 'long', 'every'].forEach(function (k) {
+      var inp = lenIns[k], r = readWhole(inp.value, k === 'every' ? MAX_EVERY : MAX_MIN, DEF[k]);
+      if (r.error && (showEmpty || inp.value.trim() !== '')) {
+        inp.setAttribute('aria-invalid', 'true');
+        inp.setAttribute('aria-describedby', 'pt-len-err');
+        if (!text) { text = LEN_NAMES[k] + ': ' + r.error; badIn = inp; }
+      } else {
+        inp.removeAttribute('aria-invalid');
+        inp.removeAttribute('aria-describedby');
+        if (!r.error) cfg[k] = r.n;
+      }
+    });
+    if (lenErr.textContent !== text) lenErr.textContent = text;
+    if (text && showEmpty && badIn) badIn.focus();
+    if (st.done > cfg.every) st.done = cfg.every;
+    if (st.state === 'ready') st.total = lenOf(st.phase);
+    renderPresets();
+    return !text;
+  }
+  function renderLengths() {
+    ['focus', 'short', 'long', 'every'].forEach(function (k) { lenIns[k].value = String(cfg[k]); lenIns[k].removeAttribute('aria-invalid'); lenIns[k].removeAttribute('aria-describedby'); });
+    lenErr.textContent = '';
+    typed = [lenIns.focus.value, lenIns.short.value, lenIns.long.value, lenIns.every.value].join('|');
+    renderPresets();
+  }
+  function renderPresets() {
+    [].forEach.call(document.querySelectorAll('#pt [data-preset]'), function (b) {
+      var p = b.getAttribute('data-preset').split('-');
+      b.setAttribute('aria-pressed', Number(p[0]) === cfg.focus && Number(p[1]) === cfg.short ? 'true' : 'false');
+    });
+  }
+  var typed = '';
+  function onLengths() {
+    readLengths(false);
+    typed = [lenIns.focus.value, lenIns.short.value, lenIns.long.value, lenIns.every.value].join('|');
+    sync();
+    writeHash();
+    prearm();
+  }
+  Object.keys(lenIns).forEach(function (k) {
+    lenIns[k].addEventListener('input', onLengths);
+    lenIns[k].addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing && st.state === 'ready') { e.preventDefault(); start(); } });
+  });
+  document.querySelector('#pt .pt-presets').addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-preset]');
+    if (!b) return;
+    var p = b.getAttribute('data-preset').split('-');
+    cfg.focus = Number(p[0]);
+    cfg.short = Number(p[1]);
+    lenIns.focus.value = p[0];
+    lenIns.short.value = p[1];
+    onLengths();
+    say('Focus ' + p[0] + ' minutes, short breaks ' + p[1] + ' minutes.');
+  });
+  function onAuto() { cfg.autoBreak = autoBreakBox.checked; cfg.autoFocus = autoFocusBox.checked; writeHash(); prearm(); }
+  autoBreakBox.addEventListener('change', onAuto);
+  autoFocusBox.addEventListener('change', onAuto);
+  tickBox.addEventListener('change', function () { cfg.tick = tickBox.checked; if (cfg.tick) audio.unlock(); writeHash(); prearm(); });
+
+  // ---------- Session log ----------
+  var log = [], logNo = 0;
+  function minutes(ms) { return String(Math.round(ms / 600) / 100); }
+  function typeOf(e) { return e.phase === 'focus' ? 'Focus ' + e.n : NAMES[e.phase]; }
+  function renderLog() {
+    logWrap.hidden = logActions.hidden = !log.length;
+    logEmpty.hidden = !!log.length;
+    logBody.innerHTML = '';
+    log.forEach(function (e) {
+      var tr = document.createElement('tr');
+      [e.no, typeOf(e), e.label, e.start, e.end, minutes(e.ms), e.result].forEach(function (v, i) {
+        var td = document.createElement('td');
+        if (i === 3 || i === 4) {
+          var tm = document.createElement('time');
+          tm.dateTime = iso(v);
+          tm.textContent = fmtTime(v);
+          td.appendChild(tm);
+        } else td.textContent = v;
+        if (i === 2) td.className = 'pt-what';
+        tr.appendChild(td);
+      });
+      logBody.appendChild(tr);
+    });
+  }
+  // Copied text uses the decimal comma of a language that writes 1,5, as a
+  // spreadsheet in that language reads 12.5 as 125. The CSV file keeps
+  // points, as the format expects.
+  var comma = (function () {
+    try { return new Intl.NumberFormat().format(1.5) === '1,5'; } catch (err) { return false; }
+  })();
+  // A label starting with = + - or @ would be read as a formula.
+  function safe(v) { return /^[=+\-@]/.test(v) ? "'" + v : v; }
+  function rows(mark) {
+    return [['Session', 'Type', 'Working on', 'Start', 'End', 'Minutes', 'Result']].concat(log.map(function (e) {
+      return [String(e.no), typeOf(e), safe(e.label), stamp(e.start), stamp(e.end), minutes(e.ms).replace('.', mark), e.result];
+    }));
+  }
+  function csvCell(v) { return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  $('#pt-copy').addEventListener('click', function (e) {
+    tick();
+    TT.copy(rows(comma ? ',' : '.').map(function (r) { return r.join('\t'); }).join('\n'), e.currentTarget);
+  });
+  $('#pt-csv').addEventListener('click', function (e) {
+    if (e.detail > 1) return;
+    tick();
+    var r = rows('.');
+    TT.download('focus-sessions.csv', '﻿' + r.map(function (x) { return x.map(csvCell).join(','); }).join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
+    say('Downloaded ' + (r.length - 1) + (r.length === 2 ? ' session.' : ' sessions.'));
+  });
+  $('#pt-clear').addEventListener('click', function () {
+    log = [];
+    logNo = 0;
+    renderLog();
+    say('Log cleared.');
+    // The buttons are gone; the focus goes to the note that replaces them.
+    logEmpty.setAttribute('tabindex', '-1');
+    logEmpty.focus();
+  });
+
+  // ---------- Full screen ----------
+  function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+  var inerted = [], full = false;
+  function setInert(el) {
+    inerted.forEach(function (s) { s.inert = false; });
+    inerted = [];
+    for (; el && el.parentElement; el = el.parentElement) {
+      for (var s = el.parentElement.firstElementChild; s; s = s.nextElementSibling) {
+        if (s === el || s.inert || /^(SCRIPT|STYLE|LINK|META|TEMPLATE)$/.test(s.tagName) || s.matches('[aria-live],[role="status"],[role="alert"]')) continue;
+        s.inert = true;
+        inerted.push(s);
+      }
+      if (el.parentElement === document.body) break;
+    }
+  }
+  function quiet(p) { if (p && p.catch) p.catch(function () {}); }
+  function setFull(on) {
+    if (on === full) return;
+    full = on;
+    card.classList.toggle('is-full', on);
+    document.documentElement.classList.toggle('pt-noscroll', on);
+    setInert(on ? card : null);
+    fullBtn.textContent = on ? 'Exit full screen' : 'Full screen';
+    if (on) {
+      var req = card.requestFullscreen || card.webkitRequestFullscreen;
+      try { if (req) quiet(req.call(card)); } catch (err) { /* the window-filling view stays */ }
+    } else if (fsElement() === card) { try { quiet((document.exitFullscreen || document.webkitExitFullscreen).call(document)); } catch (err) { /* left as is */ } }
+  }
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (type) {
+    document.addEventListener(type, function () { if (!fsElement() && full) setFull(false); });
+  });
+  fullBtn.addEventListener('click', function () { setFull(!full); });
+
+  // ---------- Mini timer (Document Picture-in-Picture) ----------
+  // Chrome and Edge 116+, Firefox 151+, on computers. The small window has
+  // the page's styles copied in, and redraws on its own frames, since the
+  // tab behind it may be hidden and slowed down.
+  var pip = null, pipEls = null;
+  if (window.documentPictureInPicture && window.isSecureContext) pipBtn.hidden = false;
+  function paintPip() {
+    if (!pip || !pipEls) return;
+    var now = clock(), t = fmtClock(leftNow(now), (st.state === 'ready' ? lenOf(st.phase) : st.total) >= 3600000);
+    var head = st.phase === 'focus' ? 'Focus ' + sessionNo() + ' of ' + cfg.every : NAMES[st.phase];
+    if (pipEls.time.textContent !== t) pipEls.time.textContent = t;
+    if (pipEls.phase.textContent !== head) pipEls.phase.textContent = head;
+    var go = goBtn.textContent;
+    if (pipEls.go.textContent !== go) pipEls.go.textContent = go;
+    pipEls.root.classList.toggle('is-ringing', st.ringing);
+  }
+  function pipFrame() { if (!pip) return; paintPip(); pip.requestAnimationFrame(pipFrame); }
+  pipBtn.addEventListener('click', function () {
+    if (pip) { pip.close(); return; }
+    var req;
+    try { req = window.documentPictureInPicture.requestWindow({ width: 300, height: 190 }); } catch (err) { req = Promise.reject(err); }
+    req.then(function (w) {
+      pip = w;
+      var d = w.document;
+      d.title = 'Focus timer';
+      d.documentElement.lang = document.documentElement.lang || 'en';
+      [].forEach.call(document.styleSheets, function (sheet) {
+        try {
+          var css = [].map.call(sheet.cssRules, function (r) { return r.cssText; }).join('\n'), el = d.createElement('style');
+          el.textContent = css;
+          d.head.appendChild(el);
+        } catch (err) { /* a sheet from elsewhere cannot be read */ }
+      });
+      var extra = d.createElement('style');
+      extra.textContent = 'body{margin:0;padding:12px;text-align:center}.pt-pip-phase{margin:0;font-weight:600}.pt-pip-time{margin:2px 0 10px;font-size:3.2rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}.pt-pip-btns{display:flex;justify-content:center;gap:8px}.is-ringing .pt-pip-time{color:var(--danger)}';
+      d.head.appendChild(extra);
+      d.body.innerHTML = '<main class="pt-pip"><p class="pt-pip-phase"></p><p class="pt-pip-time" role="timer"></p><div class="pt-pip-btns"><button type="button" class="btn">Start</button><button type="button" class="btn secondary">Skip</button></div></main>';
+      var btns = d.querySelectorAll('button');
+      pipEls = { root: d.querySelector('.pt-pip'), phase: d.querySelector('.pt-pip-phase'), time: d.querySelector('.pt-pip-time'), go: btns[0] };
+      btns[0].addEventListener('click', primary);
+      btns[1].addEventListener('click', function (e) { if (e.detail > 1) return; skip(); });
+      d.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') stopRinging();
+        else if (e.key === ' ' && e.target.tagName !== 'BUTTON') { e.preventDefault(); primary(); }
+      });
+      w.addEventListener('pagehide', function () { pip = null; pipEls = null; pipBtn.textContent = 'Mini timer'; say('Mini timer closed.'); });
+      pipBtn.textContent = 'Close mini timer';
+      say('Mini timer open.');
+      pipFrame();
+    }, function (err) {
+      showMsg('The mini timer could not open' + (err && err.message ? ': ' + err.message : '.'));
+    });
+  });
+
+  // ---------- Keys ----------
+  function letter(e) {
+    var k = e.key || '';
+    if (/^[a-z]$/i.test(k)) return k.toLowerCase();
+    var m = /^Key([A-Z])$/.exec(e.code || '');
+    return m && k.length === 1 && !/[\x20-\x7e]/.test(k) ? m[1].toLowerCase() : '';
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      var any = stopRinging();
+      if (full && !fsElement()) { setFull(false); any = true; }
+      if (any) e.preventDefault();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    var target = e.target, tag = target && target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (target && target.isContentEditable)) return;
+    if (target && target.closest && !target.closest('#pt')) {
+      if (target !== document.body && target !== document.documentElement) return;
+      var r = card.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;
+    }
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space presses those
+      e.preventDefault();
+      if (e.repeat) return;
+      primary();
+      return;
+    }
+    var k = letter(e);
+    if (!k || e.shiftKey) return;
+    if (k === 's' || k === 'r' || k === 'f') e.preventDefault();
+    if (e.repeat) return;
+    if (k === 's') skip();
+    else if (k === 'r') reset();
+    else if (k === 'f') setFull(!full);
+  });
+
+  // ---------- Sound settings ----------
+  function renderVol() {
+    var text = volIn.value + '%';
+    volOut.textContent = text;
+    volIn.setAttribute('aria-valuetext', text);
+  }
+  volIn.addEventListener('input', function () {
+    renderVol();
+    if (audio.master) audio.master.gain.setTargetAtTime(volume(), audio.now(), 0.02);
+    writeHash();
+  });
+  [sndFocus, sndBreak, ringSel].forEach(function (s) { s.addEventListener('change', function () { writeHash(); prearm(); }); });
+  var testH = null;
+  function testSound(sel, which) {
+    if (!audio.unlock()) { say('This browser cannot play sound.'); return; }
+    if (testH) audio.cancel(testH);
+    var key = sel.value;
+    testH = audio.ring(key, audio.now() + 0.03, SOUNDS[key].cycle * 0.99);
+    say('Playing the ' + SOUNDS[key].name + ' sound, for the end of ' + which + '.');
+  }
+  $('#pt-test-focus').addEventListener('click', function () { testSound(sndFocus, 'focus'); });
+  $('#pt-test-break').addEventListener('click', function () { testSound(sndBreak, 'a break'); });
+
+  // ---------- Notifications ----------
+  var NOTIFY_NONE = 'This browser does not let web pages show notifications themselves (on phones only installed apps can), so the sound and the tab title will tell you instead.';
+  function setNotifyError(text) {
+    notifyMsg.textContent = text;
+    if (text) { notifyBox.setAttribute('aria-invalid', 'true'); notifyBox.setAttribute('aria-describedby', 'pt-notify-msg'); }
+    else { notifyBox.removeAttribute('aria-invalid'); notifyBox.removeAttribute('aria-describedby'); }
+  }
+  function showNote(title, body, tag) {
+    try {
+      var n = new Notification(title, { body: body, tag: tag });
+      n.onclick = function () { window.focus(); n.close(); };
+      return true;
+    } catch (err) { return false; }
+  }
+  if (!('Notification' in window)) {
+    notifyBox.disabled = true;
+    notifyBox.setAttribute('aria-describedby', 'pt-notify-msg');
+    notifyMsg.className = 'hint';
+    notifyMsg.textContent = NOTIFY_NONE;
+  } else if (Notification.permission === 'granted') notifyBox.checked = true;
+  notifyBox.addEventListener('change', function () {
+    setNotifyError('');
+    if (!notifyBox.checked) return;
+    var done = false;
+    function answer(result) {
+      if (done) return;
+      done = true;
+      if (result !== 'granted') {
+        notifyBox.checked = false;
+        setNotifyError(result === 'denied' ? 'Notifications are blocked for this site. Allow them in your browser’s site settings, then tick the box again.' : 'Notifications were not allowed, so none will be shown.');
+      } else if (!showNote('Notifications are on', 'You will get one when a session ends.', 'pt-on')) {
+        notifyBox.checked = false;
+        setNotifyError(NOTIFY_NONE);
+      }
+    }
+    if (Notification.permission === 'granted') { answer('granted'); return; }
+    try {
+      var p = Notification.requestPermission(answer);
+      if (p && p.then) p.then(answer, function () { answer('default'); });
+    } catch (err) { answer('default'); }
+  });
+  function notify(e, text) {
+    if (!notifyBox.checked || !('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!document.hidden && document.hasFocus()) return;
+    var title = e.phase === 'focus' ? 'Focus ' + e.n + ' done' : NAMES[e.phase] + ' over';
+    if (!showNote(title, text.slice(text.indexOf('. ') + 2), 'pt-end')) {
+      notifyBox.checked = false;
+      setNotifyError(NOTIFY_NONE);
+    }
+  }
+
+  // ---------- Screen wake lock ----------
+  var wake = null, wakeBusy = false;
+  function wantWake() { return wakeBox.checked && document.visibilityState === 'visible' && busy(); }
+  function updateWake() {
+    if (!navigator.wakeLock) return;
+    if (wantWake() && !wake && !wakeBusy) {
+      wakeBusy = true;
+      navigator.wakeLock.request('screen').then(function (lock) {
+        wakeBusy = false;
+        wake = lock;
+        wakeNote.textContent = '';
+        lock.addEventListener('release', function () { if (wake === lock) wake = null; });
+        if (!wantWake()) updateWake();
+      }, function () {
+        wakeBusy = false;
+        wakeNote.textContent = 'The browser did not let this page keep the screen on, so it may turn off as usual.';
+      });
+    } else if (!wantWake() && wake) {
+      var lock = wake;
+      wake = null;
+      lock.release().catch(function () {});
+    }
+  }
+  if (!navigator.wakeLock) $('#pt-wake-row').hidden = true;
+  wakeBox.addEventListener('change', updateWake);
+
+  // ---------- Start ----------
+  function apply(r) {
+    if (r.lengths) { cfg.focus = r.lengths.focus; cfg.short = r.lengths.short; cfg.long = r.lengths.long; cfg.every = r.lengths.every; }
+    var o = r.opts;
+    cfg.autoBreak = !!o.autoBreak;
+    cfg.autoFocus = !!o.autoFocus;
+    cfg.tick = !!o.tick;
+    autoBreakBox.checked = cfg.autoBreak;
+    autoFocusBox.checked = cfg.autoFocus;
+    tickBox.checked = cfg.tick;
+    sndFocus.value = o.sounds ? o.sounds[0] : 'bell';
+    sndBreak.value = o.sounds ? o.sounds[1] : 'chime';
+    volIn.value = String(o.vol === undefined ? 70 : o.vol);
+    ringSel.value = o.ring || '5';
+    renderVol();
+    if (audio.master) audio.master.gain.value = volume();
+    renderLengths();
+    labelIn.value = r.label || '';
+    clearTimeout(timeout);
+    clearPre();
+    st.phase = 'focus'; st.done = 0; st.state = 'ready'; st.left = 0; st.last = null; st.ringing = false;
+    var p = r.pos;
+    if (p) {
+      var every = cfg.every;
+      if (p.phase === 'focus' && p.n >= 1 && p.n <= every) st.done = p.n - 1;
+      else if (p.phase !== 'focus' && p.n >= 0 && p.n <= every) st.done = p.n;
+      else { r.error = r.error || 'Part of the page address could not be read: “' + clip((p.phase === 'focus' ? 'f' : p.phase.charAt(0)) + p.n, 40) + '”.'; p = null; }
+    }
+    if (p) {
+      st.phase = p.phase;
+      var len = lenOf(p.phase), now = Date.now();
+      st.total = len;
+      if (p.kind === 'p' && p.v > 0 && p.v <= 86400000) { st.state = 'paused'; st.left = p.v; st.total = Math.max(len, p.v); st.started = now; st.ran = 0; }
+      else if (p.kind === 'r' && p.v > now && p.v - now <= 86400000) {
+        st.state = 'running'; st.end = clock() + (p.v - now); st.total = Math.max(len, p.v - now);
+        st.started = now - Math.max(0, st.total - (p.v - now)); st.ran = 0; st.runFrom = clock() - Math.max(0, st.total - (p.v - now));
+      } else if (p.kind === 'r' && p.v <= now && now - p.v <= STALE) {
+        // It ended while the page was closed: it counts, and the next one
+        // starts by itself only if the end was moments ago.
+        st.state = 'running'; st.end = clock() - (now - p.v); st.total = len; st.started = p.v - len; st.ran = 0; st.runFrom = st.end - len;
+      } else if (p.kind === 'r' && p.v > now + 86400000) { r.error = r.error || 'Part of the page address could not be read: “' + clip('r' + p.v, 40) + '”.'; }
+    }
+    if (!st.total) st.total = lenOf(st.phase);
+  }
+  // The four boxes and the label the browser filled back in after the
+  // script ran (Back button) are read again, so the timer matches them.
+  window.addEventListener('pageshow', function () {
+    if ([lenIns.focus.value, lenIns.short.value, lenIns.long.value, lenIns.every.value].join('|') !== typed) onLengths();
+    cfg.autoBreak = autoBreakBox.checked; cfg.autoFocus = autoFocusBox.checked; cfg.tick = tickBox.checked;
+    renderVol();
+    if (audio.master) audio.master.gain.value = volume();
+    writeHash();
+    tick();
+  });
+  document.addEventListener('visibilitychange', function () { tick(); arm(); updateWake(); });
+  // An address that names a part of this page, such as a heading of the
+  // guide, is a link to it, not a timer. The guide comes after this script,
+  // so the check waits until the whole page has been read.
+  function hashError(text) {
+    function show() {
+      var id = location.hash.slice(1);
+      try { id = decodeURIComponent(id); } catch (err) { /* kept as typed */ }
+      showMsg(text && id && document.getElementById(id) ? '' : text);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+    else show();
+  }
+  root.addEventListener('input', function () { keepAddress = false; }, true);
+  root.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('button, input')) keepAddress = false; }, true);
+  function load(hash) {
+    var r = readHash(hash);
+    apply(r);
+    hashError(r.error);
+    keepAddress = !!r.error;
+    sync();
+    // A session that ended while the page was closed is finished first: it
+    // counts, and the next one starts by itself if that was moments ago. It
+    // does not ring, as a page cannot play sound before a click.
+    if (st.state === 'running' && st.end <= clock()) tick();
+    arm();
+    commit();
+    // A session opened from a bookmark may sound without a click where the
+    // browser allows it; elsewhere the note asks for a tap.
+    if (st.state !== 'ready') audio.unlock();
+  }
+  window.addEventListener('hashchange', function () {
+    if (location.hash === written) return;
+    // Back or Forward to an address this page wrote while a session runs:
+    // the timer on screen is newer, so the address is brought up to date.
+    if (st.state !== 'ready' && history.state && history.state.ptTimer) { showMsg(''); writeHash(); return; }
+    stopRinging();
+    load(location.hash);
+  });
+  load(location.hash);
+  renderLog();
+})();
+</script>

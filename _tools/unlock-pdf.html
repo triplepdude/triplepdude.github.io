@@ -1,0 +1,1137 @@
+---
+title: "Unlock PDF: Remove Password from a PDF"
+description: Remove the password from a PDF, and its print or copy restrictions with the permissions password. It runs in your browser; files are never uploaded.
+category: Image & PDF
+keywords: [unlock pdf, remove password from pdf, how to remove password from pdf, pdf password remover, pdf unlocker, remove restrictions from pdf, decrypt pdf, unlock pdf for printing]
+howto: |
+  ## How to remove a password from a PDF
+
+  1. Press **Choose PDF files**, or drop one or more PDFs on the page.
+  2. Each file shows what protects it: a password to open it, restrictions
+     such as no printing or copying, or nothing, and how it is encrypted.
+  3. Type the password and press **Unlock** or Enter. Every listed file
+     that uses this password is unlocked.
+  4. Press **Download** beside a file, or **Download all** for a ZIP file.
+
+  The files are read and saved again in your browser, never uploaded.
+
+  ## Open password or permissions password?
+
+  | Password | Also called | Needed to | Typed here, it |
+  |---|---|---|---|
+  | Open password | user password | open and read the file | removes the open password |
+  | Permissions password | owner password | lift limits on printing, copying or changes | removes all protection |
+
+  A PDF can have either, both, or one password for both. With the
+  permissions password every restriction goes. With only the open password,
+  that password goes but the restrictions stay: the copy is encrypted again
+  with AES-256, opens without a password and keeps the same permissions,
+  locked with a new random permissions password, so to lift them later start
+  from the original file. A blank permissions password counts as known.
+
+  Restrictions are enforced by PDF readers, not by the encryption itself, and
+  Firefox's built-in viewer ignores them by default. Lift them only with the
+  permissions password or the owner's consent.
+
+  ## What cannot be unlocked
+
+  - **A forgotten open password.** The contents are encrypted with a key
+    made from it, and this page does not guess passwords. Ask the sender.
+  - **Certificate security.** Such files open with the recipient's private
+    key (a digital ID), not a password; this page does not open them.
+  - **Rights management and DRM.** These files are opened with keys from
+    the publisher's server, so they cannot be unlocked here.
+  - **Files that encrypt only their attachments.**
+
+  ## What the copy keeps
+
+  The whole document is saved again as it was: pages, bookmarks, links,
+  form fields, attachments, metadata and document properties. A digital
+  signature no longer validates, because the file's bytes change, so keep
+  the signed original. A copy that keeps its restrictions is stored less
+  compactly, so a file with many links, bookmarks or form fields can come
+  out several times larger. To work on the pages afterwards, use
+  [split PDF](/split-pdf/), [merge PDF](/merge-pdf/) or
+  [PDF to JPG](/pdf-to-jpg/).
+
+  ## In Chrome or on a Mac
+
+  Opening the PDF in Chrome with its password and printing it to **Save as
+  PDF** also gives a copy without a password, but Chrome refuses to print a
+  file that forbids printing, prints pages as pictures without selectable
+  text when only low-quality printing is allowed, and the copy loses
+  bookmarks, attachments and form fields. On a Mac, open the PDF in Preview
+  with its password, choose **File > Edit Permissions**, untick **Require
+  Password To Open Document** and click **Apply**.
+faq:
+  - q: Is my PDF uploaded to a server?
+    a: No. The file is read, decrypted and saved again by JavaScript in this page, on your own device, and nothing is kept after you close the tab. Online unlockers such as Smallpdf, iLovePDF, PDF24 and Sejda upload the file and delete it after one or two hours, and Adobe's needs a subscription or a trial.
+  - q: Can I unlock a PDF without the password?
+    a: Not one that needs a password to open, because its contents are encrypted with a key made from that password; ask whoever sent it. A PDF that opens freely but blocks printing or copying can be read already, and this page removes those restrictions only with the permissions password, unless that password is blank.
+  - q: Is it legal to unlock a PDF?
+    a: Removing a password you were given from a document you have the right to use is an ordinary task. Laws such as the US DMCA (17 U.S.C. §1201) and the UK Copyright, Designs and Patents Act restrict tools that get round copy protection, which print and copy restrictions may count as, so this page lifts them only with the permissions password. This is not legal advice.
+  - q: Why can't I print or edit my PDF?
+    a: Its author set restrictions, which most PDF readers obey even though the file opens without a password. This page lists the restrictions each file has. Type the permissions password to remove them, or ask the author for a copy without them.
+---
+<style>
+.ul-drop { margin: 0 0 16px; padding: 28px 16px; text-align: center; background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px; transition: border-color 0.15s ease, background-color 0.15s ease; }
+.ul.has-files .ul-drop { padding: 14px 16px; }
+.ul-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.ul-drop p { margin: 10px 0 0; }
+.ul-drop .hint { margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) { .ul-drop { transition: none; } }
+.ul-files { margin: 0 0 16px; padding: 0; list-style: none; }
+.ul-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.ul-file:last-child { border-bottom: 1px solid var(--border); }
+.ul-file-main { flex: 1 1 240px; min-width: 0; }
+.ul-name { font-weight: 600; overflow-wrap: anywhere; }
+.ul-meta, .ul-prot { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.ul-state { margin-top: 2px; font-size: 15px; overflow-wrap: anywhere; }
+.ul-file[data-state="done"] .ul-state::before { content: "\2713\00a0"; color: var(--accent); font-weight: 700; }
+.ul-file[data-state="bad"] .ul-state { color: var(--danger); }
+.ul-note { margin-top: 2px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.ul-file .btn { flex: 0 0 auto; }
+.ul-unlock { margin: 0 0 16px; padding: 14px 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+.ul-unlock .field { max-width: 460px; margin-bottom: 10px; }
+.ul-pw-row { display: flex; gap: 8px; }
+.ul-pw-row input { flex: 1 1 auto; min-width: 0; }
+.ul-pw-row .btn { flex: 0 0 auto; }
+.ul-caps { margin: 0; color: var(--danger); font-size: 14px; font-weight: 600; }
+.ul-caps:empty { display: none; }
+.ul .msg.error { margin: 0 0 10px; }
+.ul-unlock .actions { margin-bottom: 0; }
+.ul-rights { margin: 0; }
+.ul-progress { margin: 0 0 12px; }
+</style>
+
+<div class="ul" id="ul">
+  <input type="file" id="ul-file" class="visually-hidden" accept="application/pdf,.pdf" multiple tabindex="-1" aria-label="Choose PDF files">
+  <div class="ul-drop" id="ul-drop">
+    <button class="btn" type="button" id="ul-choose">Choose PDF files</button>
+    <p>or drop them anywhere on this page</p>
+    <p class="hint">Several PDFs that share a password are unlocked together. Nothing is uploaded.</p>
+  </div>
+  <p class="msg error" id="ul-error" role="alert"></p>
+
+  <ul class="ul-files" id="ul-files" aria-label="Your PDF files" hidden></ul>
+
+  <div class="ul-unlock" id="ul-unlock" hidden>
+    <div class="field">
+      <label for="ul-pw">Password</label>
+      <div class="ul-pw-row">
+        <input type="password" id="ul-pw" maxlength="1024" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-describedby="ul-pw-hint ul-caps ul-pw-error">
+        <button class="btn secondary" type="button" id="ul-show" aria-pressed="false" aria-controls="ul-pw">Show</button>
+      </div>
+      <span class="hint" id="ul-pw-hint">The password that opens the files, or their permissions password to remove restrictions too.</span>
+      <p class="ul-caps" id="ul-caps" aria-live="polite"></p>
+    </div>
+    <p class="msg error" id="ul-pw-error"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="ul-go">Unlock</button>
+    </div>
+  </div>
+
+  <p class="hint ul-progress" id="ul-progress" hidden></p>
+  <div class="actions" id="ul-actions" hidden>
+    <button class="btn" type="button" id="ul-zip" hidden>Download all (ZIP)</button>
+    <button class="btn secondary" type="button" id="ul-clear">Clear the list</button>
+  </div>
+  <p class="visually-hidden" id="ul-status" role="status"></p>
+  <p class="hint ul-rights">Unlock only PDFs you own or may change. Restrictions are removed only with the permissions password.</p>
+</div>
+
+<script src="{{ '/assets/js/zip.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+  var PDFLIB_URL = new URL({{ '/assets/vendor/pdf-lib/pdf-lib.min.js' | relative_url | jsonify }}, location.href).href;
+  {% raw %}
+  var $ = TT.$;
+  var root = $('#ul'), fileInput = $('#ul-file'), dropZone = $('#ul-drop'), listEl = $('#ul-files');
+  var errBox = $('#ul-error'), statusEl = $('#ul-status'), progressEl = $('#ul-progress');
+  var unlockBox = $('#ul-unlock'), pwIn = $('#ul-pw'), pwErr = $('#ul-pw-error'), showBtn = $('#ul-show'), goBtn = $('#ul-go'), capsEl = $('#ul-caps');
+  var actionsEl = $('#ul-actions'), zipBtn = $('#ul-zip'), clearBtn = $('#ul-clear');
+  var MAX_FILE = 1024 * 1024 * 1024, MAX_FILES = 100, BIG_FILE = 100 * 1024 * 1024;
+  var NUM = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 });
+  var files = [], nextId = 1, busy = false, generation = 0;
+  var checks = Promise.resolve();   // settles once every file added so far has been checked
+
+  // Standard security handler (ISO 32000-1 7.6.3, ISO 32000-2 7.6.4) for pdf-lib, copied from the
+  // Split PDF tool and extended: it reports what protects a file, tells the open (user) password
+  // from the permissions (owner) password, tries the encodings PDF writers use for passwords,
+  // leaves signature /Contents and an unencrypted catalogue /Metadata alone, deletes the old
+  // encryption dictionary, and can encrypt the result again with AES-256 (R6).
+  function pdfUnlocker(PDFLib) {
+    'use strict';
+    var subtle = (self.crypto || crypto).subtle;
+    var N = function (n) { return PDFLib.PDFName.of(n); };
+    var PAD = new Uint8Array([0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
+      0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A]);
+    // PDFDocEncoding 0x18-0x1F and 0x80-0xA0 (0x9F is undefined), and Windows-1252 0x80-0x9F.
+    var PDFDOC_LOW = '˘ˇˆ˙˝˛˚˜';
+    var PDFDOC_HIGH = '•†‡…—–ƒ⁄‹›−‰„“”‘’‚™ﬁﬂŁŒŠŸŽıłœšž�€';
+    var CP1252_HIGH = '€�‚ƒ„…†‡ˆ‰Š‹Œ�Ž��‘’“”•–—˜™š›œ�žŸ';
+
+    function concat() {
+      var n = 0, i, a = arguments;
+      for (i = 0; i < a.length; i++) n += a[i].length;
+      var out = new Uint8Array(n), o = 0;
+      for (i = 0; i < a.length; i++) { out.set(a[i], o); o += a[i].length; }
+      return out;
+    }
+    function equal(a, b, n) {
+      if (a.length < n || b.length < n) return false;
+      for (var i = 0; i < n; i++) if (a[i] !== b[i]) return false;
+      return true;
+    }
+    function hex(b) { var s = ''; for (var i = 0; i < b.length; i++) s += (b[i] < 16 ? '0' : '') + b[i].toString(16); return s; }
+    function random(n) { return (self.crypto || crypto).getRandomValues(new Uint8Array(n)); }
+
+    // ---- MD5 (RFC 1321) ----
+    var K = new Int32Array(64), S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+    for (var ki = 0; ki < 64; ki++) K[ki] = Math.floor(Math.abs(Math.sin(ki + 1)) * 4294967296) | 0;
+    function md5(data) {
+      var n = data.length, padded = new Uint8Array(((n + 8) >> 6 << 6) + 64);
+      padded.set(data);
+      padded[n] = 0x80;
+      var bits = n * 8, dv = new DataView(padded.buffer);
+      dv.setUint32(padded.length - 8, bits >>> 0, true);
+      dv.setUint32(padded.length - 4, Math.floor(bits / 4294967296), true);
+      var a0 = 0x67452301, b0 = 0xEFCDAB89 | 0, c0 = 0x98BADCFE | 0, d0 = 0x10325476, M = new Int32Array(16);
+      for (var off = 0; off < padded.length; off += 64) {
+        for (var j = 0; j < 16; j++) M[j] = dv.getInt32(off + j * 4, true);
+        var A = a0, B = b0, C = c0, D = d0;
+        for (var i = 0; i < 64; i++) {
+          var F, g, r = i >> 4;
+          if (r === 0) { F = (B & C) | (~B & D); g = i; }
+          else if (r === 1) { F = (D & B) | (~D & C); g = (5 * i + 1) & 15; }
+          else if (r === 2) { F = B ^ C ^ D; g = (3 * i + 5) & 15; }
+          else { F = C ^ (B | ~D); g = (7 * i) & 15; }
+          var t = D; D = C; C = B;
+          var x = (A + F + K[i] + M[g]) | 0, s = S[(r << 2) | (i & 3)];
+          B = (B + ((x << s) | (x >>> (32 - s)))) | 0;
+          A = t;
+        }
+        a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+      }
+      var out = new Uint8Array(16), ov = new DataView(out.buffer);
+      ov.setInt32(0, a0, true); ov.setInt32(4, b0, true); ov.setInt32(8, c0, true); ov.setInt32(12, d0, true);
+      return out;
+    }
+
+    // ---- RC4 ----
+    function rc4(key, data) {
+      var s = new Uint8Array(256), i, j = 0, t;
+      for (i = 0; i < 256; i++) s[i] = i;
+      for (i = 0; i < 256; i++) { j = (j + s[i] + key[i % key.length]) & 255; t = s[i]; s[i] = s[j]; s[j] = t; }
+      var out = new Uint8Array(data.length);
+      i = 0; j = 0;
+      for (var k = 0; k < data.length; k++) {
+        i = (i + 1) & 255; j = (j + s[i]) & 255;
+        t = s[i]; s[i] = s[j]; s[j] = t;
+        out[k] = data[k] ^ s[(s[i] + s[j]) & 255];
+      }
+      return out;
+    }
+
+    // ---- AES-CBC and SHA-2 through Web Crypto ----
+    // An R5/R6 file key is the same for every object, so it is imported once (WeakMap by key array).
+    var keyCache = new WeakMap();
+    function aesKey(raw, usage) {
+      var c = keyCache.get(raw);
+      if (c && c[usage]) return c[usage];
+      var p = subtle.importKey('raw', raw, { name: 'AES-CBC' }, false, [usage]);
+      if (!c) { c = {}; keyCache.set(raw, c); }
+      c[usage] = p;
+      return p;
+    }
+    async function aesEncryptNoPad(key, iv, data) {
+      var k = await subtle.importKey('raw', key, { name: 'AES-CBC' }, false, ['encrypt']);
+      var out = new Uint8Array(await subtle.encrypt({ name: 'AES-CBC', iv: iv }, k, data));
+      return out.subarray(0, data.length);   // drop the padding block Web Crypto always adds
+    }
+    // Decrypts data whose length is a multiple of 16 without expecting padding: a crafted last block
+    // decrypts to a full block of padding, which Web Crypto then removes.
+    async function aesDecryptNoPad(key, iv, data) {
+      if (!data.length || data.length % 16) throw new Error('bad AES data');
+      var last = data.subarray(data.length - 16);
+      var pad = new Uint8Array(16).fill(16);
+      var ek = await aesKey(key, 'encrypt'), dk = await aesKey(key, 'decrypt');
+      var extra = new Uint8Array(await subtle.encrypt({ name: 'AES-CBC', iv: last }, ek, pad)).subarray(0, 16);
+      return new Uint8Array(await subtle.decrypt({ name: 'AES-CBC', iv: iv }, dk, concat(data, extra)));
+    }
+    async function aesDecrypt(key, data) {
+      if (data.length < 16) return new Uint8Array(0);
+      var iv = data.subarray(0, 16), body = data.subarray(16);
+      if (!body.length) return new Uint8Array(0);
+      if (body.length % 16) body = body.subarray(0, body.length - (body.length % 16));
+      try {
+        var dk = await aesKey(key, 'decrypt');
+        return new Uint8Array(await subtle.decrypt({ name: 'AES-CBC', iv: iv }, dk, body));
+      } catch (e) {
+        // Bad padding: keep the bytes as they decrypt.
+        return aesDecryptNoPad(key, iv, body);
+      }
+    }
+    async function sha(name, data) { return new Uint8Array(await subtle.digest(name, data)); }
+
+    // ---- Reading the encryption dictionary ----
+    function num(v) { return v && typeof v.asNumber === 'function' ? v.asNumber() : (v && typeof v.value === 'function' ? Number(v.value()) : NaN); }
+    function bytesOf(v) {
+      if (!v) return new Uint8Array(0);
+      if (v instanceof PDFLib.PDFString || v instanceof PDFLib.PDFHexString) return v.asBytes();
+      return new Uint8Array(0);
+    }
+    function nameOf(v) { return v instanceof PDFLib.PDFName ? v.decodeText ? v.decodeText() : v.asString().slice(1) : ''; }
+
+    // Password bytes. R2-R4 passwords are PDFDocEncoding; writers also used UTF-8 and Windows-1252,
+    // which are tried next, as qpdf does. R5/R6 passwords are UTF-8 after SASLprep (NFKC here).
+    function encodeWith(pw, high, base, low) {
+      var out = [];
+      for (var i = 0; i < pw.length; i++) {
+        var c = pw.charCodeAt(i), b = -1;
+        if (c < 0x18 || (c >= 0x20 && c < 0x7F) || (c >= 0xA1 && c <= 0xFF && c !== 0xAD)) b = c;
+        if (b < 0 && low) { var l = low.indexOf(pw.charAt(i)); if (l >= 0) b = 0x18 + l; }
+        if (b < 0) { var h = high.indexOf(pw.charAt(i)); if (h >= 0) b = base + h; }
+        if (b < 0) return null;
+        out.push(b);
+      }
+      return new Uint8Array(out);
+    }
+    function utf8(s) { return new TextEncoder().encode(s); }
+    function candidates(e, pw) {
+      var list = [], seen = new Set();
+      function add(b) {
+        if (!b) return;
+        if (e.R >= 5 && b.length > 127) b = b.subarray(0, 127);
+        var k = hex(e.R >= 5 ? b : b.subarray(0, 32));
+        if (!seen.has(k)) { seen.add(k); list.push(b); }
+      }
+      if (e.R >= 5) { add(utf8(pw.normalize('NFKC'))); add(utf8(pw)); return list; }
+      add(encodeWith(pw, PDFDOC_HIGH, 0x80, PDFDOC_LOW));
+      add(utf8(pw));
+      add(encodeWith(pw, CP1252_HIGH, 0x80, ''));
+      var lossy = new Uint8Array(pw.length);
+      for (var i = 0; i < pw.length; i++) lossy[i] = pw.charCodeAt(i) & 0xFF;
+      add(lossy);
+      return list;
+    }
+    function pad32(b) {
+      var p = b.subarray(0, 32);
+      return concat(p, PAD.subarray(0, 32 - p.length));
+    }
+
+    // Algorithm 2: the file key from a (padded) user password, R2-R4.
+    function legacyKey(e, pw32) {
+      var P = new Uint8Array(4);
+      new DataView(P.buffer).setInt32(0, e.P, true);
+      var input = concat(pw32, e.O.subarray(0, 32), P, e.id0);
+      if (e.R >= 4 && !e.encryptMetadata) input = concat(input, new Uint8Array([255, 255, 255, 255]));
+      var h = md5(input), n = e.length;
+      if (e.R >= 3) for (var i = 0; i < 50; i++) h = md5(h.subarray(0, n));
+      return h.subarray(0, n);
+    }
+    // Algorithms 4 and 5: is this the user password?
+    function checkUser(e, key) {
+      if (e.R === 2) return equal(rc4(key, PAD), e.U, 32);
+      var x = rc4(key, md5(concat(PAD, e.id0)));
+      for (var i = 1; i <= 19; i++) {
+        var k2 = new Uint8Array(key.length);
+        for (var j = 0; j < key.length; j++) k2[j] = key[j] ^ i;
+        x = rc4(k2, x);
+      }
+      return equal(x, e.U, 16);
+    }
+    // Algorithm 7: the user password recovered from the owner password.
+    function userFromOwner(e, ownerPw) {
+      var h = md5(pad32(ownerPw)), n = e.length;
+      if (e.R >= 3) for (var i = 0; i < 50; i++) h = md5(h.subarray(0, n));
+      var key = h.subarray(0, n), x = e.O.subarray(0, 32);
+      if (e.R === 2) return rc4(key, x);
+      for (var r = 19; r >= 0; r--) {
+        var k2 = new Uint8Array(n);
+        for (var j = 0; j < n; j++) k2[j] = key[j] ^ r;
+        x = rc4(k2, x);
+      }
+      return x;
+    }
+    // Algorithm 2.B (R6) and the plain SHA-256 of R5.
+    async function hash6(pw, salt, udata, R) {
+      var k = await sha('SHA-256', concat(pw, salt, udata));
+      if (R === 5) return k;
+      for (var round = 0; ; round++) {
+        var seq = concat(pw, k, udata), k1 = new Uint8Array(seq.length * 64);
+        for (var i = 0; i < 64; i++) k1.set(seq, i * seq.length);
+        var en = await aesEncryptNoPad(k.subarray(0, 16), k.subarray(16, 32), k1);
+        var sum = 0;
+        for (var b = 0; b < 16; b++) sum += en[b];
+        k = await sha(['SHA-256', 'SHA-384', 'SHA-512'][sum % 3], en);
+        if (round >= 63 && en[en.length - 1] <= round - 31) break;
+      }
+      return k.subarray(0, 32);
+    }
+
+    // The file key for this password used as the permissions (owner) password, or null.
+    async function ownerKey(e, password) {
+      var list = candidates(e, password);
+      for (var i = 0; i < list.length; i++) {
+        var pw = list[i];
+        if (e.R >= 5) {
+          if (e.O.length < 48 || e.U.length < 48) return null;
+          var h = await hash6(pw, e.O.subarray(32, 40), e.U.subarray(0, 48), e.R);
+          if (equal(h, e.O, 32)) return aesDecryptNoPad(await hash6(pw, e.O.subarray(40, 48), e.U.subarray(0, 48), e.R), new Uint8Array(16), e.OE.subarray(0, 32));
+        } else {
+          var key = legacyKey(e, userFromOwner(e, pw));
+          if (checkUser(e, key)) return key;
+        }
+      }
+      return null;
+    }
+    // The file key for this password used as the open (user) password, or null.
+    async function userKey(e, password) {
+      var list = candidates(e, password);
+      for (var i = 0; i < list.length; i++) {
+        var pw = list[i];
+        if (e.R >= 5) {
+          if (e.U.length < 48) return null;
+          var h = await hash6(pw, e.U.subarray(32, 40), new Uint8Array(0), e.R);
+          if (equal(h, e.U, 32)) return aesDecryptNoPad(await hash6(pw, e.U.subarray(40, 48), new Uint8Array(0), e.R), new Uint8Array(16), e.UE.subarray(0, 32));
+        } else {
+          var key = legacyKey(e, pad32(pw));
+          if (checkUser(e, key)) return key;
+        }
+      }
+      return null;
+    }
+
+    function unsupported(reason, detail) { var err = new Error('UNSUPPORTED'); err.code = 'UNSUPPORTED'; err.reason = reason; err.detail = detail || ''; return err; }
+
+    function readEncrypt(context) {
+      var t = context.trailerInfo, enc = t.Encrypt && context.lookup(t.Encrypt);
+      if (!(enc instanceof PDFLib.PDFDict)) return null;
+      var get = function (k) { return enc.get(N(k)); };
+      var filter = nameOf(get('Filter')), subFilter = nameOf(get('SubFilter'));
+      if (filter !== 'Standard') {
+        var cert = filter === 'Adobe.PubSec' || /^adbe\.pkcs7\.s[345]$/.test(subFilter);
+        throw unsupported(cert ? 'certificate' : 'drm', filter);
+      }
+      var e = {
+        V: num(get('V')) || 0, R: num(get('R')) || 2, P: num(get('P')) | 0,
+        O: bytesOf(get('O')), U: bytesOf(get('U')), OE: bytesOf(get('OE')), UE: bytesOf(get('UE')),
+        length: (num(get('Length')) || 40) / 8, encryptMetadata: true, stm: 'V2', str: 'V2', eff: 'V2', ref: t.Encrypt
+      };
+      var em = get('EncryptMetadata');
+      if (em && em.toString() === 'false') e.encryptMetadata = false;
+      var ids = t.ID && context.lookup(t.ID);
+      e.id0 = ids instanceof PDFLib.PDFArray && ids.size() ? bytesOf(context.lookup(ids.get(0))) : new Uint8Array(0);
+      if (e.V === 4 || e.V === 5) {
+        var cf = get('CF'), stmF = nameOf(get('StmF')) || 'Identity', strF = nameOf(get('StrF')) || 'Identity';
+        var effF = get('EFF') ? nameOf(get('EFF')) : stmF;
+        cf = cf && context.lookup(cf);
+        var method = function (name) {
+          if (name === 'Identity') return 'None';
+          var f = cf instanceof PDFLib.PDFDict ? cf.lookup(N(name)) : null;
+          var m = f instanceof PDFLib.PDFDict ? nameOf(f.get(N('CFM'))) || 'None' : 'None';
+          if (f instanceof PDFLib.PDFDict && e.V === 4) {
+            var len = num(f.get(N('Length')));
+            if (len) e.length = len > 40 ? len / 8 : len;  // some writers give bytes, some bits
+          }
+          return m;
+        };
+        e.stm = method(stmF);
+        e.str = method(strF);
+        e.eff = method(effF);
+        // Only attachments encrypted (ISO 32000-1 7.6.5): the document itself is in the clear.
+        if (stmF === 'Identity' && strF === 'Identity' && e.eff !== 'None') throw unsupported('attachments');
+      }
+      if (!(e.R >= 2 && e.R <= 6)) throw unsupported('revision', 'R' + e.R);
+      if (e.V < 4) e.length = e.V === 1 ? 5 : Math.min(16, Math.max(5, e.length));
+      if (e.V === 4) e.length = 16;
+      e.cipher = e.V >= 5 ? 'AES 256-bit' : (e.V === 4 && e.stm === 'AESV2') ? 'AES 128-bit' : 'RC4 ' + (e.length * 8) + '-bit';
+      return e;
+    }
+
+    // ---- Permissions (ISO 32000-1 Table 22) ----
+    function bits(e) {
+      var p = e.P >>> 0, bit = function (n) { return ((p >>> (n - 1)) & 1) === 1; };
+      var b = { print: bit(3), modify: bit(4), copy: bit(5), annotate: bit(6) };
+      // R2 has only bits 3-6: form filling, assembly and full-quality printing follow them.
+      if (e.R === 2) { b.fill = b.annotate; b.assemble = b.modify; b.hq = b.print; }
+      else { b.fill = bit(9); b.assemble = bit(11); b.hq = bit(12); }
+      return b;
+    }
+    function restrictions(e) {
+      var b = bits(e), out = [];
+      if (!b.print) out.push('printing');
+      else if (!b.hq) out.push('high-quality printing');
+      if (!b.modify) out.push('changes');
+      if (!b.copy) out.push('copying');
+      if (!b.annotate) out.push(b.fill ? 'comments' : 'comments and form filling');
+      if (!b.assemble && b.modify) out.push('page assembly');
+      return out;
+    }
+    // /P for an R6 copy: the same permissions, bits 7-8 and 13-32 set, bits 1-2 clear, and bit 10
+    // (copying for accessibility, which PDF 2.0 tells readers to ignore) set.
+    function permsR6(e) {
+      var b = bits(e), p = 0xFFFFF000 | 0xC0 | 0x200;
+      if (b.print) p |= 1 << 2;
+      if (b.modify) p |= 1 << 3;
+      if (b.copy) p |= 1 << 4;
+      if (b.annotate) p |= 1 << 5;
+      if (b.fill) p |= 1 << 8;
+      if (b.assemble) p |= 1 << 10;
+      if (b.hq) p |= 1 << 11;
+      return p | 0;
+    }
+
+    // Parses a document with pdf-lib's parser, decrypting object streams before they are read.
+    var hookState = null;
+    var patched = false;
+    function patch() {
+      if (patched) return;
+      patched = true;
+      var P = PDFLib.PDFParser.prototype, origHeader = P.parseIndirectObjectHeader;
+      P.parseIndirectObjectHeader = function () {
+        var ref = origHeader.apply(this, arguments);
+        if (hookState) { hookState.ref = ref; hookState.parser = this; }
+        return ref;
+      };
+      var OS = PDFLib.PDFObjectStreamParser, origFor = OS.forStream;
+      OS.forStream = function (raw, wait) {
+        if (!hookState) return origFor.apply(this, arguments);
+        var st = hookState, ref = st.ref, parser = st.parser;
+        return {
+          parseIntoContext: async function () {
+            if (st.mode === 'skip') { parser.context.assign(ref, raw); return; }
+            raw.contents = await decryptData(st.e, st.key, ref, raw.contents, st.e.stm);
+            var real = origFor.call(OS, raw, wait), ctx = parser.context, origAssign = ctx.assign;
+            ctx.assign = function (r, o) { st.inner.add(r.tag); return origAssign.apply(this, arguments); };
+            try { await real.parseIntoContext(); } finally { ctx.assign = origAssign; }
+          }
+        };
+      };
+    }
+    async function parse(bytes, state) {
+      patch();
+      hookState = state;
+      try {
+        return await PDFLib.PDFParser.forBytesWithOptions(bytes, 400, false, false).parseDocument();
+      } finally { hookState = null; }
+    }
+
+    function objectKey(e, key, ref, aes) {
+      if (e.R >= 5) return key;
+      var n = ref.objectNumber, g = ref.generationNumber;
+      var extra = new Uint8Array([n & 255, (n >> 8) & 255, (n >> 16) & 255, g & 255, (g >> 8) & 255]);
+      var h = md5(aes ? concat(key, extra, new Uint8Array([0x73, 0x41, 0x6C, 0x54])) : concat(key, extra));
+      return h.subarray(0, Math.min(key.length + 5, 16));
+    }
+    async function decryptData(e, key, ref, data, method) {
+      if (method === 'None') return data;
+      if (method === 'AESV2' || method === 'AESV3') return aesDecrypt(objectKey(e, key, ref, true), data);
+      return rc4(objectKey(e, key, ref, false), data);
+    }
+
+    // A signature's /Contents is never encrypted (ISO 32000-2 7.6.2), nor that of a document timestamp.
+    function isSignature(d) {
+      if (!d.has(N('ByteRange')) || !d.has(N('Contents'))) return false;
+      var type = nameOf(d.get(N('Type')));
+      return !type || type === 'Sig' || type === 'DocTimeStamp';
+    }
+    async function mapStrings(v, fn) {
+      if (v instanceof PDFLib.PDFString || v instanceof PDFLib.PDFHexString) return PDFLib.PDFHexString.of(hex(await fn(v.asBytes())));
+      if (v instanceof PDFLib.PDFDict) {
+        var sig = isSignature(v), entries = v.entries();
+        for (var k = 0; k < entries.length; k++) {
+          if (sig && entries[k][0] === N('Contents')) continue;
+          var nv = await mapStrings(entries[k][1], fn);
+          if (nv !== entries[k][1]) v.set(entries[k][0], nv);
+        }
+        return v;
+      }
+      if (v instanceof PDFLib.PDFArray) {
+        for (var a = 0; a < v.size(); a++) {
+          var el = v.get(a), nel = await mapStrings(el, fn);
+          if (nel !== el) v.set(a, nel);
+        }
+        return v;
+      }
+      return v;
+    }
+    // The /Crypt filter of a stream (ISO 32000-1 7.4.10): '' when it has none, else the filter name.
+    function cryptFilter(ctx, dict) {
+      var f = ctx.lookup(dict.get(N('Filter'))), parms = ctx.lookup(dict.get(N('DecodeParms')));
+      var names = f instanceof PDFLib.PDFArray ? f.asArray().map(function (x) { return nameOf(ctx.lookup(x)); }) : [nameOf(f)];
+      var at = names.indexOf('Crypt');
+      if (at < 0) return '';
+      var p = parms instanceof PDFLib.PDFArray ? ctx.lookup(parms.get(at)) : parms;
+      return (p instanceof PDFLib.PDFDict && nameOf(p.get(N('Name')))) || 'Identity';
+    }
+    function hasSignature(ctx) {
+      var objects = ctx.enumerateIndirectObjects();
+      for (var i = 0; i < objects.length; i++) {
+        var o = objects[i][1];
+        if (!(o instanceof PDFLib.PDFDict)) continue;
+        if (isSignature(o)) return true;
+        var v = o.get(N('V'));
+        if (v instanceof PDFLib.PDFDict && isSignature(v)) return true;
+      }
+      return false;
+    }
+    function catalogMetadataRef(ctx) {
+      var cat = ctx.lookup(ctx.trailerInfo.Root);
+      var m = cat instanceof PDFLib.PDFDict ? cat.get(N('Metadata')) : null;
+      return m instanceof PDFLib.PDFRef ? m : null;
+    }
+
+    // What protects a file, without its password. Throws .code 'UNSUPPORTED' or 'DAMAGED'.
+    async function inspect(bytes) {
+      var probe = await parse(bytes, { mode: 'skip' });
+      // No catalogue in the trailer (or cross-reference stream): not a readable PDF.
+      if (!probe.trailerInfo.Root) { var d = new Error('DAMAGED'); d.code = 'DAMAGED'; throw d; }
+      var e = readEncrypt(probe);
+      if (!e) return { encrypted: false, signed: hasSignature(probe) };
+      var objects = probe.enumerateIndirectObjects();
+      for (var i = 0; i < objects.length; i++) {
+        var o = objects[i][1];
+        if (o instanceof PDFLib.PDFRawStream) {
+          var cf = cryptFilter(probe, o.dict);
+          if (cf && cf !== 'Identity') throw unsupported('cryptfilter');
+        }
+      }
+      return {
+        encrypted: true, V: e.V, R: e.R, P: e.P, cipher: e.cipher, restrictions: restrictions(e),
+        emptyOwner: !!(await ownerKey(e, '')), emptyUser: !!(await userKey(e, '')), signed: hasSignature(probe)
+      };
+    }
+
+    // Opens the file with the password: the permissions password first, then a blank one, then
+    // the open password (typed or blank), unless ownerOnly. Returns { access: 'owner' | 'user' | null, ... }.
+    async function unlock(bytes, password, ownerOnly) {
+      var probe = await parse(bytes, { mode: 'skip' });
+      var e = readEncrypt(probe);
+      if (!e) return { access: 'none' };
+      probe = null;
+      var key = null, access = null, tries = password ? [password, ''] : [''];
+      for (var i = 0; i < tries.length && !key; i++) { key = await ownerKey(e, tries[i]); if (key) access = 'owner'; }
+      for (var j = 0; j < tries.length && !key && !ownerOnly; j++) { key = await userKey(e, tries[j]); if (key) access = 'user'; }
+      if (!key) return { access: null };
+      var state = { mode: 'decrypt', e: e, key: key, inner: new Set() };
+      var context = await parse(bytes, state);
+      var encRef = context.trailerInfo.Encrypt, metaRef = catalogMetadataRef(context);
+      var objects = context.enumerateIndirectObjects();
+      var decrypt = function (ref) { return function (b) { return decryptData(e, key, ref, b, e.str); }; };
+      for (var k = 0; k < objects.length; k++) {
+        var ref = objects[k][0], obj = objects[k][1];
+        if (state.inner.has(ref.tag) || (encRef instanceof PDFLib.PDFRef && ref === encRef)) continue;
+        if (obj instanceof PDFLib.PDFRawStream) {
+          var tname = nameOf(obj.dict.get(N('Type')));
+          if (tname === 'XRef') continue;
+          await mapStrings(obj.dict, decrypt(ref));
+          if (cryptFilter(context, obj.dict)) continue;            // an /Identity crypt filter: left as it is
+          if (ref === metaRef && !e.encryptMetadata) continue;      // EncryptMetadata false: only the catalogue's
+          obj.contents = await decryptData(e, key, ref, obj.contents, tname === 'EmbeddedFile' ? e.eff : e.stm);
+        } else {
+          // An indirect object can be a string itself (a /Title or a field value kept as "12 0 R"):
+          // mapStrings returns a new object for it, which must replace the old one.
+          var plain = await mapStrings(obj, decrypt(ref));
+          if (plain !== obj) context.assign(ref, plain);
+        }
+      }
+      // The old dictionary would otherwise be written out as an orphan, and its /O and /U let
+      // anyone with the copy test guesses at the original passwords.
+      if (encRef instanceof PDFLib.PDFRef) context.delete(encRef);
+      context.trailerInfo.Encrypt = undefined;
+      // The trailer's /Size must be one more than the highest object number left.
+      var highest = 0;
+      context.enumerateIndirectObjects().forEach(function (o) { if (o[0].objectNumber > highest) highest = o[0].objectNumber; });
+      context.largestObjectNumber = highest;
+      var doc = new PDFLib.PDFDocument(context, true, false);
+      var kept = access === 'user' ? restrictions(e) : [];
+      if (kept.length) await encryptR6(doc, e, metaRef);
+      // A plain copy keeps object streams when the original had them: without them, a file with many
+      // small objects (links, a tagged structure tree) can come out several times larger. The AES-256
+      // writer encrypts each string on its own, which object streams do not allow, so it never uses them.
+      var out = await doc.save({ useObjectStreams: !kept.length && state.inner.size > 0, addDefaultPage: false, updateFieldAppearances: false });
+      return { access: access, kept: kept, signed: hasSignature(context), bytes: out };
+    }
+
+    // ---- AES-256 (R6) writer: an empty open password, a random permissions password and the
+    // original permissions (ISO 32000-2 Algorithms 8, 9 and 10) ----
+    async function encryptR6(doc, e, metaRef) {
+      var ctx = doc.context, H = function (b) { return PDFLib.PDFHexString.of(hex(b)); };
+      var fileKey = random(32), ownerPw = utf8(hex(random(16))), none = new Uint8Array(0), zero = new Uint8Array(16);
+      var uvs = random(8), uks = random(8), ovs = random(8), oks = random(8);
+      var U = concat(await hash6(none, uvs, none, 6), uvs, uks);
+      var UE = await aesEncryptNoPad(await hash6(none, uks, none, 6), zero, fileKey);
+      var O = concat(await hash6(ownerPw, ovs, U, 6), ovs, oks);
+      var OE = await aesEncryptNoPad(await hash6(ownerPw, oks, U, 6), zero, fileKey);
+      var P = permsR6(e), block = new Uint8Array(16);
+      new DataView(block.buffer).setInt32(0, P, true);
+      block.set([0xFF, 0xFF, 0xFF, 0xFF, e.encryptMetadata ? 0x54 : 0x46, 0x61, 0x64, 0x62], 4);
+      block.set(random(4), 12);
+      var Perms = await aesEncryptNoPad(fileKey, zero, block);   // one block: CBC with a zero IV is ECB
+      var key = await subtle.importKey('raw', fileKey, { name: 'AES-CBC' }, false, ['encrypt']);
+      var enc = async function (data) { var iv = random(16); return concat(iv, new Uint8Array(await subtle.encrypt({ name: 'AES-CBC', iv: iv }, key, data))); };
+      var objects = ctx.enumerateIndirectObjects();
+      for (var i = 0; i < objects.length; i++) {
+        var ref = objects[i][0], obj = objects[i][1];
+        if (obj instanceof PDFLib.PDFRawStream) {
+          await mapStrings(obj.dict, enc);
+          if (cryptFilter(ctx, obj.dict)) continue;
+          if (ref === metaRef && !e.encryptMetadata) continue;
+          obj.contents = await enc(obj.contents);
+        } else if (obj instanceof PDFLib.PDFStream) {
+          throw new Error('unexpected stream');
+        } else {
+          var sealed = await mapStrings(obj, enc);
+          if (sealed !== obj) ctx.assign(ref, sealed);
+        }
+      }
+      var dict = {
+        Filter: 'Standard', V: 5, R: 6, Length: 256, P: P, O: H(O), U: H(U), OE: H(OE), UE: H(UE), Perms: H(Perms),
+        CF: { StdCF: { AuthEvent: 'DocOpen', CFM: 'AESV3', Length: 32 } }, StmF: 'StdCF', StrF: 'StdCF'
+      };
+      if (!e.encryptMetadata) dict.EncryptMetadata = false;
+      ctx.trailerInfo.Encrypt = ctx.register(ctx.obj(dict));
+      if (!ctx.trailerInfo.ID) { var id = H(random(16)); ctx.trailerInfo.ID = ctx.obj([id, id]); }
+      // AES-256 is native to PDF 2.0; a PDF 1.x file declares Adobe's extension level 8, as qpdf does.
+      if (!ctx.header || String(ctx.header).indexOf('%PDF-2') !== 0) {
+        ctx.header = PDFLib.PDFHeader.forVersion(1, 7);
+        var ext = doc.catalog.lookup(N('Extensions'));
+        if (!(ext instanceof PDFLib.PDFDict)) { ext = ctx.obj({}); doc.catalog.set(N('Extensions'), ext); }
+        ext.set(N('ADBE'), ctx.obj({ BaseVersion: N('1.7'), ExtensionLevel: 8 }));
+      }
+    }
+
+    return { inspect: inspect, unlock: unlock, md5: md5, rc4: rc4 };
+  }
+
+  function workerMain(scope) {
+    var unlocker = null;
+    scope.onmessage = async function (ev) {
+      var msg = ev.data;
+      if (msg.type === 'init') {
+        try {
+          scope.importScripts(msg.lib);
+          unlocker = pdfUnlocker(scope.PDFLib);
+          scope.postMessage({ type: 'ready' });
+        } catch (err) { scope.postMessage({ type: 'fatal', message: String(err && err.message || err) }); }
+        return;
+      }
+      var id = msg.id, bytes;
+      try { bytes = new Uint8Array(await msg.file.arrayBuffer()); } catch (readErr) { scope.postMessage({ type: 'error', id: id, code: 'GONE' }); return; }
+      try {
+        if (msg.type === 'inspect') {
+          scope.postMessage({ type: 'done', id: id, info: await unlocker.inspect(bytes) });
+        } else {
+          var r = await unlocker.unlock(bytes, msg.password || '', !!msg.ownerOnly);
+          bytes = null;
+          var blob = r.bytes ? new Blob([r.bytes], { type: 'application/pdf' }) : null;
+          scope.postMessage({ type: 'done', id: id, result: { access: r.access, kept: r.kept || [], signed: !!r.signed, blob: blob } });
+        }
+      } catch (err) {
+        scope.postMessage({ type: 'error', id: id, code: err && err.code || 'READ', reason: err && err.reason, detail: err && err.detail, message: String(err && err.message || err) });
+      }
+    };
+  }
+
+  // ---------- the worker ----------
+  var worker = null, workerReady = null, reqId = 0, waiting = {};
+  function getWorker() {
+    if (workerReady) return workerReady;
+    workerReady = new Promise(function (resolve, reject) {
+      var src = pdfUnlocker.toString() + '\n(' + workerMain.toString() + ')(self);';
+      var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      // Rejections carry a code like the worker's own errors, so a row can say what went wrong.
+      try { worker = new Worker(url); } catch (e) { workerReady = null; reject({ code: 'START' }); return; }
+      worker.onmessage = function (e) {
+        var m = e.data;
+        if (m.type === 'ready') { URL.revokeObjectURL(url); resolve(worker); return; }
+        if (m.type === 'fatal') { stopWorker({ code: 'LOAD' }); reject({ code: 'LOAD' }); return; }
+        var w = waiting[m.id];
+        if (!w) return;
+        delete waiting[m.id];
+        if (m.type === 'done') w.resolve(m); else w.reject(m);
+      };
+      worker.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        stopWorker({ code: 'CRASH' });
+        reject({ code: 'CRASH' });
+      };
+      worker.postMessage({ type: 'init', lib: PDFLIB_URL });
+    });
+    return workerReady;
+  }
+  function stopWorker(reason) {
+    Object.keys(waiting).forEach(function (k) { waiting[k].reject(reason); delete waiting[k]; });
+    workerReady = null;
+    if (worker) { try { worker.terminate(); } catch (err) { /* already gone */ } }
+    worker = null;
+  }
+  // One request at a time: the handler patches pdf-lib's parser while it reads a file.
+  var queue = Promise.resolve();
+  function ask(msg) {
+    var p = queue.then(function () {
+      return getWorker().then(function (w) {
+        return new Promise(function (resolve, reject) {
+          var id = ++reqId;
+          waiting[id] = { resolve: resolve, reject: reject };
+          msg.id = id;
+          w.postMessage(msg);
+        });
+      });
+    });
+    queue = p.catch(function () { /* the next request still runs */ });
+    return p;
+  }
+
+  // ---------- helpers ----------
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' bytes';
+    if (n < 1024 * 1024) return NUM.format(n / 1024) + ' KB';
+    return NUM.format(n / 1024 / 1024) + ' MB';
+  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  function andList(a) { return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]; }
+  function outName(name) {
+    var base = String(name || '').replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').trim() || 'document';
+    return base + '-unlocked.pdf';
+  }
+  function isPdf(buf) {
+    var head = new Uint8Array(buf, 0, Math.min(1024, buf.byteLength));
+    for (var i = 0; i + 4 < head.length; i++) {
+      if (head[i] === 0x25 && head[i + 1] === 0x50 && head[i + 2] === 0x44 && head[i + 3] === 0x46 && head[i + 4] === 0x2D) return true;
+    }
+    return false;
+  }
+  // Written only when the text changes, unless it answers something the visitor just did.
+  var lastSaid = '';
+  function say(text, force) {
+    if (!text || (text === lastSaid && !force)) return;
+    lastSaid = text;
+    statusEl.textContent = '';
+    setTimeout(function () { statusEl.textContent = text; }, 60);
+  }
+  function setError(t) { errBox.textContent = t || ''; }
+
+  // ---------- the list ----------
+  function protection(info) {
+    if (!info || !info.encrypted) return '';
+    var parts = [];
+    if (!info.emptyUser) parts.push('Password to open');
+    if (info.restrictions.length) parts.push((parts.length ? 'blocks ' : 'Blocks ') + andList(info.restrictions));
+    else if (parts.length) parts.push('nothing else restricted');
+    parts.push(info.cipher + ' encryption');
+    return parts.join(' · ');
+  }
+  var REASONS = {
+    certificate: 'Certificate security: it opens with the recipient’s private key (a digital ID), not a password, so this page does not open it.',
+    drm: 'Rights management (DRM): it is opened with keys from the publisher’s server, so it cannot be unlocked here.',
+    attachments: 'Only its attachments are encrypted. The document itself opens without a password; this page does not unlock attachments.',
+    cryptfilter: 'Parts of it use their own encryption filter, which this page does not handle.',
+    revision: 'It uses a kind of PDF encryption this page does not know.'
+  };
+
+  function row(f) {
+    if (!f.el) {
+      f.el = document.createElement('li');
+      f.el.className = 'ul-file';
+      f.el.innerHTML = '<div class="ul-file-main"><div class="ul-name"></div><div class="ul-meta"></div><div class="ul-prot"></div>' +
+        '<div class="ul-state"></div><div class="ul-note"></div></div>';
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn small';
+      b.textContent = 'Download';
+      b.hidden = true;
+      // A double click saves the file once.
+      b.addEventListener('click', function () {
+        if (!f.output || f.saving) return;
+        f.saving = true;
+        setTimeout(function () { f.saving = false; }, 1000);
+        TT.download(f.output.name, f.output.blob);
+      });
+      f.el.appendChild(b);
+      f.btn = b;
+      listEl.appendChild(f.el);
+    }
+    var el = f.el;
+    el.querySelector('.ul-name').textContent = f.name;
+    el.querySelector('.ul-meta').textContent = fmtBytes(f.size) + (f.output ? ' → ' + f.output.name + ', ' + fmtBytes(f.output.blob.size) : '');
+    el.querySelector('.ul-prot').textContent = protection(f.info);
+    el.querySelector('.ul-state').textContent = f.text || '';
+    el.querySelector('.ul-note').textContent = f.note || '';
+    el.setAttribute('data-state', f.mood || '');
+    f.btn.hidden = !f.output;
+    if (f.output) f.btn.setAttribute('aria-label', 'Download ' + f.output.name);
+  }
+
+  function needsPassword(f) { return f.status === 'needs-open' || f.status === 'restricted' || f.status === 'kept'; }
+  function refreshUi() {
+    var outputs = files.filter(function (f) { return f.output; });
+    listEl.hidden = !files.length;
+    root.classList.toggle('has-files', files.length > 0);
+    unlockBox.hidden = !files.some(needsPassword);
+    actionsEl.hidden = !files.length;
+    zipBtn.hidden = outputs.length < 2;
+    var checking = files.filter(function (f) { return f.status === 'checking' || f.status === 'working'; }).length;
+    zipBtn.disabled = busy;
+    goBtn.disabled = busy;
+    clearBtn.disabled = busy;
+    progressEl.hidden = !checking;
+    progressEl.textContent = checking ? (busy ? 'Unlocking… ' : 'Checking… ') + plural(checking, 'file', 'files') + ' left.' : '';
+  }
+
+  function describeOutput(f, r) {
+    var info = f.info;
+    f.output = { name: outName(f.name), blob: r.blob };
+    f.mood = 'done';
+    var hadOpen = !info.emptyUser, hadLimits = info.restrictions.length > 0;
+    if (r.access === 'owner' || !r.kept.length) {
+      f.status = 'done';
+      f.text = hadOpen && hadLimits ? 'Unlocked: password and restrictions removed.' : hadOpen ? 'Unlocked: password removed.' :
+        hadLimits ? 'Unlocked: restrictions removed.' : 'Unlocked: encryption removed. It had no password and no restrictions.';
+      if (f.auto && (hadOpen || hadLimits)) f.text += info.emptyUser ? ' Its permissions password is blank.' : ' Its permissions password is blank, which also opens it.';
+      f.note = '';
+    } else {
+      f.status = 'kept';
+      f.text = 'Open password removed. Still blocks ' + andList(r.kept) + ': type the permissions password to remove that too.';
+      f.note = 'The copy keeps these restrictions under a new random permissions password, so to lift them later start from the original file.';
+    }
+    if (r.signed) f.note = (f.note ? f.note + ' ' : '') + 'It was digitally signed: the signature will not validate in the copy, so keep the original.';
+  }
+
+  function failText(f, err) {
+    f.mood = 'bad';
+    f.output = null;
+    if (err && err.code === 'UNSUPPORTED') { f.status = 'unsupported'; f.text = REASONS[err.reason] || REASONS.revision; return; }
+    if (err && err.code === 'GONE') { f.status = 'error'; f.text = 'The file could not be read. It may have been moved or deleted.'; return; }
+    if (err && (err.code === 'LOAD' || err.code === 'START')) { f.status = 'error'; f.text = 'The PDF tools could not load. Check your connection, then add the file again.'; return; }
+    if (err && err.code === 'CRASH') { f.status = 'error'; f.text = 'The browser ran out of memory. Try this file on a computer.'; return; }
+    f.status = 'error';
+    f.text = err && err.code === 'DAMAGED' ? 'This file is damaged or is not a valid PDF.' : 'This file could not be read as a PDF.';
+  }
+
+  function inspectFile(f) {
+    return ask({ type: 'inspect', file: f.file }).then(function (m) {
+      var info = m.info;
+      f.info = info;
+      if (!info.encrypted) {
+        f.status = 'plain';
+        f.mood = '';
+        f.text = 'Not protected: no password and no restrictions, so there is nothing to remove.';
+      } else if (info.emptyOwner || (info.emptyUser && !info.restrictions.length)) {
+        // A blank permissions password, or encryption that guards nothing (no open password and
+        // no restrictions): there is nothing to ask for.
+        f.auto = true;
+        return unlockFile(f, '');
+      } else if (info.emptyUser) {
+        f.status = 'restricted';
+        f.mood = '';
+        f.text = 'Opens without a password. To remove the restrictions, type its permissions password.';
+      } else {
+        f.status = 'needs-open';
+        f.mood = '';
+        f.text = 'Needs the password that opens it.';
+      }
+      if (info.signed && f.status !== 'plain') f.note = 'It is digitally signed: the signature will not validate in an unlocked copy, so keep the original.';
+    }, function (err) { failText(f, err); });
+  }
+
+  function unlockFile(f, password) {
+    // A file that opens without a password, or whose open password is already removed, only
+    // gains from its permissions password.
+    var ownerOnly = !!((f.info.emptyUser && f.info.restrictions.length) || f.prevKept);
+    f.status = 'working';
+    return ask({ type: 'unlock', file: f.file, password: password, ownerOnly: ownerOnly }).then(function (m) {
+      var r = m.result;
+      if (r.access && r.blob) { describeOutput(f, r); return true; }
+      f.status = f.info.emptyUser ? 'restricted' : 'needs-open';
+      if (f.prevKept) f.status = 'kept';
+      f.mood = '';
+      f.text = f.status === 'needs-open' ? 'That password does not open this file.' :
+        'That is not its permissions password, so the restrictions stay.' + (f.status === 'kept' ? ' The open password is already removed.' : '');
+      return false;
+    }, function (err) { failText(f, err); return false; });
+  }
+
+  // ---------- adding files ----------
+  function addFiles(list) {
+    var all = Array.prototype.slice.call(list || []);
+    if (!all.length) return;
+    setError('');
+    var room = MAX_FILES - files.length;
+    if (room <= 0) { setError('The list holds up to ' + MAX_FILES + ' files. Clear it to add more.'); return; }
+    if (all.length > room) { setError('Only the first ' + plural(room, 'file was', 'files were') + ' added: the list holds up to ' + MAX_FILES + '.'); all = all.slice(0, room); }
+    var added = [];
+    all.forEach(function (file) {
+      var f = { id: nextId++, file: file, name: file.name || 'document.pdf', size: file.size, status: 'checking', text: 'Checking…', mood: '' };
+      files.push(f);
+      if (file.size > MAX_FILE) { f.status = 'error'; f.mood = 'bad'; f.text = 'Larger than 1 GB, which is too big to unlock in a browser.'; }
+      else if (!file.size) { f.status = 'error'; f.mood = 'bad'; f.text = 'This file is empty.'; }
+      else added.push(f);
+      if (file.size > BIG_FILE && file.size <= MAX_FILE) f.note = 'A large file is unlocked in your device’s memory, which can fail on a phone.';
+      row(f);
+    });
+    refreshUi();
+    say(plural(all.length, 'file', 'files') + ' added. Checking…', true);
+    var chain = Promise.resolve(), gen = generation;
+    added.forEach(function (f) {
+      chain = chain.then(function () {
+        if (gen !== generation) return;
+        return f.file.slice(0, 1024).arrayBuffer().then(function (head) {
+          if (!isPdf(head)) { f.status = 'error'; f.mood = 'bad'; f.text = 'This is not a PDF file.'; return; }
+          return inspectFile(f);
+        }, function () { failText(f, { code: 'GONE' }); });
+      }).then(function () { if (gen === generation) { row(f); refreshUi(); } });
+    });
+    var done = chain.then(function () {
+      if (gen !== generation) return;
+      refreshUi();
+      say(summary(), true);
+      if (!unlockBox.hidden && document.activeElement !== pwIn && (document.activeElement === document.body || root.contains(document.activeElement))) pwIn.focus();
+    });
+    checks = Promise.all([checks, done]).then(function () {}, function () {});
+    return done;
+  }
+
+  function summary() {
+    var c = new Map([['needs-open', 0], ['restricted', 0], ['done', 0], ['kept', 0], ['plain', 0], ['bad', 0]]);
+    files.forEach(function (f) {
+      var k = f.status === 'unsupported' || f.status === 'error' ? 'bad' : f.status;
+      if (c.has(k)) c.set(k, c.get(k) + 1);
+    });
+    var parts = [], n;
+    if ((n = c.get('done'))) parts.push(plural(n, 'file is', 'files are') + ' unlocked');
+    if ((n = c.get('kept'))) parts.push(plural(n, 'file has', 'files have') + ' the open password removed but restrictions kept');
+    if ((n = c.get('needs-open'))) parts.push(plural(n, 'file needs', 'files need') + ' a password to open');
+    if ((n = c.get('restricted'))) parts.push(plural(n, 'file needs', 'files need') + ' the permissions password to lift restrictions');
+    if ((n = c.get('plain'))) parts.push(plural(n, 'file is', 'files are') + ' not protected');
+    c = { bad: c.get('bad') };
+    if (c.bad) parts.push(plural(c.bad, 'file cannot', 'files cannot') + ' be unlocked here');
+    if (!parts.length) return '';
+    var s = parts.join(', ');
+    return s.charAt(0).toUpperCase() + s.slice(1) + '.';
+  }
+
+  // ---------- unlocking with the typed password ----------
+  function showPwError(t) {
+    pwErr.textContent = t || '';
+    if (t) pwIn.setAttribute('aria-invalid', 'true'); else pwIn.removeAttribute('aria-invalid');
+  }
+  function unlockAll() {
+    if (busy || !files.some(needsPassword)) return;
+    var pw = pwIn.value;
+    if (!pw) { showPwError('Type the password first.'); pwIn.focus(); say('Type the password first.', true); return; }
+    showPwError('');
+    busy = true;
+    refreshUi();
+    // Files still being checked share the password too: wait for them, then unlock every one.
+    return checks.then(function () { return unlockTargets(pw); });
+  }
+  function unlockTargets(pw) {
+    var targets = files.filter(needsPassword);
+    if (!targets.length) { busy = false; refreshUi(); return; }
+    targets.forEach(function (f) { f.prevKept = f.status === 'kept'; f.status = 'working'; f.text = 'Unlocking…'; f.mood = ''; row(f); });
+    refreshUi();
+    say('Unlocking ' + plural(targets.length, 'file', 'files') + '…');
+    var ok = 0, chain = Promise.resolve();
+    targets.forEach(function (f) {
+      chain = chain.then(function () { return unlockFile(f, pw); }).then(function (done) { if (done) ok++; f.prevKept = false; row(f); refreshUi(); });
+    });
+    return chain.then(function () {
+      busy = false;
+      refreshUi();
+      if (!ok) {
+        showPwError(targets.length === 1 ? 'That password does not unlock this file. Check it, or ask whoever sent the file.' :
+          'That password does not unlock any of these files. Check it, or ask whoever sent them.');
+        pwIn.focus();
+        pwIn.select();
+        say(pwErr.textContent, true);
+      } else {
+        say((ok === targets.length ? (ok === 1 ? 'Unlocked.' : 'All ' + ok + ' files unlocked.') : 'Unlocked ' + ok + ' of ' + targets.length + ' files.') + ' ' + summary(), true);
+        if (unlockBox.hidden || !files.some(needsPassword)) {
+          var first = files.filter(function (f) { return f.output; })[0];
+          if (files.filter(function (f) { return f.output; }).length > 1) zipBtn.focus(); else if (first) first.btn.focus();
+        }
+      }
+    });
+  }
+
+  var zipBusy = false;
+  function downloadZip() {
+    var outs = files.filter(function (f) { return f.output; });
+    if (outs.length < 2 || zipBusy || busy) return;
+    zipBusy = true;
+    window.TTZip.create(outs.map(function (f) { return { name: f.output.name, data: f.output.blob }; }), { compress: 'store' })
+      .then(function (blob) { TT.download('unlocked-pdfs.zip', blob); say('Saved ' + outs.length + ' unlocked PDFs in one ZIP file.'); },
+        function (err) { setError(err && err.message || 'The ZIP file could not be made.'); })
+      .then(function () { setTimeout(function () { zipBusy = false; }, 800); });
+  }
+
+  function clearAll() {
+    if (busy) return;
+    files.forEach(function (f) { if (f.el) f.el.remove(); });
+    files = [];
+    generation++;
+    stopWorker({ code: 'CLEARED' });
+    pwIn.value = '';
+    showPwError('');
+    setError('');
+    lastSaid = '';
+    refreshUi();
+    say('The list is empty.');
+    $('#ul-choose').focus();
+  }
+
+  // ---------- events ----------
+  $('#ul-choose').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () { var l = fileInput.files; addFiles(l); fileInput.value = ''; });
+  goBtn.addEventListener('click', unlockAll);
+  zipBtn.addEventListener('click', downloadZip);
+  clearBtn.addEventListener('click', clearAll);
+  pwIn.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); unlockAll(); }
+  });
+  pwIn.addEventListener('input', function () {
+    // A PDF uses at most 127 bytes of a password; a pasted megabyte stops at the field's limit.
+    if (pwIn.value.length > 1024) {
+      var end = 1024, c = pwIn.value.charCodeAt(end - 1);
+      if (c >= 0xD800 && c <= 0xDBFF) end--;
+      pwIn.value = pwIn.value.slice(0, end);
+    }
+    if (pwErr.textContent) showPwError('');
+  });
+  // Caps Lock is shown while the box has focus and the key is on; it is a common reason for a
+  // "wrong" password.
+  function caps(e) {
+    var on = !!(e.getModifierState && e.getModifierState('CapsLock'));
+    var t = on ? 'Caps Lock is on.' : '';
+    if (capsEl.textContent !== t) capsEl.textContent = t;
+  }
+  pwIn.addEventListener('keydown', caps);
+  pwIn.addEventListener('keyup', caps);
+  pwIn.addEventListener('blur', function () { capsEl.textContent = ''; });
+  showBtn.addEventListener('click', function () {
+    var show = pwIn.type === 'password';
+    pwIn.type = show ? 'text' : 'password';
+    showBtn.setAttribute('aria-pressed', show ? 'true' : 'false');
+  });
+
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1; }
+  document.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropZone.classList.add('is-over');
+  });
+  document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) dropZone.classList.remove('is-over'); });
+  document.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropZone.classList.remove('is-over');
+    addFiles(e.dataTransfer.files);
+  });
+  {% endraw %}
+})();
+</script>
