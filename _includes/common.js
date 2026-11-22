@@ -195,6 +195,30 @@
     if (e.key === 'Tab') checkScrollers();
   }, true);
 
+  // Chrome on Android moves a slider's thumb to where a finger lands as soon as
+  // the touch starts, and keeps that value when the browser then takes the
+  // touch over to scroll the page. A swipe that only meant to scroll would
+  // silently change a quality, tempo or volume, so when a touch on a slider ends
+  // in pointercancel (the browser scrolled), the value it had before comes
+  // back. A drag along the slider and a plain tap end in pointerup and keep
+  // their value.
+  var heldSlider = null, heldValue = '';
+  document.addEventListener('pointerdown', function (e) {
+    var t = e.target;
+    heldSlider = e.pointerType === 'touch' && t instanceof HTMLInputElement && t.type === 'range' ? t : null;
+    if (heldSlider) heldValue = heldSlider.value;
+  }, true);
+  document.addEventListener('pointercancel', function () {
+    var t = heldSlider;
+    heldSlider = null;
+    if (t && t.value !== heldValue) {
+      t.value = heldValue;
+      t.dispatchEvent(new Event('input', { bubbles: true }));
+      t.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }, true);
+  document.addEventListener('pointerup', function () { heldSlider = null; }, true);
+
   window.TT = {
     $: function (sel, root) { return (root || document).querySelector(sel); },
     $$: all,
