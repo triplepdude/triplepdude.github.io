@@ -1147,11 +1147,17 @@ faq:
     pipEls.root.classList.toggle('is-ringing', st.ringing);
   }
   function pipFrame() { if (!pip) return; paintPip(); pip.requestAnimationFrame(pipFrame); }
-  pipBtn.addEventListener('click', function () {
+  // The second click of a double click, or a click while the window is still
+  // opening, must not close the window just opened or ask for another one.
+  var pipOpening = false;
+  pipBtn.addEventListener('click', function (e) {
+    if (e.detail > 1 || pipOpening) return;
     if (pip) { pip.close(); return; }
     var req;
+    pipOpening = true;
     try { req = window.documentPictureInPicture.requestWindow({ width: 300, height: 190 }); } catch (err) { req = Promise.reject(err); }
     req.then(function (w) {
+      pipOpening = false;
       pip = w;
       var d = w.document;
       d.title = 'Focus timer';
@@ -1180,6 +1186,7 @@ faq:
       say('Mini timer open.');
       pipFrame();
     }, function (err) {
+      pipOpening = false;
       showMsg('The mini timer could not open' + (err && err.message ? ': ' + err.message : '.'));
     });
   });
