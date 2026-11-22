@@ -824,7 +824,9 @@ async function siteChecks(browser, base, problems) {
 function failureText(e) {
   if (!e || !e.stack) return String(e);
   const lines = e.stack.split('\n');
-  const head = lines.slice(0, 4);
+  // The whole message, which for a failed deepEqual is a diff over several
+  // lines (up to 40 of them are kept), then three frames.
+  const head = lines.slice(0, Math.min(String(e.message).split('\n').length, 40) + 3);
   const at = lines.find(l => /^\s*at .*[\\/]tests[\\/]tools[\\/]/.test(l)) ||
     lines.find(l => /^\s*at .*[\\/]tests[\\/]run\.js:/.test(l));
   if (at && !head.includes(at)) head.push(at);

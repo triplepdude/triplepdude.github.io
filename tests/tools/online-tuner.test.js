@@ -1,5 +1,9 @@
-// getUserMedia is stubbed with a stream from an OscillatorNode in a second
-// AudioContext, so the tuner hears exact, known frequencies. Expected values
+// getUserMedia is stubbed with a silent stream, and where the page brings that
+// stream into its audio context (createMediaStreamSource) it gets an
+// OscillatorNode made in that same context instead, so the tuner hears exact,
+// known frequencies. (A tone from a second context, passed over as a stream, is
+// resampled on the way as the two contexts' clocks drift apart; on a busy
+// machine that bent its pitch by up to 9 cents for a moment.) Expected values
 // were computed in python3 with f = A4 * 2 ** ((midi - 69) / 12) and
 // cents = 1200 * log2(f / target):
 //   E2 82.4069, A2 110, D3 146.8324, G3 195.9977, E4 329.6276, B0 30.8677,
@@ -41,13 +45,20 @@ module.exports = async ({ page, open, assert, base }) => {
     navigator.mediaDevices.getUserMedia = async c => {
       window.__gum.push(JSON.parse(JSON.stringify(c)));
       if (window.__gumFail) throw new DOMException(window.__gumFail[1], window.__gumFail[0]);
+      // A real audio track, so that the page stopping it can be checked; it stays silent.
       const ac = new AudioContext();
       ac.__gen = true;
+      const stream = ac.createMediaStreamDestination().stream;
+      stream.__fake = true;
+      return stream;
+    };
+    const streamSource = AudioContext.prototype.createMediaStreamSource;
+    AudioContext.prototype.createMediaStreamSource = function (stream) {
+      if (!stream || !stream.__fake) return streamSource.apply(this, arguments);
+      const ac = this, out = new GainNode(ac, { gain: 1 });
       const osc = new OscillatorNode(ac, { type: 'sine', frequency: 440 });
       const g = new GainNode(ac, { gain: 0.3 });
-      const dest = ac.createMediaStreamDestination();
-      osc.connect(g).connect(dest);
-      osc.start();
+      osc.connect(g).connect(out);
       // White noise (fixed seed) that can be mixed in.
       const nb = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate), d = nb.getChannelData(0);
       // xorshift32: a full-period generator. (A 32-bit LCG computed with JS
@@ -56,10 +67,13 @@ module.exports = async ({ page, open, assert, base }) => {
       let seed = 0x9E3779B9;
       for (let i = 0; i < d.length; i++) { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; d[i] = (seed >>> 0) / 2147483648 - 1; }
       const noise = new AudioBufferSourceNode(ac, { buffer: nb, loop: true }), ng = new GainNode(ac, { gain: 0 });
-      noise.connect(ng).connect(dest);
-      noise.start();
-      window.__gen = { ac, osc, g, ng, stream: dest.stream };
-      return dest.stream;
+      noise.connect(ng).connect(out);
+      // Started past the hook above: these are the microphone, not sounds of the page's own.
+      sStart.call(osc);
+      sStart.call(noise);
+      if (window.__gen) { sStop.call(window.__gen.osc); sStop.call(window.__gen.noise); }
+      window.__gen = { ac, osc, g, ng, noise, out, stream };
+      return out;
     };
   });
   await open();
@@ -171,6 +185,37 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.equal(await page.$eval('#otn-gauge', g => g.classList.contains('is-good')), true);
   await page.waitForFunction(() => document.getElementById('otn-status').textContent === 'A2, in tune', null, { timeout: 4000 });
   assert.match(await text('#otn-level'), /^−(9|1\d)$/); // 0.3 amplitude sine: 20*log10(0.3/sqrt(2)) = -13.5 dBFS
+  // Dropouts: a browser that falls behind with the microphone's sound plays
+  // silence until it catches up, so 10 ms of silence is inserted into the note.
+  // Read through, that pulled A2 up to 13 cents flat for as long as the gap
+  // stayed in the 85 ms analysis window; such windows now give no reading.
+  // The note comes from a looped one-second buffer here (110 Hz fits it a whole
+  // number of times), which can stop and carry on from where it stopped.
+  const aroundGaps = await page.evaluate(async () => {
+    const { ac, out, g } = window.__gen;
+    const buf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = 0.3 * Math.sin(2 * Math.PI * 110 * i / ac.sampleRate);
+    let src = new AudioBufferSourceNode(ac, { buffer: buf, loop: true }), at = ac.currentTime + 0.02;
+    src.connect(out);
+    src.start(at);
+    g.gain.setValueAtTime(0, at);
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    await wait(900); // the switch from the oscillator is itself a jump
+    const seen = [];
+    for (let k = 0; k < 6; k++) {
+      const t = ac.currentTime + 0.03, offset = (t - at) % 1, next = new AudioBufferSourceNode(ac, { buffer: buf, loop: true });
+      src.stop(t);
+      next.connect(out);
+      next.start(t + 0.01, offset);
+      src = next; at = t + 0.01 - offset;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 500) { seen.push(document.getElementById('otn-off').textContent); await wait(20); }
+    }
+    src.stop();
+    g.gain.setValueAtTime(0.3, ac.currentTime);
+    return seen;
+  });
+  assert.ok(aroundGaps.every(o => o === '0'), `offsets shown around six 10 ms dropouts: ${[...new Set(aroundGaps)].join(' ')}`);
 
   await setTone(329.63);
   await expectNote('E', 4, 0);
