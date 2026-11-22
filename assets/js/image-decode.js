@@ -84,7 +84,8 @@
  *   GIF keeps up to 256 colours exactly, else a median-cut palette with
  *   Floyd-Steinberg dithering, and pixels under half opacity become transparent.
  *   Rejects like decode().
- * TTImage.resize(canvasOrImage, width, height) -> canvas   (on the page)
+ * TTImage.resize(canvasOrImage, width, height) -> canvas   (on the page); throws
+ *   TOO_BIG where a canvas it needs is over this browser's size limit.
  * TTImage.exif.orientation(tiffBytes), TTImage.exif.prepare(tiffBytes, {width,
  *   height, stripGps})   the EXIF helpers encode() uses.
  * TTImage.svg.info(text) -> { width, height, from, viewBox, notes[], external,
@@ -443,6 +444,10 @@
   // after EOI (a motion photo's video, an MPF file's second image, a maker's
   // trailer, zero padding) is never taken for a cut. A file that ends with EOI,
   // as nearly all do, is not read beyond its last few kilobytes.
+  // A file that lacks only its EOI counts as cut too: Chromium leaves the last
+  // row of blocks of a baseline one blank (8 to 18 pixel rows), and a
+  // progressive one cannot be told from a file cut in its last scan, which is
+  // drawn whole but with less detail, often over a third of the file.
   async function jpegCut(blob) {
     var n = blob.size, tail = await readRange(blob, Math.max(0, n - 4096), n), k = tail.length;
     while (k > 0 && tail[k - 1] === 0) k--;
@@ -1104,13 +1109,14 @@
     return g;
   }
   // Canvases over a browser's size limit (Safari: 16.7 megapixels) stay blank instead of failing.
+  // Not only full opacity counts: a browser that adds noise to what is read back changes it a little.
   function checkUsable(c, g) {
     var x = c.width - 1, y = c.height - 1;
     g.fillStyle = '#010203';
     g.fillRect(x, y, 1, 1);
     var p = g.getImageData(x, y, 1, 1).data;
     g.clearRect(x, y, 1, 1);
-    if (p[3] !== 255) throw fail('TOO_BIG', 'The image (' + c.width + ' × ' + c.height + ' pixels) is larger than this browser can handle. Try a desktop browser.');
+    if (p[3] < 128) throw fail('TOO_BIG', 'The image (' + c.width + ' × ' + c.height + ' pixels) is larger than this browser can handle. Try a desktop browser.');
   }
   function toBlob(c, mime, q) {
     return new Promise(function (resolve) {
@@ -1133,27 +1139,69 @@
       if (c.convertToBlob) return c.convertToBlob({ type: type, quality: q });
       return new Promise(function (resolve) { c.toBlob(resolve, type, q); });
     }
+    // The context of a canvas this browser can draw on, else null. One over its
+    // size limit (Safari: 16.7 or 67 megapixels) stays blank instead of failing,
+    // so the far corner is written and read back (as on the page: checkUsable).
+    function drawable(c) {
+      var g = c.getContext('2d'), x = c.width - 1, y = c.height - 1, ok = false;
+      if (g) {
+        g.fillStyle = '#010203';
+        g.fillRect(x, y, 1, 1);
+        ok = g.getImageData(x, y, 1, 1).data[3] >= 128;
+        g.clearRect(x, y, 1, 1);
+      }
+      if (!ok) c.width = 0;
+      return ok ? g : null;
+    }
     // Halve while the image is at least twice too big, then one smooth draw:
-    // a single big step skips pixels in some browsers.
+    // a single big step skips pixels in some browsers. TOO_BIG where a canvas
+    // on the way stays blank; e.first when it is the first half-size one,
+    // which shrink() can make another way.
     function scaled(src, w, h, bg) {
       var d = dims(src), cur = src, cw = d[0], ch = d[1];
-      while (cw >= w * 2 && ch >= h * 2) {
-        cw = Math.max(w, Math.floor(cw / 2));
-        ch = Math.max(h, Math.floor(ch / 2));
-        var half = make(cw, ch), hg = ctx(half);
-        hg.imageSmoothingEnabled = true;
-        hg.imageSmoothingQuality = 'high';
-        hg.drawImage(cur, 0, 0, cw, ch);
+      try {
+        while (cw >= w * 2 && ch >= h * 2) {
+          cw = Math.max(w, Math.floor(cw / 2));
+          ch = Math.max(h, Math.floor(ch / 2));
+          var half = make(cw, ch), hg = drawable(half);
+          if (!hg) throw Object.assign(err('TOO_BIG'), { first: cur === src });
+          hg.imageSmoothingEnabled = true;
+          hg.imageSmoothingQuality = 'high';
+          hg.drawImage(cur, 0, 0, cw, ch);
+          if (cur !== src) cur.width = 0;
+          cur = half;
+        }
+        var out = make(w, h), g = drawable(out);
+        if (!g) throw err('TOO_BIG');
+        if (bg) { g.fillStyle = bg; g.fillRect(0, 0, w, h); }
+        g.imageSmoothingEnabled = true;
+        g.imageSmoothingQuality = 'high';
+        if (cw === w && ch === h) g.drawImage(cur, 0, 0); else g.drawImage(cur, 0, 0, w, h);
+        return out;
+      } finally {
         if (cur !== src) cur.width = 0;
-        cur = half;
       }
-      var out = make(w, h), g = ctx(out);
-      if (bg) { g.fillStyle = bg; g.fillRect(0, 0, w, h); }
-      g.imageSmoothingEnabled = true;
-      g.imageSmoothingQuality = 'high';
-      if (cw === w && ch === h) g.drawImage(cur, 0, 0); else g.drawImage(cur, 0, 0, w, h);
-      if (cur !== src) cur.width = 0;
-      return out;
+    }
+    // scaled(), except that where the first half-size canvas is over the limit
+    // (a source over four times it), createImageBitmap's own resize makes that
+    // step, without a canvas. TOO_BIG where that fails too.
+    async function shrink(src, w, h, bg) {
+      var cur = src;
+      try {
+        for (;;) {
+          try { return scaled(cur, w, h, bg); } catch (e) {
+            if (!e.first || typeof createImageBitmap !== 'function') throw e;
+          }
+          var d = dims(cur), cw = Math.max(w, Math.floor(d[0] / 2)), ch = Math.max(h, Math.floor(d[1] / 2)), next = null;
+          try { next = await createImageBitmap(cur, { resizeWidth: cw, resizeHeight: ch, resizeQuality: 'high' }); } catch (e) { next = null; }
+          if (cur !== src) cur.close();
+          cur = next;
+          // A browser that ignores the size options gives the full size back.
+          if (!cur || cur.width !== cw || cur.height !== ch) throw err('TOO_BIG');
+        }
+      } finally {
+        if (cur && cur !== src) cur.close();
+      }
     }
     async function bmp(c, dpi) {
       var w = c.width, h = c.height, row = (w * 3 + 3) & ~3, size = 54 + row * h, ppm = Math.round((dpi || 96) / 0.0254);
@@ -1424,7 +1472,7 @@
       for (var i = 0; i < sizes.length; i++) {
         var s = sizes[i], k = Math.min(s / d[0], s / d[1]);
         var dw = Math.max(1, Math.round(d[0] * k)), dh = Math.max(1, Math.round(d[1] * k));
-        var fit = scaled(src, dw, dh), c = make(s, s);
+        var fit = await shrink(src, dw, dh), c = make(s, s);
         ctx(c).drawImage(fit, Math.floor((s - dw) / 2), Math.floor((s - dh) / 2));
         fit.width = 0;
         var b = await blobOf(c, 'image/png');
@@ -1461,7 +1509,7 @@
       },
       encode: async function (src, o) {
         if (o.fmt === 'ico') return ico(src, o.sizes);
-        var c = scaled(src, o.width, o.height, o.background);
+        var c = await shrink(src, o.width, o.height, o.background);
         try {
           if (o.fmt === 'bmp') return await bmp(c, o.dpi);
           if (o.fmt === 'tiff') return await tiff(c, o.dpi);
@@ -1500,7 +1548,13 @@
     } catch (e) { return false; }
   })();
   function isBitmap(x) { return typeof ImageBitmap !== 'undefined' && x instanceof ImageBitmap; }
-  function resize(src, w, h) { return pageOps.scaled(src && src.bitmap ? src.bitmap : src, Math.max(1, Math.round(w)), Math.max(1, Math.round(h))); }
+  function resize(src, w, h) {
+    try {
+      return pageOps.scaled(src && src.bitmap ? src.bitmap : src, Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
+    } catch (e) {
+      throw e.code === 'TOO_BIG' ? fail('TOO_BIG', 'The image is too large for this browser to resize here. Try a desktop browser.') : e;
+    }
+  }
 
   // Pixel work on an image held by a worker (res._h), or on a canvas/bitmap on
   // the page: in a worker when possible (a transferred copy), else right here.
@@ -1992,7 +2046,10 @@
         throw fail('CORRUPT', AVIF_BAD);
       }
     }
-    if (inWorker && !lazy && !canvas) canvas = await toCanvas(res);
+    if (inWorker && !lazy && !canvas) {
+      // Where the page cannot draw it (TOO_BIG), the worker's copy is freed: the caller gets no result to release.
+      try { canvas = await toCanvas(res); } catch (e) { release(res); throw e; }
+    }
     return res;
   }
   // An ImageBitmap of any drawable; a partly loaded <img> needs a canvas in between.
@@ -2012,10 +2069,10 @@
     if (!res) throw fail('CORRUPT', 'There is no image.');
     var d = Object.getOwnPropertyDescriptor(res, 'canvas');
     if (!res._h) return d && d.get ? res.canvas : res;
-    var r = await runOn(res._h.w, { cmd: 'get', key: res._h.key });
+    var r = await runOn(res._h.w, { cmd: 'get', key: res._h.key }), c;
     if (!r.ok) throw fail('CORRUPT', 'This image was already released. Open the file again.');
-    var c = drawCanvas(r.bitmap, res.width, res.height);
-    r.bitmap.close();
+    // The full-size copy is closed at once, also where it is too big to draw (TOO_BIG).
+    try { c = drawCanvas(r.bitmap, res.width, res.height); } finally { r.bitmap.close(); }
     if (res._setCanvas) res._setCanvas(c);
     return c;
   }

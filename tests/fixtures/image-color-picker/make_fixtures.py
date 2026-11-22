@@ -5,6 +5,9 @@ Colour values are worked out with exact fractions and rounded half up; the conve
 values of the Display P3 test image come from littleCMS (Pillow's ImageCms), a
 different colour engine from the browser's. p3.icc is a copy of
 tests/fixtures/image-to-pdf/p3.icc ("Display P3 (test)").
+The files the decoder warns about are copies: cut.jpg (ends 40% into its scan data) from
+tests/fixtures/jpg-to-png/, pq.avif (HDR, PQ) from tests/fixtures/avif-to-jpg/ and
+hdr-pq.heic (HDR, PQ; libheif decodes it) from tests/fixtures/heic-to-jpg/.
 """
 import io
 import json

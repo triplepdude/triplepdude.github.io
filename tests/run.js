@@ -25,8 +25,9 @@
  * icon and theme colours in the head, reduced motion, keyboard scrolling of a
  * guide table that is too wide for a phone, a long line in a guide's code
  * block on a phone (on a sample page that only a full run builds), the
- * time a paste over a long text takes on Word Counter, and a link to a quoted
- * FAQ answer on a page without a text box.
+ * time a paste over a long text takes on Word Counter, a link to a quoted
+ * FAQ answer on a page without a text box, and the shared image decoder
+ * with a canvas size limit like Safari's.
  *
  * Needs `jekyll` (or $JEKYLL) and the `playwright` package on the module path.
  */
@@ -380,6 +381,110 @@ async function quotedAnswerOpens(page, base, slugs, problems) {
   if (!opened) problems.push(`${p}: a link to a quoted FAQ answer (#:~:text=${info.quote}) did not open the closed item; only pages with a text box should hide closed <details> with display: none`);
 }
 
+// Safari leaves a canvas over its size limit (16.7 or 67 megapixels) blank
+// instead of failing. With such a limit emulated on the page and in the
+// workers of the shared image decoder (assets/js/image-decode.js), a picture
+// over four times the limit must still give right scaled copies, a file too
+// big to draw must fail with TOO_BIG instead of being saved blank, and the
+// full-size copies of a picture the page cannot draw must be let go at once.
+const CANVAS_LIMIT = 4.2e6;
+function emulateCanvasLimit() {
+  // A 2D canvas over self.canvasLimit pixels draws nowhere and reads back transparent.
+  const shim = () => {
+    for (const C of [self.HTMLCanvasElement, self.OffscreenCanvas]) {
+      if (!C) continue;
+      const real = C.prototype.getContext;
+      C.prototype.getContext = function (type, options) {
+        if (!self.canvasLimit || type !== '2d' || this.width * this.height <= self.canvasLimit) return real.call(this, type, options);
+        const elsewhere = C === self.OffscreenCanvas ? new OffscreenCanvas(1, 1) : Object.assign(document.createElement('canvas'), { width: 1, height: 1 });
+        return real.call(elsewhere, type, options);
+      };
+    }
+  };
+  shim();
+  // Each new worker gets the limit too; what is closed or sent to a worker is logged.
+  self.closedBitmaps = [];
+  self.workerJobs = [];
+  const close = ImageBitmap.prototype.close;
+  ImageBitmap.prototype.close = function () { if (this.width) self.closedBitmaps.push(`${this.width}x${this.height}`); return close.call(this); };
+  const RealWorker = self.Worker, post = RealWorker.prototype.postMessage;
+  RealWorker.prototype.postMessage = function (m, transfer) { if (m && m.cmd) self.workerJobs.push(`${m.cmd}:${m.key}`); return post.call(this, m, transfer); };
+  self.Worker = function (url, options) {
+    if (self.canvasLimit && typeof url === 'string' && url.startsWith('blob:') && !(options && options.type === 'module')) {
+      url = URL.createObjectURL(new Blob([`self.canvasLimit = ${self.canvasLimit}; (${shim})(); importScripts(${JSON.stringify(url)});`], { type: 'text/javascript' }));
+    }
+    return new RealWorker(url, options);
+  };
+  self.Worker.prototype = RealWorker.prototype;
+}
+
+async function canvasLimitChecks(browser, base, problems) {
+  const { context, page } = await newPage(browser, base, { width: 1280, height: 900 }, problems);
+  await context.addInitScript(emulateCanvasLimit);
+  await page.goto(base + '/404.html', { waitUntil: 'load' });
+  await page.addScriptTag({ url: '/assets/js/image-decode.js' });
+  const r = await page.evaluate(async limit => {
+    // 4200 x 4200 pixels (17.6 megapixels) in four colours, drawn before the limit is on.
+    const N = 4200, colours = [[220, 30, 30], [30, 180, 40], [30, 60, 220], [240, 210, 20]];
+    const c = Object.assign(document.createElement('canvas'), { width: N, height: N }), g = c.getContext('2d');
+    colours.forEach((rgb, i) => { g.fillStyle = `rgb(${rgb})`; g.fillRect((i % 2) * N / 2, (i >> 1) * N / 2, N / 2, N / 2); });
+    const file = new File([await new Promise(done => c.toBlob(done, 'image/png'))], 'quarters.png', { type: 'image/png' });
+    c.width = 0;
+    self.canvasLimit = limit;
+    const outcome = async f => { try { return { value: await f() }; } catch (e) { return { code: e.code || String(e) }; } };
+    // Whether an encoded picture shows the four colours, with no pixel transparent.
+    const right = async blob => {
+      const bm = await createImageBitmap(blob), w = bm.width, h = bm.height;
+      const cv = Object.assign(document.createElement('canvas'), { width: w, height: h }), cg = cv.getContext('2d');
+      cg.drawImage(bm, 0, 0);
+      bm.close();
+      const d = cg.getImageData(0, 0, w, h).data;
+      for (let i = 3; i < d.length; i += 4) if (d[i] < 255) return false;
+      return colours.every((rgb, i) => {
+        const p = cg.getImageData(Math.floor(((i % 2) * 2 + 1) * w / 4), Math.floor(((i >> 1) * 2 + 1) * h / 4), 1, 1).data;
+        return rgb.every((v, k) => Math.abs(p[k] - v) <= 4);
+      });
+    };
+    const out = {};
+    const res = await outcome(() => TTImage.decode(file, { canvas: false }));
+    if (!res.value) return { decoded: res.code };
+    out.png = await outcome(async () => right(await TTImage.encode(res.value, 'png', { width: 600, height: 600 })));
+    out.ico = await outcome(async () => {
+      const b = new Uint8Array(await (await TTImage.encode(res.value, 'ico', { icoSizes: [256] })).arrayBuffer()), dv = new DataView(b.buffer);
+      return right(new Blob([b.subarray(dv.getUint32(18, true), dv.getUint32(18, true) + dv.getUint32(14, true))], { type: 'image/png' }));
+    });
+    out.bmp = await outcome(async () => (await TTImage.encode(res.value, 'bmp')).size);
+    TTImage.release(res.value);
+    // The page cannot draw it: decode() with a canvas, and toCanvas().
+    closedBitmaps.length = workerJobs.length = 0;
+    out.decode = await outcome(() => TTImage.decode(file));
+    const key = (workerJobs.find(j => j.startsWith('native:')) || '').slice(7);
+    out.decodeFreed = workerJobs.includes(`free:${key}`);
+    out.decodeClosed = closedBitmaps.includes(`${N}x${N}`);
+    const lazy = await TTImage.decode(file, { canvas: false });
+    closedBitmaps.length = 0;
+    out.toCanvas = await outcome(() => TTImage.toCanvas(lazy));
+    out.toCanvasClosed = closedBitmaps.includes(`${N}x${N}`);
+    TTImage.release(lazy);
+    const bm = await createImageBitmap(file);
+    out.resize = await outcome(() => TTImage.resize(bm, 600, 600));
+    bm.close();
+    return out;
+  }, CANVAS_LIMIT);
+  await context.close();
+  const where = `assets/js/image-decode.js, with a canvas size limit like Safari's (here ${CANVAS_LIMIT / 1e6} megapixels) and a 4200 x 4200 picture`;
+  if (r.decoded) { problems.push(`${where}: decode({ canvas: false }) failed (${r.decoded}), so the limit is not tested`); return; }
+  for (const k of ['png', 'ico']) {
+    if (r[k].value !== true) problems.push(`${where}: a ${k === 'png' ? '600 x 600 PNG' : '256 x 256 ICO'} copy ${r[k].code ? `failed (${r[k].code})` : 'came out blank or wrong'}: the first half-size step is over the limit and must be made without a canvas`);
+  }
+  if (r.bmp.code !== 'TOO_BIG') problems.push(`${where}: a full-size BMP ${r.bmp.code ? `failed with ${r.bmp.code}` : 'was saved blank'} instead of failing with TOO_BIG`);
+  if (r.decode.code !== 'TOO_BIG') problems.push(`${where}: decode() with a canvas gave ${r.decode.code || 'a result'}, expected TOO_BIG`);
+  else if (!r.decodeFreed || !r.decodeClosed) problems.push(`${where}: decode() failed with TOO_BIG but ${!r.decodeFreed ? 'left the picture in its worker' : 'did not close its full-size copy on the page'}`);
+  if (r.toCanvas.code !== 'TOO_BIG') problems.push(`${where}: toCanvas() gave ${r.toCanvas.code || 'a canvas'}, expected TOO_BIG`);
+  else if (!r.toCanvasClosed) problems.push(`${where}: toCanvas() failed with TOO_BIG but did not close its full-size copy`);
+  if (r.resize.code !== 'TOO_BIG') problems.push(`${where}: resize() to 600 x 600 gave ${r.resize.code || 'a canvas (blank)'}, expected TOO_BIG`);
+}
+
 // Checks of the shared pages and files, run once on a full build.
 async function siteChecks(browser, base, problems) {
   const slugs = fs.readdirSync(path.join(ROOT, '_tools')).map(f => f.replace(/\.(html|md)$/, ''));
@@ -578,6 +683,7 @@ async function siteChecks(browser, base, problems) {
 
   await pasteOverLongText(page, base, problems);
   await quotedAnswerOpens(page, base, slugs, problems);
+  await canvasLimitChecks(browser, base, problems);
 
   // About and Privacy agree on whether the site shows ads, and the ad-blocker
   // promise only appears when there are ads.
