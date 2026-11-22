@@ -77,9 +77,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   }));
   // Once nothing is due to sound, the audio is suspended. The check runs on
   // the page's test clock and reads the audio clock, which runs in real time.
+  // Steps of 640 ms, a whole number of the test clock's 16 ms frames, keep
+  // its frames where they were however many steps it takes (a timer below
+  // must not end exactly on a frame).
   const ctxState = () => page.evaluate(() => window.__master ? window.__master.context.state : 'none');
   const untilSuspended = async () => {
-    for (let i = 0; i < 60 && await ctxState() !== 'suspended'; i++) { await page.clock.runFor(600); await page.waitForTimeout(20); }
+    for (let i = 0; i < 60 && await ctxState() !== 'suspended'; i++) { await page.clock.runFor(640); await page.waitForTimeout(20); }
     return ctxState();
   };
   const untilRunning = () => page.waitForFunction(() => window.__master && window.__master.context.state === 'running');
