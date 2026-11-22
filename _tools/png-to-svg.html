@@ -1,0 +1,1054 @@
+---
+title: "PNG to SVG Converter: Trace Images to Vectors"
+description: Convert a PNG or JPG to an SVG vector in your browser. Trace logos, black and white cut files or photos, then recolour, remove the background and save.
+category: Image & PDF
+keywords: [png to svg, vectorize image, svg converter, jpg to svg, png to vector, image to svg, png to svg for cricut, jpg to svg converter]
+howto: |
+  ## How to convert a PNG to SVG
+
+  1. Choose, drop or paste an image: PNG, JPG, WebP, GIF, BMP, TIFF, HEIC
+     or AVIF. A sample logo is traced until you do.
+  2. Say what it is: **Logo or drawing**, **Black and white** for cutting
+     machines, or **Photo**.
+  3. Set the colours, speck size and smoothness. The image is traced again
+     a moment after each change, in the background.
+  4. Drag the divider over the picture, or move the Compare slider, to check
+     the trace against the original. Zoom in to see the edges.
+  5. **Download SVG**, or **Copy SVG code** to paste it into a web page.
+
+  ## Choosing the settings
+
+  | Setting | What it does | When to raise it |
+  |---|---|---|
+  | Colours | The most colours the trace may use; close shades are merged | The logo has more inks |
+  | Speck size | Spots up to this many pixels across are dropped | Scans and JPGs |
+  | Smoothness | How far curves may stray from the pixel edges | Round shapes, not small text |
+
+  Each colour becomes one group of shapes in the SVG. The colours are
+  stacked, each on top of the ones below it, so no hairline gaps show
+  between shapes that touch. In the colour list you can change a colour or
+  remove it; to drop a background, press **Pick a colour to remove** and
+  click it. Transparent parts of a PNG stay transparent, and edge pixels that
+  are at least half opaque count as solid. Big pictures are traced at up to
+  2 megapixels (photos at 0.5); pictures under half a megapixel are first
+  enlarged 2 to 4 times, except in Photo mode, so their curves come out
+  smooth.
+
+  ## SVG cut files for Cricut and other cutting machines
+
+  Choose **Black and white**. The page splits dark from light at the
+  threshold that Otsu's method finds for your picture; move the slider to
+  change it, or tick **Invert** to cut the light parts instead. Transparent
+  parts count as white paper. Only the dark parts are drawn, as one black
+  layer, and holes such as the middle of an O stay open. A logo traced in Logo mode gives one layer per colour: as the
+  colours are stacked, each layer is a whole piece that the colours above it
+  cover. Crop away what you do not need first with
+  [Crop Image](/crop-image/).
+
+  ## JPG to SVG, and other formats
+
+  A JPG traces like a PNG, but its compression leaves speckles and soft
+  edges, so raise the speck size. It has no transparency either: a white
+  background is traced as a white shape until you remove it. For the other
+  direction, the [SVG to PNG converter](/svg-to-png/) draws an SVG at any
+  size, and the [image converter](/image-converter/) changes between bitmap
+  formats.
+
+  ## Vectorising: what an SVG converter can and cannot do
+
+  A converter that traces, like this one, redraws the outline of each area
+  of colour as lines and curves. The SVG then stays sharp at any size and
+  can be cut, but it is a new drawing, not a lossless copy: fine detail,
+  gradients and shadows become flat shapes, and text becomes outlines that
+  can no longer be edited as text. A photo can be traced in Photo mode, but
+  it needs many colours and thousands of shapes, so its SVG is often larger
+  than the JPG and slow to open.
+  A PNG that is only wrapped in an SVG file is still a grid of pixels: it is
+  not a vector, and a cutting machine cannot follow it. Tracing someone
+  else's logo does not give you the right to use it.
+faq:
+  - q: Can I convert a PNG to SVG without losing quality?
+    a: Not exactly. Tracing redraws the picture as shapes, so flat logos and lettering come out close to the original and stay sharp at any size, while gradients, shadows and photo detail are simplified. An SVG that merely wraps the PNG keeps every pixel, but it is still a bitmap that cannot be scaled or cut cleanly.
+  - q: Does the transparent background stay transparent?
+    a: Yes. Transparent areas of a PNG are left empty in the SVG, and pixels that are at least half opaque count as part of a shape, so edges do not grow. A solid background colour can be taken out with Pick a colour to remove.
+  - q: Why is my SVG blotchy or so large?
+    a: Blotches come from JPG speckles, soft edges and more colours than the picture needs. Lower Colours, raise Speck size or Smoothness, or start from a larger, sharper image. The file grows with the number of shapes, which is why photos make big files; the page warns above 5,000 shapes.
+  - q: Is my image uploaded to a server?
+    a: No. The image is read and traced by your browser on this page, in a background thread, and the SVG is made there too. Nothing is sent anywhere, and nothing is kept once you close the page.
+---
+<style>
+.p2s-pick { position: relative; margin: 0 0 16px; }
+.p2s-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.p2s-drop {
+  display: grid; place-items: center; gap: 2px; min-height: 84px; padding: 14px 16px;
+  border: 2px dashed var(--border); border-radius: 10px; background: var(--surface-2);
+  text-align: center; cursor: pointer;
+}
+.p2s-drop:hover, .p2s-drop.is-over { border-color: var(--accent); }
+.p2s-input:focus-visible + .p2s-drop { outline: 2px solid var(--accent); outline-offset: 2px; }
+.p2s-drop strong, .p2s-drop .hint { overflow-wrap: anywhere; }
+.p2s-drop strong span { color: var(--accent); text-decoration: underline; }
+.p2s-note { background: var(--surface-2); border-left: 3px solid var(--accent); color: var(--text); }
+.p2s-modes { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
+.p2s-modes legend { padding: 0; margin: 0 0 4px; }
+.p2s-set { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; margin: 0 0 12px; }
+.p2s-set .field { margin: 0; }
+.p2s-set label { display: flex; justify-content: space-between; gap: 8px; }
+.p2s-set output { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.p2s-frame { position: relative; margin: 4px 0 6px; }
+.p2s-view {
+  display: flex; overflow: auto; height: 340px; border: 1px solid var(--border); border-radius: 10px;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 20px 20px;
+  touch-action: pan-x pan-y; overscroll-behavior: contain;
+}
+.p2s-view:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.p2s-view.is-picking .p2s-stage { cursor: crosshair; }
+.p2s-stage { position: relative; flex: none; margin: auto; cursor: ew-resize; user-select: none; -webkit-user-select: none; }
+.p2s-stage > canvas, .p2s-stage > img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; -webkit-user-drag: none; }
+.p2s-stage.is-pixel > canvas { image-rendering: pixelated; }
+/* Left of the divider only the original shows, right of it only the SVG (over the checks, so its
+   transparent parts look transparent). */
+.p2s-stage > canvas { clip-path: inset(0 calc(100% - var(--cut, 50%)) 0 0); }
+.p2s-svg { clip-path: inset(0 0 0 var(--cut, 50%)); }
+.p2s-line { position: absolute; top: 0; bottom: 0; left: var(--cut, 50%); width: 2px; margin-left: -1px; background: #ffffff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); pointer-events: none; }
+.p2s-knob {
+  position: absolute; top: 50%; left: var(--cut, 50%); width: 44px; height: 44px; margin: -22px 0 0 -22px;
+  border-radius: 50%; background: #ffffff; border: 2px solid rgba(0, 0, 0, 0.6); touch-action: none; cursor: ew-resize;
+  display: grid; place-items: center; color: #111111; font-size: 18px; line-height: 1;
+}
+.p2s-view.is-picking .p2s-knob { display: none; }
+.p2s-tag { position: absolute; top: 8px; padding: 2px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.7); color: #ffffff; font-size: 13px; pointer-events: none; }
+.p2s-tag.is-l { left: 8px; }
+.p2s-tag.is-r { right: 8px; }
+.p2s-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; margin: 0 0 16px; }
+.p2s-bar .p2s-cmp { flex: 1 1 220px; margin: 0; }
+.p2s-zooms { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.p2s-zoom { min-width: 7ch; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.p2s-pal-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
+.p2s-btn-on { background: var(--accent-soft); border-color: var(--accent); }
+.p2s-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.p2s-list li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.p2s-list .p2s-hex { flex: 1 1 auto; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.p2s-list .p2s-mono { font-family: var(--mono); }
+.p2s-list .p2s-hex small { display: block; color: var(--muted); font-size: 12px; }
+#p2s-list { max-height: 360px; overflow: auto; }
+.p2s-list.is-removed li { border-style: dashed; }
+.p2s-sw { width: 28px; height: 28px; flex: none; border-radius: 6px; border: 1px solid var(--field-border); }
+.p2s-info { margin: 0 0 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.p2s-progress { margin: 0 0 12px; min-height: 1.4em; }
+.p2s-warn { background: var(--danger-soft); color: var(--text); border-left: 3px solid var(--danger); }
+.p2s-code { margin: 8px 0 0; max-height: 280px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.p2s-details summary { cursor: pointer; font-weight: 600; padding: 10px 0; }
+@media (max-width: 640px) {
+  .p2s-set { grid-template-columns: minmax(0, 1fr); }
+  .p2s-bar .p2s-cmp { flex-basis: 100%; }
+}
+</style>
+
+<div class="p2s-pick">
+  <input class="p2s-input" type="file" id="p2s-file" aria-describedby="p2s-error">
+  <label class="p2s-drop" for="p2s-file" id="p2s-drop">
+    <strong id="p2s-drop-title"><span>Choose an image</span> or drop it here</strong>
+    <span class="hint" id="p2s-drop-hint">Showing a sample logo. PNG, JPG, WebP, GIF, BMP, TIFF, HEIC or AVIF; you can also paste one with Ctrl+V.</span>
+  </label>
+</div>
+<p class="msg error" id="p2s-error" role="alert"></p>
+<p class="msg p2s-note" id="p2s-note" aria-live="polite"></p>
+
+<fieldset class="p2s-modes">
+  <legend class="label">The image is</legend>
+  <div class="checks">
+    <label class="check"><input type="radio" name="p2s-mode" value="logo" checked autocomplete="off"> Logo or drawing</label>
+    <label class="check"><input type="radio" name="p2s-mode" value="bw" autocomplete="off"> Black and white (cut file)</label>
+    <label class="check"><input type="radio" name="p2s-mode" value="photo" autocomplete="off"> Photo</label>
+  </div>
+</fieldset>
+
+<div class="p2s-set">
+  <div class="field" id="p2s-colours-field">
+    <label for="p2s-colours"><span>Colours</span><output id="p2s-colours-out" for="p2s-colours" aria-hidden="true">up to 8</output></label>
+    <input type="range" id="p2s-colours" min="2" max="16" step="1" value="8" autocomplete="off">
+  </div>
+  <div class="field" id="p2s-thr-field" hidden>
+    <label for="p2s-thr"><span>Threshold</span><output id="p2s-thr-out" for="p2s-thr" aria-hidden="true">128</output></label>
+    <input type="range" id="p2s-thr" min="1" max="254" step="1" value="128" autocomplete="off">
+  </div>
+  <div class="field">
+    <label for="p2s-speck"><span>Speck size</span><output id="p2s-speck-out" for="p2s-speck" aria-hidden="true">2 px</output></label>
+    <input type="range" id="p2s-speck" min="0" max="20" step="1" value="2" autocomplete="off">
+  </div>
+  <div class="field">
+    <label for="p2s-smooth"><span>Smoothness</span><output id="p2s-smooth-out" for="p2s-smooth" aria-hidden="true">4</output></label>
+    <input type="range" id="p2s-smooth" min="0" max="10" step="1" value="4" autocomplete="off">
+  </div>
+</div>
+<div class="checks" id="p2s-bw-checks" hidden>
+  <label class="check"><input type="checkbox" id="p2s-auto" checked autocomplete="off"> Automatic threshold</label>
+  <label class="check"><input type="checkbox" id="p2s-invert" autocomplete="off"> Invert (trace the light parts)</label>
+</div>
+
+<div class="p2s-frame">
+  <div class="p2s-view" id="p2s-view" tabindex="0" role="group" aria-label="Original and SVG compared" aria-describedby="p2s-view-help">
+    <div class="p2s-stage" id="p2s-stage">
+      <canvas id="p2s-orig"></canvas>
+      <img class="p2s-svg" id="p2s-svg" alt="The traced SVG">
+      <span class="p2s-line" aria-hidden="true"></span>
+      <span class="p2s-knob" id="p2s-knob" aria-hidden="true">&#8596;</span>
+    </div>
+  </div>
+  <span class="p2s-tag is-l" aria-hidden="true">Original</span>
+  <span class="p2s-tag is-r" aria-hidden="true">SVG</span>
+</div>
+<p class="hint" id="p2s-view-help">The original is on the left of the divider and the SVG on the right. Drag the divider or use the Compare slider; with the picture focused, + and − zoom and the arrow keys scroll.</p>
+<div class="p2s-bar">
+  <div class="field p2s-cmp">
+    <label for="p2s-cut">Compare</label>
+    <input type="range" id="p2s-cut" min="0" max="100" step="1" value="50" autocomplete="off">
+  </div>
+  <div class="p2s-zooms">
+    <button class="btn secondary small" type="button" id="p2s-zoom-out">Zoom out</button>
+    <button class="btn secondary small" type="button" id="p2s-zoom-in">Zoom in</button>
+    <button class="btn secondary small" type="button" id="p2s-fit">Fit</button>
+    <span class="p2s-zoom" id="p2s-zoom-val">Fit</span>
+  </div>
+</div>
+
+<div class="p2s-pal-head">
+  <span class="label" id="p2s-pal-label">Colours in the SVG</span>
+  <button class="btn secondary small" type="button" id="p2s-pickbtn" aria-pressed="false">Pick a colour to remove</button>
+</div>
+<ul class="p2s-list" id="p2s-list" aria-labelledby="p2s-pal-label"></ul>
+<p class="label" id="p2s-removed-label" hidden>Removed colours</p>
+<ul class="p2s-list is-removed" id="p2s-removed" aria-labelledby="p2s-removed-label" hidden></ul>
+
+<p class="p2s-info" id="p2s-info" role="status"></p>
+<p class="hint p2s-progress" id="p2s-progress"></p>
+<p class="msg p2s-warn" id="p2s-warn" aria-live="polite"></p>
+<div class="actions">
+  <button class="btn" type="button" id="p2s-download">Download SVG</button>
+  <button class="btn secondary" type="button" id="p2s-copy">Copy SVG code</button>
+</div>
+<details class="p2s-details" id="p2s-details">
+  <summary>Show the SVG code</summary>
+  <pre class="p2s-code" id="p2s-code" tabindex="0"></pre>
+</details>
+
+<script src="{{ '/assets/js/image-decode.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var LIB = new URL('{{ "/assets/vendor/imagetracerjs/imagetracer.min.js" | relative_url }}', location.href).href;
+  var fileInput = $('#p2s-file'), drop = $('#p2s-drop'), errEl = $('#p2s-error'), noteEl = $('#p2s-note');
+  var modeRadios = Array.prototype.slice.call(document.querySelectorAll('input[name="p2s-mode"]'));
+  var coloursIn = $('#p2s-colours'), thrIn = $('#p2s-thr'), speckIn = $('#p2s-speck'), smoothIn = $('#p2s-smooth');
+  var autoBox = $('#p2s-auto'), invertBox = $('#p2s-invert');
+  var view = $('#p2s-view'), stage = $('#p2s-stage'), origCv = $('#p2s-orig'), svgImg = $('#p2s-svg'), knob = $('#p2s-knob');
+  var cutIn = $('#p2s-cut'), zoomVal = $('#p2s-zoom-val'), pickBtn = $('#p2s-pickbtn');
+  var listEl = $('#p2s-list'), removedEl = $('#p2s-removed'), removedLabel = $('#p2s-removed-label');
+  var infoEl = $('#p2s-info'), progressEl = $('#p2s-progress'), warnEl = $('#p2s-warn');
+  var dlBtn = $('#p2s-download'), copyBtn = $('#p2s-copy'), codeEl = $('#p2s-code');
+
+  // Per image type: colour range and default, speck size, smoothness, and the most pixels traced.
+  var MODES = {
+    logo: { colours: [2, 16, 8], speck: 2, smooth: 4, cap: 2e6 },
+    bw: { speck: 3, smooth: 4, cap: 2e6 },
+    photo: { colours: [16, 64, 24], speck: 3, smooth: 5, cap: 0.5e6 }
+  };
+  // Smoothness 0 to 10: how far (squared, in px²) a fitted line and a fitted curve may stray from the
+  // outline. Up to 5, corners where the outline turns at a right angle are kept sharp.
+  var LINE_ERR = [0.25, 0.5, 0.75, 1, 1, 1.5, 2, 3, 4, 6, 8], CURVE_ERR = [0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 6, 8, 12];
+  var WARN_SHAPES = 5000, CODE_SHOW = 60000;
+
+  var st = {
+    src: null, work: null, mode: 'logo', vals: {}, removed: [], recolour: new Map(),
+    res: null, svg: '', shapes: 0, url: null, job: 0, worker: null, wait: null, release: null, timer: 0, svgTimer: 0,
+    zoom: 1, cut: 50, picking: false, loadRun: 0, palKey: '', errKind: ''
+  };
+  Object.keys(MODES).forEach(function (k) {
+    var m = MODES[k];
+    st.vals[k] = { colours: m.colours ? m.colours[2] : 0, speck: m.speck, smooth: m.smooth, auto: true, threshold: 128, invert: false };
+  });
+
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  var coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+  function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function hex(c) { return '#' + c.map(function (v) { return (v < 16 ? '0' : '') + v.toString(16); }).join(''); }
+  function bytes(n) { return n < 1000 ? fmtN(n) + ' bytes' : n < 1e6 ? (n / 1000).toFixed(1) + ' KB' : (n / 1e6).toFixed(2) + ' MB'; }
+  function baseName(n) { return (String(n || 'image').replace(/\.[^.]+$/, '') || 'image').slice(0, 120); }
+  function friendly(msg) { var e = new Error(msg); e.friendly = true; return e; }
+
+  // ---------- The tracing worker (runs in its own thread; one fresh worker per job) ----------
+  function workerMain(self) {
+    var IT = null;
+    self.onmessage = function (e) {
+      var m = e.data;
+      try {
+        if (!IT) { importScripts(m.lib); IT = self.ImageTracer; }
+        if (!IT || typeof IT.pathscan !== 'function') throw new Error('The tracing code could not be loaded.');
+        var r = run(m);
+        self.postMessage({ type: 'done', id: m.id, r: r }, [r.index.buffer]);
+      } catch (err) {
+        self.postMessage({ type: 'error', id: m.id, message: String((err && err.message) || err) });
+      }
+    };
+    function progress(m, v) { self.postMessage({ type: 'progress', id: m.id, value: v }); }
+    function d2(a, r, g, b) { var x = a[0] - r, y = a[1] - g, z = a[2] - b; return x * x + y * y + z * z; }
+    function nearest(cols, r, g, b) {
+      var best = 0, bd = Infinity;
+      for (var j = 0; j < cols.length; j++) { var d = d2(cols[j], r, g, b); if (d < bd) { bd = d; best = j; } }
+      return best;
+    }
+    // Otsu's method: the level t that best splits the histogram into [0, t] and [t + 1, 255].
+    function otsu(hist, total) {
+      var sum = 0, t;
+      for (t = 0; t < 256; t++) sum += t * hist[t];
+      var sumB = 0, wB = 0, best = -1, bestT = 127;
+      for (t = 0; t < 255; t++) {
+        wB += hist[t];
+        if (!wB) continue;
+        var wF = total - wB;
+        if (!wF) break;
+        sumB += t * hist[t];
+        var mB = sumB / wB, mF = (sum - sumB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+        if (v > best) { best = v; bestT = t; }
+      }
+      return bestT;
+    }
+    // Flat pixels: opaque, and no opaque neighbour differs by more than 16 in any channel.
+    // Their colours make the palette, so blended edge pixels do not become colours of their own.
+    function flatMask(px, op, w, h) {
+      var f = new Uint8Array(w * h), T = 16;
+      function close(o, p) { return Math.abs(px[o] - px[p]) <= T && Math.abs(px[o + 1] - px[p + 1]) <= T && Math.abs(px[o + 2] - px[p + 2]) <= T; }
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          var i = y * w + x;
+          if (!op[i]) continue;
+          var o = 4 * i, ok = true;
+          if (x > 0 && op[i - 1] && !close(o, o - 4)) ok = false;
+          else if (x < w - 1 && op[i + 1] && !close(o, o + 4)) ok = false;
+          else if (y > 0 && op[i - w] && !close(o, o - 4 * w)) ok = false;
+          else if (y < h - 1 && op[i + w] && !close(o, o + 4 * w)) ok = false;
+          if (ok) f[i] = 1;
+        }
+      }
+      return f;
+    }
+    // Palette: colours binned at 6 bits a channel, split by median cut, refined by k-means. For logos
+    // the cut splits at the middle of the widest range (so a small accent gets its own colour), makes
+    // twice as many colours as asked, then merges shades closer than 24 and the closest pairs.
+    function quantise(px, op, flat, m) {
+      var n = op.length, logo = m.mode === 'logo', N = m.colours, i, key;
+      var nFlat = 0, nOp = 0;
+      for (i = 0; i < n; i++) { if (op[i]) { nOp++; if (flat && flat[i]) nFlat++; } }
+      if (!nOp) return [];
+      var useFlat = flat && nFlat >= Math.max(64, nOp * 0.02);
+      var cnt = new Uint32Array(262144), sr = new Uint32Array(262144), sg = new Uint32Array(262144), sb = new Uint32Array(262144);
+      for (i = 0; i < n; i++) {
+        if (!op[i] || (useFlat && !flat[i])) continue;
+        var o = 4 * i, r = px[o], g = px[o + 1], b = px[o + 2];
+        key = ((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2);
+        cnt[key]++; sr[key] += r; sg[key] += g; sb[key] += b;
+      }
+      var items = [];
+      for (key = 0; key < 262144; key++) if (cnt[key]) items.push(key);
+      var K = items.length, R = new Float64Array(K), G = new Float64Array(K), B = new Float64Array(K), W = new Float64Array(K);
+      for (i = 0; i < K; i++) { key = items[i]; W[i] = cnt[key]; R[i] = sr[key] / cnt[key]; G[i] = sg[key] / cnt[key]; B[i] = sb[key] / cnt[key]; }
+      var ix = []; for (i = 0; i < K; i++) ix.push(i);
+      var CH = [R, G, B];
+      function box(s, e) {
+        var lo = [255, 255, 255], hi = [0, 0, 0], wt = 0;
+        for (var t = s; t < e; t++) {
+          var q = ix[t]; wt += W[q];
+          for (var c = 0; c < 3; c++) { var v = CH[c][q]; if (v < lo[c]) lo[c] = v; if (v > hi[c]) hi[c] = v; }
+        }
+        var axis = 0, range = -1;
+        for (var c2 = 0; c2 < 3; c2++) if (hi[c2] - lo[c2] > range) { range = hi[c2] - lo[c2]; axis = c2; }
+        return { s: s, e: e, w: wt, axis: axis, range: range, lo: lo[axis], hi: hi[axis] };
+      }
+      var boxes = [box(0, K)], target = logo ? Math.min(32, N * 2) : N;
+      while (boxes.length < target) {
+        var bi = -1, bs = 0;
+        for (var b0 = 0; b0 < boxes.length; b0++) {
+          var bx = boxes[b0];
+          if (bx.e - bx.s < 2 || bx.range <= 0) continue;
+          var sc = logo ? bx.range : bx.range * bx.w;
+          if (sc > bs) { bs = sc; bi = b0; }
+        }
+        if (bi < 0) break;
+        var X = boxes[bi], A = CH[X.axis], part = ix.slice(X.s, X.e);
+        part.sort(function (p, q) { return A[p] - A[q] || p - q; });
+        for (var t2 = 0; t2 < part.length; t2++) ix[X.s + t2] = part[t2];
+        var cut = X.s + 1;
+        if (logo) {
+          var mid = (X.lo + X.hi) / 2;
+          while (cut < X.e - 1 && A[ix[cut]] <= mid) cut++;
+        } else {
+          var half = X.w / 2, acc = W[ix[X.s]];
+          while (cut < X.e - 1 && acc + W[ix[cut]] <= half) { acc += W[ix[cut]]; cut++; }
+        }
+        boxes.splice(bi, 1, box(X.s, cut), box(cut, X.e));
+      }
+      var cen = boxes.map(function (bx) {
+        var r = 0, g = 0, b = 0, wt = 0;
+        for (var t = bx.s; t < bx.e; t++) { var q = ix[t]; r += R[q] * W[q]; g += G[q] * W[q]; b += B[q] * W[q]; wt += W[q]; }
+        return [r / wt, g / wt, b / wt, wt];
+      });
+      for (var it = 0; it < 4; it++) {
+        var acc2 = cen.map(function () { return [0, 0, 0, 0]; });
+        for (i = 0; i < K; i++) {
+          var j = nearest(cen, R[i], G[i], B[i]), a = acc2[j];
+          a[0] += R[i] * W[i]; a[1] += G[i] * W[i]; a[2] += B[i] * W[i]; a[3] += W[i];
+        }
+        cen = acc2.filter(function (a) { return a[3] > 0; }).map(function (a) { return [a[0] / a[3], a[1] / a[3], a[2] / a[3], a[3]]; });
+      }
+      if (logo) {
+        while (cen.length > 1) {
+          var pa = 0, pb = 1, pd = Infinity;
+          for (var u = 0; u < cen.length; u++) for (var v = u + 1; v < cen.length; v++) {
+            var dd = d2(cen[u], cen[v][0], cen[v][1], cen[v][2]);
+            if (dd < pd) { pd = dd; pa = u; pb = v; }
+          }
+          if (cen.length <= N && pd >= 24 * 24) break;
+          var cu = cen[pa], cv = cen[pb], wt2 = cu[3] + cv[3];
+          cen[pa] = [(cu[0] * cu[3] + cv[0] * cv[3]) / wt2, (cu[1] * cu[3] + cv[1] * cv[3]) / wt2, (cu[2] * cu[3] + cv[2] * cv[3]) / wt2, wt2];
+          cen.splice(pb, 1);
+        }
+      }
+      return cen.map(function (c) { return [Math.round(c[0]), Math.round(c[1]), Math.round(c[2])]; });
+    }
+    // Every opaque pixel gets its nearest palette colour. In logos, a blended edge pixel may only take
+    // a colour that a flat pixel within 2 px of it has, so no thin rims of a third colour appear.
+    function assign(px, op, flat, w, h, cols, idx) {
+      var n = w * h, cache = new Uint8Array(1 << 24), i, o;
+      function near(o2) {
+        var k = (px[o2] << 16) | (px[o2 + 1] << 8) | px[o2 + 2], v = cache[k];
+        if (!v) { v = nearest(cols, px[o2], px[o2 + 1], px[o2 + 2]) + 1; cache[k] = v; }
+        return v - 1;
+      }
+      for (i = 0; i < n; i++) if (op[i] && (!flat || flat[i])) idx[i] = near(4 * i);
+      if (!flat) return;
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          i = y * w + x;
+          if (!op[i] || flat[i]) continue;
+          var mask = 0;
+          for (var yy = Math.max(0, y - 2); yy <= Math.min(h - 1, y + 2); yy++) {
+            for (var xx = Math.max(0, x - 2); xx <= Math.min(w - 1, x + 2); xx++) {
+              var q = yy * w + xx;
+              if (flat[q]) mask |= 1 << idx[q];
+            }
+          }
+          o = 4 * i;
+          if (!mask) { idx[i] = near(o); continue; }
+          var best = 0, bd = Infinity;
+          for (var j = 0; j < cols.length; j++) {
+            if (!(mask & (1 << j))) continue;
+            var d = d2(cols[j], px[o], px[o + 1], px[o + 2]);
+            if (d < bd) { bd = d; best = j; }
+          }
+          idx[i] = best;
+        }
+      }
+    }
+    function f1(v) { return String(Math.round(v * 10) / 10); }
+    function outer(sg) {
+      var s = 'M' + f1(sg[0].x1) + ' ' + f1(sg[0].y1);
+      for (var k = 0; k < sg.length; k++) {
+        var q = sg[k];
+        s += q.type === 'Q' ? 'Q' + f1(q.x2) + ' ' + f1(q.y2) + ' ' + f1(q.x3) + ' ' + f1(q.y3) : 'L' + f1(q.x2) + ' ' + f1(q.y2);
+      }
+      return s + 'Z';
+    }
+    // A hole is written backwards, so it stays open under the default (non-zero) fill rule.
+    function hole(sg) {
+      var last = sg[sg.length - 1], s = 'M' + (last.type === 'Q' ? f1(last.x3) + ' ' + f1(last.y3) : f1(last.x2) + ' ' + f1(last.y2));
+      for (var k = sg.length - 1; k >= 0; k--) {
+        var q = sg[k];
+        s += q.type === 'Q' ? 'Q' + f1(q.x2) + ' ' + f1(q.y2) + ' ' + f1(q.x1) + ' ' + f1(q.y1) : 'L' + f1(q.x1) + ' ' + f1(q.y1);
+      }
+      return s + 'Z';
+    }
+    // One layer: the edge-node grid of the mask (as imagetracer's layeringstep builds it), then its
+    // path scan, corner interpolation and line and curve fitting. Returns one path string per shape.
+    function traceMask(mask, w, h, m) {
+      var rows = new Array(h + 2), i, j;
+      rows[0] = new Uint8Array(w + 2);
+      for (j = 1; j < h + 2; j++) {
+        var row = rows[j] = new Uint8Array(w + 2), up = (j - 2) * w, cur = (j - 1) * w, hasUp = j >= 2, hasCur = j <= h;
+        for (i = 1; i < w + 2; i++) {
+          var x0 = i - 2, x1 = i - 1, v = 0;
+          if (hasUp) { if (x0 >= 0 && mask[up + x0]) v += 1; if (x1 < w && mask[up + x1]) v += 2; }
+          if (hasCur) { if (x0 >= 0 && mask[cur + x0]) v += 8; if (x1 < w && mask[cur + x1]) v += 4; }
+          row[i] = v;
+        }
+      }
+      var paths = IT.pathscan(rows, m.pathomit);
+      var traced = IT.batchtracepaths(IT.internodes(paths, { rightangleenhance: m.corners }), m.ltres, m.qtres);
+      var out = [];
+      for (var p = 0; p < traced.length; p++) {
+        var s = traced[p];
+        if (s.isholepath || !s.segments.length) continue;
+        var d = outer(s.segments);
+        for (var c = 0; c < s.holechildren.length; c++) {
+          var hs = traced[s.holechildren[c]];
+          if (hs && hs.segments.length) d += hole(hs.segments);
+        }
+        out.push(d);
+      }
+      return out;
+    }
+    function run(m) {
+      var w = m.w, h = m.h, n = w * h, px = m.px, idx = new Uint8Array(n), pal, thr = null, i;
+      idx.fill(255);
+      if (m.mode === 'bw') {
+        // Transparent parts count as white paper; dark parts (or light ones, inverted) are the ink.
+        var L = new Uint8Array(n), hist = new Float64Array(256), ink = 0;
+        for (i = 0; i < n; i++) {
+          var o = 4 * i, a = px[o + 3], k = 255 - a;
+          var r = ((px[o] * a + 255 * k + 127) / 255) | 0, g = ((px[o + 1] * a + 255 * k + 127) / 255) | 0, b = ((px[o + 2] * a + 255 * k + 127) / 255) | 0;
+          var l = ((299 * r + 587 * g + 114 * b + 500) / 1000) | 0;
+          L[i] = l; hist[l]++;
+        }
+        thr = m.threshold == null ? otsu(hist, n) : m.threshold;
+        for (i = 0; i < n; i++) if (m.invert ? L[i] > thr : L[i] <= thr) { idx[i] = 0; ink++; }
+        pal = [{ rgb: [0, 0, 0], count: ink, removed: false }];
+      } else {
+        var op = new Uint8Array(n);
+        for (i = 0; i < n; i++) if (px[4 * i + 3] >= 128) op[i] = 1;
+        var flat = m.mode === 'logo' ? flatMask(px, op, w, h) : null;
+        var cols = m.palette || quantise(px, op, flat, m);
+        progress(m, 0.15);
+        if (cols.length) assign(px, op, flat, w, h, cols, idx);
+        pal = cols.map(function (c) { return { rgb: c, count: 0, removed: false }; });
+        for (i = 0; i < n; i++) if (idx[i] !== 255) pal[idx[i]].count++;
+        (m.removed || []).forEach(function (c) {
+          if (!cols.length) return;
+          var j = nearest(cols, c[0], c[1], c[2]);
+          if (d2(cols[j], c[0], c[1], c[2]) <= 40 * 40) pal[j].removed = true;
+        });
+      }
+      // Stacked layers: the most used colour at the bottom, covering its own pixels and those of
+      // every colour above it, so shapes that touch never leave a gap between them.
+      var order = [];
+      pal.forEach(function (p, j) { if (!p.removed && p.count > 0) order.push(j); });
+      order.sort(function (a2, b2) { return pal[b2].count - pal[a2].count || a2 - b2; });
+      var rank = new Int16Array(pal.length).fill(-1);
+      order.forEach(function (j, k2) { rank[j] = k2; });
+      var mask = new Uint8Array(n), layers = [];
+      for (var k3 = 0; k3 < order.length; k3++) {
+        for (i = 0; i < n; i++) { var q = idx[i]; mask[i] = q !== 255 && rank[q] >= k3 ? 1 : 0; }
+        layers.push({ index: order[k3], d: traceMask(mask, w, h, m) });
+        progress(m, 0.15 + 0.85 * (k3 + 1) / order.length);
+      }
+      return { w: w, h: h, threshold: thr, palette: pal, layers: layers, index: idx };
+    }
+  }
+  var workerUrl = null;
+  function newWorker() {
+    if (!workerUrl) workerUrl = URL.createObjectURL(new Blob(['(' + workerMain + ')(self);'], { type: 'text/javascript' }));
+    return new Worker(workerUrl);
+  }
+
+  // ---------- Settings ----------
+  function modeNow() { var r = modeRadios.filter(function (x) { return x.checked; })[0]; return r ? r.value : 'logo'; }
+  function readVals() {
+    var v = st.vals[st.mode];
+    if (st.mode !== 'bw') v.colours = Number(coloursIn.value);
+    v.speck = Number(speckIn.value); v.smooth = Number(smoothIn.value);
+    if (st.mode === 'bw') { v.auto = autoBox.checked; v.threshold = Number(thrIn.value); v.invert = invertBox.checked; }
+  }
+  function showVals() {
+    var m = MODES[st.mode], v = st.vals[st.mode];
+    $('#p2s-colours-field').hidden = st.mode === 'bw';
+    $('#p2s-thr-field').hidden = $('#p2s-bw-checks').hidden = st.mode !== 'bw';
+    if (m.colours) { coloursIn.min = m.colours[0]; coloursIn.max = m.colours[1]; coloursIn.value = v.colours; }
+    speckIn.value = v.speck; smoothIn.value = v.smooth;
+    if (st.mode === 'bw') { autoBox.checked = v.auto; thrIn.value = v.threshold; invertBox.checked = v.invert; }
+    labels();
+  }
+  function labels() {
+    var c = Number(coloursIn.value), s = Number(speckIn.value), sm = Number(smoothIn.value), t = Number(thrIn.value);
+    setText($('#p2s-colours-out'), 'up to ' + c);
+    coloursIn.setAttribute('aria-valuetext', 'up to ' + c + ' colours');
+    setText($('#p2s-speck-out'), s ? s + ' px' : 'off');
+    speckIn.setAttribute('aria-valuetext', s ? 'spots up to ' + s + ' by ' + s + ' pixels are dropped' : 'off, every spot is kept');
+    setText($('#p2s-smooth-out'), String(sm));
+    smoothIn.setAttribute('aria-valuetext', sm + ' of 10');
+    var auto = autoBox.checked;
+    setText($('#p2s-thr-out'), t + (auto ? ' (automatic)' : ''));
+    thrIn.setAttribute('aria-valuetext', t + (auto ? ', automatic' : ''));
+  }
+  // Speck size is in pixels of the picture as opened; the trace may run on an enlarged or reduced
+  // copy, and a speck s pixels across has an outline of about 4 s points there.
+  function jobOptions() {
+    var v = st.vals[st.mode], s = v.speck, k = st.work && st.src ? st.work.w / st.src.w0 : 1;
+    return {
+      mode: st.mode, colours: v.colours, pathomit: s ? Math.max(1, Math.round(4 * s * k)) + 1 : 0,
+      ltres: LINE_ERR[v.smooth], qtres: CURVE_ERR[v.smooth], corners: v.smooth <= 5,
+      threshold: st.mode === 'bw' && !v.auto ? v.threshold : null, invert: !!v.invert
+    };
+  }
+
+  // ---------- Jobs ----------
+  function schedule(delay) {
+    clearTimeout(st.timer);
+    st.timer = setTimeout(start, delay || 0) || -1;
+  }
+  function start() {
+    st.timer = 0;
+    if (!st.work) return;
+    var id = ++st.job, o = jobOptions(), w = st.work;
+    if (st.worker) { st.worker.terminate(); st.worker = null; }
+    if (st.release) st.release();
+    var key = st.mode + ':' + o.colours + ':' + w.key;
+    var msg = Object.assign({ id: id, lib: LIB, w: w.w, h: w.h, px: w.data.data.slice(), removed: st.removed.slice(),
+      palette: st.mode !== 'bw' && st.res && st.palKey === key ? st.res.palette.map(function (p) { return p.rgb; }) : null }, o);
+    var wk;
+    try { wk = st.worker = newWorker(); } catch (e) { failTrace('This browser blocked the background thread that traces the image.'); return; }
+    setText(progressEl, 'Tracing…');
+    st.wait = new Promise(function (resolve) {
+      st.release = function () { st.release = null; resolve(); };
+      function end() { wk.terminate(); if (st.worker === wk) st.worker = null; if (st.release) st.release(); }
+      wk.onmessage = function (e) {
+        var d = e.data;
+        if (id !== st.job) return;
+        if (d.type === 'progress') { setText(progressEl, 'Tracing… ' + Math.round(d.value * 100) + '%'); return; }
+        end();
+        if (d.type === 'done') { st.palKey = key; finish(d.r); } else failTrace('The image could not be traced: ' + d.message);
+      };
+      wk.onerror = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (id !== st.job) return;
+        end();
+        failTrace('The image could not be traced. It may need more memory than this browser allows; try a smaller image or fewer colours.');
+      };
+    });
+    wk.postMessage(msg, [msg.px.buffer]);
+  }
+  // Actions use the newest result: a trace waiting for a pause, or still running, is finished first.
+  async function current() {
+    for (var guard = 0; guard < 100; guard++) {
+      if (st.timer) { clearTimeout(st.timer); start(); }
+      var job = st.job;
+      await st.wait;
+      if (job === st.job && !st.timer && !st.worker) break;
+    }
+    if (st.svgTimer) { clearTimeout(st.svgTimer); st.svgTimer = 0; buildSvg(); }
+    return !!st.res && !!st.svg;
+  }
+  // Errors about a file stay until another file is opened; others go with the next good result.
+  function showErr(msg, kind) { errEl.textContent = msg; st.errKind = kind; }
+  function failTrace(msg) {
+    setText(progressEl, '');
+    st.res = null; st.svg = ''; st.shapes = 0;
+    if (st.url) { URL.revokeObjectURL(st.url); st.url = null; }
+    svgImg.removeAttribute('src');
+    setText(infoEl, '');
+    setText(warnEl, '');
+    codeEl.textContent = '';
+    renderColours();
+    showErr(msg, 'trace');
+  }
+  // A new picture or image type: the trace still running is for the old one.
+  function dropJob() {
+    st.job++;
+    if (st.worker) { st.worker.terminate(); st.worker = null; }
+    if (st.release) st.release();
+  }
+
+  // ---------- Result ----------
+  function colourOf(p) { var h = hex(p.rgb); return st.recolour.get(h) || h; }
+  function buildSvg() {
+    var r = st.res, src = st.src;
+    if (!r) return;
+    var parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="' + src.w0 + '" height="' + src.h0 + '" viewBox="0 0 ' + r.w + ' ' + r.h + '">\n'], shapes = 0;
+    r.layers.forEach(function (L) {
+      if (!L.d.length) return;
+      parts.push('<g fill="' + colourOf(r.palette[L.index]) + '">\n');
+      for (var i = 0; i < L.d.length; i++) parts.push('<path d="' + L.d[i] + '"/>\n');
+      parts.push('</g>\n');
+      shapes += L.d.length;
+    });
+    parts.push('</svg>\n');
+    st.svg = parts.join('');
+    st.shapes = shapes;
+    if (st.url) URL.revokeObjectURL(st.url);
+    st.url = URL.createObjectURL(new Blob([st.svg], { type: 'image/svg+xml' }));
+    svgImg.src = st.url;
+    var colours = r.layers.filter(function (L) { return L.d.length; }).length, info;
+    if (shapes) info = colours + (colours === 1 ? ' colour, ' : ' colours, ') + fmtN(shapes) + (shapes === 1 ? ' shape, ' : ' shapes, ') + bytes(st.svg.length) + ' SVG.';
+    else if (r.layers.length) info = 'Nothing to draw: every shape is smaller than the speck size. Lower Speck size.';
+    else if (r.palette.some(function (p) { return p.count; })) info = 'Nothing to draw: every colour has been removed.';
+    else info = 'Nothing to draw: ' + (st.mode === 'bw' ? 'no part of the image is on the ink side of the threshold.' : 'the image is fully transparent.');
+    setText(infoEl, info);
+    setText(warnEl, shapes > WARN_SHAPES ? 'This SVG has ' + fmtN(shapes) + ' shapes, so drawing programs and cutting machines may be slow with it. Fewer colours, a larger speck size or more smoothness make fewer shapes.' : '');
+    codeEl.textContent = st.svg.length > CODE_SHOW ? st.svg.slice(0, st.svg.lastIndexOf('\n', CODE_SHOW) + 1) + '… (' + bytes(st.svg.length) + ' in all; Download or Copy gives the whole file)' : st.svg;
+  }
+  function finish(r) {
+    st.res = r;
+    if (st.errKind !== 'file') errEl.textContent = '';
+    setText(progressEl, '');
+    if (st.mode === 'bw' && r.threshold != null && autoBox.checked) { thrIn.value = r.threshold; st.vals.bw.threshold = r.threshold; labels(); }
+    buildSvg();
+    renderColours();
+  }
+  function swatchItem(p, removed) {
+    var h = hex(p.rgb), li = document.createElement('li');
+    var share = st.work ? Math.max(0.1, Math.round(1000 * p.count / (st.work.w * st.work.h)) / 10) : 0;
+    if (removed) {
+      var sw = document.createElement('span');
+      sw.className = 'p2s-sw'; sw.style.background = h; sw.setAttribute('aria-hidden', 'true');
+      li.appendChild(sw);
+    } else {
+      var inp = document.createElement('input');
+      inp.type = 'color'; inp.value = colourOf(p);
+      inp.setAttribute('aria-label', 'Colour ' + h + ', ' + share + '% of the picture');
+      inp.addEventListener('input', function () {
+        if (inp.value.toLowerCase() === h) st.recolour.delete(h); else st.recolour.set(h, inp.value.toLowerCase());
+        txt.firstChild.textContent = inp.value.toLowerCase();
+        small.textContent = share + '% of the picture' + (inp.value.toLowerCase() !== h ? ', was ' + h : '');
+        clearTimeout(st.svgTimer);
+        st.svgTimer = setTimeout(function () { st.svgTimer = 0; buildSvg(); }, 150);
+      });
+      li.appendChild(inp);
+    }
+    var txt = document.createElement('span'), code = document.createElement('span');
+    txt.className = 'p2s-hex'; code.className = 'p2s-mono';
+    code.textContent = removed ? h : colourOf(p);
+    txt.appendChild(code);
+    var small = document.createElement('small');
+    small.textContent = share + '% of the picture' + (!removed && colourOf(p) !== h ? ', was ' + h : '');
+    txt.appendChild(small);
+    li.appendChild(txt);
+    if (st.mode === 'bw' && !removed) return li; // the one ink layer can be recoloured, not removed
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'btn secondary small';
+    btn.textContent = removed ? 'Restore' : 'Remove';
+    btn.setAttribute('aria-label', (removed ? 'Restore colour ' : 'Remove colour ') + h);
+    btn.addEventListener('click', function () { removed ? restoreColour(p.rgb) : removeColour(p.rgb); });
+    li.appendChild(btn);
+    return li;
+  }
+  function renderColours() {
+    var r = st.res;
+    listEl.textContent = ''; removedEl.textContent = '';
+    if (!r) return;
+    var shown = r.palette.filter(function (p) { return p.count && !p.removed; }).sort(function (a, b) { return b.count - a.count; });
+    var gone = r.palette.filter(function (p) { return p.removed && p.count; });
+    shown.forEach(function (p) { listEl.appendChild(swatchItem(p, false)); });
+    gone.forEach(function (p) { removedEl.appendChild(swatchItem(p, true)); });
+    removedEl.hidden = removedLabel.hidden = !gone.length;
+    pickBtn.disabled = !shown.length || st.mode === 'bw';
+    if (!shown.length && st.picking) setPicking(false);
+  }
+  function sameRgb(a, b) { return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]; }
+  function removeColour(rgb) {
+    if (st.removed.some(function (c) { return sameRgb(c, rgb); })) return;
+    st.removed.push(rgb.slice());
+    setText(progressEl, 'Removing ' + hex(rgb) + '…');
+    schedule(0);
+  }
+  function restoreColour(rgb) {
+    st.removed = st.removed.filter(function (c) { return !sameRgb(c, rgb); });
+    schedule(0);
+  }
+
+  // ---------- Comparison view ----------
+  function fitScale() {
+    var w = st.work ? st.work.w : 1, h = st.work ? st.work.h : 1, vw = Math.max(50, view.clientWidth);
+    var maxH = Math.max(220, Math.min(560, Math.round(window.innerHeight * 0.6)));
+    return Math.min(vw / w, maxH / h);
+  }
+  function maxZoom() { return Math.max(4, 12 / fitScale()); }
+  function layout(keepCentre) {
+    if (!st.work) return;
+    var s = fitScale(), w = st.work.w, h = st.work.h;
+    var vh = Math.round(h * s) + 2;
+    var cx = 0.5, cy = 0.5;
+    if (keepCentre && stage.offsetWidth) {
+      cx = (view.scrollLeft + view.clientWidth / 2) / stage.offsetWidth;
+      cy = (view.scrollTop + view.clientHeight / 2) / stage.offsetHeight;
+    }
+    if (view.style.height !== vh + 'px') view.style.height = vh + 'px';
+    var sw = Math.max(1, Math.round(w * s * st.zoom)), sh = Math.max(1, Math.round(h * s * st.zoom));
+    stage.style.width = sw + 'px'; stage.style.height = sh + 'px';
+    stage.classList.toggle('is-pixel', s * st.zoom >= 2);
+    view.scrollLeft = cx * sw - view.clientWidth / 2;
+    view.scrollTop = cy * sh - view.clientHeight / 2;
+    var pct = Math.round(s * st.zoom * 100);
+    setText(zoomVal, st.zoom <= 1.0001 ? 'Fit (' + pct + '%)' : pct + '%');
+    $('#p2s-zoom-out').disabled = $('#p2s-fit').disabled = st.zoom <= 1.0001;
+    $('#p2s-zoom-in').disabled = st.zoom >= maxZoom() - 1e-6;
+  }
+  function zoomBy(f) { st.zoom = Math.min(maxZoom(), Math.max(1, st.zoom * f)); layout(true); }
+  function setCut(v) {
+    v = Math.min(100, Math.max(0, Math.round(v)));
+    st.cut = v;
+    stage.style.setProperty('--cut', v + '%');
+    if (Number(cutIn.value) !== v) cutIn.value = v;
+    cutIn.setAttribute('aria-valuetext', v + '%: original on the left, SVG on the right');
+  }
+  function showWork() {
+    var w = st.work;
+    origCv.width = w.w; origCv.height = w.h;
+    origCv.getContext('2d').drawImage(w.canvas, 0, 0);
+    st.zoom = 1;
+    layout(false);
+  }
+  $('#p2s-zoom-in').addEventListener('click', function () { zoomBy(1.5); });
+  $('#p2s-zoom-out').addEventListener('click', function () { zoomBy(1 / 1.5); });
+  $('#p2s-fit').addEventListener('click', function () { st.zoom = 1; layout(false); });
+  cutIn.addEventListener('input', function () { setCut(Number(cutIn.value)); });
+  view.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === '+' || e.key === '=') zoomBy(1.5);
+    else if (e.key === '-' || e.key === '_') zoomBy(1 / 1.5);
+    else if (e.key === '0') { st.zoom = 1; layout(false); }
+    else return;
+    e.preventDefault();
+  });
+  // Dragging the divider (or, with a mouse, anywhere on the picture) moves it; in pick mode a
+  // click or tap removes the colour under it instead.
+  var drag = null;
+  function cutAt(e) { var r = stage.getBoundingClientRect(); setCut((e.clientX - r.left) / r.width * 100); }
+  stage.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    var onKnob = e.target === knob;
+    if (st.picking) { drag = { id: e.pointerId, x: e.clientX, y: e.clientY, pick: true }; return; }
+    if (!onKnob && e.pointerType !== 'mouse') return;
+    e.preventDefault();
+    drag = { id: e.pointerId, pick: false };
+    try { stage.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+    cutAt(e);
+  });
+  stage.addEventListener('pointermove', function (e) { if (drag && !drag.pick && drag.id === e.pointerId) cutAt(e); });
+  stage.addEventListener('pointerup', function (e) {
+    if (!drag || drag.id !== e.pointerId) return;
+    var d = drag;
+    drag = null;
+    if (d.pick && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 8) pickAt(e);
+  });
+  stage.addEventListener('pointercancel', function () { drag = null; });
+  function pickAt(e) {
+    var r = st.res, rect = stage.getBoundingClientRect();
+    if (!r) return;
+    var x = Math.floor((e.clientX - rect.left) / rect.width * r.w), y = Math.floor((e.clientY - rect.top) / rect.height * r.h);
+    if (x < 0 || y < 0 || x >= r.w || y >= r.h) return;
+    var k = r.index[y * r.w + x];
+    if (k === 255 || !r.palette[k] || r.palette[k].removed) { setText(progressEl, 'That part is already transparent.'); return; }
+    setPicking(false);
+    removeColour(r.palette[k].rgb);
+  }
+  function setPicking(on) {
+    st.picking = on;
+    pickBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    pickBtn.classList.toggle('p2s-btn-on', on);
+    view.classList.toggle('is-picking', on);
+    setText(pickBtn, on ? (coarse ? 'Tap' : 'Click') + ' a colour on the picture' : 'Pick a colour to remove');
+  }
+  pickBtn.addEventListener('click', function () { setPicking(!st.picking); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && st.picking) setPicking(false); });
+
+  // ---------- Loading ----------
+  // The copy that is traced: at most 2 megapixels (0.5 for photos); small icons enlarged 2 to 4 times.
+  function workFor(mode) {
+    var s = st.src, cap = MODES[mode].cap, w = s.base.width, h = s.base.height;
+    // Photos are not enlarged: more pixels would only make more shapes.
+    if (mode === 'photo' && s.orig && s.w0 * s.h0 <= cap) {
+      if (s.orig === s.base) return s.work0;
+      if (!s.small) s.small = makeWork(s.orig, 'o');
+      return s.small;
+    }
+    if (w * h <= cap) return s.work0;
+    var k = Math.sqrt(cap / (w * h)), ww = Math.max(1, Math.floor(w * k)), hh = Math.max(1, Math.floor(h * k));
+    if (!s.small || s.small.w !== ww) s.small = makeWork(TTImage.resize(s.base, ww, hh), 'p');
+    return s.small;
+  }
+  function makeWork(canvas, tag) {
+    var g = canvas.getContext('2d');
+    return { canvas: canvas, w: canvas.width, h: canvas.height, data: g.getImageData(0, 0, canvas.width, canvas.height), key: tag + (++keySeq) };
+  }
+  var keySeq = 0;
+  // Pictures under half a megapixel are enlarged 2 to 4 times first, so that curves can follow the
+  // blended edge pixels instead of the pixel steps; larger ones are traced at up to 2 megapixels.
+  function baseSize(W, H) {
+    var k = 1;
+    if (W * H < 0.5e6) k = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(0.6e6 / (W * H)))));
+    else if (W * H > 2e6) k = Math.sqrt(2e6 / (W * H));
+    return [Math.max(1, Math.floor(W * k + 1e-9)), Math.max(1, Math.floor(H * k + 1e-9)), k];
+  }
+  async function decodeBase(file) {
+    var res;
+    try { res = await TTImage.decode(file); } catch (e) {
+      if (!e || e.code !== 'TOO_BIG') throw e;
+      // Too big for a canvas here: the decoder's worker makes the 2-megapixel copy.
+      res = await TTImage.decode(file, { canvas: false });
+      try {
+        var sz0 = baseSize(res.width, res.height);
+        var bm = await createImageBitmap(await TTImage.encode(res, 'png', { width: sz0[0], height: sz0[1] }));
+        var c0 = document.createElement('canvas');
+        c0.width = sz0[0]; c0.height = sz0[1];
+        c0.getContext('2d').drawImage(bm, 0, 0);
+        bm.close();
+        return { canvas: c0, meta: meta(res) };
+      } finally { TTImage.release(res); }
+    }
+    try {
+      var sz = baseSize(res.width, res.height);
+      if (sz[2] < 1) return { canvas: TTImage.resize(res.canvas, sz[0], sz[1]), orig: null, meta: meta(res) };
+      var orig = TTImage.resize(res.canvas, res.width, res.height);
+      return { canvas: sz[2] === 1 ? orig : TTImage.resize(orig, sz[0], sz[1]), orig: orig, meta: meta(res) };
+    } finally { TTImage.release(res); }
+  }
+  function meta(res) { return { w0: res.width, h0: res.height, fmt: res.format, animated: !!res.animated, pages: res.images || 1 }; }
+  function setSource(src) {
+    st.src = src;
+    src.work0 = makeWork(src.base, 'b');
+    st.removed = []; st.recolour.clear(); st.res = null; st.palKey = '';
+    useMode();
+  }
+  function useMode() {
+    dropJob();
+    st.work = workFor(st.mode);
+    showWork();
+    var s = st.src, w = st.work, notes = [];
+    if (s.animated) notes.push('This image is animated: only its first frame is traced.');
+    if (s.pages > 1) notes.push('This file holds ' + s.pages + ' images; the first one is traced.');
+    if (w.w > s.w0) notes.push('Enlarged ' + Math.round(w.w / s.w0 * 10) / 10 + ' times, to ' + fmtN(w.w) + ' × ' + fmtN(w.h) + ' px, so the curves come out smooth.');
+    else if (w.w < s.w0) notes.push('Traced at ' + fmtN(w.w) + ' × ' + fmtN(w.h) + ' px, reduced from ' + fmtN(s.w0) + ' × ' + fmtN(s.h0) + ' px; the SVG keeps the original size.');
+    if (s.fmt === 'jpeg' && st.mode === 'logo') notes.push('A JPG has no transparency: remove the background colour if you do not want it.');
+    setText(noteEl, notes.join(' '));
+    schedule(0);
+  }
+  async function openFile(file) {
+    if (!file) return;
+    var run = ++st.loadRun, name = file.name || 'pasted image';
+    errEl.textContent = ''; st.errKind = '';
+    fileInput.removeAttribute('aria-invalid');
+    setText(progressEl, 'Opening ' + name + '…');
+    try {
+      var fmt = await TTImage.sniff(file);
+      if (fmt === 'svg') throw Object.assign(new Error('svg'), { svg: true });
+      var b = await decodeBase(file);
+      if (run !== st.loadRun) return;
+      var r = b.meta;
+      r.name = baseName(file.name || 'pasted-image');
+      r.base = b.canvas; r.orig = b.orig || null;
+      setSource(r);
+      $('#p2s-drop-title').textContent = file.name || 'Pasted image';
+      $('#p2s-drop-hint').textContent = fmtN(r.w0) + ' × ' + fmtN(r.h0) + ' px ' + ((TTImage.formats[r.fmt] || {}).label || '') + '. Choose or drop another image to replace it.';
+    } catch (e) {
+      if (run !== st.loadRun) return;
+      setText(progressEl, '');
+      fileInput.setAttribute('aria-invalid', 'true');
+      errEl.textContent = ''; st.errKind = 'file';
+      if (e && e.svg) {
+        errEl.appendChild(document.createTextNode((file.name || 'This file') + ' is already an SVG, so there is nothing to trace. To turn an SVG into a PNG, use the '));
+        var a = document.createElement('a');
+        a.href = '{{ "/svg-to-png/" | relative_url }}'; a.textContent = 'SVG to PNG converter';
+        errEl.appendChild(a);
+        errEl.appendChild(document.createTextNode('.'));
+      } else {
+        showErr((e && (e.code || e.friendly) && e.message) ? e.message : (file.name || 'This file') + ' could not be opened as an image.', 'file');
+      }
+    }
+  }
+  function sample() {
+    var c = document.createElement('canvas');
+    c.width = 480; c.height = 320;
+    var g = c.getContext('2d');
+    function round(x, y, w, h, r) {
+      g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+      g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+    }
+    g.fillStyle = '#1f6f4a'; round(40, 30, 400, 260, 44); g.fill();
+    g.fillStyle = '#f4ecd8'; g.beginPath(); g.arc(240, 160, 104, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#e07a2e'; g.beginPath(); g.moveTo(150, 226); g.lineTo(222, 104); g.lineTo(262, 168); g.lineTo(284, 138); g.lineTo(334, 226); g.closePath(); g.fill();
+    g.fillStyle = '#c0392b'; g.beginPath(); g.arc(300, 98, 14, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#1f6f4a'; g.fillRect(150, 226, 184, 12);
+    var sz = baseSize(480, 320);
+    setSource({ name: 'sample-logo', fmt: 'png', w0: 480, h0: 320, base: TTImage.resize(c, sz[0], sz[1]), orig: c, animated: false, pages: 1, sample: true });
+  }
+
+  // ---------- Controls ----------
+  modeRadios.forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (!r.checked) return;
+      readVals();
+      st.mode = r.value;
+      st.palKey = '';
+      showVals();
+      if (st.src) useMode();
+    });
+  });
+  [coloursIn, speckIn, smoothIn].forEach(function (el) {
+    el.addEventListener('input', function () { readVals(); labels(); schedule(300); });
+  });
+  thrIn.addEventListener('input', function () { autoBox.checked = false; readVals(); labels(); schedule(300); });
+  autoBox.addEventListener('change', function () { readVals(); labels(); schedule(0); });
+  invertBox.addEventListener('change', function () { readVals(); schedule(0); });
+  dlBtn.addEventListener('click', async function (e) {
+    if (e.detail > 1 || dlBtn.dataset.busy) return;
+    dlBtn.dataset.busy = '1';
+    try {
+      if (!(await current())) return;
+      if (!st.shapes) { showErr('There is nothing in the SVG to save: ' + infoEl.textContent.replace(/^Nothing to draw: /, ''), 'save'); return; }
+      TT.download(st.src.name + '.svg', new Blob([st.svg], { type: 'image/svg+xml' }));
+      setText(progressEl, 'Saved ' + st.src.name + '.svg (' + bytes(st.svg.length) + ').');
+    } finally { delete dlBtn.dataset.busy; }
+  });
+  copyBtn.addEventListener('click', async function (e) {
+    if (e.detail > 1) return;
+    if (!(await current())) return;
+    TT.copy(st.svg, copyBtn);
+  });
+
+  // ---------- Files in ----------
+  fileInput.accept = TTImage.accept;
+  fileInput.addEventListener('change', function () {
+    var f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    openFile(f);
+  });
+  ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('is-over'); }); });
+  ['dragleave', 'dragend'].forEach(function (t) { drop.addEventListener(t, function () { drop.classList.remove('is-over'); }); });
+  drop.addEventListener('drop', function (e) {
+    e.preventDefault();
+    drop.classList.remove('is-over');
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) openFile(e.dataTransfer.files[0]);
+  });
+  document.addEventListener('dragover', function (e) {
+    if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) e.preventDefault();
+  });
+  document.addEventListener('drop', function (e) {
+    var files = e.dataTransfer && e.dataTransfer.files;
+    if (e.defaultPrevented || !files || !files.length) return;
+    e.preventDefault();
+    openFile(files[0]);
+  });
+  document.addEventListener('paste', function (e) {
+    var files = e.clipboardData ? Array.prototype.filter.call(e.clipboardData.files || [], function (f) { return /^image\//.test(f.type); }) : [];
+    if (!files.length) return;
+    e.preventDefault();
+    openFile(files[0]);
+  });
+
+  var lastW = 0;
+  function onResize() { var w = view.clientWidth; if (w === lastW) return; lastW = w; layout(true); }
+  if (typeof ResizeObserver === 'function') new ResizeObserver(onResize).observe(view);
+  window.addEventListener('resize', onResize);
+  // After Back or a reload the browser may put back the radios, sliders and boxes once this script
+  // has run: read them again and trace with what they show.
+  window.addEventListener('pageshow', function (e) {
+    var m = modeNow();
+    if (m !== st.mode) { st.mode = m; st.palKey = ''; showVals(); if (st.src) useMode(); }
+    readVals(); labels(); setCut(Number(cutIn.value));
+    if (e.persisted || st.res) schedule(0);
+  });
+  st.mode = modeNow();
+  showVals();
+  setCut(Number(cutIn.value));
+  sample();
+})();
+</script>
