@@ -21,6 +21,21 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     document.querySelectorAll('#tt-text .tt-w').length > 50, null, { timeout: 10000 });
   const active = (p = page) => p.evaluate(() => document.activeElement && document.activeElement.id);
   const rows = (sel, p = page) => p.$$eval(sel + ' tr', trs => trs.map(tr => Array.from(tr.cells).map(td => td.textContent)));
+  // Where the caret is: "word:letter:the letter it stands before" ('' after the last letter).
+  const caret = (p = page) => p.evaluate(() => {
+    const c = document.querySelectorAll('#tt-text .tt-car');
+    if (c.length !== 1) return c.length + ' carets';
+    const w = c[0].closest('.tt-w');
+    return Array.from(document.querySelectorAll('#tt-text .tt-w')).indexOf(w) + ':' + Array.from(w.children).indexOf(c[0]) + ':' + c[0].textContent;
+  });
+  // Whether the caret's line is inside the three lines shown.
+  const caretInView = (p = page) => p.evaluate(() => {
+    const t = document.getElementById('tt-text').getBoundingClientRect();
+    const c = document.querySelector('#tt-text .tt-car').getBoundingClientRect();
+    return c.top >= t.top - 1 && c.bottom <= t.bottom + 1;
+  });
+  const BULK_NOTE = 'Text added in one go, such as a paste from a phone keyboard, is not counted: type it yourself.';
+  const PASTE_NOTE = 'Pasting is turned off in the typing test: type the text yourself.';
 
   // ---- Defaults: 1 minute of common words from the vendored list ----
   await open();
