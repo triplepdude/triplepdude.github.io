@@ -957,7 +957,10 @@ faq:
     if (best.blob.size >= orig) {
       notes.push('The result is ' + (best.blob.size > orig ? 'larger than' : 'the same size as') + ' your original (' + fmtBytes(orig) + '), which is already well compressed. Use the original, or lower the ' + (s.mode === 'quality' ? 'quality' : 'limit') + '.');
     }
-    it.out = { blob: best.blob, fmt, w: best.w, h: best.h, q: qText(best), notes, limit, name: baseName(it.name) + '-compressed.' + EXT[fmt] };
+    // keepsDate: a photo that keeps its EXIF, date taken included, also keeps
+    // its file date in the ZIP; otherwise the ZIP dates it now, as a single
+    // download is.
+    it.out = { blob: best.blob, fmt, w: best.w, h: best.h, q: qText(best), notes, limit, name: baseName(it.name) + '-compressed.' + EXT[fmt], keepsDate: keepExif };
   }
 
   // ---------- Queue ----------
@@ -1250,7 +1253,7 @@ faq:
     zipBtn.disabled = true;
     zipBtn.textContent = 'Creating ZIP…';
     try {
-      const zip = await TTZip.create(done.map(x => ({ name: x.out.name, data: x.out.blob, date: x.file.lastModified ? new Date(x.file.lastModified) : null })));
+      const zip = await TTZip.create(done.map(x => ({ name: x.out.name, data: x.out.blob, date: x.out.keepsDate && x.file.lastModified ? new Date(x.file.lastModified) : null })));
       TT.download('compressed-images.zip', zip);
       live.textContent = 'Downloaded a ZIP with ' + plural(done.length, 'image', 'images') + '.';
     } catch (e) {

@@ -11,6 +11,11 @@
  *                    become "/", leading "/" and "." / ".." segments are dropped, and
  *                    repeated names get " (2)", " (3)" ... before the extension
  *                    (compared case-insensitively, as Windows and macOS do).
+ *                    Each part is made extractable everywhere: : * ? " < > | become
+ *                    "-", trailing dots and spaces go, device names such as CON get
+ *                    a "_", and a part over 240 UTF-8 bytes loses the middle of its
+ *                    stem to an ellipsis, cut between characters, keeping its end
+ *                    and extension.
  *              data  Blob, File, ArrayBuffer, typed array or string (saved as UTF-8).
  *              date  Date for the entry's modified time (default: now, local time).
  *     options: { compress: 'auto' | 'store' | 'deflate' }   (default 'auto')
@@ -70,10 +75,44 @@
     throw new Error('Unsupported ZIP entry data');
   }
 
+  // Each part of a name is made one that Windows, macOS and Linux can all
+  // extract: Windows refuses : * ? " < > | in a name, a name that ends in a
+  // dot or a space, and device names such as CON or LPT1, and most file
+  // systems allow 255 bytes in a name. A longer part is cut to 240 UTF-8
+  // bytes, which leaves room for the " (2)" of a repeated name. The end of a
+  // name is what often tells the files apart ("-page-12"), so the middle of
+  // it goes, replaced by an ellipsis, and the cuts fall between two
+  // characters as a reader sees them; the extension stays.
+  var MAX_PART = 240;
+  var utf8 = new TextEncoder();
+  var graphemes = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+  var DEVICE = /^(con|prn|aux|nul|com\d|lpt\d)(?=\.|$)/i;
+
+  function fitPart(p) {
+    if (utf8.encode(p).length <= MAX_PART) return p;
+    var dot = p.lastIndexOf('.');
+    var ext = dot > 0 && p.length - dot <= 16 && !/\s/.test(p.slice(dot)) ? p.slice(dot) : '';
+    var stem = ext ? p.slice(0, dot) : p;
+    var chars = graphemes ? Array.from(graphemes.segment(stem), function (x) { return x.segment; }) : Array.from(stem);
+    var size = chars.map(function (c) { return utf8.encode(c).length; });
+    var room = MAX_PART - utf8.encode(ext).length - 3; // the ellipsis is 3 bytes
+    var tail = '', t = 0, j = chars.length;
+    while (j > 0 && t + size[j - 1] <= Math.min(60, Math.floor(room / 3))) { t += size[--j]; tail = chars[j] + tail; }
+    var head = '', h = 0;
+    for (var i = 0; i < j && h + size[i] <= room - t; i++) { h += size[i]; head += chars[i]; }
+    return head.replace(/[. ]+$/, '') + '\u2026' + tail + ext;
+  }
+
+  function cleanPart(p) {
+    p = p.trim().replace(/[:*?"<>|]/g, '-').replace(/[. ]+$/, '');
+    if (DEVICE.test(p)) p = p.replace(DEVICE, '$1_');
+    return fitPart(p) || '_';
+  }
+
   function cleanName(name) {
     var s = String(name == null ? '' : name).replace(/\\/g, '/').replace(/[\u0000-\u001f\u007f]/g, '_');
     var parts = s.split('/').filter(function (p) { return p && p !== '.' && p !== '..'; });
-    s = parts.map(function (p) { return p.trim() || '_'; }).join('/');
+    s = parts.map(cleanPart).join('/');
     return s || 'file';
   }
 

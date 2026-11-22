@@ -109,6 +109,18 @@ function psnr(a, b) {
   return 10 * Math.log10(255 * 255 / (se / (a.length * 3 / 4)));
 }
 // ZIP (APPNOTE 6.3) entries from the central directory.
+// The year of each ZIP entry's modified time (MS-DOS date field), by name.
+function zipYears(buf) {
+  let eocd = buf.length - 22;
+  while (buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  const out = {};
+  for (let i = 0, n = buf.readUInt16LE(eocd + 10), p = buf.readUInt32LE(eocd + 16); i < n; i++) {
+    const nlen = buf.readUInt16LE(p + 28);
+    out[buf.toString('utf8', p + 46, p + 46 + nlen)] = 1980 + (buf.readUInt16LE(p + 14) >> 9);
+    p += 46 + nlen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return out;
+}
 function unzip(buf) {
   let eocd = buf.length - 22;
   while (buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
@@ -602,9 +614,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // The HEIC original cannot be shown by the browser, so its preview is drawn by the decoder.
   await page.click('.cmpi-item:nth-child(1) [data-act="show"]');
   await page.waitForFunction(() => document.querySelector('#cmpi-before').naturalWidth === 96);
+  // With the photo details removed, the originals' file dates stay out of
+  // the ZIP too: for a photo from a camera that is often when it was taken.
+  await page.evaluate(() => Object.defineProperty(File.prototype, 'lastModified', { configurable: true, get: () => new Date(2001, 0, 2, 3, 4, 6).getTime() }));
   const [zdl] = await Promise.all([page.waitForEvent('download'), page.click('#cmpi-zip')]);
   assert.equal(zdl.suggestedFilename(), 'compressed-images.zip');
-  const zip = unzip(fs.readFileSync(await zdl.path()));
+  const zipBuf = fs.readFileSync(await zdl.path());
+  for (const [name, year] of Object.entries(zipYears(zipBuf))) assert.ok(year >= 2026, `${name} is dated ${year} in the ZIP, the original file's date, though the photo details were removed`);
+  const zip = unzip(zipBuf);
   assert.deepEqual(Object.keys(zip).sort(), Object.keys(one).sort());
   for (const n of Object.keys(one)) assert.ok(zip[n].equals(one[n]), `${n} in the ZIP matches its own download`);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'cmpi-zip', 'focus stays on the ZIP button');

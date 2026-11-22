@@ -71,6 +71,18 @@ function dqt0(b) {
 }
 
 // Reads a ZIP from its central directory (APPNOTE 4.3.12), checking every CRC-32.
+// The year of each ZIP entry's modified time (MS-DOS date field), by name.
+function zipYears(buf) {
+  let eocd = buf.length - 22;
+  while (buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  const out = {};
+  for (let i = 0, n = buf.readUInt16LE(eocd + 10), p = buf.readUInt32LE(eocd + 16); i < n; i++) {
+    const nlen = buf.readUInt16LE(p + 28);
+    out[buf.toString('utf8', p + 46, p + 46 + nlen)] = 1980 + (buf.readUInt16LE(p + 14) >> 9);
+    p += 46 + nlen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return out;
+}
 function readZip(buf, assert) {
   const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   assert.ok(eocd >= 0, 'end of central directory');
@@ -405,8 +417,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.locator('#fl-list .fl-pick').nth(4).click();
   assert.equal(await page.$eval('#fl-format option[value="same"]', o => o.textContent), 'Original (saved as JPG)', 'HEIC cannot be written');
   assert.equal(await page.getAttribute('#fl-list .fl-row:nth-child(5) .fl-pick', 'aria-pressed'), 'true');
+  // The originals' file dates stay out of the ZIP: the new files carry no metadata.
+  await page.evaluate(() => Object.defineProperty(File.prototype, 'lastModified', { configurable: true, get: () => new Date(2001, 0, 2, 3, 4, 6).getTime() }));
   f = await save('#fl-zip');
   assert.equal(f.name, 'rotated-images.zip');
+  for (const [name, year] of Object.entries(zipYears(f.buf))) assert.ok(year >= 2026, `${name} is dated ${year} in the ZIP, the original file's date, though the new files carry no metadata`);
   assert.match(await text('#fl-status'), /Saved rotated-images\.zip: 5 images/);
   const entries = readZip(f.buf, assert);
   assert.deepEqual(entries.map(e => e.name), ['grid-rotated-90.png', 'photo-rotated-90.jpg', 'anim-rotated-90.gif', 'logo-rotated-90.png', 'quadrants-rotated-90.jpg']);

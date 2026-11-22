@@ -406,6 +406,9 @@ faq:
       it.thumbUrl = URL.createObjectURL(thumb);
       it.fmt = s.fmt;
       it.outName = baseName(it.name) + '.' + EXT[s.fmt];
+      // A photo that keeps its EXIF, date taken included, also keeps its file
+      // date in the ZIP; otherwise the ZIP dates it now, as a single download is.
+      it.keepsDate = s.meta !== 'strip' && !!d.exif;
       it.w = t.w;
       it.h = t.h;
       it.notes = notesFor(d, s);
@@ -472,7 +475,7 @@ faq:
     zipBtn.disabled = true;
     zipBtn.textContent = 'Creating ZIP…';
     try {
-      var zip = await TTZip.create(done.map(function (i) { return { name: i.outName, data: i.blob, date: i.file.lastModified ? new Date(i.file.lastModified) : null }; }));
+      var zip = await TTZip.create(done.map(function (i) { return { name: i.outName, data: i.blob, date: i.keepsDate && i.file.lastModified ? new Date(i.file.lastModified) : null }; }));
       TT.download('heic-to-' + EXT[settings().fmt] + '.zip', zip);
       status.textContent = 'ZIP with ' + done.length + (done.length === 1 ? ' photo' : ' photos') + ' downloaded.';
     } catch (e) {

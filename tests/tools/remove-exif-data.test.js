@@ -162,6 +162,18 @@ function gifBlocks(buf) {
 }
 
 // ---- ZIP (APPNOTE 6.3): entries from the central directory ----
+// The year of each entry's modified time (MS-DOS date field), by name.
+function zipYears(buf) {
+  let eocd = buf.length - 22;
+  while (buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  const out = {};
+  for (let i = 0, n = buf.readUInt16LE(eocd + 10), p = buf.readUInt32LE(eocd + 16); i < n; i++) {
+    const nlen = buf.readUInt16LE(p + 28);
+    out[buf.toString('utf8', p + 46, p + 46 + nlen)] = 1980 + (buf.readUInt16LE(p + 14) >> 9);
+    p += 46 + nlen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return out;
+}
 function unzip(buf) {
   let eocd = buf.length - 22;
   while (buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
@@ -345,9 +357,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
 
   // ---------- Download all: one ZIP ----------
   assert.equal(await page.textContent('#rexif-all'), 'Download all as ZIP (4)');
+  // The cleaned photos do not take their originals' file dates into the ZIP:
+  // for a photo from a camera or phone that is often the time it was taken.
+  await page.evaluate(() => Object.defineProperty(File.prototype, 'lastModified', { configurable: true, get: () => new Date(2001, 0, 2, 3, 4, 6).getTime() }));
   const [zdl] = await Promise.all([page.waitForEvent('download'), page.click('#rexif-all')]);
   assert.equal(zdl.suggestedFilename(), 'photos-without-metadata.zip');
-  const zip = unzip(fs.readFileSync(await zdl.path()));
+  const zipBuf = fs.readFileSync(await zdl.path());
+  for (const [name, year] of Object.entries(zipYears(zipBuf))) assert.ok(year >= 2026, `${name} is dated ${year} in the ZIP, the original file's date`);
+  const zip = unzip(zipBuf);
   assert.deepEqual(Object.keys(zip).sort(), ['gps-rotated-clean.jpg', 'meta-clean.png', 'meta-clean.webp', 'plain-clean.jpg']);
   assert.ok(zip['plain-clean.jpg'].equals(fs.readFileSync(F('plain.jpg'))), 'ZIP entry matches the single download');
   assert.deepEqual(webpChunks(zip['meta-clean.webp'], assert).map(c => c.type), ['VP8X', 'ICCP', 'VP8 ']);
