@@ -39,6 +39,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     return { opaque, px: pts.map(([x, y]) => Array.from(d.subarray(4 * (y * w + x), 4 * (y * w + x) + 4))) };
   }, [svg, w, h, pts]);
   const near = (p, q, tol = 3) => q.every((v, k) => Math.abs(p[k] - v) <= tol);
+  // The SVG shown beside the original, read back from its image.
+  const shown = () => page.evaluate(async () => (await fetch(document.querySelector('#p2s-svg').src)).text());
   const openFile = async name => {
     await page.setInputFiles('#p2s-file', path.join(fixtures, name));
     await page.waitForFunction(n => document.querySelector('#p2s-drop-title').textContent === n, name);
@@ -107,6 +109,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.$eval(`#p2s-list input[aria-label^="Colour ${accent}"]`, el => { el.value = '#00ff00'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   svg = await downloadSvg(); // the change is applied before saving, without waiting for the pause
   assert.ok(svg.text.includes('<g fill="#00ff00">') && !svg.text.includes(accent), 'recoloured');
+  assert.equal(await shown(), svg.text, 'the SVG saved is the one shown');
   assert.deepEqual((await pixels(svg.text, 240, 160, [[200, 20]])).px[0], [0, 255, 0, 255]);
   assert.ok((await page.textContent('#p2s-list')).includes('was ' + accent));
   await page.click('button[aria-label="Remove colour #14286e"]');
@@ -120,6 +123,16 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   svg = await downloadSvg();
   assert.ok(svg.text.includes('<g fill="#14286e">') && svg.text.includes('<g fill="#00ff00">'), 'navy back, the new green kept');
   assert.equal(await page.isHidden('#p2s-removed'), true);
+  // From the keyboard, Remove and Restore leave the focus in the colour lists, not on the page.
+  const focused = () => page.evaluate(() => document.activeElement.getAttribute('aria-label'));
+  await page.focus('button[aria-label="Remove colour #14286e"]');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => /^2 colours/.test(document.querySelector('#p2s-info').textContent));
+  assert.equal(await focused(), `Remove colour ${green}`, 'the focus moves on to the next colour');
+  await page.focus('button[aria-label="Restore colour #14286e"]');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => /^3 colours/.test(document.querySelector('#p2s-info').textContent));
+  assert.equal(await focused(), 'Remove colour #14286e', 'with no removed colour left, the focus goes to the colour put back');
 
   // Pick mode: a click on the picture removes the colour under it.
   await page.click('#p2s-pickbtn');
@@ -161,9 +174,18 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(label, `${pct}%`);
   const zoomed = await page.$eval('#p2s-view', el => el.scrollWidth > el.clientWidth);
   assert.ok(zoomed, 'zoomed in, the picture scrolls');
+  assert.equal(await page.$eval('#p2s-view', el => getComputedStyle(el).overscrollBehaviorY), 'contain', 'zoomed in, the wheel scrolls the picture only');
   await page.keyboard.press('0');
   [label, pct] = await zoomLabel();
   assert.equal(label, `Fit (${pct}%)`);
+  // At its fitted size the picture does not hold on to the wheel: the page scrolls.
+  await page.$eval('#p2s-view', el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  const vbox = await page.locator('#p2s-view').boundingBox();
+  await page.mouse.move(vbox.x + vbox.width * 0.75, vbox.y + vbox.height / 2);
+  const wy = await page.evaluate(() => scrollY);
+  await page.mouse.wheel(0, 120);
+  await page.waitForFunction(y => scrollY !== y, wy, { timeout: 3000 }).catch(() => {});
+  assert.ok(await page.evaluate(y => scrollY > y, wy), 'the wheel over the picture scrolls the page');
   await page.focus('#p2s-copy');
   await page.keyboard.press('Shift+Tab');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'p2s-download');
@@ -180,7 +202,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---------- Black and white: Otsu's threshold, holes, specks, invert ----------
   await openFile('lettering.png');
+  // Picking a colour to remove ends with the switch: black and white has no colours to remove.
+  await page.click('#p2s-pickbtn');
   await page.check('input[name="p2s-mode"][value="bw"]');
+  assert.deepEqual(await page.evaluate(() => [document.querySelector('#p2s-pickbtn').getAttribute('aria-pressed'), document.querySelector('#p2s-view').classList.contains('is-picking')]),
+    ['false', false], 'no picking in black and white');
   assert.equal(await page.isHidden('#p2s-colours-field'), true);
   svg = await downloadSvg();
   assert.equal(await page.textContent('#p2s-thr-out'), expected.otsu + ' (automatic)', 'Otsu threshold as computed independently');
@@ -222,6 +248,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.check('#p2s-auto');
   await downloadSvg();
   assert.equal(await page.textContent('#p2s-thr-out'), expected.otsu + ' (automatic)');
+  // A transparent logo: its transparent parts are white paper, never ink (a canvas reads them as
+  // black), so only the ring, the accent and the 78% green block are cut; the faint shadow is not.
+  await openFile('logo.png');
+  svg = await downloadSvg();
+  px = await pixels(svg.text, 240, 160, [[5, 5], [90, 30], [90, 80], [200, 20], [190, 80], [190, 135], [235, 155]]);
+  assert.deepEqual(px.px.map(p => p[3] >= 128), [false, true, false, true, true, false, false], 'ink where the logo is, paper elsewhere');
 
   // ---------- A photo: 16 to 64 colours, traced at its own size ----------
   await page.check('input[name="p2s-mode"][value="photo"]');
@@ -234,16 +266,69 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   px = await pixels(svg.text, 640, 480, [[480, 110], [100, 50]]);
   assert.ok(near(px.px[0], [250, 220, 120, 255], 30), `sun ${px.px[0]}`);
   assert.ok(near(px.px[1], [60, 120, 196, 255], 30), `sky ${px.px[1]}`);
+  assert.equal(await shown(), svg.text, 'the SVG saved is the one shown');
+
+  // ---------- Over 2 megapixels: traced at 2, the SVG keeps the picture's own size ----------
+  const big = await page.evaluate(() => {
+    const c = Object.assign(document.createElement('canvas'), { width: 2400, height: 1500 }), g = c.getContext('2d');
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, 2400, 1500);
+    g.fillStyle = '#c0392b'; g.beginPath(); g.arc(800, 750, 500, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#1f6f4a'; g.fillRect(1500, 300, 700, 900);
+    return c.toDataURL('image/png').split(',')[1];
+  });
+  await page.check('input[name="p2s-mode"][value="logo"]');
+  await page.setInputFiles('#p2s-file', { name: 'big.png', mimeType: 'image/png', buffer: Buffer.from(big, 'base64') });
+  await page.waitForFunction(() => document.querySelector('#p2s-drop-title').textContent === 'big.png');
+  svg = await downloadSvg();
+  assert.equal(await page.textContent('#p2s-note'), 'Traced at 1,788 × 1,118 px, reduced from 2,400 × 1,500 px; the SVG keeps the original size.');
+  assert.deepEqual((await structure(svg.text)).attrs, ['2400', '1500', '0 0 1788 1118']);
+  assert.match(await info(), /^3 colours, 4 shapes, /, 'the white ground, the circle, and the block both in red and in green on top (colours are stacked)');
+  px = await pixels(svg.text, 2400, 1500, [[800, 750], [1850, 750], [100, 100], [800, 1270]]);
+  assert.deepEqual(px.px, [[192, 57, 43, 255], [31, 111, 74, 255], [255, 255, 255, 255], [255, 255, 255, 255]]);
+  [label, pct] = await page.evaluate(() => [document.querySelector('#p2s-zoom-val').textContent, Math.round(parseFloat(document.querySelector('#p2s-stage').style.width) / 2400 * 100)]);
+  assert.equal(label, `Fit (${pct}%)`, 'the zoom is of the picture\'s own size');
 
   // ---------- Thousands of shapes: a warning ----------
   await page.check('input[name="p2s-mode"][value="logo"]');
   await openFile('dots.png');
   await downloadSvg();
   assert.match(await page.textContent('#p2s-warn'), /^This SVG has 6,401 shapes, so drawing programs and cutting machines may be slow with it\./);
-  await setRange('#p2s-speck', 10);
+  // Speck size counts pixels of the picture as opened, not of the copy traced at twice its size:
+  // at 4 px the 3 px dots go (6 px in that copy).
+  await setRange('#p2s-speck', 4);
   await downloadSvg();
-  assert.equal(await page.textContent('#p2s-warn'), '', 'specks up to 10 px dropped: no warning');
+  assert.equal(await page.textContent('#p2s-warn'), '', 'spots up to 4 px across dropped: no warning');
   assert.match(await info(), /^1 colour, 1 shape, /);
+  assert.deepEqual(await colourList(), ['#ffffff'], 'a colour whose shapes are all specks is not in the SVG, so not in the list');
+
+  // ---------- A new file still opening or tracing: nothing of the last one is shown, copied or saved ----------
+  await page.evaluate(() => {
+    const decode = TTImage.decode;
+    window.p2sOpen = new Promise(r => { window.p2sLetGo = r; });
+    TTImage.decode = async function () { await window.p2sOpen; TTImage.decode = decode; return decode.apply(this, arguments); };
+    window.p2sSeen = null;
+    new MutationObserver((m, o) => {
+      o.disconnect();
+      window.p2sSeen = { src: document.querySelector('#p2s-svg').getAttribute('src'), info: document.querySelector('#p2s-info').textContent,
+        colours: document.querySelectorAll('#p2s-list li').length, code: document.querySelector('#p2s-code').textContent.length };
+    }).observe(document.querySelector('#p2s-drop-title'), { childList: true, characterData: true, subtree: true });
+  });
+  await page.setInputFiles('#p2s-file', path.join(fixtures, 'logo.png'));
+  await page.waitForFunction(() => /^Opening logo\.png/.test(document.querySelector('#p2s-progress').textContent));
+  const early = page.waitForEvent('download', { timeout: 60000 });
+  await page.click('#p2s-download');
+  await page.click('#p2s-copy');
+  await page.evaluate(() => window.p2sLetGo());
+  const edl = await early;
+  assert.equal(edl.suggestedFilename(), 'logo.svg', 'Download pressed while the file opens saves that file');
+  const etext = fs.readFileSync(await edl.path(), 'utf8');
+  assert.deepEqual((await structure(etext)).attrs, ['240', '160', '0 0 960 640']);
+  await page.waitForFunction(() => /Copied/.test(document.querySelector('#p2s-copy').textContent));
+  const ecopy = await page.evaluate(() => navigator.clipboard.readText());
+  assert.deepEqual((await structure(ecopy)).attrs, ['240', '160', '0 0 960 640'], 'Copy pressed while the file opens copies that file');
+  assert.equal(ecopy, etext);
+  assert.deepEqual(await page.evaluate(() => window.p2sSeen), { src: null, info: '', colours: 0, code: 0 },
+    'the last picture\'s SVG, colours and code are gone once the new picture shows');
 
   // ---------- Files it cannot trace ----------
   await page.setInputFiles('#p2s-file', { name: 'drawing.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>') });
@@ -258,10 +343,23 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => /^again\.svg/.test(document.querySelector('#p2s-error').textContent));
   await downloadSvg();
   assert.match(await page.textContent('#p2s-error'), /^again\.svg is already an SVG/);
+  // Download pressed while a file opens that then cannot be opened: nothing is saved, not even the last picture.
+  await page.evaluate(() => {
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () { if (this.download) window.p2sSaved = this.download; return click.call(this); };
+    window.p2sSaved = null;
+    const decode = TTImage.decode;
+    window.p2sOpen = new Promise(r => { window.p2sLetGo = r; });
+    TTImage.decode = async function () { await window.p2sOpen; TTImage.decode = decode; return decode.apply(this, arguments); };
+  });
   await page.setInputFiles('#p2s-file', { name: 'notes.png', mimeType: 'image/png', buffer: Buffer.from('just some text') });
-  await page.waitForFunction(() => /not a supported image/.test(document.querySelector('#p2s-error').textContent));
+  await page.waitForFunction(() => /^Opening notes\.png/.test(document.querySelector('#p2s-progress').textContent));
+  await page.click('#p2s-download');
+  await page.evaluate(() => window.p2sLetGo());
+  await page.waitForFunction(() => /not a supported image/.test(document.querySelector('#p2s-error').textContent) && !document.querySelector('#p2s-download').dataset.busy);
+  assert.equal(await page.evaluate(() => window.p2sSaved), null, 'nothing saved for a file that could not be opened');
   assert.equal(await page.getAttribute('#p2s-file', 'aria-invalid'), 'true');
-  assert.equal(await page.textContent('#p2s-drop-title'), 'dots.png', 'the last good image stays');
+  assert.equal(await page.textContent('#p2s-drop-title'), 'logo.png', 'the last good image stays');
   await openFile('logo.png');
   await downloadSvg();
   assert.equal(await page.textContent('#p2s-error'), '');
@@ -273,6 +371,30 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await page.waitForFunction(name => document.querySelector('#p2s-drop-title').textContent === name, n);
     await page.waitForFunction(r => new RegExp(r).test(document.querySelector('#p2s-note').textContent), re.source);
   }
+  // Nothing to draw: say why, and Copy refuses as Download does.
+  const drawn = fill => page.evaluate(fill => {
+    const c = Object.assign(document.createElement('canvas'), { width: 120, height: 80 }), g = c.getContext('2d');
+    g.fillStyle = fill; g.fillRect(0, 0, 120, 80);
+    return c.toDataURL('image/png').split(',')[1];
+  }, fill);
+  for (const [n, fill, why] of [['faint.png', 'rgba(30, 90, 200, 0.4)', 'no pixel is at least half opaque, and fainter ones are left out.'],
+    ['clear.png', 'rgba(30, 90, 200, 0)', 'the image is fully transparent.']]) {
+    await page.setInputFiles('#p2s-file', { name: n, mimeType: 'image/png', buffer: Buffer.from(await drawn(fill), 'base64') });
+    await page.waitForFunction(n => document.querySelector('#p2s-drop-title').textContent === n, n);
+    await page.waitForFunction(() => /^Nothing to draw/.test(document.querySelector('#p2s-info').textContent));
+    assert.equal(await info(), 'Nothing to draw: ' + why);
+  }
+  await page.evaluate(() => navigator.clipboard.writeText('before'));
+  await page.click('#p2s-copy');
+  await page.waitForFunction(() => document.querySelector('#p2s-error').textContent || /Copied/.test(document.querySelector('#p2s-copy').textContent));
+  assert.equal(await page.textContent('#p2s-error'), 'There is nothing in the SVG to copy: the image is fully transparent.');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'before', 'an empty SVG is not copied');
+  // A long name is cut between whole characters, never inside an emoji.
+  const longName = 'x'.repeat(119) + '\u{1F600}y.png';
+  await page.setInputFiles('#p2s-file', { name: longName, mimeType: 'image/png', buffer: fs.readFileSync(path.join(fixtures, 'logo.png')) });
+  await page.waitForFunction(n => document.querySelector('#p2s-drop-title').textContent === n, longName);
+  await downloadSvg();
+  assert.equal(await page.evaluate(() => window.p2sSaved), 'x'.repeat(119) + '\u{1F600}.svg');
   await openFile('logo.png');
 
   // ---------- Back to the page: the browser may restore the radios after the script ran ----------
@@ -290,6 +412,21 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await phone.goto(url);
   await phone.waitForFunction(() => /SVG\.$/.test(document.querySelector('#p2s-info').textContent), null, { timeout: 30000 });
   assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  // A finger on the picture, away from the divider's knob, scrolls the page.
+  const cdp = await ctx.newCDPSession(phone);
+  await phone.$eval('#p2s-view', el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  const vb = await phone.$eval('#p2s-view', el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  const sy = await phone.evaluate(() => scrollY), from = { x: vb.x + vb.w * 0.85, y: vb.y + vb.h * 0.7 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+  for (let s = 1; s <= 8; s++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + s * 0.4, y: from.y - s * 20 }] });
+    await phone.waitForTimeout(16);
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await phone.waitForFunction(y => scrollY !== y, sy, { timeout: 3000 }).catch(() => {});
+  assert.ok(await phone.evaluate(y => scrollY > y, sy), 'a swipe on the picture scrolls the page');
+  assert.equal(await phone.$eval('#p2s-stage', el => el.style.getPropertyValue('--cut')), '50%', 'and leaves the divider where it was');
+  await cdp.detach();
   await phone.tap('#p2s-pickbtn');
   await phone.locator('#p2s-view').scrollIntoViewIfNeeded();
   const pb = await phone.locator('#p2s-stage').boundingBox();

@@ -137,6 +137,16 @@ function hooks() {
     // [method, ...numeric arguments, the context's currentTime when it was called]
     AudioParam.prototype[m] = function (...args) { const c = log.contexts[0]; (this.__calls || (this.__calls = [])).push([m, ...args.map(a => (typeof a === 'number' ? a : null)), c ? c.currentTime : null]); return f.apply(this, args); };
   }
+  // Firefox works out AudioParam.value from the main thread's own copy of the
+  // schedule, so a value read straight after cancelScheduledValues() has lost
+  // the ramp in progress: such reads are counted.
+  const vd = Object.getOwnPropertyDescriptor(AudioParam.prototype, 'value');
+  log.lateReads = 0;
+  Object.defineProperty(AudioParam.prototype, 'value', {
+    configurable: true,
+    get() { const c = this.__calls; if (c && c.length && c[c.length - 1][0] === 'cancelScheduledValues') log.lateReads++; return vd.get.call(this); },
+    set(v) { vd.set.call(this, v); },
+  });
   // Connections are recorded; whatever reaches the speakers is also fed to
   // two analysers (left and right) for the test to read.
   const connect = AudioNode.prototype.connect;
@@ -436,6 +446,21 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     const s = swing(a.block, a.sr, a.kw, 0.02);
     assert.ok(s.max < 2 && s.min > -2, `${c}, tone ${from} to ${to}: the loudness swings from ${s.min.toFixed(1)} to +${s.max.toFixed(1)} dB (20 ms windows)`);
   }
+  // A link opened while the noise plays (a new hash) can change the colour
+  // and the tone at once. The colour fading out keeps its own tone and level,
+  // so that does not swell or dip either (it used to take the new tone at its
+  // old level: violet at -12 to white at +12 swelled by up to 8 dB, white to
+  // violet at -12 dipped by up to 9).
+  for (const [key, from, hash, big] of [['7', -12, '#white&tone=12', 'White noise'], ['1', 0, '#violet&tone=-12', 'Violet noise']]) {
+    await blur();
+    await page.keyboard.press(key);
+    await setRange('#ng-tone', from);
+    await settle();
+    const a = await around(() => page.evaluate(h => { location.hash = h; }, hash), 0.45);
+    assert.deepEqual([await text('#ng-big'), await page.inputValue('#ng-tone')], [big, hash.split('=')[1]]);
+    const s = swing(a.block, a.sr, a.kw, 0.02);
+    assert.ok(s.max < 2 && s.min > -2, `a link to ${hash} opened while playing: the loudness swings from ${s.min.toFixed(1)} to ${s.max.toFixed(1)} dB (20 ms windows)`);
+  }
   // A colour change cross-fades at a constant power (the colours are
   // independent and equally loud), so it does not dip half-way (pink and
   // grey dipped by 1 dB, white and brown by 2.5).
@@ -520,6 +545,10 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
       for (let k = j + 2; k < i; k++) assert.notEqual(calls[k][0], 'setTargetAtTime');
     });
   }
+  // The value an anchor holds is read before the cancel: read after it,
+  // Firefox gives the value without the ramp in progress (so a stop during the
+  // fade-in cut the sound off at once instead of fading it).
+  assert.equal(await page.evaluate(() => window.__log.lateReads), 0, 'an AudioParam value was read straight after cancelScheduledValues()');
 
   // ---- Clock time: an empty or half-typed time is an error, after a pause ----
   await page.selectOption('#ng-timer', 'clock');
