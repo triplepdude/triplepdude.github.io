@@ -559,6 +559,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   checkTiming(parseGif(gifK), scen.keyboard, 'keyboard');
   assert.deepEqual(await codesOf(page, gifK, exp.blocks.coded), scen.keyboard.codes);
 
+  // A GIF under 1 KB gives its size once ("739 bytes", not "739 bytes (739 bytes)"):
+  // a 64 x 36 px, 1-second video made by tests/fixtures/mp4-to-mp3/make_fixtures.py.
+  await openVideo(page, { name: 'tiny.mp4', mimeType: 'video/mp4', buffer: fs.readFileSync(path.join(fixtures, '..', 'mp4-to-mp3', 'silent-video.mp4')) });
+  await estimated(page);
+  const tiny = await text('#v2g-summary');
+  assert.match(tiny, / · \d{3} bytes\./, tiny);
+  assert.doesNotMatch(tiny, /bytes \(/, tiny);
+
   // ---------- A phone: touch drags and taps ----------
   const browser = page.context().browser();
   // A German phone: the comma is the decimal mark there.
