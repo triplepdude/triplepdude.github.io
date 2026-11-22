@@ -57,9 +57,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.locator('#tzc-plan [role="option"]').count(), 24);
   assert.equal(await page.getAttribute('#tzc-plan', 'aria-activedescendant'), 'tzc-col-13');
   assert.match(await page.locator('#tzc-col-13').textContent(), /13:00 in Rome \(working hours\);07:00 in New York \(morning or evening\);/);
-  // Live: a minute later every row has moved on.
+  // Live: a minute later every row has moved on, in the same elements, and the focus stays put.
+  const clockEl = await page.$('#tzc-rows li[data-i="0"] .tzc-t');
+  await page.focus('#tzc-rows li[data-i="2"] button[data-act="first"]');
   await page.clock.runFor(60000);
   assert.equal((await rows())[0].time, '13:01');
+  assert.equal(await clockEl.evaluate(e => e.isConnected && e.textContent), '13:01', 'the minute tick updates the same element');
+  assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Make first place: London');
   assert.equal(await page.inputValue('#tzc-time'), '13:01');
   // The tz 2026f check, in the small print.
   const browserOld = await page.evaluate(() => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Vancouver', hour: 'numeric', hourCycle: 'h23' }).format(new Date('2026-11-24T12:00:00Z')) === '04');
@@ -155,6 +159,14 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     assert.match(await text('#tzc-ask-error'), msg, q);
     await describedBy('#tzc-ask', 'tzc-ask-error');
   }
+  // Words that name built-in properties of objects are just unknown places.
+  for (const w of ['constructor', '__proto__', 'toString']) {
+    await ask('3pm ' + w);
+    assert.equal(await text('#tzc-ask-error'), `No place called “${w}” was found. Try a larger city nearby, the country, a zone such as Europe/Paris or an offset such as UTC+2.`);
+    await page.fill('#tzc-add', w);
+    assert.equal(await page.$$eval('#tzc-sugg [data-opt]', ls => ls.length), 0, w);
+  }
+  await page.fill('#tzc-add', '');
   await page.fill('#tzc-ask', 'London');
   assert.equal(await page.getAttribute('#tzc-ask', 'aria-invalid'), null, 'typing clears the error');
   assert.equal(await text('#tzc-ask-error'), '');

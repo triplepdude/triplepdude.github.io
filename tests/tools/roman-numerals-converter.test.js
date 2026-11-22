@@ -318,6 +318,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.inputValue('#rn-rom'), 'MCMXCIV');
   assert.equal(await text('#rn-big'), 'MCMXCIV');
   await page.goto('about:blank');
+  await page.goto(url + '#s=constructor&k=__proto__&o=toString&n=12');
+  assert.equal(await page.inputValue('#rn-rom'), 'XII');
+  assert.deepEqual([await page.inputValue('#rn-sep'), await page.inputValue('#rn-ink'), await page.inputValue('#rn-order')], ['dot', 'bw', 'dmy'], 'unknown settings in a link are ignored');
+  await page.goto('about:blank');
   await page.goto(url + '#n=' + '1'.repeat(2000));
   assert.equal(await text('#rn-num-error'), 'The link is too long to read, so the page starts with this year.');
   assert.equal(await page.inputValue('#rn-num'), '2026');

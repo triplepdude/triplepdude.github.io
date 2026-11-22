@@ -12,8 +12,8 @@ howto: |
   abbreviation (EST, IST, AoE). Up to 12 places are compared. Each shows its
   UTC offset, whether its date differs, its next clock change and any change
   in the time difference over the next 12 months. When an abbreviation, a
-  city name or a country has more than one meaning or time zone, the page
-  says which one it used and offers the others. **Now** follows your
+  country or a city name could mean places in different time zones, the page
+  says which it used and offers the likeliest others. **Now** follows your
   device's clock.
 
   In the planner each column is one hour of the first place's day: tap one,
@@ -79,7 +79,7 @@ faq:
   - q: What does AoE mean in a deadline?
     a: "Anywhere on Earth: UTC−12:00, the last time zone in which a date ends. A deadline of 23:59 AoE on 15 May has passed everywhere once it is 11:59 UTC on 16 May. The convention comes from IEEE 802.16 balloting and is common for conference submissions."
   - q: Why does my computer show the wrong time for Vancouver, Calgary or Winnipeg?
-    a: British Columbia, Alberta, the Northwest Territories and Manitoba stopped changing their clocks in 2026, and devices or browsers that have not been updated still apply the old rules. This page checks the eight zones that changed in 2026 and marks every row it had to correct. Updating your browser and operating system fixes the other apps too.
+    a: British Columbia, Alberta, the Northwest Territories and Manitoba stopped changing their clocks in 2026, and devices or browsers that have not been updated still apply the old rules. This page checks the eight zones that changed in 2026 and marks every row it had to correct. Updating your browser and operating system brings in the new rules.
   - q: Is anything I type sent to a server?
     a: No. Times are worked out in your browser with its own time zone rules, and the current time comes from your device's clock. The list of places is a file on this site, loaded the first time you search, and nothing is stored; the places and time you pick are kept only in the page address.
 ---
@@ -318,7 +318,9 @@ faq:
   // ---------- Time zone engine ----------
   // The browser's own rules (Intl) give each zone's offset; offsets typed by the visitor
   // (UTC+05:30) are plain arithmetic and never go through Intl.
-  var MODERN = {
+  // Tables keyed by text from the visitor or the link have no prototype, so "constructor" finds nothing.
+  function table(o) { return Object.assign(Object.create(null), o); }
+  var MODERN = table({
     'Asia/Calcutta': 'Asia/Kolkata', 'Asia/Katmandu': 'Asia/Kathmandu', 'Asia/Saigon': 'Asia/Ho_Chi_Minh',
     'Asia/Rangoon': 'Asia/Yangon', 'Asia/Thimbu': 'Asia/Thimphu', 'Europe/Kiev': 'Europe/Kyiv',
     'Atlantic/Faeroe': 'Atlantic/Faroe', 'America/Godthab': 'America/Nuuk', 'Pacific/Truk': 'Pacific/Chuuk',
@@ -327,7 +329,7 @@ faq:
     'America/Cordoba': 'America/Argentina/Cordoba', 'America/Jujuy': 'America/Argentina/Jujuy',
     'America/Mendoza': 'America/Argentina/Mendoza', 'America/Indianapolis': 'America/Indiana/Indianapolis',
     'America/Louisville': 'America/Kentucky/Louisville', 'America/Coral_Harbour': 'America/Atikokan'
-  };
+  });
   var known = new Map();
   function validZone(tz) {
     if (!known.has(tz)) {
@@ -362,8 +364,9 @@ faq:
   // built with older data still apply the old ones. Each period below is [start, end) in minutes
   // since 1970 UTC, the offset older data gives and the offset tz 2026f gives, in minutes east of
   // UTC. A browser whose offset matches the old one is corrected; one that gives anything else is
-  // trusted, as it may have newer data. Made by comparing tzdata 2026f (zic and Python zoneinfo)
-  // with Chromium 153 (tz 2025c), 2026 to 2040. Update with each tz release.
+  // trusted, as it may have newer data. Made by tests/fixtures/time-zone-converter/stale_table.py,
+  // which compares tzdata 2026f with older data (Node 22's tz 2025b; Chromium 153's tz 2025c gives
+  // the same), 2026 to 2040. Update it, TZ_VERSION and TZ_DATE with each tz release.
   var STALE = {
     'America/Vancouver': [[29892060,30083640,-480,-420],[30426300,30607800,-480,-420],[30950460,31131960,-480,-420],[31474620,31656120,-480,-420],[31998780,32180280,-480,-420],[32522940,32714520,-480,-420],[33057180,33238680,-480,-420],[33581340,33762840,-480,-420],[34105500,34287000,-480,-420],[34629660,34811160,-480,-420],[35153820,35335320,-480,-420],[35677980,35869560,-480,-420],[36212220,36393720,-480,-420],[36736380,36917880,-480,-420],[37260540,37343520,-480,-420]],
     'America/Edmonton': [[29892000,30083580,-420,-360],[30426240,30607740,-420,-360],[30950400,31131900,-420,-360],[31474560,31656060,-420,-360],[31998720,32180220,-420,-360],[32522880,32714460,-420,-360],[33057120,33238620,-420,-360],[33581280,33762780,-420,-360],[34105440,34286940,-420,-360],[34629600,34811100,-420,-360],[35153760,35335260,-420,-360],[35677920,35869500,-420,-360],[36212160,36393660,-420,-360],[36736320,36917820,-420,-360],[37260480,37343520,-420,-360]],
@@ -374,16 +377,17 @@ faq:
     'Africa/El_Aaiun': [[29831100,30032760,60,0],[30083160,30536760,60,0],[30597240,31050840,60,0],[31101240,31554840,60,0],[31615320,32068920,60,0],[32119320,32583000,60,0],[32633400,33087000,60,0],[33147480,33601080,60,0],[33651480,34105080,60,0],[34165560,34619160,60,0],[34679640,35133240,60,0],[35183640,35637240,60,0],[35697720,36151320,60,0],[36201720,36665400,60,0],[36715800,37169400,60,0],[37229880,37343520,60,0]],
     'Europe/Chisinau': [[29579040,29579100,180,120],[29881440,29881500,120,180],[30103200,30103260,180,120],[30415680,30415740,120,180],[30627360,30627420,180,120],[30939840,30939900,120,180],[31151520,31151580,180,120],[31464000,31464060,120,180],[31685760,31685820,180,120],[31988160,31988220,120,180],[32209920,32209980,180,120],[32512320,32512380,120,180],[32734080,32734140,180,120],[33046560,33046620,120,180],[33258240,33258300,180,120],[33570720,33570780,120,180],[33782400,33782460,180,120],[34094880,34094940,120,180],[34306560,34306620,180,120],[34619040,34619100,120,180],[34840800,34840860,180,120],[35143200,35143260,120,180],[35364960,35365020,180,120],[35667360,35667420,120,180],[35889120,35889180,180,120],[36201600,36201660,120,180],[36413280,36413340,180,120],[36725760,36725820,120,180],[36937440,36937500,180,120],[37249920,37249980,120,180]]
   };
-  var STALE_LINKS = {
+  STALE = table(STALE);
+  var STALE_LINKS = table({
     'Canada/Pacific': 'America/Vancouver', 'Canada/Mountain': 'America/Edmonton', 'America/Yellowknife': 'America/Edmonton',
     'Canada/Central': 'America/Winnipeg', 'America/Rainy_River': 'America/Winnipeg', 'Cuba': 'America/Havana'
-  };
-  var STALE_NAMES = {
+  });
+  var STALE_NAMES = table({
     'America/Vancouver': 'Vancouver (British Columbia)', 'America/Edmonton': 'Edmonton (Alberta)',
     'America/Inuvik': 'Inuvik (Northwest Territories)', 'America/Winnipeg': 'Winnipeg (Manitoba)',
     'America/Havana': 'Havana (Cuba)', 'Africa/Casablanca': 'Casablanca (Morocco)',
     'Africa/El_Aaiun': 'El Aaiún (Western Sahara)', 'Europe/Chisinau': 'Chișinău (Moldova)'
-  };
+  });
   function staleList(tz) { return STALE[STALE_LINKS[tz] || tz] || null; }
   function staleFix(tz, ms, raw) { // corrected offset in seconds, or null
     var list = staleList(tz);
@@ -677,17 +681,17 @@ faq:
       .replace(/[łŁ]/g, 'l').replace(/[đĐ]/g, 'd').replace(/[æÆ]/g, 'ae').replace(/[œŒ]/g, 'oe')
       .replace(/ı/g, 'i').toLowerCase().replace(/['’`.]/g, '').replace(/[\s\-_\/,()]+/g, ' ').trim();
   }
-  var COUNTRY_ALIASES = {
+  var COUNTRY_ALIASES = table({
     uk: 'GB', 'great britain': 'GB', britain: 'GB', england: 'GB', scotland: 'GB', wales: 'GB', 'northern ireland': 'GB',
     us: 'US', usa: 'US', america: 'US', 'united states of america': 'US', uae: 'AE', emirates: 'AE', holland: 'NL',
     netherlands: 'NL', korea: 'KR', 'czech republic': 'CZ', 'ivory coast': 'CI', 'cote divoire': 'CI', burma: 'MM',
     turkiye: 'TR', macau: 'MO', drc: 'CD', 'dr congo': 'CD', palestine: 'PS', 'east timor': 'TL', swaziland: 'SZ'
-  };
-  var CITY_ALIASES = {
+  });
+  var CITY_ALIASES = table({
     nyc: 'new york city', 'new york': 'new york city', la: 'los angeles', sf: 'san francisco', dc: 'washington',
     'washington dc': 'washington', bombay: 'mumbai', calcutta: 'kolkata', madras: 'chennai', bangalore: 'bengaluru',
     saigon: 'ho chi minh city', peking: 'beijing', kiev: 'kyiv', canton: 'guangzhou', 'mexico df': 'mexico city'
-  };
+  });
   var data = null, dataP = null;
   function loadData() {
     if (data) return Promise.resolve(data);
@@ -867,6 +871,24 @@ faq:
   function announce(text) { if (text && statusEl.textContent !== text) statusEl.textContent = text; }
 
   // ---------- Rendering ----------
+  // Containers are brought up to date in place: elements that stay keep their identity, and only the
+  // text and attributes that differ change, so the focus and a screen reader's place survive the
+  // update every minute.
+  var tpl = document.createElement('template');
+  function patch(el, html) { tpl.innerHTML = html; sync(el, tpl.content); }
+  function sync(a, b) {
+    var an = a.childNodes, bn = b.childNodes;
+    while (an.length > bn.length) a.removeChild(a.lastChild);
+    for (var i = 0; i < bn.length; i++) {
+      var x = an[i], y = bn[i];
+      if (!x) { a.appendChild(y.cloneNode(true)); continue; }
+      if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName) { a.replaceChild(y.cloneNode(true), x); continue; }
+      if (y.nodeType !== 1) { if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; continue; }
+      for (var k = x.attributes.length - 1; k >= 0; k--) if (!y.hasAttribute(x.attributes[k].name)) x.removeAttribute(x.attributes[k].name);
+      for (k = 0; k < y.attributes.length; k++) if (x.getAttribute(y.attributes[k].name) !== y.attributes[k].value) x.setAttribute(y.attributes[k].name, y.attributes[k].value);
+      sync(x, y);
+    }
+  }
   var shown = null; // { t, w } of the last render
   // Rows and the overlap list are rebuilt on every change and every minute, so the button that had
   // the focus is found again by its place in the list and its job.
@@ -1039,7 +1061,7 @@ faq:
         (state.places.length > 1 ? '<button class="btn secondary small" type="button" data-act="remove">Remove<span class="visually-hidden"> ' + esc(p.name) + '</span></button>' : '') +
         '</div></li>');
     });
-    rowsEl.innerHTML = html.join('');
+    patch(rowsEl, html.join(''));
   }
 
   // Other meanings of an ambiguous abbreviation, or other zones of a city name or country.
@@ -1084,7 +1106,7 @@ faq:
     planCols = cols;
     planHint.textContent = 'Each column is one hour of ' + fmtDate(cur.w) + ' in ' + p0.name +
       '. Tap a column, or use the arrow keys, to pick that hour; Home and End go to the first and last hour, Page Up and Page Down to the day before or after.';
-    planNames.innerHTML = state.places.map(function (p) { return '<div>' + esc(p.name) + '</div>'; }).join('');
+    patch(planNames, state.places.map(function (p) { return '<div>' + esc(p.name) + '</div>'; }).join(''));
     var html = cols.map(function (t, i) {
       // Each option is named by its own text: the visible hour, plus hidden words that finish it.
       var cells = state.places.map(function (p) {
@@ -1099,7 +1121,7 @@ faq:
       });
       return '<div class="tzc-col" role="option" id="tzc-col-' + i + '" data-col="' + i + '" aria-selected="' + (i === sel) + '">' + cells.join('') + '</div>';
     }).join('');
-    planEl.innerHTML = html;
+    patch(planEl, html);
     planEl.setAttribute('aria-activedescendant', 'tzc-col-' + sel);
   }
   function keepColumnInView() {
@@ -1123,7 +1145,7 @@ faq:
     var cols = planCols, p0 = home();
     if (state.work[0] >= state.work[1]) {
       overlapSum.textContent = 'Pick working hours that start before they end.';
-      runsEl.innerHTML = '';
+      patch(runsEl, '');
       return;
     }
     var start = cols[0], end = cols[cols.length - 1] + HOUR, slots = [];
@@ -1156,7 +1178,7 @@ faq:
     }
     if (state.places.length < 2) runs = [];
     if (overlapSum.textContent !== sum) overlapSum.textContent = sum;
-    runsEl.innerHTML = runs.slice(0, 8).map(function (r, i) {
+    patch(runsEl, runs.slice(0, 8).map(function (r, i) {
       var text = state.places.map(function (p) {
         var a = wallAt(p, r.a), b = wallAt(p, r.b);
         return p.name + ' ' + fmtTime(a.h, a.mi) + '–' + fmtTime(b.h, b.mi) + (a.days !== cur.w.days ? ' (' + DOW[a.dow] + ')' : '');
@@ -1164,7 +1186,7 @@ faq:
       var a0 = wallAt(p0, r.a);
       return '<li><span>' + esc(text) + '</span><button class="btn secondary small" type="button" data-run="' + i + '">Use ' +
         esc(fmtTime(a0.h, a0.mi)) + '<span class="visually-hidden"> in ' + esc(p0.name) + '</span></button></li>';
-    }).join('');
+    }).join(''));
     runsEl._runs = runs;
   }
 
@@ -1199,7 +1221,7 @@ faq:
           return '<td' + (changed ? ' class="tzc-chg"' : '') + '>' + esc(c) + (changed ? '<span class="visually-hidden"> (changed)</span>' : '') + '</td>';
         }).join('') + '</tr>';
     }).join('');
-    weekEl.innerHTML = head + '<tbody>' + body + '</tbody>';
+    patch(weekEl, head + '<tbody>' + body + '</tbody>');
   }
 
   // ---------- URL hash ----------
@@ -1215,10 +1237,14 @@ faq:
       '&c=' + (state.h12 ? '12' : '24') + '&w=' + state.work[0] + '-' + state.work[1];
   }
   var hashNote = '';
-  function writeHash() {
+  function linkHash() {
     var h = hashFor(true);
     hashNote = '';
     if (h.length > MAX_HASH) { h = hashFor(false); hashNote = 'The link keeps the places and the time but not the place names, which are too long for a link.'; }
+    return h;
+  }
+  function writeHash() {
+    var h = linkHash();
     if (h === lastHash) return;
     lastHash = h;
     try { history.replaceState(null, '', location.pathname + location.search + '#' + h); } catch (e) { /* a sandboxed page */ }
@@ -1670,8 +1696,11 @@ faq:
   $('#tzc-link').addEventListener('click', function (e) {
     current();
     writeHash();
+    // Built here rather than read back from the address bar, which the browser may update late
+    // when the address changes many times in a few seconds.
+    var link = location.href.split('#')[0] + '#' + linkHash();
     setError(exportErr, null, hashNote);
-    TT.copy(location.href, e.currentTarget);
+    TT.copy(link, e.currentTarget);
   });
   titleIn.addEventListener('input', function () { if (titleIn.value.length > MAX_TITLE) titleIn.value = cut(titleIn.value, MAX_TITLE); });
 
