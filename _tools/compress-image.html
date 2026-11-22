@@ -326,6 +326,7 @@ faq:
   const CANCEL = { cancelled: true };
   // What the decoder found in the file itself, in the image converter's words.
   const CUT = 'The file seems to be cut off, so part of the picture may be blank.';
+  const DAMAGED = 'The file seems to be damaged, so part of the picture may be blank.';
   const HDR = {
     hdr: 'This is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.',
     'hdr-mapped': 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.'
@@ -758,7 +759,7 @@ faq:
       throw it.decodeError;
     }
     if (items.indexOf(it) < 0) { TTImage.release(d); throw CANCEL; }
-    Object.assign(it, { w: d.width, h: d.height, inFmt: d.format, hasAlpha: d.hasAlpha, cut: (d.warnings || []).indexOf('truncated') >= 0 });
+    Object.assign(it, { w: d.width, h: d.height, inFmt: d.format, hasAlpha: d.hasAlpha, cut: (d.warnings || []).indexOf('truncated') >= 0, damaged: (d.warnings || []).indexOf('damaged') >= 0 });
     remember(it.id, d);
     if (it === selected) showBefore(it);
     return d;
@@ -942,6 +943,7 @@ faq:
     if (g !== gen) throw CANCEL;
     if (fmt === 'jpeg' && d.hasAlpha) notes.unshift('This image has transparent areas. JPG cannot store transparency, so they are filled with white. Choose WebP or PNG to keep them.');
     if (it.cut) notes.unshift(CUT);
+    if (it.damaged) notes.unshift(DAMAGED);
     if (best.exact) notes.push('This image has only ' + plural(best.colours, 'colour', 'colours') + ', so the PNG is pixel-exact.');
     else if (fmt === 'png' && !best.lossless && !d.hasAlpha && (best.q <= PNG_MIN || best.s < scale)) notes.push('This looks like a photo: JPG or WebP keeps far more detail at this file size.');
     if (d.animated) notes.push('Only the first frame of this animation was kept.');
@@ -1062,7 +1064,7 @@ faq:
     if (it.row) {
       it.row.setAttribute('data-state', it.state);
       it.row.querySelector('.hint').textContent = rowText(it);
-      it.row.querySelector('.cmpi-item-note').textContent = it.cut && it.state !== 'error' ? CUT : '';
+      it.row.querySelector('.cmpi-item-note').textContent = it.state === 'error' ? '' : it.cut ? CUT : it.damaged ? DAMAGED : '';
       it.row.querySelector('[data-act="dl"]').disabled = it.state !== 'done';
       const on = it === selected;
       if (on) it.row.setAttribute('aria-current', 'true'); else it.row.removeAttribute('aria-current');

@@ -25,23 +25,30 @@
  *              canvas = true    false keeps the pixels in a worker: use
  *                               encode(result) / toCanvas(result); fastest for
  *                               converters, as the page never touches the pixels }
+ *   An ICO whose largest picture is a PNG is decoded from that PNG (format stays
+ *   'ico'), since Chromium draws one whose size differs from the directory's blank.
  *   result:  { canvas,       an upright <canvas> (see options.canvas); the EXIF
  *                            orientation of JPEG, PNG and WebP, the rotation and
  *                            mirror boxes of HEIC and AVIF and the TIFF
  *                            Orientation tag are all applied
- *              width, height, format, hasAlpha (any transparent pixel),
+ *              width, height, format, hasAlpha (any transparent pixel; false for a
+ *                            PNG whose header allows no transparency),
  *              orientation,  EXIF orientation found in the file (1 = none)
  *              exif,         Uint8Array of the EXIF block (TIFF layout) if
  *                            options.exif and the file has one, else null
  *              animated, frames,   only the first frame is decoded (GIF, APNG, WebP)
  *              images,       HEIC: number of top-level images (the primary one is
  *                            decoded); TIFF: number of pages (the first is decoded)
- *              colorProfile, 'converted' when a wide-gamut HEIC/TIFF profile was
- *                            converted to sRGB (browsers do this themselves for
- *                            the formats they decode)
+ *              colorProfile, 'converted' when the file's colour profile is not
+ *                            sRGB, so its colours were converted to sRGB: by this
+ *                            decoder for HEIC and TIFF, by the browser for JPEG,
+ *                            PNG and WebP (an RGB matrix profile, such as Display P3)
  *              decoder,      'browser' | 'libheif' | 'utif' | 'svg'
  *              warnings }    'truncated' when a PNG, WebP or JPEG ends early (the rest
  *                            is blank; data after a JPEG's EOI marker is not a cut);
+ *                            'damaged' when a PNG's picture chunks fail their
+ *                            checksums, or a PNG that cannot hold transparency
+ *                            decodes with transparent pixels (part of it is blank);
  *                            'foreignObject' when an SVG's HTML content was left out;
  *                            'hdr' when a HEIC decoded by libheif is HDR (PQ/HLG), which
  *                            is converted without tone mapping; 'hdr-mapped' when the
@@ -405,6 +412,35 @@
     }
     return null;
   }
+  // The ICC colour profile of a JPEG: APP2 ICC_PROFILE segments, which a big
+  // profile spreads over several, joined in their order. Null without one.
+  function jpegIcc(b) {
+    var i = 2, parts = [], n = 0;
+    while (i + 4 <= b.length && b[i] === 0xFF) {
+      var m = b[i + 1];
+      if (m === 0xD8 || (m >= 0xD0 && m <= 0xD7) || m === 0xFF) { i += m === 0xFF ? 1 : 2; continue; }
+      if (m === 0xDA || m === 0xD9) break;
+      var len = u16be(b, i + 2);
+      if (m === 0xE2 && len > 16 && ascii(b, i + 4, 12) === 'ICC_PROFILE\0') parts.push({ seq: b[i + 16], data: b.subarray(i + 18, Math.min(b.length, i + 2 + len)) });
+      i += 2 + len;
+    }
+    if (!parts.length) return null;
+    parts.sort(function (x, y) { return x.seq - y.seq; });
+    parts.forEach(function (p) { n += p.data.length; });
+    var out = new Uint8Array(n), at = 0;
+    parts.forEach(function (p) { out.set(p.data, at); at += p.data.length; });
+    return out;
+  }
+  // The ICC profile of a PNG (an iCCP chunk: a name, then the zlib-compressed profile).
+  async function pngIcc(b) {
+    var raw = null;
+    pngChunks(b, function (t, st, len) { if (t === 'iCCP') { raw = b.subarray(st, Math.min(b.length, st + len)); return false; } if (t === 'IDAT') return false; });
+    if (!raw || typeof DecompressionStream !== 'function') return null;
+    var z = raw.indexOf(0);
+    if (z < 1 || z > 79 || raw[z + 1] !== 0) return null;
+    var out = new Response(new Blob([raw.subarray(z + 2)]).stream().pipeThrough(new DecompressionStream('deflate')));
+    return new Uint8Array(await out.arrayBuffer());
+  }
   // An IEND chunk: length 0, type, CRC AE 42 60 82.
   function hasIend(b) {
     for (var i = b.length - 12; i >= 0; i--) {
@@ -412,6 +448,33 @@
         b[i + 8] === 0xAE && b[i + 9] === 0x42 && b[i + 10] === 0x60 && b[i + 11] === 0x82) return true;
     }
     return false;
+  }
+  // The largest picture in an ICO's directory, where 0 means 256 pixels and a
+  // tie goes to the most colours, as { offset, size } of its data.
+  function icoLargest(b) {
+    var best = null;
+    for (var k = 0, n = u16le(b, 4); k < n && 6 + 16 * k + 16 <= b.length; k++) {
+      var e = 6 + 16 * k, area = (b[e] || 256) * (b[e + 1] || 256), bpp = u16le(b, e + 6);
+      if (!best || area > best.area || (area === best.area && bpp > best.bpp)) best = { area: area, bpp: bpp, size: u32le(b, e + 8), offset: u32le(b, e + 12) };
+    }
+    return best;
+  }
+  // Is a PNG that ends with IEND damaged on the way? A chunk that makes the
+  // picture (IHDR, PLTE, tRNS, IDAT) fails its checksum, or the chunks stop
+  // making sense (a type that is not four letters, a length past the end).
+  // The checksums are worked out a few megabytes at a time, letting the page
+  // breathe in between.
+  async function pngDamaged(blob) {
+    var b = new Uint8Array(await blob.arrayBuffer()), o = 8, since = 0;
+    while (o + 12 <= b.length) {
+      var len = u32be(b, o), type = ascii(b, o + 4, 4);
+      if (!/^[A-Za-z]{4}$/.test(type) || o + 12 + len > b.length) return true;
+      if (type === 'IEND') return false;
+      if ((type === 'IHDR' || type === 'PLTE' || type === 'tRNS' || type === 'IDAT') && crc32([b.subarray(o + 4, o + 8 + len)]) !== u32be(b, o + 8 + len)) return true;
+      if ((since += len) > 4e6) { since = 0; await new Promise(function (r) { setTimeout(r, 0); }); }
+      o += 12 + len;
+    }
+    return true;
   }
   function pngChunks(b, fn) {
     var o = 8;
@@ -970,6 +1033,12 @@
     }
 
     async function handle(m) {
+      // Whether a matrix/TRC RGB profile describes colours other than sRGB's.
+      if (m.cmd === 'icc') {
+        var it = null;
+        try { it = colourTransform({ icc: m.icc }); } catch (x) { it = null; }
+        return { ok: true, converts: !!it };
+      }
       if (m.cmd === 'native') {
         var nb = await nativeDecode(m.file);
         if (!nb) return { ok: false, code: 'NATIVE_FAILED' };
@@ -1830,8 +1899,23 @@
     var fmt = sniffBytes(head);
     if (!fmt) throw fail('UNSUPPORTED', notImage(head));
     var res = { format: fmt, orientation: 1, exif: null, animated: false, frames: null, images: 1, colorProfile: null, decoder: 'browser', warnings: [] };
-    var dims = headerSize(head, fmt), src = null, canvas = null, h = null, inWorker = false, W = 0, H = 0, i, opaqueAvif = false;
+    var dims = headerSize(head, fmt), src = null, canvas = null, h = null, inWorker = false, W = 0, H = 0, i, opaqueAvif = false, opaquePng = false;
     if (dims && dims[0] * dims[1] > maxPixels) throw tooBig(dims[0], dims[1], maxPixels);
+    // An ICO whose largest picture is a PNG is decoded from that PNG. Chromium
+    // draws an embedded PNG whose size is not the one the icon's directory
+    // gives as a blank, transparent 256 x 256 picture, without an error, and
+    // the PNG's own header gives the real size for the limit.
+    if (fmt === 'ico') {
+      var entry = icoLargest(head);
+      if (entry && entry.offset >= 6 + 16 * u16le(head, 4) && entry.offset + 33 <= file.size) {
+        var inner = file.slice(entry.offset, Math.min(file.size, entry.offset + entry.size), 'image/png');
+        if (sniffBytes(await readRange(inner, 0, 64)) === 'png') {
+          var fromPng = await decode(inner, o);
+          fromPng.format = 'ico';
+          return fromPng;
+        }
+      }
+    }
     var worker = function () {
       try { return { w: pickWorker(), key: ++keySeq }; } catch (e) { useWorker = false; return null; }
     };
@@ -1862,6 +1946,17 @@
           pngChunks(head, function (t, st, len) { if (t === 'IDAT') { idat = st + len <= file.size || file.size - st >= 4096; return false; } });
           if (idat === false || (idat === null && head.length >= file.size)) throw fail('CORRUPT', 'The PNG file is incomplete: it ends before its image data, so there is no picture in it. Download or copy it again.');
           res.warnings.push('truncated');
+        }
+        // A PNG damaged inside its image data still ends with IEND, and browsers
+        // ignore chunk checksums and leave everything after a broken zlib stream
+        // blank and transparent, without an error. So the checksums of the
+        // chunks that make the picture are checked, and a PNG whose header
+        // allows no transparency is checked for transparent pixels below.
+        if (fmt === 'png') {
+          var trns = false;
+          pngChunks(head, function (t) { if (t === 'tRNS') { trns = true; return false; } if (t === 'IDAT') return false; });
+          opaquePng = !trns && (head[25] === 0 || head[25] === 2 || head[25] === 3);
+          if (res.warnings.indexOf('truncated') < 0 && file.size <= 64e6 && await pngDamaged(file)) res.warnings.push('damaged');
         }
         if (fmt === 'webp' && u32le(head, 4) + 8 > file.size) res.warnings.push('truncated');
         if (fmt === 'jpeg' && await jpegCut(file)) res.warnings.push('truncated');
@@ -1909,6 +2004,23 @@
           // image sequence: that is drawn from its track, which may have alpha the still item lacks.
           var main = box.items[box.primary];
           opaqueAvif = !res.animated && !box.broken && !!main && (main.type === 'av01' || main.type === 'grid') && !box.alpha;
+        }
+
+        // A JPEG, PNG or WebP whose colour profile is not sRGB, such as the
+        // Display P3 of iPhone photos: the browser converts its colours to sRGB.
+        if (h && (fmt === 'jpeg' || fmt === 'png' || fmt === 'webp')) {
+          var profile = null;
+          try {
+            if (fmt === 'jpeg') profile = jpegIcc(head);
+            else if (fmt === 'png') profile = await pngIcc(head);
+            else {
+              await webpChunks(file, head, async function (t, st, len) {
+                if (t === 'ICCP') { profile = st + len <= head.length ? head.slice(st, st + len) : await readRange(file, st, st + len); return false; }
+                if (t === 'VP8 ' || t === 'VP8L' || t === 'ALPH' || t === 'ANMF') return false;
+              });
+            }
+            if (profile && profile.length >= 132 && (await runOn(h.w, { cmd: 'icc', icc: profile })).converts) res.colorProfile = 'converted';
+          } catch (e) { /* no note */ }
         }
 
         // The browser's own decoder (Safari also reads HEIC and TIFF), in the worker if there is one.
@@ -2039,6 +2151,16 @@
         release(res);
         throw fail('CORRUPT', 'The ' + FORMATS[fmt].label + ' file is incomplete: it ends early, and this browser could not draw any of the picture. Download or copy it again.');
       }
+      // A PNG that cannot hold transparency has none: transparent pixels there
+      // are what the browser leaves where the image data is broken.
+      if (opaquePng && alpha) {
+        if (alpha === 'blank') {
+          release(res);
+          throw fail('CORRUPT', 'The PNG file is damaged, and this browser could not draw any of the picture. Download or copy it again.');
+        }
+        if (res.warnings.indexOf('damaged') < 0 && !cut) res.warnings.push('damaged');
+      }
+      if (opaquePng) res.hasAlpha = false;
       // A still AVIF without an alpha layer has no transparent pixels: Chrome draws
       // one whose AV1 data is damaged as a blank, transparent picture, without an error.
       if (alpha && opaqueAvif) {
