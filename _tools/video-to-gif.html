@@ -1,0 +1,1476 @@
+---
+title: "Video to GIF Converter: MP4 to GIF Online"
+description: Turn an MP4, MOV or WebM video into an animated GIF in your browser. Trim, crop, resize, set the frame rate and speed, reverse or boomerang it.
+category: Image & PDF
+keywords: [video to gif, mp4 to gif, video to gif converter, gif maker, mov to gif, webm to gif, make a gif from a video, screen recording to gif]
+howto: |
+  ## How to make a GIF from a video
+
+  1. Choose a video, or drop it on the page. MP4 and WebM open in every
+     current browser, and so do most MOV files. The first 10 seconds are
+     selected to start with.
+  2. Drag the two handles under the picture, or type the start and end in
+     seconds (12.5) or minutes and seconds (1:02.5). On a handle, ← and →
+     move it by one GIF frame and Shift with an arrow by one second.
+  3. Set the width, frame rate, speed, direction and number of plays. To
+     crop, pick a shape such as 1:1 and drag the frame over the picture.
+  4. Press **Make GIF**. Before you start, the line above the button gives
+     the number of frames, the size in pixels and an estimate of the file
+     size.
+
+  ## On a phone
+
+  **Choose a video** lets you pick a clip from your photos or record one. On
+  an iPhone, Safari can compress a video picked from Photos; to keep the
+  original quality, save it to Files and pick it from there. Keep the page in
+  front while the GIF is made: the tool pauses when you switch away and
+  carries on when you come back. **Share** then sends the GIF to a chat app
+  or saves it, and **Download** saves the file (on an iPhone, to the
+  Downloads folder in Files).
+
+  ## Making a GIF smaller (for Discord)
+
+  Discord takes files up to 20 MB on a free account, 50 MB with Nitro Basic
+  and 500 MB with Nitro. A GIF grows with the square of its width, with its
+  frame rate and with its length. Sizes of one 6-second test clip, a slow
+  pan across a photo:
+
+  | Settings | GIF size |
+  |---|---|
+  | 480 px, 10 fps, 256 colours, dithering on | 4.4 MB |
+  | Width 320 px | 2.1 MB |
+  | 20 frames per second | 8.7 MB |
+  | 64 colours | 2.9 MB |
+  | Dithering off | 3.6 MB |
+  | 64 colours, dithering off | 2.1 MB |
+
+  **Skip unchanged pixels** makes the parts of a frame that did not change
+  transparent, so the frame before shows through. It halved a screen
+  recording but saved only 2% on the test clip, where the picture moves and
+  almost every pixel changes.
+
+  ## Which frame rate to use
+
+  GIF frame times are whole hundredths of a second, so 5, 10, 20 and 25 fps
+  play exactly. At 30 fps the frames alternate between 3 and 4 hundredths,
+  and the tool spreads the rounding so the total length stays right.
+  Browsers play a frame time of one hundredth or less as a tenth of a second,
+  so no GIF plays faster than 50 fps. 10 to 15 fps suits reactions and memes;
+  20 to 30 fps looks smooth but doubles or triples the size.
+
+  **Speed** changes how much video each frame covers, not the frame times: at
+  2×, a 6-second part of the video becomes a 3-second GIF.
+
+  ## Why GIFs look grainy
+
+  Each GIF frame holds at most 256 colours. The tool picks one palette from
+  frames across your selection, and **dithering** mixes neighbouring colours
+  in a fine, fixed pattern so that skies and skin do not break into bands.
+  Close up the pattern looks like grain, but it stays still from frame to
+  frame instead of shimmering, and colours the palette holds exactly, such
+  as the flat background of a screen recording, stay clean. Without
+  dithering, gradients turn into stripes.
+
+  ## Videos that will not open
+
+  AVI, WMV and FLV files do not play in browsers: convert them to MP4 first.
+  iPhone videos in HEVC (the High Efficiency setting) open in Safari, but in
+  Chrome, Edge or Firefox on Windows and Linux only when the computer can
+  decode HEVC. GIFs have no sound. You can record a clip with the
+  [webcam test](/webcam-test/) and turn it into a GIF here, and the
+  [image converter](/image-converter/) makes still GIFs from pictures.
+faq:
+  - q: Is my video uploaded to a server?
+    a: No. The video is read, cut and turned into a GIF by your own browser, and nothing is sent anywhere or stored. The GIF encoder ([gifenc](/assets/vendor/gifenc/README.txt), MIT licence) is a small file loaded from this site the first time you open a video.
+  - q: Can I make a GIF from a YouTube link?
+    a: No. The tool only converts video files on your device and never fetches links. YouTube's terms forbid downloading videos except where YouTube itself offers a download or with written permission, so use videos you made or have permission to use.
+  - q: How long can a GIF be?
+    a: The GIF format sets no limit on the number of frames, and one frame can last up to 655.35 seconds. This tool makes up to 3,000 frames, which is 5 minutes at 10 fps, and tells you the expected file size before you start.
+  - q: Why is my GIF bigger than the video?
+    a: A video format stores most frames as small changes from the frame before, while a GIF stores each frame as a picture of its own with at most 256 colours. A 6-second test clip at 480 × 270 pixels and 10 fps took 89 KB as an MP4 and 4.4 MB as a GIF.
+---
+<style>
+.v2g-drop {
+  position: relative; margin: 0 0 16px; padding: 22px 16px; text-align: center;
+  background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px;
+}
+.v2g-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.v2g-drop p { margin: 10px 0 0; }
+.v2g-drop .hint { margin-top: 4px; }
+.v2g-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
+.v2g-info { margin: 0 0 10px; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.v2g-info b { color: var(--text); font-weight: 600; }
+.v2g-stage {
+  --v2g-ar: 1.7778;
+  position: relative; width: min(100%, calc(min(56vh, 420px) * var(--v2g-ar))); aspect-ratio: var(--v2g-ar);
+  margin: 0 auto 6px; overflow: hidden; background: #000; border-radius: 8px;
+}
+.v2g-stage video { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+.v2g-stage #v2g-video { z-index: 1; }
+.v2g-crop {
+  position: absolute; z-index: 2; cursor: move; touch-action: none;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.7), 0 0 0 9999px rgb(0 0 0 / 0.55);
+  outline: 2px solid #fff; outline-offset: -2px;
+}
+.v2g-crop:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.v2g-crop::after {
+  content: ""; position: absolute; inset: 33.333%; border: 1px dashed rgb(255 255 255 / 0.6); pointer-events: none;
+}
+.v2g-hint { margin: 0 0 12px; text-align: center; }
+.v2g-trim { position: relative; padding: 0 30px; margin: 4px 0 10px; }
+.v2g-track { position: relative; height: 56px; touch-action: pan-y; -webkit-user-select: none; user-select: none; cursor: pointer; }
+.v2g-strip { position: absolute; left: 0; right: 0; top: 6px; bottom: 6px; display: flex; overflow: hidden; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); }
+.v2g-strip img { flex: 1 1 0; min-width: 0; height: 100%; object-fit: cover; display: block; }
+.v2g-shade { position: absolute; top: 6px; bottom: 6px; background: rgb(0 0 0 / 0.6); pointer-events: none; }
+.v2g-shade-l { left: 0; border-radius: 6px 0 0 6px; }
+.v2g-shade-r { right: 0; border-radius: 0 6px 6px 0; }
+.v2g-sel { position: absolute; top: 3px; bottom: 3px; border-top: 3px solid var(--accent); border-bottom: 3px solid var(--accent); pointer-events: none; }
+.v2g-head { position: absolute; top: 2px; bottom: 2px; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 0 1px #000; pointer-events: none; }
+.v2g-handle { position: absolute; top: 0; bottom: 0; width: 40px; display: flex; touch-action: none; cursor: ew-resize; outline: none; }
+.v2g-handle::before { content: ""; width: 10px; height: 100%; border-radius: 5px; background: var(--accent); box-shadow: 0 0 0 1px var(--surface); }
+.v2g-h-start { margin-left: -40px; justify-content: flex-end; }
+.v2g-h-end { margin-left: 0; justify-content: flex-start; }
+.v2g-handle:focus-visible::before { outline: 3px solid var(--text); outline-offset: 2px; }
+.v2g-times { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 18px; margin-bottom: 6px; }
+.v2g-time { flex: 1 1 230px; margin: 0; }
+.v2g-tf { display: flex; gap: 6px; }
+.v2g-tf input { flex: 1 1 6em; min-width: 0; font-variant-numeric: tabular-nums; }
+.v2g-tf .btn { flex: none; padding: 0 10px; }
+.v2g-times > .btn { flex: none; }
+.v2g-time-hint { margin: 0 0 14px; }
+.v2g-errs .msg { margin: 0 0 10px; }
+.v2g-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px 14px; margin-bottom: 14px; }
+.v2g-opts .field { margin: 0; }
+.v2g-zlabel { display: flex; justify-content: space-between; gap: 8px; }
+.v2g-zlabel output { font-weight: 400; font-variant-numeric: tabular-nums; }
+.v2g-checks { margin-bottom: 12px; }
+.v2g-summary { margin: 0 0 14px; padding: 10px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; font-size: 15px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.v2g-summary b { font-weight: 600; }
+.v2g-part[inert] { opacity: 0.6; }
+.v2g-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; }
+.v2g-progress progress { flex: 1 1 180px; height: 12px; accent-color: var(--accent); }
+.v2g-progress span { font-size: 14px; font-variant-numeric: tabular-nums; }
+.v2g-result { margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+.v2g-result h2 { margin: 0 0 12px; font-size: 1.15rem; }
+.v2g-result img { display: block; max-width: 100%; height: auto; margin: 0 auto 10px; border-radius: 6px; }
+.v2g-result-info { margin: 0 0 12px; text-align: center; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.v2g-result .actions { justify-content: center; }
+.v2g-result .hint { text-align: center; margin: 0; }
+</style>
+
+<div class="v2g" id="v2g">
+  <div class="v2g-drop" id="v2g-drop">
+    <input type="file" id="v2g-file" class="v2g-file" accept="video/*,.mp4,.m4v,.mov,.webm,.mkv,.ogv" tabindex="-1" aria-label="Choose a video">
+    <button class="btn" type="button" id="v2g-choose" aria-describedby="v2g-drop-hint">Choose a video</button>
+    <p>or drop it here</p>
+    <p class="hint" id="v2g-drop-hint">MP4, MOV, WebM or any video your browser plays. Nothing is uploaded.</p>
+  </div>
+  <p class="msg error" id="v2g-file-error" role="alert"></p>
+
+  <div id="v2g-editor" hidden>
+    <div class="v2g-part" id="v2g-part">
+      <p class="v2g-info" id="v2g-info"></p>
+      <div class="v2g-stage" id="v2g-stage">
+        <video id="v2g-cap" muted playsinline preload="auto" tabindex="-1" aria-hidden="true"></video>
+        <video id="v2g-video" muted playsinline preload="auto" aria-label="Video preview"></video>
+        <div class="v2g-crop" id="v2g-crop" tabindex="0" role="group" aria-label="Crop frame" aria-describedby="v2g-crop-hint" hidden></div>
+      </div>
+      <p class="hint v2g-hint" id="v2g-crop-hint" hidden>Drag the frame over the picture, or focus it and use the arrow keys, to choose what to keep.</p>
+
+      <div class="v2g-trim">
+        <div class="v2g-track" id="v2g-track">
+          <div class="v2g-strip" id="v2g-strip" aria-hidden="true"></div>
+          <div class="v2g-shade v2g-shade-l" id="v2g-shade-l"></div>
+          <div class="v2g-shade v2g-shade-r" id="v2g-shade-r"></div>
+          <div class="v2g-sel" id="v2g-sel"></div>
+          <div class="v2g-head" id="v2g-head"></div>
+          <div class="v2g-handle v2g-h-start" id="v2g-h-start" role="slider" tabindex="0" aria-label="Start of the GIF" aria-describedby="v2g-time-hint" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>
+          <div class="v2g-handle v2g-h-end" id="v2g-h-end" role="slider" tabindex="0" aria-label="End of the GIF" aria-describedby="v2g-time-hint" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>
+        </div>
+      </div>
+
+      <div class="v2g-times">
+        <div class="field v2g-time">
+          <label for="v2g-start">Start</label>
+          <div class="v2g-tf">
+            <input type="text" id="v2g-start" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="v2g-time-hint">
+            <button class="btn secondary small" type="button" data-nudge="start" data-dir="-1" aria-label="−1 frame, start">−1 frame</button>
+            <button class="btn secondary small" type="button" data-nudge="start" data-dir="1" aria-label="+1 frame, start">+1 frame</button>
+          </div>
+        </div>
+        <div class="field v2g-time">
+          <label for="v2g-end">End</label>
+          <div class="v2g-tf">
+            <input type="text" id="v2g-end" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="v2g-time-hint">
+            <button class="btn secondary small" type="button" data-nudge="end" data-dir="-1" aria-label="−1 frame, end">−1 frame</button>
+            <button class="btn secondary small" type="button" data-nudge="end" data-dir="1" aria-label="+1 frame, end">+1 frame</button>
+          </div>
+        </div>
+        <button class="btn secondary" type="button" id="v2g-play">Play selection</button>
+      </div>
+      <p class="hint v2g-time-hint" id="v2g-time-hint">Seconds (12.5) or minutes and seconds (1:02.5); a comma works as the decimal mark too. On a handle, ← and → move by one GIF frame and Shift with an arrow by one second.</p>
+      <div class="v2g-errs">
+        <p class="msg error" id="v2g-start-error"></p>
+        <p class="msg error" id="v2g-end-error"></p>
+      </div>
+
+      <div class="v2g-opts">
+        <div class="field">
+          <label for="v2g-width">Width</label>
+          <select id="v2g-width">
+            <option value="160">160 px</option>
+            <option value="240">240 px</option>
+            <option value="320">320 px</option>
+            <option value="400">400 px</option>
+            <option value="480" selected>480 px</option>
+            <option value="640">640 px</option>
+            <option value="800">800 px</option>
+            <option value="1080">1080 px</option>
+            <option value="1280">1280 px</option>
+            <option value="orig">Original</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="v2g-fps">Frame rate</label>
+          <select id="v2g-fps">
+            <option value="5">5 fps</option>
+            <option value="8">8 fps</option>
+            <option value="10" selected>10 fps</option>
+            <option value="12">12 fps</option>
+            <option value="15">15 fps</option>
+            <option value="20">20 fps</option>
+            <option value="24">24 fps</option>
+            <option value="25">25 fps</option>
+            <option value="30">30 fps</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="v2g-speed">Speed</label>
+          <select id="v2g-speed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="0.75">0.75×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+            <option value="3">3×</option>
+            <option value="4">4×</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="v2g-dir">Direction</label>
+          <select id="v2g-dir">
+            <option value="forward" selected>Forward</option>
+            <option value="reverse">Reverse</option>
+            <option value="boomerang">Boomerang</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="v2g-plays">Plays</label>
+          <select id="v2g-plays">
+            <option value="0" selected>Forever</option>
+            <option value="1">Once</option>
+            <option value="2">2 times</option>
+            <option value="3">3 times</option>
+            <option value="5">5 times</option>
+            <option value="10">10 times</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="v2g-aspect">Crop</label>
+          <select id="v2g-aspect">
+            <option value="orig" selected>None</option>
+            <option value="1:1">1:1</option>
+            <option value="4:5">4:5</option>
+            <option value="9:16">9:16</option>
+            <option value="16:9">16:9</option>
+            <option value="4:3">4:3</option>
+            <option value="3:2">3:2</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="v2g-zlabel" for="v2g-zoom"><span>Zoom</span><output id="v2g-zoom-out" for="v2g-zoom" aria-hidden="true">100%</output></label>
+          <input type="range" id="v2g-zoom" min="100" max="400" step="5" value="100" aria-valuetext="100%">
+        </div>
+        <div class="field">
+          <label for="v2g-colors">Colours</label>
+          <select id="v2g-colors">
+            <option value="256" selected>256</option>
+            <option value="128">128</option>
+            <option value="64">64</option>
+          </select>
+        </div>
+      </div>
+      <div class="checks v2g-checks">
+        <label class="check"><input type="checkbox" id="v2g-dither" checked> Dithering (smoother gradients)</label>
+        <label class="check"><input type="checkbox" id="v2g-skip"> Skip unchanged pixels (screen recordings)</label>
+      </div>
+    </div>
+
+    <p class="v2g-summary" id="v2g-summary"></p>
+    <p class="msg error" id="v2g-error" role="alert"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="v2g-make">Make GIF</button>
+      <button class="btn secondary" type="button" id="v2g-cancel" hidden>Cancel</button>
+    </div>
+    <div class="v2g-progress" id="v2g-progress" hidden>
+      <progress id="v2g-bar" max="1000" aria-labelledby="v2g-progress-text"></progress>
+      <span id="v2g-progress-text"></span>
+    </div>
+  </div>
+
+  <section class="v2g-result" id="v2g-result" aria-labelledby="v2g-result-h" hidden>
+    <h2 id="v2g-result-h">Your GIF</h2>
+    <img id="v2g-gif" alt="">
+    <p class="v2g-result-info" id="v2g-result-info"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="v2g-download">Download GIF</button>
+      <button class="btn secondary" type="button" id="v2g-share" hidden>Share</button>
+    </div>
+    <p class="hint" id="v2g-save-hint">On a phone you can also press and hold the GIF to save or share it.</p>
+  </section>
+  <p class="visually-hidden" id="v2g-status" role="status"></p>
+  <p class="visually-hidden" id="v2g-summary-live" role="status"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const GIFENC = new URL({{ '/assets/vendor/gifenc/gifenc.esm.js' | relative_url | jsonify }}, location.href).href;
+  const MAX_FRAMES = 3000;      // frames in one GIF
+  const MAX_PIXELS = 2100000;   // pixels in one frame, about 1920 x 1080
+  const MAX_BYTES = 250e6;      // a GIF that passes this is stopped
+  const TIME_MAX = 24;          // characters in a time field
+  const NUDGE = 0.001;          // each frame is taken 1 ms after its time, safely inside the video frame
+  const FIRST_SPAN = 10;        // seconds selected when a video opens
+  const MIN_SPAN = 0.01;
+  const SPREAD = { 256: 16, 128: 24, 64: 32 }; // strength of the ordered dither
+  const FPS = [5, 8, 10, 12, 15, 20, 24, 25, 30];
+  const SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+  const ASPECTS = new Map([['1:1', 1], ['4:5', 0.8], ['9:16', 9 / 16], ['16:9', 16 / 9], ['4:3', 4 / 3], ['3:2', 1.5]]);
+  const nf = new Intl.NumberFormat('en-GB');
+
+  const fileInput = $('#v2g-file'), chooseBtn = $('#v2g-choose'), drop = $('#v2g-drop'), fileErr = $('#v2g-file-error');
+  const editor = $('#v2g-editor'), part = $('#v2g-part'), info = $('#v2g-info'), stage = $('#v2g-stage');
+  const cap = $('#v2g-cap'), vid = $('#v2g-video'), cropEl = $('#v2g-crop'), cropHint = $('#v2g-crop-hint');
+  const track = $('#v2g-track'), strip = $('#v2g-strip'), shadeL = $('#v2g-shade-l'), shadeR = $('#v2g-shade-r');
+  const selBox = $('#v2g-sel'), head = $('#v2g-head'), hStart = $('#v2g-h-start'), hEnd = $('#v2g-h-end');
+  const startIn = $('#v2g-start'), endIn = $('#v2g-end'), startErr = $('#v2g-start-error'), endErr = $('#v2g-end-error');
+  const playBtn = $('#v2g-play');
+  const widthSel = $('#v2g-width'), fpsSel = $('#v2g-fps'), speedSel = $('#v2g-speed'), dirSel = $('#v2g-dir');
+  const playsSel = $('#v2g-plays'), aspectSel = $('#v2g-aspect'), zoomIn = $('#v2g-zoom'), zoomOut = $('#v2g-zoom-out');
+  const colorsSel = $('#v2g-colors'), ditherChk = $('#v2g-dither'), skipChk = $('#v2g-skip');
+  const summary = $('#v2g-summary'), summaryLive = $('#v2g-summary-live'), errBox = $('#v2g-error');
+  const makeBtn = $('#v2g-make'), cancelBtn = $('#v2g-cancel');
+  const prog = $('#v2g-progress'), bar = $('#v2g-bar'), progText = $('#v2g-progress-text');
+  const result = $('#v2g-result'), gifImg = $('#v2g-gif'), resultInfo = $('#v2g-result-info');
+  const dlBtn = $('#v2g-download'), shareBtn = $('#v2g-share'), statusEl = $('#v2g-status');
+
+  const S = {
+    token: 0, ready: false, file: null, name: '', url: '', dur: 0, vw: 0, vh: 0,
+    start: 0, end: 0, fx: 0.5, fy: 0.5,
+    busy: false, job: null, analysis: null,
+    gif: null, // { blob, url, name }
+  };
+  const STALE = { stale: true }, CANCELLED = { cancelled: true };
+
+  // ---------- Small helpers ----------
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  function announce(text) { if (statusEl.textContent !== text) statusEl.textContent = text; }
+  function fmtBytes(n, digits) {
+    if (n < 1000) return nf.format(n) + ' bytes';
+    if (n < 1e6) return (n / 1000).toFixed(n < 1e5 ? 1 : 0) + ' KB';
+    return (n / 1e6).toFixed(n < 1e8 ? (digits == null ? 1 : digits) : 0) + ' MB';
+  }
+  function fmtTime(t) {
+    const cs = Math.round(t * 100);
+    if (S.dur < 60) return (cs / 100).toFixed(2);
+    const h = Math.floor(cs / 360000), m = Math.floor(cs / 6000) % 60, sec = ((cs % 6000) / 100).toFixed(2).padStart(5, '0');
+    return h ? h + ':' + String(m).padStart(2, '0') + ':' + sec : m + ':' + sec;
+  }
+  function spoken(t) {
+    const cs = Math.round(t * 100), m = Math.floor(cs / 6000), s = (cs % 6000) / 100;
+    const sec = s.toFixed(2).replace(/\.?0+$/, '') + (s === 1 ? ' second' : ' seconds');
+    return m ? m + (m === 1 ? ' minute ' : ' minutes ') + sec : sec;
+  }
+  function fmtLength(cs) {
+    if (cs < 6000) return (cs / 100).toFixed(2) + ' s';
+    const m = Math.floor(cs / 6000);
+    return m + ' min ' + ((cs % 6000) / 100).toFixed(2) + ' s';
+  }
+  function pick(list, v, d) { const n = Number(v); return list.indexOf(n) >= 0 ? n : d; }
+  function bitsFor(n) { let b = 1; while ((1 << b) < n) b++; return b; }
+  // Frame i lasts from round(100 i / fps) to round(100 (i + 1) / fps) hundredths of a second, so
+  // rounding never adds up: at 30 fps the frames take 3, 4, 3, 3, 4, 3 ... hundredths.
+  function csAt(i, fps) { return Math.floor((200 * i + fps) / (2 * fps)); }
+  function delayCs(i, fps) { return csAt(i + 1, fps) - csAt(i, fps); }
+
+  // ---------- Settings ----------
+  function cropRect() {
+    const vw = S.vw, vh = S.vh, key = aspectSel.value;
+    const a = ASPECTS.has(key) ? ASPECTS.get(key) : vw / vh;
+    let cw, ch;
+    if (vw / vh > a) { ch = vh; cw = vh * a; } else { cw = vw; ch = vw / a; }
+    const z = clamp(Number(zoomIn.value) / 100 || 1, 1, 4);
+    cw /= z; ch /= z;
+    return { x: (vw - cw) * S.fx, y: (vh - ch) * S.fy, w: cw, h: ch, whole: !ASPECTS.has(key) && z === 1 };
+  }
+  function settings() {
+    const fps = pick(FPS, fpsSel.value, 10), speed = pick(SPEEDS, speedSel.value, 1);
+    const colors = pick([256, 128, 64], colorsSel.value, 256);
+    const crop = cropRect();
+    const cw = Math.max(1, Math.round(crop.w));
+    let w = widthSel.value === 'orig' ? cw : Math.min(pick([160, 240, 320, 400, 480, 640, 800, 1080, 1280], widthSel.value, 480), cw);
+    let h = Math.max(1, Math.round(w * crop.h / crop.w));
+    let limited = false;
+    if (w * h > MAX_PIXELS) {
+      w = Math.max(1, Math.floor(w * Math.sqrt(MAX_PIXELS / (w * h))));
+      h = Math.max(1, Math.round(w * crop.h / crop.w));
+      limited = true;
+    }
+    const step = speed / fps;
+    const span = S.end - S.start;
+    const n = span > 0 ? Math.max(1, Math.ceil(span / step - 1e-9)) : 0;
+    const dir = ['forward', 'reverse', 'boomerang'].indexOf(dirSel.value) >= 0 ? dirSel.value : 'forward';
+    const total = dir === 'boomerang' && n > 1 ? 2 * n - 2 : n;
+    const plays = pick([0, 1, 2, 3, 5, 10], playsSel.value, 0);
+    return {
+      fps, speed, colors, dither: ditherChk.checked, skip: skipChk.checked, crop, w, h, limited,
+      upscaleCap: widthSel.value !== 'orig' && Number(widthSel.value) > cw ? cw : 0,
+      step, n, total, dir, plays, repeat: plays === 0 ? 0 : plays - 1 || -1,
+    };
+  }
+  // Index of the video sample shown by GIF frame i.
+  function sourceIndex(s, i) {
+    if (s.dir === 'reverse') return s.n - 1 - i;
+    if (s.dir === 'boomerang' && i >= s.n) return 2 * s.n - 2 - i;
+    return i;
+  }
+  function sampleTime(s, k) { return Math.min(S.start + k * s.step + NUDGE, S.dur); }
+  function contentKey(s) {
+    return [S.token, s.crop.x, s.crop.y, s.crop.w, s.crop.h, s.w, s.h, s.colors, s.dither, s.skip,
+      S.start, S.end, s.step].map(v => typeof v === 'number' ? Math.round(v * 1000) : v).join('|');
+  }
+
+  // ---------- The encoder worker ----------
+  // Runs gifenc (assets/vendor/gifenc) in a module worker: one palette for the whole GIF, ordered
+  // (Bayer) dithering, "skip unchanged pixels" and the LZW coding of each frame.
+  function workerMain(self, GIFEncoder, quantize) {
+    const BAYER = [0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38,
+      60, 28, 52, 20, 62, 30, 54, 22, 3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+      15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21];
+    let job = null;
+    function bitsFor(n) { let b = 1; while ((1 << b) < n) b++; return b; }
+    function makePalette(frames, colors, skip) {
+      let size = 0;
+      for (const f of frames) size += f.byteLength;
+      const all = new Uint8Array(size);
+      let o = 0;
+      for (const f of frames) { all.set(new Uint8Array(f), o); o += f.byteLength; }
+      let pal = quantize(all, skip ? colors - 1 : colors, { format: 'rgb565' }).map(c => [c[0], c[1], c[2]]);
+      if (!pal.length) pal = [[0, 0, 0]];
+      const nReal = pal.length;
+      if (skip) pal.push([0, 0, 0]); // the transparent entry, never matched by a colour
+      return { pal, nReal };
+    }
+    // Maps RGBA pixels to palette indexes. Colours are looked up by 6-6-6 bit bins, each bin
+    // answered once with the palette entry nearest its centre, so a pixel's index depends only on
+    // its colour and position, never on the order of the pixels. A colour that the palette holds
+    // (within the bin) is not dithered, so flat areas such as a page in a screen recording stay
+    // clean; the rest gets an ordered (Bayer 8 x 8) offset before the lookup.
+    function makeMapper(pal, nReal, spread) {
+      const R = new Int32Array(nReal), G = new Int32Array(nReal), B = new Int32Array(nReal);
+      for (let i = 0; i < nReal; i++) { R[i] = pal[i][0]; G[i] = pal[i][1]; B[i] = pal[i][2]; }
+      const cache = new Int16Array(262144).fill(-1); // palette index, plus 256 when the colour is in the palette
+      const off = new Int16Array(64);
+      for (let i = 0; i < 64; i++) off[i] = Math.round(((BAYER[i] + 0.5) / 64 - 0.5) * spread);
+      function lookup(key) {
+        let v = cache[key];
+        if (v >= 0) return v;
+        const r = ((key >> 12) << 2) | 2, g = (((key >> 6) & 63) << 2) | 2, b = ((key & 63) << 2) | 2;
+        let best = 0, bd = Infinity;
+        for (let i = 0; i < nReal; i++) {
+          const dr = R[i] - r, dg = G[i] - g, db = B[i] - b;
+          const d = dr * dr + dg * dg + db * db;
+          if (d < bd) { bd = d; best = i; }
+        }
+        v = cache[key] = best | (bd <= 12 ? 256 : 0);
+        return v;
+      }
+      return function map(rgba, w, h, dither, out) {
+        for (let y = 0, i = 0, p = 0; y < h; y++) {
+          const row = (y & 7) << 3;
+          for (let x = 0; x < w; x++, i += 4, p++) {
+            let r = rgba[i], g = rgba[i + 1], b = rgba[i + 2];
+            const v = lookup(((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2));
+            if (!dither || v & 256) { out[p] = v & 255; continue; }
+            const d = off[row | (x & 7)];
+            r += d; g += d; b += d;
+            r = r < 0 ? 0 : r > 255 ? 255 : r;
+            g = g < 0 ? 0 : g > 255 ? 255 : g;
+            b = b < 0 ? 0 : b > 255 ? 255 : b;
+            out[p] = lookup(((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2)) & 255;
+          }
+        }
+      };
+    }
+    // Pixels that show the same palette entry as the picture on screen become transparent.
+    function markSame(cur, shown, out, t) {
+      for (let i = 0; i < cur.length; i++) out[i] = cur[i] === shown[i] ? t : cur[i];
+    }
+    function frameBytes(enc, data, w, h, opts) {
+      enc.reset();
+      enc.writeFrame(data, w, h, opts);
+      return enc.bytesView().slice();
+    }
+    // With "skip unchanged pixels", a frame is stored with its unchanged pixels transparent, or
+    // whole when that is smaller (when nearly every pixel changed). On screen the two are the same.
+    function skipFrame(enc, cur, shown, out, w, h, nReal, opts) {
+      markSame(cur, shown, out, nReal);
+      const part = frameBytes(enc, out, w, h, Object.assign({ transparent: true, transparentIndex: nReal }, opts));
+      const whole = frameBytes(enc, cur, w, h, opts);
+      return whole.length <= part.length ? whole : part;
+    }
+    self.onmessage = function (e) {
+      const m = e.data;
+      try {
+        if (m.cmd === 'analyse') {
+          const { pal, nReal } = makePalette(m.frames, m.colors, m.skip);
+          const map = makeMapper(pal, nReal, m.spread);
+          const px = m.w * m.h, cur = new Uint8Array(px), prev = new Uint8Array(px), out = new Uint8Array(px);
+          const enc = GIFEncoder({ auto: false }), depth = bitsFor(pal.length);
+          const full = [], delta = [];
+          for (let i = 0; i < m.frames.length; i++) {
+            map(new Uint8Array(m.frames[i]), m.w, m.h, m.dither, cur);
+            full.push(frameBytes(enc, cur, m.w, m.h, { delay: 100, colorDepth: depth, dispose: m.skip ? 1 : -1 }).length);
+            if (m.skip && i > 0 && (m.seq || i % 2 === 1)) {
+              delta.push(skipFrame(enc, cur, prev, out, m.w, m.h, nReal, { delay: 100, colorDepth: depth, dispose: 1 }).length);
+            }
+            prev.set(cur);
+          }
+          self.postMessage({ cmd: 'analysed', id: m.id, palette: pal, nReal, full, delta });
+        } else if (m.cmd === 'start') {
+          const px = m.w * m.h;
+          job = {
+            id: m.id, w: m.w, h: m.h, pal: m.palette, nReal: m.nReal, skip: m.skip, dither: m.dither, repeat: m.repeat,
+            map: makeMapper(m.palette, m.nReal, m.spread), depth: bitsFor(m.palette.length),
+            enc: GIFEncoder({ auto: false }), cur: new Uint8Array(px), shown: new Uint8Array(px), out: new Uint8Array(px),
+            k: 0, bytes: 0, chunks: [],
+          };
+        } else if (m.cmd === 'frame') {
+          const j = job;
+          if (!j || j.id !== m.id) return;
+          j.map(new Uint8Array(m.buffer), j.w, j.h, j.dither, j.cur);
+          const opts = { delay: m.delay, colorDepth: j.depth };
+          if (j.skip) opts.dispose = 1;
+          let chunk;
+          if (j.k === 0) {
+            j.enc.reset();
+            j.enc.writeHeader();
+            j.enc.writeFrame(j.cur, j.w, j.h, Object.assign({ first: true, palette: j.pal, repeat: j.repeat }, opts));
+            chunk = j.enc.bytesView().slice();
+          } else if (j.skip) chunk = skipFrame(j.enc, j.cur, j.shown, j.out, j.w, j.h, j.nReal, opts);
+          else chunk = frameBytes(j.enc, j.cur, j.w, j.h, opts);
+          if (j.skip) j.shown.set(j.cur);
+          j.chunks.push(chunk.buffer);
+          j.bytes += chunk.length;
+          j.k++;
+          self.postMessage({ cmd: 'progress', id: j.id, k: j.k, bytes: j.bytes });
+        } else if (m.cmd === 'finish') {
+          const j = job;
+          if (!j || j.id !== m.id) return;
+          j.enc.reset();
+          j.enc.finish();
+          const tail = j.enc.bytesView().slice();
+          j.chunks.push(tail.buffer);
+          j.bytes += tail.length;
+          job = null;
+          self.postMessage({ cmd: 'done', id: j.id, chunks: j.chunks, bytes: j.bytes }, j.chunks);
+        }
+      } catch (err) {
+        if (job && job.id === m.id) job = null;
+        self.postMessage({ cmd: 'error', id: m.id, message: String((err && err.message) || err) });
+      }
+    };
+  }
+
+  let worker = null, workerUrl = '', wseq = 0;
+  const pending = new Map();
+  let moduleWorkers = null;
+  function canModuleWorker() {
+    if (moduleWorkers === null) {
+      moduleWorkers = false;
+      if (typeof Worker === 'function') {
+        const url = URL.createObjectURL(new Blob([''], { type: 'text/javascript' }));
+        try { new Worker(url, { get type() { moduleWorkers = true; return 'module'; } }).terminate(); } catch (e) { moduleWorkers = false; }
+        URL.revokeObjectURL(url);
+      }
+    }
+    return moduleWorkers;
+  }
+  function encoderError(code) {
+    const e = new Error(code);
+    e.code = code;
+    return e;
+  }
+  function getWorker() {
+    if (worker) return worker;
+    if (!canModuleWorker()) throw encoderError('NO_WORKER');
+    const src = 'import { GIFEncoder, quantize } from ' + JSON.stringify(GIFENC) + ';\n(' + workerMain + ')(self, GIFEncoder, quantize);\n';
+    workerUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    worker = new Worker(workerUrl, { type: 'module' });
+    worker.onmessage = function (e) {
+      const m = e.data, p = pending.get(m.id);
+      if (!p) return;
+      if (m.cmd === 'progress') { if (p.progress) p.progress(m); return; }
+      pending.delete(m.id);
+      if (m.cmd === 'error') p.reject(encoderError('ENCODE'));
+      else p.resolve(m);
+    };
+    worker.onerror = function (e) { if (e && e.preventDefault) e.preventDefault(); stopWorker(encoderError('LOAD')); };
+    return worker;
+  }
+  function stopWorker(reason) {
+    if (!worker) return;
+    worker.terminate();
+    worker = null;
+    URL.revokeObjectURL(workerUrl);
+    const all = Array.from(pending.values());
+    pending.clear();
+    all.forEach(p => p.reject(reason));
+  }
+  function ask(msg, transfer) {
+    let w;
+    try { w = getWorker(); } catch (e) { return Promise.reject(e); }
+    const id = ++wseq;
+    msg.id = id;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      w.postMessage(msg, transfer || []);
+    });
+  }
+
+  // ---------- Reading frames from the video ----------
+  // Frames come from a second, hidden <video> (cap) seeked to each moment, so that the preview the
+  // visitor is looking at never jumps. Right after 'seeked' a browser can still draw the previous
+  // frame (Safari: WebKit bugs 153588 and 194986; Chromium now and then too), so each frame waits
+  // for the video to present the new one (requestVideoFrameCallback), or for two animation frames
+  // where that is missing. When the new moment lies in the frame already shown, nothing new is
+  // presented, so the wait also ends after RVFC_FRAMES animation frames: counted in frames, not
+  // milliseconds, so that a slow or busy device, which also presents frames late, waits longer.
+  const RVFC_FRAMES = 6;
+  let rvfc = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+  let rvSilent = 0, lastSeekAt = null;
+  function seekTo(v, t) {
+    return new Promise((resolve, reject) => {
+      let seeked = false, framed = false, done = false, waitTimer = 0, raf = 0, cb = 0;
+      const stuck = setTimeout(() => end(new Error('SEEK')), 20000);
+      function end(err) {
+        if (done) return;
+        done = true;
+        clearTimeout(stuck);
+        clearTimeout(waitTimer);
+        cancelAnimationFrame(raf);
+        v.removeEventListener('seeked', onSeeked);
+        v.removeEventListener('error', onError);
+        v.removeEventListener('emptied', onEmptied);
+        if (cb && !framed && v.cancelVideoFrameCallback) v.cancelVideoFrameCallback(cb);
+        if (err) reject(err); else resolve(framed);
+      }
+      function onError() { end(new Error('DECODE')); }
+      function onEmptied() { end(STALE); } // another video was opened
+      function timedOut() {
+        // Three silent waits in a row between moments half a second or more apart (where a new
+        // frame is all but certain) mean the browser does not report frames after seeks: use
+        // animation frames from then on.
+        if (lastSeekAt !== null && Math.abs(t - lastSeekAt) >= 0.5) { if (++rvSilent >= 3) rvfc = false; } else rvSilent = 0;
+        end();
+      }
+      function onSeeked() {
+        seeked = true;
+        if (!rvfc) { raf = requestAnimationFrame(() => { raf = requestAnimationFrame(() => end()); }); return; }
+        if (framed) { end(); return; }
+        let count = 0;
+        const tick = () => { if (++count >= RVFC_FRAMES) timedOut(); else raf = requestAnimationFrame(tick); };
+        raf = requestAnimationFrame(tick);
+        // Where animation frames stop (a window covered by another), carry on after 3 seconds.
+        waitTimer = setTimeout(timedOut, 3000);
+      }
+      v.addEventListener('seeked', onSeeked);
+      v.addEventListener('error', onError);
+      v.addEventListener('emptied', onEmptied);
+      if (rvfc) {
+        cb = v.requestVideoFrameCallback(() => {
+          framed = true;
+          rvSilent = 0;
+          if (seeked) end();
+        });
+      }
+      v.currentTime = t;
+    }).finally(() => { lastSeekAt = t; });
+  }
+  // One sequence of seeks at a time on the hidden video.
+  let capLock = Promise.resolve();
+  function withCapture(fn) {
+    const run = capLock.then(fn, fn);
+    capLock = run.catch(() => {});
+    return run;
+  }
+  const grabCanvas = document.createElement('canvas');
+  let grabCtx = null;
+  function grab(s) {
+    if (!grabCtx || grabCanvas.width !== s.w || grabCanvas.height !== s.h) {
+      grabCanvas.width = s.w;
+      grabCanvas.height = s.h;
+      grabCtx = grabCanvas.getContext('2d', { willReadFrequently: true, alpha: false });
+    }
+    grabCtx.imageSmoothingEnabled = true;
+    grabCtx.imageSmoothingQuality = 'high';
+    grabCtx.drawImage(cap, s.crop.x, s.crop.y, s.crop.w, s.crop.h, 0, 0, s.w, s.h);
+    return grabCtx.getImageData(0, 0, s.w, s.h).data;
+  }
+  // Phones and browsers stop drawing video in a tab that is not in front, so capture waits.
+  function whileVisible(job) {
+    if (!document.hidden || job.cancelled) return Promise.resolve();
+    showProgressText('Paused: bring this page back to the front to carry on.');
+    announce('Paused while the page is in the background.');
+    return new Promise(resolve => {
+      job.wake = function () {
+        if (document.hidden && !job.cancelled) return;
+        document.removeEventListener('visibilitychange', job.wake);
+        job.wake = null;
+        resolve();
+      };
+      document.addEventListener('visibilitychange', job.wake);
+    });
+  }
+  async function grabAt(s, t, job) {
+    for (;;) {
+      if (job && job.cancelled) throw CANCELLED;
+      if (job) await whileVisible(job);
+      await seekTo(cap, t);
+      if (!document.hidden || !job) return grab(s);
+    }
+  }
+
+  // ---------- Palette and size estimate ----------
+  // Up to 16 frames: every frame when the GIF has that few, otherwise 8 pairs of neighbouring
+  // frames spread over the selection (the second of each pair measures "skip unchanged pixels").
+  function sampleList(s) {
+    if (s.n <= 16) return { seq: true, ks: Array.from({ length: s.n }, (_, k) => k) };
+    const ks = [];
+    for (let j = 0; j < 8; j++) {
+      const k = Math.min(s.n - 2, Math.floor((j + 0.5) * (s.n - 1) / 8));
+      ks.push(k, k + 1);
+    }
+    return { seq: false, ks };
+  }
+  async function analyse(s, isStale, job) {
+    const list = sampleList(s);
+    const frames = await withCapture(async () => {
+      const out = [];
+      for (const k of list.ks) {
+        if (isStale()) throw STALE;
+        out.push((await grabAt(s, sampleTime(s, k), job)).buffer);
+      }
+      return out;
+    });
+    if (isStale()) throw STALE;
+    const r = await ask({ cmd: 'analyse', w: s.w, h: s.h, colors: s.colors, dither: s.dither, skip: s.skip, spread: SPREAD[s.colors], seq: list.seq, frames }, frames);
+    const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+    return { key: contentKey(s), palette: r.palette, nReal: r.nReal, seq: list.seq, full: r.full, delta: r.delta, fullMean: mean(r.full), deltaMean: mean(r.delta) };
+  }
+  function estimate(s, a) {
+    let bytes = 6 + 7 + 3 * (1 << bitsFor(a.palette.length)) + (s.repeat >= 0 ? 19 : 0) + 1;
+    if (a.seq && s.dir === 'forward' && a.full.length === s.total) {
+      bytes += a.full[0];
+      for (let i = 1; i < s.total; i++) bytes += s.skip ? a.delta[i - 1] : a.full[i];
+      return { bytes, exact: true };
+    }
+    bytes += a.fullMean + (s.total - 1) * (s.skip ? a.deltaMean : a.fullMean);
+    return { bytes: Math.round(bytes), exact: false };
+  }
+  let anaGen = 0, anaTimer = 0;
+  function scheduleAnalysis() {
+    clearTimeout(anaTimer);
+    anaTimer = setTimeout(runAnalysis, 450);
+  }
+  async function runAnalysis() {
+    if (!S.ready || S.busy) return;
+    const s = settings();
+    if (!s.n || s.total > MAX_FRAMES || badTimes()) return;
+    const key = contentKey(s);
+    if (S.analysis && S.analysis.key === key) return;
+    const gen = ++anaGen, token = S.token;
+    try {
+      const a = await analyse(s, () => gen !== anaGen || token !== S.token || S.busy);
+      if (gen === anaGen && token === S.token) { S.analysis = a; refreshSummary(); }
+    } catch (e) {
+      if (e === STALE || gen !== anaGen || token !== S.token) return;
+      if (e && (e.code === 'LOAD' || e.code === 'NO_WORKER')) showError(e);
+      refreshSummary();
+    }
+  }
+
+  // ---------- Summary ----------
+  let liveTimer = 0;
+  function refreshSummary() {
+    if (!S.ready) return;
+    const s = settings();
+    const parts = [];
+    if (!s.n) { summary.textContent = 'Choose a start before the end.'; return; }
+    parts.push('<b>' + nf.format(s.total) + (s.total === 1 ? ' frame' : ' frames') + '</b>');
+    parts.push(s.w + ' × ' + s.h + ' px');
+    parts.push(fmtLength(csAt(s.total, s.fps)));
+    let size;
+    const a = S.analysis && S.analysis.key === contentKey(s) ? S.analysis : null;
+    if (s.total > MAX_FRAMES) size = 'too many frames';
+    else if (a) { const est = estimate(s, a); size = est.exact ? fmtBytes(est.bytes) + ' (' + nf.format(est.bytes) + ' bytes)' : 'about ' + fmtBytes(est.bytes); }
+    else size = 'estimating the file size…';
+    parts.push(size);
+    let text = parts.join(' · ');
+    if (s.limited) text += '. The width is reduced to keep each frame under 2.1 megapixels.';
+    else if (s.upscaleCap) text += '. The ' + (s.crop.whole ? 'video' : 'cropped part') + ' is only ' + s.upscaleCap + ' px wide, so the GIF is not enlarged.';
+    summary.innerHTML = text;
+    if (s.total > MAX_FRAMES) setError('That is ' + nf.format(s.total) + ' frames; a GIF can have at most ' + nf.format(MAX_FRAMES) + ' here. Shorten the selection, lower the frame rate or raise the speed.');
+    else if (errBox.dataset.kind === 'frames') setError('');
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => {
+      const plain = summary.textContent;
+      if (summaryLive.textContent !== plain) summaryLive.textContent = plain;
+    }, 800);
+  }
+  // The box is an alert: it is written only when its text changes, so it is announced once.
+  function setError(text, kind) {
+    if (errBox.textContent !== text) errBox.textContent = text;
+    errBox.dataset.kind = text ? (kind || 'frames') : '';
+  }
+  function showError(e) {
+    const code = e && e.code;
+    let text;
+    if (code === 'NO_WORKER') text = 'This browser cannot run the GIF encoder. Use a current version of Chrome, Edge, Firefox or Safari.';
+    else if (code === 'LOAD') text = 'The GIF encoder could not be loaded. Check your connection and try again.';
+    else if (code === 'TOO_BIG') text = 'The GIF passed ' + fmtBytes(MAX_BYTES) + ', so it was stopped. Make it shorter, narrower or slower (fewer frames per second).';
+    else if (code === 'ENCODE') text = 'The GIF encoder stopped, most likely for lack of memory. Make the GIF shorter or narrower.';
+    else if (e && e.message === 'DECODE') text = 'The video could not be decoded at ' + spoken(S.start) + ' or later. The file may be damaged.';
+    else if (e && e.message === 'SEEK') text = 'The video stopped responding while frames were read. Try again, or try another browser.';
+    else text = 'The GIF could not be made: ' + ((e && e.message) || 'unknown error') + '.';
+    setError(text, 'job');
+  }
+
+  // ---------- Layout of the trim bar and crop frame ----------
+  function pct(t) { return S.dur > 0 ? clamp(t / S.dur * 100, 0, 100) : 0; }
+  function layoutTrim() {
+    const a = pct(S.start), b = pct(S.end);
+    hStart.style.left = a + '%';
+    hEnd.style.left = b + '%';
+    shadeL.style.width = a + '%';
+    shadeR.style.width = (100 - b) + '%';
+    selBox.style.left = a + '%';
+    selBox.style.width = Math.max(0, b - a) + '%';
+    const dur = S.dur.toFixed(2);
+    hStart.setAttribute('aria-valuemax', dur);
+    hEnd.setAttribute('aria-valuemax', dur);
+    hStart.setAttribute('aria-valuenow', S.start.toFixed(2));
+    hEnd.setAttribute('aria-valuenow', S.end.toFixed(2));
+    hStart.setAttribute('aria-valuetext', spoken(S.start));
+    hEnd.setAttribute('aria-valuetext', spoken(S.end));
+  }
+  function layoutHead() { head.style.left = pct(vid.currentTime || 0) + '%'; }
+  function layoutCrop() {
+    if (!S.ready) return;
+    const c = cropRect();
+    cropEl.hidden = c.whole;
+    cropHint.hidden = c.whole;
+    if (c.whole) return;
+    cropEl.style.left = (c.x / S.vw * 100) + '%';
+    cropEl.style.top = (c.y / S.vh * 100) + '%';
+    cropEl.style.width = (c.w / S.vw * 100) + '%';
+    cropEl.style.height = (c.h / S.vh * 100) + '%';
+  }
+  function syncZoomLabel() {
+    const z = Math.round(Number(zoomIn.value)) + '%';
+    zoomOut.textContent = z;
+    zoomIn.setAttribute('aria-valuetext', z);
+  }
+
+  // ---------- Start and end ----------
+  // Full-width digits (Chinese and Japanese keyboards) and Arabic-Indic digits are read as 0-9,
+  // the Arabic decimal separator as a dot. The Arabic thousands separator is not a time mark.
+  function normDigits(s) {
+    return s.replace(/[\uFF10-\uFF19]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFF10 + 48))
+      .replace(/[\u0660-\u0669]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x0660 + 48))
+      .replace(/[\u06F0-\u06F9]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x06F0 + 48))
+      .replace(/\uFF1A/g, ':').replace(/[\uFF0E\u066B]/g, '.').replace(/\uFF0C/g, ',');
+  }
+  // Seconds ("12.5", "12,5"), m:ss ("1:02.5") or h:mm:ss. A comma is always a decimal mark here:
+  // no time needs a thousands separator.
+  function parseTime(raw) {
+    if (raw.length > TIME_MAX) return { error: 'long' };
+    const s = normDigits(raw).trim().replace(/\s*s$/i, '');
+    if (!s) return { error: 'empty' };
+    const parts = s.split(':');
+    if (parts.length > 3) return { error: 'format' };
+    const last = parts[parts.length - 1];
+    if (!/^(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(last)) return { error: 'format' };
+    for (let i = 0; i < parts.length - 1; i++) if (!/^\d+$/.test(parts[i])) return { error: 'format' };
+    const sec = Number(last.replace(',', '.'));
+    if (parts.length > 1 && sec >= 60) return { error: 'sixty' };
+    if (parts.length === 3 && Number(parts[1]) >= 60) return { error: 'sixty' };
+    let v = sec;
+    if (parts.length >= 2) v += Number(parts[parts.length - 2]) * 60;
+    if (parts.length === 3) v += Number(parts[0]) * 3600;
+    return isFinite(v) ? { value: v } : { error: 'format' };
+  }
+  const fieldErr = new Map([[startIn, startErr], [endIn, endErr]]);
+  function setFieldError(input, text) {
+    const box = fieldErr.get(input);
+    box.textContent = text;
+    if (text) {
+      input.setAttribute('aria-invalid', 'true');
+      input.setAttribute('aria-describedby', box.id + ' v2g-time-hint');
+    } else {
+      input.removeAttribute('aria-invalid');
+      input.setAttribute('aria-describedby', 'v2g-time-hint');
+    }
+  }
+  function badTimes() { return startIn.hasAttribute('aria-invalid') || endIn.hasAttribute('aria-invalid'); }
+  function readField(input) {
+    const which = input === startIn ? 'start' : 'end', name = which === 'start' ? 'Start' : 'End';
+    const r = parseTime(input.value);
+    if (r.error) {
+      const msg = {
+        long: name + ': that is too long to be a time.',
+        empty: name + ': enter a time, such as 2.5 or 1:02.5.',
+        format: name + ': enter a time such as 2.5 or 1:02.5, without other characters.',
+        sixty: name + ': after a colon, use fewer than 60 seconds or minutes, as in 1:05.',
+      }[r.error];
+      setFieldError(input, msg);
+      refreshSummary();
+      return;
+    }
+    const v = r.value;
+    if (v > S.dur + 0.005) { setFieldError(input, name + ': the video is only ' + fmtTime(S.dur) + (S.dur < 60 ? ' seconds' : '') + ' long.'); refreshSummary(); return; }
+    if (which === 'start' && v >= S.end - MIN_SPAN / 2) {
+      setFieldError(input, 'Start: must be before the end (' + fmtTime(S.end) + ').');
+      refreshSummary();
+      return;
+    }
+    if (which === 'end' && v <= S.start + MIN_SPAN / 2) {
+      setFieldError(input, 'End: must be after the start (' + fmtTime(S.start) + ').');
+      refreshSummary();
+      return;
+    }
+    setFieldError(input, '');
+    if (which === 'start') S.start = Math.min(v, S.dur); else S.end = Math.min(v, S.dur);
+    // The other field may have been refused only because of this one.
+    const other = which === 'start' ? endIn : startIn;
+    if (other.hasAttribute('aria-invalid') && parseTime(other.value).value !== undefined) readField(other);
+    afterTimes(which === 'start' ? S.start : S.end, null);
+  }
+  // write: which field shows the new value ('start', 'end' or 'both'). A field the visitor is
+  // correcting keeps what they typed until they or a handle change that edge.
+  function afterTimes(showAt, write) {
+    if (write === 'start' || write === 'both') { startIn.value = fmtTime(S.start); setFieldError(startIn, ''); }
+    if (write === 'end' || write === 'both') { endIn.value = fmtTime(S.end); setFieldError(endIn, ''); }
+    layoutTrim();
+    if (showAt != null) showTime(showAt);
+    refreshSummary();
+    scheduleAnalysis();
+  }
+  function setEdge(which, t) {
+    if (which === 'start') S.start = clamp(t, 0, Math.max(0, S.end - MIN_SPAN));
+    else S.end = clamp(t, Math.min(S.dur, S.start + MIN_SPAN), S.dur);
+    afterTimes(which === 'start' ? S.start : S.end, which);
+  }
+  function nudge(which, dir, big) {
+    const s = settings();
+    const d = big ? dir : dir * s.step;
+    setEdge(which, (which === 'start' ? S.start : S.end) + d);
+  }
+  [startIn, endIn].forEach(input => {
+    // A paste too long to be a time is refused before it reaches the field.
+    input.addEventListener('beforeinput', e => {
+      const add = e.data != null ? e.data : (e.dataTransfer ? e.dataTransfer.getData('text/plain') : '');
+      if (!add || !/^insert/.test(e.inputType || '')) return;
+      const kept = input.value.length - Math.abs((input.selectionEnd || 0) - (input.selectionStart || 0));
+      if (kept + add.length > TIME_MAX) {
+        e.preventDefault();
+        setFieldError(input, (input === startIn ? 'Start' : 'End') + ': that is too long to be a time, so it was not pasted.');
+      }
+    });
+    input.addEventListener('input', () => { stopPlay(); readField(input); });
+    input.addEventListener('blur', () => {
+      if (!input.hasAttribute('aria-invalid')) input.value = fmtTime(input === startIn ? S.start : S.end);
+    });
+  });
+  document.querySelectorAll('[data-nudge]').forEach(btn => {
+    btn.addEventListener('click', () => { stopPlay(); nudge(btn.dataset.nudge, Number(btn.dataset.dir), false); });
+  });
+
+  // ---------- Preview ----------
+  let pvWant = null, pvBusy = false, pvTimer = 0;
+  function showTime(t) {
+    pvWant = t;
+    if (!pvBusy) pumpPreview();
+  }
+  function pumpPreview() {
+    if (pvWant === null || playing) return;
+    const t = Math.min(pvWant + NUDGE, S.dur);
+    pvWant = null;
+    pvBusy = true;
+    const done = () => { clearTimeout(pvTimer); vid.removeEventListener('seeked', done); pvBusy = false; layoutHead(); pumpPreview(); };
+    vid.addEventListener('seeked', done);
+    pvTimer = setTimeout(done, 3000);
+    vid.currentTime = t;
+  }
+  let playing = false, playRaf = 0;
+  function playLoop() {
+    if (!playing) return;
+    if (vid.currentTime >= S.end || vid.ended) vid.currentTime = S.start + NUDGE;
+    layoutHead();
+    playRaf = requestAnimationFrame(playLoop);
+  }
+  function startPlay() {
+    if (!S.ready || S.busy) return;
+    const s = settings();
+    vid.playbackRate = s.speed;
+    if (vid.currentTime < S.start || vid.currentTime >= S.end) vid.currentTime = S.start + NUDGE;
+    playing = true;
+    playBtn.textContent = 'Pause';
+    const p = vid.play();
+    if (p && p.catch) p.catch(() => stopPlay());
+    playRaf = requestAnimationFrame(playLoop);
+  }
+  function stopPlay() {
+    if (!playing) return;
+    playing = false;
+    cancelAnimationFrame(playRaf);
+    vid.pause();
+    playBtn.textContent = 'Play selection';
+    layoutHead();
+  }
+  playBtn.addEventListener('click', () => { if (playing) stopPlay(); else startPlay(); });
+  vid.addEventListener('seeked', layoutHead);
+
+  // ---------- Trim bar: pointer and keyboard ----------
+  function timeAt(clientX) {
+    const r = track.getBoundingClientRect();
+    return r.width > 0 ? clamp((clientX - r.left) / r.width, 0, 1) * S.dur : 0;
+  }
+  let drag = null;
+  track.addEventListener('pointerdown', e => {
+    if (!S.ready || S.busy || e.button > 0) return;
+    const t = timeAt(e.clientX);
+    let which;
+    if (hStart.contains(e.target)) which = 'start';
+    else if (hEnd.contains(e.target)) which = 'end';
+    else which = Math.abs(t - S.start) <= Math.abs(t - S.end) ? 'start' : 'end';
+    e.preventDefault();
+    stopPlay();
+    // Grabbed by its handle, an edge keeps its distance from the finger; a press on the strip
+    // moves the nearer edge there.
+    const onHandle = hStart.contains(e.target) || hEnd.contains(e.target);
+    drag = { id: e.pointerId, which, offset: onHandle ? (which === 'start' ? S.start : S.end) - t : 0 };
+    try { track.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    (which === 'start' ? hStart : hEnd).focus({ preventScroll: true });
+    if (!onHandle) setEdge(which, t);
+  });
+  track.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    setEdge(drag.which, timeAt(e.clientX) + drag.offset);
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => track.addEventListener(type, e => {
+    if (drag && e.pointerId === drag.id) drag = null;
+  }));
+  [[hStart, 'start'], [hEnd, 'end']].forEach(([el, which]) => {
+    el.addEventListener('keydown', e => {
+      if (e.ctrlKey || e.metaKey || e.altKey || !S.ready || S.busy) return;
+      const big = e.shiftKey;
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') nudge(which, -1, big);
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') nudge(which, 1, big);
+      else if (e.key === 'PageDown') nudge(which, -1, true);
+      else if (e.key === 'PageUp') nudge(which, 1, true);
+      else if (e.key === 'Home') setEdge(which, which === 'start' ? 0 : S.start + MIN_SPAN);
+      else if (e.key === 'End') setEdge(which, which === 'start' ? S.end - MIN_SPAN : S.dur);
+      else return;
+      e.preventDefault();
+      stopPlay();
+    });
+  });
+
+  // ---------- Crop frame: pointer and keyboard ----------
+  let cdrag = null;
+  cropEl.addEventListener('pointerdown', e => {
+    if (S.busy || e.button > 0) return;
+    e.preventDefault();
+    cropEl.focus({ preventScroll: true });
+    try { cropEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    cdrag = { id: e.pointerId, x: e.clientX, y: e.clientY, fx: S.fx, fy: S.fy };
+  });
+  cropEl.addEventListener('pointermove', e => {
+    if (!cdrag || e.pointerId !== cdrag.id) return;
+    const r = stage.getBoundingClientRect(), c = cropRect();
+    const freeX = (S.vw - c.w) / S.vw * r.width, freeY = (S.vh - c.h) / S.vh * r.height;
+    S.fx = freeX > 0.5 ? clamp(cdrag.fx + (e.clientX - cdrag.x) / freeX, 0, 1) : 0.5;
+    S.fy = freeY > 0.5 ? clamp(cdrag.fy + (e.clientY - cdrag.y) / freeY, 0, 1) : 0.5;
+    onCrop();
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => cropEl.addEventListener(type, e => {
+    if (cdrag && e.pointerId === cdrag.id) cdrag = null;
+  }));
+  cropEl.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || S.busy) return;
+    const c = cropRect(), stepPx = (e.shiftKey ? 0.1 : 0.01);
+    const fx = S.vw - c.w > 0 ? stepPx * S.vw / (S.vw - c.w) : 0, fy = S.vh - c.h > 0 ? stepPx * S.vh / (S.vh - c.h) : 0;
+    if (e.key === 'ArrowLeft') S.fx = clamp(S.fx - fx, 0, 1);
+    else if (e.key === 'ArrowRight') S.fx = clamp(S.fx + fx, 0, 1);
+    else if (e.key === 'ArrowUp') S.fy = clamp(S.fy - fy, 0, 1);
+    else if (e.key === 'ArrowDown') S.fy = clamp(S.fy + fy, 0, 1);
+    else if (e.key === 'Home') { S.fx = 0.5; S.fy = 0.5; }
+    else return;
+    e.preventDefault();
+    onCrop();
+  });
+  function onCrop() {
+    layoutCrop();
+    refreshSummary();
+    scheduleAnalysis();
+  }
+
+  // ---------- Settings changes ----------
+  [widthSel, fpsSel, speedSel, dirSel, playsSel, colorsSel, aspectSel].forEach(el => el.addEventListener('change', () => {
+    if (el === speedSel && playing) vid.playbackRate = settings().speed;
+    if (el === aspectSel) { S.fx = 0.5; S.fy = 0.5; }
+    layoutCrop();
+    refreshSummary();
+    scheduleAnalysis();
+  }));
+  zoomIn.addEventListener('input', () => { syncZoomLabel(); onCrop(); });
+  [ditherChk, skipChk].forEach(el => el.addEventListener('change', () => { refreshSummary(); scheduleAnalysis(); }));
+
+  // ---------- Opening a video ----------
+  function fileError(text) {
+    fileErr.textContent = text;
+    chooseBtn.setAttribute('aria-describedby', text ? 'v2g-file-error v2g-drop-hint' : 'v2g-drop-hint');
+  }
+  function loadInto(v, url) {
+    return new Promise((resolve, reject) => {
+      let kick = 0;
+      const timer = setTimeout(() => fail('timeout'), 30000);
+      function cleanup() {
+        clearTimeout(timer);
+        clearTimeout(kick);
+        v.removeEventListener('loadedmetadata', onMeta);
+        v.removeEventListener('loadeddata', onData);
+        v.removeEventListener('error', onErr);
+      }
+      function fail(kind) { cleanup(); const e = new Error(kind); e.kind = kind; reject(e); }
+      function onMeta() {
+        if (!v.videoWidth || !v.videoHeight) { fail('nopicture'); return; }
+        // Some phones load only the metadata until the video is played once.
+        kick = setTimeout(() => { if (v.readyState < 2) { const p = v.play(); if (p && p.then) p.then(() => v.pause(), () => {}); } }, 1500);
+      }
+      function onData() {
+        if (!v.videoWidth || !v.videoHeight) { fail('nopicture'); return; }
+        cleanup();
+        resolve();
+      }
+      function onErr() { fail('unsupported'); }
+      v.addEventListener('loadedmetadata', onMeta);
+      v.addEventListener('loadeddata', onData);
+      v.addEventListener('error', onErr);
+      v.src = url;
+      v.load();
+    });
+  }
+  // Recordings made in a browser (MediaRecorder) often carry no length. Seeking far past the end
+  // makes the browser read the whole file and report it.
+  function findDuration(v) {
+    if (isFinite(v.duration) && v.duration > 0) return Promise.resolve();
+    return new Promise(resolve => {
+      const timer = setTimeout(finish, 15000);
+      function finish() { clearTimeout(timer); v.removeEventListener('durationchange', onChange); v.removeEventListener('seeked', onChange); resolve(); }
+      function onChange() { if (isFinite(v.duration) && v.duration > 0) finish(); }
+      v.addEventListener('durationchange', onChange);
+      v.addEventListener('seeked', onChange);
+      v.currentTime = 1e101;
+    });
+  }
+  function baseName(name) {
+    const b = String(name || '').replace(/\.[^.]{1,5}$/, '').replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, '').trim();
+    return (b || 'video').slice(0, 120);
+  }
+  function videoMessage(kind, name) {
+    if (kind === 'nopicture') return 'No picture could be read from ' + name + '. It may hold only sound, or its video may be in a format this browser cannot decode, such as HEVC on some computers.';
+    if (kind === 'timeout') return name + ' did not open within 30 seconds. Try again, or try another browser.';
+    if (kind === 'duration') return 'The length of ' + name + ' cannot be read, so it cannot be trimmed. Try another browser, or save the video again with a video editor.';
+    return 'This browser cannot play ' + name + '. AVI, WMV and FLV files do not open in browsers, and iPhone videos in HEVC open in Chrome, Edge or Firefox on Windows and Linux only where the computer can decode HEVC. Convert the video to MP4 first, or try Safari or another browser.';
+  }
+  async function openFile(f) {
+    if (!f) return;
+    if (S.busy) cancelJob();
+    stopPlay();
+    fileError('');
+    const name = f.name || 'the video';
+    const kind = String(f.type || '').split('/')[0];
+    if (kind === 'image') { fileError(name + ' is a picture, not a video. Choose a video such as an MP4, MOV or WebM file.'); return; }
+    if (kind === 'audio') { fileError(name + ' is a sound file, so it has no picture. Choose a video.'); return; }
+    if (!f.size) { fileError(name + ' is empty (0 bytes).'); return; }
+    const token = ++S.token;
+    S.ready = false;
+    S.analysis = null;
+    anaGen++;
+    clearTimeout(anaTimer);
+    editor.hidden = true;
+    setError('');
+    announce('Opening ' + name + '…');
+    const url = URL.createObjectURL(f);
+    try {
+      await Promise.all([loadInto(vid, url), loadInto(cap, url)]);
+      if (token !== S.token) throw STALE;
+      await Promise.all([findDuration(vid), findDuration(cap)]);
+      if (token !== S.token) throw STALE;
+      if (!(isFinite(vid.duration) && vid.duration > 0)) { const e = new Error('duration'); e.kind = 'duration'; throw e; }
+    } catch (e) {
+      if (token === S.token) {
+        URL.revokeObjectURL(url);
+        vid.removeAttribute('src');
+        cap.removeAttribute('src');
+        vid.load();
+        cap.load();
+        fileError(videoMessage(e.kind || 'unsupported', name));
+        announce('');
+      }
+      return;
+    }
+    if (S.url) URL.revokeObjectURL(S.url);
+    S.url = url;
+    S.file = f;
+    S.name = name;
+    S.dur = vid.duration;
+    S.vw = vid.videoWidth;
+    S.vh = vid.videoHeight;
+    S.start = 0;
+    S.end = Math.min(S.dur, FIRST_SPAN);
+    S.fx = 0.5;
+    S.fy = 0.5;
+    S.ready = true;
+    stage.style.setProperty('--v2g-ar', String(S.vw / S.vh));
+    info.innerHTML = '';
+    const b = document.createElement('b');
+    b.textContent = name;
+    info.append(b, ' · ' + S.vw + ' × ' + S.vh + ' px · ' + fmtTime(S.dur) + (S.dur < 60 ? ' s' : ''));
+    editor.hidden = false;
+    chooseBtn.textContent = 'Choose another video';
+    layoutCrop();
+    afterTimes(0, 'both');
+    announce('Opened ' + name + ': ' + spoken(S.dur) + ', ' + S.vw + ' × ' + S.vh + ' pixels. ' + (S.dur > FIRST_SPAN ? 'The first ' + FIRST_SPAN + ' seconds are selected.' : 'The whole video is selected.'));
+    makeThumbs(token);
+  }
+  async function makeThumbs(token) {
+    S.thumbsDone = false;
+    strip.textContent = '';
+    const N = 10, th = 72, tw = Math.max(8, Math.round(th * S.vw / S.vh));
+    const c = document.createElement('canvas');
+    c.width = tw;
+    c.height = th;
+    const ctx = c.getContext('2d');
+    const imgs = [];
+    for (let i = 0; i < N; i++) { const img = document.createElement('img'); img.alt = ''; strip.appendChild(img); imgs.push(img); }
+    try {
+      await withCapture(async () => {
+        for (let i = 0; i < N; i++) {
+          if (token !== S.token || S.busy) return;
+          await seekTo(cap, (i + 0.5) * S.dur / N);
+          ctx.drawImage(cap, 0, 0, tw, th);
+          imgs[i].src = c.toDataURL('image/jpeg', 0.7);
+        }
+        if (token === S.token) S.thumbsDone = true;
+      });
+    } catch (e) { /* the strip is only a guide */ }
+    if (token === S.token) runAnalysis();
+  }
+  chooseBtn.addEventListener('click', () => { if (!S.busy) fileInput.click(); });
+  fileInput.addEventListener('change', () => { const f = fileInput.files && fileInput.files[0]; fileInput.value = ''; openFile(f); });
+  const isFileDrag = e => e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
+  document.addEventListener('dragover', e => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    if (!S.busy) drop.classList.add('is-over');
+  });
+  document.addEventListener('dragleave', e => { if (!e.relatedTarget) drop.classList.remove('is-over'); });
+  document.addEventListener('drop', e => {
+    drop.classList.remove('is-over');
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    if (S.busy) return;
+    const files = Array.from(e.dataTransfer.files || []);
+    openFile(files.find(f => /^video\//.test(f.type)) || files[0]);
+  });
+  document.addEventListener('paste', e => {
+    const t = e.target;
+    if (S.busy || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && t.type !== 'file')) return;
+    const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
+    const it = items.find(x => x.kind === 'file' && /^video\//.test(x.type));
+    if (it) { e.preventDefault(); openFile(it.getAsFile()); }
+  });
+
+  // ---------- Making the GIF ----------
+  let wakeLock = null;
+  function lockScreen() {
+    if (wakeLock || !navigator.wakeLock || !navigator.wakeLock.request) return;
+    navigator.wakeLock.request('screen').then(l => {
+      if (!S.busy) { l.release().catch(() => {}); return; }
+      wakeLock = l;
+      l.addEventListener('release', () => { if (wakeLock === l) wakeLock = null; });
+    }, () => {});
+  }
+  function unlockScreen() { if (wakeLock) { const l = wakeLock; wakeLock = null; l.release().catch(() => {}); } }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.busy) lockScreen(); });
+
+  function showProgressText(t) { progText.textContent = t; }
+  function setBusy(on) {
+    S.busy = on;
+    part.inert = on;
+    makeBtn.disabled = on;
+    cancelBtn.hidden = !on;
+    chooseBtn.disabled = on;
+    prog.hidden = !on;
+  }
+  function cancelJob() {
+    const job = S.job;
+    if (!job) return;
+    job.cancelled = true;
+    stopWorker(CANCELLED);
+    if (job.wake) job.wake();
+    if (job.room) job.room();
+  }
+  async function makeGif() {
+    if (!S.ready || S.busy) return;
+    if (badTimes()) { (startIn.hasAttribute('aria-invalid') ? startIn : endIn).focus(); return; }
+    const s = settings();
+    if (!s.n) return;
+    if (s.total > MAX_FRAMES) { refreshSummary(); return; }
+    stopPlay();
+    setError('');
+    const job = { cancelled: false, wake: null, room: null };
+    S.job = job;
+    anaGen++;
+    clearTimeout(anaTimer);
+    setBusy(true);
+    cancelBtn.focus();
+    bar.removeAttribute('value');
+    showProgressText('Choosing colours…');
+    announce('Making the GIF: ' + nf.format(s.total) + ' frames.');
+    lockScreen();
+    try {
+      let a = S.analysis && S.analysis.key === contentKey(s) ? S.analysis : null;
+      if (!a) { a = await analyse(s, () => job.cancelled, job); S.analysis = a; }
+      if (job.cancelled) throw CANCELLED;
+      const out = await encode(s, a, job);
+      showResult(out, s);
+    } catch (e) {
+      if (job.cancelled || e === CANCELLED) announce('Cancelled. No GIF was made.');
+      else showError(e);
+    } finally {
+      const active = document.activeElement;
+      const lost = !active || active === document.body || active === cancelBtn;
+      if (S.job === job) S.job = null;
+      setBusy(false);
+      unlockScreen();
+      refreshSummary();
+      if (lost) { if (S.gif && S.gif.job === job) dlBtn.focus(); else makeBtn.focus(); }
+      if (S.ready && !S.thumbsDone) makeThumbs(S.token);
+    }
+  }
+  async function encode(s, a, job) {
+    const w = getWorker();
+    const id = ++wseq;
+    let inflight = 0, last = { k: 0, bytes: 0 };
+    const done = new Promise((resolve, reject) => {
+      pending.set(id, {
+        resolve, reject,
+        progress(m) {
+          inflight--;
+          last = m;
+          if (job.room) { const f = job.room; job.room = null; f(); }
+        },
+      });
+    });
+    done.catch(e => { job.failed = e; if (job.room) { const f = job.room; job.room = null; f(); } });
+    w.postMessage({ cmd: 'start', id, w: s.w, h: s.h, palette: a.palette, nReal: a.nReal, dither: s.dither, skip: s.skip, repeat: s.repeat, spread: SPREAD[s.colors] });
+    const started = performance.now();
+    await withCapture(async () => {
+      for (let i = 0; i < s.total; i++) {
+        if (job.cancelled) throw CANCELLED;
+        if (job.failed) throw job.failed;
+        const data = await grabAt(s, sampleTime(s, sourceIndex(s, i)), job);
+        while (inflight >= 3 && !job.cancelled && !job.failed) await new Promise(r => { job.room = r; });
+        if (job.cancelled) throw CANCELLED;
+        if (job.failed) throw job.failed;
+        if (last.bytes > MAX_BYTES) { stopWorker(CANCELLED); throw encoderError('TOO_BIG'); }
+        inflight++;
+        w.postMessage({ cmd: 'frame', id, buffer: data.buffer, delay: delayCs(i, s.fps) * 10 }, [data.buffer]);
+        bar.value = Math.round((i + 1) / s.total * 1000);
+        let text = 'Frame ' + nf.format(i + 1) + ' of ' + nf.format(s.total);
+        if (last.bytes) text += ' · ' + fmtBytes(last.bytes) + ' so far';
+        const spent = performance.now() - started;
+        if (i >= 10 && spent > 5000) text += ' · about ' + Math.max(1, Math.round(spent / (i + 1) * (s.total - i - 1) / 1000)) + ' s left';
+        showProgressText(text);
+      }
+    });
+    w.postMessage({ cmd: 'finish', id });
+    showProgressText('Finishing…');
+    const r = await done;
+    if (r.bytes > MAX_BYTES) throw encoderError('TOO_BIG');
+    return r;
+  }
+  function showResult(r, s) {
+    if (S.gif) URL.revokeObjectURL(S.gif.url);
+    const blob = new Blob(r.chunks, { type: 'image/gif' });
+    const url = URL.createObjectURL(blob);
+    S.gif = { blob, url, name: baseName(S.name) + '.gif', job: S.job };
+    gifImg.width = s.w;
+    gifImg.height = s.h;
+    gifImg.src = url;
+    gifImg.alt = 'Animated GIF made from ' + S.name + ', ' + s.w + ' by ' + s.h + ' pixels';
+    const plays = s.plays === 0 ? 'plays forever' : s.plays === 1 ? 'plays once' : 'plays ' + s.plays + ' times';
+    resultInfo.textContent = fmtBytes(blob.size, 2) + ' (' + nf.format(blob.size) + ' bytes) · ' + s.w + ' × ' + s.h + ' px · ' +
+      nf.format(s.total) + (s.total === 1 ? ' frame' : ' frames') + ' · ' + fmtLength(csAt(s.total, s.fps)) + ' · ' + plays;
+    let canShare = false;
+    try { canShare = !!(navigator.canShare && navigator.canShare({ files: [new File([blob], S.gif.name, { type: 'image/gif' })] })); } catch (e) { canShare = false; }
+    shareBtn.hidden = !canShare;
+    result.hidden = false;
+    announce('GIF ready: ' + fmtBytes(blob.size, 2) + ', ' + nf.format(s.total) + ' frames, ' + s.w + ' by ' + s.h + ' pixels.');
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    result.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+  }
+  makeBtn.addEventListener('click', makeGif);
+  cancelBtn.addEventListener('click', () => { cancelJob(); });
+  // A second click within a second on the same GIF (a double click) saves nothing more.
+  let lastSave = { gif: null, at: 0 };
+  dlBtn.addEventListener('click', () => {
+    if (!S.gif || (lastSave.gif === S.gif && performance.now() - lastSave.at < 1000)) return;
+    lastSave = { gif: S.gif, at: performance.now() };
+    TT.download(S.gif.name, S.gif.blob);
+    announce('Downloading ' + S.gif.name + '.');
+  });
+  let sharing = false;
+  shareBtn.addEventListener('click', async () => {
+    if (!S.gif || sharing) return;
+    sharing = true;
+    try {
+      await navigator.share({ files: [new File([S.gif.blob], S.gif.name, { type: 'image/gif' })] });
+    } catch (e) {
+      if (!e || e.name !== 'AbortError') announce('Sharing did not work here. Use Download instead.');
+    }
+    sharing = false;
+  });
+
+  // Back or Forward can restore the menus after this script has run: read them again.
+  window.addEventListener('pageshow', () => { syncZoomLabel(); layoutCrop(); refreshSummary(); });
+  syncZoomLabel();
+})();
+</script>

@@ -11,8 +11,9 @@ howto: |
      open. A sample picture is shown until you do.
   2. Move over the picture: the magnifier shows the pixels around the
      pointer, enlarged, with the one you will pick outlined. Click to pick
-     it. On a phone, touch the picture, slide your finger until the
-     magnifier above it shows the right pixel, and lift.
+     it. On a phone, tap a pixel to pick it, or touch and hold until the
+     magnifier appears above your finger, slide to the right pixel and
+     lift; a swipe scrolls the page.
   3. Copy the code you need. Every pick is added to **Picked colours**,
      newest first.
 
@@ -97,8 +98,11 @@ faq:
 @media (max-width: 760px) { .icp-layout { grid-template-columns: minmax(0, 1fr); } }
 .icp-wrap { position: relative; min-width: 0; }
 .icp-stage { display: flex; justify-content: center; margin: 0 0 8px; }
+/* Served at the sample picture's 960 × 640, so its box is kept before the script sizes it.
+   A swipe on the picture scrolls (or pans a zoomed page) and two fingers zoom; touch and hold aims. */
 .icp-canvas {
-  display: block; max-width: 100%; cursor: crosshair; touch-action: none; border-radius: 4px;
+  display: block; max-width: 100%; max-height: max(200px, min(70vh, 640px)); cursor: crosshair; border-radius: 4px;
+  touch-action: manipulation; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
   background: repeating-conic-gradient(var(--border) 0% 25%, var(--surface) 0% 50%) 0 0 / 16px 16px;
 }
 .icp-canvas.is-pixelated { image-rendering: pixelated; }
@@ -138,6 +142,7 @@ faq:
 .icp-chip:hover { border-color: var(--muted); }
 .icp-dot { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--field-border); }
 @media (pointer: coarse) { .icp-chip { min-height: 44px; } }
+.icp-palette[aria-busy="true"] { opacity: 0.5; }
 .icp-palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
 .icp-pal {
   display: grid; width: 100%; padding: 0 0 8px; overflow: hidden; cursor: pointer; text-align: left;
@@ -159,17 +164,18 @@ faq:
     <span class="hint" id="icp-info">Drop an image anywhere on the page or paste one with Ctrl+V. Nothing is uploaded.</span>
   </div>
   <button class="btn secondary" type="button" id="icp-screen" hidden>Pick from screen</button>
+  <script>if ('EyeDropper' in window) document.getElementById('icp-screen').hidden = false;</script>
 </div>
 <p class="msg error" id="icp-error" role="alert"></p>
 
 <div class="icp-layout">
   <div class="icp-wrap" id="icp-wrap">
     <div class="icp-stage">
-      <canvas class="icp-canvas" id="icp-canvas" width="1" height="1" tabindex="0" role="application" aria-label="Image to pick colours from" aria-describedby="icp-help"></canvas>
+      <canvas class="icp-canvas" id="icp-canvas" width="960" height="640" tabindex="0" role="application" aria-label="Image to pick colours from" aria-describedby="icp-help"></canvas>
     </div>
     <div class="icp-marker" id="icp-marker" hidden></div>
     <div class="icp-loupe" id="icp-loupe" hidden aria-hidden="true"><canvas id="icp-loupe-cv" width="132" height="132"></canvas><span id="icp-loupe-hex"></span></div>
-    <p class="hint icp-help" id="icp-help">Click or tap a pixel to pick its colour. Keyboard: arrow keys move one pixel, Shift+arrow ten, Enter picks.</p>
+    <p class="hint icp-help" id="icp-help">Click or tap a pixel to pick its colour, or touch and hold to aim with the magnifier. Keyboard: arrow keys move one pixel, Shift+arrow ten, Enter picks.</p>
     <div class="row icp-opts">
       <div class="field">
         <label for="icp-size">Sample</label>
@@ -251,7 +257,7 @@ faq:
     foreignObject: 'The HTML inside this SVG (a <foreignObject> element) is left out: this browser does not allow it to be drawn.'
   };
   // img: { name, w, h, data (sRGB as the browser shows it), raw (stored values, when asked for), view, res, file, orientation }
-  var img = null, aim = { x: 0, y: 0 }, cur = null, history = [], palette = [], palFor = '', loadRun = 0, dragging = null;
+  var img = null, aim = { x: 0, y: 0 }, cur = null, history = [], palette = [], palFor = '', palShown = '', loadRun = 0, dragging = null;
 
   if (window.TTImage) $('#icp-file').accept = TTImage.accept;
 
@@ -383,6 +389,7 @@ faq:
     var k = Math.min(availW / img.w, maxH / img.h, 24);
     cv.style.width = (img.w * k).toFixed(2) + 'px';
     cv.style.height = (img.h * k).toFixed(2) + 'px';
+    cv.style.maxHeight = 'none';
     cv.classList.toggle('is-pixelated', k >= 2);
     if (img.picked && marker.dataset.at === 'pick') placeMarker(img.picked.x, img.picked.y);
   }
@@ -462,27 +469,60 @@ faq:
     return { x: Math.floor((e.clientX - r.left) / r.width * img.w), y: Math.floor((e.clientY - r.top) / r.height * img.h) };
   }
 
+  // A mouse or pen aims at once. A finger only aims once it has been held still for HOLD ms:
+  // then the magnifier comes up above it and the colour is picked where it lifts. A quick tap
+  // picks at once, and a swipe scrolls the page (the canvas lets the browser pan and zoom).
+  var HOLD = 300, press = null;
+  function endPress() { if (press) { clearTimeout(press.timer); press = null; } }
   cv.addEventListener('pointerdown', function (e) {
     if (!img || e.button > 0) return;
+    if (e.pointerType === 'touch') {
+      if (press || dragging !== null) return;
+      var pr = press = { id: e.pointerId, x0: e.clientX, y0: e.clientY, clientX: e.clientX, clientY: e.clientY };
+      pr.timer = setTimeout(function () {
+        if (press !== pr) return;
+        press = null;
+        dragging = pr.id;
+        var p = eventPixel(pr);
+        aimAt(p.x, p.y, true);
+      }, HOLD);
+      return;
+    }
     try { cv.setPointerCapture(e.pointerId); } catch (x) { /* not capturable */ }
     dragging = e.pointerId;
     var p = eventPixel(e);
-    aimAt(p.x, p.y, e.pointerType === 'touch');
+    aimAt(p.x, p.y, false);
   });
   cv.addEventListener('pointermove', function (e) {
-    if (!img || (dragging !== e.pointerId && e.pointerType === 'touch')) return;
+    if (!img) return;
+    if (press && press.id === e.pointerId) {
+      press.clientX = e.clientX;
+      press.clientY = e.clientY;
+      // Moved before the hold: a swipe, not an aim.
+      if (Math.abs(e.clientX - press.x0) + Math.abs(e.clientY - press.y0) > 10) endPress();
+      return;
+    }
+    if (dragging !== e.pointerId && e.pointerType === 'touch') return;
     var p = eventPixel(e);
     aimAt(p.x, p.y, e.pointerType === 'touch');
   });
   cv.addEventListener('pointerup', function (e) {
-    if (dragging !== e.pointerId) return;
+    if (press && press.id === e.pointerId) endPress();
+    else if (dragging !== e.pointerId) return;
     dragging = null;
     var p = eventPixel(e);
     aimAt(p.x, p.y, e.pointerType === 'touch');
     pick();
     if (e.pointerType === 'touch') hideLoupe();
   });
-  cv.addEventListener('pointercancel', function () { dragging = null; hideLoupe(); });
+  cv.addEventListener('pointercancel', function (e) {
+    if (press && press.id === e.pointerId) endPress();
+    if (dragging === e.pointerId) dragging = null;
+    hideLoupe();
+  });
+  // Once the magnifier is up, the finger moves it rather than the page.
+  cv.addEventListener('touchmove', function (e) { if (dragging !== null && e.cancelable) e.preventDefault(); }, { passive: false });
+  cv.addEventListener('contextmenu', function (e) { if (press || dragging !== null) e.preventDefault(); });
   cv.addEventListener('pointerleave', function (e) { if (dragging === null && e.pointerType !== 'touch') hideLoupe(); });
   cv.addEventListener('focus', function () {
     if (img && dragging === null && cv.matches(':focus-visible')) aimAt(aim.x, aim.y, false);
@@ -504,140 +544,176 @@ faq:
   });
 
   // ---------- the palette ----------
-  var LIN = new Float64Array(256);
-  for (var li = 0; li < 256; li++) { var cc = li / 255; LIN[li] = cc <= 0.04045 ? cc / 12.92 : Math.pow((cc + 0.055) / 1.055, 2.4); }
-  // sRGB to OKLab (Björn Ottosson, 2020).
-  function oklab(r, g, b, out, o) {
-    var lr = LIN[r], lg = LIN[g], lb = LIN[b];
-    var l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
-    var m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
-    var s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
-    out[o] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
-    out[o + 1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
-    out[o + 2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  // paletteMaker() runs in the worker (see below), or on the page where there is none, so it uses
+  // nothing from outside itself. The function it returns groups the colours of the sampled pixels
+  // (R, G, B bytes) into at most n: variance-based median cut, then k-means, both in OKLab. It
+  // gives the number of pixels and each group's average colour (0xRRGGBB) with its pixel count,
+  // largest first.
+  function paletteMaker() {
+    var LIN = new Float64Array(256);
+    for (var li = 0; li < 256; li++) { var cc = li / 255; LIN[li] = cc <= 0.04045 ? cc / 12.92 : Math.pow((cc + 0.055) / 1.055, 2.4); }
+    function roundFrac(p, q) { return Math.floor((2 * p + q) / (2 * q)); }
+    // sRGB to OKLab (Björn Ottosson, 2020).
+    function oklab(r, g, b, out, o) {
+      var lr = LIN[r], lg = LIN[g], lb = LIN[b];
+      var l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+      var m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+      var s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+      out[o] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+      out[o + 1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+      out[o + 2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    }
+    return function (rgb, n) {
+      var counts = new Map(), total = rgb.length / 3, k, i;
+      for (k = 0; k < rgb.length; k += 3) {
+        var key = (rgb[k] << 16) | (rgb[k + 1] << 8) | rgb[k + 2];
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      if (!total) return { total: 0, list: [] };
+      // A photo can have a different colour in almost every sampled pixel. Above 32,768 colours, shades
+      // that differ only in the last 3 bits of each channel are grouped first, at their exact mean, so
+      // the palette takes a fraction of a second instead of freezing the page.
+      var groups = counts;
+      if (counts.size > 32768) {
+        groups = new Map();
+        counts.forEach(function (c, key) {
+          var gk = (key >> 3) & 0x1f1f1f, gr = groups.get(gk);
+          if (!gr) groups.set(gk, gr = [0, 0, 0, 0]);
+          gr[0] += c; gr[1] += c * (key >> 16); gr[2] += c * ((key >> 8) & 255); gr[3] += c * (key & 255);
+        });
+      }
+      // For each colour (or group): its key, pixel count, OKLab position and the sums of its pixels' R, G, B.
+      var m = groups.size, keys = new Int32Array(m), wt = new Float64Array(m), lab = new Float64Array(m * 3), sums = new Float64Array(m * 3);
+      i = 0;
+      groups.forEach(function (c, key) {
+        var r, g, b;
+        if (groups === counts) {
+          r = key >> 16; g = (key >> 8) & 255; b = key & 255;
+          wt[i] = c; sums[i * 3] = c * r; sums[i * 3 + 1] = c * g; sums[i * 3 + 2] = c * b;
+        } else {
+          wt[i] = c[0]; sums[i * 3] = c[1]; sums[i * 3 + 1] = c[2]; sums[i * 3 + 2] = c[3];
+          r = Math.round(c[1] / c[0]); g = Math.round(c[2] / c[0]); b = Math.round(c[3] / c[0]);
+        }
+        keys[i] = key;
+        oklab(r, g, b, lab, i * 3);
+        i++;
+      });
+      function stats(idx) {
+        var W = 0, s = [0, 0, 0], q = 0, j, a;
+        for (j = 0; j < idx.length; j++) { var p = idx[j]; W += wt[p]; for (a = 0; a < 3; a++) s[a] += wt[p] * lab[p * 3 + a]; }
+        var mean = [s[0] / W, s[1] / W, s[2] / W];
+        for (j = 0; j < idx.length; j++) { var t = idx[j]; for (a = 0; a < 3; a++) { var e = lab[t * 3 + a] - mean[a]; q += wt[t] * e * e; } }
+        return { idx: idx, sse: q };
+      }
+      // The split along one axis that separates the two halves most (largest between-group variance).
+      function bestSplit(box) {
+        var best = null;
+        for (var a = 0; a < 3; a++) {
+          var idx = box.idx.slice().sort(function (p, q) { return lab[p * 3 + a] - lab[q * 3 + a] || keys[p] - keys[q]; });
+          var Wt = 0, St = 0, j;
+          for (j = 0; j < idx.length; j++) { Wt += wt[idx[j]]; St += wt[idx[j]] * lab[idx[j] * 3 + a]; }
+          var W1 = 0, S1 = 0;
+          for (j = 0; j < idx.length - 1; j++) {
+            W1 += wt[idx[j]]; S1 += wt[idx[j]] * lab[idx[j] * 3 + a];
+            if (lab[idx[j] * 3 + a] === lab[idx[j + 1] * 3 + a]) continue;
+            var W2 = Wt - W1, diff = S1 / W1 - (St - S1) / W2, gain = W1 * W2 / Wt * diff * diff;
+            if (!best || gain > best.gain) best = { gain: gain, idx: idx, at: j + 1 };
+          }
+        }
+        // Cut once, at the best place: copying the halves at every better place found was quadratic.
+        return best && { left: best.idx.slice(0, best.at), right: best.idx.slice(best.at) };
+      }
+      var all = [];
+      for (i = 0; i < m; i++) all.push(i);
+      var boxes = [stats(all)];
+      while (boxes.length < n) {
+        var bi = -1;
+        for (i = 0; i < boxes.length; i++) if (boxes[i].sse > 1e-12 && (bi < 0 || boxes[i].sse > boxes[bi].sse)) bi = i;
+        if (bi < 0) break;
+        var sp = bestSplit(boxes[bi]);
+        if (!sp) { boxes[bi].sse = 0; continue; }
+        boxes.splice(bi, 1, stats(sp.left), stats(sp.right));
+      }
+      // k-means from the boxes' means.
+      var kk = boxes.length, assign = new Int32Array(m), cen = new Float64Array(kk * 3);
+      boxes.forEach(function (bx, b) { bx.idx.forEach(function (p) { assign[p] = b; }); });
+      for (var round = 0; round < 12; round++) {
+        var sw = new Float64Array(kk), sum = new Float64Array(kk * 3), a;
+        for (i = 0; i < m; i++) { var c0 = assign[i]; sw[c0] += wt[i]; for (a = 0; a < 3; a++) sum[c0 * 3 + a] += wt[i] * lab[i * 3 + a]; }
+        for (var b2 = 0; b2 < kk; b2++) for (a = 0; a < 3; a++) cen[b2 * 3 + a] = sw[b2] ? sum[b2 * 3 + a] / sw[b2] : 1e9;
+        var moved = false;
+        for (i = 0; i < m; i++) {
+          var bestC = assign[i], bestD = Infinity;
+          for (var c1 = 0; c1 < kk; c1++) {
+            var e0 = lab[i * 3] - cen[c1 * 3], e1 = lab[i * 3 + 1] - cen[c1 * 3 + 1], e2 = lab[i * 3 + 2] - cen[c1 * 3 + 2], dd = e0 * e0 + e1 * e1 + e2 * e2;
+            if (dd < bestD) { bestD = dd; bestC = c1; }
+          }
+          if (bestC !== assign[i]) { assign[i] = bestC; moved = true; }
+        }
+        if (!moved) break;
+      }
+      // Each group's average colour in sRGB, weighted by how many pixels have each colour.
+      var acc = [];
+      for (i = 0; i < kk; i++) acc.push({ w: 0, r: 0, g: 0, b: 0 });
+      for (i = 0; i < m; i++) {
+        var t = acc[assign[i]];
+        t.w += wt[i]; t.r += sums[i * 3]; t.g += sums[i * 3 + 1]; t.b += sums[i * 3 + 2];
+      }
+      // Groups that come out as the same colour count as one.
+      var byColour = new Map(), list = [];
+      acc.forEach(function (t) {
+        if (!t.w) return;
+        var c = roundFrac(t.r, t.w) << 16 | roundFrac(t.g, t.w) << 8 | roundFrac(t.b, t.w);
+        byColour.set(c, (byColour.get(c) || 0) + t.w);
+      });
+      byColour.forEach(function (w, c) { list.push([c, w]); });
+      list.sort(function (p, q) { return q[1] - p[1] || p[0] - q[0]; });
+      return { total: total, list: list };
+    };
   }
-  // Groups the image's colours into at most n: variance-based median cut, then k-means, both in OKLab.
-  function computePalette(n) {
-    var d = pixels(), w = img.w, h = img.h, step = 1, counts = new Map(), total = 0, x, y, k, i;
-    if (w * h > SAMPLE_MAX) step = Math.ceil(Math.sqrt(w * h / SAMPLE_MAX));
+  var pagePalette = null;
+  function paletteHere(rgb, n) { return (pagePalette || (pagePalette = paletteMaker()))(rgb, n); }
+  // The pixels the palette is made from, as R, G, B bytes: all of them, or for an image over
+  // SAMPLE_MAX pixels an even grid of them, leaving out pixels more than half transparent.
+  function paletteSample() {
+    var d = pixels(), w = img.w, h = img.h, step = w * h > SAMPLE_MAX ? Math.ceil(Math.sqrt(w * h / SAMPLE_MAX)) : 1;
+    var out = new Uint8Array(3 * Math.ceil(w / step) * Math.ceil(h / step)), o = 0, x, y, k;
     for (y = step >> 1; y < h; y += step) {
       for (x = step >> 1; x < w; x += step) {
         k = (y * w + x) * 4;
         if (d[k + 3] < 128) continue;
-        var key = (d[k] << 16) | (d[k + 1] << 8) | d[k + 2];
-        counts.set(key, (counts.get(key) || 0) + 1);
-        total++;
+        out[o++] = d[k]; out[o++] = d[k + 1]; out[o++] = d[k + 2];
       }
     }
-    if (!total) return { total: 0, list: [] };
-    // A photo can have a different colour in almost every sampled pixel. Above 32,768 colours, shades
-    // that differ only in the last 3 bits of each channel are grouped first, at their exact mean, so
-    // the palette takes a fraction of a second instead of freezing the page.
-    var groups = counts;
-    if (counts.size > 32768) {
-      groups = new Map();
-      counts.forEach(function (c, key) {
-        var gk = (key >> 3) & 0x1f1f1f, gr = groups.get(gk);
-        if (!gr) groups.set(gk, gr = [0, 0, 0, 0]);
-        gr[0] += c; gr[1] += c * (key >> 16); gr[2] += c * ((key >> 8) & 255); gr[3] += c * (key & 255);
-      });
-    }
-    // For each colour (or group): its key, pixel count, OKLab position and the sums of its pixels' R, G, B.
-    var m = groups.size, keys = new Int32Array(m), wt = new Float64Array(m), lab = new Float64Array(m * 3), sums = new Float64Array(m * 3);
-    i = 0;
-    groups.forEach(function (c, key) {
-      var r, g, b;
-      if (groups === counts) {
-        r = key >> 16; g = (key >> 8) & 255; b = key & 255;
-        wt[i] = c; sums[i * 3] = c * r; sums[i * 3 + 1] = c * g; sums[i * 3 + 2] = c * b;
-      } else {
-        wt[i] = c[0]; sums[i * 3] = c[1]; sums[i * 3 + 1] = c[2]; sums[i * 3 + 2] = c[3];
-        r = Math.round(c[1] / c[0]); g = Math.round(c[2] / c[0]); b = Math.round(c[3] / c[0]);
-      }
-      keys[i] = key;
-      oklab(r, g, b, lab, i * 3);
-      i++;
-    });
-    function stats(idx) {
-      var W = 0, s = [0, 0, 0], q = 0, j, a;
-      for (j = 0; j < idx.length; j++) { var p = idx[j]; W += wt[p]; for (a = 0; a < 3; a++) s[a] += wt[p] * lab[p * 3 + a]; }
-      var mean = [s[0] / W, s[1] / W, s[2] / W];
-      for (j = 0; j < idx.length; j++) { var t = idx[j]; for (a = 0; a < 3; a++) { var e = lab[t * 3 + a] - mean[a]; q += wt[t] * e * e; } }
-      return { idx: idx, sse: q };
-    }
-    // The split along one axis that separates the two halves most (largest between-group variance).
-    function bestSplit(box) {
-      var best = null;
-      for (var a = 0; a < 3; a++) {
-        var idx = box.idx.slice().sort(function (p, q) { return lab[p * 3 + a] - lab[q * 3 + a] || keys[p] - keys[q]; });
-        var Wt = 0, St = 0, j;
-        for (j = 0; j < idx.length; j++) { Wt += wt[idx[j]]; St += wt[idx[j]] * lab[idx[j] * 3 + a]; }
-        var W1 = 0, S1 = 0;
-        for (j = 0; j < idx.length - 1; j++) {
-          W1 += wt[idx[j]]; S1 += wt[idx[j]] * lab[idx[j] * 3 + a];
-          if (lab[idx[j] * 3 + a] === lab[idx[j + 1] * 3 + a]) continue;
-          var W2 = Wt - W1, diff = S1 / W1 - (St - S1) / W2, gain = W1 * W2 / Wt * diff * diff;
-          if (!best || gain > best.gain) best = { gain: gain, idx: idx, at: j + 1 };
-        }
-      }
-      // Cut once, at the best place: copying the halves at every better place found was quadratic.
-      return best && { left: best.idx.slice(0, best.at), right: best.idx.slice(best.at) };
-    }
-    var all = [];
-    for (i = 0; i < m; i++) all.push(i);
-    var boxes = [stats(all)];
-    while (boxes.length < n) {
-      var bi = -1;
-      for (i = 0; i < boxes.length; i++) if (boxes[i].sse > 1e-12 && (bi < 0 || boxes[i].sse > boxes[bi].sse)) bi = i;
-      if (bi < 0) break;
-      var sp = bestSplit(boxes[bi]);
-      if (!sp) { boxes[bi].sse = 0; continue; }
-      boxes.splice(bi, 1, stats(sp.left), stats(sp.right));
-    }
-    // k-means from the boxes' means.
-    var kk = boxes.length, assign = new Int32Array(m), cen = new Float64Array(kk * 3);
-    boxes.forEach(function (bx, b) { bx.idx.forEach(function (p) { assign[p] = b; }); });
-    for (var round = 0; round < 12; round++) {
-      var sw = new Float64Array(kk), sum = new Float64Array(kk * 3), a;
-      for (i = 0; i < m; i++) { var c0 = assign[i]; sw[c0] += wt[i]; for (a = 0; a < 3; a++) sum[c0 * 3 + a] += wt[i] * lab[i * 3 + a]; }
-      for (var b2 = 0; b2 < kk; b2++) for (a = 0; a < 3; a++) cen[b2 * 3 + a] = sw[b2] ? sum[b2 * 3 + a] / sw[b2] : 1e9;
-      var moved = false;
-      for (i = 0; i < m; i++) {
-        var bestC = assign[i], bestD = Infinity;
-        for (var c1 = 0; c1 < kk; c1++) {
-          var e0 = lab[i * 3] - cen[c1 * 3], e1 = lab[i * 3 + 1] - cen[c1 * 3 + 1], e2 = lab[i * 3 + 2] - cen[c1 * 3 + 2], dd = e0 * e0 + e1 * e1 + e2 * e2;
-          if (dd < bestD) { bestD = dd; bestC = c1; }
-        }
-        if (bestC !== assign[i]) { assign[i] = bestC; moved = true; }
-      }
-      if (!moved) break;
-    }
-    // Each group's average colour in sRGB, weighted by how many pixels have each colour.
-    var acc = [];
-    for (i = 0; i < kk; i++) acc.push({ w: 0, r: 0, g: 0, b: 0 });
-    for (i = 0; i < m; i++) {
-      var t = acc[assign[i]];
-      t.w += wt[i]; t.r += sums[i * 3]; t.g += sums[i * 3 + 1]; t.b += sums[i * 3 + 2];
-    }
-    var byHex = {};
-    acc.forEach(function (t) {
-      if (!t.w) return;
-      var c = { r: roundFrac(t.r, t.w), g: roundFrac(t.g, t.w), b: roundFrac(t.b, t.w), a: 255 }, hx = formats(c).hex;
-      if (byHex[hx]) byHex[hx].w += t.w; else byHex[hx] = { c: c, w: t.w, hex: hx };
-    });
-    var list = Object.keys(byHex).map(function (hx) { return byHex[hx]; });
-    list.sort(function (p, q) { return q.w - p.w || (p.hex < q.hex ? -1 : 1); });
-    return { total: total, list: list };
+    return out.subarray(0, o);
+  }
+  function paletteKey() { return img.id + ':' + (img.raw ? 'raw' : 'srgb') + ':' + countSel.value; }
+  // The palette shown stays until the new one is ready, marked as busy.
+  function paletteWaiting() {
+    palList.setAttribute('aria-busy', 'true');
+    setText(palNote, 'Working out the palette…');
   }
   function renderPalette() {
     if (!img) return;
-    var key = img.id + ':' + (img.raw ? 'raw' : 'srgb') + ':' + countSel.value;
+    var key = paletteKey(), n = Number(countSel.value);
     if (palFor === key) return;
     palFor = key;
-    var p = computePalette(Number(countSel.value));
-    palette = p.list;
+    paletteWaiting();
+    var rgb = paletteSample();
+    work({ cmd: 'palette', rgb: rgb, n: n }, [rgb.buffer]).then(null, function () { return { ok: false }; }).then(function (r) {
+      // Another picture, mode or count was asked for meanwhile, or the palette was needed sooner.
+      if (palFor !== key || palShown === key) return;
+      showPalette(r.ok ? r : paletteHere(paletteSample(), n), n, key);
+    });
+  }
+  function showPalette(p, n, key) {
+    palShown = key;
+    palette = p.list.map(function (e) {
+      var c = { r: e[0] >> 16, g: (e[0] >> 8) & 255, b: e[0] & 255, a: 255 };
+      return { c: c, w: e[1], hex: formats(c).hex };
+    });
     palList.textContent = '';
-    p.list.forEach(function (e, i) {
+    palette.forEach(function (e, i) {
       var li = document.createElement('li'), b = document.createElement('button'), sw = document.createElement('span'), hx = document.createElement('b'), share = document.createElement('span');
       var pct = roundFrac(100 * e.w, p.total);
       b.type = 'button';
@@ -651,20 +727,26 @@ faq:
       li.appendChild(b);
       palList.appendChild(li);
     });
-    $('#icp-pal-copy').disabled = !p.list.length;
+    palList.removeAttribute('aria-busy');
+    $('#icp-pal-copy').disabled = !palette.length;
     setText(palNote, !p.total ? 'No palette: every pixel of this image is more than half transparent.' :
-      p.list.length < Number(countSel.value) ? 'This image has only ' + p.list.length + (p.list.length === 1 ? ' colour.' : ' distinct colours.') : '');
+      palette.length < n ? 'This image has only ' + palette.length + (palette.length === 1 ? ' colour.' : ' distinct colours.') : '');
   }
   var paletteSoon = TT.debounce(renderPalette, 30);
   palList.addEventListener('click', function (e) {
     var b = e.target.closest('.icp-pal');
-    if (!b) return;
+    // While busy, the list can still show the colours of the picture before.
+    if (!b || palList.hasAttribute('aria-busy')) return;
     var c = palette[Number(b.dataset.i)].c, f = show(c, 'From the palette');
     addHistory(c);
     say(f.hex + ' picked from the palette.');
   });
   $('#icp-pal-copy').addEventListener('click', function (e) {
-    renderPalette();
+    // Pressed before the worker has answered: the palette is worked out here and now.
+    if (img && palShown !== paletteKey()) {
+      palFor = paletteKey();
+      showPalette(paletteHere(paletteSample(), Number(countSel.value)), Number(countSel.value), palFor);
+    }
     TT.copy(palette.map(function (x) { return x.hex; }).join(', '), e.currentTarget);
   });
   countSel.addEventListener('change', renderPalette);
@@ -677,6 +759,77 @@ faq:
     }
     if (!loupe.hidden) drawLoupe(aim.x, aim.y);
   });
+
+  // ---------- the worker ----------
+  // The heavy work on a picture runs in a worker, so a big photo does not freeze the page: reading
+  // its pixels on an OffscreenCanvas, with the smaller copy shown here, and the palette. Where
+  // there is no worker, or it fails, the page does the same work itself.
+  function workerMain(self, makePalette) {
+    var paletteOf = makePalette();
+    self.onmessage = async function (e) {
+      var m = e.data, out = { id: m.id, ok: true }, move = [];
+      try {
+        if (m.cmd === 'palette') {
+          var p = paletteOf(m.rgb, m.n);
+          out.total = p.total;
+          out.list = p.list;
+        } else {
+          var bm = m.bitmap, w = bm.width, h = bm.height, c = new OffscreenCanvas(w, h), g = c.getContext('2d', { willReadFrequently: true });
+          // A canvas the browser cannot hold can stay blank instead of failing.
+          g.fillStyle = '#010203';
+          g.fillRect(w - 1, h - 1, 1, 1);
+          if (g.getImageData(w - 1, h - 1, 1, 1).data[3] < 128) throw new Error('blank canvas');
+          g.clearRect(w - 1, h - 1, 1, 1);
+          g.drawImage(bm, 0, 0);
+          out.data = g.getImageData(0, 0, w, h).data;
+          c.width = c.height = 0;
+          move.push(out.data.buffer);
+          if (m.view) {
+            out.view = await createImageBitmap(bm, { resizeWidth: m.view[0], resizeHeight: m.view[1], resizeQuality: 'high' });
+            move.push(out.view);
+          }
+        }
+      } catch (x) {
+        out = { id: m.id, ok: false };
+        move = [];
+      }
+      if (m.bitmap) m.bitmap.close();
+      try { self.postMessage(out, move); } catch (x) { self.postMessage({ id: m.id, ok: false }); }
+    };
+  }
+  var worker = null, workerUrl = '', jobs = new Map(), jobSeq = 0, canWork = typeof Worker === 'function';
+  function workerFailed() {
+    canWork = false;
+    if (worker) worker.terminate();
+    if (workerUrl) URL.revokeObjectURL(workerUrl);
+    worker = null;
+    workerUrl = '';
+    jobs.forEach(function (done) { done({ ok: false }); });
+    jobs.clear();
+  }
+  // The worker's answer, or { ok: false } when it fails; rejected where there is no worker.
+  function work(msg, transfer) {
+    if (canWork && !worker) {
+      try {
+        workerUrl = URL.createObjectURL(new Blob(['(' + workerMain + ')(self, ' + paletteMaker + ');'], { type: 'text/javascript' }));
+        worker = new Worker(workerUrl);
+        worker.onmessage = function (e) {
+          // The script has loaded, so its address is no longer needed.
+          if (workerUrl) { URL.revokeObjectURL(workerUrl); workerUrl = ''; }
+          var done = jobs.get(e.data.id);
+          jobs.delete(e.data.id);
+          if (done) done(e.data);
+        };
+        worker.onerror = workerFailed;
+      } catch (e) { workerFailed(); }
+    }
+    if (!worker) return Promise.reject(new Error('No worker'));
+    return new Promise(function (resolve) {
+      msg.id = ++jobSeq;
+      jobs.set(msg.id, resolve);
+      try { worker.postMessage(msg, transfer || []); } catch (e) { jobs.delete(msg.id); resolve({ ok: false }); }
+    });
+  }
 
   // ---------- colour profiles ----------
   // The description of an embedded ICC profile (ICC.1, 'desc' tag: textDescriptionType or
@@ -750,7 +903,7 @@ faq:
     try {
       var turned = img.orientation >= 5;
       if (bm.width !== img.w || bm.height !== img.h || (img.orientation > 1 && !turned)) return null;
-      return readPixels(bm, img.w, img.h);
+      return (await readImage(bm, img.w, img.h, true)).data;
     } finally { bm.close(); }
   }
   modeSel.addEventListener('change', applyMode);
@@ -784,7 +937,10 @@ faq:
   }
 
   // ---------- loading ----------
+  // On the page. A canvas of the right size is read as it is, rather than drawn again first.
   function readPixels(src, w, h) {
+    var own = src.getContext && src.width === w && src.height === h ? src.getContext('2d') : null;
+    if (own) return own.getImageData(0, 0, w, h).data;
     var c = document.createElement('canvas');
     c.width = w; c.height = h;
     var g = c.getContext('2d', { willReadFrequently: true });
@@ -793,6 +949,26 @@ faq:
       g.drawImage(src, 0, 0, w, h);
       return g.getImageData(0, 0, w, h).data;
     } finally { c.width = c.height = 0; }
+  }
+  // The pixels of an upright picture and, unless noView, the copy shown on the page, at most
+  // VIEW_MAX pixels a side. Read in the worker for up to 16.7 megapixels, the most every browser
+  // holds in one canvas; larger pictures, or where the worker cannot, on the page.
+  async function readImage(src, w, h, noView) {
+    var k = Math.min(1, VIEW_MAX / Math.max(w, h));
+    var size = k < 1 && !noView ? [Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k))] : null;
+    if (canWork && typeof OffscreenCanvas === 'function' && w * h <= 16777216) {
+      var bm = null, r = null;
+      try {
+        bm = await createImageBitmap(src);
+        r = await work({ cmd: 'pixels', bitmap: bm, view: size }, [bm]);
+      } catch (e) {
+        if (bm) bm.close();
+      }
+      if (r && r.ok && r.data.length === w * h * 4) return { data: r.data, view: r.view || src };
+      if (r && r.view) r.view.close();
+    }
+    var data = readPixels(src, w, h);
+    return { data: data, view: size ? await createImageBitmap(src, { resizeWidth: size[0], resizeHeight: size[1], resizeQuality: 'high' }) : src };
   }
   var nextId = 1;
   function setImage(o) {
@@ -811,18 +987,19 @@ faq:
     $('#icp-mode-field').hidden = !o.profile || /sRGB/i.test(o.profile);
     setText($('#icp-profile'), profileText());
     palFor = '';
-    setText(palNote, 'Working out the palette…');
+    paletteWaiting();
     paletteSoon();
   }
   // The whole image, decoded by the shared decoder (EXIF orientation applied, HEIC and TIFF too).
   async function fullRead(file) {
     var res = await TTImage.decode(file, { maxPixels: DECODE_MAX });
     try {
-      var w = res.width, h = res.height, src = res.bitmap || res.canvas, data;
-      try { data = readPixels(src, w, h); } catch (e) { throw Object.assign(new Error('The image is too large for this browser to read its pixels.'), { code: 'TOO_BIG', browser: true }); }
-      var k = Math.min(1, VIEW_MAX / Math.max(w, h));
-      var view = k === 1 ? src : await createImageBitmap(src, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'high' });
-      return { w: w, h: h, data: data, view: view, res: res, fmt: res.format, orientation: res.orientation || 1, warnings: res.warnings || [] };
+      var w = res.width, h = res.height, src = res.bitmap || res.canvas, px;
+      try { px = await readImage(src, w, h); } catch (e) { throw Object.assign(new Error('The image is too large for this browser to read its pixels.'), { code: 'TOO_BIG', browser: true }); }
+      var o = { w: w, h: h, data: px.data, view: px.view, res: res, fmt: res.format, orientation: res.orientation || 1, warnings: res.warnings || [] };
+      // The decoder's copy is kept only while it is the one shown.
+      if (px.view !== src) { TTImage.release(res); o.res = null; }
+      return o;
     } catch (e) {
       TTImage.release(res);
       throw e;
@@ -840,15 +1017,16 @@ faq:
       var g = c.getContext('2d', { willReadFrequently: true });
       g.imageSmoothingQuality = 'high';
       g.drawImage(bm, 0, 0, w, h);
-      var data = g.getImageData(0, 0, w, h).data, kv = Math.min(1, VIEW_MAX / Math.max(w, h));
-      var view = kv === 1 ? c : await createImageBitmap(c, { resizeWidth: Math.max(1, Math.round(w * kv)), resizeHeight: Math.max(1, Math.round(h * kv)), resizeQuality: 'high' });
-      if (view !== c) c.width = c.height = 0;
-      return { w: w, h: h, data: data, view: view, res: null, fmt: await TTImage.sniff(file), orientation: 1, scaledFrom: k < 1 ? [bm.width, bm.height] : null };
+      var px = await readImage(c, w, h);
+      if (px.view !== c) c.width = c.height = 0;
+      return { w: w, h: h, data: px.data, view: px.view, res: null, fmt: await TTImage.sniff(file), orientation: 1, scaledFrom: k < 1 ? [bm.width, bm.height] : null };
     } finally { bm.close(); }
   }
-  async function load(file) {
+  // count: how many files were dropped or pasted together. Only the first is opened, and the page says so.
+  async function load(file, count) {
     if (!file) return;
     var run = ++loadRun, name = file.name || 'Pasted image', o = null, why = '', profile = '';
+    var others = count > 1 ? 'Only the first of the ' + count + ' files was ' : '';
     errBox.textContent = '';
     try {
       o = await fullRead(file);
@@ -858,12 +1036,13 @@ faq:
     }
     if (o) { try { profile = await profileOf(new Uint8Array(await file.slice(0, 1 << 20).arrayBuffer())); } catch (e) { profile = ''; } }
     if (run !== loadRun) { if (o && o.res) TTImage.release(o.res); return; }
-    if (!o) { errBox.textContent = '“' + name + '” could not be opened. ' + why; return; }
+    if (!o) { errBox.textContent = '“' + name + '” could not be opened. ' + why + (others ? ' ' + others + 'tried.' : ''); return; }
     setImage({ name: name, w: o.w, h: o.h, data: o.data, raw: null, view: o.view, res: o.res, file: file, orientation: o.orientation, profile: profile });
     var f = TTImage.formats[o.fmt], notes = (o.warnings || []).filter(function (w) { return WARN[w]; }).map(function (w) { return WARN[w] + ' '; }).join('');
+    if (others) notes += others + 'opened. ';
     setText($('#icp-name'), name);
     setText($('#icp-info'), o.scaledFrom
-      ? 'Read at ' + o.w + ' × ' + o.h + ' px, scaled down from ' + o.scaledFrom[0] + ' × ' + o.scaledFrom[1] + (o.byBrowser ? ' because the full image is too large for this browser' : ', as images over ' + DECODE_MAX / 1e6 + ' megapixels are read at a smaller size') + '; positions are in the smaller copy.'
+      ? 'Read at ' + o.w + ' × ' + o.h + ' px, scaled down from ' + o.scaledFrom[0] + ' × ' + o.scaledFrom[1] + (o.byBrowser ? ' because the full image is too large for this browser' : ', as images over ' + DECODE_MAX / 1e6 + ' megapixels are read at a smaller size') + '; positions are in the smaller copy.' + (others ? ' ' + others + 'opened.' : '')
       : o.w + ' × ' + o.h + ' px' + (f ? ', ' + f.label : '') + (profile ? ', ' + profile + ' profile' : '') + '. ' + notes + 'Drop or paste another image to replace it.');
     var c = colourAt(aim.x, aim.y, sampleSize());
     c.fromImage = true;
@@ -930,13 +1109,13 @@ faq:
     if (!hasFiles(e)) return;
     e.preventDefault();
     bar.classList.remove('is-over');
-    load(e.dataTransfer.files[0]);
+    load(e.dataTransfer.files[0], e.dataTransfer.files.length);
   });
   document.addEventListener('paste', function (e) {
-    var f = e.clipboardData && Array.prototype.filter.call(e.clipboardData.files || [], function (x) { return /^image\//.test(x.type); })[0];
-    if (!f) return;
+    var fs = e.clipboardData ? Array.prototype.filter.call(e.clipboardData.files || [], function (x) { return /^image\//.test(x.type); }) : [];
+    if (!fs.length) return;
     e.preventDefault();
-    load(f);
+    load(fs[0], fs.length);
   });
 
   var relayout = TT.debounce(function () { layout(); if (!loupe.hidden) hideLoupe(); }, 100);

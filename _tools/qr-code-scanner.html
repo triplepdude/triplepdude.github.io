@@ -2,7 +2,7 @@
 title: "QR Code Scanner Online: Camera or Image"
 description: Scan a QR code with your camera or from an image or screenshot. See where a link goes before you open it. Wi-Fi, contacts and more are read in your browser.
 category: Image & PDF
-keywords: [qr code scanner, scan qr code, qr code reader, qr scanner, scan qr code from image, qr code scanner online, scan qr code from screenshot, scan qr code on laptop]
+keywords: [qr code scanner, scan qr code, qr code reader, qr scanner, scan qr code from image, qr code scanner online, scan qr code from screenshot, scan qr code on laptop, scan qr code from photo, read qr code, qr code decoder, barcode scanner, barcode reader]
 howto: |
   ## How to scan a QR code online
 
@@ -17,10 +17,11 @@ howto: |
   3. Read the result. Nothing opens by itself: a link shows the website it
      leads to first, and only **Open** takes you there.
 
-  To read a code on this computer's own screen, take a screenshot of it and
-  paste it here. **Win+Shift+S** on Windows and **Ctrl+Shift+⌘+4** on a Mac
-  copy the area you select. To copy printed text from a photo or
-  screenshot rather than a code, use [image to text](/image-to-text/).
+  For a code on your own screen, take a screenshot and paste it here:
+  **Win+Shift+S** on Windows and **Ctrl+Shift+⌘+4** on a Mac copy the area
+  you select. On a phone, pick the screenshot with **Choose image**. To copy
+  printed text from a photo or screenshot rather than a code, use
+  [image to text](/image-to-text/).
 
   ## What the result shows
 
@@ -952,43 +953,59 @@ faq:
         : jsqrMany(window.jsQR, img.data, img.width, img.height, max, invert))
     }));
   }
+  // The worker's reads still running belong to a scan or a camera that has been replaced: they are
+  // dropped, so that the new picture or the camera does not wait for them.
+  let liveWorker = null;
+  function stopReading() { if (liveWorker) liveWorker.stop(); }
   function getEngine() {
     if (engineP) return engineP;
-    engineP = new Promise(resolve => {
+    let mine = null;
+    engineP = mine = new Promise(resolve => {
       let w;
       try {
         const src = [jsqrMany, paintOut, windowStarts, jsqrTiles, jsqrAll].map(f => f.toString()).join('\n') + '\n(' + workerMain.toString() + ')();';
         w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
       } catch (e) { resolve(mainThreadEngine()); return; }
       const waiting = new Map();
-      let nextId = 1, ready = false, dead = false;
-      w.onmessage = e => {
-        const m = e.data;
-        if (m.type === 'ready') {
-          if (m.failed) { w.terminate(); resolve(mainThreadEngine()); return; }
-          ready = true;
-          resolve({
-            scan: (img, max, invert, all) => new Promise(done => {
-              if (dead) { done([]); return; }
-              const id = nextId++;
-              waiting.set(id, done);
-              w.postMessage({ type: 'scan', id, buffer: img.data.buffer, width: img.width, height: img.height, max, invert, all: !!all }, [img.data.buffer]);
-            })
-          });
-        } else if (m.type === 'result' && waiting.has(m.id)) { waiting.get(m.id)(m.codes); waiting.delete(m.id); }
-      };
-      // A worker that dies is replaced by a new one on the next scan (or by the page, if it never started).
-      w.onerror = e => {
-        if (e.preventDefault) e.preventDefault();
+      let nextId = 1, ready = false, dead = false, api = null;
+      // A worker that dies, or is ended because a read ran too long or was dropped, is replaced by a
+      // new one on the next scan (or by the page, if it never started). Reads still waiting find nothing.
+      const end = () => {
+        if (dead) return;
         dead = true;
         w.terminate();
         waiting.forEach(done => done([]));
         waiting.clear();
-        if (ready) engineP = null; else resolve(mainThreadEngine());
+        if (liveWorker === api) liveWorker = null;
+        if (!ready) resolve(mainThreadEngine());
+        else if (engineP === mine) engineP = null;
+      };
+      w.onmessage = e => {
+        const m = e.data;
+        if (m.type === 'ready') {
+          if (m.failed) { dead = true; w.terminate(); resolve(mainThreadEngine()); return; }
+          ready = true;
+          liveWorker = api = {
+            // ms: at most this long, then the worker is ended (jsQR cannot be stopped part way).
+            scan: (img, max, invert, all, ms) => new Promise(done => {
+              if (dead) { done([]); return; }
+              const id = nextId++;
+              waiting.set(id, done);
+              w.postMessage({ type: 'scan', id, buffer: img.data.buffer, width: img.width, height: img.height, max, invert, all: !!all }, [img.data.buffer]);
+              if (ms > 0) setTimeout(() => { if (waiting.has(id)) end(); }, ms);
+            }),
+            stop: () => { if (waiting.size) end(); }
+          };
+          resolve(api);
+        } else if (m.type === 'result' && waiting.has(m.id)) { waiting.get(m.id)(m.codes); waiting.delete(m.id); }
+      };
+      w.onerror = e => {
+        if (e.preventDefault) e.preventDefault();
+        end();
       };
       w.postMessage({ type: 'init', url: JSQR_URL });
     });
-    engineP = engineP.catch(e => { engineP = null; throw e; });
+    engineP = mine = mine.catch(e => { if (engineP === mine) engineP = null; throw e; });
     return engineP;
   }
   function fromJsqr(list, k, dx, dy) {
@@ -1028,16 +1045,24 @@ faq:
     if (codes.length < 2 || codes.some(c => !c.corners)) return codes;
     return codes.map(c => [c, box(c)]).sort((a, b) => (Math.abs(a[1].cy - b[1].cy) < (a[1].h + b[1].h) / 4 ? a[1].cx - b[1].cx : a[1].cy - b[1].cy)).map(x => x[0]);
   }
-  async function scanPicture(src) {
-    return readingOrder(await findCodes(src));
+  // how: { alive() false once a newer scan has started, say(text) for the status line }
+  async function scanPicture(src, how) {
+    return readingOrder(await findCodes(src, how || {}));
   }
-  async function findCodes(src) {
+  // After the first size, the reads of one picture stop after this long. A photo of gravel,
+  // foliage or sensor noise holds no code, but jsQR then takes a minute or more on it.
+  const READ_BUDGET = 15000;
+  async function findCodes(src, how) {
     const L = Math.max(src.width, src.height);
+    const alive = how.alive || (() => true), note = how.say || (() => {});
+    // The canvases are emptied once read: a 4096-pixel copy holds 57 MB until the browser frees it.
+    const done = p => { p.canvas.width = 0; p.canvas.height = 0; };
     const det = await getDetector();
     if (det) {
       try {
         const p = prepared(src, Math.min(L, 2048), true);
-        const found = fromDetector(await det.detector.detect(p.canvas), p.k, p.m, p.m);
+        let found;
+        try { found = fromDetector(await det.detector.detect(p.canvas), p.k, p.m, p.m); } finally { done(p); }
         if (found.length) return found;
       } catch (e) { /* fall back to jsQR */ }
     }
@@ -1050,21 +1075,29 @@ faq:
     if (L > 2400) add(Math.min(L, 4096), true);
     if (L < 400) add(L * Math.max(2, Math.floor(800 / L)), false);
     const pixels = p => p.canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, p.canvas.width, p.canvas.height);
-    for (const [s, smooth] of sizes) {
+    const t0 = performance.now(), left = () => READ_BUDGET - (performance.now() - t0);
+    for (let i = 0; i < sizes.length; i++) {
+      const [s, smooth] = sizes[i];
+      if (i && (left() <= 0 || !alive())) return [];
+      // The first size found nothing. The rest of a small picture is read in a moment.
+      if (i === 1 && L > 600) note('No code found yet; looking more closely (this can take several seconds).');
       const p = prepared(src, s, smooth);
-      let found = await engine.scan(pixels(p), MAX_CODES, 'attemptBoth');
-      if (found.length) {
-        // A code was found at this size: windows of the picture are read too, for codes that the
-        // others hid (up to 2400 pixels, to keep it quick).
-        if (found.length < MAX_CODES && s <= 2400) {
-          const more = await engine.scan(pixels(p), MAX_CODES, 'attemptBoth', true);
-          if (more.length > found.length) found = more;
+      try {
+        let found = await engine.scan(pixels(p), MAX_CODES, 'attemptBoth', false, i ? left() : 0);
+        if (found.length) {
+          // A code was found at this size: windows of the picture are read too, for codes that the
+          // others hid (up to 2400 pixels, to keep it quick).
+          if (found.length < MAX_CODES && s <= 2400 && left() > 0 && alive()) {
+            const more = await engine.scan(pixels(p), MAX_CODES, 'attemptBoth', true, left());
+            if (more.length > found.length) found = more;
+          }
+          return fromJsqr(found, p.k, p.m, p.m);
         }
-        return fromJsqr(found, p.k, p.m, p.m);
-      }
+      } finally { done(p); }
     }
+    if (left() <= 0 || !alive()) return [];
     const p = prepared(src, Math.min(L, 1600), true);
-    return fromJsqr(await engine.scan(pixels(p), MAX_CODES, 'attemptBoth', true), p.k, p.m, p.m);
+    try { return fromJsqr(await engine.scan(pixels(p), MAX_CODES, 'attemptBoth', true, left()), p.k, p.m, p.m); } finally { done(p); }
   }
 
   function accentColour() { return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#1f6f4a'; }
@@ -1118,10 +1151,14 @@ faq:
   }
 
   let scanGen = 0;
+  // A decoded picture holds its full-size pixels twice, in the decoder's worker and on the page
+  // (46 MB for a 12-megapixel photo), until it is released.
+  function freePicture(res) { if (res && window.TTImage) window.TTImage.release(res); }
   async function scanFiles(files, how) {
     const list = Array.from(files || []).filter(f => f && f.size !== undefined);
     if (!list.length) return;
     const gen = ++scanGen;
+    stopReading();
     if (cam.stream || cam.starting) stopCamera('');
     showError('');
     const errors = [], none = [], entries = [];
@@ -1129,29 +1166,38 @@ faq:
     if (list.length > MAX_FILES) errors.push('Only the first ' + MAX_FILES + ' of ' + list.length + ' files were scanned.');
     const todo = list.slice(0, MAX_FILES);
     try { await loadDecoder(); } catch (e) { showError(e.message); say(''); return; }
-    for (let i = 0; i < todo.length; i++) {
-      const f = todo[i];
-      const name = how === 'paste' ? 'Pasted image' : how === 'sample' ? 'Sample code' : f.name || 'Image';
-      say('Reading ' + (todo.length > 1 ? (i + 1) + ' of ' + todo.length + ': ' : '') + name + '\u2026');
-      let res;
-      try {
-        res = await window.TTImage.decode(f, { maxPixels: 60e6 });
-      } catch (e) {
-        errors.push(name + ': ' + (e && e.code === 'UNSUPPORTED' ? 'this is not an image the page can read. Use a PNG, JPEG, WebP, GIF, HEIC, AVIF, BMP, TIFF or SVG file.' : (e && e.message) || 'it could not be read.'));
-        continue;
+    // Only the last picture is shown, so every other one is released as soon as it is scanned, and
+    // that one once it is drawn; a scan that a newer one replaces releases what it holds.
+    try {
+      for (let i = 0; i < todo.length; i++) {
+        const f = todo[i];
+        const name = how === 'paste' ? 'Pasted image' : how === 'sample' ? 'Sample code' : f.name || 'Image';
+        const reading = 'Reading ' + (todo.length > 1 ? (i + 1) + ' of ' + todo.length + ': ' : '') + name + '\u2026';
+        say(reading);
+        let res;
+        try {
+          res = await window.TTImage.decode(f, { maxPixels: 60e6 });
+        } catch (e) {
+          errors.push(name + ': ' + (e && e.code === 'UNSUPPORTED' ? 'this is not an image the page can read. Use a PNG, JPEG, WebP, GIF, HEIC, AVIF, BMP, TIFF or SVG file.' : (e && e.message) || 'it could not be read.'));
+          continue;
+        }
+        if (gen !== scanGen) { freePicture(res); return; }
+        let codes = [];
+        const alive = () => gen === scanGen;
+        try { codes = await scanPicture(res.canvas, { alive, say: t => { if (alive()) say(reading + ' ' + t); } }); } catch (e) { errors.push(name + ': ' + e.message); }
+        if (gen !== scanGen) { freePicture(res); return; }
+        const found = codes.length;
+        if (found >= MAX_CODES) capped = true;
+        if (lastShown) freePicture(lastShown.res);
+        lastShown = { res, codes, label: name + ': ' + (found ? plural(found, 'code') + ' found and outlined' : 'no code found') };
+        if (!found) none.push(name);
+        codes.forEach((c, j) => entries.push(makeEntry(c, name + (found > 1 ? ', code ' + (j + 1) : ''))));
       }
       if (gen !== scanGen) return;
-      let codes = [];
-      try { codes = await scanPicture(res.canvas); } catch (e) { errors.push(name + ': ' + e.message); }
-      if (gen !== scanGen) return;
-      const found = codes.length;
-      if (found >= MAX_CODES) capped = true;
-      lastShown = { canvas: res.canvas, codes, label: name + ': ' + (found ? plural(found, 'code') + ' found and outlined' : 'no code found') };
-      if (!found) none.push(name);
-      codes.forEach((c, j) => entries.push(makeEntry(c, name + (found > 1 ? ', code ' + (j + 1) : ''))));
+      if (lastShown) showView(lastShown.res.canvas, lastShown.codes, lastShown.label, false);
+    } finally {
+      if (lastShown) freePicture(lastShown.res);
     }
-    if (gen !== scanGen) return;
-    if (lastShown) showView(lastShown.canvas, lastShown.codes, lastShown.label, false);
     if (none.length) {
       const engine = (await getDetector()) ? 'QR code or barcode' : 'QR code';
       errors.unshift('No ' + engine + ' found in ' + (none.length > 1 ? none.length + ' images: ' + none.map(n => clip(n, 40)).join(', ') : clip(none[0], 60)) +
@@ -1248,6 +1294,7 @@ faq:
     if (bad) { showError(bad); return; }
     if (cam.starting) return;
     ++scanGen;
+    stopReading();
     showError('');
     releaseCamera();
     const gen = cam.gen;
@@ -1299,6 +1346,8 @@ faq:
     await Promise.race([ready, new Promise(r => setTimeout(r, 4000))]);
     if (gen !== cam.gen) return;
     if (video.videoWidth) setStageShape(video.videoWidth, video.videoHeight);
+    // On a phone held sideways the preview starts partly below the screen: the whole frame is shown.
+    stage.scrollIntoView({ block: 'nearest' });
     say('Camera on. Hold a code inside the frame.');
     cam.scanning = true;
     cam.n = 0;
@@ -1374,6 +1423,7 @@ faq:
       cam.focusPending = !!(document.activeElement && (document.activeElement === camBtn || camOpts.contains(document.activeElement)));
       stopCamera(undefined);
       showView(shot, codes, 'Camera picture: ' + plural(codes.length, 'code') + ' found and outlined', mirrored);
+      shot.width = shot.height = 0;
       showResults(entries);
       say(summary(entries) + '. The camera is off; press Scan another code to read more.');
       return;

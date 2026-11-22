@@ -221,6 +221,7 @@ faq:
   var MIN_WAIT = 2000, MAX_WAIT = 5000; // random wait before the signal, in ms
   var GUESS_MS = 100;                   // faster than this after the signal is a guess
   var BEEP_LEAD = 150;                  // the beep is scheduled this long before it plays
+  var IDLE_MS = 2000;                   // the sound output is switched off this long after the last beep
   // Human Benchmark's reaction time results chart: the number of scores in
   // each 25 ms band from 0 ms up to 1000 ms, as drawn on its test page
   // (humanbenchmark.com, read 21 November 2026).
@@ -244,6 +245,7 @@ faq:
   var goT = 0;          // when the signal appeared or sounded, on the performance.now() clock
   var waitTimer = 0, goTimer = 0, rafId = 0;
   var audio = null, beep = null;
+  var beepEnd = 0, restTimer = 0, asleep = false;
 
   function now() { return performance.now(); }
   // The time the browser gave the event, which is when the button or key
@@ -288,8 +290,21 @@ faq:
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     if (!audio) { try { audio = new AC(); } catch (e) { return null; } }
-    if (audio.state === 'suspended' && audio.resume) audio.resume().catch(function () {});
+    if ((asleep || audio.state !== 'running') && audio.resume) { asleep = false; audio.resume().catch(function () {}); }
+    rest();
     return audio;
+  }
+  // A running audio context renders silence for as long as the page is
+  // open, so it is suspended once no beep is playing or due; a round with
+  // the beep, or Play the beep, starts it again from a click, tap or key.
+  function rest() {
+    clearTimeout(restTimer);
+    restTimer = setTimeout(function () {
+      if (audio.state !== 'running') return;
+      if ((setCue === 'sound' && (state === 'wait' || state === 'go')) || audio.currentTime < beepEnd) { rest(); return; }
+      asleep = true;
+      audio.suspend().catch(function () {});
+    }, Math.max(0, beepEnd - audio.currentTime) * 1000 + IDLE_MS);
   }
   function playBeep(when) {
     var o = audio.createOscillator(), g = audio.createGain();
@@ -303,6 +318,8 @@ faq:
     g.connect(audio.destination);
     o.start(when);
     o.stop(when + 0.16);
+    beepEnd = Math.max(beepEnd, when + 0.16);
+    rest();
     return { osc: o, gain: g };
   }
   function stopBeep() {
@@ -493,10 +510,19 @@ faq:
 
   // ---- Input ----
   var lastPress = -1e9; // time stamp of the last pointer or key press on the box
+  // A touch or pen press is taken when it lifts, timed from when it went
+  // down, because until then the browser may turn it into a scroll or a
+  // zoom (pointercancel). Pointer id -> time stamp.
+  var touches = new Map();
   pad.addEventListener('pointerdown', function (e) {
     lastPress = stamp(e);
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    respond(lastPress);
+    if (e.pointerType !== 'mouse') touches.set(e.pointerId, lastPress);
+    else if (e.button === 0) respond(lastPress);
+  });
+  // A touch that scrolled or zoomed the page is no press, and the round
+  // cannot be timed fairly while the page moves.
+  pad.addEventListener('pointercancel', function (e) {
+    if (touches.delete(e.pointerId)) pause('The page was scrolled or zoomed.');
   });
   pad.addEventListener('keydown', function (e) {
     var space = e.key === ' ' || e.code === 'Space' || e.key === 'Spacebar';
@@ -519,8 +545,10 @@ faq:
     var t = stamp(e);
     if (e.detail === 0 && t - lastPress > 500) respond(t);
   });
-  pad.addEventListener('pointerup', function () {
+  pad.addEventListener('pointerup', function (e) {
     if (cue() === 'sound' || setCue === 'sound') ensureAudio();
+    var t = touches.get(e.pointerId);
+    if (t !== undefined) { touches.delete(e.pointerId); respond(t); }
     // Safari does not focus a button that is clicked; Space needs the focus.
     if (document.activeElement !== pad) pad.focus({ preventScroll: true });
   });

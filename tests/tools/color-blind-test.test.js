@@ -298,6 +298,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await run({ observer: sees('S') });
   assert.equal((await verdict())[0], 'Signs of a blue-yellow colour vision deficiency');
   assert.match((await verdict())[1], /^Likely type: tritan \(the blue-sensitive S cones\)\. Severity hint: strong\. Inherited blue-yellow deficiency is rare/);
+  // The guide's 'Reading your result' explains every type a result can name, this one included.
+  const reading = await page.evaluate(() => {
+    let n = [...document.querySelectorAll('.prose h2')].find(h => h.textContent === 'Reading your result').nextElementSibling, t = '';
+    for (; n && n.tagName !== 'H2'; n = n.nextElementSibling) t += ' ' + n.textContent;
+    return t.replace(/\s+/g, ' ');
+  });
+  for (const type of ['protan', 'deutan', 'tritan']) assert.match(reading, new RegExp(`\\b${type} \\(`), `the guide explains a ${type} result`);
+  assert.match(reading, /Two or more missed S-cone plates point to a tritan \(blue-yellow\) deficiency, which a warm-tinted screen can also cause\./);
   await again();
 
   // A milder blue-yellow loss: the two faintest S-cone plates missed.
@@ -472,6 +480,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
       await small.close();
     }
   }
+
+  // The questions people ask about colour blindness, the cure among them, are answered.
+  await page.goto(url);
+  const faq = await page.$$eval('.faq details', ds => ds.map(d => [d.querySelector('summary').textContent, d.querySelector('.faq-answer').textContent.trim()]));
+  const cure = faq.find(([q]) => q === 'Can colour blindness be cured?');
+  assert.ok(cure, `FAQ: ${faq.map(f => f[0]).join(' | ')}`);
+  assert.match(cure[1], /^Inherited colour blindness has no cure.* EnChroma .* do not restore normal colour vision.* can improve once the cause is treated, which is one more reason to see an optometrist about any change\.$/);
 
   // Leave a finished result on screen for the runner's layout checks.
   await page.goto(url);

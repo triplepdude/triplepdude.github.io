@@ -151,7 +151,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal((await list()).length, 10);
 
   // ---- Errors. Each box points at the message. ----
-  for (const id of ['rn-min', 'rn-max', 'rn-count', 'rn-unique']) assert.equal(await attr('#' + id, 'aria-describedby'), 'rn-msg');
+  // (The two ends of the range also point at the hint on negative numbers.)
+  for (const [id, by] of [['rn-min', 'rn-sign-hint rn-msg'], ['rn-max', 'rn-sign-hint rn-msg'], ['rn-count', 'rn-msg'], ['rn-unique', 'rn-msg']]) assert.equal(await attr('#' + id, 'aria-describedby'), by);
   assert.equal(await page.$eval('#rn-msg', e => e.classList.contains('msg') && e.classList.contains('error')), true);
   const refuses = async (min, max, count, field, message, places = 0) => {
     await setUp(min, max, count, false, places);
@@ -610,6 +611,21 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await p.waitForFunction(() => { const r = document.querySelector('#rn-out').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
   await p.tap('#rn-unique');
   assert.equal(await p.isChecked('#rn-unique'), false);
+  // With the keyboard open (500 px left to see), the box being typed in stays where it is
+  // while the list above it grows: typing 500 used to push How many 280 px down, under the keyboard.
+  await p.fill('#rn-count', '1');
+  await p.tap('#rn-generate');
+  await p.tap('#rn-count');
+  await p.setViewportSize({ width: 390, height: 500 });
+  await p.evaluate(() => document.activeElement.scrollIntoView({ block: 'nearest' }));
+  const field = () => p.$eval('#rn-count', e => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; });
+  const still = await field();
+  await p.keyboard.press('Control+A');
+  await p.keyboard.type('500', { delay: 50 });
+  await p.waitForFunction(() => document.querySelector('#rn-out').textContent.split(', ').length === 500);
+  const after = await field();
+  assert.ok(Math.abs(after.top - still.top) <= 1 && after.bottom <= 500, `How many moved from ${still.top}px to ${after.top}px`);
+  await p.setViewportSize(devices['iPhone 13'].viewport);
   // Controls are at least 44 px tall and text boxes at least 16 px, so iOS does not zoom in.
   const sizes = await p.$$eval('.rn input[type="text"], .rn select, .rn button, .rn .check', els => els.filter(e => e.getClientRects().length).map(e => ({ id: e.id || e.textContent.trim(), h: e.getBoundingClientRect().height, font: parseFloat(getComputedStyle(e).fontSize), tag: e.tagName })));
   assert.equal(sizes.length, 15);
@@ -654,4 +670,41 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(await p.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1, 'no sideways scroll with an error');
   assert.deepEqual(errors, []);
   await phone.close();
+
+  // ---- Negative numbers on an iPhone or iPad. ----
+  // Their number keypad has no minus key, so there the two ends of the range, which may be
+  // negative, open the ordinary keyboard, whose number keys include it; How many, never
+  // negative, keeps the keypad. Elsewhere every box keeps its number keypad. The hint under
+  // the boxes says how to write a negative number.
+  assert.deepEqual(await page.$$eval('#rn-min, #rn-max, #rn-count', l => l.map(e => e.inputMode)), ['decimal', 'decimal', 'numeric']);
+  assert.equal(await text('#rn-sign-hint'), 'For a negative number, type a minus sign: -50.');
+  assert.equal(await page.getAttribute('#rn-min', 'aria-describedby'), 'rn-sign-hint rn-msg');
+  for (const [platform, touches] of [['iPhone', 5], ['iPad', 5], ['MacIntel', 5]]) {
+    const ios = await page.context().browser().newContext({ ...devices['iPhone 13'] });
+    await ios.addInitScript(([pf, tp]) => {
+      Object.defineProperty(Navigator.prototype, 'platform', { get: () => pf });
+      Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => tp });
+    }, [platform, touches]);
+    const q = await ios.newPage();
+    await q.goto(url, { waitUntil: 'load' });
+    assert.deepEqual(await q.$$eval('#rn-min, #rn-max, #rn-count', l => l.map(e => e.inputMode)), ['text', 'text', 'numeric'], platform);
+    if (platform === 'iPhone') {
+      await q.tap('#rn-min');
+      await q.keyboard.press('Control+A');
+      await q.keyboard.type('-50');
+      await q.tap('#rn-max');
+      await q.keyboard.press('Control+A');
+      await q.keyboard.type('50');
+      await q.tap('#rn-generate');
+      await q.waitForFunction(() => /from -50 to 50\./.test(document.querySelector('#rn-info').textContent));
+    }
+    await ios.close();
+  }
+  // A Mac with a mouse keeps the keypad setting (it has a minus key anyway).
+  const mac = await page.context().browser().newContext();
+  await mac.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' }); });
+  const m = await mac.newPage();
+  await m.goto(url, { waitUntil: 'load' });
+  assert.equal(await m.$eval('#rn-min', e => e.inputMode), 'decimal');
+  await mac.close();
 };

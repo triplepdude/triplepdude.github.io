@@ -4,6 +4,7 @@
 //   photo.png  scikit-image's "astronaut" sample (NASA, public domain) at 200x200
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 // JPEG reader: size and chroma sampling from the frame header, EXIF from APP1.
 function jpegInfo(b) {
@@ -53,6 +54,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const links = await page.$$eval('.prose a', as => as.map(a => a.getAttribute('href')));
   for (const h of ['/image-converter/', '/jpg-to-png/', '/compress-image/']) assert.ok(links.includes(h), `guide links to ${h}`);
   for (const h of links) assert.ok(/^\/[a-z0-9-]+\/$/.test(h) && fs.existsSync(path.join(__dirname, '..', '..', '_tools', h.slice(1, -1) + '.html')), `guide link ${h} is not a tool page`);
+  // The guide's advice names the real controls: the Size menu with its longest-side choice, and
+  // the ZIP button that the batch question in the FAQ points to.
+  const guide = (await page.textContent('.prose')).replace(/\s+/g, ' ');
+  assert.match(guide, /If the picture has more pixels than it needs, also set Size to a longest side such as 2000 px: a 12-megapixel phone photo then keeps a quarter of its pixels, and the file shrinks with them\./);
+  assert.deepEqual([await page.textContent('label[for="imc-resize"]'), await page.textContent('#imc-resize option[value="max"]'), await page.textContent('#imc-zip')], ['Size', 'Longest side (px)', 'Download all (ZIP)']);
+  assert.deepEqual(await page.$$eval('.faq summary', s => s.map(e => e.textContent.trim())), [
+    'How much smaller is a JPG than a PNG?', 'Why does my transparent PNG get a white background as a JPG?', 'Can I convert many PNG files at once?', 'Will my picture look worse as a JPG?']);
+  assert.match((await page.textContent('.faq')).replace(/\s+/g, ' '), /and Download all \(ZIP\) saves the JPGs in one file\./);
 
   const rows = page.locator('.imc-item');
   const rowText = async i => (await rows.nth(i).innerText()).replace(/\s+/g, ' ');
@@ -122,7 +131,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
 
   // ---------- The page's note belongs to JPG: not shown for PNG, back with JPG ----------
   await rerun(() => page.selectOption('#imc-format', 'png'));
-  assert.equal(await page.textContent('#imc-note'), 'PNG is lossless: every pixel is kept exactly, and photos make large files.');
+  assert.equal(await page.textContent('#imc-note'), 'PNG is lossless: the decoded pixels are saved without further loss, and photos make large files.');
   assert.equal(await page.isVisible('#imc-bg-field'), false);
   assert.match(await rowText(0), /^alpha\.png PNG 64×48/);
   assert.doesNotMatch(await rowText(0), /filled with/);
@@ -221,4 +230,29 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.ok(seen.texts.length, 'no list changes were recorded');
   assert.deepEqual(seen.texts.filter(t => /#336699/.test(t)), [], 'a file finished on the colour that had just been changed');
   assert.match(await rowText(0), /Transparent areas were filled with black\./);
+
+  // ---------- A 12-megapixel picture with Size set to a longest side of 2000 px ----------
+  // 4032x3024, the size of most phone photos, made here as one flat colour so the PNG is small.
+  // As the guide says, 2000 x 1500 keeps a quarter of the pixels (24.6%).
+  const big = (() => {
+    const w = 4032, h = 3024, line = Buffer.alloc(1 + w * 3);
+    line.set([1, 60, 120, 180]); // Sub filter: the first pixel's colour repeats across the line
+    const chunk = (type, data) => {
+      const len = Buffer.alloc(4), crc = Buffer.alloc(4), body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+      len.writeUInt32BE(data.length);
+      crc.writeUInt32BE(zlib.crc32(body) >>> 0);
+      return Buffer.concat([len, body, crc]);
+    };
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+    const idat = zlib.deflateSync(Buffer.concat(Array.from({ length: h }, () => line)));
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))]);
+  })();
+  await page.click('#imc-clear');
+  await page.selectOption('#imc-resize', 'max');
+  await page.fill('#imc-resize-val', '2000');
+  await page.setInputFiles('#imc-file', [{ name: 'phone.png', mimeType: 'image/png', buffer: big }]);
+  await page.waitForFunction(() => /→ JPG 2000×1500,/.test(document.querySelector('.imc-item').textContent) && document.querySelector('#imc-summary').textContent === '1 of 1 converted.', null, { timeout: 30000 });
+  assert.match(await rowText(0), /^phone\.jpg PNG 4032×3024, [\d.]+ KB → JPG 2000×1500, /);
+  assert.ok((2000 * 1500) / (4032 * 3024) <= 0.25);
 };

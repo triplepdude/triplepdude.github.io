@@ -509,8 +509,10 @@ faq:
 
   // ---------- Audio ----------
   var RATE = 22050, LEAD = 0.1, MAX_SECONDS = 20 * 60;
+  var IDLE_MS = 2000; // the sound output is switched off this long after playback ends
   function ramp(unit) { return Math.min(0.005, unit / 4); }
   var ctx = null, master = null, osc = null, env = null, playing = false, startAt = 0, current = null, raf = 0, token = 0;
+  var idleTimer = 0, asleep = false;
   var light = $('#mc-light'), now = $('#mc-now'), playBtn = $('#mc-play');
   var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (reduce) { $('#mc-flash').checked = false; $('#mc-motion').hidden = false; }
@@ -525,6 +527,18 @@ faq:
     now.textContent = '';
     playBtn.textContent = 'Play';
     updateTiming();
+    rest();
+  }
+  // A running audio context renders silence for as long as the page is
+  // open, so it is suspended a moment after playback ends; Play resumes it.
+  function rest() {
+    clearTimeout(idleTimer);
+    if (!ctx) return;
+    idleTimer = setTimeout(function () {
+      if (playing || ctx.state !== 'running') return;
+      asleep = true;
+      ctx.suspend().catch(function () {});
+    }, IDLE_MS);
   }
   function play(lines, label) {
     var st = settings();
@@ -540,8 +554,10 @@ faq:
         master.connect(ctx.destination);
       }
     } catch (e) { setMsg.textContent = 'This browser cannot play sound.'; return; }
-    if (ctx.state === 'suspended') {
+    clearTimeout(idleTimer);
+    if (asleep || ctx.state !== 'running') {
       // Schedule only once the audio clock runs, or the first tones are lost.
+      asleep = false;
       var mine = token;
       ctx.resume().then(function () { if (mine === token) start(tl, st, label); }, function () { setMsg.textContent = 'This browser cannot play sound.'; });
       return;

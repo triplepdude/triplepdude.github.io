@@ -2,7 +2,7 @@
 title: "CPS Test: Click Speed Test, 1 to 100 Seconds"
 description: Test your clicks per second over 1, 5, 10, 15, 30, 60 or 100 seconds with left click, right click, space bar or taps. Runs in your browser.
 category: Device Tests
-keywords: [cps test, click speed test, clicks per second test, cps test 5 seconds, cps test 10 seconds, right click cps test, spacebar cps test, jitter click test, butterfly click test]
+keywords: [cps test, click speed test, clicks per second test, cps test 5 seconds, cps test 10 seconds, mouse click test, double click test, kohi click test, right click cps test, spacebar cps test, jitter click test, butterfly click test]
 howto: |
   ## How to use the CPS test
 
@@ -61,7 +61,8 @@ howto: |
   needs 0.625 seconds to recharge fully, so spam clicking lands weak hits.
   Bedrock Edition and servers that keep 1.8 combat have no cooldown, so a
   higher CPS gives you more chances to hit the moment the target's
-  half-second damage immunity ends.
+  half-second damage immunity ends. Minecraft players also call a click
+  speed test a Kohi click test, after a PvP server whose website had one.
 
   To test how fast you react rather than how fast you click, try the
   [reaction time test](/reaction-time-test/).
@@ -105,7 +106,9 @@ faq:
 .cps-pad:focus { outline: none; }
 .cps-pad:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .cps-pad.is-running { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
-.cps-pad.is-running:active { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+/* Pressed: a thicker edge only. Shading the whole box on each press made it
+   flash several times a second during fast clicking (WCAG 2.3.1). */
+.cps-pad.is-running:active { box-shadow: inset 0 0 0 3px var(--accent); }
 .cps-pad.is-over { border-style: solid; border-color: var(--border); }
 .cps-pad-main { font-size: clamp(1.5rem, 6vw, 2.4rem); font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .cps-pad.is-running .cps-pad-main { font-size: clamp(2.6rem, 12vw, 4.5rem); }
@@ -216,6 +219,7 @@ faq:
   var HASH_MAX = 16;
   var CLOSE_MS = 60;    // presses stamped before the end may still be on their way
   var COOL_MS = 1000;   // pause after the end so the last frantic clicks do not start a new test
+  var HOLD_MS = 500;    // the longest the result waits for a finger still on the box at the end
   var RANKS = [[1400, 'Extreme'], [1100, 'Very fast'], [800, 'Fast'], [600, 'Quick'], [400, 'Steady'], [0, 'Warming up']];
 
   var pad = TT.$('#cps-pad'), padMain = TT.$('#cps-pad-main'), padSub = TT.$('#cps-pad-sub');
@@ -227,6 +231,10 @@ faq:
   var tests = [];       // finished tests, oldest first
   var best = {};        // 'mode-length' -> best score in hundredths of a CPS
   var endTimer = 0, closeTimer = 0, coolTimer = 0, rafId = 0;
+  // Counted touches (and pen presses) still on the box: the browser may yet
+  // turn one into a scroll or a zoom, and a touch that scrolled the page is
+  // no click. Pointer id -> { run, t }.
+  var touches = new Map();
 
   function now() { return performance.now(); }
   // The time the browser gave the event, which is when the button went down
@@ -297,10 +305,13 @@ faq:
   }
 
   // ---- A test ----
+  var shown = [padMain, padSub, timeEl, countEl, rateEl];
   function start(t) {
+    // How things stood, in case this first press was a touch that scrolls.
+    var before = { phase: phase, run: run, texts: shown.map(function (el) { return el.textContent; }) };
     clearTimers();
     var mode = getMode();
-    run = { n: tests.length + 1, len: getLen(), mode: mode, start: t, times: [t] };
+    run = { n: tests.length + 1, len: getLen(), mode: mode, start: t, times: [t], before: before };
     phase = 'running';
     pad.classList.remove('is-over');
     pad.classList.add('is-running');
@@ -341,6 +352,9 @@ faq:
   }
   function finish() {
     if (phase !== 'closing') return;
+    if (touches.size && now() - endAt() < HOLD_MS) { closeTimer = setTimeout(finish, 20); return; }
+    touches.clear();
+    run.before = null;
     var len = run.len, times = run.times, n = times.length;
     run.clicks = n;
     run.cents = cents(n, len);
@@ -426,26 +440,62 @@ faq:
   function stop(message) {
     var was = phase === 'running' || phase === 'closing';
     clearTimers();
+    touches.clear();
+    if (run) run.before = null;
     phase = 'idle';
     idleView(false);
     if (was && message) say(message);
   }
 
   // ---- Input ----
+  // Returns the time the press was counted at, or null if it did not count.
   function press(t) {
-    if (phase === 'cooldown') return;
+    if (phase === 'cooldown') return null;
     if (phase === 'closing') {
       // Only a press that happened before the end still counts.
-      if (t < endAt()) { run.times.push(t); countEl.textContent = run.times.length.toLocaleString('en-GB'); }
+      if (t >= endAt()) return null;
+      run.times.push(t);
+      countEl.textContent = run.times.length.toLocaleString('en-GB');
+      return t;
+    }
+    if (phase === 'running') {
+      if (t >= endAt()) { close(); return null; }
+      t = Math.max(t, run.start);
+      run.times.push(t);
+      showCount();
+      return t;
+    }
+    start(t);
+    return t;
+  }
+  // A counted touch became a scroll or a zoom: take it off again. If it was
+  // the only click, the test never started; if it was the first, the clock
+  // runs from the next one.
+  function untouch(e) {
+    var p = touches.get(e.pointerId);
+    if (!p) return;
+    touches.delete(e.pointerId);
+    if (p.run !== run || (phase !== 'running' && phase !== 'closing')) return;
+    var i = run.times.lastIndexOf(p.t);
+    if (i < 0) return;
+    run.times.splice(i, 1);
+    if (!run.times.length) {
+      var b = run.before;
+      clearTimers();
+      touches.clear();
+      phase = b.phase;
+      run = b.run;
+      pad.classList.remove('is-running', 'is-over');
+      shown.forEach(function (el, k) { el.textContent = b.texts[k]; });
+      say('');
       return;
     }
     if (phase === 'running') {
-      if (t >= endAt()) { close(); return; }
-      run.times.push(Math.max(t, run.start));
+      run.start = run.times.reduce(function (a, c) { return c < a ? c : a; });
       showCount();
-      return;
+    } else {
+      countEl.textContent = run.times.length.toLocaleString('en-GB');
     }
-    start(t);
   }
   function wanted(button, pointerType) {
     var mode = getMode();
@@ -463,13 +513,17 @@ faq:
       if (waiting) padSub.textContent = 'Taps are not counted in Right click mode. Choose Left click or tap, or use a mouse.';
       return;
     }
-    if (wanted(e.button, e.pointerType)) press(stamp(e));
+    if (!wanted(e.button, e.pointerType)) return;
+    var t = press(stamp(e));
+    if (t !== null && e.pointerType !== 'mouse') touches.set(e.pointerId, { run: run, t: t });
   });
   // Safari does not focus a button that is clicked, and Space bar mode needs
   // the focus on the box.
-  pad.addEventListener('pointerup', function () {
+  pad.addEventListener('pointerup', function (e) {
+    touches.delete(e.pointerId);
     if (document.activeElement !== pad) pad.focus({ preventScroll: true });
   });
+  pad.addEventListener('pointercancel', untouch);
   // A second button pressed while another is held sends pointermove, not
   // pointerdown (Pointer Events "chorded" buttons).
   pad.addEventListener('pointermove', function (e) {

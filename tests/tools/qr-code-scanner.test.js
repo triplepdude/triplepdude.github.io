@@ -5,7 +5,7 @@ const path = require('path');
 // back with zxing-cpp (make_fixtures.py), so expected.json holds what an independent reader sees.
 // IBAN and EMV checksums there were worked out in Python. The camera is fed either Chromium's fake
 // camera (no code in sight) or a canvas stream that shows one of the fixture images.
-module.exports = async ({ page, open, assert, fixtures, url }) => {
+module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const expected = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const want = name => expected[name].texts[0];
   const text = s => page.locator(s).textContent();
@@ -72,6 +72,18 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.isVisible('#qs-view'), true);
   assert.equal(await page.isVisible('#qs-placeholder'), false);
 
+  // Every decoded picture must be released once it has been scanned and drawn: until then the
+  // decoder holds its pixels in its worker and on the page (46 MB for a 12-megapixel photo), and
+  // two batches of 20 phone photos once took the tab to 2.3 GB. Each decode() result is recorded,
+  // and marked when the page hands it to release().
+  await page.evaluate(() => {
+    const T = window.TTImage, decode = T.decode, release = T.release;
+    window.__qsPics = [];
+    T.decode = async function () { const res = await decode.apply(this, arguments); window.__qsPics.push({ res, freed: false }); return res; };
+    T.release = function (res) { window.__qsPics.forEach(p => { if (p.res === res) p.freed = true; }); return release.apply(this, arguments); };
+  });
+  const pics = () => page.evaluate(() => ({ decoded: window.__qsPics.length, kept: window.__qsPics.filter(p => !p.freed).length }));
+
   // ---- One code per payload type, 20 files at once ----
   const types = ['wifi.png', 'vcard.png', 'text.png', 'latin1.png', 'kanji.png', 'mecard.png', 'mailto.png', 'tel.png', 'sms.png', 'geo.png',
     'event.png', 'otp.png', 'upi.png', 'bitcoin.png', 'epc.png', 'epc-bad.png', 'emv.png', 'emv-bad.png', 'binary.png', 'plain-note.png'];
@@ -81,6 +93,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   ({ by: r } = await cards());
   for (const f of types) if (f !== 'binary.png') assert.equal(r[f].raw, want(f), `${f}: text read`);
   assert.equal(await text('#qs-results-h'), 'Results (20)');
+  assert.deepEqual(await pics(), { decoded: 20, kept: 0 }, 'every picture of the batch is released');
 
   // Wi-Fi: Latin-1 bytes without a character set, escaped \" \; \: \\ (wifi.png).
   assert.equal(r['wifi.png'].label, 'Wi-Fi network');
@@ -244,6 +257,66 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const blocked = await page.evaluate(() => Math.max(0, ...window.__qsLong));
   assert.ok(Date.now() - t0 < 15000, `big picture took ${Date.now() - t0} ms`);
   assert.ok(blocked < 1500, `main thread blocked for ${Math.round(blocked)} ms`);
+  // A scan replaced by a newer one releases its picture too.
+  let n0 = (await pics()).decoded;
+  await fresh(page);
+  await page.setInputFiles('#qs-file', path.join(fixtures, 'big.png'));
+  await page.setInputFiles('#qs-file', path.join(fixtures, 'url.png'));
+  await done(page);
+  assert.equal(await text('#qs-status'), 'Found: Web link, example.com.');
+  assert.equal(await page.getAttribute('#qs-view', 'aria-label'), 'url.png: 1 code found and outlined');
+  await page.waitForFunction(n => window.__qsPics.length === n && window.__qsPics.every(p => p.freed), n0 + 2, { timeout: 30000 });
+
+  // ---- A busy photo without a code ----
+  // A 12-megapixel JPEG of fine noise, made on the page. jsQR finds nothing in it, but its five
+  // passes once took 99 s while the status said only "Reading noise.jpg…". Now the status says
+  // that the page is looking more closely, and the reading stops after 15 s.
+  const seen = [];
+  await page.exposeFunction('qsSeen', t => seen.push(t));
+  await page.evaluate(() => new MutationObserver(() => window.qsSeen(document.querySelector('#qs-status').textContent))
+    .observe(document.querySelector('#qs-status'), { childList: true, characterData: true, subtree: true }));
+  const dropNoise = () => page.evaluate(async () => {
+    if (!window.__qsNoise) {
+      const W = 4000, H = 3000, c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const g = c.getContext('2d'), img = g.createImageData(W, H), d = img.data;
+      let x = 2463534242;
+      for (let i = 0, j = 0; i < W * H; i++, j += 4) {
+        x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0;
+        const v = 110 + (i % W) / W * 40;
+        d[j] = v + ((x & 255) - 128) * 0.9; d[j + 1] = v + (((x >>> 8) & 255) - 128) * 0.9; d[j + 2] = v + (((x >>> 16) & 255) - 128) * 0.9; d[j + 3] = 255;
+      }
+      g.putImageData(img, 0, 0);
+      window.__qsNoise = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.9));
+      c.width = 0;
+    }
+    const dt = new DataTransfer();
+    dt.items.add(new File([window.__qsNoise], 'noise.jpg', { type: 'image/jpeg' }));
+    document.querySelector('#qs-stage').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  const closer = 'Reading noise.jpg\u2026 No code found yet; looking more closely (this can take several seconds).';
+  await fresh(page);
+  let t1 = Date.now();
+  await dropNoise();
+  await done(page, 90000);
+  const noiseMs = Date.now() - t1;
+  assert.match(await text('#qs-error'), /^No QR code found in noise\.jpg\. Make sure the whole code/);
+  assert.ok(seen.includes(closer), JSON.stringify(seen));
+  assert.ok(noiseMs < 35000, `noise.jpg was read for ${noiseMs} ms`);
+  // A picture added while a slow one is read is read at once: the old reading is dropped (it held
+  // the reader for up to 15 s), and its picture released.
+  n0 = (await pics()).decoded;
+  await fresh(page);
+  await dropNoise();
+  await page.waitForFunction(t => document.querySelector('#qs-status').textContent === t, closer, { timeout: 30000 });
+  t1 = Date.now();
+  await page.setInputFiles('#qs-file', path.join(fixtures, 'url.png'));
+  await page.waitForFunction(() => /^Found/.test(document.querySelector('#qs-status').textContent), null, { timeout: 30000 });
+  const quickMs = Date.now() - t1;
+  assert.ok(quickMs < 8000, `url.png waited ${quickMs} ms behind the reading of noise.jpg`);
+  assert.equal(await text('#qs-status'), 'Found: Web link, example.com.');
+  assert.equal(await text('#qs-error'), '');
+  await page.waitForFunction(n => window.__qsPics.length === n && window.__qsPics.every(p => p.freed), n0 + 2, { timeout: 30000 });
 
   // ---- Nothing found, not an image ----
   const histBefore = await page.locator('#qs-hist-body tr').count();
@@ -334,10 +407,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(r[0].raw, want('sms.png'));
   assert.match(r[0].meta, /dropped\.png/);
 
+  // Every picture decoded so far, by every route in, has been released.
+  assert.equal((await pics()).kept, 0, 'a decoded picture was kept');
+
   // ---- History ----
   const histRows = () => page.$$eval('#qs-hist-body tr', trs => trs.map(t => [t.querySelector('.qs-hist-type').textContent, t.querySelector('.qs-hist-clip').textContent]));
   let rows = await histRows();
-  assert.equal(rows.length, 1 + 20 + 12 + 8 + 1 + 3 + 6 + 3 + 8 + 1 + 1 + 1 + 1 + 1 + 1);
+  assert.equal(rows.length, 1 + 20 + 12 + 8 + 1 + 3 + 6 + 3 + 8 + 1 + 2 + 1 + 1 + 1 + 1 + 1);
   // The table never shows a two-step secret key (it is folded away on the card too); copying the
   // row still gives the whole text. Each row shows the scan's number that its buttons are named by.
   const histText = await page.textContent('#qs-hist-body');
@@ -622,6 +698,42 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), width);
   }
   await phoneCtx.close();
+
+  // ---- A phone held sideways: the whole camera preview is brought on screen ----
+  // (It started 112 px below the screen when the camera was started from below a result.)
+  const land = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, permissions: ['camera'] });
+  const lp = await land.newPage();
+  await lp.goto(url);
+  await lp.tap('#qs-sample');
+  await done(lp);
+  await lp.evaluate(() => document.querySelector('#qs-results').scrollIntoView({ block: 'start', behavior: 'instant' }));
+  await lp.tap('#qs-camera');
+  await lp.waitForFunction(() => /^Camera on/.test(document.querySelector('#qs-status').textContent));
+  // The page scrolls smoothly (unless reduced motion is asked for), so where the preview ends up is
+  // measured once the page has kept still for ten frames.
+  await lp.evaluate(() => new Promise(res => {
+    let last = scrollY, still = 0;
+    const give = setTimeout(res, 3000);
+    const tick = () => {
+      if (scrollY !== last) { last = scrollY; still = 0; } else if (++still >= 10) { clearTimeout(give); res(); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }));
+  const preview = await lp.$eval('#qs-stage', e => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, screen: innerHeight }; });
+  assert.ok(preview.top >= 0 && preview.bottom <= preview.screen + 1, 'camera preview off screen: ' + JSON.stringify(preview));
+  await lp.tap('#qs-camera');
+  assert.equal(await lp.textContent('#qs-status'), 'Camera off.');
+  await land.close();
+
+  // ---- The home page's search finds the scanner for barcode and decoder searches ----
+  const home = await page.context().newPage();
+  await home.goto(base + '/');
+  for (const q of ['barcode scanner', 'scan barcode', 'qr decoder', 'decode qr', 'qr code from photo']) {
+    await home.fill('#tool-search', q);
+    assert.ok(await home.isVisible('#all-tools a[href$="/qr-code-scanner/"]'), `search for "${q}"`);
+  }
+  await home.close();
 
   // Leave a full result on screen for the runner's phone-width checks.
   await scan(['vcard.png', 'phishy.png']);

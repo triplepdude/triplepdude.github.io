@@ -36,7 +36,8 @@ howto: |
 
   - **URL-safe** swaps `+` and `/` for `-` and `_`, which need no escaping
     in URLs and file names. JSON Web Tokens use this alphabet without
-    padding.
+    padding. To percent-encode text for a link or a query string instead,
+    use the [URL encoder and decoder](/url-encode-decode/).
   - **No = padding** leaves out the `=` at the end. A decoder can work out
     the length without it.
   - **Line length** breaks the output every 76 characters, the limit MIME
@@ -53,7 +54,8 @@ howto: |
   Base64 stores bytes, not letters. To show text, the bytes must be read
   with the encoding they were written in. Most text today is UTF-8, but é
   is the two bytes C3 A9 in UTF-8 and the single byte E9 in Windows-1252,
-  so `6Q==` reads as é only when **Text encoding** is set to Windows-1252.
+  so `6Q==` decodes to � as UTF-8 and to é once **Text encoding** is set to
+  Windows-1252.
   If � appears, try another encoding. When the data is a file and no text
   at all, download it; the **hex dump** shows its first bytes.
 
@@ -663,6 +665,7 @@ faq:
   function work() {
     var m = mode(), file = state.file, text = file ? '' : boxText(), codes = null;
     var res = { dir: m === 'decode' ? 'decode' : 'encode', error: '', csError: '', full: '', bytes: null, notes: [], auto: '', stats: '', spoken: '', kind: null, hideText: false, picture: null, ext: 'txt', mime: '' };
+    if (file && file.count > 1) res.notes.push('Only the first of the ' + fmt(file.count) + ' files was opened.');
     if (!file && text.length > MAX_TEXT) {
       res.error = 'This is ' + fmt(text.length) + ' characters long. The box takes up to ' + fmt(MAX_TEXT) + '; open longer data as a file.';
       return res;
@@ -847,7 +850,9 @@ faq:
   function update(silent) { show(work(), silent); }
 
   // ---------- Files ----------
-  function takeFile(f) {
+  // Of several files dropped, pasted or chosen, the first is opened, and the page says so.
+  function takeFiles(files) {
+    var f = files && files[0], count = files ? files.length : 0;
     if (!f) return;
     var job = ++state.reading;
     if (f.size > MAX_FILE) {
@@ -858,7 +863,7 @@ faq:
     f.arrayBuffer().then(function (buf) {
       if (job !== state.reading) return;
       state.fileError = '';
-      state.file = { name: f.name, type: f.type || '', bytes: new Uint8Array(buf) };
+      state.file = { name: f.name, type: f.type || '', bytes: new Uint8Array(buf), count: count };
       update();
     }, function () {
       if (job !== state.reading) return;
@@ -867,7 +872,7 @@ faq:
     });
   }
   fileEl.addEventListener('change', function () {
-    takeFile(fileEl.files && fileEl.files[0]);
+    takeFiles(fileEl.files);
     fileEl.value = '';
   });
   $('#b64-file-remove').addEventListener('click', function () {
@@ -877,23 +882,29 @@ faq:
     update();
     input.focus();
   });
-  // A file dropped anywhere on the tool, or an image pasted into the box.
+  // A file dropped anywhere on the page is opened, as one dropped on the box is: the browser
+  // would otherwise open it in place of the page and lose what is in the box. While a file is
+  // held over the page, the box is marked as the place it goes. dragenter and dragleave come in
+  // pairs for every element the pointer crosses (Safari gives them no relatedTarget), so the
+  // count is back at 0 only once the file has left the window.
   function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+  var dragDepth = 0;
+  function dragDone() { dragDepth = 0; root.classList.remove('is-over'); }
   ['dragenter', 'dragover'].forEach(function (t) {
-    root.addEventListener(t, function (e) {
+    document.addEventListener(t, function (e) {
       if (!hasFiles(e)) return;
       e.preventDefault();
+      if (t === 'dragenter') dragDepth++;
       root.classList.add('is-over');
     });
   });
-  ['dragleave', 'dragend'].forEach(function (t) {
-    root.addEventListener(t, function (e) { if (!root.contains(e.relatedTarget)) root.classList.remove('is-over'); });
-  });
-  root.addEventListener('drop', function (e) {
+  document.addEventListener('dragleave', function (e) { if (hasFiles(e) && --dragDepth <= 0) dragDone(); });
+  document.addEventListener('dragend', dragDone);
+  document.addEventListener('drop', function (e) {
+    dragDone();
     if (!hasFiles(e)) return;
     e.preventDefault();
-    root.classList.remove('is-over');
-    takeFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    takeFiles(e.dataTransfer.files);
   });
   input.addEventListener('paste', function (e) {
     var data = e.clipboardData, files = data && data.files;
@@ -903,7 +914,7 @@ faq:
     var types = Array.prototype.slice.call(data.types || []);
     if (types.indexOf('text/plain') >= 0 && (types.indexOf('text/html') >= 0 || types.indexOf('text/rtf') >= 0)) return;
     e.preventDefault();
-    takeFile(files[0]);
+    takeFiles(files);
   });
 
   // ---------- Controls ----------

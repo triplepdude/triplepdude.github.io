@@ -227,6 +227,30 @@ module.exports = async ({ page, open, assert }) => {
   assert.match(await text('#mc-timing'), /length 2\.6 s$/);
 
   // Playback with Web Audio: the button toggles, the light flashes, it ends by itself.
+  // Every sound source is logged with when it ends, and every suspend of the
+  // audio context with the latest end of a source scheduled before it.
+  await page.evaluate(() => {
+    window.__srcs = new Set();
+    window.__starts = [];
+    window.__sleeps = [];
+    const proto = AudioScheduledSourceNode.prototype, start = proto.start, stop = proto.stop;
+    proto.start = function (when) {
+      window.__ctx = this.context;
+      window.__starts.push({ when: when || 0, now: this.context.currentTime, state: this.context.state });
+      this.__end = Infinity;
+      window.__srcs.add(this);
+      return start.apply(this, arguments);
+    };
+    proto.stop = function (when) {
+      this.__end = arguments.length && when > this.context.currentTime ? when : this.context.currentTime;
+      return stop.apply(this, arguments);
+    };
+    const suspend = AudioContext.prototype.suspend;
+    AudioContext.prototype.suspend = function () {
+      window.__sleeps.push({ at: this.currentTime, lastEnd: Math.max(0, ...[...window.__srcs].map(x => x.__end)) });
+      return suspend.apply(this, arguments);
+    };
+  });
   await page.fill('#mc-text', 'EE');
   await page.evaluate(() => {
     window.__mcOn = 0;
@@ -257,6 +281,24 @@ module.exports = async ({ page, open, assert }) => {
   await page.click('#mc-play');
   assert.equal(await text('#mc-play'), 'Play');
   assert.equal(await page.locator('#mc-light.mc-on').count(), 0);
+  // A running audio context renders silence for as long as the page is
+  // open: a moment after the sound stops, the page suspends it, never before
+  // the end of a tone, and the next Play starts it again with no extra delay.
+  const asleep = () => page.waitForFunction(() => window.__ctx.state === 'suspended', null, { timeout: 6000 });
+  await asleep();
+  await page.fill('#mc-wpm', '20');
+  await page.fill('#mc-text', 'E');
+  const n0 = await page.evaluate(() => window.__starts.length);
+  await page.click('#mc-play');
+  await page.waitForFunction(n => window.__starts.length === n + 1, n0);
+  const again = await page.evaluate(() => window.__starts[window.__starts.length - 1]);
+  assert.equal(again.state, 'running', 'the tones were scheduled while the sound was off');
+  assert.ok(again.when - again.now <= 0.1, `the tones were scheduled ${(again.when - again.now).toFixed(3)} s ahead`);
+  await page.waitForFunction(() => document.querySelector('#mc-play').textContent === 'Play', null, { timeout: 5000 });
+  await asleep();
+  const sleeps = await page.evaluate(() => window.__sleeps);
+  assert.ok(sleeps.length >= 2, `the sound was switched off ${sleeps.length} times`);
+  for (const z of sleeps) assert.ok(z.at >= z.lastEnd, `the sound was switched off at ${z.at.toFixed(3)} s, before a tone ending at ${z.lastEnd} s`);
 
   // Chart: every ITU cell shows the standard code and plays it.
   const cells = await page.$$eval('#mc-charts .mc-cell', els => els.map(e => [e.querySelector('.mc-ch').firstChild.textContent, e.querySelector('.mc-code').textContent]));
@@ -272,7 +314,8 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(named[0][0], 'Play <SOS> Distress: dot dot dot dash dash dash dot dot dot');
   await page.fill('#mc-wpm', '60');
   await page.click('#mc-charts .mc-cell >> nth=0');
-  assert.equal(await text('#mc-play'), 'Stop');
+  // The sound was switched off by now, so playing waits for it to start again.
+  await page.waitForFunction(() => document.querySelector('#mc-play').textContent === 'Stop', null, { timeout: 3000 });
   await page.waitForFunction(() => document.querySelector('#mc-play').textContent === 'Play', null, { timeout: 5000 });
 
   await page.click('#mc-clear');

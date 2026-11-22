@@ -10,6 +10,12 @@
 //                a motion photo stores its clip after the end-of-image marker
 //   padded.jpg   the same JPG complete, followed by 6000 zero bytes
 //   early.jpg    the same JPG stopped 12 bytes into its image data: Chrome draws none of it
+//   p3.jpg       64x64 JPG (Pillow) tagged with tests/fixtures/image-to-pdf/p3.icc (Display P3):
+//                left half stored as (200,100,50), right half (0,255,1). In sRGB that is about
+//                (215,93,31), and the P3 green lies outside sRGB, so it clips to (0,255,0)
+//   meta.jpg     copy of remove-exif-data's gps-rotated.jpg: EXIF with Make Canon, Artist and
+//                Copyright "Jane Example", BodySerialNumber 012345678901, OffsetTimeOriginal
+//                +02:00 and a GPS position, plus XMP, IPTC, a comment and an sRGB profile
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -45,7 +51,7 @@ function decodePng(b) {
   const at = (x, y) => { const i = y * stride + x * ch; return ch === 4 ? [...px.subarray(i, i + 4)] : [...px.subarray(i, i + 3), 255]; };
   return { w, h, type, chunks, exif, at };
 }
-// TIFF/EXIF reader: IFD0 tags, and the GPS IFD if linked.
+// TIFF/EXIF reader: IFD0 tags, and the EXIF and GPS IFDs if linked.
 function exifTags(t) {
   const le = t.toString('latin1', 0, 2) === 'II';
   const r16 = o => (le ? t.readUInt16LE(o) : t.readUInt16BE(o)), r32 = o => (le ? t.readUInt32LE(o) : t.readUInt32BE(o));
@@ -61,7 +67,7 @@ function exifTags(t) {
     return out;
   };
   const ifd0 = ifd(r32(4));
-  return { ifd0, gps: ifd0[0x8825] ? ifd(ifd0[0x8825]) : null };
+  return { ifd0, exif: ifd0[0x8769] ? ifd(ifd0[0x8769]) : {}, gps: ifd0[0x8825] ? ifd(ifd0[0x8825]) : null };
 }
 
 module.exports = async ({ page, open, assert, fixtures }) => {
@@ -70,7 +76,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.textContent('h1'), 'JPG to PNG Converter for JPEG Photos');
 
   // ---------- Set up for JPG to PNG as served, and nothing moves as the script starts ----------
-  const NOTE = 'PNG is lossless: every pixel is kept exactly, and photos make large files. Converting cannot restore detail that the JPG compression has already removed.';
+  const NOTE = 'PNG is lossless: the decoded pixels are saved without further loss, and photos make large files. Converting cannot restore detail that the JPG compression has already removed.';
   const HINT = 'JPG or JPEG photos, as many as you like. Nothing is uploaded.';
   const START = ['png', '90', '90%', '#ffffff', 'strip', 'true,false,true,false,true,true', NOTE, HINT];
   const load = await page.evaluate(async () => {
@@ -93,7 +99,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
 
   // ---------- The guide links to the hub and to PNG to JPG, all real tool pages ----------
   const links = await page.$$eval('.prose a', as => as.map(a => a.getAttribute('href')));
-  for (const h of ['/image-converter/', '/png-to-jpg/']) assert.ok(links.includes(h), `guide links to ${h}`);
+  for (const h of ['/image-converter/', '/png-to-jpg/', '/resize-image/']) assert.ok(links.includes(h), `guide links to ${h}`);
+  // The FAQ answers what the guide does not: how to convert with the apps built into Windows and macOS.
+  assert.deepEqual(await page.$$eval('.faq summary', s => s.map(e => e.textContent.trim())), [
+    'Does converting JPG to PNG improve image quality?',
+    'How do I convert JPG to PNG on Windows or a Mac without a website?',
+    'My JPG has a white background. Will the PNG be transparent?',
+    'Is a .jpeg file different from a .jpg file?']);
   for (const h of links) assert.ok(/^\/[a-z0-9-]+\/$/.test(h) && fs.existsSync(path.join(__dirname, '..', '..', '_tools', h.slice(1, -1) + '.html')), `guide link ${h} is not a tool page`);
 
   const rows = page.locator('.imc-item');
@@ -188,4 +200,31 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     near(png.at(60, 10), [40, 90, 200, 255], 8, 'top half');
     near(png.at(60, 80), [230, 180, 40, 255], 8, 'bottom half');
   }
+
+  // ---------- What the page promises matches what happens to colour profiles and EXIF ----------
+  const guide = (await page.textContent('.prose')).replace(/\s+/g, ' ');
+  const desc = await page.getAttribute('meta[name="description"]', 'content');
+  await page.click('#imc-clear');
+  await page.setInputFiles('#imc-file', ['p3.jpg', 'meta.jpg'].map(fx));
+  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '2 of 2 converted.', null, { timeout: 30000 });
+  // A Display P3 JPG (as iPhones save them) comes out in sRGB with no profile, so vivid colours
+  // are toned down: the page must not promise an exact copy of the pixels, and says what happens.
+  png = decodePng((await download(0)).data);
+  assert.ok(!png.chunks.includes('iCCP') && !png.chunks.includes('sRGB'), 'no colour profile in the PNG: ' + png.chunks);
+  near(png.at(10, 32), [215, 93, 31, 255], 4, 'P3 (200,100,50) converted to sRGB');
+  near(png.at(50, 32), [0, 255, 0, 255], 2, 'P3 green clipped to the sRGB gamut');
+  assert.doesNotMatch(desc, /exact|identical|perfect/i, 'the description promises exact pixels: ' + desc);
+  assert.match(guide, /A JPG with a wide colour profile, such as the Display P3 of iPhone photos, is converted to sRGB, which tones down colours more vivid than sRGB can show\./);
+  const faq = (await page.textContent('.faq')).replace(/\s+/g, ' ');
+  assert.doesNotMatch(faq + guide, /perfect copy|looks identical|copied exactly/, 'a claim of an exact copy is left');
+  // Keep, without location removes only the GPS block: the photographer's name, the copyright
+  // notice, the camera serial number and the time zone stay, as the guide says.
+  png = decodePng((await download(1)).data);
+  const t = exifTags(png.exif);
+  assert.equal(t.gps, null, 'no GPS block');
+  assert.deepEqual([t.ifd0[0x010F], t.ifd0[0x013B], t.ifd0[0x8298]], ['Canon', 'Jane Example', '(c) Jane Example']);
+  assert.deepEqual([t.exif[0xA431], t.exif[0x9011]], ['012345678901', '+02:00']);
+  assert.match(guide, /Choose Keep, without location to copy the EXIF data without the GPS position: camera and lens, exposure, date and time zone, and the photographer[’']s name, copyright notice and camera serial number if the photo has them\./);
+  // XMP, IPTC and the comment are never copied, and the PNG carries no colour profile.
+  assert.deepEqual(png.chunks.filter(c => !['IHDR', 'eXIf', 'IDAT', 'IEND'].includes(c)), [], 'only the EXIF is carried over');
 };

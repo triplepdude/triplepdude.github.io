@@ -143,6 +143,10 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.deepEqual(await page.$$eval('#mt-dots li', l => l.map(x => x.className + ':' + x.textContent)), ['l0:1', 'l1:2', 'l1:3', 'l1:4']);
   assert.equal(await text('#mt-start'), 'Start');
   assert.equal(await text('#mt-vol-out'), '70%');
+  // The slider speaks its own value (aria-valuetext); the number beside it is no
+  // live status region, which would read every step out a second time.
+  assert.equal(await page.getByRole('status').filter({ hasText: '70%' }).count(), 0, 'the volume is read out twice');
+  assert.equal(await attr('#mt-vol', 'aria-valuetext'), '70%');
   assert.equal(await text('#mt-status'), '');
   assert.equal(await page.evaluate(() => location.hash), '');
   assert.equal(await page.locator('#mt-marks tr[aria-current="true"] button').getAttribute('data-bpm'), '144');
@@ -968,6 +972,27 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.deepEqual(touches.map(t => t[0]), ['touch', 'touch', 'touch', 'touch']);
   assert.equal(await ph.inputValue('#mt-bpm'), String(lsqBpm(touches.map(t => t[1]))), 'tempo tapped on a touch screen');
   near(lsqBpm(touches.map(t => t[1])), 120, 25, 'touch taps about 500 ms apart');
+  // A finger that lands on Tap tempo to scroll on down the page is no tap: the
+  // browser turns the touch into a scroll (pointercancel) and the tempo stays.
+  // Two ordinary flicks through the browser's touch input, as a visitor makes.
+  const tapped = [await ph.inputValue('#mt-bpm'), await ph.textContent('#mt-tapinfo')];
+  await ph.evaluate(() => { window.__flick = []; for (const t of ['pointerdown', 'pointerup', 'pointercancel']) document.querySelector('#mt-tap').addEventListener(t, () => window.__flick.push(t)); });
+  const cdp = await phone.newCDPSession(ph);
+  for (let i = 0; i < 2; i++) {
+    await ph.evaluate(() => document.querySelector('#mt-tap').scrollIntoView({ block: 'center', behavior: 'instant' }));
+    const b = await (await ph.$('#mt-tap')).boundingBox(), x = b.x + b.width / 2, y = b.y + b.height / 2;
+    const y0 = await ph.evaluate(() => scrollY);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    for (let s = 1; s <= 6; s++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + s / 3, y: y - s * 40 }] });
+      await ph.waitForTimeout(12);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await ph.waitForFunction(y0 => scrollY > y0 + 100, y0);
+  }
+  await cdp.detach();
+  assert.equal((await ph.evaluate(() => window.__flick)).join(' '), 'pointerdown pointercancel pointerdown pointercancel', 'each flick became a scroll');
+  assert.deepEqual([await ph.inputValue('#mt-bpm'), await ph.textContent('#mt-tapinfo')], tapped, 'two flicks that started on Tap tempo changed the tempo');
   await ph.tap('#mt-start');
   assert.equal(await ph.textContent('#mt-start'), 'Start');
   // Every control is at least 44 px tall, and no text is cut off in a select or button, from 320 to 540 px.

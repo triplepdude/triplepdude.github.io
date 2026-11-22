@@ -28,6 +28,10 @@ module.exports = async ({ page, open, assert, base }) => {
     window.__prints = [];
     window.print = () => { window.__prints.push({ top: true, title: document.title }); };
   });
+  // What the page and its preview fetch, in order: ['get' | 'got', url].
+  const fetched = [];
+  page.on('request', r => fetched.push(['get', r.url()]));
+  page.on('requestfinished', r => fetched.push(['got', r.url()]));
   await open();
   const frame = await (await page.$('#mdp-frame')).contentFrame();
   // Waits by polling from the test: inside the sandboxed preview frame no script may run, so
@@ -53,15 +57,32 @@ module.exports = async ({ page, open, assert, base }) => {
     f.contentWindow.print = () => window.__prints.push({ frame: true, title: document.title, frameTitle: f.contentDocument.title });
   });
 
-  // ---- The example renders on load, with lazily loaded highlighting and math. ----
+  // ---- On load: a short sample without code or formulas, so that neither highlight.js nor
+  // KaTeX (about 120 KB compressed, and long script tasks on a phone) is fetched until a
+  // document uses them. ----
   await inFrameSel('#mdp-doc h1');
-  await inFrameSel('#mdp-doc .katex');
-  await inFrameSel('#mdp-doc pre code .hljs-keyword');
+  await page.waitForFunction(() => /^\d+ words$/.test(document.getElementById('mdp-info').textContent));
+  await page.waitForLoadState('networkidle');
+  assert.deepEqual(fetched.filter(([, u]) => /katex|highlight/.test(u)), [], 'fetched on load');
   assert.equal(await frame.textContent('#mdp-doc h1'), 'Quarterly project update');
   assert.equal(await page.inputValue('#mdp-name'), 'Quarterly project update');
   assert.equal(await inDoc('input[type=checkbox]', l => l.map(c => c.checked).join()), 'true,true,false');
   assert.equal(await inDoc('table th', l => l.map(c => c.getAttribute('align')).join()), 'left,right,right,right');
   assert.equal(await inDoc('.footnotes li', l => l.length), 1);
+  assert.match(await page.inputValue('#mdp-input'), /Press \*\*Example\*\* for a longer sample with highlighted code and LaTeX math\./);
+  // The Example button loads the longer sample, with highlighted code and math.
+  await page.click('#mdp-sample');
+  await inFrameSel('#mdp-doc .katex');
+  await inFrameSel('#mdp-doc pre code .hljs-keyword');
+  assert.equal(await frame.textContent('#mdp-doc h1'), 'Quarterly project update');
+  assert.equal(await inDoc('.footnotes li', l => l.length), 1);
+  assert.doesNotMatch(await page.inputValue('#mdp-input'), /Press \*\*Example\*\*/);
+  // KaTeX's style sheet goes into the preview first. This page gets its own copy (for printing
+  // from the browser menu) only once the preview's has arrived, so it is not fetched twice at once.
+  const css = () => fetched.filter(([, u]) => /katex\.min\.css$/.test(u)).map(([k]) => k).join(' ');
+  for (let i = 0; i < 100 && css() !== 'get got get got'; i++) await page.waitForTimeout(50);
+  assert.equal(css(), 'get got get got', 'the two copies of katex.min.css');
+  assert.equal(await page.$$eval('head link[href$="katex.min.css"]', l => l.length), 1);
   assert.match(await page.textContent('#mdp-info'), /^\d+ words$/);
   // The preview is a separate, script-free document: the page keeps one <h1>.
   assert.equal(await page.getAttribute('#mdp-frame', 'sandbox'), 'allow-same-origin allow-modals');
