@@ -423,8 +423,10 @@ module.exports = async ({ page, open, assert, base }) => {
   // live click count shows one slow click counted twice.
   const guide = (await text('.prose')).replace(/\s+/g, ' ');
   assert.match(guide, /let you raise the debounce time\. A mouse that double-clicks on a single press has the same fault: click slowly in the CPS test and watch whether the count ever jumps by two\./);
+  // The same section links the spacebar counter, which flags chatter on the space
+  // bar, and the FAQ on phone keyboards links the typing test, which works with them.
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/cps-test/']);
+  assert.deepEqual(links, ['/spacebar-counter/', '/cps-test/', '/typing-test/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }

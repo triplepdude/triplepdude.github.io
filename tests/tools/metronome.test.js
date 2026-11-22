@@ -446,7 +446,8 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await startPlay();
   await waitClicks(2);
   const tLoud = (await played())[1].when;
-  await page.waitForFunction(t => window.__ctx.currentTime > t + 1.3, tLoud, { timeout: 5000 });
+  // The recorder sends 4096 frames at a time, so wait well past the end of the range.
+  await page.waitForFunction(t => window.__ctx.currentTime > t + 1.4, tLoud, { timeout: 5000 });
   heard = await page.evaluate(([a, b]) => window.__heard(a, b), [tLoud, tLoud + 1.2]);
   await stopPlay();
   assert.ok(heard.covered && heard.covered[0] <= tLoud && heard.covered[1] >= tLoud + 1.2, `recorded ${heard.covered}`);

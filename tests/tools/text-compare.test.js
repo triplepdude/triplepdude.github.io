@@ -303,9 +303,9 @@ module.exports = async ({ page, open, assert }) => {
   await settle();
   // While a long result is drawn, what is on screen stays where it is, in the middle of the result
   // or below it, though a block is rarely as tall as its box was (on a phone, where lines wrap, up
-  // to 3,200 px taller). The browser's own scroll anchoring let the rows on screen drift by 32,000 px
-  // at 390 px wide and the guide below the result by 150,000 px; at 1280 px it holds, so it would
-  // add its correction to the page's own if the page left it on.
+  // to 3,200 px taller). Left to Chromium's scroll anchoring, the rows on screen drifted by 1,000 to
+  // 32,000 px and the guide below the result by 150,000 px, at one width or the other depending on
+  // how the page got there.
   for (const size of [{ width: 390, height: 844 }, { width: 1280, height: 900 }]) {
     await page.setViewportSize(size);
     for (const where of ['middle', 'below']) {
@@ -316,7 +316,8 @@ module.exports = async ({ page, open, assert }) => {
         B.value = b;
         B.dispatchEvent(new Event('input', { bubbles: true }));
         // As soon as the result is in the page, jump past the blocks still to draw.
-        while (!out.querySelector('.tc-hole')) await new Promise(r => setTimeout(r, 5));
+        const until = performance.now() + 20000;
+        while (!out.querySelector('.tc-hole') && performance.now() < until) await new Promise(r => setTimeout(r, 5));
         let mark = null;
         if (where === 'below') {
           mark = document.querySelector('.prose h2');
@@ -331,11 +332,12 @@ module.exports = async ({ page, open, assert }) => {
           if (!mark) return { holes: 0, moved: 'no row came into view' };
         }
         const holes = out.querySelectorAll('.tc-hole').length, top = mark.getBoundingClientRect().top;
-        while (out.getAttribute('aria-busy') !== 'false') await new Promise(r => requestAnimationFrame(r));
+        while (out.getAttribute('aria-busy') !== 'false' && performance.now() < until) await new Promise(r => requestAnimationFrame(r));
+        if (out.getAttribute('aria-busy') !== 'false') return { holes, moved: 'still drawing after 20 s' };
         return { holes, moved: Math.round(mark.getBoundingClientRect().top - top) };
       }, [manyA.join('\n'), manyB.join('\n') + '\n', where]);
       assert.ok(d.holes > 5, `${size.width} px, ${where}: ${d.holes} blocks left to draw after the jump`);
-      assert.ok(Math.abs(d.moved) <= 1, `${size.width} px, ${where}: what was on screen moved ${d.moved} px while the comparison was drawn`);
+      assert.ok(Math.abs(d.moved) <= 1, `${size.width} px, ${where}: what was on screen moved while the comparison was drawn (${typeof d.moved === 'number' ? d.moved + ' px' : d.moved})`);
     }
   }
   assert.equal(await page.evaluate(() => document.documentElement.style.overflowAnchor), '', 'scroll anchoring back on once drawn');

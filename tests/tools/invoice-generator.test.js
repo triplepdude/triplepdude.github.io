@@ -461,8 +461,9 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.match(guide, /A JavaScript PDF library would need a font file embedded for every script, megabytes for Chinese alone, and pdf-lib, for example, writes a number inside an Arabic line backwards\./);
 
   // ----- Links to the tools that prepare an invoice's numbers -----
+  // (and Number to Words, for a total that must also be written in words)
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/hours-calculator/', '/percentage-calculator/']);
+  assert.deepEqual(links, ['/hours-calculator/', '/percentage-calculator/', '/number-to-words/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }

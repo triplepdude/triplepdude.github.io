@@ -233,7 +233,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await visit('#brightness');
   await page.waitForTimeout(400);
   assert.deepEqual([await text('#ws-msg'), await hash(), await text('#ws-name')], ['', '#brightness', 'White']);
-  const [headTop, vh, sy] = await page.evaluate(() => [document.getElementById('brightness').getBoundingClientRect().top, innerHeight, scrollY]);
+  // The site scrolls smoothly, so the browser may still be on its way to the
+  // heading (on a busy machine it was once 600 px short after 0.4 s): wait up
+  // to 5 s for it to arrive.
+  let headTop, vh, sy;
+  for (let i = 0; i < 50; i++) {
+    [headTop, vh, sy] = await page.evaluate(() => [document.getElementById('brightness').getBoundingClientRect().top, innerHeight, scrollY]);
+    if (sy > 0 && headTop > -2 && headTop < vh / 2) break;
+    await page.waitForTimeout(100);
+  }
   assert.ok(sy > 0 && headTop > -2 && headTop < vh / 2, `scrolled to the Brightness heading (top ${headTop}, scrollY ${sy})`);
   // Followed from the page itself, it leaves the colour alone until the next change.
   await visit('#red&b=50');

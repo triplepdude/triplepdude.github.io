@@ -334,12 +334,21 @@ async function pasteOverLongText(page, base, problems) {
   await page.waitForTimeout(300);
   await page.evaluate(text => navigator.clipboard.writeText(text), lines('new', 5000));
   await box.evaluate(t => { t.focus(); t.select(); });
+  // Timed in main-thread CPU time (Chrome's ThreadTime metric), not wall time:
+  // on a busy machine the page waits for a CPU, which once stretched the usual
+  // 0.1 s to 1.1 s. A page that skips drawing content takes about 5 s of CPU.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Performance.enable');
+  const threadMs = async () => (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'ThreadTime').value * 1000;
+  const cpu0 = await threadMs();
   const start = Date.now();
   await page.keyboard.press('ControlOrMeta+V');
   await page.evaluate(() => new Promise(done => requestAnimationFrame(() => setTimeout(done, 0))));
   const ms = Date.now() - start;
+  const cpu = Math.round((await threadMs()) - cpu0);
+  await cdp.detach();
   if (!(await box.evaluate((t, text) => t.value === text, lines('new', 5000)))) problems.push(`${p}: select all and paste through the clipboard did not replace the text in the box, so pasting over a long text is not tested`);
-  else if (ms > 1000) problems.push(`${p}: pasting 5,000 lines over 5,000 took ${ms} ms (1,000 allowed): something skips drawing its content (see skippedContent in tests/run.js)`);
+  else if (cpu > 1000) problems.push(`${p}: pasting 5,000 lines over 5,000 took ${cpu} ms of main-thread CPU time (${ms} ms in all; 1,000 allowed): something skips drawing its content (see skippedContent in tests/run.js)`);
 }
 
 // The other side of has-text-box (_layouts/tool.html): on a tool page without
