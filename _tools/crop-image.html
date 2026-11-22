@@ -291,6 +291,7 @@ faq:
   var EXT = { png: 'png', jpeg: 'jpg', webp: 'webp', avif: 'avif', gif: 'gif', bmp: 'bmp', tiff: 'tif', ico: 'ico', svg: 'svg' };
   var LABEL = { png: 'PNG', jpeg: 'JPG', webp: 'WebP', avif: 'AVIF', gif: 'GIF', bmp: 'BMP', tiff: 'TIFF', ico: 'ICO', svg: 'SVG' };
   var LOSSY = { jpeg: true, webp: true, avif: true };
+  var EXIF_OK = { jpeg: true, png: true, webp: true }; // the formats TTImage.encode writes EXIF into
   var RAW = /\.(3fr|ari|arw|bay|cr2|cr3|crw|dcr|dng|erf|fff|iiq|k25|kdc|mef|mos|mrw|nef|nrw|orf|pef|ptx|raf|raw|rw2|rwl|sr2|srf|srw|x3f)$/i;
   var canSave = { webp: false, avif: false };
 
@@ -306,7 +307,7 @@ faq:
   function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
   function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
   function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
-  // Cut by characters, not UTF-16 units: half an emoji makes Chrome save the file as "download".
+  // Cut by characters, not UTF-16 units: half an emoji is a broken character (�) in the saved name.
   function baseName(n) { return Array.from(String(n || 'image').replace(/\.[^.]+$/, '') || 'image').slice(0, 120).join(''); }
   function gcd(a, b) { while (b) { var t = a % b; a = b; b = t; } return a; }
 
@@ -606,7 +607,9 @@ faq:
     if (!it) return;
     var b = st.box, p = ratioPair(), out = outFor(b.w, b.h, it), key = outKey(it, out);
     var shape = p ? ratioLabel(p) : ratioLabel([b.w, b.h]);
-    setText(infoEl, 'Crop ' + b.w + ' × ' + b.h + ' px (' + shape + ') at ' + b.x + ', ' + b.y + '. Saves as a ' + out.w + ' × ' + out.h + ' px ' + LABEL[key] + '.');
+    // An icon is square: a crop of another shape is centred on it.
+    var side = Math.max(out.w, out.h), icon = key === 'ico' && out.w !== out.h;
+    setText(infoEl, 'Crop ' + b.w + ' × ' + b.h + ' px (' + shape + ') at ' + b.x + ', ' + b.y + '. Saves as a ' + (icon ? side + ' × ' + side : out.w + ' × ' + out.h) + ' px ' + LABEL[key] + '.');
     var hint = [];
     var kx = out.w / (b.w * (it.svg ? 1 : it.k)), ky = out.h / (b.h * (it.svg ? 1 : it.k));
     if (!it.svg && (kx > 1.01 || ky > 1.01)) hint.push('The crop covers ' + Math.round(b.w * it.k) + ' × ' + Math.round(b.h * it.k) + ' px of your picture, so it is enlarged and may look soft.');
@@ -617,6 +620,7 @@ faq:
       hint.push(from + (it.fmt === 'ico' ? ' icons are at most 256 pixels a side, so this is saved as ' : ' files cannot be saved here, so this is saved as ') + LABEL[key] + '.');
     }
     if (key === 'jpeg' && it.hasAlpha) hint.push('JPG has no transparency, so see-through areas turn white.');
+    if (icon) hint.push('Icons are square, so the crop is centred on a see-through ' + side + ' × ' + side + ' px icon.');
     // JPG, PNG, BMP and TIFF record the DPI; a WebP only in the camera details it keeps.
     if (dpi() && !/^(jpeg|png|bmp|tiff)$/.test(key) && !(key === 'webp' && it.exif && exifBox.checked)) hint.push(LABEL[key] + ' files have no DPI setting, so the DPI is not saved.');
     if (it.k < 1 && !it.svg) hint.push('Saved from a ' + it.src.width + ' × ' + it.src.height + ' px copy, the largest this browser can hold.');
@@ -628,7 +632,7 @@ faq:
     setText(qOut, qIn.value + (own ? ' (as the original)' : ''));
     qIn.setAttribute('aria-valuetext', qIn.value + (own ? ', as the original' : ''));
     // The other pictures of a batch are read only when the ZIP is made, and may have EXIF.
-    exifRow.hidden = !((it.exif || st.extra.length) && (key === 'jpeg' || key === 'png' || key === 'webp'));
+    exifRow.hidden = !((it.exif && EXIF_OK[key]) || (st.extra.length && (fmtSel.value === 'same' || EXIF_OK[key])));
     var o = fmtSel.querySelector('option[value="same"]'), sameKey = outKeySame(it, out);
     setText(o, 'Original format (' + LABEL[sameKey] + ')');
     dlBtn.textContent = 'Download ' + LABEL[key];
@@ -1183,7 +1187,6 @@ faq:
       return b;
     } catch (x) { return exif; }
   }
-  var EXIF_OK = { jpeg: true, png: true, webp: true };
   async function produce(it, key) {
     var geo = geometryFor(it), out = geo.out;
     key = key || outKey(it, out);
@@ -1191,7 +1194,11 @@ faq:
     var d = dpi(), exif = it.exif && exifBox.checked && EXIF_OK[key] ? exifWithDpi(it.exif, d) : null;
     var opts = { quality: qualityFor(it, key), dpi: d, wasm: key === 'avif', exif: exif, stripGps: true };
     var c, from = null, W = out.w, H = out.h;
-    if (it.svg) c = await TTImage.svg.render(svgCropped(it, geo, W, H), W, H);
+    if (it.svg) {
+      // A drawing can be cropped to more pixels than any canvas holds; a smaller output size helps.
+      if (!fits(W, H)) throw friendly('This browser cannot make a picture of ' + fmtN(W) + ' × ' + fmtN(H) + ' px. Choose Set width and height under Output size and enter a smaller size.');
+      c = await TTImage.svg.render(svgCropped(it, geo, W, H), W, H);
+    }
     else {
       var r = cropCanvas(it, geo);
       c = r.canvas; from = r.from;
@@ -1200,6 +1207,7 @@ faq:
     try {
       opts.width = W; opts.height = H; opts.icoSizes = key === 'ico' ? [Math.max(W, H)] : null;
       var blob = await TTImage.encode(c, key, opts);
+      if (key === 'ico') W = H = Math.max(W, H);
       return { blob: blob, key: key, w: W, h: H, from: from, keepsExif: !!exif };
     } finally { c.width = c.height = 0; }
   }

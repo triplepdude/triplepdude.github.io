@@ -11,6 +11,8 @@ photo.jpg   stored 120 x 80 at JPEG quality 77 with EXIF Orientation 6 (shown
 big.png     1600 x 1000 in four flat quadrants (red, green / blue, yellow), for
             a browser whose canvas cannot hold it (the test limits it).
 anim.gif    two frames, 40 x 30: red, then blue.
+icon.ico    one 30 x 23 PNG entry (a 40 x 30 red picture fitted into 30 x 30),
+            for an icon whose crop is not square.
 logo.svg    200 x 100 px, viewBox 0 0 100 50: red left half, blue right half,
             a green disc of radius 10 at (25, 25).
 expected.json  the luminance quantisation table libjpeg writes at quality 77
@@ -84,6 +86,8 @@ big = Image.new('RGB', (1600, 1000))
 for (qx, qy), c in cols.items():
     big.paste(c, (qx * 800, qy * 500, qx * 800 + 800, qy * 500 + 500))
 big.save(out('big.png'))
+
+Image.new('RGBA', (40, 30), (200, 30, 30, 255)).save(out('icon.ico'), sizes=[(30, 30)])
 
 f1, f2 = Image.new('RGB', (40, 30), (255, 0, 0)), Image.new('RGB', (40, 30), (0, 0, 255))
 f1.save(out('anim.gif'), save_all=True, append_images=[f2], duration=200, loop=0)

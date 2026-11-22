@@ -445,6 +445,16 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(px.px[0], [255, 0, 0, 255]);
   assert.deepEqual([px.w, px.h], [32, 24]);
 
+  // ---------- An icon stays an icon, which is square: the summary gives its real size ----------
+  await openFile('icon.ico');
+  assert.equal(await info(), 'Crop 24 × 18 px (4:3) at 3, 3. Saves as a 24 × 24 px ICO.');
+  assert.equal(await page.textContent('#crp-out-hint'), 'Icons are square, so the crop is centred on a see-through 24 × 24 px icon.');
+  d = await download();
+  assert.equal(d.name, 'icon-cropped.ico');
+  // ICONDIR: reserved 0, type 1, one image; its entry is 24 x 24.
+  assert.deepEqual([d.buf.readUInt16LE(0), d.buf.readUInt16LE(2), d.buf.readUInt16LE(4), d.buf[6], d.buf[7]], [0, 1, 1, 24, 24]);
+  assert.match(await page.textContent('#crp-status'), /^Saved icon-cropped\.ico: 24 × 24 px, /);
+
   // ---------- SVG stays a vector ----------
   await openFile('logo.svg');
   assert.match(await page.textContent('#crp-drop-hint'), /^200 × 100 px SVG/);
@@ -482,6 +492,28 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(p.px(120, 160 - 76), [0, 255, 0, 255], 'inside the disc, 4 px from its edge');
   assert.deepEqual(p.px(120, 160 - 84), [255, 0, 0, 255], 'outside the disc, 4 px from its edge');
   await page.selectOption('#crp-size', 'crop');
+  await page.selectOption('#crp-format', 'same');
+  // Turned clockwise, the box (20, 10, 100 x 80) turns with the drawing, and the SVG gets the turn as
+  // a transform: output (i, j) shows image pixel (20 + j, 89 - i).
+  await page.click('#crp-rotate');
+  assert.equal(await fields(), '10,20,80,100');
+  d = await download();
+  const turnedSvg = await page.evaluate(async text => {
+    const img = new Image();
+    img.src = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+    await img.decode();
+    const c = Object.assign(document.createElement('canvas'), { width: 80, height: 100 }), g = c.getContext('2d');
+    g.drawImage(img, 0, 0);
+    return [[5, 5], [39, 30], [40, 95]].map(([x, y]) => Array.from(g.getImageData(x, y, 1, 1).data));
+  }, d.buf.toString('utf8'));
+  assert.deepEqual(turnedSvg, [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]], 'image (25, 84) red, (50, 50) the disc centre, (115, 49) blue');
+  // A drawing cropped to more pixels than a canvas can hold asks for a smaller output size.
+  await page.setInputFiles('#crp-file', { name: 'huge.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="30000" height="30000" viewBox="0 0 2 2"><rect width="2" height="2" fill="#00f"/></svg>') });
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'huge.svg');
+  await page.selectOption('#crp-format', 'png');
+  await page.click('#crp-download');
+  await page.waitForFunction(() => document.querySelector('#crp-error').textContent);
+  assert.equal(await page.textContent('#crp-error'), 'This browser cannot make a picture of 24,000 × 24,000 px. Choose Set width and height under Output size and enter a smaller size.');
   await page.selectOption('#crp-format', 'same');
 
   // ---------- Batch: the same relative crop for each picture, in one ZIP ----------
@@ -553,6 +585,21 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.textContent('#crp-error'), 'The settings changed while the ZIP file was being made, so it was not saved. Choose Download all (ZIP) again.');
   assert.equal(zipSaves, 0, 'no ZIP is saved');
   for (let i = 0; i < 3; i++) await page.click('#crp-rotate');
+  // A ratio and a turn apply to every picture: each gets the largest box of that ratio that the
+  // relative size allows, centred at the same relative place, turned and mirrored the same way.
+  await page.selectOption('#crp-ratio', '1:1');
+  await page.click('#crp-rotate'); await page.click('#crp-flip-v');
+  await type('#crp-w', '100'); await type('#crp-x', '20'); await type('#crp-y', '150');
+  assert.equal(await fields(), '20,150,100,100');
+  const turnedZip = unzip((await download('#crp-zip')).buf);
+  const ts = decodePng(turnedZip['a'.repeat(119) + '😀-cropped.png'], assert);
+  assert.deepEqual([ts.w, ts.h], [50, 50], 'small.png: half the width, so half the box');
+  // Turned clockwise and mirrored top to bottom, small.png (150 x 100) shows (149 - y, 99 - x) at (x, y);
+  // the box is at 10, 75.
+  checkGrid(ts, null, (i, j) => [74 - j, 89 - i], 'zip: turned, mirrored and square');
+  await page.click('#crp-flip-v');
+  for (let i = 0; i < 3; i++) await page.click('#crp-rotate');
+  await page.selectOption('#crp-ratio', 'free');
 
   // ---------- Files that cannot be cropped ----------
   await page.setInputFiles('#crp-file', { name: 'oops.png', mimeType: 'image/png', buffer: Buffer.from('not an image at all') });
@@ -564,6 +611,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.match(await page.textContent('#crp-drop-title'), /^grid\.png/, 'the pictures already open stay');
   assert.equal(await page.getAttribute('#crp-file', 'aria-invalid'), 'true');
   assert.equal(await page.getAttribute('#crp-file', 'aria-describedby'), 'crp-error');
+
+  // ---------- A picture pasted with Ctrl+V opens; text pasted into a field stays text ----------
+  const paste = (b64, sel) => page.evaluate(([b64, sel]) => {
+    const dt = new DataTransfer();
+    if (b64) dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], 'image.png', { type: 'image/png' }));
+    else dt.setData('text/plain', '42');
+    const e = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+    document.querySelector(sel).dispatchEvent(e);
+    return e.defaultPrevented;
+  }, [b64, sel]);
+  assert.equal(await paste(null, '#crp-dpi'), false, 'text pasted into the DPI field is left to the field');
+  assert.equal(await paste(fs.readFileSync(path.join(fixtures, 'small.png')).toString('base64'), 'body'), true);
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'image.png');
+  assert.match(await page.textContent('#crp-drop-hint'), /^150 × 100 px PNG\./);
 
   // ---------- Files the decoder warns about ----------
   // A PNG damaged half way (from the image converter's fixtures) and a Display P3 JPG.
@@ -657,13 +718,22 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const pf = (await phone.evaluate(() => ['x', 'y', 'w', 'h'].map(k => document.querySelector('#crp-' + k).value))).map(Number);
   assert.deepEqual(pf.slice(0, 2), [120, 80], 'the opposite corner stays');
   assert.ok(Math.abs(pf[2] - 860) <= 8 && Math.abs(pf[3] - 540) <= 8, `the south-east handle followed the finger: ${pf}`);
+  // Handles are 44 px touch targets: a finger landing 10 px below and right of the corner, outside
+  // the box, still takes the handle instead of drawing a new box.
+  const se = P(pf[0] + pf[2], pf[1] + pf[3]), off = { x: se.x + 10, y: se.y + 10 };
+  await touch('touchStart', [off]);
+  for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: off.x - 40 * i / 6, y: off.y - 40 * i / 6 }]);
+  await touch('touchEnd', []);
+  const pf2 = (await phone.evaluate(() => ['x', 'y', 'w', 'h'].map(k => document.querySelector('#crp-' + k).value))).map(Number);
+  assert.deepEqual(pf2.slice(0, 2), [120, 80], `a finger beside the corner takes the handle: ${pf2}`);
+  assert.ok(pf2[2] < pf[2] - 40 && pf2[3] < pf[3] - 40, `the corner moved with the finger: ${pf2}`);
   const mid = P(600, 400);
   await touch('touchStart', [{ x: mid.x - 20, y: mid.y }, { x: mid.x + 20, y: mid.y }]);
   for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: mid.x - 20 - 12 * i, y: mid.y }, { x: mid.x + 20 + 12 * i, y: mid.y }]);
   await touch('touchEnd', []);
   assert.doesNotMatch(await phone.textContent('#crp-zoom-val'), /Fit/, 'a pinch zooms in');
   const after = (await phone.evaluate(() => ['x', 'y', 'w', 'h'].map(k => document.querySelector('#crp-' + k).value))).map(Number);
-  assert.deepEqual(after, pf, 'a pinch does not move the box');
+  assert.deepEqual(after, pf2, 'a pinch does not move the box');
   const small = await phone.$$eval('.crp-bar .btn', l => Math.min(...l.map(b => b.getBoundingClientRect().height)));
   assert.ok(small >= 44, `buttons are at least 44 px tall on a touch screen: ${small}`);
   // No menu cuts off the option it shows, at any phone or tablet width: each menu is at least as
