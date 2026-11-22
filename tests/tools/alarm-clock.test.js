@@ -19,11 +19,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // session are stand-ins, as headless Chromium has none of them.
   const INIT = () => {
     window.__osc = [];
-    const start = AudioScheduledSourceNode.prototype.start, stop = AudioScheduledSourceNode.prototype.stop;
-    AudioScheduledSourceNode.prototype.start = function (when = 0, ...rest) {
+    // AudioBufferSourceNode has a start() of its own.
+    const wrap = (proto, start) => { proto.start = function (when = 0, ...rest) { return record.call(this, start, when, rest); }; };
+    const record = function (start, when, rest) {
       const osc = this instanceof OscillatorNode, buf = this instanceof AudioBufferSourceNode && this.buffer && this.buffer.length > 1;
       if (osc || buf) {
-        this.__rec = { kind: osc ? 'osc' : 'buf', f: osc ? Math.round(this.frequency.value * 100) / 100 : 0, type: osc ? this.type : '', when, now: this.context.currentTime, stops: [] };
+        this.__rec = { kind: osc ? 'osc' : 'buf', f: osc ? Math.round(this.frequency.value * 100) / 100 : 0, type: osc ? this.type : '', when, now: this.context.currentTime, wall: Date.now(), stops: [] };
         if (buf) {
           const d = this.buffer.getChannelData(0);
           let peak = 0;
@@ -34,6 +35,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
       }
       return start.call(this, when, ...rest);
     };
+    wrap(AudioScheduledSourceNode.prototype, AudioScheduledSourceNode.prototype.start);
+    if (Object.prototype.hasOwnProperty.call(AudioBufferSourceNode.prototype, 'start')) wrap(AudioBufferSourceNode.prototype, AudioBufferSourceNode.prototype.start);
+    const stop = AudioScheduledSourceNode.prototype.stop;
     AudioScheduledSourceNode.prototype.stop = function (when = 0) {
       if (this.__rec) this.__rec.stops.push({ when, now: this.context.currentTime });
       return stop.call(this, when);
@@ -93,9 +97,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.addInitScript(INIT);
   const R0 = X.rings[0];   // Sunday 22 November 2026, 22:47:30 in New York
   const T0 = R0.now;
+  // Every "Leave site?" question is answered Leave, and noted.
+  const dialogs = [];
+  page.on('dialog', d => { dialogs.push(d.type()); d.accept().catch(() => {}); });
   await page.clock.install({ time: T0 - 3000 });
   await open();
-  await page.clock.pauseAt(T0);
+  await page.clock.pauseAt(T0 + 100);
   assert.equal(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone), 'America/New_York');
 
   const text = s => page.locator(s).textContent();
@@ -116,6 +123,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const guarded = () => page.evaluate(() => { const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; });
   const isRinging = () => page.$eval('#ac-face', f => f.classList.contains('is-ringing'));
   const baseTitle = await page.title();
+  // "in 8 h 12 min": minutes rounded up, as the guide's example reads.
+  const fmtLeft = ms => { const mins = Math.ceil(ms / 60000); return [mins >= 60 ? `${Math.floor(mins / 60)} h` : '', mins % 60 ? `${mins % 60} min` : ''].filter(Boolean).join(' '); };
 
   // ---- Fresh page: one alarm at 7:00, off; the address untouched. ----
   assert.equal(await page.locator('.ac-card').count(), 1);
@@ -137,6 +146,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.evaluate(() => window.__wake.requests), 0);
 
   // ---- How typed times are read. ----
+  await page.fill('#ac-1-time', '6:00');
+  assert.equal(await hash(), '#6:00!o', 'the address follows the time typed');
   for (const [typed, want] of X.times) {
     await page.fill('#ac-1-time', typed);
     const err = await text('#ac-1-err'), inv = await page.getAttribute('#ac-1-time', 'aria-invalid');
@@ -183,7 +194,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await goText(1), 'Turn off');
   assert.equal(await goName(1), 'Turn off the 7:00 AM alarm');
   assert.equal(await guarded(), true, 'the leave-page warning is on while an alarm is set');
-  await page.waitForFunction(() => window.__wake.held === 1);
+  await page.waitForFunction(() => window.__wake.held === 1 && /Sound is on/.test(document.querySelector('#ac-ready').textContent));
   const r1 = await ready();
   assert.deepEqual(r1.map(r => r[0]), ['is-ok', 'is-ok', 'is-info', 'is-ok', 'is-info']);
   assert.equal(r1[0][1], 'Sound is on. Press Test sound to check the volume.');
@@ -194,25 +205,28 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await meta(1), 'Rings at 7:00 AM tomorrow (Monday), in 8 h 12 min');
 
   // ---- In the last minutes the ring is scheduled ahead on the audio clock. ----
+  // A jump of the test clock is like a computer that slept or a background
+  // tab that ran late; the check once a second notices within a second.
   const AT = R0.at;
   await page.clock.setSystemTime(AT - 100000);
   const n0 = await oscCount();
-  await page.clock.runFor(1000);
-  assert.equal(await meta(1), 'Rings at 7:00 AM today, in 1 h 39 min'.replace('1 h 39 min', '1 min 39 s').replace('1 min 39 s', '2 min'));
+  await page.clock.runFor(1100);
+  assert.equal(await meta(1), 'Rings at 7:00 AM today, in 2 min');
   let pre = await oscFrom(n0);
+  const lead = r => r.when - r.now - (AT - r.wall) / 1000;
   assert.ok(pre.length > 0 && pre[0].f === 880, 'the Bell is scheduled');
-  assert.ok(Math.abs(pre[0].when - pre[0].now - 99) < 0.1, `scheduled ${pre[0].when - pre[0].now} s ahead`);
-  // Two seconds before: re-timed, then the alarm rings from what was scheduled.
-  await page.clock.setSystemTime(AT - 2000);
+  assert.ok(Math.abs(lead(pre[0])) < 0.05 && AT - pre[0].wall > 98000, `scheduled ${pre[0].when - pre[0].now} s ahead, ${(AT - pre[0].wall) / 1000} s before the alarm`);
+  // Three seconds before: re-timed, then the alarm rings from what was scheduled.
+  await page.clock.setSystemTime(AT - 3000);
   const n1 = await oscCount();
-  await page.clock.runFor(500);
+  await page.clock.runFor(1100);
   pre = await oscFrom(n1);
-  assert.ok(pre.length > 0 && Math.abs(pre[0].when - pre[0].now - 1.5) < 0.1, `re-timed to ${pre.length && pre[0].when - pre[0].now} s ahead`);
+  assert.ok(pre.length > 0 && Math.abs(lead(pre[0])) < 0.05, `re-timed to ${pre.length && pre[0].when - pre[0].now} s ahead`);
   assert.ok((await oscFrom(n0)).slice(0, n1 - n0).every(r => r.stops.length > 1), 'the ring scheduled earlier is cancelled');
   assert.equal(await meta(1), 'Rings at 7:00 AM today, in 2 s');
-  await page.waitForTimeout(1600);
+  await page.waitForTimeout(Math.ceil((pre[0].when - pre[0].now) * 1000) + 300);
   const n2 = await oscCount();
-  await page.clock.runFor(1600);
+  await page.clock.runFor(2100);
   assert.equal(await alertText(), 'Alarm: 7:00 AM.');
   assert.equal(await oscCount(), n2, 'no second sound starts: the one scheduled ahead rings');
   assert.equal(await isRinging(), true);
@@ -241,7 +255,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.ok((await oscFrom(n1)).every(r => r.stops.length >= 2 && r.stops[r.stops.length - 1].when - r.stops[r.stops.length - 1].now < 0.1), 'Snooze stops every scheduled sound');
   assert.deepEqual(await page.evaluate(() => window.__session), ['playback', 'auto']);
   assert.deepEqual((await page.evaluate(() => window.__vibes)).slice(-1), [0]);
-  assert.equal(await page.evaluate(() => document.activeElement.className), 'btn ac-go', 'the focus goes back to where it was');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'ac-1-time', 'the focus goes back to where it was');
   assert.equal(await page.$eval('#ac-add', el => !!el.closest('[inert]')), false);
   // The snooze ends: it rings again; Esc stops it and the alarm is off.
   await page.clock.runFor(540100);
@@ -263,12 +277,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   w = await wall();
   const next7 = est(2026, 11, 24, 7, 0);
   assert.equal(await hash(), `#7:00!a${next7}`);
-  assert.equal(await meta(1), `Rings at 7:00 AM tomorrow (Tuesday), in ${Math.floor((next7 - w) / 3600000)} h ${Math.ceil(((next7 - w) % 3600000) / 60000)} min`);
+  assert.equal(await meta(1), `Rings at 7:00 AM tomorrow (Tuesday), in ${fmtLeft(next7 - w)}`);
 
   // ---- The computer sleeps through the alarm: missed, not rung late. ----
   await page.clock.setSystemTime(next7 + 30 * 60000);
   const n3 = await oscCount();
-  await page.clock.runFor(100);
+  await page.clock.runFor(1100);
   assert.equal(await alertText(), 'Missed: the 7:00 AM alarm could not ring, as the page was paused or the computer asleep at that time.');
   assert.equal(await meta(1), 'Missed at 7:00 AM today: the page was paused or the computer asleep, so it could not ring.');
   assert.equal(await page.$eval('#ac-1-meta', el => el.classList.contains('is-missed')), true);
@@ -305,7 +319,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.press('#ac-2-time', 'Enter');
   w = await wall();
   const g645 = est(2026, 11, 26, 6, 45);
-  assert.match(await status(), /^Gym alarm set for 6:45 AM tomorrow \(Thursday\), in \d+ hours? \d+ minutes?\.$/);
+  assert.match(await status(), /^Gym 🏋️ alarm set for 6:45 AM tomorrow \(Thursday\), in \d+ hours? \d+ minutes?\.$/);
   assert.equal(await hash(), `#7:00!o,6:45!a${g645}~Gym%20%F0%9F%8F%8B%EF%B8%8F`);
   assert.match(await text('#ac-next'), /^Next alarm 6:45 AM tomorrow \(Thursday\) · Gym 🏋️, in \d+ h \d+ min$/);
   // A quick alarm sets the free alarm (no label, off) without a new history entry.
@@ -395,7 +409,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const A630 = est(2026, 11, 26, 6, 30);
   await page.clock.setSystemTime(A630 - 60000);
   const n4 = await oscCount();
-  await page.clock.runFor(1000);
+  await page.clock.runFor(1100);
   const ramps = await page.evaluate(() => window.__ramps);
   const first = (await oscFrom(n4))[0];
   assert.ok(ramps.length === 2 && ramps[0][0] === 'from' && ramps[1][0] === 'to' && ramps[1][1] === 1, JSON.stringify(ramps));
@@ -407,11 +421,17 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   w = await wall();
   assert.equal(await status(), 'Snoozed until 6:35 AM, in 5 minutes.');
   assert.equal(await hash(), `#6:30!s${w + 300000},vol=50,fade=30,snooze=5`);
-  // The second click of a double click cannot land on what the view hid.
-  await page.click('#ac-1 .ac-go');   // turn off
+  // The second click of a double click cannot land on what the view hid...
+  await page.$eval('#ac-1 .ac-go', b => b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 2 })));
+  assert.equal(await goText(1), 'Turn off', 'a second click straight after Snooze does nothing');
+  // ...but a click of its own does.
+  await page.click('#ac-1 .ac-go');
   assert.equal(await goText(1), 'Set alarm');
   await page.selectOption('#ac-fade', '0');
   await page.selectOption('#ac-snooze-len', '9');
+  await page.focus('#ac-vol');
+  for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+  assert.equal(await hash(), '#6:30!o');
 
   // ---- Your own sound: a WAV file, the first 2 minutes in a loop, in mono. ----
   const wav = (seconds, left, right, rate = 8000) => {
@@ -451,9 +471,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.waitForFunction(() => /silent/.test(document.querySelector('#ac-file-err').textContent));
   assert.equal(await text('#ac-file-err'), '“quiet.wav” is silent.');
   await page.setInputFiles('#ac-file', { name: 'long.wav', mimeType: 'audio/wav', buffer: Buffer.alloc(10 * 1024 * 1024 + 1) });
-  assert.equal(await text('#ac-file-err'), '“long.wav” is 10 MB, more than the 10 MB this page can open. Choose a shorter song, or an MP3 rather than a WAV.');
+  assert.equal(await text('#ac-file-err'), '“long.wav” is 10.1 MB, more than the 10 MB this page can open. Choose a shorter song, or an MP3 rather than a WAV.');
   await page.setInputFiles('#ac-file', { name: 'short.wav', mimeType: 'audio/wav', buffer: wav(3, t => 0.3 * Math.sin(2 * Math.PI * 660 * t), t => 0.3 * Math.sin(2 * Math.PI * 660 * t)) });
-  await page.waitForFunction(() => /short\.wav/.test(document.querySelector('#ac-file-note').textContent));
+  await page.waitForFunction(() => /short\.wav” is the alarm sound/.test(document.querySelector('#ac-file-note').textContent));
   assert.equal(await text('#ac-file-err'), '');
   assert.equal(await page.getAttribute('#ac-file', 'aria-invalid'), null);
   assert.equal(await text('#ac-file-note'), '“short.wav” is the alarm sound. It is not kept after a reload.');
@@ -477,7 +497,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const A630b = est(2026, 11, 27, 6, 30);
   assert.equal(await hash(), `#6:30!a${A630b}`);
   await page.clock.setSystemTime(A630b - 500);
-  await page.clock.runFor(600);
+  await page.clock.runFor(1600);
   assert.deepEqual(await page.evaluate(() => window.__notes[1]), ['Alarm: 6:30 AM', 'Ringing since 6:30 AM. Open the page to snooze or stop it.']);
   await page.keyboard.press('Escape');
   await page.evaluate(() => { document.hasFocus = () => true; });
@@ -533,7 +553,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     assert.equal(await meta(1), m, h);
     if (canon.includes('!r')) {
       assert.equal(await isRinging(), true, h);
-      assert.equal(await text('#ac-sound-note'), '', 'sound starts with no click in this test browser');
+      // Started without a click, which this test browser allows.
+      await page.waitForFunction(() => document.querySelector('#ac-sound-note').textContent === '');
     }
   }
   await reopen('#6:30~Gym,7:15');
@@ -553,7 +574,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.inputValue('#ac-1-time'), '07:00');
   assert.equal(await hash(), `#7:00!a${A7},sound=chime,vol=50,fade=30,snooze=5,clock=24`);
   // What cannot be read is named, and the address stays as it was typed.
-  const bad = ['#7:00,sound=constructor', '#__proto__', '#constructor', '#7:61', '#7:00!x5', `#7:00!a${now0 + 30 * 3600000}`, `#7:00!m${now0 + 60000}`, '#7:00,vol=55', '#7:00,clock=13', '#%E0%A4%A', '#7:00!a12!s5'];
+  const bad = ['#7:00,sound=constructor', '#__proto__', '#constructor', '#7:61', '#7:00!x5', `#7:00!a${now0 + 30 * 3600000}`, `#7:00!m${now0 + 60000}`, '#7:00,vol=57', '#7:00,clock=13', '#%E0%A4%A', '#7:00!a12!s5'];
   for (const h of bad) {
     await reopen(h);
     assert.match(await text('#ac-msg'), /^Part of the page address could not be read as an alarm: “.+”\.$/, h);
@@ -583,10 +604,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await reopen('#' + '7:00!o,'.repeat(600));
   assert.match(await text('#ac-msg'), /longer than 4,000 characters/);
   assert.equal(await page.locator('.ac-card').count(), 1);
-  await page.goto('about:blank');
-  cpu = await cpuMs(() => page.goto(url + '#' + '7:00,'.repeat(200000)));
-  assert.match(await text('#ac-msg'), /longer than 4,000 characters/);
-  assert.ok(cpu < 3000, `a megabyte address took ${cpu} ms of CPU`);
+  await reopen('#7:00!o');
+  cpu = await cpuMs(async () => {
+    await page.evaluate(() => { location.hash = '#' + '7:00,'.repeat(200000); });
+    await page.waitForFunction(() => /longer than 4,000 characters/.test(document.querySelector('#ac-msg').textContent));
+  });
+  assert.ok(cpu < 1000, `a megabyte address took ${cpu} ms of CPU`);
   // A link to another alarm while one is set adds it.
   await reopen('#7:00');
   await page.evaluate(() => { location.hash = '#8:00~Tea'; });
@@ -599,11 +622,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   });
   assert.match(await hash(), /^#6:15!a\d+,8:00!a\d+~Tea$/);
-  // The leave-page warning shows when you navigate away from a set alarm.
-  let asked = '';
-  page.once('dialog', d => { asked = d.type(); d.accept(); });
+  // The leave-page warning shows when you navigate away from a set alarm
+  // (browsers ask only after a click on the page).
+  await page.click('h1');
+  const nd = dialogs.length;
   await page.goto('about:blank');
-  assert.equal(asked, 'beforeunload');
+  assert.deepEqual(dialogs.slice(nd), ['beforeunload']);
 
   const browser = page.context().browser();
   const problems = [];
@@ -616,7 +640,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     const p = await ctx.newPage();
     watch(p, problems);
     await p.addInitScript(INIT);
-    await p.clock.install({ time: rs[0].now });
+    await p.clock.install({ time: rs[0].now - 1000 });
     await p.clock.pauseAt(rs[0].now);
     for (const r of rs) {
       await p.clock.setSystemTime(r.now);
@@ -651,7 +675,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const pp = await phone.newPage();
   watch(pp, problems);
   await pp.addInitScript(INIT);
-  await pp.clock.install({ time: T0 });
+  pp.on('dialog', d => d.accept().catch(() => {}));
+  await pp.clock.install({ time: T0 - 1000 });
+  await pp.clock.pauseAt(T0);
   await pp.route('**/*', route => { if (!route.request().url().startsWith(base)) { problems.push('outside request ' + route.request().url()); return route.abort(); } return route.continue(); });
   await pp.goto(url);
   for (const sel of ['#ac-1 .ac-go', '#ac-add', '#ac-test', '#ac-1-time', '#ac-1-label', '#ac-full', '#ac-night', '#ac-quick a', '.ac-fmt .check', '#ac-file']) {
@@ -663,9 +689,21 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await pp.textContent('#ac-1 .ac-go-text'), 'Turn off');
   // No label breaks over two lines or is cut off, down to 320 px, ringing too.
   const twoLines = () => pp.$$eval('#ac .btn, #ac select', bs => bs.filter(b => b.getClientRects().length).map(b => {
-    if (b.tagName === 'SELECT') return [b.id, 1, b.scrollWidth > b.clientWidth];
-    const r = document.createRange(); r.selectNodeContents(b);
-    return [b.textContent, new Set([...r.getClientRects()].filter(x => x.width > 1).map(x => Math.round(x.top))).size, b.scrollWidth > b.clientWidth];
+    if (b.tagName === 'SELECT') {
+      // The longest choice must fit beside the arrow.
+      const cs = getComputedStyle(b), c = document.createElement('canvas').getContext('2d');
+      c.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      const widest = Math.max(...[...b.options].filter(o => !o.hidden).map(o => c.measureText(o.text).width));
+      return [b.id, 1, widest > b.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 16];
+    }
+    // The visible words only: text for screen readers sits in a 1 px box.
+    const tops = new Set(), walk = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+      if (t.parentElement.closest('.visually-hidden')) continue;
+      const r = document.createRange(); r.selectNodeContents(t);
+      for (const x of r.getClientRects()) if (x.width > 0) tops.add(Math.round(x.top));
+    }
+    return [b.textContent, tops.size, b.scrollWidth > b.clientWidth];
   }).filter(x => x[1] > 1 || x[2]));
   const long = Array.from({ length: 10 }, (_, i) => `${i + 5}:${i % 2 ? '45' : '15'}~${encodeURIComponent('Ein sehr langer Name für diesen Wecker ' + i)}`).join(',');
   for (const width of [320, 340, 360, 390, 412, 480, 540]) {
@@ -673,7 +711,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     for (const h of ['', '#' + long, `#7:00!a${T0 - 10000}`]) {
       await pp.goto('about:blank');
       await pp.goto(url + h);
-      assert.deepEqual(await twoLines(), [], `${width} px, ${h.slice(0, 20)}`);
+      const tl = await twoLines();
+      assert.deepEqual(tl, [], `${width} px, ${h.slice(0, 20)}: ${JSON.stringify(tl)}`);
       assert.ok(await pp.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no sideways scroll at ${width} px, ${h.slice(0, 20)}`);
     }
     // The ringing view fills the screen, with big buttons.
@@ -683,6 +722,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     await pp.tap('#ac-night');
     assert.ok(await pp.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `night mode at ${width} px`);
     assert.deepEqual(await twoLines(), [], `night mode at ${width} px`);
+    await pp.tap('#ac-night');
+    await pp.waitForFunction(() => !document.fullscreenElement);
   }
   await phone.close();
   assert.deepEqual(problems, []);

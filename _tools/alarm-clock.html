@@ -93,6 +93,7 @@ faq:
 .ac-date { margin: 2px 0 0; color: var(--muted); }
 .ac-next { margin: 8px 0 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .ac-next.is-missed { color: var(--danger); }
+.ac-face.is-ringing .ac-next { display: none; }
 .ac-face-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .ac .btn { touch-action: manipulation; }
 .ac-fmt { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 0 0 16px; padding: 0; border: 0; }
@@ -217,8 +218,8 @@ faq:
         <label for="ac-fade">Fade in</label>
         <select id="ac-fade">
           <option value="0" selected>Off</option>
-          <option value="30">Over 30 seconds</option>
-          <option value="60">Over 1 minute</option>
+          <option value="30">30 seconds</option>
+          <option value="60">1 minute</option>
         </select>
       </div>
       <div class="field">
@@ -1082,9 +1083,11 @@ faq:
     sync(a);
     paint(Date.now());
   }
-  // Leaving the box writes the time out in full.
+  // Leaving the box writes the time out in full. An empty box is not
+  // flagged here: a message appearing as the box loses the focus would move
+  // the Set alarm button away from a click that has already begun.
   function onTimeDone(a) {
-    if (!readBox(a, true)) return;
+    if (!readBox(a, false)) return;
     renderTime(a);
     sync(a);
     if (a.state === 'on') {
@@ -1296,7 +1299,7 @@ faq:
     writeHash();
     prearm();
   }
-  function mb(n) { return (Math.round(n / 104857.6) / 10).toLocaleString() + ' MB'; }
+  function mb(n) { return (Math.ceil(n / 104857.6) / 10).toLocaleString() + ' MB'; }
   fileIn.addEventListener('change', function () {
     var f = fileIn.files && fileIn.files[0], token = ++fileToken;
     if (!f) return;
@@ -1559,6 +1562,10 @@ faq:
   applySettings(first.settings, true);
   renderQuick();
   build(first.items);
+  // An alarm opened from a bookmark may sound without a click where the
+  // browser allows it (Chrome does on sites you use often); elsewhere the
+  // note asks for a tap.
+  if (needsSound()) audio.unlock();
   tick();
   schedule();
 })();
