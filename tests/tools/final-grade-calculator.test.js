@@ -133,8 +133,9 @@ module.exports = async ({ page, open, assert, url }) => {
     assert.equal(await text('#fg-need'), '–', v);
     assert.equal(await text('#fg-msg'), 'Enter your current grade as a percentage, such as 88.', v);
   }
-  // The guide links the percentage calculator and the grade calculator.
-  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/percentage-calculator/', '/grade-calculator/']);
+  // The guide links the percentage calculator, the grade calculator and, for the
+  // term's grade point average, the GPA calculator.
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/percentage-calculator/', '/grade-calculator/', '/gpa-calculator/']);
   // A typed target is echoed exactly, not rounded to 90: (89.995 - 66) / 0.25 = 95.98.
   await set('88', '25', '89.995');
   assert.equal(await text('#fg-need'), '95.98%');

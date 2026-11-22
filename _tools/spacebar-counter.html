@@ -1,0 +1,519 @@
+---
+title: Spacebar Counter and Spacebar Speed Test
+description: Count space bar presses freely or in a 5, 10, 30 or 60 second test, with presses per second, key-repeat timing and double-press checks, all in your browser.
+category: Device Tests
+keywords: [spacebar counter, spacebar test, space bar counter, spacebar speed test, spacebar clicker, spacebar counter 10 seconds, space bar test online, spacebar double typing test, key repeat rate test]
+howto: |
+  ## How to use the spacebar counter
+
+  Press the space bar and the number goes up. A press counts wherever you are
+  on this page, except while another button, a link or the FAQ has the focus,
+  and the page does not scroll while you press. On a phone or tablet, tap the
+  large button instead: every tap counts, so two fingers can take turns.
+
+  - **No limit** keeps counting until you press Reset, and shows how long you
+    have been going.
+  - **5, 10, 30 or 60 s** starts the clock with your first press and stops
+    counting when the time runs out. A short pause follows, so a last
+    hurried press does not start the next test.
+
+  Links can open a timed test straight away: add `#10s` or `#60s` to the
+  page address.
+
+  ## How the numbers are worked out
+
+  - **Per second** is presses divided by seconds: 64 presses in the
+    10-second test is 6.40. With no limit, the seconds run from your first
+    press until now, so the average falls while you rest.
+  - **Best second** is the most presses within any one second, wherever that
+    second starts, so a burst that spans the clock's tick still counts in
+    full.
+  - **Shortest gap** is the least time between the start of one press and
+    the start of the next.
+
+  After a timed test, a bar for each second shows where you sped up or
+  tired.
+
+  ## Holding the bar down: key repeat
+
+  Hold a key and your computer types it once, waits, then repeats it many
+  times a second. Browsers mark those repeats, and the counter leaves them
+  out, so a held bar is one press. Hold the space bar for about two seconds
+  and the panel below the counter measures your keyboard's **repeat delay**
+  (the wait before the first repeat) and **repeat rate**.
+
+  | System | Where to change it | Range |
+  |---|---|---|
+  | Windows | Control Panel > Keyboard: Repeat delay, Repeat rate | About 250 ms to 1 s; about 2.5 to 30 repeats a second |
+  | macOS | System Settings > Keyboard: Key repeat rate, Delay until repeat | Sliders without numbers |
+
+  ## Double presses
+
+  The counter flags every press of the bar that starts less than 30 ms after
+  the one before it. That is over 33 presses a second, far beyond what a finger can
+  do on one key, so it almost always means one press was read twice. Such
+  presses are still counted, because the keyboard really sent them, but a
+  score that includes them is not a fair one. To check other keys the same
+  way, use the [keyboard tester](/keyboard-tester/), and to count mouse
+  clicks rather than key presses, try the [CPS test](/cps-test/).
+faq:
+  - q: How many times can you press the space bar in 10 seconds?
+    a: About 50 with one finger. That is the average in the finger tapping test, where you tap a key with your index finger for 10 seconds; 183 adults aged 19 to 60 averaged 49.5 taps with their dominant hand (Heaton and others, 2020). Screens give much the same. A 2024 study of 370 adults found that those aged 50 to 70 tapped a phone or tablet 5.2 times a second, and that people aged 18 to 30 were faster with the index and middle fingers.
+  - q: What is a good spacebar speed?
+    a: Over 10 seconds, 5 presses a second is average for one finger and 6 or more is fast. In the tapping study above, the quickest of the 183 adults averaged 62.6 taps in 10 seconds. Taking turns with two fingers or both thumbs can push past what one finger manages. Rates fall as the hand tires, so expect fewer per second in the 60-second test than in the 10-second one.
+  - q: Why does my space bar type two spaces?
+    a: Usually because the switch under the bar bounces, so one press closes its contacts twice; this is called key chatter. Dirt under the bar and worn switches are the common causes, so clean underneath first, and replace a mechanical switch that still does it. Keyboards running QMK firmware let you raise the debounce time, 5 ms by default, and on Windows the Filter keys settings (Settings > Accessibility > Keyboard) can ignore unintended keystrokes until the fault is fixed.
+  - q: Does the spacebar counter work on a phone?
+    a: Yes. Tap the large button and each tap counts, including taps from two fingers in turn. The phone's on-screen keyboard is not used, because the page has no text box for it to type into, but a Bluetooth or USB keyboard works just as it does on a computer.
+  - q: Are my presses recorded or sent anywhere?
+    a: No. The page's own JavaScript counts each press and keeps the numbers in memory only. Nothing is uploaded or saved in your browser, and reloading the page clears every count.
+---
+<style>
+.sb-seg { min-width: 0; margin: 0 0 14px; padding: 0; border: 0; }
+.sb-seg legend { margin: 0 0 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.sb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sb-chip { position: relative; display: inline-flex; }
+.sb-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.sb-chip span {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 52px; min-height: 44px; padding: 0 14px;
+  border: 1px solid var(--field-border); border-radius: 999px;
+  background: var(--surface); color: var(--text); font-size: 15px; white-space: nowrap;
+}
+.sb-chip input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.sb-chip input:checked + span::before { content: "\2713"; }
+.sb-chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sb-pad {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  width: 100%; min-height: 220px; margin: 0 0 12px; padding: 18px 16px;
+  border: 2px solid var(--field-border); border-radius: 18px; border-bottom-width: 8px;
+  background: var(--surface-2); color: var(--text); font: inherit; text-align: center; cursor: pointer;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.sb-pad:focus { outline: none; }
+.sb-pad:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.sb-pad.is-counting { border-color: var(--accent); background: var(--accent-soft); }
+.sb-pad.is-down { border-bottom-width: 2px; padding-top: 24px; }
+.sb-pad.is-resting { border-color: var(--border); }
+.sb-pad-count { font-size: clamp(3rem, 14vw, 5rem); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sb-pad-sub { max-width: 30em; color: var(--muted); font-size: 15px; }
+.sb-live { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sb-live .stat b, .sb-rep .stat b { font-variant-numeric: tabular-nums; }
+.sb-under { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; }
+.sb-under .hint { flex: 1 1 260px; margin: 0; }
+.sb-result { margin: 0 0 20px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.sb-score { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 8px; }
+.sb-score b { font-size: clamp(2rem, 8vw, 3rem); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sb-score span { font-size: 1.05rem; font-weight: 600; }
+.sb-result p { margin: 0 0 8px; }
+.sb-bars { display: flex; align-items: flex-end; gap: 3px; height: 80px; margin: 12px 0 6px; padding: 0 0 2px; border-bottom: 1px solid var(--border); }
+.sb-bars i { flex: 1 1 0; min-width: 0; max-width: 44px; background: var(--accent); border-radius: 3px 3px 0 0; }
+.sb-bars.is-dense { gap: 1px; }
+.sb-bars.is-dense i { border-radius: 0; }
+.sb-h { margin: 24px 0 8px; font-size: 1.05rem; }
+.sb-rep { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+@media (max-width: 560px) {
+  .sb-live { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .sb-live .stat { padding: 10px 12px; }
+  .sb-pad { min-height: 200px; }
+}
+@media (max-width: 360px) {
+  .sb-rep { grid-template-columns: 1fr; }
+}
+</style>
+
+<fieldset class="sb-seg">
+  <legend>Count for</legend>
+  <div class="sb-chips">
+    <label class="sb-chip"><input type="radio" name="sb-len" value="0" autocomplete="off" checked><span>No limit</span></label>
+    <label class="sb-chip"><input type="radio" name="sb-len" value="5" autocomplete="off"><span>5 s</span></label>
+    <label class="sb-chip"><input type="radio" name="sb-len" value="10" autocomplete="off"><span>10 s</span></label>
+    <label class="sb-chip"><input type="radio" name="sb-len" value="30" autocomplete="off"><span>30 s</span></label>
+    <label class="sb-chip"><input type="radio" name="sb-len" value="60" autocomplete="off"><span>60 s</span></label>
+  </div>
+</fieldset>
+
+<button type="button" class="sb-pad" id="sb-pad" aria-describedby="sb-hint">
+  <span class="sb-pad-count" id="sb-pad-count">0</span>
+  <span class="sb-pad-sub" id="sb-pad-sub">Press Space or tap this key to begin counting</span>
+</button>
+<div class="stats sb-live">
+  <div class="stat"><b id="sb-time">0.0 s</b><span id="sb-time-label">Time</span></div>
+  <div class="stat"><b id="sb-count">0</b><span>Presses</span></div>
+  <div class="stat"><b id="sb-rate">0.00</b><span>Per second</span></div>
+  <div class="stat"><b id="sb-best">0</b><span>Best second</span></div>
+</div>
+<div class="sb-under">
+  <p class="hint" id="sb-hint">Space counts anywhere on this page except when another button or a link has the focus. Holding it down counts once.</p>
+  <button type="button" class="btn secondary small" id="sb-copy" hidden>Copy result</button>
+  <button type="button" class="btn secondary small" id="sb-reset">Reset</button>
+</div>
+<p class="visually-hidden" id="sb-sr" role="status"></p>
+
+<div class="sb-result" id="sb-result" hidden>
+  <p class="sb-score"><b id="sb-score">0.00</b><span>presses per second</span></p>
+  <p id="sb-detail"></p>
+  <div id="sb-bars-wrap">
+    <div class="sb-bars" id="sb-bars" aria-hidden="true"></div>
+    <p class="hint" id="sb-bars-note"></p>
+  </div>
+  <p id="sb-session"></p>
+</div>
+
+<h2 class="sb-h" id="sb-rep-h">Key repeat and double presses</h2>
+<div class="stats sb-rep" aria-labelledby="sb-rep-h" role="group">
+  <div class="stat"><b id="sb-delay">–</b><span>Repeat delay</span></div>
+  <div class="stat"><b id="sb-reprate">–</b><span>Repeats per second</span></div>
+  <div class="stat"><b id="sb-ignored">0</b><span>Repeats not counted</span></div>
+  <div class="stat"><b id="sb-doubles">0</b><span>Presses under 30 ms apart</span></div>
+</div>
+<p class="hint" id="sb-rep-note">Hold the space bar for about two seconds to measure how your keyboard repeats a held key.</p>
+
+<script>
+(function () {
+  'use strict';
+
+  var LENGTHS = [0, 5, 10, 30, 60];   // 0: no time limit
+  var HASH_MAX = 8;                   // longer than #60s, the longest this page writes
+  var DOUBLE_MS = 30;                 // a press this soon after the last one is flagged
+  var GRACE_MS = 50;                  // presses made before the end may still be arriving
+  var REST_MS = 800;                  // after a test, presses are ignored for this long
+
+  var pad = TT.$('#sb-pad'), padCount = TT.$('#sb-pad-count'), padSub = TT.$('#sb-pad-sub');
+  var timeEl = TT.$('#sb-time'), timeLabel = TT.$('#sb-time-label'), countEl = TT.$('#sb-count');
+  var rateEl = TT.$('#sb-rate'), bestEl = TT.$('#sb-best'), srEl = TT.$('#sb-sr'), copyBtn = TT.$('#sb-copy');
+
+  var phase = 'idle';   // idle, counting, closing, resting, done
+  var run = null;       // the count or test in progress, or the last one
+  var last = null;      // the last timed test, as shown in the result panel
+  var bestByLen = {};   // test length -> best score this session, in hundredths
+  var hold = null;      // the Space key being held: { down, reps }
+  var spaceDown = false;
+  var endTimer = 0, graceTimer = 0, restTimer = 0, rafId = 0;
+
+  function now() { return performance.now(); }
+  // When the key went down or the finger touched, as the browser stamped it;
+  // now() if the stamp is on another clock.
+  function stamp(e) {
+    var t = e && e.timeStamp, n = now();
+    return t > 0 && Math.abs(n - t) < 10000 ? t : n;
+  }
+  function say(text) { if (srEl.textContent !== text) srEl.textContent = text; }
+  function getLen() {
+    var el = TT.$('input[name="sb-len"]:checked'), v = el ? Number(el.value) : 0;
+    return LENGTHS.indexOf(v) >= 0 ? v : 0;
+  }
+  function setLen(v) { TT.$$('input[name="sb-len"]').forEach(function (r) { r.checked = Number(r.value) === v; }); }
+  // round(a / b) for whole numbers, halves rounded up.
+  function rdiv(a, b) { return Math.floor((2 * a + b) / (2 * b)); }
+  function hundredths(c) { var r = c % 100; return Math.floor(c / 100) + '.' + (r < 10 ? '0' : '') + r; }
+  function num(n) { return n.toLocaleString('en-GB'); }
+  function presses(n) { return num(n) + (n === 1 ? ' press' : ' presses'); }
+  function secs(n) { return n === 1 ? '1 second' : n + ' seconds'; }
+  // 7.3 s below a minute, 1:04.2 from a minute on (tenths, rounded down).
+  function elapsedText(ms) {
+    var d = Math.floor(Math.max(0, ms) / 100), s = Math.floor(d / 10), t = d % 10;
+    if (s < 60) return s + '.' + t + ' s';
+    var m = Math.floor(s / 60), r = s % 60;
+    return m + ':' + (r < 10 ? '0' : '') + r + '.' + t;
+  }
+  // Time left, rounded up to the tenth, so the clock reads 0.0 only at the end.
+  function leftText(ms) { var d = Math.ceil(Math.max(0, ms) / 100); return Math.floor(d / 10) + '.' + (d % 10) + ' s'; }
+
+  // ---- Address: #5s, #10s, #30s or #60s; nothing for no limit ----
+  function readHash() {
+    var h = location.hash;
+    if (!h || h.length > HASH_MAX) return null;
+    var m = /^#(5|10|30|60)s$/.exec(h);
+    return m ? Number(m[1]) : null;
+  }
+  function writeHash() {
+    var len = getLen(), h = len ? '#' + len + 's' : '';
+    if (h === location.hash || (!h && !location.hash)) return;
+    try { history.replaceState(null, '', location.pathname + location.search + h); } catch (e) { /* a sandboxed page may refuse */ }
+  }
+  function applyHash() { setLen(readHash() || 0); }
+
+  // ---- Display ----
+  function startText() { var len = getLen(); return len ? 'Press Space or tap this key to begin the ' + len + '-second test' : 'Press Space or tap this key to begin counting'; }
+  function idleView(again) {
+    var len = getLen();
+    pad.classList.remove('is-counting', 'is-resting');
+    timeLabel.textContent = len ? 'Time left' : 'Time';
+    timeEl.textContent = len ? leftText(len * 1000) : elapsedText(0);
+    if (!again) {
+      padCount.textContent = '0';
+      countEl.textContent = '0';
+      rateEl.textContent = '0.00';
+      bestEl.textContent = '0';
+      TT.$('#sb-ignored').textContent = '0';
+      TT.$('#sb-doubles').textContent = '0';
+    }
+    padSub.textContent = again ? 'Press Space or tap for another test' : startText();
+  }
+  function showCounts() {
+    var n = run.times.length;
+    padCount.textContent = num(n);
+    countEl.textContent = num(n);
+    bestEl.textContent = num(run.best);
+    TT.$('#sb-doubles').textContent = num(run.doubles);
+    TT.$('#sb-ignored').textContent = num(run.ignored);
+  }
+  function liveRate(t) {
+    var el = Math.max(1000, Math.round(t - run.start));
+    rateEl.textContent = hundredths(rdiv(run.times.length * 100000, el));
+  }
+  function clearTimers() {
+    clearTimeout(endTimer); clearTimeout(graceTimer); clearTimeout(restTimer);
+    cancelAnimationFrame(rafId);
+  }
+
+  // ---- Counting ----
+  function begin(t) {
+    clearTimers();
+    run = { len: getLen(), start: t, times: [], left: 0, best: 0, doubles: 0, ignored: 0, lastKey: null, minGap: null };
+    phase = 'counting';
+    pad.classList.remove('is-resting');
+    pad.classList.add('is-counting');
+    padSub.textContent = run.len ? 'Keep pressing: the clock is running' : 'Counting. Reset starts again from 0';
+    TT.$('#sb-result').hidden = true;
+    if (run.len) endTimer = setTimeout(checkEnd, run.len * 1000 - (now() - t) + 2);
+    rafId = requestAnimationFrame(tick);
+    say(run.len ? 'Counting for ' + secs(run.len) + '.' : 'Counting started.');
+  }
+  function endAt() { return run.start + run.len * 1000; }
+  function checkEnd() {
+    if (phase !== 'counting') return;
+    var left = endAt() - now();
+    if (left > 0) { endTimer = setTimeout(checkEnd, left + 2); return; }
+    closeTest();
+  }
+  function tick() {
+    if (phase !== 'counting') return;
+    var t = now();
+    if (run.len) {
+      var left = endAt() - t;
+      if (left <= 0) { closeTest(); return; }
+      timeEl.textContent = leftText(left);
+    } else {
+      timeEl.textContent = elapsedText(t - run.start);
+    }
+    liveRate(t);
+    rafId = requestAnimationFrame(tick);
+  }
+  function add(t, key) {
+    var times = run.times;
+    t = Math.max(t, run.start);
+    if (times.length) {
+      var gap = t - times[times.length - 1];
+      if (run.minGap === null || gap < run.minGap) run.minGap = gap;
+    }
+    if (key) {
+      if (run.lastKey !== null && t - run.lastKey < DOUBLE_MS) run.doubles++;
+      run.lastKey = t;
+    }
+    times.push(t);
+    // Best second: the most presses in any span of under 1,000 ms.
+    while (times[run.left] <= t - 1000) run.left++;
+    run.best = Math.max(run.best, times.length - run.left);
+    showCounts();
+  }
+  function press(t, key) {
+    if (phase === 'resting') return;
+    if (phase === 'closing') {
+      if (t < endAt()) { add(t, key); }
+      return;
+    }
+    if (phase === 'counting') {
+      if (run.len && t >= endAt()) { closeTest(); return; }
+      add(t, key);
+      liveRate(Math.max(t, now()));
+      return;
+    }
+    begin(t);
+    add(t, key);
+    liveRate(t);
+    copyBtn.hidden = getLen() !== 0;
+  }
+  // The time is up: the display stops at once, then late presses made
+  // before the end are let in for a moment.
+  function closeTest() {
+    if (phase !== 'counting') return;
+    phase = 'closing';
+    clearTimers();
+    pad.classList.remove('is-counting');
+    pad.classList.add('is-resting');
+    padSub.textContent = 'Time is up';
+    timeEl.textContent = leftText(0);
+    graceTimer = setTimeout(finishTest, GRACE_MS);
+  }
+  function finishTest() {
+    if (phase !== 'closing') return;
+    var r = run, n = r.times.length;
+    r.cents = rdiv(100 * n, r.len);
+    r.bins = [];
+    for (var i = 0; i < r.len; i++) r.bins.push(0);
+    r.times.forEach(function (t) { r.bins[Math.min(r.len - 1, Math.floor((t - r.start) / 1000))]++; });
+    var prev = bestByLen.hasOwnProperty(r.len) ? bestByLen[r.len] : null;
+    r.first = prev === null;
+    r.newBest = prev !== null && r.cents > prev;
+    if (prev === null || r.cents > prev) bestByLen[r.len] = r.cents;
+    r.sessionBest = bestByLen[r.len];
+    last = r;
+    showCounts();
+    rateEl.textContent = hundredths(r.cents);
+    showResult(r);
+    copyBtn.hidden = false;
+    say('Time is up: ' + presses(n) + ' in ' + secs(r.len) + ', ' + hundredths(r.cents) + ' per second.' +
+      (r.doubles ? ' ' + presses(r.doubles) + ' less than 30 milliseconds after the one before.' : '') + (r.newBest ? ' Best for this length so far.' : ''));
+    phase = 'resting';
+    restTimer = setTimeout(function () {
+      if (phase !== 'resting') return;
+      phase = 'done';
+      idleView(true);
+    }, REST_MS);
+  }
+
+  function detailText(r) {
+    var s = presses(r.times.length) + ' in ' + secs(r.len) + '. Best second: ' + presses(r.best) + '.';
+    if (r.minGap !== null) s += ' Shortest gap: ' + num(Math.round(r.minGap)) + ' ms.';
+    if (r.ignored) s += ' Held-key repeats left out: ' + num(r.ignored) + '.';
+    if (r.doubles) s += ' ' + presses(r.doubles) + ' came under 30 ms after the one before, which points to key chatter.';
+    return s;
+  }
+  function showResult(r) {
+    TT.$('#sb-result').hidden = false;
+    TT.$('#sb-score').textContent = hundredths(r.cents);
+    TT.$('#sb-detail').textContent = detailText(r);
+    var max = Math.max.apply(null, r.bins), min = Math.min.apply(null, r.bins);
+    TT.$('#sb-bars').classList.toggle('is-dense', r.bins.length > 30);
+    TT.$('#sb-bars').innerHTML = r.bins.map(function (b) {
+      return '<i style="height:' + (max ? Math.max(b ? 4 : 0, Math.round(b / max * 100)) : 0) + '%"></i>';
+    }).join('');
+    TT.$('#sb-bars-note').textContent = 'Presses in each second, from the first to the last: ' + r.bins.join(', ') + '.';
+    TT.$('#sb-session').textContent = r.first ? 'Your first ' + r.len + '-second test this session.'
+      : 'Best ' + r.len + '-second result this session: ' + hundredths(r.sessionBest) + ' per second' + (r.newBest ? ', set just now.' : '.');
+  }
+  // The count with no time limit up to now, or else the timed test in the
+  // result panel, with a link that opens a test of the same length.
+  function copyText() {
+    var url = location.origin + location.pathname;
+    if (run && !run.len && phase === 'counting' && run.times.length) {
+      var t = now(), el = Math.max(1000, Math.round(t - run.start));
+      return 'Spacebar counter: ' + presses(run.times.length) + ' in ' + elapsedText(t - run.start) + ', ' +
+        hundredths(rdiv(run.times.length * 100000, el)) + ' per second. Best second: ' + presses(run.best) + '.\n' + url;
+    }
+    if (!last || TT.$('#sb-result').hidden) return '';
+    return 'Spacebar test: ' + presses(last.times.length) + ' in ' + secs(last.len) + ', ' + hundredths(last.cents) +
+      ' per second. Best second: ' + presses(last.best) + '.\n' + url + '#' + last.len + 's';
+  }
+
+  function stopAll(message) {
+    var was = phase === 'counting' || phase === 'closing';
+    clearTimers();
+    phase = 'idle';
+    run = null;
+    // The result of the last timed test stays, and can still be copied.
+    copyBtn.hidden = !last || TT.$('#sb-result').hidden;
+    idleView(false);
+    if (was && message) say(message);
+  }
+
+  // ---- Key repeat ----
+  function repeatSeen(t) {
+    if (!hold) hold = { down: null, reps: [] };
+    hold.reps.push(t);
+    if (run && (phase === 'counting' || phase === 'closing')) {
+      run.ignored++;
+      TT.$('#sb-ignored').textContent = num(run.ignored);
+    }
+    if (hold.reps.length === 1) padSub.textContent = 'Space is held down: its repeats are not counted';
+  }
+  function released() {
+    var h = hold;
+    hold = null;
+    pad.classList.remove('is-down');
+    if (!h || !h.reps.length) return;
+    var reps = h.reps, delay = h.down === null ? null : Math.round(reps[0] - h.down);
+    var rate = reps.length >= 2 ? Math.round((reps.length - 1) * 10000 / (reps[reps.length - 1] - reps[0])) : null;
+    TT.$('#sb-delay').textContent = delay === null ? '–' : delay + ' ms';
+    TT.$('#sb-reprate').textContent = rate === null ? '–' : (rate / 10).toFixed(1);
+    var held = h.down === null ? null : (reps[reps.length - 1] - h.down) / 1000;
+    TT.$('#sb-rep-note').textContent = 'Measured from ' + num(reps.length) + (reps.length === 1 ? ' repeat' : ' repeats') +
+      (held === null ? '' : ' while Space was held for ' + held.toFixed(1) + ' seconds') + '.' +
+      (rate === null ? ' Hold it longer to measure the repeat rate.' : '');
+    say('Key repeat: ' + (delay === null ? '' : 'delay ' + delay + ' milliseconds, ') +
+      (rate === null ? 'hold longer to measure the rate.' : (rate / 10).toFixed(1) + ' repeats per second.'));
+    if (phase === 'counting') padSub.textContent = 'Repeats were left out. Keep pressing';
+    else if (phase === 'done') padSub.textContent = 'Press Space or tap for another test';
+    else if (phase === 'idle') padSub.textContent = startText();
+  }
+
+  // ---- Input ----
+  function isSpace(e) { return e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar'; }
+  // Space counts unless something else on the page should get it: a button,
+  // a link, the FAQ or a choice that is not ticked yet.
+  function spaceIsOurs() {
+    var a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement || a === pad) return true;
+    return a.name === 'sb-len' && a.checked;
+  }
+  document.addEventListener('keydown', function (e) {
+    if (!isSpace(e) || e.ctrlKey || e.metaKey || e.altKey || !spaceIsOurs()) return;
+    e.preventDefault();   // no scrolling, no button press
+    var t = stamp(e);
+    if (e.repeat) { repeatSeen(t); return; }
+    hold = { down: t, reps: [] };
+    spaceDown = true;
+    pad.classList.add('is-down');
+    press(t, true);
+  });
+  document.addEventListener('keyup', function (e) {
+    if (!isSpace(e)) return;
+    if (spaceIsOurs()) e.preventDefault();
+    if (spaceDown || hold) { spaceDown = false; released(); }
+  });
+  window.addEventListener('blur', function () { if (hold) released(); spaceDown = false; });
+  pad.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse') {
+      if (phase !== 'counting') {
+        padSub.textContent = 'Mouse clicks are not counted here: press Space, or tap this key on a touchscreen';
+        say('Mouse clicks are not counted here. Press Space, or tap this key on a touchscreen. The CPS test counts mouse clicks.');
+      }
+      return;
+    }
+    press(stamp(e), false);
+  });
+  // Keep the focus on the button after a tap or click, so Space goes on counting.
+  pad.addEventListener('pointerup', function () { if (document.activeElement !== pad) pad.focus({ preventScroll: true }); });
+  pad.addEventListener('click', function (e) { e.preventDefault(); });
+
+  TT.$$('input[name="sb-len"]').forEach(function (r) {
+    r.addEventListener('change', function () { writeHash(); stopAll('Counting stopped.'); });
+  });
+  TT.$('#sb-reset').addEventListener('click', function () {
+    var was = phase === 'counting' || phase === 'closing' || !!run;
+    TT.$('#sb-result').hidden = true;
+    stopAll('');
+    say(was ? 'Counter reset to 0.' : 'Nothing to reset yet.');
+    // Otherwise the next Space would press Reset again instead of counting.
+    pad.focus({ preventScroll: true });
+  });
+  copyBtn.addEventListener('click', function (e) {
+    var text = copyText();
+    if (text) TT.copy(text, e.currentTarget);
+  });
+  window.addEventListener('hashchange', function () { applyHash(); stopAll('Counting stopped.'); });
+  // Back and Forward can show the page again with a count frozen half way,
+  // or with other choices restored after this script ran.
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted || readHash()) applyHash();
+    writeHash();
+    stopAll('');
+  });
+
+  applyHash();
+  idleView(false);
+})();
+</script>
