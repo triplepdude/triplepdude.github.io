@@ -26,8 +26,9 @@
  * guide table that is too wide for a phone, a long line in a guide's code
  * block on a phone (on a sample page that only a full run builds), the
  * time a paste over a long text takes on Word Counter, a link to a quoted
- * FAQ answer on a page without a text box, and the shared image decoder
- * with a canvas size limit like Safari's.
+ * FAQ answer on a page without a text box, the shared image decoder
+ * with a canvas size limit like Safari's, and front matter values cut short
+ * by a " #" that YAML reads as a comment.
  *
  * Needs `jekyll` (or $JEKYLL) and the `playwright` package on the module path.
  */
@@ -486,8 +487,40 @@ async function canvasLimitChecks(browser, base, problems) {
 }
 
 // Checks of the shared pages and files, run once on a full build.
+// Lines of a page's front matter where a plain (unquoted) YAML value meets
+// " #", which YAML reads as the start of a comment, so the rest of the value
+// is dropped. Block scalars (| and >) keep # as text and are skipped.
+function hashCuts(src) {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(src);
+  if (!fm) return [];
+  const cut = [];
+  let block = -1; // a block scalar's lines are indented past this column
+  fm[1].split(/\r?\n/).forEach((line, i) => {
+    const indent = line.length - line.trimStart().length;
+    if (block >= 0) {
+      if (!line.trim() || indent > block) return;
+      block = -1;
+    }
+    if (/^\s*(#|$)/.test(line)) return; // a comment or a blank line
+    const m = /^(\s*(?:-\s+)?)([^\s:#][^:#]*?):(?:\s+(.*))?$/.exec(line);
+    const value = m ? (m[3] || '') : line.trim();
+    if (m && /^[|>][-+0-9]*\s*(#.*)?$/.test(value)) { block = m[1].length; return; }
+    if (/^["']/.test(value)) return;
+    if (/(^|\s)#/.test(value)) cut.push(i + 2);
+  });
+  return cut;
+}
+
 async function siteChecks(browser, base, problems) {
   const slugs = fs.readdirSync(path.join(ROOT, '_tools')).map(f => f.replace(/\.(html|md)$/, ''));
+  // A value cut at " #" in the front matter: eight FAQ answers once lost
+  // everything after "the # sign", and a question "What is #FF5733 in RGB?"
+  // showed as "What is".
+  for (const f of fs.readdirSync(path.join(ROOT, '_tools')).sort()) {
+    for (const line of hashCuts(fs.readFileSync(path.join(ROOT, '_tools', f), 'utf8'))) {
+      problems.push(`_tools/${f}, line ${line}: a front matter value is cut at " #", which YAML reads as a comment; quote the value`);
+    }
+  }
   const { context, page } = await newPage(browser, base, { width: 1280, height: 900 }, problems);
   const get = async p => {
     const resp = await page.request.get(base + p);
