@@ -1467,7 +1467,7 @@
       for (var i = 0; i < sizes.length; i++) {
         var s = sizes[i], k = Math.min(s / d[0], s / d[1]);
         var dw = Math.max(1, Math.round(d[0] * k)), dh = Math.max(1, Math.round(d[1] * k));
-        var fit = scaled(src, dw, dh), c = make(s, s);
+        var fit = await shrink(src, dw, dh), c = make(s, s);
         ctx(c).drawImage(fit, Math.floor((s - dw) / 2), Math.floor((s - dh) / 2));
         fit.width = 0;
         var b = await blobOf(c, 'image/png');
@@ -1504,7 +1504,7 @@
       },
       encode: async function (src, o) {
         if (o.fmt === 'ico') return ico(src, o.sizes);
-        var c = scaled(src, o.width, o.height, o.background);
+        var c = await shrink(src, o.width, o.height, o.background);
         try {
           if (o.fmt === 'bmp') return await bmp(c, o.dpi);
           if (o.fmt === 'tiff') return await tiff(c, o.dpi);
@@ -1543,7 +1543,13 @@
     } catch (e) { return false; }
   })();
   function isBitmap(x) { return typeof ImageBitmap !== 'undefined' && x instanceof ImageBitmap; }
-  function resize(src, w, h) { return pageOps.scaled(src && src.bitmap ? src.bitmap : src, Math.max(1, Math.round(w)), Math.max(1, Math.round(h))); }
+  function resize(src, w, h) {
+    try {
+      return pageOps.scaled(src && src.bitmap ? src.bitmap : src, Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
+    } catch (e) {
+      throw e.code === 'TOO_BIG' ? fail('TOO_BIG', 'The image is too large for this browser to resize here. Try a desktop browser.') : e;
+    }
+  }
 
   // Pixel work on an image held by a worker (res._h), or on a canvas/bitmap on
   // the page: in a worker when possible (a transferred copy), else right here.
@@ -2035,7 +2041,10 @@
         throw fail('CORRUPT', AVIF_BAD);
       }
     }
-    if (inWorker && !lazy && !canvas) canvas = await toCanvas(res);
+    if (inWorker && !lazy && !canvas) {
+      // Where the page cannot draw it (TOO_BIG), the worker's copy is freed: the caller gets no result to release.
+      try { canvas = await toCanvas(res); } catch (e) { release(res); throw e; }
+    }
     return res;
   }
   // An ImageBitmap of any drawable; a partly loaded <img> needs a canvas in between.
@@ -2055,10 +2064,10 @@
     if (!res) throw fail('CORRUPT', 'There is no image.');
     var d = Object.getOwnPropertyDescriptor(res, 'canvas');
     if (!res._h) return d && d.get ? res.canvas : res;
-    var r = await runOn(res._h.w, { cmd: 'get', key: res._h.key });
+    var r = await runOn(res._h.w, { cmd: 'get', key: res._h.key }), c;
     if (!r.ok) throw fail('CORRUPT', 'This image was already released. Open the file again.');
-    var c = drawCanvas(r.bitmap, res.width, res.height);
-    r.bitmap.close();
+    // The full-size copy is closed at once, also where it is too big to draw (TOO_BIG).
+    try { c = drawCanvas(r.bitmap, res.width, res.height); } finally { r.bitmap.close(); }
     if (res._setCanvas) res._setCanvas(c);
     return c;
   }
