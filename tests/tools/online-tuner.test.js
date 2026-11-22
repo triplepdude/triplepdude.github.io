@@ -1,9 +1,9 @@
 // getUserMedia is stubbed with a silent stream, and where the page brings that
 // stream into its audio context (createMediaStreamSource) it gets an
 // OscillatorNode made in that same context instead, so the tuner hears exact,
-// known frequencies. (A tone from a second context, passed over as a stream, is
-// resampled on the way as the two contexts' clocks drift apart; on a busy
-// machine that bent its pitch by up to 9 cents for a moment.) Expected values
+// known frequencies. (A tone from a second context, passed over as a stream,
+// now and then lost a 10 ms block on a busy machine, played as silence, and the
+// test failed on that dropout instead of on the page.) Expected values
 // were computed in python3 with f = A4 * 2 ** ((midi - 69) / 12) and
 // cents = 1200 * log2(f / target):
 //   E2 82.4069, A2 110, D3 146.8324, G3 195.9977, E4 329.6276, B0 30.8677,
@@ -187,7 +187,7 @@ module.exports = async ({ page, open, assert, base }) => {
   assert.match(await text('#otn-level'), /^−(9|1\d)$/); // 0.3 amplitude sine: 20*log10(0.3/sqrt(2)) = -13.5 dBFS
   // Dropouts: a browser that falls behind with the microphone's sound plays
   // silence until it catches up, so 10 ms of silence is inserted into the note.
-  // Read through, that pulled A2 up to 13 cents flat for as long as the gap
+  // Read through, that pulled A2 up to 18 cents flat for as long as the gap
   // stayed in the 85 ms analysis window; such windows now give no reading.
   // The note comes from a looped one-second buffer here (110 Hz fits it a whole
   // number of times), which can stop and carry on from where it stopped.
