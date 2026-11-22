@@ -301,6 +301,44 @@ module.exports = async ({ page, open, assert }) => {
   assert.equal(drawing.inView, 0, 'the blocks in view are drawn first');
   assert.deepEqual([drawing.printed, drawing.busy], [0, 'false'], 'everything drawn before printing');
   await settle();
+  // While a long result is drawn, what is on screen stays where it is, in the middle of the result
+  // or below it, though a block is rarely as tall as its box was (on a phone, where lines wrap, up
+  // to 3,200 px taller). The browser's own scroll anchoring let the rows on screen drift by 32,000 px
+  // at 390 px wide and the guide below the result by 150,000 px; at 1280 px it holds, so it would
+  // add its correction to the page's own if the page left it on.
+  for (const size of [{ width: 390, height: 844 }, { width: 1280, height: 900 }]) {
+    await page.setViewportSize(size);
+    for (const where of ['middle', 'below']) {
+      const d = await page.evaluate(async ([a, b, where]) => {
+        const out = document.querySelector('#tc-out');
+        document.querySelector('#tc-a').value = a;
+        const B = document.querySelector('#tc-b');
+        B.value = b;
+        B.dispatchEvent(new Event('input', { bubbles: true }));
+        // As soon as the result is in the page, jump past the blocks still to draw.
+        while (!out.querySelector('.tc-hole')) await new Promise(r => setTimeout(r, 5));
+        let mark = null;
+        if (where === 'below') {
+          mark = document.querySelector('.prose h2');
+          mark.scrollIntoView({ block: 'start', behavior: 'instant' });
+        } else {
+          const parts = out.querySelectorAll('.tc-hole, .tc-blk');
+          parts[parts.length >> 1].scrollIntoView({ block: 'start', behavior: 'instant' });
+          for (let i = 0; i < 30 && !mark; i++) {
+            await new Promise(r => requestAnimationFrame(r));
+            mark = [...out.querySelectorAll('tr')].find(e => { const r = e.getBoundingClientRect(); return r.top > 50 && r.top < 400; });
+          }
+          if (!mark) return { holes: 0, moved: 'no row came into view' };
+        }
+        const holes = out.querySelectorAll('.tc-hole').length, top = mark.getBoundingClientRect().top;
+        while (out.getAttribute('aria-busy') !== 'false') await new Promise(r => requestAnimationFrame(r));
+        return { holes, moved: Math.round(mark.getBoundingClientRect().top - top) };
+      }, [manyA.join('\n'), manyB.join('\n') + '\n', where]);
+      assert.ok(d.holes > 5, `${size.width} px, ${where}: ${d.holes} blocks left to draw after the jump`);
+      assert.ok(Math.abs(d.moved) <= 1, `${size.width} px, ${where}: what was on screen moved ${d.moved} px while the comparison was drawn`);
+    }
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.style.overflowAnchor), '', 'scroll anchoring back on once drawn');
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   // Word mode splits running text into blocks too.
   await mode('word');
