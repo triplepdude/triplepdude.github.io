@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 
-def read_whole(raw, top):
+def read_whole(raw, top, eg):
     if len(raw) > 20:
         return 'too long for a number.'
     s = ''.join(str(unicodedata.digit(c)) if unicodedata.category(c) == 'Nd' else c for c in raw)
@@ -32,8 +32,8 @@ def read_whole(raw, top):
     if not all('0' <= c <= '9' for c in s):
         body = s.replace('.', '', 1) if s.count('.') == 1 else s.replace(',', '', 1) if s.count(',') == 1 else s.replace('٫', '', 1) if s.count('٫') == 1 else None
         if body is not None and all('0' <= c <= '9' for c in body):
-            return 'use a whole number, such as 25.'
-        return 'use digits only, such as 25.'
+            return f'use a whole number, such as {eg}.'
+        return f'use digits only, such as {eg}.'
     n = int(s)
     if not 1 <= n <= top:
         return f'use a number from 1 to {top}.'
@@ -43,8 +43,8 @@ def read_whole(raw, top):
 NUMBERS = ['25', '025', '240', '241', '0', '1', '1,5', '1.5', '1.', '.5', '1,000', '12٫5', '٢٥',
            '２５', '२५', '5²', ' 25', '25\t', '2 5', '2\t5', '-5', '+5', '1e2', '0x10',
            '0' * 18 + '25', '1' * 21, '　２５　']
-numbers = [[x, read_whole(x, 240)] for x in NUMBERS]
-every = [[x, read_whole(x, 12)] for x in ['12', '13', '2', '0']]
+numbers = [[x, read_whole(x, 240, 25)] for x in NUMBERS]
+every = [[x, read_whole(x, 12, 4)] for x in ['12', '13', '2', '0', 'x', '2.5']]
 
 # ---- An unattended run: focus 1, short 1, long 2 minutes, a long break after every 2. ----
 LEN = {'focus': 1, 'short': 1, 'long': 2}

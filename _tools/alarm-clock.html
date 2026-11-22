@@ -35,8 +35,9 @@ howto: |
   computer not to sleep. While an alarm is set, the page asks to keep the
   screen on, and **Night mode** dims it to almost black. If the computer slept
   anyway, the page shows "Missed at 7:00 AM" when it wakes instead of ringing
-  late. The Clock apps of Windows and macOS also need the computer awake, so
-  for an alarm you cannot miss, use your phone's Clock app or an alarm clock.
+  late. Microsoft says the same of the Windows Clock app: the computer has to
+  stay awake. So for an alarm you cannot miss, use your phone's Clock app or
+  an alarm clock.
 
   ## Can I switch tabs or minimise the browser?
 
@@ -649,6 +650,8 @@ faq:
     return api;
   })();
   function volume() { var v = Number(volIn.value) / 100; return v * v; }
+  // Only after a click on the page; without one a browser refuses anyway.
+  function mayResume() { return !!audio.ctx && !audio.ready() && (!navigator.userActivation || navigator.userActivation.hasBeenActive); }
   function fadeSeconds() { return Number(fadeSel.value) || 0; }
   function clipReady() { return !!clipSound; }
   // The sound that rings: the visitor's file once it is decoded, else the choice.
@@ -865,6 +868,9 @@ faq:
   // tab's code, and re-timed every few seconds.
   function prearm() {
     var next = soonest(), now = Date.now();
+    // A sound card the browser suspended since the last click is asked to
+    // resume, which Chrome and Firefox allow once the page has had a click.
+    if (next && next.at - now <= PREARM && mayResume()) audio.unlock();
     if (!next || ringing().length || !audio.ready() || next.at - now > PREARM) { if (pre) { audio.cancel(pre); pre = null; } return; }
     var left = (next.at - now) / 1000, at = audio.now() + left, key = soundKey();
     if (pre && !pre.cancelled && pre.for === next.at && pre.key === key && pre.fade === fadeSeconds() && (Math.abs(pre.at - at) < 0.03 || left < 0.5)) return;
@@ -953,6 +959,7 @@ faq:
     if (ringing().length) {
       // Alarms that rang before a click let the page play sound start
       // sounding at the next check after one.
+      if (mayResume()) audio.unlock();
       if (began.length || !ringH || ringH.cancelled) soundOn();
       audio.extend(ringH);
       if (!document.hidden && now - lastVibe > 29000) vibrate(true);
@@ -1073,7 +1080,7 @@ faq:
       if (e.detail > 1) return;
       if (a.state === 'off') turnOn(a); else turnOff(a);
     });
-    c.remove.addEventListener('click', function () { remove(a); });
+    c.remove.addEventListener('click', function (e) { if (e.detail > 1) return; remove(a); });
   }
   function onTime(a) {
     var before = a.h + ':' + a.m + '!' + a.at;
@@ -1110,7 +1117,8 @@ faq:
     commit();
     armTimer(true);
   }
-  addBtn.addEventListener('click', function () {
+  addBtn.addEventListener('click', function (e) {
+    if (e.detail > 1) return;
     if (alarms.length >= MAX_ALARMS) { showMsg('10 alarms is the most this page keeps. Remove one to add another.'); return; }
     var a = makeAlarm({ state: 'off' });
     alarms.push(a);

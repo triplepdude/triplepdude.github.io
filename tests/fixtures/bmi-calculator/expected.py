@@ -137,6 +137,8 @@ for c in [
     {'name': 'CDC 5 ft 9 in, obesity edge', 'hu': 'ftin', 'ft': '5', 'in': '9', 'inches': '69', 'wu': 'lb', 'lb': '203', 'lbValue': '203'},
     {'name': 'CDC 5 ft 9 in, class 2 edge', 'hu': 'ftin', 'ft': '5', 'in': '9', 'inches': '69', 'wu': 'lb', 'lb': '237', 'lbValue': '237'},
     {'name': 'CDC 5 ft 9 in, class 3 edge', 'hu': 'ftin', 'ft': '5', 'in': '9', 'inches': '69', 'wu': 'lb', 'lb': '271', 'lbValue': '271'},
+    {'name': 'exact pound factor: 0.4536 would give 20.9', 'hu': 'ftin', 'ft': '4', 'in': '8', 'inches': '56', 'wu': 'lb', 'lb': '93', 'lbValue': '93'},
+    {'name': 'exact factors: 703 would give 34.8', 'hu': 'ftin', 'ft': '5', 'in': '9', 'inches': '69', 'wu': 'lb', 'lb': '236', 'lbValue': '236'},
     {'name': 'exactly 24.95 rounds up', 'hu': 'cm', 'cm': '200', 'cmValue': '200', 'wu': 'kg', 'kg': '99.8', 'kgValue': '99.8'},
     {'name': 'just under 24.95', 'hu': 'cm', 'cm': '200', 'cmValue': '200', 'wu': 'kg', 'kg': '99.79', 'kgValue': '99.79'},
     {'name': 'exactly 18.45 rounds up', 'hu': 'cm', 'cm': '200', 'cmValue': '200', 'wu': 'kg', 'kg': '73.8', 'kgValue': '73.8'},
@@ -147,6 +149,10 @@ for c in [
     {'name': 'NICE class 3 at 37.5', 'hu': 'cm', 'cm': '200', 'cmValue': '200', 'wu': 'kg', 'kg': '150', 'kgValue': '150', 'nice': True},
     {'name': 'class 3', 'hu': 'cm', 'cm': '160', 'cmValue': '160', 'wu': 'lb', 'lb': '1,000', 'lbValue': '1000', 'wread': 'Read as 1,000 lb.'},
     {'name': 'waist, increased risk', 'hu': 'cm', 'cm': '180', 'cmValue': '180', 'wu': 'kg', 'kg': '85', 'kgValue': '85', 'waist': '96', 'age': '45'},
+    {'name': 'waist exactly 0.40', 'hu': 'cm', 'cm': '180', 'cmValue': '180', 'wu': 'kg', 'kg': '72', 'kgValue': '72', 'waist': '72'},
+    {'name': 'waist just under 0.40', 'hu': 'cm', 'cm': '180', 'cmValue': '180', 'wu': 'kg', 'kg': '72', 'kgValue': '72', 'waist': '71'},
+    {'name': 'waist exactly half the height', 'hu': 'cm', 'cm': '180', 'cmValue': '180', 'wu': 'kg', 'kg': '72', 'kgValue': '72', 'waist': '90'},
+    {'name': 'waist exactly 0.60', 'hu': 'cm', 'cm': '180', 'cmValue': '180', 'wu': 'kg', 'kg': '72', 'kgValue': '72', 'waist': '108'},
     {'name': 'waist, BMI 35 or more', 'hu': 'ftin', 'ft': '5', 'in': '4', 'inches': '64', 'wu': 'lb', 'lb': '210', 'lbValue': '210', 'waist': '44'},
     {'name': '20 years old is an adult', 'hu': 'cm', 'cm': '165', 'cmValue': '165', 'wu': 'kg', 'kg': '58', 'kgValue': '58', 'age': '20'},
 ]:
@@ -170,10 +176,13 @@ for sex, y, m, h_cm, w_kg in [
     ('2', 9, 6, '140', '41.552'),    # CDC worked example: 92.2, z 1.4215
     ('2', 15, 4, '160', '69.632'),   # BMI 27.2: CDC's inverse example (z 1.5)
     ('1', 7, 8, '120', '34.704'),    # BMI 24.1: CDC's inverse example (98.7th)
+    ('1', 4, 2, '100', '17.822007'),  # just above the 95th percentile (17.821886): the extended method, 100% of it
     ('1', 2, 0, '86', '12.1'), ('2', 2, 0, '84', '9.5'), ('1', 3, 5, '97', '24'), ('2', 5, 11, '112', '17.4'),
     ('1', 6, 0, '116', '28'), ('2', 8, 3, '128', '25.9'), ('1', 10, 7, '142', '33.3'), ('2', 11, 0, '146', '60'),
     ('1', 12, 9, '155', '90'), ('2', 13, 2, '157', '38'), ('1', 14, 6, '168', '120'), ('2', 16, 1, '163', '52.5'),
     ('1', 17, 11, '178', '70'), ('2', 18, 6, '165', '70'), ('1', 19, 11, '180', '160'), ('2', 19, 0, '170', '40'),
+    ('1', 19, 6, '180', '115'),     # BMI 35.5 but under 120% of the 95th: severe by BMI
+    ('2', 19, 0, '165', '110'),     # BMI 40.4, under 140%: class 3 by BMI
     ('1', 9, 0, '135', '95'), ('2', 4, 9, '105', '13.9'), ('1', 15, 0, '170', '102'), ('2', 12, 0, '150', '80'),
 ]:
     months = y * 12 + m

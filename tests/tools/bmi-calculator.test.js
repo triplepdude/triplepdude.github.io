@@ -84,6 +84,10 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     assert.deepEqual(await tableRow(`${hText} (your height)`) || await tableRow(hText), [await tableRow(`${hText} (your height)`) ? `${hText} (your height)` : hText, c.range.healthy, c.range.over, c.range.obese], `chart row, ${c.name}`);
     assert.equal(await invalid(), '', c.name);
     assert.equal(r.note.includes('NICE'), !!c.nice, c.name);
+    // Your own height is marked in the chart, or added to it once.
+    const listed = c.hu === 'cm' ? +c.cmValue % 5 === 0 && +c.cmValue >= 145 && +c.cmValue <= 200 : +c.inches % 2 === 0 && +c.inches >= 58 && +c.inches <= 78;
+    assert.equal(await page.$$eval('#bm-tbody tr', t => t.length), (c.hu === 'cm' ? 12 : 11) + (listed ? 0 : 1), `chart rows, ${c.name}`);
+    assert.equal(await page.$$eval('#bm-tbody tr.is-you', t => t.length), 1, c.name);
   }
   // The CDC's 5 ft 9 in example, row by row.
   await setAdult(data.adults.find(c => c.name === 'guide, imperial'));

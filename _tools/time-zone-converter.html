@@ -1,0 +1,1712 @@
+---
+title: Time Zone Converter and Meeting Planner
+description: Convert a time between cities, countries, UTC offsets and abbreviations such as EST or IST, with daylight saving and a meeting planner. Runs in your browser.
+category: Date & Time
+keywords: [time zone converter, time converter, meeting planner, time zone meeting planner, est to ist, pst to est, utc to est, time difference between time zones]
+howto: |
+  ## How to convert a time between time zones
+
+  Type a question such as `3pm EST to IST` or `10:30 London to Tokyo and
+  Sydney`, or set the date and time of the first place and add others by
+  city, country, zone name (Europe/London), UTC offset (UTC+5:30) or
+  abbreviation (EST, IST, AoE). Up to 12 places are compared. Each shows its
+  UTC offset, whether its date differs, its next clock change and any change
+  in the time difference over the next 12 months. When an abbreviation, a
+  city name or a country has more than one meaning or time zone, the page
+  says which one it used and offers the others. **Now** follows your
+  device's clock.
+
+  In the planner each column is one hour of the first place's day: tap one,
+  or use the arrow keys, to pick it. Below it, the times that fall within
+  everyone's working hours are listed.
+
+  ## What is 3 pm EST in UK and India time?
+
+  | New York | UK | India |
+  |---|---|---|
+  | 3:00 pm EST (winter) | 8:00 pm GMT | 1:30 am IST, next day |
+  | 3:00 pm EDT (summer) | 8:00 pm BST | 12:30 am IST, next day |
+
+  EST is UTC−5 and EDT is UTC−4; ET means whichever of the two New York is
+  on. Many people write EST all year, so a summer EST is read as New York
+  time: the page says so and offers fixed UTC−5 with one tap. CST, MST, PST
+  and other standard-time abbreviations work the same way.
+
+  ## Why is London sometimes only four hours ahead of New York?
+
+  The US changes its clocks on the second Sunday of March and the first
+  Sunday of November, the UK and the EU on the last Sundays of March and
+  October. In between, the gap is 4 hours instead of 5: in 2027 from 14 to
+  28 March and from 31 October to 7 November. The weekly table shows how a
+  meeting's local times move through the year.
+
+  ## Skipped and repeated times
+
+  When clocks go forward, an hour is skipped: 02:30 on 14 March 2027 does not
+  exist in New York, so the page shows that moment as 03:30 EDT. When they go
+  back, an hour repeats: 01:30 on 7 November 2027 happens twice, and you pick
+  which one you mean.
+
+  ## When can London, New York and India all meet?
+
+  No hour falls between 9:00 and 17:00 in all three. The usual compromise is
+  early morning in New York: in winter 8:00 EST is 13:00 in London and 18:30
+  in India, in summer 8:00 EDT is 13:00 BST and 17:30 IST.
+
+  ## Calendar files and links
+
+  **Download .ics** saves the meeting for Google Calendar, Outlook or Apple
+  Calendar with its times in UTC, so every guest sees it in their own time
+  zone. A weekly series is saved as one event per date, which keeps each date
+  at the right local time across clock changes. The page address keeps the
+  places and the time, so you can share it as a link.
+
+  ## Where the rules come from
+
+  The maths uses your browser's copy of the IANA time zone database. Eight
+  zones changed their rules in 2026: British Columbia (UTC−7 all year),
+  Alberta and the Northwest Territories (UTC−6), Manitoba (UTC−5), Morocco
+  and Western Sahara (UTC+0), Cuba (UTC−4 until 7 November 2027) and Moldova
+  (clocks change at the EU's hours). Browsers with data older than tz 2026f
+  get some of these wrong, so the page checks them and shows the corrected
+  time. Place names come from GeoNames (CC BY 4.0). For Unix time, use the
+  [Unix timestamp converter](/unix-timestamp-converter/); to show a time in
+  each reader's own zone on Discord, use the
+  [Discord timestamp generator](/discord-timestamp-generator/).
+faq:
+  - q: Is UTC the same as GMT?
+    a: "On a clock, yes: both are UTC+00:00. UTC is the world's reference time scale, kept by atomic clocks, while GMT is also the name of the UK's winter time. From the last Sunday of March to the last Sunday of October the UK is on BST, UTC+01:00, so a summer time given in GMT is an hour behind UK clocks."
+  - q: What does AoE mean in a deadline?
+    a: "Anywhere on Earth: UTC−12:00, the last time zone in which a date ends. A deadline of 23:59 AoE on 15 May has passed everywhere once it is 11:59 UTC on 16 May. The convention comes from IEEE 802.16 balloting and is common for conference submissions."
+  - q: Why does my computer show the wrong time for Vancouver, Calgary or Winnipeg?
+    a: British Columbia, Alberta, the Northwest Territories and Manitoba stopped changing their clocks in 2026, and devices or browsers that have not been updated still apply the old rules. This page checks the eight zones that changed in 2026 and marks every row it had to correct. Updating your browser and operating system fixes the other apps too.
+  - q: Is anything I type sent to a server?
+    a: No. Times are worked out in your browser with its own time zone rules, and the current time comes from your device's clock. The list of places is a file on this site, loaded the first time you search, and nothing is stored; the places and time you pick are kept only in the page address.
+---
+<style>
+.tzc-h { margin: 28px 0 8px; font-size: 1.15rem; }
+.tzc-ask { display: flex; flex-wrap: wrap; gap: 8px; }
+.tzc-ask input { flex: 1 1 220px; min-width: 0; }
+.tzc-ask .btn { flex: 0 0 auto; }
+.tzc .hint code { font-family: var(--mono); font-size: 0.95em; }
+.tzc-when > .field { flex: 1 1 150px; max-width: 230px; }
+.tzc-when .btn { flex: 0 0 auto; }
+.tzc-fs { margin: 0 0 12px; padding: 0; border: 0; min-width: 0; }
+.tzc-fs legend { padding: 0; margin-bottom: 2px; }
+.tzc-fs .checks { margin: 0; }
+.tzc-live { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+.tzc-rows { display: grid; gap: 10px; margin: 0 0 12px; padding: 0; list-style: none; }
+.tzc-row { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); min-width: 0; }
+.tzc-row.is-home { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.tzc-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 16px; }
+.tzc-place { min-width: 0; flex: 1 1 200px; }
+.tzc-name { font-size: 1.05rem; overflow-wrap: anywhere; }
+.tzc-sub { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.tzc-face { text-align: right; flex: 0 1 auto; }
+.tzc-t { display: block; font-size: 1.6rem; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tzc-d { font-size: 14px; }
+.tzc-tag { display: inline-block; margin-left: 4px; padding: 0 7px; border: 1px solid var(--field-border); border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; vertical-align: 1px; }
+.tzc-line { margin: 6px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.tzc-line b { font-weight: 600; }
+.tzc-note { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; background: var(--surface-2); font-size: 14px; overflow-wrap: anywhere; }
+.tzc-note.is-warn { border-left-color: var(--danger); }
+.tzc-note .btn { margin: 6px 6px 0 0; }
+.tzc-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tzc-combo { position: relative; }
+.tzc-list { position: absolute; z-index: 5; top: 100%; left: 0; right: 0; max-height: 330px; margin: 4px 0 0; padding: 4px; overflow-y: auto; list-style: none; background: var(--surface); border: 1px solid var(--field-border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.15); }
+.tzc-opt { min-height: 44px; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 15px; overflow-wrap: anywhere; }
+.tzc-opt small { display: block; color: var(--muted); font-size: 13px; }
+.tzc-opt[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.tzc-opt.is-info { cursor: default; color: var(--muted); }
+.tzc-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 8px; padding: 0; list-style: none; font-size: 13px; }
+.tzc-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.tzc-swatch { display: inline-block; width: 22px; height: 16px; border: 1px solid var(--border); border-radius: 3px; }
+.tzc-plan-wrap { position: relative; max-width: 100%; margin: 0 0 12px; overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+.tzc-plan { display: flex; width: max-content; min-width: 100%; }
+.tzc-names { position: sticky; left: 0; z-index: 2; flex: 0 0 96px; width: 96px; background: var(--surface); border-right: 1px solid var(--border); }
+.tzc-names div { display: block; height: 44px; padding: 0 6px; overflow: hidden; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; line-height: 44px; white-space: nowrap; text-overflow: ellipsis; }
+.tzc-names div:last-child, .tzc-cell:last-child { border-bottom: 0; }
+.tzc-cols { display: flex; }
+.tzc-cols:focus { outline: none; }
+.tzc-cols:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.tzc-col { flex: 0 0 36px; width: 36px; cursor: pointer; border-right: 1px solid var(--border); }
+.tzc-col:last-child { border-right: 0; }
+.tzc-col[aria-selected="true"] { position: relative; }
+.tzc-col[aria-selected="true"]::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--text); border-radius: 3px; pointer-events: none; }
+.tzc-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 44px; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tzc-cell small { font-size: 10px; font-weight: 400; }
+.tzc-work { background: var(--accent-soft); font-weight: 700; }
+.tzc-eve { background: var(--surface-2); }
+.tzc-night { background: repeating-linear-gradient(135deg, var(--surface) 0 5px, var(--border) 5px 7px); }
+.tzc-swatch.tzc-night { background: repeating-linear-gradient(135deg, var(--surface) 0 5px, var(--border) 5px 7px); }
+.tzc-work-row > .field { flex: 1 1 190px; max-width: 280px; }
+.tzc-runs { margin: 0 0 16px; padding: 0; list-style: none; }
+.tzc-runs li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.tzc-runs li span { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.tzc table.data td, .tzc table.data th { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tzc table.data td.tzc-chg { font-weight: 700; }
+.tzc table.data th[scope="row"] { min-width: 9em; white-space: normal; }
+.tzc-export > .field { flex: 1 1 160px; }
+.tzc-export > .tzc-title { flex: 2 1 220px; }
+.tzc-small { margin: 20px 0 0; color: var(--muted); font-size: 13px; }
+.tzc-small p { margin: 0 0 6px; }
+@media (pointer: coarse) {
+  .tzc-col { flex-basis: 44px; width: 44px; }
+}
+@media (max-width: 480px) {
+  .tzc-face { text-align: left; flex-basis: 100%; }
+  .tzc-t { font-size: 1.45rem; }
+}
+</style>
+
+<div class="tzc">
+  <form id="tzc-ask-form" class="field" autocomplete="off" novalidate>
+    <label for="tzc-ask">Type a time and places</label>
+    <div class="tzc-ask">
+      <input type="text" id="tzc-ask" maxlength="300" placeholder="3pm EST to IST" enterkeyhint="go" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="tzc-ask-hint tzc-ask-error">
+      <button class="btn" type="submit" id="tzc-ask-go">Convert</button>
+    </div>
+    <span class="hint" id="tzc-ask-hint">For example <code>10:30 London to Tokyo and Sydney</code>, <code>noon PST tomorrow in UTC+5:45</code> or <code>now in Lagos</code>.</span>
+  </form>
+  <p class="msg error" id="tzc-ask-error" role="alert"></p>
+  <p class="msg ok" id="tzc-ask-ok"></p>
+
+  <div class="row tzc-when">
+    <div class="field">
+      <label for="tzc-date">Date in <span class="tzc-home-name">your time zone</span></label>
+      <input type="date" id="tzc-date" min="1900-01-01" max="2100-12-31" aria-describedby="tzc-when-error">
+    </div>
+    <div class="field">
+      <label for="tzc-time">Time in <span class="tzc-home-name">your time zone</span></label>
+      <input type="time" id="tzc-time" aria-describedby="tzc-when-error">
+    </div>
+    <button class="btn secondary" type="button" id="tzc-now" aria-pressed="true">Now</button>
+  </div>
+  <p class="msg error" id="tzc-when-error" role="alert"></p>
+  <fieldset class="tzc-fs">
+    <legend class="label">Clock</legend>
+    <div class="checks">
+      <label class="check"><input type="radio" name="tzc-clock" value="24" id="tzc-c24"> 24-hour</label>
+      <label class="check"><input type="radio" name="tzc-clock" value="12" id="tzc-c12"> 12-hour (am/pm)</label>
+    </div>
+  </fieldset>
+  <p class="tzc-live" id="tzc-live"></p>
+
+  <h2 class="tzc-h" id="tzc-places-h">Places</h2>
+  <ol class="tzc-rows" id="tzc-rows" aria-labelledby="tzc-places-h"></ol>
+
+  <div class="field tzc-combo">
+    <label for="tzc-add">Add a place</label>
+    <input type="text" id="tzc-add" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tzc-sugg" maxlength="100" placeholder="City, country, zone or EST" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-describedby="tzc-add-hint tzc-add-error">
+    <ul class="tzc-list" id="tzc-sugg" role="listbox" aria-label="Matching places" hidden></ul>
+    <span class="hint" id="tzc-add-hint">Up to 12 places. Try Mumbai, Brazil, Europe/Paris, UTC−3 or AoE.</span>
+  </div>
+  <p class="msg error" id="tzc-add-error" role="alert"></p>
+
+  <h2 class="tzc-h" id="tzc-plan-h">Meeting planner</h2>
+  <p class="hint" id="tzc-plan-hint"></p>
+  <ul class="tzc-legend" aria-label="Colours in the planner">
+    <li><span class="tzc-swatch tzc-work"></span> Working hours (bold)</li>
+    <li><span class="tzc-swatch tzc-eve"></span> Morning or evening (07:00 to 22:00)</li>
+    <li><span class="tzc-swatch tzc-night"></span> Night (striped)</li>
+  </ul>
+  <div class="tzc-plan-wrap" id="tzc-plan-wrap">
+    <div class="tzc-plan">
+      <div class="tzc-names" id="tzc-plan-names" aria-hidden="true"></div>
+      <div class="tzc-cols" id="tzc-plan" role="listbox" aria-orientation="horizontal" tabindex="0" aria-labelledby="tzc-plan-h" aria-describedby="tzc-plan-hint"></div>
+    </div>
+  </div>
+  <div class="row tzc-work-row">
+    <div class="field">
+      <label for="tzc-ws">Work starts</label>
+      <select id="tzc-ws" aria-describedby="tzc-work-error"></select>
+    </div>
+    <div class="field">
+      <label for="tzc-we">Work ends</label>
+      <select id="tzc-we" aria-describedby="tzc-work-error"></select>
+    </div>
+  </div>
+  <p class="msg error" id="tzc-work-error" role="alert"></p>
+  <h3 class="tzc-h" id="tzc-overlap-h">When everyone can meet</h3>
+  <p class="tzc-line" id="tzc-overlap-sum"></p>
+  <ul class="tzc-runs" id="tzc-runs" aria-labelledby="tzc-overlap-h"></ul>
+
+  <h2 class="tzc-h" id="tzc-week-h">Every week at this time</h2>
+  <p class="hint" id="tzc-week-hint"></p>
+  <div class="table-wrap">
+    <table class="data" id="tzc-week" aria-labelledby="tzc-week-h"></table>
+  </div>
+
+  <h2 class="tzc-h">Save or share</h2>
+  <div class="row tzc-export">
+    <div class="field tzc-title">
+      <label for="tzc-title">Meeting name</label>
+      <input type="text" id="tzc-title" value="Meeting" maxlength="200" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="tzc-dur">Length</label>
+      <select id="tzc-dur">
+        <option value="15">15 min</option>
+        <option value="30">30 min</option>
+        <option value="45">45 min</option>
+        <option value="60" selected>1 hour</option>
+        <option value="90">1 h 30 min</option>
+        <option value="120">2 hours</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="tzc-rep">Repeat weekly</label>
+      <select id="tzc-rep">
+        <option value="1" selected>No, once</option>
+        <option value="4">4 times</option>
+        <option value="13">13 times</option>
+        <option value="26">26 times</option>
+        <option value="52">52 times</option>
+      </select>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" id="tzc-ics">Download .ics</button>
+    <button class="btn secondary" type="button" id="tzc-copy">Copy times</button>
+    <button class="btn secondary" type="button" id="tzc-link">Copy link</button>
+  </div>
+  <p class="msg error" id="tzc-export-error" role="alert"></p>
+
+  <p class="visually-hidden" id="tzc-status" role="status"></p>
+  <div class="tzc-small">
+    <p id="tzc-rules"></p>
+    <p>Place names: <a href="https://www.geonames.org/">GeoNames</a>, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>, a selection of 2,827 places.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$;
+  var DATA_URL = "{{ '/assets/vendor/geonames-cities/cities.txt' | relative_url }}";
+  var MAX_PLACES = 12, MAX_HASH = 3000, MAX_NAME = 60, MAX_ASK = 300, MAX_ADD = 100, MAX_TITLE = 200;
+  var MIN = 60000, HOUR = 3600000, DAY = 86400000;
+  var DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var TZ_VERSION = '2026f', TZ_DATE = '27 October 2026';
+  var AWAKE = [7 * 60, 22 * 60]; // morning and evening: 07:00 to 22:00
+
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+  // Cut text to n code points, never inside a surrogate pair.
+  function cut(s, n) { var a = Array.from(String(s)); return a.length > n ? a.slice(0, n).join('') : String(s); }
+
+  // ---------- Calendar arithmetic (proleptic Gregorian, days since 1970-01-01) ----------
+  function daysFromCivil(y, m, d) {
+    y -= m <= 2 ? 1 : 0;
+    var era = Math.floor(y / 400), yoe = y - era * 400;
+    var doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+    return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy - 719468;
+  }
+  function civil(z) {
+    var dow = ((z % 7) + 11) % 7;
+    z += 719468;
+    var era = Math.floor(z / 146097), doe = z - era * 146097;
+    var yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+    var doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+    var mp = Math.floor((5 * doy + 2) / 153), d = doy - Math.floor((153 * mp + 2) / 5) + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    return { y: yoe + era * 400 + (m <= 2 ? 1 : 0), m: m, d: d, dow: dow };
+  }
+  function daysInMonth(y, m) { return m === 12 ? 31 : daysFromCivil(y, m + 1, 1) - daysFromCivil(y, m, 1); }
+  function utcMs(y, mo, d, h, mi, s) { return ((daysFromCivil(y, mo, d) * 24 + h) * 60 + mi) * MIN + s * 1000; }
+
+  // ---------- Time zone engine ----------
+  // The browser's own rules (Intl) give each zone's offset; offsets typed by the visitor
+  // (UTC+05:30) are plain arithmetic and never go through Intl.
+  var MODERN = {
+    'Asia/Calcutta': 'Asia/Kolkata', 'Asia/Katmandu': 'Asia/Kathmandu', 'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+    'Asia/Rangoon': 'Asia/Yangon', 'Asia/Thimbu': 'Asia/Thimphu', 'Europe/Kiev': 'Europe/Kyiv',
+    'Atlantic/Faeroe': 'Atlantic/Faroe', 'America/Godthab': 'America/Nuuk', 'Pacific/Truk': 'Pacific/Chuuk',
+    'Pacific/Ponape': 'Pacific/Pohnpei', 'Pacific/Enderbury': 'Pacific/Kanton', 'Africa/Asmera': 'Africa/Asmara',
+    'America/Buenos_Aires': 'America/Argentina/Buenos_Aires', 'America/Catamarca': 'America/Argentina/Catamarca',
+    'America/Cordoba': 'America/Argentina/Cordoba', 'America/Jujuy': 'America/Argentina/Jujuy',
+    'America/Mendoza': 'America/Argentina/Mendoza', 'America/Indianapolis': 'America/Indiana/Indianapolis',
+    'America/Louisville': 'America/Kentucky/Louisville', 'America/Coral_Harbour': 'America/Atikokan'
+  };
+  var known = new Map();
+  function validZone(tz) {
+    if (!known.has(tz)) {
+      var ok = false;
+      try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); ok = /^[A-Za-z][A-Za-z0-9_+\-\/]*$/.test(tz); } catch (e) { ok = false; }
+      known.set(tz, ok);
+    }
+    return known.get(tz);
+  }
+  function modern(tz) { var m = MODERN[tz]; return m && validZone(m) ? m : tz; }
+  var DEVICE_TZ = (function () {
+    try { return modern(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'); } catch (e) { return 'UTC'; }
+  })();
+  var fmts = new Map();
+  function rawOff(ms, tz) { // seconds east of UTC, by the browser's rules
+    var f = fmts.get(tz);
+    if (!f) {
+      f = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, hourCycle: 'h23', era: 'short', year: 'numeric', month: 'numeric',
+        day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric'
+      });
+      fmts.set(tz, f);
+    }
+    var o = {};
+    f.formatToParts(new Date(ms)).forEach(function (p) { o[p.type] = p.value; });
+    var y = +o.year;
+    if (/^B/.test(o.era || '')) y = 1 - y;
+    return Math.round((utcMs(y, +o.month, +o.day, +o.hour % 24, +o.minute, +o.second) - Math.floor(ms / 1000) * 1000) / 1000);
+  }
+
+  // The tz 2026f check. Eight zones changed their rules in 2026 (tz 2026a to 2026f), and browsers
+  // built with older data still apply the old ones. Each period below is [start, end) in minutes
+  // since 1970 UTC, the offset older data gives and the offset tz 2026f gives, in minutes east of
+  // UTC. A browser whose offset matches the old one is corrected; one that gives anything else is
+  // trusted, as it may have newer data. Made by comparing tzdata 2026f (zic and Python zoneinfo)
+  // with Chromium 153 (tz 2025c), 2026 to 2040. Update with each tz release.
+  var STALE = {
+    'America/Vancouver': [[29892060,30083640,-480,-420],[30426300,30607800,-480,-420],[30950460,31131960,-480,-420],[31474620,31656120,-480,-420],[31998780,32180280,-480,-420],[32522940,32714520,-480,-420],[33057180,33238680,-480,-420],[33581340,33762840,-480,-420],[34105500,34287000,-480,-420],[34629660,34811160,-480,-420],[35153820,35335320,-480,-420],[35677980,35869560,-480,-420],[36212220,36393720,-480,-420],[36736380,36917880,-480,-420],[37260540,37343520,-480,-420]],
+    'America/Edmonton': [[29892000,30083580,-420,-360],[30426240,30607740,-420,-360],[30950400,31131900,-420,-360],[31474560,31656060,-420,-360],[31998720,32180220,-420,-360],[32522880,32714460,-420,-360],[33057120,33238620,-420,-360],[33581280,33762780,-420,-360],[34105440,34286940,-420,-360],[34629600,34811100,-420,-360],[35153760,35335260,-420,-360],[35677920,35869500,-420,-360],[36212160,36393660,-420,-360],[36736320,36917820,-420,-360],[37260480,37343520,-420,-360]],
+    'America/Inuvik': [[29892000,30083580,-420,-360],[30426240,30607740,-420,-360],[30950400,31131900,-420,-360],[31474560,31656060,-420,-360],[31998720,32180220,-420,-360],[32522880,32714460,-420,-360],[33057120,33238620,-420,-360],[33581280,33762780,-420,-360],[34105440,34286940,-420,-360],[34629600,34811100,-420,-360],[35153760,35335260,-420,-360],[35677920,35869500,-420,-360],[36212160,36393660,-420,-360],[36736320,36917820,-420,-360],[37260480,37343520,-420,-360]],
+    'America/Winnipeg': [[29891940,30083520,-360,-300],[30426180,30607680,-360,-300],[30950340,31131840,-360,-300],[31474500,31656000,-360,-300],[31998660,32180160,-360,-300],[32522820,32714400,-360,-300],[33057060,33238560,-360,-300],[33581220,33762720,-360,-300],[34105380,34286880,-360,-300],[34629540,34811040,-360,-300],[35153700,35335200,-360,-300],[35677860,35869440,-360,-300],[36212100,36393600,-360,-300],[36736260,36917760,-360,-300],[37260420,37343520,-360,-300]],
+    'America/Havana': [[29891820,30083340,-300,-240]],
+    'Africa/Casablanca': [[29831100,30032760,60,0],[30083160,30536760,60,0],[30597240,31050840,60,0],[31101240,31554840,60,0],[31615320,32068920,60,0],[32119320,32583000,60,0],[32633400,33087000,60,0],[33147480,33601080,60,0],[33651480,34105080,60,0],[34165560,34619160,60,0],[34679640,35133240,60,0],[35183640,35637240,60,0],[35697720,36151320,60,0],[36201720,36665400,60,0],[36715800,37169400,60,0],[37229880,37343520,60,0]],
+    'Africa/El_Aaiun': [[29831100,30032760,60,0],[30083160,30536760,60,0],[30597240,31050840,60,0],[31101240,31554840,60,0],[31615320,32068920,60,0],[32119320,32583000,60,0],[32633400,33087000,60,0],[33147480,33601080,60,0],[33651480,34105080,60,0],[34165560,34619160,60,0],[34679640,35133240,60,0],[35183640,35637240,60,0],[35697720,36151320,60,0],[36201720,36665400,60,0],[36715800,37169400,60,0],[37229880,37343520,60,0]],
+    'Europe/Chisinau': [[29579040,29579100,180,120],[29881440,29881500,120,180],[30103200,30103260,180,120],[30415680,30415740,120,180],[30627360,30627420,180,120],[30939840,30939900,120,180],[31151520,31151580,180,120],[31464000,31464060,120,180],[31685760,31685820,180,120],[31988160,31988220,120,180],[32209920,32209980,180,120],[32512320,32512380,120,180],[32734080,32734140,180,120],[33046560,33046620,120,180],[33258240,33258300,180,120],[33570720,33570780,120,180],[33782400,33782460,180,120],[34094880,34094940,120,180],[34306560,34306620,180,120],[34619040,34619100,120,180],[34840800,34840860,180,120],[35143200,35143260,120,180],[35364960,35365020,180,120],[35667360,35667420,120,180],[35889120,35889180,180,120],[36201600,36201660,120,180],[36413280,36413340,180,120],[36725760,36725820,120,180],[36937440,36937500,180,120],[37249920,37249980,120,180]]
+  };
+  var STALE_LINKS = {
+    'Canada/Pacific': 'America/Vancouver', 'Canada/Mountain': 'America/Edmonton', 'America/Yellowknife': 'America/Edmonton',
+    'Canada/Central': 'America/Winnipeg', 'America/Rainy_River': 'America/Winnipeg', 'Cuba': 'America/Havana'
+  };
+  var STALE_NAMES = {
+    'America/Vancouver': 'Vancouver (British Columbia)', 'America/Edmonton': 'Edmonton (Alberta)',
+    'America/Inuvik': 'Inuvik (Northwest Territories)', 'America/Winnipeg': 'Winnipeg (Manitoba)',
+    'America/Havana': 'Havana (Cuba)', 'Africa/Casablanca': 'Casablanca (Morocco)',
+    'Africa/El_Aaiun': 'El Aaiún (Western Sahara)', 'Europe/Chisinau': 'Chișinău (Moldova)'
+  };
+  function staleList(tz) { return STALE[STALE_LINKS[tz] || tz] || null; }
+  function staleFix(tz, ms, raw) { // corrected offset in seconds, or null
+    var list = staleList(tz);
+    if (!list) return null;
+    var m = ms / MIN;
+    for (var i = 0; i < list.length; i++) {
+      if (m < list[i][0]) return null;
+      if (m < list[i][1]) return raw === list[i][2] * 60 ? list[i][3] * 60 : null;
+    }
+    return null;
+  }
+
+  // A zone's offsets over about 400 days: [start ms, offset s, corrected?] segments. Found by
+  // sampling every 3 days and bisecting each change to the minute, then applying the check.
+  var STEP = 3 * DAY, timelines = new Map();
+  function rawTimeline(tz, from, to) {
+    var segs = [[from, rawOff(from, tz)]], t = from;
+    while (t < to) {
+      var cur = segs[segs.length - 1][1], n = Math.min(t + STEP, to);
+      if (rawOff(n, tz) === cur) { t = n; continue; }
+      var lo = t, hi = n;
+      while (hi - lo > MIN) {
+        var mid = lo + Math.max(1, Math.floor((hi - lo) / MIN / 2)) * MIN;
+        if (rawOff(mid, tz) === cur) lo = mid; else hi = mid;
+      }
+      segs.push([hi, rawOff(hi, tz)]);
+      t = hi;
+    }
+    return segs;
+  }
+  function correctTimeline(tz, segs, from, to) {
+    var list = staleList(tz), pts = segs.map(function (s) { return s[0]; });
+    if (list) list.forEach(function (iv) { [iv[0] * MIN, iv[1] * MIN].forEach(function (p) { if (p > from && p < to) pts.push(p); }); });
+    pts.sort(function (a, b) { return a - b; });
+    var out = [], j = 0;
+    pts.forEach(function (p, k) {
+      if (k && p === pts[k - 1]) return;
+      while (j + 1 < segs.length && segs[j + 1][0] <= p) j++;
+      var raw = segs[j][1], fix = list ? staleFix(tz, p, raw) : null;
+      var off = fix == null ? raw : fix, st = fix != null, last = out[out.length - 1];
+      if (last && last[1] === off && last[2] === st) return;
+      out.push([p, off, st]);
+    });
+    return out;
+  }
+  function anchor(p, t) {
+    if (p.off != null) return null;
+    var c = timelines.get(p.zone);
+    if (c && t - 2 * DAY >= c.from && t + 380 * DAY <= c.to) return c;
+    var from = Math.floor(t / MIN) * MIN - 3 * DAY, to = from + 400 * DAY;
+    c = { from: from, to: to, segs: correctTimeline(p.zone, rawTimeline(p.zone, from, to), from, to) };
+    timelines.set(p.zone, c);
+    return c;
+  }
+  function segIndex(segs, t) {
+    var lo = 0, hi = segs.length - 1;
+    while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (segs[mid][0] <= t) lo = mid; else hi = mid - 1; }
+    return lo;
+  }
+  function offAt(p, t) { // { off: seconds east of UTC, st: corrected by the check }
+    if (p.off != null) return { off: p.off * 60, st: false };
+    var c = timelines.get(p.zone);
+    if (c && t >= c.from && t < c.to) { var s = c.segs[segIndex(c.segs, t)]; return { off: s[1], st: s[2] }; }
+    var raw = rawOff(t, p.zone), fix = staleFix(p.zone, t, raw);
+    return fix == null ? { off: raw, st: false } : { off: fix, st: true };
+  }
+  function wallAt(p, t) {
+    var o = offAt(p, t), lt = t + o.off * 1000, days = Math.floor(lt / DAY), c = civil(days), r = lt - days * DAY;
+    return { y: c.y, m: c.m, d: c.d, dow: c.dow, days: days, h: Math.floor(r / HOUR), mi: Math.floor(r % HOUR / MIN), off: o.off, st: o.st };
+  }
+  // Wall-clock time in a place -> instant. A repeated time gives the first or (rep) the second
+  // instant; a skipped time gives the moment it would have been on the old offset.
+  function fromWall(p, y, m, d, h, mi, rep) {
+    var w = utcMs(y, m, d, h, mi, 0);
+    if (p.off != null) return { t: w - p.off * MIN };
+    var before = offAt(p, w - DAY).off, after = offAt(p, w + DAY).off, found = [];
+    [before, after].forEach(function (o) {
+      var t = w - o * 1000;
+      if (offAt(p, t).off === o && found.indexOf(t) < 0) found.push(t);
+    });
+    found.sort(function (a, b) { return a - b; });
+    if (!found.length) return { t: w - before * 1000, skipped: true, before: before, after: after };
+    if (found.length > 1) return { t: found[rep ? 1 : 0], repeated: true, both: found, rep: rep ? 1 : 0 };
+    return { t: found[0] };
+  }
+
+  // Abbreviations shown for each zone, from tzdata 2026f (zones whose tz abbreviations are only
+  // numbers, such as -03, show the offset alone). Browser names vary by language (en-GB gives
+  // GMT-5 for New York), so they are not used.
+  var ABBR_DATA = {
+    '60 CET,120 CEST': 'Africa/Ceuta Arctic/Longyearbyen Europe/Amsterdam Europe/Andorra Europe/Belgrade Europe/Berlin Europe/Bratislava Europe/Brussels Europe/Budapest Europe/Busingen Europe/Copenhagen Europe/Gibraltar Europe/Ljubljana Europe/Luxembourg Europe/Madrid Europe/Malta Europe/Monaco Europe/Oslo Europe/Paris Europe/Podgorica Europe/Prague Europe/Rome Europe/San_Marino Europe/Sarajevo Europe/Skopje Europe/Stockholm Europe/Tirane Europe/Vaduz Europe/Vatican Europe/Vienna Europe/Warsaw Europe/Zagreb Europe/Zurich',
+    '-240 AST': 'America/Anguilla America/Antigua America/Aruba America/Barbados America/Blanc-Sablon America/Curacao America/Dominica America/Grenada America/Guadeloupe America/Kralendijk America/Lower_Princes America/Marigot America/Martinique America/Montserrat America/Port_of_Spain America/Puerto_Rico America/Santo_Domingo America/St_Barthelemy America/St_Kitts America/St_Lucia America/St_Thomas America/St_Vincent America/Tortola',
+    '0 GMT': 'Africa/Abidjan Africa/Accra Africa/Bamako Africa/Banjul Africa/Bissau Africa/Conakry Africa/Dakar Africa/Freetown Africa/Lome Africa/Monrovia Africa/Nouakchott Africa/Ouagadougou Africa/Sao_Tome America/Danmarkshavn Atlantic/Reykjavik Atlantic/St_Helena',
+    '120 EET,180 EEST': 'Africa/Cairo Asia/Beirut Asia/Famagusta Asia/Gaza Asia/Hebron Asia/Nicosia Europe/Athens Europe/Bucharest Europe/Chisinau Europe/Helsinki Europe/Kyiv Europe/Mariehamn Europe/Riga Europe/Sofia Europe/Tallinn Europe/Vilnius',
+    '-360 CST': 'America/Bahia_Banderas America/Belize America/Chihuahua America/Costa_Rica America/Edmonton America/El_Salvador America/Guatemala America/Inuvik America/Managua America/Merida America/Mexico_City America/Monterrey America/Regina America/Swift_Current America/Tegucigalpa',
+    '-300 EST,-240 EDT': 'America/Detroit America/Grand_Turk America/Indiana/Indianapolis America/Indiana/Marengo America/Indiana/Petersburg America/Indiana/Vevay America/Indiana/Vincennes America/Indiana/Winamac America/Iqaluit America/Kentucky/Louisville America/Kentucky/Monticello America/Nassau America/New_York America/Port-au-Prince America/Toronto',
+    '60 WAT': 'Africa/Bangui Africa/Brazzaville Africa/Douala Africa/Kinshasa Africa/Lagos Africa/Libreville Africa/Luanda Africa/Malabo Africa/Ndjamena Africa/Niamey Africa/Porto-Novo',
+    '120 CAT': 'Africa/Blantyre Africa/Bujumbura Africa/Gaborone Africa/Harare Africa/Juba Africa/Khartoum Africa/Kigali Africa/Lubumbashi Africa/Lusaka Africa/Maputo Africa/Windhoek',
+    '-360 CST,-300 CDT': 'America/Chicago America/Indiana/Knox America/Indiana/Tell_City America/Matamoros America/Menominee America/North_Dakota/Beulah America/North_Dakota/Center America/North_Dakota/New_Salem America/Ojinaga America/Rankin_Inlet America/Resolute',
+    '180 EAT': 'Africa/Addis_Ababa Africa/Asmara Africa/Dar_es_Salaam Africa/Djibouti Africa/Kampala Africa/Mogadishu Africa/Nairobi Indian/Antananarivo Indian/Comoro Indian/Mayotte',
+    '-420 MST': 'America/Creston America/Dawson America/Dawson_Creek America/Fort_Nelson America/Hermosillo America/Mazatlan America/Phoenix America/Vancouver America/Whitehorse',
+    '-540 AKST,-480 AKDT': 'America/Anchorage America/Juneau America/Metlakatla America/Nome America/Sitka America/Yakutat',
+    '-300 EST': 'America/Atikokan America/Cancun America/Cayman America/Jamaica America/Panama America/Winnipeg',
+    '-240 AST,-180 ADT': 'America/Glace_Bay America/Goose_Bay America/Halifax America/Moncton America/Thule Atlantic/Bermuda',
+    '-420 MST,-360 MDT': 'America/Boise America/Cambridge_Bay America/Ciudad_Juarez America/Denver',
+    '600 AEST,660 AEDT': 'Antarctica/Macquarie Australia/Hobart Australia/Melbourne Australia/Sydney',
+    '0 WET,60 WEST': 'Atlantic/Canary Atlantic/Faroe Atlantic/Madeira Europe/Lisbon',
+    '0 GMT,60 BST': 'Europe/Guernsey Europe/Isle_of_Man Europe/Jersey Europe/London',
+    '180 MSK': 'Europe/Kirov Europe/Moscow Europe/Simferopol Europe/Volgograd',
+    '120 SAST': 'Africa/Johannesburg Africa/Maseru Africa/Mbabane',
+    '480 CST': 'Asia/Macau Asia/Shanghai Asia/Taipei',
+    '60 CET': 'Africa/Algiers Africa/Tunis',
+    '120 EET': 'Africa/Tripoli Europe/Kaliningrad',
+    '-480 PST,-420 PDT': 'America/Los_Angeles America/Tijuana',
+    '720 NZST,780 NZDT': 'Antarctica/McMurdo Pacific/Auckland',
+    '420 WIB': 'Asia/Jakarta Asia/Pontianak',
+    '540 KST': 'Asia/Pyongyang Asia/Seoul',
+    '570 ACST,630 ACDT': 'Australia/Adelaide Australia/Broken_Hill',
+    '600 AEST': 'Australia/Brisbane Australia/Lindeman',
+    '600 ChST': 'Pacific/Guam Pacific/Saipan',
+    '-660 SST': 'Pacific/Midway Pacific/Pago_Pago',
+    '-600 HST,-540 HDT': 'America/Adak',
+    '-300 CST,-240 CDT': 'America/Havana',
+    '-210 NST,-150 NDT': 'America/St_Johns',
+    '480 HKT': 'Asia/Hong_Kong',
+    '540 WIT': 'Asia/Jayapura',
+    '120 IST,180 IDT': 'Asia/Jerusalem',
+    '300 PKT': 'Asia/Karachi',
+    '330 IST': 'Asia/Kolkata',
+    '480 WITA': 'Asia/Makassar',
+    '480 PST': 'Asia/Manila',
+    '540 JST': 'Asia/Tokyo',
+    '570 ACST': 'Australia/Darwin',
+    '480 AWST': 'Australia/Perth',
+    '0 GMT,60 IST': 'Europe/Dublin',
+    '-600 HST': 'Pacific/Honolulu'
+  };
+  var ABBR = new Map();
+  Object.keys(ABBR_DATA).forEach(function (k) {
+    var map = new Map();
+    k.split(',').forEach(function (x) { var i = x.indexOf(' '); map.set(+x.slice(0, i) * 60, x.slice(i + 1)); });
+    ABBR_DATA[k].split(' ').forEach(function (z) { ABBR.set(z, map); });
+  });
+  function abbrOf(p, off) {
+    if (p.off != null) return p.ab || (p.off === 0 ? 'UTC' : '');
+    var m = ABBR.get(p.zone);
+    return (m && m.get(off)) || '';
+  }
+
+  // What typed abbreviations mean: [abbreviation, meaning, zone ('' = a fixed offset), its offset
+  // in minutes (null = whichever the zone is on), the place's name]. Several rows for one
+  // abbreviation are several meanings, the first being the one used unless the visitor picks another.
+  var ABBR_LIST = [
+    ['UTC', 'Coordinated Universal Time', '', 0], ['GMT', 'Greenwich Mean Time', '', 0, 'Europe/London'],
+    ['Z', 'Zulu time (UTC)', '', 0], ['ZULU', 'Zulu time (UTC)', '', 0], ['AOE', 'Anywhere on Earth', '', -720],
+    ['EST', 'Eastern Standard Time', 'America/New_York', -300, 'New York'],
+    ['EDT', 'Eastern Daylight Time', 'America/New_York', -240, 'New York'],
+    ['ET', 'Eastern Time', 'America/New_York', null, 'New York'],
+    ['CST', 'Central Standard Time', 'America/Chicago', -360, 'Chicago'],
+    ['CST', 'China Standard Time', 'Asia/Shanghai', 480, 'Beijing'],
+    ['CST', 'Cuba Standard Time', 'America/Havana', -300, 'Havana'],
+    ['CDT', 'Central Daylight Time', 'America/Chicago', -300, 'Chicago'],
+    ['CDT', 'Cuba Daylight Time', 'America/Havana', -240, 'Havana'],
+    ['CT', 'Central Time', 'America/Chicago', null, 'Chicago'],
+    ['MST', 'Mountain Standard Time', 'America/Denver', -420, 'Denver'],
+    ['MST', 'Mountain Standard Time, Arizona', 'America/Phoenix', -420, 'Phoenix'],
+    ['MDT', 'Mountain Daylight Time', 'America/Denver', -360, 'Denver'],
+    ['MT', 'Mountain Time', 'America/Denver', null, 'Denver'],
+    ['PST', 'Pacific Standard Time', 'America/Los_Angeles', -480, 'Los Angeles'],
+    ['PST', 'Philippine Standard Time', 'Asia/Manila', 480, 'Manila'],
+    ['PDT', 'Pacific Daylight Time', 'America/Los_Angeles', -420, 'Los Angeles'],
+    ['PT', 'Pacific Time', 'America/Los_Angeles', null, 'Los Angeles'],
+    ['AKST', 'Alaska Standard Time', 'America/Anchorage', -540, 'Anchorage'],
+    ['AKDT', 'Alaska Daylight Time', 'America/Anchorage', -480, 'Anchorage'],
+    ['HST', 'Hawaii Standard Time', 'Pacific/Honolulu', -600, 'Honolulu'],
+    ['AST', 'Atlantic Standard Time', 'America/Halifax', -240, 'Halifax'],
+    ['AST', 'Arabia Standard Time', 'Asia/Riyadh', 180, 'Riyadh'],
+    ['ADT', 'Atlantic Daylight Time', 'America/Halifax', -180, 'Halifax'],
+    ['NST', 'Newfoundland Standard Time', 'America/St_Johns', -210, 'St. John’s'],
+    ['NDT', 'Newfoundland Daylight Time', 'America/St_Johns', -150, 'St. John’s'],
+    ['BST', 'British Summer Time', 'Europe/London', 60, 'London'],
+    ['BST', 'Bangladesh Standard Time', 'Asia/Dhaka', 360, 'Dhaka'],
+    ['IST', 'India Standard Time', 'Asia/Kolkata', 330, 'New Delhi'],
+    ['IST', 'Israel Standard Time', 'Asia/Jerusalem', 120, 'Jerusalem'],
+    ['IST', 'Irish Standard Time', 'Europe/Dublin', 60, 'Dublin'],
+    ['IDT', 'Israel Daylight Time', 'Asia/Jerusalem', 180, 'Jerusalem'],
+    ['WET', 'Western European Time', 'Europe/Lisbon', 0, 'Lisbon'],
+    ['WEST', 'Western European Summer Time', 'Europe/Lisbon', 60, 'Lisbon'],
+    ['CET', 'Central European Time', 'Europe/Paris', 60, 'Paris'],
+    ['CEST', 'Central European Summer Time', 'Europe/Paris', 120, 'Paris'],
+    ['EET', 'Eastern European Time', 'Europe/Athens', 120, 'Athens'],
+    ['EEST', 'Eastern European Summer Time', 'Europe/Athens', 180, 'Athens'],
+    ['MSK', 'Moscow Time', 'Europe/Moscow', 180, 'Moscow'], ['TRT', 'Turkey Time', 'Europe/Istanbul', 180, 'Istanbul'],
+    ['GST', 'Gulf Standard Time', 'Asia/Dubai', 240, 'Dubai'], ['PKT', 'Pakistan Standard Time', 'Asia/Karachi', 300, 'Karachi'],
+    ['NPT', 'Nepal Time', 'Asia/Kathmandu', 345, 'Kathmandu'], ['ICT', 'Indochina Time', 'Asia/Bangkok', 420, 'Bangkok'],
+    ['WIB', 'Western Indonesia Time', 'Asia/Jakarta', 420, 'Jakarta'], ['WITA', 'Central Indonesia Time', 'Asia/Makassar', 480, 'Makassar'],
+    ['WIT', 'Eastern Indonesia Time', 'Asia/Jayapura', 540, 'Jayapura'], ['SGT', 'Singapore Time', 'Asia/Singapore', 480, 'Singapore'],
+    ['HKT', 'Hong Kong Time', 'Asia/Hong_Kong', 480, 'Hong Kong'], ['PHT', 'Philippine Time', 'Asia/Manila', 480, 'Manila'],
+    ['AWST', 'Australian Western Standard Time', 'Australia/Perth', 480, 'Perth'],
+    ['JST', 'Japan Standard Time', 'Asia/Tokyo', 540, 'Tokyo'], ['KST', 'Korea Standard Time', 'Asia/Seoul', 540, 'Seoul'],
+    ['ACST', 'Australian Central Standard Time', 'Australia/Adelaide', 570, 'Adelaide'],
+    ['ACST', 'Australian Central Standard Time, Northern Territory', 'Australia/Darwin', 570, 'Darwin'],
+    ['ACDT', 'Australian Central Daylight Time', 'Australia/Adelaide', 630, 'Adelaide'],
+    ['AEST', 'Australian Eastern Standard Time', 'Australia/Sydney', 600, 'Sydney'],
+    ['AEST', 'Australian Eastern Standard Time, Queensland', 'Australia/Brisbane', 600, 'Brisbane'],
+    ['AEDT', 'Australian Eastern Daylight Time', 'Australia/Sydney', 660, 'Sydney'],
+    ['AET', 'Australian Eastern Time', 'Australia/Sydney', null, 'Sydney'],
+    ['NZST', 'New Zealand Standard Time', 'Pacific/Auckland', 720, 'Auckland'],
+    ['NZDT', 'New Zealand Daylight Time', 'Pacific/Auckland', 780, 'Auckland'],
+    ['NZT', 'New Zealand Time', 'Pacific/Auckland', null, 'Auckland'],
+    ['SAST', 'South Africa Standard Time', 'Africa/Johannesburg', 120, 'Johannesburg'],
+    ['CAT', 'Central Africa Time', 'Africa/Maputo', 120, 'Maputo'], ['EAT', 'East Africa Time', 'Africa/Nairobi', 180, 'Nairobi'],
+    ['WAT', 'West Africa Time', 'Africa/Lagos', 60, 'Lagos'], ['BRT', 'Brasília Time', 'America/Sao_Paulo', -180, 'São Paulo'],
+    ['ART', 'Argentina Time', 'America/Argentina/Buenos_Aires', -180, 'Buenos Aires'],
+    ['SST', 'Samoa Standard Time', 'Pacific/Pago_Pago', -660, 'Pago Pago'],
+    ['SST', 'Singapore Standard Time', 'Asia/Singapore', 480, 'Singapore'],
+    ['CHST', 'Chamorro Standard Time', 'Pacific/Guam', 600, 'Guam']
+  ];
+  function abbrEntries(word) {
+    var w = word.toUpperCase();
+    return ABBR_LIST.filter(function (e) { return e[0] === w && (!e[2] || validZone(modern(e[2]))); });
+  }
+  function placeFromAbbr(e) {
+    if (!e[2]) return { off: e[3], name: e[0] === 'AOE' ? 'AoE' : e[0], sub: e[1] + ', ' + fmtOff(e[3] * 60), ab: e[0] === 'AOE' ? 'AoE' : e[0] };
+    return { zone: modern(e[2]), name: e[4], sub: e[1], from: e[0] };
+  }
+  function fixedFromAbbr(e) { return { off: e[3], name: e[0] + ' (fixed)', sub: e[1] + ', ' + fmtOff(e[3] * 60) + ' all year', ab: e[0] }; }
+  // The entry a zone row stands for, when it was made from an abbreviation.
+  function abbrEntryOf(p) {
+    if (!p.from || p.off != null) return null;
+    return abbrEntries(p.from).filter(function (e) { return modern(e[2]) === p.zone; })[0] || null;
+  }
+
+  // ---------- Offsets typed as text ----------
+  function parseOffset(s) { // "UTC+05:30", "GMT-3", "+0545", "UTC" -> minutes, or null
+    var m = /^(?:utc|gmt|z)?\s*(?:([+\-−–])\s*(\d{1,2})(?:(?::|\.|h)?([0-5]\d))?)?$/i.exec(s.trim());
+    if (!m || !s.trim()) return null;
+    if (!m[1]) return /^(utc|gmt|z)$/i.test(s.trim()) ? 0 : null;
+    var v = +m[2] * 60 + (m[3] ? +m[3] : 0);
+    if (m[1] !== '+') v = -v;
+    return v >= -720 && v <= 840 ? v : null;
+  }
+  function fmtOff(sec) {
+    var a = Math.abs(sec), h = Math.floor(a / 3600), m = Math.floor(a % 3600 / 60), s = a % 60;
+    return 'UTC' + (sec < 0 ? '−' : '+') + pad(h) + ':' + pad(m) + (s ? ':' + pad(s) : '');
+  }
+  function fixedPlace(min) {
+    var name = min ? fmtOff(min * 60) : 'UTC';
+    return { off: min, name: name, sub: min ? 'Fixed offset from UTC' : 'Coordinated Universal Time' };
+  }
+  function placeId(p) {
+    if (p.off == null) return p.zone;
+    var a = Math.abs(p.off);
+    return 'UTC' + (p.off ? (p.off < 0 ? '-' : '+') + pad(Math.floor(a / 60)) + ':' + pad(a % 60) : '');
+  }
+  function zonePlace(tz) {
+    tz = modern(tz);
+    if (/^(Etc\/)?(UTC|UCT|GMT|Universal|Zulu|GMT0|Greenwich)$/.test(tz)) return fixedPlace(0);
+    var last = tz.split('/').pop().replace(/_/g, ' ');
+    return { zone: tz, name: last, sub: '' };
+  }
+  function samePlace(a, b) { return placeId(a) === placeId(b) && a.name === b.name; }
+
+  // ---------- Formatting ----------
+  var H12 = (function () {
+    try { var o = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions(); return o.hour12 === true || /h1[12]/.test(o.hourCycle || ''); } catch (e) { return false; }
+  })();
+  function fmtTime(h, mi) {
+    if (!state.h12) return pad(h) + ':' + pad(mi);
+    return ((h % 12) || 12) + ':' + pad(mi) + '\u00a0' + (h < 12 ? 'am' : 'pm');
+  }
+  function fmtDate(w) { return DOW[w.dow] + ' ' + w.d + ' ' + MON[w.m - 1] + ' ' + w.y; }
+  function fmtDay(w) { return DOW[w.dow] + ' ' + w.d + ' ' + MON[w.m - 1]; }
+  function fmtSpan(sec) {
+    var a = Math.round(Math.abs(sec) / 60), h = Math.floor(a / 60), m = a % 60;
+    return ((h ? h + ' h' : '') + (h && m ? ' ' : '') + (m ? m + ' min' : '')) || '0 h';
+  }
+  function fmtAmount(sec) {
+    var a = Math.round(Math.abs(sec) / 60), h = Math.floor(a / 60), m = a % 60;
+    return ((h ? h + (h === 1 ? ' hour' : ' hours') : '') + (h && m ? ' ' : '') + (m ? m + ' minutes' : ''));
+  }
+  function fmtDiff(sec, other) {
+    return sec === 0 ? 'same time as ' + other : fmtSpan(sec) + (sec > 0 ? ' ahead of ' : ' behind ') + other;
+  }
+  function dayShift(n) { return n === 1 ? 'next day' : n === -1 ? 'previous day' : (n > 0 ? '+' : '−') + Math.abs(n) + ' days'; }
+  function isoDate(w) { return w.y + '-' + pad(w.m) + '-' + pad(w.d); }
+
+  // ---------- Places from the GeoNames list ----------
+  function fold(s) {
+    return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss').replace(/[øØ]/g, 'o')
+      .replace(/[łŁ]/g, 'l').replace(/[đĐ]/g, 'd').replace(/[æÆ]/g, 'ae').replace(/[œŒ]/g, 'oe')
+      .replace(/ı/g, 'i').toLowerCase().replace(/['’`.]/g, '').replace(/[\s\-_\/,()]+/g, ' ').trim();
+  }
+  var COUNTRY_ALIASES = {
+    uk: 'GB', 'great britain': 'GB', britain: 'GB', england: 'GB', scotland: 'GB', wales: 'GB', 'northern ireland': 'GB',
+    us: 'US', usa: 'US', america: 'US', 'united states of america': 'US', uae: 'AE', emirates: 'AE', holland: 'NL',
+    netherlands: 'NL', korea: 'KR', 'czech republic': 'CZ', 'ivory coast': 'CI', 'cote divoire': 'CI', burma: 'MM',
+    turkiye: 'TR', macau: 'MO', drc: 'CD', 'dr congo': 'CD', palestine: 'PS', 'east timor': 'TL', swaziland: 'SZ'
+  };
+  var CITY_ALIASES = {
+    nyc: 'new york city', 'new york': 'new york city', la: 'los angeles', sf: 'san francisco', dc: 'washington',
+    'washington dc': 'washington', bombay: 'mumbai', calcutta: 'kolkata', madras: 'chennai', bangalore: 'bengaluru',
+    saigon: 'ho chi minh city', peking: 'beijing', kiev: 'kyiv', canton: 'guangzhou', 'mexico df': 'mexico city'
+  };
+  var data = null, dataP = null;
+  function loadData() {
+    if (data) return Promise.resolve(data);
+    if (!dataP) {
+      dataP = fetch(DATA_URL).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      }).then(parseData);
+      dataP.catch(function () { dataP = null; });
+    }
+    return dataP;
+  }
+  function parseData(text) {
+    var zones = [], cn = new Map(), a1 = new Map(), cities = [], countries = new Map();
+    text.split('\n').forEach(function (l) {
+      if (!l || l[0] === '#') return;
+      var tag = l.slice(0, 3);
+      if (tag === '@z ') { zones = l.slice(3).split(' '); return; }
+      if (tag === '@c ') { l.slice(3).split('|').forEach(function (x) { cn.set(x.slice(0, 2), x.slice(3)); }); return; }
+      if (tag === '@a ') { l.slice(3).split('|').forEach(function (x) { var i = x.indexOf(' '); a1.set(x.slice(0, i), x.slice(i + 1)); }); return; }
+      var p = l.split('|'), zone = zones[+p[3]];
+      if (!zone || !validZone(zone)) return;
+      var c = { name: p[0], cc: p[1], region: a1.get(p[1] + '.' + p[2]) || '', country: cn.get(p[1]) || p[1], zone: modern(zone), cap: p[4] === 'c', i: cities.length };
+      c.key = fold(c.name);
+      c.qual = fold(c.region + ' ' + c.country + ' ' + c.cc);
+      cities.push(c);
+      var k = countries.get(c.cc);
+      if (!k) countries.set(c.cc, k = { cc: c.cc, name: c.country, key: fold(c.country), byZone: new Map(), cap: null });
+      if (!k.byZone.has(c.zone)) k.byZone.set(c.zone, c);
+      if (c.cap && !k.cap) k.cap = c;
+    });
+    data = { cities: cities, countries: countries };
+    return data;
+  }
+  function cityPlace(c) {
+    var sub = [c.region, c.country].filter(function (x, i, a) { return x && x !== c.name && a.indexOf(x) === i; }).join(', ');
+    return { zone: c.zone, name: c.name, sub: sub };
+  }
+  // Cities whose name matches the query: exact name 4, start of the name 3, start of a later word 2,
+  // anywhere 1 (three letters or more). A query with a comma, or whose last words match a region or
+  // country ("portland oregon"), narrows to places there.
+  function cityMatches(raw, limit) {
+    if (!data) return [];
+    var q = fold(raw), qual = '', parts = String(raw).split(',');
+    if (parts.length > 1) { q = fold(parts[0]); qual = fold(parts.slice(1).join(' ')); }
+    q = CITY_ALIASES[q] || q;
+    if (!q) return [];
+    function qualOk(c, ql) { return !ql || ql.split(' ').every(function (w) { return (' ' + c.qual).indexOf(' ' + w) >= 0; }); }
+    function run(qq, ql) {
+      var out = [];
+      data.cities.forEach(function (c) {
+        if (!qualOk(c, ql)) return;
+        var sv = c.key === qq ? 4 : c.key.indexOf(qq) === 0 ? 3 : c.key.indexOf(' ' + qq) >= 0 ? 2 : (qq.length >= 3 && c.key.indexOf(qq) >= 0 ? 1 : 0);
+        if (sv) out.push({ c: c, s: sv, i: out.length });
+      });
+      return out;
+    }
+    var found = run(q, qual);
+    if (!qual && !found.some(function (x) { return x.s >= 3; })) {
+      var words = q.split(' ');
+      for (var n = 1; n < words.length && !found.length; n++) found = run(words.slice(0, words.length - n).join(' '), words.slice(words.length - n).join(' '));
+    }
+    found.sort(function (a, b) { return b.s - a.s || a.i - b.i; });
+    return found.slice(0, limit).map(function (x) { return x.c; });
+  }
+  function countryMatch(raw, exactOnly) {
+    if (!data) return [];
+    var q = fold(raw);
+    if (!q) return [];
+    var alias = COUNTRY_ALIASES[q], out = [];
+    data.countries.forEach(function (k) {
+      if (alias ? k.cc === alias : (k.key === q || (!exactOnly && q.length >= 3 && k.key.indexOf(q) === 0))) out.push(k);
+    });
+    return out;
+  }
+  function countryPlaces(k) { // the capital's zone first, then the largest place of each other zone
+    var list = [];
+    if (k.cap) list.push(k.cap);
+    k.byZone.forEach(function (c, z) { if (!k.cap || z !== k.cap.zone) list.push(c); });
+    return list.map(function (c) {
+      var p = cityPlace(c);
+      if (k.byZone.size === 1) { p.name = k.name; p.sub = c.name === k.name ? '' : c.name; }
+      return p;
+    });
+  }
+  var ZONES = (function () {
+    var z = [];
+    try { z = Intl.supportedValuesOf('timeZone').map(modern); } catch (e) { z = []; }
+    return z.filter(function (x, i, a) { return a.indexOf(x) === i; }).sort();
+  })();
+  function zoneMatches(raw, limit) {
+    var q = fold(raw);
+    if (q.length < 3) return [];
+    var exact = ZONES.filter(function (z) { return fold(z) === q; });
+    var part = ZONES.filter(function (z) { var f = ' ' + fold(z); return exact.indexOf(z) < 0 && f.indexOf(' ' + q) >= 0; });
+    return exact.concat(part).slice(0, limit);
+  }
+
+  // ---------- State ----------
+  var DEFAULTS = [
+    { zone: 'America/New_York', name: 'New York', sub: 'New York, United States' },
+    { zone: 'Europe/London', name: 'London', sub: 'England, United Kingdom' },
+    { zone: 'Asia/Kolkata', name: 'New Delhi', sub: 'Delhi, India' }
+  ];
+  var state = { places: [], live: true, date: '', time: '', rep: 0, h12: H12, work: [9, 17] };
+  function devicePlace() {
+    if (!validZone(DEVICE_TZ)) return fixedPlace(0);
+    var p = zonePlace(DEVICE_TZ);
+    if (p.zone) p.sub = 'Your device’s time zone';
+    return p;
+  }
+  function defaultPlaces() {
+    var list = [devicePlace()];
+    DEFAULTS.forEach(function (d) {
+      if (!validZone(d.zone)) return;
+      var p = { zone: modern(d.zone), name: d.name, sub: d.sub };
+      if (list[0].zone === p.zone) list[0] = p;
+      else list.push(p);
+    });
+    return list;
+  }
+  function home() { return state.places[0]; }
+
+  // ---------- The instant shown ----------
+  var tickMinute = 0;
+  function parseDateStr(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+    if (!m) return null;
+    var y = +m[1], mo = +m[2], d = +m[3];
+    if (y < 1900 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo)) return null;
+    return { y: y, m: mo, d: d };
+  }
+  function parseTimeStr(s) {
+    var m = /^(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(s || '');
+    if (!m || +m[1] > 23 || +m[2] > 59) return null;
+    return { h: +m[1], mi: +m[2] };
+  }
+  function current() { // { t, r (fromWall result or null), w (home wall) }
+    var p = home();
+    if (state.live) {
+      var t = Math.floor(Date.now() / MIN) * MIN;
+      anchor(p, t);
+      return { t: t, r: null, w: wallAt(p, t) };
+    }
+    var d = parseDateStr(state.date), tm = parseTimeStr(state.time);
+    anchor(p, utcMs(d.y, d.m, d.d, tm.h, tm.mi, 0));
+    var r = fromWall(p, d.y, d.m, d.d, tm.h, tm.mi, state.rep);
+    return { t: r.t, r: r, w: wallAt(p, r.t) };
+  }
+  // Fix the shown instant in the first place's wall time (after a reorder or a planner pick).
+  function setInstant(t, p) {
+    p = p || home();
+    anchor(p, t);
+    var w = wallAt(p, t);
+    state.live = false;
+    state.date = isoDate(w);
+    state.time = pad(w.h) + ':' + pad(w.mi);
+    var r = fromWall(p, w.y, w.m, w.d, w.h, w.mi, 0);
+    state.rep = r.repeated && r.both[1] === t ? 1 : 0;
+  }
+
+  // ---------- Elements ----------
+  var askForm = $('#tzc-ask-form'), askIn = $('#tzc-ask'), askErr = $('#tzc-ask-error'), askOk = $('#tzc-ask-ok');
+  var dateIn = $('#tzc-date'), timeIn = $('#tzc-time'), nowBtn = $('#tzc-now'), whenErr = $('#tzc-when-error');
+  var liveLine = $('#tzc-live'), rowsEl = $('#tzc-rows'), addIn = $('#tzc-add'), sugg = $('#tzc-sugg'), addErr = $('#tzc-add-error');
+  var planEl = $('#tzc-plan'), planNames = $('#tzc-plan-names'), planHint = $('#tzc-plan-hint');
+  var wsSel = $('#tzc-ws'), weSel = $('#tzc-we'), workErr = $('#tzc-work-error'), overlapSum = $('#tzc-overlap-sum'), runsEl = $('#tzc-runs');
+  var weekEl = $('#tzc-week'), weekHint = $('#tzc-week-hint'), statusEl = $('#tzc-status'), rulesEl = $('#tzc-rules');
+  var titleIn = $('#tzc-title'), durSel = $('#tzc-dur'), repSel = $('#tzc-rep'), exportErr = $('#tzc-export-error');
+
+  function setError(el, field, text) {
+    if (el.textContent !== text) el.textContent = text;
+    [].concat(field || []).forEach(function (f) {
+      if (text) f.setAttribute('aria-invalid', 'true'); else f.removeAttribute('aria-invalid');
+    });
+  }
+  function announce(text) { if (text && statusEl.textContent !== text) statusEl.textContent = text; }
+
+  // ---------- Rendering ----------
+  var shown = null; // { t, w } of the last render
+  // Rows and the overlap list are rebuilt on every change and every minute, so the button that had
+  // the focus is found again by its place in the list and its job.
+  function focusKey() {
+    var a = document.activeElement;
+    if (!a || !a.closest) return null;
+    if (rowsEl.contains(a) && a.closest('li')) return 'li[data-i="' + a.closest('li').getAttribute('data-i') + '"] button[data-act="' + a.getAttribute('data-act') + '"]' + (a.hasAttribute('data-alt') ? '[data-alt="' + a.getAttribute('data-alt') + '"]' : '');
+    if (runsEl.contains(a)) return 'button[data-run="' + a.getAttribute('data-run') + '"]';
+    return null;
+  }
+  var lastSel = -1;
+  function render(opts) {
+    opts = opts || {};
+    var fk = focusKey();
+    var cur = current(), t = cur.t, p0 = home();
+    state.places.forEach(function (p) { anchor(p, t); });
+    shown = { t: t, w: cur.w };
+    // Fields follow the shown instant, unless the visitor is typing in them.
+    var dv = isoDate(cur.w), tv = pad(cur.w.h) + ':' + pad(cur.w.mi);
+    if (state.live || opts.syncFields) {
+      if (document.activeElement !== dateIn && dateIn.value !== dv) dateIn.value = dv;
+      if (document.activeElement !== timeIn && timeIn.value !== tv) timeIn.value = tv;
+    }
+    nowBtn.setAttribute('aria-pressed', state.live ? 'true' : 'false');
+    TT.$$('.tzc-home-name').forEach(function (el) { if (el.textContent !== p0.name) el.textContent = p0.name; });
+    $('#tzc-c12').checked = state.h12;
+    $('#tzc-c24').checked = !state.h12;
+    var live = state.live
+      ? 'Showing the time now, from your device’s clock. It updates every minute.'
+      : 'Showing the time you picked. Press Now to follow the current time.';
+    if (liveLine.textContent !== live) liveLine.textContent = live;
+    renderRows(cur);
+    renderPlanner(cur);
+    renderOverlap(cur);
+    renderWeekly(cur);
+    if (!opts.tick) writeHash();
+    if (opts.announce) announce(summary(cur));
+    if (fk) { var again = rowsEl.querySelector(fk) || runsEl.querySelector(fk); if (again && again !== document.activeElement) again.focus({ preventScroll: true }); }
+    var sel = +(planEl.getAttribute('aria-activedescendant') || '').replace('tzc-col-', '');
+    if (sel !== lastSel) { lastSel = sel; keepColumnInView(); }
+  }
+
+  function rowInfo(p, cur) {
+    var t = cur.t, w = wallAt(p, t), hw = cur.w;
+    return { p: p, w: w, ab: abbrOf(p, w.off), shift: w.days - hw.days };
+  }
+  function summary(cur) {
+    var parts = state.places.slice(0, 4).map(function (p, i) {
+      var r = rowInfo(p, cur);
+      return fmtTime(r.w.h, r.w.mi) + (r.shift ? ' ' + DOW[r.w.dow] : '') + ' in ' + p.name;
+    });
+    return parts[0] + (parts.length > 1 ? ' is ' + parts.slice(1).join(', ') : '') + '.';
+  }
+
+  function nextChange(p, t) {
+    if (p.off != null) return null;
+    var c = anchor(p, t), i = segIndex(c.segs, t), off = c.segs[i][1];
+    for (var j = i + 1; j < c.segs.length; j++) {
+      if (c.segs[j][0] > t + 366 * DAY) break;
+      if (c.segs[j][1] !== off) return { at: c.segs[j][0], from: off, to: c.segs[j][1] };
+    }
+    return { none: true };
+  }
+  function changeText(p, ch) {
+    if (!ch) return 'Fixed offset: its clock never changes.';
+    if (ch.none) return 'No clock change in the next 12 months.';
+    var before = wallFromOff(ch.at, ch.from), after = wallFromOff(ch.at, ch.to), d = ch.to - ch.from;
+    var ab = abbrOf(p, ch.to);
+    return 'Next clock change: ' + fmtDate(before) + ' at ' + fmtTime(before.h, before.mi) + ', ' + (d > 0 ? 'forward ' : 'back ') +
+      fmtAmount(d) + ' to ' + fmtTime(after.h, after.mi) + ' (' + (ab ? ab + ', ' : '') + fmtOff(ch.to) + ').';
+  }
+  function wallFromOff(t, off) {
+    var lt = t + off * 1000, days = Math.floor(lt / DAY), c = civil(days), r = lt - days * DAY;
+    return { y: c.y, m: c.m, d: c.d, dow: c.dow, days: days, h: Math.floor(r / HOUR), mi: Math.floor(r % HOUR / MIN) };
+  }
+  // Periods in the next 12 months when the gap to the first place differs from today's.
+  // Each change is dated in the place whose clocks change, as the date people know it by.
+  function gapChanges(p0, p, t) {
+    var end = t + 365 * DAY, pts = [{ t: t, q: p0 }];
+    [p0, p].forEach(function (q) {
+      if (q.off != null) return;
+      anchor(q, t).segs.forEach(function (s) { if (s[0] > t && s[0] < end) pts.push({ t: s[0], q: q }); });
+    });
+    pts.sort(function (a, b) { return a.t - b.t; });
+    var runs = [];
+    pts.forEach(function (x, i) {
+      if (i && x.t === pts[i - 1].t) return;
+      var g = offAt(p, x.t).off - offAt(p0, x.t).off, last = runs[runs.length - 1];
+      if (last && last.g === g) return;
+      if (last) { last.end = x.t; last.endQ = x.q; }
+      runs.push({ start: x.t, startQ: x.q, g: g, end: end, endQ: null });
+    });
+    return { now: runs[0].g, other: runs.slice(1).filter(function (r) { return r.g !== runs[0].g; }) };
+  }
+  function repeatedNote(p, w, t) { // the local time of a non-first row happens twice
+    var r = fromWall(p, w.y, w.m, w.d, w.h, w.mi, 0);
+    if (!r.repeated) return '';
+    var first = r.both[0] === t;
+    return fmtTime(w.h, w.mi) + ' happens twice in ' + p.name + ' on ' + fmtDate(w) + ', as clocks go back; this is the ' +
+      (first ? 'first' : 'second') + ' time, ' + (abbrOf(p, w.off) || fmtOff(w.off)) + '.';
+  }
+
+  function renderRows(cur) {
+    var p0 = home(), html = [];
+    state.places.forEach(function (p, i) {
+      var r = rowInfo(p, cur), w = r.w, notes = [];
+      var meta = [];
+      if (r.ab) meta.push('<b>' + esc(r.ab) + '</b>');
+      meta.push(esc(fmtOff(w.off)));
+      if (i) meta.push(esc(fmtDiff(w.off - offAt(p0, cur.t).off, p0.name)));
+      else if (state.places.length > 1) meta.push('the others are compared with this place');
+      var sub = [p.sub, p.zone].filter(Boolean).filter(function (x, k, a) { return a.indexOf(x) === k; }).join(' · ');
+      var lines = ['<p class="tzc-line">' + meta.join(' · ') + '</p>', '<p class="tzc-line">' + esc(changeText(p, nextChange(p, cur.t))) + '</p>'];
+      if (i) {
+        var g = gapChanges(p0, p, cur.t);
+        if (g.other.length) {
+          lines.push('<p class="tzc-line">Gap changes: ' + g.other.slice(0, 4).map(function (x) {
+            var a = wallAt(x.startQ, x.start), b = x.endQ ? wallAt(x.endQ, x.end) : null;
+            return esc(fmtDiff(x.g, p0.name)) + ' from ' + esc(fmtDate(a)) + (b ? ' to ' + esc(fmtDate(b)) : ' on');
+          }).join('; ') + '.</p>');
+        }
+      }
+      // Notes: the first place's skipped or repeated time, corrected rules, how an abbreviation was read.
+      if (!i && cur.r && cur.r.skipped) {
+        var gap = cur.r.after - cur.r.before, tm = parseTimeStr(state.time);
+        notes.push('<p class="tzc-note is-warn">' + esc(fmtTime(tm.h, tm.mi)) + ' does not exist in ' + esc(p.name) + ' on ' + esc(fmtDate(w)) +
+          ': clocks go forward ' + esc(fmtAmount(gap)) + ' that night. Showing ' + esc(fmtTime(w.h, w.mi)) + ' ' + esc(r.ab || fmtOff(w.off)) +
+          ', the moment ' + esc(fmtTime(tm.h, tm.mi)) + ' would have been before the change.</p>');
+      }
+      if (!i && cur.r && cur.r.repeated) {
+        var other = cur.r.both[1 - cur.r.rep], ow = wallAt(p, other), oab = abbrOf(p, ow.off) || fmtOff(ow.off);
+        notes.push('<p class="tzc-note is-warn">' + esc(fmtTime(w.h, w.mi)) + ' happens twice in ' + esc(p.name) + ' on ' + esc(fmtDate(w)) +
+          ', as clocks go back. Showing the ' + (cur.r.rep ? 'second' : 'first') + ' time, ' + esc(r.ab || fmtOff(w.off)) + ' (' + esc(fmtOff(w.off)) + ').' +
+          '<br><button class="btn secondary small" type="button" data-act="rep">Use the ' + (cur.r.rep ? 'first' : 'second') + ' time (' + esc(oab) + ')</button></p>');
+      }
+      if (i) { var rn = repeatedNote(p, w, cur.t); if (rn) notes.push('<p class="tzc-note">' + esc(rn) + '</p>'); }
+      if (w.st) {
+        notes.push('<p class="tzc-note is-warn">Corrected: your browser’s time zone rules for ' + esc(STALE_NAMES[STALE_LINKS[p.zone] || p.zone] || p.name) +
+          ' are older than tz ' + TZ_VERSION + ', which has ' + esc(fmtOff(w.off)) + ' here. Other apps on this device may show this time wrong.</p>');
+      }
+      var e = abbrEntryOf(p);
+      if (e && e[3] != null && e[3] * 60 !== w.off) {
+        notes.push('<p class="tzc-note">' + esc(p.from) + ' is read as ' + esc(p.name) + ' time: on ' + esc(fmtDate(w)) + ' ' + esc(p.name) + ' is on ' +
+          esc(r.ab || fmtOff(w.off)) + ' (' + esc(fmtOff(w.off)) + '), not ' + esc(p.from) + ' (' + esc(fmtOff(e[3] * 60)) + ').' +
+          '<br><button class="btn secondary small" type="button" data-act="fixed">Use fixed ' + esc(fmtOff(e[3] * 60)) + '</button></p>');
+      }
+      if (p.ab === 'GMT' && p.off === 0) {
+        var lon = { zone: 'Europe/London', name: 'London', sub: 'England, United Kingdom' };
+        if (validZone(lon.zone) && offAt(lon, cur.t).off !== 0) {
+          notes.push('<p class="tzc-note">GMT is UTC+00:00 all year; on this date UK clocks are on BST (UTC+01:00).' +
+            '<br><button class="btn secondary small" type="button" data-act="uk">Use UK time</button></p>');
+        }
+      }
+      var alts = altChoices(p);
+      if (alts.length) {
+        notes.push('<p class="tzc-note">' + esc(alts.lead) + alts.map(function (a, k) {
+          return '<br><button class="btn secondary small" type="button" data-act="alt" data-alt="' + k + '">' + esc(a.label) + '</button>';
+        }).join('') + '</p>');
+      }
+      var dayTag = r.shift ? '<span class="tzc-tag">' + esc(dayShift(r.shift)) + '</span>' : '';
+      var badges = (i === 0 ? '<span class="tzc-tag">first place</span>' : '') +
+        (p.zone && p.zone === DEVICE_TZ ? '<span class="tzc-tag">your device</span>' : '');
+      html.push('<li class="tzc-row' + (i === 0 ? ' is-home' : '') + '" data-i="' + i + '">' +
+        '<div class="tzc-top"><div class="tzc-place"><b class="tzc-name">' + esc(p.name) + '</b>' + badges +
+        (sub ? '<span class="tzc-sub">' + esc(sub) + '</span>' : '') + '</div>' +
+        '<div class="tzc-face"><span class="tzc-t">' + esc(fmtTime(w.h, w.mi)) + '</span><span class="tzc-d">' + esc(fmtDate(w)) + '</span>' + dayTag + '</div></div>' +
+        lines.join('') + notes.join('') +
+        '<div class="tzc-acts">' +
+        (i ? '<button class="btn secondary small" type="button" data-act="first">Make first<span class="visually-hidden"> place: ' + esc(p.name) + '</span></button>' : '') +
+        (state.places.length > 1 ? '<button class="btn secondary small" type="button" data-act="remove">Remove<span class="visually-hidden"> ' + esc(p.name) + '</span></button>' : '') +
+        '</div></li>');
+    });
+    rowsEl.innerHTML = html.join('');
+  }
+
+  // Other meanings of an ambiguous abbreviation, or other zones of a city name or country.
+  function altChoices(p) {
+    var out = [];
+    var e = abbrEntryOf(p);
+    if (p.from) {
+      var all = abbrEntries(p.from);
+      if (all.length > 1) {
+        all.forEach(function (x) {
+          if (e && x === e) return;
+          var q = placeFromAbbr(x);
+          out.push({ place: q, label: x[1] + ' (' + (x[2] ? q.name + ', ' : '') + fmtOff((x[3] == null ? offAt(q, shown ? shown.t : Date.now()).off / 60 : x[3]) * 60) + ')' });
+        });
+        out.lead = p.from + ' is read as ' + (e ? e[1] : p.name) + '. It can also mean:';
+      }
+    } else if (p.alts && p.alts.length) {
+      p.alts.forEach(function (q) { out.push({ place: q, label: q.name + (q.sub ? ', ' + q.sub : '') + ' (' + fmtOff(offAt(q, shown ? shown.t : Date.now()).off) + ')' }); });
+      out.lead = p.altLead || p.altLead2 || 'Also:';
+    }
+    return out;
+  }
+
+  // ---------- Planner ----------
+  function dayColumns(cur) { // instants of each hour of the first place's day
+    var p0 = home(), w = cur.w;
+    var start = fromWall(p0, w.y, w.m, w.d, 0, 0, 0).t, cols = [];
+    if (wallAt(p0, start).days !== w.days) start = fromWall(p0, w.y, w.m, w.d, 1, 0, 0).t;
+    for (var t = start; cols.length < 30 && wallAt(p0, t).days === w.days; t += HOUR) cols.push(t);
+    return cols;
+  }
+  function slotClass(h, mi) {
+    var m = h * 60 + mi;
+    if (m >= state.work[0] * 60 && m < state.work[1] * 60) return 'work';
+    return m >= AWAKE[0] && m < AWAKE[1] ? 'eve' : 'night';
+  }
+  var CLASS_WORDS = { work: 'working hours', eve: 'morning or evening', night: 'night' };
+  var planCols = [];
+  function renderPlanner(cur) {
+    var cols = dayColumns(cur), sel = 0, p0 = home();
+    cols.forEach(function (c, i) { if (c <= cur.t) sel = i; });
+    planCols = cols;
+    planHint.textContent = 'Each column is one hour of ' + fmtDate(cur.w) + ' in ' + p0.name +
+      '. Tap a column, or use the arrow keys, to pick that hour; Home and End go to the first and last hour, Page Up and Page Down to the day before or after.';
+    planNames.innerHTML = state.places.map(function (p) { return '<div>' + esc(p.name) + '</div>'; }).join('');
+    var html = cols.map(function (t, i) {
+      // Each option is named by its own text: the visible hour, plus hidden words that finish it.
+      var cells = state.places.map(function (p) {
+        var w = wallAt(p, t), prev = i ? wallAt(p, t - HOUR) : null, cls = slotClass(w.h, w.mi);
+        var newDay = (i === 0 && w.days !== cur.w.days) || (prev && prev.days !== w.days);
+        var main = state.h12 ? String((w.h % 12) || 12) : pad(w.h);
+        var below = (w.mi ? ':' + pad(w.mi) : '') + (state.h12 ? (w.h < 12 ? 'am' : 'pm') : '');
+        var zeros = w.mi ? '' : '<span class="visually-hidden">:00' + (state.h12 ? ' ' : '') + '</span>';
+        return '<div class="tzc-cell tzc-' + cls + '">' + (newDay ? '<small>' + esc(DOW[w.dow] + ' ' + w.d) + '</small>' : '') +
+          '<span>' + esc(main) + (state.h12 ? '' : zeros) + '</span>' + (below ? '<small>' + (state.h12 ? zeros : '') + below + '</small>' : '') +
+          '<span class="visually-hidden">' + (w.days !== cur.w.days && !newDay ? ' ' + esc(fmtDay(w)) : '') + ' in ' + esc(p.name) + ' (' + CLASS_WORDS[cls] + ');</span></div>';
+      });
+      return '<div class="tzc-col" role="option" id="tzc-col-' + i + '" data-col="' + i + '" aria-selected="' + (i === sel) + '">' + cells.join('') + '</div>';
+    }).join('');
+    planEl.innerHTML = html;
+    planEl.setAttribute('aria-activedescendant', 'tzc-col-' + sel);
+  }
+  function keepColumnInView() {
+    var el = planEl.querySelector('[aria-selected="true"]'), wrap = $('#tzc-plan-wrap');
+    if (!el) return;
+    var names = planNames.offsetWidth, left = el.offsetLeft, right = left + el.offsetWidth;
+    if (left < wrap.scrollLeft + names) wrap.scrollLeft = Math.max(0, left - names - 4);
+    else if (right > wrap.scrollLeft + wrap.clientWidth) wrap.scrollLeft = right - wrap.clientWidth + 4;
+  }
+  function pickColumn(i) {
+    if (!planCols.length) return;
+    if (i < 0 || i >= planCols.length) {
+      var t = i < 0 ? planCols[0] - HOUR : planCols[planCols.length - 1] + HOUR;
+      setInstant(t);
+    } else setInstant(planCols[i]);
+    render({ syncFields: true });
+  }
+
+  // ---------- When everyone can meet ----------
+  function renderOverlap(cur) {
+    var cols = planCols, p0 = home();
+    if (state.work[0] >= state.work[1]) {
+      overlapSum.textContent = 'Pick working hours that start before they end.';
+      runsEl.innerHTML = '';
+      return;
+    }
+    var start = cols[0], end = cols[cols.length - 1] + HOUR, slots = [];
+    for (var t = start; t < end; t += 15 * MIN) {
+      var all = 'work';
+      for (var k = 0; k < state.places.length; k++) {
+        var w = wallAt(state.places[k], t), m = w.h * 60 + w.mi;
+        var inWork = m >= state.work[0] * 60 && m + 15 <= state.work[1] * 60, awake = m >= AWAKE[0] && m + 15 <= AWAKE[1];
+        if (!inWork) all = awake && all !== 'none' ? 'awake' : 'none';
+        if (all === 'none') break;
+      }
+      slots.push({ t: t, k: all });
+    }
+    function runsOf(ok) {
+      var out = [], run = null;
+      slots.forEach(function (s) {
+        if (ok(s.k)) { if (!run) out.push(run = { a: s.t, b: s.t + 15 * MIN }); else run.b = s.t + 15 * MIN; }
+        else run = null;
+      });
+      return out;
+    }
+    var work = runsOf(function (k) { return k === 'work'; }), runs = work, sum;
+    var wh = pad(state.work[0]) + ':00 to ' + pad(state.work[1]) + ':00';
+    if (state.places.length < 2) sum = 'Add another place to compare working hours.';
+    else if (work.length) sum = 'Within everyone’s working hours (' + wh + ' local time) on ' + fmtDate(cur.w) + ' in ' + p0.name + ':';
+    else {
+      runs = runsOf(function (k) { return k !== 'none'; });
+      sum = 'No time on ' + fmtDate(cur.w) + ' falls within everyone’s working hours (' + wh + ').' +
+        (runs.length ? ' Times when nobody is in the night (07:00 to 22:00 local time):' : ' No time is between 07:00 and 22:00 for everyone either.');
+    }
+    if (state.places.length < 2) runs = [];
+    if (overlapSum.textContent !== sum) overlapSum.textContent = sum;
+    runsEl.innerHTML = runs.slice(0, 8).map(function (r, i) {
+      var text = state.places.map(function (p) {
+        var a = wallAt(p, r.a), b = wallAt(p, r.b);
+        return p.name + ' ' + fmtTime(a.h, a.mi) + '–' + fmtTime(b.h, b.mi) + (a.days !== cur.w.days ? ' (' + DOW[a.dow] + ')' : '');
+      }).join(' · ');
+      var a0 = wallAt(p0, r.a);
+      return '<li><span>' + esc(text) + '</span><button class="btn secondary small" type="button" data-run="' + i + '">Use ' +
+        esc(fmtTime(a0.h, a0.mi)) + '<span class="visually-hidden"> in ' + esc(p0.name) + '</span></button></li>';
+    }).join('');
+    runsEl._runs = runs;
+  }
+
+  // ---------- Every week ----------
+  function series(n, cur) {
+    var p0 = home(), w = cur.w, base = w.days, out = [];
+    for (var k = 0; k < n; k++) {
+      var c = civil(base + 7 * k);
+      var r = k === 0 && cur.r ? cur.r : fromWall(p0, c.y, c.m, c.d, w.h, w.mi, k === 0 ? state.rep : 0);
+      if (k === 0 && !cur.r) r = { t: cur.t };
+      out.push({ t: r.t, skipped: !!r.skipped });
+    }
+    return out;
+  }
+  function renderWeekly(cur) {
+    var occ = series(52, cur), p0 = home(), runs = [];
+    occ.forEach(function (o) {
+      var hw = wallAt(p0, o.t);
+      var cells = state.places.map(function (p) { var w = wallAt(p, o.t); return fmtTime(w.h, w.mi) + (w.days !== hw.days ? ' (' + dayShift(w.days - hw.days) + ')' : ''); });
+      var key = cells.join('|'), last = runs[runs.length - 1];
+      if (last && last.key === key) { last.b = hw; last.n++; return; }
+      runs.push({ key: key, cells: cells, a: hw, b: hw, n: 1 });
+    });
+    weekHint.textContent = 'A meeting at ' + fmtTime(cur.w.h, cur.w.mi) + ' in ' + p0.name + ' every ' + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][cur.w.dow] +
+      ' for 52 weeks from ' + fmtDate(cur.w) + (runs.length > 1 ? '. Rows start where a clock change moves the local time somewhere; changed times are in bold.' : '. No clock change moves it anywhere.');
+    var head = '<thead><tr><th scope="col">Weeks</th>' + state.places.map(function (p) { return '<th scope="col">' + esc(p.name) + '</th>'; }).join('') + '</tr></thead>';
+    var body = runs.map(function (r, i) {
+      var prev = runs[i - 1];
+      return '<tr><th scope="row">' + esc(fmtDay(r.a) + ' ' + r.a.y + (r.n > 1 ? ' – ' + fmtDay(r.b) + ' ' + r.b.y : '')) + ' (' + r.n + (r.n === 1 ? ' week' : ' weeks') + ')</th>' +
+        r.cells.map(function (c, k) {
+          var changed = prev && prev.cells[k] !== c;
+          return '<td' + (changed ? ' class="tzc-chg"' : '') + '>' + esc(c) + (changed ? '<span class="visually-hidden"> (changed)</span>' : '') + '</td>';
+        }).join('') + '</tr>';
+    }).join('');
+    weekEl.innerHTML = head + '<tbody>' + body + '</tbody>';
+  }
+
+  // ---------- URL hash ----------
+  var lastHash = null;
+  function encodePlace(p, withNames) {
+    var f = [placeId(p).replace(':', '')]; // UTC+0530: the colon separates the fields
+    if (withNames) f.push(encodeURIComponent(p.name), encodeURIComponent(p.sub || ''), encodeURIComponent(p.from || p.ab || ''));
+    return f.join(':').replace(/:+$/, '');
+  }
+  function hashFor(withNames) {
+    return 'p=' + state.places.map(function (p) { return encodePlace(p, withNames); }).join(',') +
+      '&t=' + (state.live ? 'now' : state.date + 'T' + state.time + (state.rep ? '-2' : '')) +
+      '&c=' + (state.h12 ? '12' : '24') + '&w=' + state.work[0] + '-' + state.work[1];
+  }
+  var hashNote = '';
+  function writeHash() {
+    var h = hashFor(true);
+    hashNote = '';
+    if (h.length > MAX_HASH) { h = hashFor(false); hashNote = 'The link keeps the places and the time but not the place names, which are too long for a link.'; }
+    if (h === lastHash) return;
+    lastHash = h;
+    try { history.replaceState(null, '', location.pathname + location.search + '#' + h); } catch (e) { /* a sandboxed page */ }
+  }
+  function readHash() {
+    var raw = location.hash.slice(1);
+    if (!raw) return false;
+    if (raw === lastHash) return true;
+    if (raw.length > MAX_HASH) { setError(askErr, null, 'This link is too long to read (over ' + MAX_HASH.toLocaleString('en-GB') + ' characters), so the page starts with its usual places.'); return false; }
+    var kv = new Map(), bad = 0;
+    raw.split('&').forEach(function (x) { var i = x.indexOf('='); if (i > 0) kv.set(x.slice(0, i), x.slice(i + 1)); });
+    var places = [];
+    (kv.get('p') || '').split(',').forEach(function (s) {
+      if (!s) return;
+      var f = s.split(':'), p = null;
+      if (/^UTC[+-]\d{1,2}$/.test(f[0]) && /^[0-5]\d$/.test(f[1] || '')) f.splice(0, 2, f[0] + ':' + f[1]); // UTC+05:30 typed by hand
+      var id = f[0];
+      function dec(x) { try { return cut(decodeURIComponent(x || ''), MAX_NAME); } catch (e) { return ''; } }
+      var off = /^UTC/.test(id) ? parseOffset(id) : null;
+      if (off != null) p = fixedPlace(off);
+      else if (validZone(id)) p = zonePlace(id);
+      if (!p) { bad++; return; }
+      if (dec(f[1])) p.name = dec(f[1]);
+      if (f.length > 2) p.sub = dec(f[2]);
+      var tag = dec(f[3]);
+      if (tag && p.zone && abbrEntries(tag).some(function (e) { return modern(e[2]) === p.zone; })) p.from = tag.toUpperCase();
+      else if (tag && p.off != null) p.ab = tag;
+      if (places.length < MAX_PLACES) places.push(p);
+    });
+    if (!places.length) return false;
+    var t = kv.get('t') || 'now', m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(-2)?$/.exec(t);
+    state.places = places;
+    if (m && parseDateStr(m[1]) && parseTimeStr(m[2])) { state.live = false; state.date = m[1]; state.time = m[2]; state.rep = m[3] ? 1 : 0; }
+    else state.live = true;
+    state.h12 = kv.get('c') === '12' ? true : kv.get('c') === '24' ? false : state.h12;
+    var wk = /^(\d{1,2})-(\d{1,2})$/.exec(kv.get('w') || '');
+    if (wk && +wk[1] < +wk[2] && +wk[2] <= 24) state.work = [+wk[1], +wk[2]];
+    lastHash = raw;
+    if (bad) setError(askErr, null, bad + (bad === 1 ? ' place' : ' places') + ' in the link could not be read and ' + (bad === 1 ? 'was' : 'were') + ' left out.');
+    return true;
+  }
+
+  // ---------- Typed questions ----------
+  var MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  var MONTH_RE = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?';
+  var WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  function parseAsk(text) {
+    var s = text.replace(/[−–—]/g, '-').replace(/→/g, ' to ').replace(/\s+/g, ' ').trim();
+    s = s.replace(/[?!]+$/, '').trim()
+      .replace(/^(?:what(?:'s|’s| is)|whats|convert|show(?: me)?|when is)\s+/i, '')
+      .replace(/^(?:what\s+)?(?:the\s+)?(?:current\s+)?time\s+(?:is\s+it\s+|now\s+)?(?=in\b|at\b)/i, '')
+      .replace(/\s+(?:time|times)$/i, '');
+    var sep = /\s+(?:to|in|into|=|->|vs\.?|versus)\s+|^(?:in)\s+/i.exec(s), left = s, right = '';
+    if (sep) { left = s.slice(0, sep.index); right = s.slice(sep.index + sep[0].length); }
+    var out = { time: null, date: null, from: '', to: [] };
+    // Dates first, so that the day of the month is not read as an hour.
+    var m;
+    left = ' ' + left + ' ';
+    if ((m = /\s(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})(?=\s)/.exec(left))) {
+      return { error: 'Write the date as 14 Mar 2027 or 2027-03-14: ' + m[0].trim() + ' is a different day in the UK and the US.' };
+    }
+    if ((m = /\s(\d{4})-(\d{1,2})-(\d{1,2})(?=\s)/.exec(left))) { out.date = { y: +m[1], m: +m[2], d: +m[3] }; left = left.replace(m[0], ' '); }
+    else if ((m = new RegExp('\\s(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?' + MONTH_RE + '(?:,?\\s+(\\d{4}))?(?=\\s)', 'i').exec(left))) {
+      out.date = { d: +m[1], m: MONTHS.indexOf(m[2].slice(0, 3).toLowerCase()) + 1, y: m[3] ? +m[3] : null }; left = left.replace(m[0], ' ');
+    } else if ((m = new RegExp('\\s' + MONTH_RE + '\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?(?=\\s)', 'i').exec(left))) {
+      out.date = { d: +m[2], m: MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) + 1, y: m[3] ? +m[3] : null }; left = left.replace(m[0], ' ');
+    } else if ((m = /\s(today|tonight|tomorrow|yesterday)(?=\s)/i.exec(left))) {
+      out.date = { rel: { today: 0, tonight: 0, tomorrow: 1, yesterday: -1 }[m[1].toLowerCase()] }; left = left.replace(m[0], ' ');
+    } else if ((m = /\s(?:on\s+|next\s+)?(sun|mon|tue|wed|thu|fri|sat)(?:day|s|nday|sday|nesday|rsday|urday|ues|urs|hurs)?(?=\s)/i.exec(left))) {
+      out.date = { dow: WEEKDAYS.indexOf(m[1].toLowerCase()), next: /next/i.test(m[0]) }; left = left.replace(m[0], ' ');
+    }
+    if ((m = /\s(?:at\s+)?(noon|midday|midnight|now|(\d{1,2})(?:[:.h](\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?)(?=\s)/i.exec(left))) {
+      var word = m[1].toLowerCase();
+      if (word === 'noon' || word === 'midday') out.time = { h: 12, mi: 0 };
+      else if (word === 'midnight') out.time = { h: 0, mi: 0 };
+      else if (word === 'now') out.time = 'now';
+      else if (m[3] != null || m[4]) {
+        var h = +m[2], mi = m[3] != null ? +m[3] : 0, ap = (m[4] || '').replace(/\./g, '').toLowerCase();
+        if (ap) { if (h < 1 || h > 12) return { error: m[1].trim() + ' is not a time: with am or pm the hour runs from 1 to 12.' }; h = h % 12 + (ap === 'pm' ? 12 : 0); }
+        if (h > 23 || mi > 59) return { error: m[1].trim() + ' is not a time of day.' };
+        out.time = { h: h, mi: mi };
+      }
+      if (out.time) left = left.replace(m[0], ' ');
+    }
+    out.from = left.replace(/\s+(?:at|on)\s*$/i, '').replace(/^\s*(?:at|on)\s+/i, '').trim();
+    out.to = right ? right.split(/\s*(?:,|;|&|\band\b|\bplus\b)\s*/i).map(function (x) { return x.trim(); }).filter(Boolean) : [];
+    return out;
+  }
+  // A place named in text -> { place, alts, lead } or { error }.
+  function resolvePlace(str) {
+    var s = str.trim().replace(/^the\s+/i, '').replace(/\s+(?:time zone|timezone|time)$/i, '');
+    var off = parseOffset(s);
+    if (off != null) return Promise.resolve({ place: fixedPlace(off) });
+    if (/^(?:utc|gmt)\s*[+\-]/i.test(s)) return Promise.resolve({ error: s + ' is not an offset between UTC−12:00 and UTC+14:00.' });
+    var ab = abbrEntries(s);
+    if (ab.length) return Promise.resolve({ place: placeFromAbbr(ab[0]) });
+    var z = ZONES.filter(function (x) { return fold(x) === fold(s); })[0];
+    if (z) return Promise.resolve({ place: zonePlace(z) });
+    return loadData().then(function () {
+      var k = countryMatch(s, true)[0];
+      if (k) {
+        var list = countryPlaces(k);
+        var r = { place: list[0] };
+        if (list.length > 1) { r.alts = list.slice(1, 7); r.lead = k.name + ' has ' + k.byZone.size + ' time zones in this list; ' + list[0].name + '\u2019s is used. Others:'; r.lead2 = 'Other time zones in ' + k.name + ':'; }
+        return r;
+      }
+      var cs = cityMatches(s, 40);
+      if (!cs.length) {
+        var zs = zoneMatches(s, 1);
+        if (zs.length) return { place: zonePlace(zs[0]) };
+        return { error: 'No place called “' + cut(s, 40) + '” was found. Try a larger city nearby, the country, a zone such as Europe/Paris or an offset such as UTC+2.' };
+      }
+      var best = cs[0], seen = [best.zone], alts = [];
+      // Namesakes in other zones are offered when they are not much smaller (the list is in order of size).
+      cs.forEach(function (c) {
+        if (c.key !== best.key || seen.indexOf(c.zone) >= 0 || alts.length >= 4 || c.i > best.i * 3 + 100) return;
+        seen.push(c.zone);
+        alts.push(cityPlace(c));
+      });
+      var res = { place: cityPlace(best) };
+      if (alts.length) { res.alts = alts; res.lead = best.name + ' is read as ' + best.name + (res.place.sub ? ', ' + res.place.sub : '') + '. Other places called ' + best.name + ':'; res.lead2 = 'Other places called ' + best.name + ':'; }
+      return res;
+    }, function () {
+      return { error: 'The list of cities could not be loaded. Zone names (Europe/Paris), offsets (UTC+2) and abbreviations (CET) still work.' };
+    });
+  }
+  function withAlts(r) { var p = r.place; if (r.alts) { p.alts = r.alts; p.altLead = r.lead; p.altLead2 = r.lead2; } return p; }
+  function todayIn(p) { var t = Date.now(); anchor(p, t); return wallAt(p, t); }
+  var askBusy = 0;
+  function runAsk() {
+    var text = askIn.value;
+    setError(askErr, askIn, '');
+    askOk.textContent = '';
+    if (text.length > MAX_ASK) { setError(askErr, askIn, 'That is too long for a question: keep it under ' + MAX_ASK + ' characters.'); return; }
+    if (!text.trim()) { setError(askErr, askIn, 'Type a time and places, such as 3pm EST to IST.'); return; }
+    var q = parseAsk(text);
+    if (q.error) { setError(askErr, askIn, q.error); return; }
+    if (!q.from && !q.to.length && !q.time && !q.date) { setError(askErr, askIn, 'Name at least one place, such as London, IST or UTC+5:30.'); return; }
+    var token = ++askBusy;
+    Promise.all([q.from ? resolvePlace(q.from) : Promise.resolve(null)].concat(q.to.map(resolvePlace))).then(function (res) {
+      if (token !== askBusy) return;
+      var errs = res.filter(function (r) { return r && r.error; });
+      if (errs.length) { setError(askErr, askIn, errs[0].error); return; }
+      var src = res[0] ? withAlts(res[0]) : home();
+      var targets = res.slice(1).map(withAlts);
+      // The date and time are read in the source place.
+      var base = todayIn(src), date = null;
+      if (q.date) {
+        if (q.date.rel != null) date = civil(base.days + q.date.rel);
+        else if (q.date.dow != null) { var dd = (q.date.dow - base.dow + 7) % 7; if (!dd && q.date.next) dd = 7; date = civil(base.days + dd); }
+        else {
+          var y = q.date.y || base.y;
+          if (y < 1900 || y > 2100) { setError(askErr, askIn, 'Pick a year between 1900 and 2100.'); return; }
+          if (q.date.m < 1 || q.date.m > 12 || q.date.d < 1 || q.date.d > daysInMonth(y, q.date.m)) {
+            setError(askErr, askIn, 'There is no ' + q.date.d + ' ' + (MON[q.date.m - 1] || 'month ' + q.date.m) + ' ' + y + '.'); return;
+          }
+          date = civil(daysFromCivil(y, q.date.m, q.date.d));
+        }
+      }
+      // A named source and targets replace the list; a source alone becomes the first place; targets
+      // alone are added to the places already shown.
+      var list = !res[0] ? state.places.concat(targets) : targets.length ? [src].concat(targets) : [src].concat(state.places);
+      var uniq = [];
+      list.forEach(function (p) { if (!uniq.some(function (u) { return samePlace(u, p); })) uniq.push(p); });
+      var dropped = uniq.length > MAX_PLACES;
+      state.places = uniq.slice(0, MAX_PLACES);
+      if (q.time === 'now' || (!q.time && !date)) state.live = true;
+      else {
+        var tm = q.time || { h: base.h, mi: base.mi };
+        var d = date || base;
+        state.live = false;
+        state.date = d.y + '-' + pad(d.m) + '-' + pad(d.d);
+        state.time = pad(tm.h) + ':' + pad(tm.mi);
+        state.rep = 0;
+      }
+      setError(whenErr, [dateIn, timeIn], '');
+      render({ syncFields: true, announce: true });
+      var w = shown.w;
+      askOk.textContent = 'Read as ' + (state.live ? 'the time now' : fmtTime(w.h, w.mi) + ' on ' + fmtDate(w)) + ' in ' + home().name +
+        (home().from ? ' (' + home().from + ')' : '') + (state.places.length > 1 ? ', compared with ' + state.places.slice(1).map(function (p) { return p.name; }).join(', ') : '') + '.' +
+        (dropped ? ' Only the first ' + MAX_PLACES + ' places are kept.' : '');
+    });
+  }
+  askForm.addEventListener('submit', function (e) { e.preventDefault(); runAsk(); });
+  askIn.addEventListener('focus', function () { loadData().catch(function () {}); });
+  askIn.addEventListener('input', function () { if (askErr.textContent) setError(askErr, askIn, ''); });
+
+  // ---------- Date and time fields ----------
+  function fromFields() {
+    var d = parseDateStr(dateIn.value), tm = parseTimeStr(timeIn.value);
+    if (!d) { setError(whenErr, dateIn, dateIn.value ? 'Pick a date between 1 January 1900 and 31 December 2100.' : 'Pick a date.'); timeIn.removeAttribute('aria-invalid'); return; }
+    if (!tm) { setError(whenErr, timeIn, 'Pick a time.'); dateIn.removeAttribute('aria-invalid'); return; }
+    setError(whenErr, [dateIn, timeIn], '');
+    state.live = false;
+    state.date = dateIn.value;
+    state.time = pad(tm.h) + ':' + pad(tm.mi);
+    state.rep = 0;
+    render({ announce: true });
+  }
+  dateIn.addEventListener('input', fromFields);
+  dateIn.addEventListener('change', fromFields);
+  timeIn.addEventListener('input', fromFields);
+  timeIn.addEventListener('change', fromFields);
+  nowBtn.addEventListener('click', function () {
+    state.live = true;
+    setError(whenErr, [dateIn, timeIn], '');
+    render({ syncFields: true, announce: true });
+  });
+  TT.$$('input[name="tzc-clock"]').forEach(function (r) {
+    r.addEventListener('change', function () { state.h12 = r.value === '12'; render(); });
+  });
+
+  // ---------- Row buttons ----------
+  rowsEl.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]');
+    if (!b || e.detail > 1) return; // the second click of a double click would act on the next row
+    var li = b.closest('li'), i = +li.getAttribute('data-i'), p = state.places[i], act = b.getAttribute('data-act');
+    if (!p) return;
+    var t = shown.t, focusAct = null, focusI = i;
+    if (act === 'remove') {
+      if (state.places.length < 2) return;
+      state.places.splice(i, 1);
+      if (i === 0 && !state.live) setInstant(t, state.places[0]);
+      announceAfter = p.name + ' removed.';
+      focusI = Math.min(i, state.places.length - 1);
+      focusAct = 'remove';
+    } else if (act === 'first') {
+      state.places.splice(i, 1);
+      state.places.unshift(p);
+      if (!state.live) setInstant(t, p);
+      announceAfter = p.name + ' is now the first place.';
+      focusI = 0; focusAct = 'remove';
+    } else if (act === 'rep') {
+      state.rep = state.rep ? 0 : 1;
+      focusI = 0; focusAct = 'rep';
+    } else if (act === 'fixed') {
+      var en = abbrEntryOf(p);
+      if (!en) return;
+      state.places[i] = fixedFromAbbr(en);
+      if (i === 0 && !state.live) { /* the typed wall time stays, now read on the fixed offset */ }
+      focusAct = 'remove';
+    } else if (act === 'uk') {
+      state.places[i] = { zone: 'Europe/London', name: 'London', sub: 'UK time (GMT in winter, BST in summer)' };
+      focusAct = 'remove';
+    } else if (act === 'alt') {
+      var alts = altChoices(p), a = alts[+b.getAttribute('data-alt')];
+      if (!a) return;
+      var q = a.place;
+      if (p.from && !q.from && q.zone) q.from = p.from;
+      if (!p.from && p.alts) {
+        q.alts = p.alts.filter(function (x) { return x !== a.place; }).concat([{ zone: p.zone, name: p.name, sub: p.sub }]);
+        q.altLead = q.altLead2 = p.altLead2;
+      }
+      state.places[i] = q;
+      focusAct = 'remove';
+    }
+    setError(addErr, addIn, '');
+    render({ syncFields: true, announce: !announceAfter });
+    if (announceAfter) { announce(announceAfter); announceAfter = ''; }
+    var target = rowsEl.querySelector('li[data-i="' + focusI + '"] button[data-act="' + focusAct + '"]') || rowsEl.querySelector('li[data-i="' + focusI + '"] button') || addIn;
+    target.focus();
+  });
+  var announceAfter = '';
+
+  // ---------- Adding a place ----------
+  var items = [], active = -1;
+  function suggestions(raw) {
+    var out = [], q = raw.trim();
+    if (!q) return out;
+    var t = shown ? shown.t : Date.now();
+    function add(p, detail) {
+      if (out.some(function (o) { return samePlace(o.place, p); })) return;
+      out.push({ place: p, detail: detail });
+    }
+    function detailOf(p) { return [p.sub, p.zone, fmtOff(offAt(p, t).off)].filter(Boolean).join(' · '); }
+    var off = parseOffset(q);
+    if (off != null) add(fixedPlace(off), 'Fixed offset from UTC');
+    abbrEntries(q).forEach(function (e) {
+      var p = placeFromAbbr(e);
+      add(p, e[0] + ': ' + (e[2] ? e[1] + ', ' + p.name + ' time (follows its clock changes) · ' + fmtOff(offAt(p, t).off) + ' now' : e[1]));
+      if (e[2] && e[3] != null && ABBR.get(p.zone) && ABBR.get(p.zone).size > 1) add(fixedFromAbbr(e), e[0] + ': ' + e[1] + ', fixed ' + fmtOff(e[3] * 60) + ' all year');
+    });
+    if (data) {
+      countryMatch(q, false).slice(0, 2).forEach(function (k) {
+        countryPlaces(k).slice(0, 6).forEach(function (p) { add(p, detailOf(p)); });
+      });
+      cityMatches(q, 8).forEach(function (c) { var p = cityPlace(c); add(p, detailOf(p)); });
+    }
+    zoneMatches(q, 3).forEach(function (z) {
+      var p = zonePlace(z);
+      if (!out.some(function (o) { return o.place.zone === p.zone; })) add(p, detailOf(p)); // a city of that zone is already offered
+    });
+    return out.slice(0, 10);
+  }
+  function closeList() {
+    sugg.hidden = true;
+    sugg.innerHTML = '';
+    items = []; active = -1;
+    addIn.setAttribute('aria-expanded', 'false');
+    addIn.removeAttribute('aria-activedescendant');
+  }
+  function showList() {
+    var q = addIn.value;
+    if (q.length > MAX_ADD) { closeList(); return; }
+    if (!q.trim()) { closeList(); return; }
+    items = suggestions(q);
+    active = items.length ? 0 : -1;
+    var html = items.map(function (it, i) {
+      return '<li class="tzc-opt" role="option" id="tzc-opt-' + i + '" data-opt="' + i + '" aria-selected="' + (i === active) + '">' + esc(it.place.name) +
+        '<small>' + esc(it.detail) + '</small></li>';
+    });
+    if (!data && dataP) html.push('<li class="tzc-opt is-info" role="option" aria-disabled="true" aria-selected="false">Loading the list of cities…</li>');
+    else if (!items.length) html.push('<li class="tzc-opt is-info" role="option" aria-disabled="true" aria-selected="false">No place matches. Try a city, a country, Europe/Paris, UTC+2 or CET.</li>');
+    sugg.innerHTML = html.join('');
+    sugg.hidden = false;
+    addIn.setAttribute('aria-expanded', 'true');
+    if (active >= 0) addIn.setAttribute('aria-activedescendant', 'tzc-opt-' + active); else addIn.removeAttribute('aria-activedescendant');
+  }
+  function moveActive(d) {
+    if (!items.length) return;
+    active = (active + d + items.length) % items.length;
+    TT.$$('.tzc-opt', sugg).forEach(function (o) { o.setAttribute('aria-selected', String(+o.getAttribute('data-opt') === active)); });
+    addIn.setAttribute('aria-activedescendant', 'tzc-opt-' + active);
+    var el = $('#tzc-opt-' + active);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+  function pick(i) {
+    var it = items[i];
+    if (!it) return;
+    if (state.places.length >= MAX_PLACES) { setError(addErr, addIn, 'Up to ' + MAX_PLACES + ' places can be compared. Remove one first.'); closeList(); return; }
+    var p = it.place;
+    if (state.places.some(function (x) { return samePlace(x, p); })) { setError(addErr, addIn, p.name + ' is already in the list.'); closeList(); return; }
+    state.places.push(p);
+    addIn.value = '';
+    closeList();
+    setError(addErr, addIn, '');
+    render({ syncFields: true });
+    announce(p.name + ' added: ' + rowSentence(p));
+  }
+  function rowSentence(p) { var w = wallAt(p, shown.t); return fmtTime(w.h, w.mi) + ', ' + fmtDate(w) + '.'; }
+  addIn.addEventListener('focus', function () {
+    loadData().then(function () { if (document.activeElement === addIn && addIn.value.trim()) showList(); }, function () {
+      setError(addErr, addIn, 'The list of cities could not be loaded. Zone names (Europe/Paris), offsets (UTC+2) and abbreviations (CET) still work.');
+    });
+  });
+  addIn.addEventListener('input', function () { if (addErr.textContent) setError(addErr, addIn, ''); showList(); });
+  addIn.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (sugg.hidden) showList(); else moveActive(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1); }
+    else if (e.key === 'Escape') { if (!sugg.hidden) { e.preventDefault(); closeList(); } }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.repeat) return;
+      showList(); // brings the list up to date with what is in the box right now
+      if (items.length) pick(active >= 0 ? active : 0);
+      else if (addIn.value.trim()) setError(addErr, addIn, data || !dataP ? 'No place matches “' + cut(addIn.value.trim(), 40) + '”.' : 'The list of cities is still loading. Try again in a moment.');
+    }
+  });
+  addIn.addEventListener('blur', function () { setTimeout(function () { if (document.activeElement !== addIn) closeList(); }, 150); });
+  sugg.addEventListener('mousedown', function (e) { e.preventDefault(); });
+  sugg.addEventListener('click', function (e) {
+    var o = e.target.closest('[data-opt]');
+    if (o && e.detail < 2) pick(+o.getAttribute('data-opt'));
+  });
+
+  // ---------- Planner and overlap controls ----------
+  planEl.addEventListener('click', function (e) {
+    var c = e.target.closest('[data-col]');
+    if (c) { pickColumn(+c.getAttribute('data-col')); planEl.focus({ preventScroll: true }); }
+  });
+  planEl.addEventListener('keydown', function (e) {
+    var sel = +((planEl.getAttribute('aria-activedescendant') || 'tzc-col-0').replace('tzc-col-', ''));
+    var map = { ArrowRight: sel + 1, ArrowLeft: sel - 1, Home: 0, End: planCols.length - 1 };
+    if (e.key in map) { e.preventDefault(); pickColumn(map[e.key]); return; }
+    if (e.key === 'PageDown' || e.key === 'PageUp') {
+      e.preventDefault();
+      var p0 = home(), w = wallAt(p0, planCols[sel]), c = civil(w.days + (e.key === 'PageDown' ? 1 : -1));
+      setInstant(fromWall(p0, c.y, c.m, c.d, w.h, w.mi, 0).t);
+      render({ syncFields: true });
+    }
+  });
+  for (var hh = 0; hh <= 24; hh++) {
+    if (hh < 24) wsSel.add(new Option(pad(hh) + ':00', String(hh)));
+    if (hh > 0) weSel.add(new Option(hh === 24 ? '24:00 (midnight)' : pad(hh) + ':00', String(hh)));
+  }
+  function workChanged() {
+    var a = +wsSel.value, b = +weSel.value;
+    if (a >= b) { setError(workErr, [wsSel, weSel], 'Working hours must end after they start.'); return; }
+    setError(workErr, [wsSel, weSel], '');
+    state.work = [a, b];
+    render();
+  }
+  wsSel.addEventListener('change', workChanged);
+  weSel.addEventListener('change', workChanged);
+  runsEl.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-run]');
+    if (!b || !runsEl._runs) return;
+    var r = runsEl._runs[+b.getAttribute('data-run')];
+    if (!r) return;
+    setInstant(r.a);
+    render({ syncFields: true, announce: true });
+    var again = runsEl.querySelector('button[data-run="0"]');
+    (again || planEl).focus();
+  });
+
+  // ---------- Export ----------
+  function stamp(t) { var d = new Date(t); return d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate()) + 'T' + pad(d.getUTCHours()) + pad(d.getUTCMinutes()) + pad(d.getUTCSeconds()) + 'Z'; }
+  function icsText(s) { return String(s).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\r\n?/g, '\n').replace(/[\\;,]/g, function (c) { return '\\' + c; }).replace(/\n/g, '\\n'); }
+  function utf8Len(ch) { var c = ch.codePointAt(0); return c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; }
+  // RFC 5545 3.1: lines of at most 75 octets, continued after CRLF and a space; never inside a character.
+  function icsFold(line) {
+    var out = [], cur = '', n = 0;
+    Array.from(line).forEach(function (ch) {
+      var b = utf8Len(ch);
+      if (n + b > 75) { out.push(cur); cur = ' '; n = 1; }
+      cur += ch; n += b;
+    });
+    out.push(cur);
+    return out.join('\r\n');
+  }
+  function timesText(t, withDate) {
+    var p0 = home(), h = wallAt(p0, t);
+    return state.places.map(function (p) {
+      var w = wallAt(p, t), ab = abbrOf(p, w.off);
+      return p.name + ': ' + (withDate || w.days !== h.days ? fmtDate(w) + ', ' : '') + fmtTime(w.h, w.mi) + ' (' + (ab ? ab + ', ' : '') + fmtOff(w.off) + ')';
+    }).join('\n');
+  }
+  var lastIcs = 0;
+  $('#tzc-ics').addEventListener('click', function () {
+    if (Date.now() - lastIcs < 1000) return; // a double click saves one file
+    lastIcs = Date.now();
+    var cur = current();
+    var title = cut(titleIn.value.trim() || 'Meeting', MAX_TITLE), dur = +durSel.value * MIN, n = +repSel.value;
+    var occ = series(n, cur), now = stamp(Date.now()), id = placeId(home()).replace(/[^A-Za-z0-9]+/g, '-');
+    var lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//TripleP Tools//Time Zone Converter//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+    occ.forEach(function (o, k) {
+      lines.push('BEGIN:VEVENT', 'UID:' + stamp(o.t) + '-' + id + '-' + (k + 1) + '@triplepdude.github.io', 'DTSTAMP:' + now,
+        'DTSTART:' + stamp(o.t), 'DTEND:' + stamp(o.t + dur), 'SUMMARY:' + icsText(title),
+        'DESCRIPTION:' + icsText(timesText(o.t, true)), 'END:VEVENT');
+    });
+    lines.push('END:VCALENDAR');
+    TT.download('meeting-' + isoDate(cur.w) + '.ics', lines.map(icsFold).join('\r\n') + '\r\n', 'text/calendar;charset=utf-8');
+    announce('Saved ' + (n === 1 ? 'the meeting' : n + ' weekly meetings') + ' as a calendar file.');
+  });
+  $('#tzc-copy').addEventListener('click', function (e) {
+    var cur = current();
+    TT.copy(fmtDate(cur.w) + '\n' + timesText(cur.t, false), e.currentTarget);
+  });
+  $('#tzc-link').addEventListener('click', function (e) {
+    current();
+    writeHash();
+    setError(exportErr, null, hashNote);
+    TT.copy(location.href, e.currentTarget);
+  });
+  titleIn.addEventListener('input', function () { if (titleIn.value.length > MAX_TITLE) titleIn.value = cut(titleIn.value, MAX_TITLE); });
+
+  // ---------- Rules note ----------
+  function rulesCheck() {
+    var stale = [];
+    Object.keys(STALE).forEach(function (z) {
+      if (!validZone(z)) return;
+      var now = Date.now() / MIN, iv = STALE[z].filter(function (x) { return x[1] > now; })[0];
+      if (!iv) return;
+      if (rawOff(Math.floor((iv[0] + iv[1]) / 2) * MIN, z) === iv[2] * 60) stale.push(STALE_NAMES[z]);
+    });
+    rulesEl.textContent = 'Times come from your browser’s time zone rules and the current time from your device’s clock. ' +
+      'Checked against tz ' + TZ_VERSION + ' (' + TZ_DATE + ') for the eight zones whose rules changed in 2026: ' +
+      (stale.length ? 'your browser’s rules are out of date for ' + stale.join(', ') + ', so the page corrects those times.' : 'your browser’s rules are up to date for all of them.');
+  }
+
+  // ---------- Start ----------
+  var started = false;
+  function start() {
+    if (!readHash()) state.places = defaultPlaces();
+    wsSel.value = String(state.work[0]);
+    weSel.value = String(state.work[1]);
+    render({ syncFields: true, tick: !location.hash });
+    if (!started) { started = true; rulesCheck(); }
+  }
+  setInterval(function () {
+    if (!state.live) return;
+    var m = Math.floor(Date.now() / MIN);
+    if (m !== tickMinute) { tickMinute = m; render({ tick: true }); }
+  }, 1000);
+  window.addEventListener('hashchange', function () { if (location.hash.slice(1) !== lastHash && readHash()) render({ syncFields: true }); });
+  // After Back or Forward the browser may restore old field values once this script has run.
+  window.addEventListener('pageshow', function (e) { if (e.persisted || dateIn.value !== (shown && isoDate(shown.w))) { lastHash = null; start(); } });
+  tickMinute = Math.floor(Date.now() / MIN);
+  start();
+})();
+</script>

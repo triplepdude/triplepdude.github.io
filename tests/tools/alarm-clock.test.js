@@ -208,9 +208,14 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // A jump of the test clock is like a computer that slept or a background
   // tab that ran late; the check once a second notices within a second.
   const AT = R0.at;
+  // A sound card the browser suspended meanwhile is asked to resume in time.
+  await page.evaluate(() => window.__master.context.suspend());
+  await page.waitForFunction(() => /^Click or tap anywhere/.test(document.querySelector('#ac-sound-note').textContent));
   await page.clock.setSystemTime(AT - 100000);
   const n0 = await oscCount();
   await page.clock.runFor(1100);
+  await page.waitForFunction(n => window.__master.context.state === 'running' && window.__osc.length > n, n0);
+  assert.equal(await text('#ac-sound-note'), '');
   assert.equal(await meta(1), 'Rings at 7:00 AM today, in 2 min');
   let pre = await oscFrom(n0);
   const lead = r => r.when - r.now - (AT - r.wall) / 1000;

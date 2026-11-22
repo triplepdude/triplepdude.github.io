@@ -53,7 +53,9 @@ howto: |
   | 120% of the 95th or more, or BMI 35 or more | Severe obesity |
 
   Above the 95th percentile the page uses the CDC's 2022 extended charts and
-  also gives the BMI as a percentage of the 95th percentile. The American
+  also gives the BMI as a percentage of the 95th percentile, the "X is what
+  percent of Y" sum of the [percentage calculator](/percentage-calculator/).
+  The American
   Academy of Pediatrics calls 120% to 139% (or a BMI of 35 to 39.9) class 2
   severe obesity and 140% or more (or a BMI of 40 or more) class 3. No target weight is given for a child. At 18 and
   19 you also see the adult category, which the NHS uses from 18. Under 2,
@@ -264,7 +266,7 @@ faq:
   // Arabic-Indic, Persian, Devanagari and Bengali digits count as digits;
   // full-width ones are folded by NFKC.
   function digits(s) {
-    return s.replace(/[٠-٩۰-۹०-९০-৯]/g, function (ch) {
+    return s.replace(/[\u0660-\u0669\u06F0-\u06F9\u0966-\u096F\u09E6-\u09EF]/g, function (ch) {
       var c = ch.charCodeAt(0);
       return String(c - (c >= 0x09E6 ? 0x09E6 : c >= 0x0966 ? 0x0966 : c >= 0x06F0 ? 0x06F0 : 0x0660));
     });
@@ -273,9 +275,9 @@ faq:
     var s = String(raw == null ? '' : raw);
     if (s.length > MAX_LEN) return { long: true, s: '' };
     // A raised digit (as in 5²) or a tab from pasted cells is not part of a number.
-    if (/[²³¹⁰-₟\t\n\r\v\f]/.test(s)) return { s: '?' };
+    if (/[\u00B2\u00B3\u00B9\u2070-\u209F\t\n\r\v\f]/.test(s)) return { s: '?' };
     // The Arabic decimal separator is a point; the Arabic thousands separator is not read.
-    return { s: digits(s.normalize('NFKC')).replace(/٫/g, '.').trim().toLowerCase().replace(/\s+/g, ' ') };
+    return { s: digits(s.normalize('NFKC')).replace(/\u066B/g, '.').trim().toLowerCase().replace(/\s+/g, ' ') };
   }
   // "70", "70.5" or "70,5": a comma is a decimal comma (no height or weight
   // needs a thousands separator). Returns { n, d, sep } or null.
@@ -467,7 +469,7 @@ faq:
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
     }).then(function (text) {
-      var rows = Object.create(null), lines = text.replace(/^﻿/, '').trim().split(/\r?\n/), head = lines[0].split(',');
+      var rows = Object.create(null), lines = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/), head = lines[0].split(',');
       var at = {};
       head.forEach(function (h, i) { at[h.trim()] = i; });
       for (var i = 1; i < lines.length; i++) {

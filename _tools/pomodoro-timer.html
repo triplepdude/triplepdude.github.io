@@ -37,9 +37,10 @@ howto: |
   Italian). Choose one task, work on it for 25 minutes, then take a break of 3
   to 5 minutes; after four sessions, take 15 to 30. A session cannot be split:
   if an interruption ends it, it does not count and you start a new one. He
-  wrote that sessions of 20 to 35 minutes work best, and 40 at most.
-  Pomodoro® and Pomodoro Technique® are registered trademarks of Francesco
-  Cirillo; this site is not affiliated with him.
+  wrote that sessions of 20 to 35 minutes work best, 40 at most, so 25 is a
+  starting point rather than a rule. Pomodoro® and Pomodoro Technique® are
+  registered trademarks of Francesco Cirillo; this site is not affiliated with
+  him.
 
   ## Is 50/10 or 52/17 better than 25/5?
 
@@ -58,8 +59,8 @@ howto: |
   keeping away from work talk and email. The NHS advises breaking up long
   periods of sitting, and the American Academy of Ophthalmology's 20-20-20
   rule is to look at something 20 feet (6 metres) away for 20 seconds every 20
-  minutes. As for sessions, he suggests starting with one without
-  interruptions a day and building up to 10 to 12.
+  minutes. For sessions, Cirillo suggests starting with one uninterrupted
+  session a day and building up to 10 to 12.
 
   ## Does it keep running in another tab or on a locked phone?
 
@@ -107,6 +108,7 @@ faq:
 .pt-actions .btn { min-width: 6.5em; white-space: nowrap; }
 .pt-actions .pt-go { min-width: 8em; min-height: 52px; font-size: 1.05rem; }
 .pt .btn { touch-action: manipulation; }
+.pt .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 .pt-keys { margin: 12px 0 0; text-align: center; }
 .pt-keys kbd { padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); color: var(--text); font: 12px/1.6 var(--mono); }
 .pt-note { border-left: 3px solid var(--accent); background: var(--surface-2); color: var(--text); }
@@ -114,7 +116,7 @@ faq:
 .pt-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .pt-presets .btn[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .pt-settings .row { align-items: flex-end; }
-.pt-settings .row > .field { flex: 1 1 140px; }
+.pt-settings .row > .field { flex: 1 1 150px; }
 .pt-num { font-variant-numeric: tabular-nums; }
 .pt-vol-row { display: flex; align-items: center; gap: 10px; }
 .pt-vol-row output { min-width: 3em; font-variant-numeric: tabular-nums; }
@@ -130,7 +132,8 @@ faq:
 :root.pt-noscroll, :root.pt-noscroll body { overflow: hidden; }
 @media (max-width: 480px) {
   .pt-actions .btn { flex: 1 1 40%; min-width: auto; padding: 0 8px; }
-  .pt-modes .btn, .pt-presets .btn { flex: 1 1 28%; min-width: auto; padding: 0 6px; }
+  .pt-modes .btn { flex: 1 1 auto; min-width: auto; padding: 0 6px; white-space: nowrap; }
+  .pt-presets .btn { flex: 1 1 28%; min-width: auto; padding: 0 6px; }
 }
 </style>
 
@@ -154,14 +157,13 @@ faq:
     </div>
     <div class="field pt-task">
       <label for="pt-label">Working on</label>
-      <input type="text" id="pt-label" maxlength="60" autocomplete="off" placeholder="Optional, such as Chapter 3 notes">
+      <input type="text" id="pt-label" maxlength="60" autocomplete="off" placeholder="Optional">
     </div>
     <div class="pt-actions">
       <button type="button" class="btn pt-go" id="pt-go">Start</button>
-      <button type="button" class="btn secondary" id="pt-stop">Stop alarm</button>
       <button type="button" class="btn secondary" id="pt-skip">Skip</button>
-      <button type="button" class="btn secondary" id="pt-reset">Reset</button>
-      <button type="button" class="btn secondary" id="pt-plus">+1 min</button>
+      <button type="button" class="btn secondary" id="pt-reset" aria-disabled="true">Reset</button>
+      <button type="button" class="btn secondary" id="pt-plus" aria-disabled="true">+1 min</button>
       <button type="button" class="btn secondary" id="pt-full">Full screen</button>
       <button type="button" class="btn secondary" id="pt-pip" hidden>Mini timer</button>
     </div>
@@ -224,8 +226,8 @@ faq:
       </div>
     </div>
     <div class="pt-tests">
-      <button type="button" class="btn secondary small" id="pt-test-focus">Test<span class="visually-hidden"> the end of focus sound</span></button>
-      <button type="button" class="btn secondary small" id="pt-test-break">Test<span class="visually-hidden"> the end of break sound</span></button>
+      <button type="button" class="btn secondary small" id="pt-test-focus">Test focus sound</button>
+      <button type="button" class="btn secondary small" id="pt-test-break">Test break sound</button>
     </div>
     <div class="checks" style="margin-top: 12px">
       <label class="check"><input type="checkbox" id="pt-tick"> Tick quietly during focus sessions</label>
@@ -268,7 +270,7 @@ faq:
   var PRESETS = [[25, 5], [50, 10], [52, 17]];
 
   var root = $('#pt'), card = $('#pt-card'), timeEl = $('#pt-time'), barEl = $('#pt-bar'), metaEl = $('#pt-meta'), lastEl = $('#pt-last');
-  var dotsEl = $('#pt-dots'), labelIn = $('#pt-label'), goBtn = $('#pt-go'), stopBtn = $('#pt-stop'), skipBtn = $('#pt-skip');
+  var dotsEl = $('#pt-dots'), labelIn = $('#pt-label'), goBtn = $('#pt-go'), skipBtn = $('#pt-skip');
   var resetBtn = $('#pt-reset'), plusBtn = $('#pt-plus'), fullBtn = $('#pt-full'), pipBtn = $('#pt-pip'), newSetBtn = $('#pt-newset');
   var statusEl = $('#pt-status'), alertEl = $('#pt-alert'), msgEl = $('#pt-msg'), soundNote = $('#pt-sound-note');
   var lenIns = { focus: $('#pt-focus'), short: $('#pt-short'), long: $('#pt-long'), every: $('#pt-every') }, lenErr = $('#pt-len-err');
@@ -350,11 +352,11 @@ faq:
   }
   // Whole minutes (or sessions) only: a decimal point or comma, a sign or
   // a space is refused rather than guessed.
-  function readWhole(raw, max) {
+  function readWhole(raw, max, eg) {
     if (raw.length > 20) return { error: 'too long for a number.' };
     var s = asciiDigits(raw.trim());
     if (s === '') return { error: 'type a number.' };
-    if (!/^\d+$/.test(s)) return { error: /^\d*[.,٫]\d*$/.test(s) ? 'use a whole number, such as 25.' : 'use digits only, such as 25.' };
+    if (!/^\d+$/.test(s)) return { error: /^\d*[.,٫]\d*$/.test(s) ? 'use a whole number, such as ' + eg + '.' : 'use digits only, such as ' + eg + '.' };
     var n = Number(s);
     if (n < 1 || n > max) return { error: 'use a number from 1 to ' + max + '.' };
     return { n: n };
@@ -594,6 +596,8 @@ faq:
     return api;
   })();
   function volume() { var v = Number(volIn.value) / 100; return v * v; }
+  // Only after a click on the page; without one a browser refuses anyway.
+  function mayResume() { return !!audio.ctx && !audio.ready() && (!navigator.userActivation || navigator.userActivation.hasBeenActive); }
   function ringSeconds() { var v = Number(ringSel.value); return v > 0 ? v : Infinity; }
   function onAudioState() { prearm(); updateSoundNote(); }
   function updateSoundNote() {
@@ -629,6 +633,9 @@ faq:
     return out;
   }
   function prearm() {
+    // A sound card the browser suspended since the last click is asked to
+    // resume, which Chrome and Firefox allow once the page has had a click.
+    if (st.state === 'running' && mayResume()) audio.unlock();
     var want = plan(), keep = [];
     pre.forEach(function (p) {
       var w = want.filter(function (x) { return !x.have && x.kind === p.kind && x.at === p.at && x.key === p.key && x.secs === p.secs; })[0];
@@ -705,7 +712,14 @@ faq:
       if (mine) audio.cancel(mine.h);
       if (ring) h = audio.ring(endSound(phase), audio.now() + 0.02, ringSeconds());
     }
-    if (h) { if (ringH && ringH !== h) audio.cancel(ringH); ringH = h; st.ringing = true; }
+    if (h) {
+      if (ringH && ringH !== h) audio.cancel(ringH);
+      ringH = h;
+      st.ringing = true;
+      // It also ends by the wall clock: the audio clock stops while a
+      // computer sleeps, which would leave a short ring sounding after it.
+      h.wallEnd = ringSeconds() === Infinity ? 0 : (h === (mine && mine.h) ? wallAt(endAt) : Date.now()) + ringSeconds() * 1000;
+    }
     st.last = { phase: phase, n: n, at: wallAt(endAt), late: late > RING_LATE };
     st.phase = next;
     st.total = lenOf(next);
@@ -736,7 +750,7 @@ faq:
     }
     if (st.ringing) {
       audio.extend(ringH);
-      if (audio.finished(ringH)) { ringH = null; st.ringing = false; sync(); }
+      if (audio.finished(ringH) || (ringH.wallEnd && Date.now() > ringH.wallEnd + 1000)) { audio.cancel(ringH); ringH = null; st.ringing = false; sync(); }
     }
     if (now - lastSync > 5000) { lastSync = now; prearm(); }
     paint(now);
@@ -790,9 +804,12 @@ faq:
   function sync() {
     var s = st.state;
     card.classList.toggle('is-ringing', st.ringing);
-    goBtn.textContent = s === 'running' ? 'Pause' : s === 'paused' ? 'Resume' : 'Start';
-    stopBtn.hidden = !st.ringing;
-    resetBtn.hidden = plusBtn.hidden = s === 'ready';
+    // The buttons keep their places, so the second click of a double click
+    // lands where the first did: while the alarm rings, the main button
+    // stops it, and Reset and +1 min are there but off until a session starts.
+    goBtn.textContent = st.ringing ? 'Stop alarm' : s === 'running' ? 'Pause' : s === 'paused' ? 'Resume' : 'Start';
+    resetBtn.setAttribute('aria-disabled', s === 'ready' ? 'true' : 'false');
+    plusBtn.setAttribute('aria-disabled', s === 'ready' ? 'true' : 'false');
     [].forEach.call($('#pt-modes').children, function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-phase') === st.phase ? 'true' : 'false'); });
     var dots = '';
     for (var i = 0; i < cfg.every; i++) dots += '<span class="pt-dot' + (i < st.done ? ' is-done' : (i === st.done && st.phase === 'focus' ? ' is-now' : '')) + '"></span>';
@@ -867,6 +884,7 @@ faq:
   }
   function primary(e) {
     if (e && e.detail > 1) return;
+    if (stopRinging()) return;
     if (st.state === 'ready') start();
     else if (st.state === 'running') pause();
     else resume();
@@ -926,9 +944,8 @@ faq:
     say('New set: focus 1 of ' + cfg.every + '.');
   }
   goBtn.addEventListener('click', primary);
-  stopBtn.addEventListener('click', stopRinging);
   skipBtn.addEventListener('click', function (e) { if (e.detail > 1) return; skip(); });
-  resetBtn.addEventListener('click', reset);
+  resetBtn.addEventListener('click', function (e) { if (e.detail > 1) return; reset(); });
   plusBtn.addEventListener('click', plusMinute);
   newSetBtn.addEventListener('click', newSet);
   $('#pt-modes').addEventListener('click', function (e) {
@@ -944,7 +961,7 @@ faq:
   function readLengths(showEmpty) {
     var text = '', badIn = null;
     ['focus', 'short', 'long', 'every'].forEach(function (k) {
-      var inp = lenIns[k], r = readWhole(inp.value, k === 'every' ? MAX_EVERY : MAX_MIN);
+      var inp = lenIns[k], r = readWhole(inp.value, k === 'every' ? MAX_EVERY : MAX_MIN, DEF[k]);
       if (r.error && (showEmpty || inp.value.trim() !== '')) {
         inp.setAttribute('aria-invalid', 'true');
         inp.setAttribute('aria-describedby', 'pt-len-err');
@@ -1053,6 +1070,7 @@ faq:
   });
   $('#pt-clear').addEventListener('click', function () {
     log = [];
+    logNo = 0;
     renderLog();
     say('Log cleared.');
     // The buttons are gone; the focus goes to the note that replaces them.
@@ -1132,11 +1150,11 @@ faq:
       d.body.innerHTML = '<main class="pt-pip"><p class="pt-pip-phase"></p><p class="pt-pip-time" role="timer"></p><div class="pt-pip-btns"><button type="button" class="btn">Start</button><button type="button" class="btn secondary">Skip</button></div></main>';
       var btns = d.querySelectorAll('button');
       pipEls = { root: d.querySelector('.pt-pip'), phase: d.querySelector('.pt-pip-phase'), time: d.querySelector('.pt-pip-time'), go: btns[0] };
-      btns[0].addEventListener('click', function (e) { if (st.ringing) stopRinging(); else primary(e); });
+      btns[0].addEventListener('click', primary);
       btns[1].addEventListener('click', function (e) { if (e.detail > 1) return; skip(); });
       d.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') stopRinging();
-        else if (e.key === ' ' && e.target.tagName !== 'BUTTON') { e.preventDefault(); if (!stopRinging()) primary(); }
+        else if (e.key === ' ' && e.target.tagName !== 'BUTTON') { e.preventDefault(); primary(); }
       });
       w.addEventListener('pagehide', function () { pip = null; pipEls = null; pipBtn.textContent = 'Mini timer'; say('Mini timer closed.'); });
       pipBtn.textContent = 'Close mini timer';
@@ -1173,7 +1191,7 @@ faq:
       if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space presses those
       e.preventDefault();
       if (e.repeat) return;
-      if (!stopRinging()) primary();
+      primary();
       return;
     }
     var k = letter(e);
@@ -1360,8 +1378,9 @@ faq:
     hashError(r.error);
     keepAddress = !!r.error;
     sync();
-    // A session that ended while the page was closed is finished first, and
-    // rings only if that was moments ago.
+    // A session that ended while the page was closed is finished first: it
+    // counts, and the next one starts by itself if that was moments ago. It
+    // does not ring, as a page cannot play sound before a click.
     if (st.state === 'running' && st.end <= clock()) tick();
     arm();
     commit();
