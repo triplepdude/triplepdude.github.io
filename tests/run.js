@@ -28,7 +28,9 @@
  * time a paste over a long text takes on Word Counter, a link to a quoted
  * FAQ answer on a page without a text box, the shared image decoder
  * with a canvas size limit like Safari's, front matter values cut short by
- * a " #" that YAML reads as a comment, and a swipe that starts on a slider.
+ * a " #" that YAML reads as a comment, a swipe that starts on a slider, the
+ * Search key on the homepage, the height of the header, breadcrumb and footer
+ * links on a touch screen, and names inside the site's ZIP files.
  *
  * Needs `jekyll` (or $JEKYLL) and the `playwright` package on the module path.
  */
@@ -424,6 +426,30 @@ function emulateCanvasLimit() {
 // the old value back on that pointercancel (_includes/common.js), so a swipe
 // that starts on a slider scrolls the page and leaves the value alone, while a
 // drag along the slider still changes it. Checked on the metronome's tempo.
+// Names inside the site's ZIP files (assets/js/zip.js) that Windows, macOS
+// and Linux can all extract: no character Windows refuses, no trailing dot or
+// space, no device name, and at most 240 UTF-8 bytes a part, cut in the middle
+// between whole characters so that the end and the extension stay.
+async function zipNameChecks(page, base, problems) {
+  await page.goto(base + '/split-pdf/', { waitUntil: 'load' });
+  const family = '\u{1F468}\u{1F3FD}\u200D\u{1F469}\u{1F3FD}\u200D\u{1F467}\u{1F3FD}\u200D\u{1F466}\u{1F3FD}';
+  const got = await page.evaluate(names => {
+    const used = new Set(), enc = new TextEncoder();
+    return names.map(n => { const out = window.TTZip.uniqueName(n, used); return { out, bytes: enc.encode(out).length }; });
+  }, ['he said "hi" & \'yo\' <b>.jpg', 'a:b*c?d|e.png', 'notes ...', 'CON.jpg', 'lpt1', 'Contents.png', 'folder./a.txt', '../../etc/passwd',
+    'x'.repeat(250) + '.pdf', 'x'.repeat(260) + '.pdf', family.repeat(20) + '.png', 'é'.repeat(200) + '-page-1.pdf', 'é'.repeat(200) + '-page-2.pdf']);
+  const exact = ['he said -hi- & \'yo\' -b-.jpg', 'a-b-c-d-e.png', 'notes', 'CON_.jpg', 'lpt1_', 'Contents.png', 'folder/a.txt', 'etc/passwd'];
+  exact.forEach((want, i) => { if (got[i].out !== want) problems.push(`ZIP entry name ${JSON.stringify(got[i].out)}, expected ${JSON.stringify(want)}`); });
+  const long = got.slice(exact.length);
+  const broken = s => /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(s);
+  const ok = long.every(g => g.bytes <= 248 && !broken(g.out)) &&
+    long[0].bytes === 240 && long[0].out.endsWith('x.pdf') && long[0].out.includes('\u2026') &&
+    long[1].out.endsWith(' (2).pdf') &&
+    /^(?:\u{1F468}\u{1F3FD}\u200D\u{1F469}\u{1F3FD}\u200D\u{1F467}\u{1F3FD}\u200D\u{1F466}\u{1F3FD})+\u2026(?:\u{1F468}\u{1F3FD}\u200D\u{1F469}\u{1F3FD}\u200D\u{1F467}\u{1F3FD}\u200D\u{1F466}\u{1F3FD})+\.png$/u.test(long[2].out) &&
+    long[3].out.endsWith('-page-1.pdf') && long[4].out.endsWith('-page-2.pdf') && long[3].bytes === 240;
+  if (!ok) problems.push(`long ZIP entry names are not cut to 240 bytes in the middle, between whole characters, keeping their ends: ${JSON.stringify(long.map(g => [g.bytes, g.out.slice(0, 8), g.out.slice(-16)]))}`);
+}
+
 async function sliderSwipeChecks(browser, base, problems) {
   const p = '/metronome/', sel = '#mt-slider';
   const { context, page } = await newPage(browser, base, { width: 412, height: 915 }, problems, { hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
@@ -665,6 +691,40 @@ async function siteChecks(browser, base, problems) {
       if (await page.$eval(`#all-tools a[href="${s.href}"]`, a => a.closest('li').hidden)) problems.push(`homepage search "${word}" does not show ${s.href}, whose text says "${s.said}"`);
     }
   }
+
+  // A phone keyboard shows a Search key, and Enter, which that key sends,
+  // moves to the first of several matches, which closes the keyboard that
+  // covers them, or opens the only one. Enter that ends an IME composition
+  // only confirms the typed word.
+  const searchEnter = async (query, composing = false) => {
+    await page.fill('#tool-search', query);
+    if (composing) await page.$eval('#tool-search', el => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
+    else await page.press('#tool-search', 'Enter');
+  };
+  if (await page.getAttribute('#tool-search', 'enterkeyhint') !== 'search') problems.push('the homepage search box has no enterkeyhint="search", so a phone keyboard shows no Search key');
+  const firstHit = () => page.$eval('#all-tools li[data-search]:not([hidden]) a', a => a.getAttribute('href'));
+  const focusedHref = () => page.evaluate(() => document.activeElement.getAttribute('href'));
+  await searchEnter('image', true);
+  if (await page.evaluate(() => document.activeElement.id) !== 'tool-search') problems.push('homepage search: Enter during an IME composition left the search box');
+  await searchEnter('image');
+  if (await focusedHref() !== await firstHit()) problems.push(`homepage search "image" + Enter: focus is on ${await focusedHref()}, expected the first match ${await firstHit()}`);
+  if (page.url() !== base + '/') problems.push(`homepage search "image" + Enter left the page for ${page.url()}`);
+  await searchEnter('zzzz-no-such-tool');
+  if (await page.evaluate(() => document.activeElement.id) !== 'tool-search') problems.push('homepage search: Enter with no match left the search box');
+  const titles = await page.$$eval('#all-tools li[data-search] strong', s => s.map(e => e.textContent.toLowerCase()));
+  let only = null;
+  for (const t of titles) {
+    await page.fill('#tool-search', t);
+    if (await page.$$eval('#all-tools li[data-search]:not([hidden])', l => l.length) === 1) { only = { query: t, href: await firstHit() }; break; }
+  }
+  if (!only) {
+    problems.push('homepage search: no tool title matches only its own tool, so Enter opening the only match is not being tested');
+  } else {
+    await searchEnter(only.query);
+    const opened = await page.waitForURL(u => u.pathname === only.href, { timeout: 5000 }).then(() => true, () => false);
+    if (!opened) problems.push(`homepage search "${only.query}" + Enter did not open its only match ${only.href} (the page is ${page.url()})`);
+    await page.goto(base + '/', { waitUntil: 'load' });
+  }
   await page.fill('#tool-search', '');
 
   // Field outlines need 3:1 and placeholder text 4.5:1 against the surfaces
@@ -698,6 +758,19 @@ async function siteChecks(browser, base, problems) {
   const narrow = await newPage(browser, base, PHONES[0], problems, TOUCH);
   for (const p of ['/', '/about/', '/privacy/', '/404.html']) await narrowChecks(narrow.page, page, base + p, problems, `${p}: `);
   await page.setViewportSize({ width: 1280, height: 900 });
+
+  // On a touch screen the links of the header, the breadcrumb and the footer,
+  // the page's only way around, are 44px tall like its other controls; the
+  // header bar keeps its height, and the breadcrumb's "/" stays in line.
+  await narrow.page.setViewportSize(PHONES[0]);
+  await narrow.page.goto(base + '/case-converter/', { waitUntil: 'load' });
+  const navLinks = await narrow.page.$$eval('.site-header a, .crumbs a, .footer-links a', as => as.map(a => ({ text: a.textContent.trim(), h: Math.round(a.getBoundingClientRect().height * 10) / 10 })));
+  const shortLinks = navLinks.filter(l => l.h < 44);
+  if (navLinks.length < 7 || shortLinks.length) problems.push(`/case-converter/ on a touch screen: of ${navLinks.length} header, breadcrumb and footer links, these are under 44px tall: ${JSON.stringify(shortLinks)}`);
+  const headerBar = await narrow.page.$eval('.site-header .nav', n => n.getBoundingClientRect().height);
+  if (headerBar !== 58) problems.push(`/case-converter/ on a touch screen: the header bar is ${headerBar}px tall, expected 58px`);
+  const crumbMiddles = await narrow.page.$$eval('.crumbs > *', els => els.map(e => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; }));
+  if (Math.max(...crumbMiddles) - Math.min(...crumbMiddles) > 2) problems.push(`/case-converter/ on a touch screen: the breadcrumb's links and "/" are not in line (middles at ${crumbMiddles.map(m => m.toFixed(1)).join(', ')})`);
 
   // A guide table too wide for a phone scrolls inside its own box, and what
   // that hides must be reachable without a pointer (WCAG 2.1.1): the table is
@@ -754,6 +827,7 @@ async function siteChecks(browser, base, problems) {
   await quotedAnswerOpens(page, base, slugs, problems);
   await canvasLimitChecks(browser, base, problems);
   await sliderSwipeChecks(browser, base, problems);
+  await zipNameChecks(page, base, problems);
 
   // About and Privacy agree on whether the site shows ads, and the ad-blocker
   // promise only appears when there are ads.

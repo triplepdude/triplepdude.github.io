@@ -121,8 +121,8 @@
 .imc-err { margin: 4px 0 0; color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
 .imc-info { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
 .imc-err:empty, .imc-info:empty { display: none; }
-.imc-btns { display: flex; gap: 6px; }
-.imc-x { width: 36px; padding: 0; font-size: 18px; line-height: 1; }
+.imc-btns { display: flex; gap: 10px; }
+.imc-x { width: 44px; padding: 0; font-size: 18px; line-height: 1; }
 @media (max-width: 520px) {
   .imc-item { grid-template-columns: 52px minmax(0, 1fr); }
   .imc-thumb { width: 52px; height: 52px; }
@@ -152,8 +152,8 @@
     </select>
   </div>
   <div class="field" id="imc-quality-field"{% unless imc_fmt == 'jpeg' or imc_fmt == 'webp' or imc_fmt == 'avif' %} hidden{% endunless %}>
-    <label class="imc-qlabel" for="imc-quality"><span>Quality</span><output id="imc-quality-out" for="imc-quality">{{ imc_q }}%</output></label>
-    <input type="range" id="imc-quality" min="10" max="100" step="1" value="{{ imc_q }}">
+    <label class="imc-qlabel" for="imc-quality"><span>Quality</span><output id="imc-quality-out" for="imc-quality" aria-hidden="true">{{ imc_q }}%</output></label>
+    <input type="range" id="imc-quality" min="10" max="100" step="1" value="{{ imc_q }}" aria-valuetext="{{ imc_q }}%">
   </div>
   <div class="field" id="imc-resize-field"{% if imc_fmt == 'ico' %} hidden{% endif %}>
     <label for="imc-resize">Size</label>
@@ -288,7 +288,7 @@
     sizesBox.hidden = f !== 'ico';
     resizeVal.hidden = resizeSel.value === 'none';
     resizeVal.setAttribute('aria-label', { max: 'Longest side in pixels', width: 'Width in pixels', height: 'Height in pixels', percent: 'Scale in percent' }[resizeSel.value] || 'Size value');
-    qualityOut.textContent = quality.value + '%';
+    showQuality();
     var n = [];
     if (cannot[f]) n.push('This browser cannot save ' + LABEL[f] + ' images, so ' + LABEL[f] + ' output is unavailable here. It can still convert ' + LABEL[f] + ' files you add.');
     if (f === 'ico') n.push('One icon file with ' + s.icoSizes.length + (s.icoSizes.length === 1 ? ' size' : ' sizes') + ': ' + s.icoSizes.join(', ') + ' px. Pictures that are not square are centred on a transparent square.' + (lastSize ? ' An icon needs at least one size, so the last one stays ticked.' : ''));
@@ -495,6 +495,9 @@
       it.thumbUrl = URL.createObjectURL(thumb);
       it.fmt = s.fmt;
       it.outName = baseName(it.name) + '.' + EXT[s.fmt];
+      // A photo that keeps its EXIF, date taken included, also keeps its file
+      // date in the ZIP; otherwise the ZIP dates it now, as a single download is.
+      it.keepsDate = s.meta !== 'strip' && !!d.exif && (s.fmt === 'jpeg' || s.fmt === 'png' || s.fmt === 'webp');
       it.inLabel = TTImage.formats[d.format].label;
       it.inW = d.width;
       it.inH = d.height;
@@ -578,7 +581,13 @@
   // (While waiting is set, a rerun always follows, even if the list was cleared meanwhile.)
   function onSettings() { syncControls(); if (items.length || waiting) { stale(); rerun(); } }
   fmtSel.addEventListener('change', onSettings);
-  quality.addEventListener('input', function () { qualityOut.textContent = quality.value + '%'; });
+  // The slider says its value with the per cent sign; the number beside it is
+  // only for the eye, so a screen reader does not hear each step twice.
+  function showQuality() {
+    qualityOut.textContent = quality.value + '%';
+    quality.setAttribute('aria-valuetext', quality.value + '%');
+  }
+  quality.addEventListener('input', showQuality);
   quality.addEventListener('change', onSettings);
   resizeSel.addEventListener('change', function () {
     var defaults = { max: 1920, width: 1200, height: 800, percent: 50 };
@@ -640,7 +649,7 @@
     zipBtn.disabled = true;
     zipBtn.textContent = 'Creating ZIP…';
     try {
-      var zip = await TTZip.create(done.map(function (i) { return { name: i.outName, data: i.blob, date: i.file.lastModified ? new Date(i.file.lastModified) : null }; }));
+      var zip = await TTZip.create(done.map(function (i) { return { name: i.outName, data: i.blob, date: i.keepsDate && i.file.lastModified ? new Date(i.file.lastModified) : null }; }));
       TT.download('converted-images-' + EXT[settings().fmt] + '.zip', zip);
       status.textContent = 'ZIP with ' + done.length + (done.length === 1 ? ' image' : ' images') + ' downloaded.';
     } catch (e) {

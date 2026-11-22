@@ -68,13 +68,16 @@ function readZip(b) {
     const method = b.readUInt16LE(p + 10), crc = b.readUInt32LE(p + 16), csize = b.readUInt32LE(p + 20), usize = b.readUInt32LE(p + 24);
     const nlen = b.readUInt16LE(p + 28), xlen = b.readUInt16LE(p + 30), clen = b.readUInt16LE(p + 32), off = b.readUInt32LE(p + 42);
     const name = b.toString('utf8', p + 46, p + 46 + nlen);
+    // The entry's modified time, as MS-DOS fields.
+    const dt = b.readUInt16LE(p + 12), dd = b.readUInt16LE(p + 14);
+    const date = [1980 + (dd >> 9), (dd >> 5) & 15, dd & 31, dt >> 11, (dt >> 5) & 63, (dt & 31) * 2];
     if (b.readUInt32LE(off) !== 0x04034b50) throw new Error('bad local header');
     const start = off + 30 + b.readUInt16LE(off + 26) + b.readUInt16LE(off + 28);
     const raw = b.subarray(start, start + csize);
     const data = method === 8 ? zlib.inflateRawSync(raw) : Buffer.from(raw);
     if (data.length !== usize) throw new Error('size mismatch in ' + name);
     if ((zlib.crc32(data) >>> 0) !== crc) throw new Error('CRC mismatch in ' + name);
-    out.push({ name, data, method, flags: b.readUInt16LE(p + 8) });
+    out.push({ name, data, method, flags: b.readUInt16LE(p + 8), date });
     p += 46 + nlen + xlen + clen;
   }
   return out;
@@ -287,6 +290,16 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await rerun(() => page.locator('#imc-quality').evaluate(el => { el.value = '98'; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); }));
   assert.ok(await size(7) > low * 1.5, 'higher quality, bigger file');
   assert.equal(await page.textContent('#imc-quality-out'), '98%');
+  // The slider says its value with the per cent sign, and the number beside it
+  // is hidden from screen readers, which would otherwise hear each step twice
+  // (an <output> is a live status region).
+  assert.equal(await page.getAttribute('#imc-quality', 'aria-valuetext'), '98%');
+  assert.equal(await page.getAttribute('#imc-quality-out', 'aria-hidden'), 'true');
+  await page.focus('#imc-quality');
+  await rerun(() => page.keyboard.press('ArrowLeft'));
+  assert.equal(await page.getAttribute('#imc-quality', 'aria-valuetext'), '97%');
+  assert.equal(await page.textContent('#imc-quality-out'), '97%');
+  await rerun(() => page.locator('#imc-quality').evaluate(el => { el.value = '98'; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); }));
 
   // ---------- Resize: longest side 50 px ----------
   await rerun(() => page.selectOption('#imc-resize', 'max'));
@@ -307,9 +320,15 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await rerun(() => page.selectOption('#imc-format', 'png'));
   assert.equal(await page.locator('#imc-quality-field').isHidden(), true);
   assert.equal(await page.locator('#imc-bg-field').isHidden(), true);
+  // Every file added says it was last changed on 2 January 2001 at 03:04:06.
+  // A photo whose metadata is removed must not take that date into the ZIP:
+  // for a photo from a camera or phone it is often the time it was taken.
+  await page.evaluate(() => Object.defineProperty(File.prototype, 'lastModified', { configurable: true, get: () => new Date(2001, 0, 2, 3, 4, 6).getTime() }));
+  const OLD = [2001, 1, 2, 3, 4, 6];
   const [zdl] = await Promise.all([page.waitForEvent('download'), page.click('#imc-zip')]);
   assert.equal(zdl.suggestedFilename(), 'converted-images-png.zip');
   const entries = readZip(fs.readFileSync(await zdl.path()));
+  entries.forEach(e => assert.ok(e.date[0] >= 2026, `${e.name} is dated ${e.date.join(',')} in the ZIP while its metadata was removed`));
   assert.deepEqual(entries.map(e => e.name), ['alpha.png', 'rotated.png', 'anim.png', 'green.png', 'icon.png', 'orient8.png', 'alpha (2).png', 'gradient.png', 'small.png']);
   entries.forEach(e => { assert.equal(e.flags & 0x800, 0x800, 'UTF-8 flag'); pngInfo(e.data); });
   const alphaPng = pngInfo(entries[0].data);
@@ -323,6 +342,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   near(px[1], [40, 180, 60, 255], 12, 'HEIC quadrant 2');
   near(px[2], [40, 60, 200, 255], 12, 'HEIC quadrant 3');
   near(px[3], [240, 240, 240, 255], 12, 'HEIC quadrant 4');
+  // A photo that keeps its EXIF, and with it the date taken, keeps its file
+  // date too; one without EXIF is dated now.
+  await rerun(() => page.selectOption('#imc-meta', 'keep'));
+  const [kdl] = await Promise.all([page.waitForEvent('download'), page.click('#imc-zip')]);
+  const kept = Object.fromEntries(readZip(fs.readFileSync(await kdl.path())).map(e => [e.name, e.date]));
+  assert.deepEqual(kept['rotated.png'], OLD, 'rotated.jpg keeps its EXIF and its file date');
+  assert.ok(kept['alpha.png'][0] >= 2026, `alpha.png has no EXIF, so it is dated now, not ${kept['alpha.png']}`);
+  await rerun(() => page.selectOption('#imc-meta', 'strip'));
 
   // ---------- BMP: 24-bit, bottom-up rows ----------
   await rerun(() => page.selectOption('#imc-format', 'bmp'));
@@ -419,6 +446,11 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await rerun(() => page.selectOption('#imc-format', 'webp'));
 
   // ---------- Remove, paste, drop, clear ----------
+  // The remove button is a full 44px wide and not right against Download, so
+  // a tap on the edge of Download does not throw the file away.
+  // (Measured on a converted file's row, where Download is shown.)
+  const btns = await rows.nth(0).evaluate(li => ['dl', 'rm'].map(a => li.querySelector(`[data-act="${a}"]`).getBoundingClientRect()).map(r => ({ left: r.left, right: r.right, w: r.width, h: r.height })));
+  assert.ok(btns[0].w > 0 && btns[1].w >= 44 && btns[1].h >= 32 && btns[1].left - btns[0].right >= 10, `remove button ${JSON.stringify(btns[1])}, Download ${JSON.stringify(btns[0])}`);
   await rows.nth(10).locator('[data-act="rm"]').click();
   assert.equal(await rows.count(), 10);
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Remove broken.png');

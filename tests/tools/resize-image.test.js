@@ -64,6 +64,18 @@ function imageInfo(b) {
 }
 
 // Reads a ZIP from its central directory (APPNOTE 4.3.12), checking every entry's CRC-32 and size.
+// The year of each ZIP entry's modified time (MS-DOS date field), by name.
+function zipYears(buf) {
+  let eocd = buf.length - 22;
+  while (buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  const out = {};
+  for (let i = 0, n = buf.readUInt16LE(eocd + 10), p = buf.readUInt32LE(eocd + 16); i < n; i++) {
+    const nlen = buf.readUInt16LE(p + 28);
+    out[buf.toString('utf8', p + 46, p + 46 + nlen)] = 1980 + (buf.readUInt16LE(p + 14) >> 9);
+    p += 46 + nlen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return out;
+}
 function readZip(buf) {
   const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   assert_(eocd >= 0, 'ZIP end of central directory');
@@ -616,11 +628,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const [single] = await Promise.all([page.waitForEvent('download'), page.locator('#ri-list .ri-dl').nth(3).click()]);
   assert.equal(single.suggestedFilename(), 'anim-120x60.gif');
   assert.deepEqual((await pixels(fs.readFileSync(await single.path()), [[60, 30]]))[0], [255, 0, 0, 255], 'first GIF frame');
-  // Everything as a ZIP. Focus comes back to the button afterwards.
+  // Everything as a ZIP. Focus comes back to the button afterwards. The
+  // originals' file dates stay out of it: the new files carry no metadata.
+  await page.evaluate(() => Object.defineProperty(File.prototype, 'lastModified', { configurable: true, get: () => new Date(2001, 0, 2, 3, 4, 6).getTime() }));
   await page.focus('#ri-zip');
   const [zdl] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
   assert.equal(zdl.suggestedFilename(), 'resized-images.zip');
-  const entries = readZip(fs.readFileSync(await zdl.path()));
+  const zipBuf = fs.readFileSync(await zdl.path());
+  for (const [name, year] of Object.entries(zipYears(zipBuf))) assert.ok(year >= 2026, `${name} is dated ${year} in the ZIP, the original file's date, though the new files carry no metadata`);
+  const entries = readZip(zipBuf);
   assert.deepEqual(entries.map(e => e.name), ['quadrants-120x80.jpg', 'two-pages-120x80.tif', 'flag-120x60.bmp', 'anim-120x60.gif', 'flat-120x60.' + (avifOk ? 'avif' : 'jpg')]);
   const [eq, et, eb, eg] = entries.map(e => e.data);
   assert.deepEqual([imageInfo(eq).type, imageInfo(eq).width, imageInfo(eq).height], ['jpeg', 120, 80]);

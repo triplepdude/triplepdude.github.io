@@ -77,6 +77,18 @@ function riffChunks(b) {
   }
   return out;
 }
+// The year of each ZIP entry's modified time (MS-DOS date field), by name.
+function zipYears(buf) {
+  let eocd = buf.length - 22;
+  while (buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  const out = {};
+  for (let i = 0, n = buf.readUInt16LE(eocd + 10), p = buf.readUInt32LE(eocd + 16); i < n; i++) {
+    const nlen = buf.readUInt16LE(p + 28);
+    out[buf.toString('utf8', p + 46, p + 46 + nlen)] = 1980 + (buf.readUInt16LE(p + 14) >> 9);
+    p += 46 + nlen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return out;
+}
 function readZip(b) {
   let e = b.length - 22;
   while (e >= 0 && b.readUInt32LE(e) !== 0x06054b50) e--;
@@ -258,9 +270,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await rerun(() => page.selectOption('#h2j-resize', 'none'));
 
   // ---------- ZIP ----------
+  // With the metadata removed, the originals' file dates stay out of the ZIP
+  // too: for a photo from a phone that is often when it was taken.
+  await page.evaluate(() => Object.defineProperty(File.prototype, 'lastModified', { configurable: true, get: () => new Date(2001, 0, 2, 3, 4, 6).getTime() }));
   const [zdl] = await Promise.all([page.waitForEvent('download'), page.click('#h2j-zip')]);
   assert.equal(zdl.suggestedFilename(), 'heic-to-jpg.zip');
-  const entries = readZip(fs.readFileSync(await zdl.path()));
+  const zipBuf = fs.readFileSync(await zdl.path());
+  for (const [name, year] of Object.entries(zipYears(zipBuf))) assert.ok(year >= 2026, `${name} is dated ${year} in the ZIP, the original file's date, though the metadata was removed`);
+  const entries = readZip(zipBuf);
   assert.deepEqual(entries.map(e => e.name), ['quadrants.jpg', 'portrait-gps.jpg', 'burst.jpg', 'display-p3.jpg', 'alpha.jpg', 'grid.jpg', 'photo-12mp.jpg']);
   entries.forEach(e => assert.equal(e.data.readUInt16BE(0), 0xFFD8));
   assert.deepEqual([jpegInfo(entries[6].data).w, jpegInfo(entries[6].data).h], [4032, 3024]);

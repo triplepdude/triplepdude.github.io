@@ -608,7 +608,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await p.evaluate(() => window.scrollBy(0, 300));
   await p.tap('[data-preset="lottery"]');
   await p.waitForFunction(() => document.querySelector('#rn-out').textContent.split(', ').length === 6);
-  await p.waitForFunction(() => { const r = document.querySelector('#rn-out').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+  // (Within a pixel: the phone scrolls in steps of a third of a CSS pixel, so an
+  // edge scrolled into view can end up a fraction of a pixel outside.)
+  await p.waitForFunction(() => { const r = document.querySelector('#rn-out').getBoundingClientRect(); return r.top >= -1 && r.bottom <= innerHeight + 1; });
   await p.tap('#rn-unique');
   assert.equal(await p.isChecked('#rn-unique'), false);
   // With the keyboard open (500 px left to see), the box being typed in stays where it is
