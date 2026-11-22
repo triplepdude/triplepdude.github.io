@@ -333,7 +333,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(guide, /AVIF pictures, often saved from websites, share the HEIF container but are compressed with AV1; for those, use the AVIF to JPG converter\./);
   assert.match(guide, /so portrait shots come out upright\. To mirror a selfie or turn a photo yourself, use Flip Image: it opens HEIC too and saves a JPG\./);
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/avif-to-jpg/', '/assets/vendor/libheif/README.txt', '/flip-image/', '/remove-exif-data/', '/image-to-pdf/']);
+  assert.deepEqual(links, ['/avif-to-jpg/', '/assets/vendor/libheif/README.txt', '/flip-image/', '/remove-exif-data/', '/image-to-pdf/', '/image-to-text/']);
+  assert.match(guide, /To copy the text from a photo of a document, open it in image to text, which reads HEIC too\./);
   for (const href of links) {
     const file = href.startsWith('/assets/') ? path.join(__dirname, '..', '..', href) : path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html');
     assert.ok(fs.existsSync(file), `${href} is linked from the guide but does not exist`);
