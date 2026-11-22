@@ -146,13 +146,24 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // Each side shows only its own picture, so transparent parts of the SVG look transparent.
   assert.deepEqual(await page.evaluate(() => [getComputedStyle(document.querySelector('#p2s-orig')).clipPath, getComputedStyle(document.querySelector('#p2s-svg')).clipPath]),
     ['inset(0px 55% 0px 0px)', 'inset(0px 0px 0px 45%)']);
+  // The zoom is a percentage of the picture's own size (240 px wide), which
+  // the SVG keeps, not of the copy enlarged four times for tracing.
+  const zoomLabel = () => page.evaluate(() => {
+    const pct = Math.round(parseFloat(document.querySelector('#p2s-stage').style.width) / 240 * 100);
+    return [document.querySelector('#p2s-zoom-val').textContent, pct];
+  });
+  let [label, pct] = await zoomLabel();
+  assert.equal(label, `Fit (${pct}%)`);
+  assert.ok(pct > 100, `the 240 px logo fills the wider view: ${label}`);
   await page.focus('#p2s-view');
   await page.keyboard.press('Equal');
-  assert.doesNotMatch(await page.textContent('#p2s-zoom-val'), /Fit/);
+  [label, pct] = await zoomLabel();
+  assert.equal(label, `${pct}%`);
   const zoomed = await page.$eval('#p2s-view', el => el.scrollWidth > el.clientWidth);
   assert.ok(zoomed, 'zoomed in, the picture scrolls');
   await page.keyboard.press('0');
-  assert.match(await page.textContent('#p2s-zoom-val'), /^Fit \(\d+%\)$/);
+  [label, pct] = await zoomLabel();
+  assert.equal(label, `Fit (${pct}%)`);
   await page.focus('#p2s-copy');
   await page.keyboard.press('Shift+Tab');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'p2s-download');
