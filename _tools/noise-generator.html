@@ -754,7 +754,7 @@ faq:
     st.mode = 'stopped';
     st.intShown = false;
     const endedAt = why === 'timer' ? tm.endAt : 0;
-    disarm();
+    disarm(true);
     keepPause();
     session('auto');
     if (au) {
@@ -937,11 +937,14 @@ faq:
     if (want && !tm.iv) tm.iv = setInterval(tick, 1000);
     else if (!want && tm.iv) { clearInterval(tm.iv); tm.iv = 0; }
   }
-  function disarm() {
+  // A timer turned off or changed brings the level back up; a stop holds it
+  // where the fade had got to (Play sets it back to full), so the noise does
+  // not swell again while the stop fades out.
+  function disarm(hold) {
     const had = tm.endAt;
     tm.endAt = 0;
     ticker();
-    if (au && had) rampTo(au.fader.gain, 1, 0.5);
+    if (au && had) { if (hold) anchor(au.fader.gain, au.ctx.currentTime); else rampTo(au.fader.gain, 1, 0.5); }
   }
   // Starts the countdown from now. While the sound is interrupted the
   // countdown runs on, and its fade is booked once the sound is back.
@@ -1214,22 +1217,24 @@ faq:
       const r = root.getBoundingClientRect();
       if (r.bottom < 0 || r.top > window.innerHeight) return;
     }
-    const k = e.key, input = tag === 'INPUT';
-    if (/^[1-7]$/.test(k) && !e.shiftKey) {
-      // Digits still type into the time field.
-      if (input && t.type !== 'radio' && t.type !== 'range') return;
+    // A colour radio or a slider (focused by clicking one) takes the digits
+    // and Space too; the time field keeps them for typing.
+    const k = e.key, input = tag === 'INPUT', field = input && t.type !== 'radio' && t.type !== 'range';
+    // (French keyboards type digits with Shift.)
+    if (/^[1-7]$/.test(k)) {
+      if (field) return;
       e.preventDefault();
       pick(COLOURS[+k - 1], true);
       return;
     }
-    // Arrows and Space keep their usual jobs in sliders, radios and fields.
-    if (input) return;
     if (k === ' ' || k === 'Spacebar') {
-      if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space presses those
+      if (field || tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space presses those
       e.preventDefault();
       if (!e.repeat) toggle();
       return;
     }
+    // Arrows keep their usual jobs in sliders, radios and fields.
+    if (input) return;
     if (k === 'ArrowLeft' || k === 'ArrowRight') { e.preventDefault(); stepColour(k === 'ArrowRight' ? 1 : -1, true); return; }
     if (k === 'ArrowUp' || k === 'ArrowDown') { e.preventDefault(); setVolume(st.vol + (k === 'ArrowUp' ? 5 : -5), true); }
   });
