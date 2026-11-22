@@ -26,7 +26,7 @@ howto: |
   | Format | What happens to the sound | Size per minute |
   |---|---|---|
   | MP3, 192 kbps | Decoded and compressed again | 1.44 MB |
-  | WAV, 16-bit | Decoded, with no further loss | 10.6 MB (stereo, 44.1 kHz) |
+  | WAV, 16-bit | Decoded, not compressed again | 10.6 MB (stereo, 44.1 kHz) |
   | Original audio (.m4a) | AAC copied byte for byte | as in the video |
 
   Most MP4 and MOV videos store their sound as AAC. **Original audio** copies
@@ -57,17 +57,18 @@ howto: |
   Files to convert the original. Safari saves downloads in the Downloads
   folder of the Files app, Android in Downloads. Keep the page on screen
   while it converts, as phones pause pages in the background; the page asks
-  the phone to keep the screen on where it can. To check the result's left
-  and right channels, play it alongside the [speaker test](/speaker-test/).
+  the phone to keep the screen on where it can. If the result sounds wrong
+  on one side, check the speakers with the [speaker test](/speaker-test/).
 
   ## Limits, links and protected files
 
-  MP3 and M4A have no size limit here. A WAV file or a ZIP is built in
-  memory, so WAV stops at 2 GB on a computer (about 3 hours of stereo at
-  48 kHz) and at 300 MB on a phone. Browsers that cannot decode audio a
-  piece at a time, such as Safari before version 26 and Firefox on Android,
-  must decode the whole sound track at once: up to 20 minutes on a phone and
-  60 minutes on a computer.
+  The video can be any size, since only its sound is read. The result is built
+  in memory, which matters for WAV: it stops at 2 GB on a computer (about 3
+  hours of stereo at 48 kHz) and at 300 MB on a phone (about 26 minutes), and
+  a ZIP has the same limits. Browsers that cannot decode audio a piece at a
+  time, such as Safari before version 26 and Firefox on Android, must decode
+  the whole sound track at once: up to 20 minutes on a phone and 60 minutes on
+  a computer.
 
   The page converts files on your device, not links, so it cannot fetch
   videos from YouTube or other sites. YouTube's terms allow downloading only
@@ -78,7 +79,7 @@ faq:
   - q: Are my videos uploaded anywhere?
     a: No. The files are read and converted by your browser on your own device, and the converter's code is loaded from this site. No video, audio or tag you type is sent anywhere or stored, and closing the tab discards everything.
   - q: Does converting MP4 to MP3 lose quality?
-    a: Yes, a little. The sound in a video is already compressed, usually as AAC, and MP3 compresses it a second time. At 192 kbps or more the difference is hard to hear; to avoid it, choose WAV, which adds no further loss, or Original audio, which keeps the sound exactly as it is.
+    a: Yes, a little. The sound in a video is already compressed, usually as AAC, and MP3 compresses it a second time. At 192 kbps or more the difference is hard to hear; to avoid it, choose WAV, which is not compressed again, or Original audio, which keeps the sound exactly as it is.
   - q: Why can't a file be converted?
     a: The message under the file name says why. Usually the video has no sound track, its audio uses a codec the browser cannot decode, such as the AC-3 or DTS sound of some MKV films, or it is protected with DRM. Files made by phones and cameras almost always work.
   - q: Can I convert several videos at once?
@@ -120,6 +121,7 @@ faq:
 .m2m-fs { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
 .m2m-fs legend { margin-bottom: 6px; padding: 0; font-size: 14px; font-weight: 600; }
 .m2m-fs .checks { margin-bottom: 0; }
+.m2m-tracks { flex-direction: column; align-items: flex-start; gap: 0; }
 .m2m-tags { margin: 0 0 16px; }
 .m2m-tags summary { padding: 6px 0; font-weight: 600; cursor: pointer; }
 .m2m-tags[open] summary { margin-bottom: 8px; }
@@ -129,6 +131,9 @@ faq:
 .m2m-results { margin: 0 0 16px; }
 .m2m-note { margin: 0 0 16px; }
 .m2m fieldset:disabled .hint { opacity: 0.8; }
+@media (pointer: coarse) {
+  .m2m-tags summary { padding-block: 10px; }
+}
 @media (max-width: 480px) {
   .m2m-track { height: 112px; }
   .m2m-drop { padding: 16px 10px; }
@@ -158,10 +163,10 @@ faq:
   <section id="m2m-edit" aria-labelledby="m2m-edit-h" hidden>
     <h2 class="m2m-h" id="m2m-edit-h">Trim <span id="m2m-edit-name"></span></h2>
     <fieldset class="m2m-fs" id="m2m-edit-fs">
-    <div class="field" id="m2m-track-field" hidden>
-      <label for="m2m-track">Audio track</label>
-      <select id="m2m-track"></select>
-    </div>
+    <fieldset class="m2m-fs" id="m2m-track-field" hidden>
+      <legend>Audio track</legend>
+      <div class="checks m2m-tracks" id="m2m-tracks"></div>
+    </fieldset>
     <div class="m2m-wave" id="m2m-wave">
       <div class="m2m-track" id="m2m-trackbox">
         <canvas id="m2m-canvas" role="img" aria-label="Waveform"></canvas>
@@ -312,7 +317,7 @@ faq:
   var dom = {
     root: $('m2m'), drop: $('m2m-drop'), open: $('m2m-open'), file: $('m2m-file'), sample: $('m2m-sample'), fileErr: $('m2m-file-error'),
     filesSec: $('m2m-files-sec'), list: $('m2m-files'), listActions: $('m2m-list-actions'), clear: $('m2m-clear'),
-    editFs: $('m2m-edit-fs'), edit: $('m2m-edit'), editName: $('m2m-edit-name'), trackField: $('m2m-track-field'), track: $('m2m-track'),
+    editFs: $('m2m-edit-fs'), edit: $('m2m-edit'), editName: $('m2m-edit-name'), trackField: $('m2m-track-field'), tracks: $('m2m-tracks'),
     wave: $('m2m-wave'), box: $('m2m-trackbox'), canvas: $('m2m-canvas'), playhead: $('m2m-playhead'), hStart: $('m2m-h-start'), hEnd: $('m2m-h-end'),
     waveMsg: $('m2m-wave-msg'), scaleEnd: $('m2m-scale-end'), start: $('m2m-start'), end: $('m2m-end'), len: $('m2m-len'), timeErr: $('m2m-time-error'),
     play: $('m2m-play'), all: $('m2m-all'), fadeIn: $('m2m-fadein'), fadeOut: $('m2m-fadeout'), fadeErr: $('m2m-fade-error'),
@@ -331,6 +336,7 @@ faq:
   var busy = false;
   var cancelRequested = false;
   var activeConv = null;
+  var resultSeq = 0;
   var settings = { format: 'mp3', kbps: 192, mono: false };
 
   // ---------- Small helpers ----------
@@ -365,7 +371,13 @@ faq:
     if (/[\uD800-\uDBFF]/.test(s.charAt(i - 1))) i--;
     return s.slice(0, i);
   }
-  function clean(s) { return cut(String(s == null ? '' : s).replace(/[\u0000-\u001F\u007F]+/g, ' ').trim(), MAX_TAG); }
+  function clean(s) { return cut(String(s == null ? '' : s).slice(0, MAX_TAG * 4).replace(/[\u0000-\u001F\u007F]+/g, ' ').trim(), MAX_TAG); }
+  // A value set by a script or an input method can be longer than maxlength.
+  // It is cut at once, so neither the patterns nor the layout see a megabyte.
+  function capField(f) {
+    var max = f.maxLength;
+    if (max > 0 && f.value.length > max) f.value = cut(f.value, max);
+  }
   function baseName(name) {
     var b = String(name || '').replace(/\.[^.\/\\]{1,8}$/, '').trim();
     return cut(b || 'audio', 120);
@@ -385,9 +397,12 @@ faq:
     dom.status.textContent = text;
   }
   function setMsg(el, text) { if (el.textContent !== text) el.textContent = text; }
-  function tooSoon(btn) {
+  // A second press on the same button for the same thing within 1.5 s is a
+  // double click. A new result can be saved at once.
+  function tooSoon(btn, what) {
     var now = Date.now();
-    if (btn._m2mAt && now - btn._m2mAt < 1500) return true;
+    if (btn._m2mWhat === what && now - btn._m2mAt < 1500) return true;
+    btn._m2mWhat = what;
     btn._m2mAt = now;
     return false;
   }
@@ -779,9 +794,19 @@ faq:
     setMsg(dom.editName, e.name);
     dom.trackField.hidden = e.tracks.length < 2;
     if (e.tracks.length > 1) {
-      dom.track.textContent = '';
-      e.tracks.forEach(function (t, i) { var o = el('option', null, trackLabel(t, i)); o.value = String(i); dom.track.appendChild(o); });
-      dom.track.value = String(e.ti);
+      // Built once per file, so a radio that has the focus is never replaced.
+      if (dom.tracks._m2mFor !== e) {
+        dom.tracks._m2mFor = e;
+        dom.tracks.textContent = '';
+        e.tracks.forEach(function (t, i) {
+          var row = el('label', 'check'), r = document.createElement('input');
+          r.type = 'radio'; r.name = 'm2m-track'; r.value = String(i); r.id = 'm2m-track-' + i;
+          row.appendChild(r);
+          row.appendChild(document.createTextNode(' ' + trackLabel(t, i)));
+          dom.tracks.appendChild(row);
+        });
+      }
+      dom.tracks.querySelectorAll('input').forEach(function (r) { r.checked = +r.value === e.ti; });
     }
     dom.start.value = fmtTime(e.sel.start);
     dom.end.value = fmtTime(e.sel.end);
@@ -1147,7 +1172,7 @@ faq:
 
   [['start', dom.start], ['end', dom.end]].forEach(function (pair) {
     var which = pair[0], f = pair[1];
-    f.addEventListener('input', function () { onTimeInput(which); });
+    f.addEventListener('input', function () { capField(f); onTimeInput(which); });
     f.addEventListener('change', function () { if (onTimeInput(which)) f.value = fmtTime(current.sel[which]); });
     f.addEventListener('keydown', function (ev) {
       if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
@@ -1172,7 +1197,7 @@ faq:
     draw();
   });
   [dom.fadeIn, dom.fadeOut].forEach(function (f) {
-    f.addEventListener('input', function () { checkFades(true); });
+    f.addEventListener('input', function () { capField(f); checkFades(true); });
   });
   dom.vol.addEventListener('input', function () {
     if (!editorOn()) return;
@@ -1184,6 +1209,7 @@ faq:
   });
   [['title', dom.title], ['artist', dom.artist], ['album', dom.album]].forEach(function (pair) {
     pair[1].addEventListener('input', function () {
+      capField(pair[1]);
       if (!editorOn()) return;
       var v = clean(pair[1].value);
       if (v !== current.tags[pair[0]]) { current.tags[pair[0]] = v; invalidate(current); }
@@ -1194,10 +1220,10 @@ faq:
     current.keepCover = dom.cover.checked;
     invalidate(current);
   });
-  dom.track.addEventListener('change', function () {
+  dom.tracks.addEventListener('change', function (ev) {
     var e = current;
-    if (!editorOn()) return;
-    var i = +dom.track.value;
+    if (!editorOn() || !ev.target || ev.target.name !== 'm2m-track') return;
+    var i = +ev.target.value;
     if (!(i >= 0 && i < e.tracks.length) || i === e.ti) return;
     stopPlay();
     if (whole && whole.e === e) releaseWhole();
@@ -1321,7 +1347,7 @@ faq:
       return 'MP3 at ' + s.kbps + ' kbps' + (s.mono ? ' mono' : '') + ' takes about ' + (s.kbps * 60 / 8000).toFixed(2) + ' MB a minute. A higher bitrate cannot add detail that the source does not have.';
     }
     if (s.format === 'wav') {
-      return '16-bit WAV keeps every sample of the decoded sound, with no further loss, but takes about ' + (s.mono ? '5.3' : '10.6') +
+      return '16-bit WAV stores the decoded sound without compressing it again, but takes about ' + (s.mono ? '5.3' : '10.6') +
         ' MB a minute (' + (s.mono ? 'mono' : 'stereo') + ', 44.1 kHz). Limit on this device: ' + fmtBytes(WAV_LIMIT) + ' per file.';
     }
     return 'Copies the AAC sound of MP4, MOV and M4A files as it is into an .m4a file: no further loss and a small file. The cut is rounded out to whole AAC frames (about 21 ms), and fades, volume and mono are not applied.';
@@ -1465,7 +1491,7 @@ faq:
     var used = new Set();
     entries.forEach(function (x) { if (x.result) used.add(x.result.name.toLowerCase()); });
     var blob = new Blob([out.target.buffer], { type: mime });
-    return { blob: blob, name: uniqueName(e.base + '.' + ext, used) };
+    return { id: ++resultSeq, blob: blob, name: uniqueName(e.base + '.' + ext, used) };
   }
   function isCancel(err) {
     return err && (err.name === 'ConversionCanceledError' || (MB && MB.ConversionCanceledError && err instanceof MB.ConversionCanceledError) || /cancel/i.test(err.message || ''));
@@ -1553,7 +1579,7 @@ faq:
 
   // ---------- Downloads ----------
   function downloadEntry(e, btn) {
-    if (!e.result || tooSoon(btn)) return;
+    if (!e.result || tooSoon(btn, e.result)) return;
     TT.download(e.result.name, e.result.blob);
   }
   function updateResults() {
@@ -1564,8 +1590,8 @@ faq:
     setMsg(dom.zipNote, res.length > 1 && total > ZIP_LIMIT ? 'Together the files take ' + fmtBytes(total) + ', too much for one ZIP on this device, so download them one by one.' : '');
   }
   dom.zip.addEventListener('click', async function () {
-    if (tooSoon(dom.zip) || dom.zip.getAttribute('aria-busy') === 'true') return;
     var res = entries.filter(function (e) { return e.result; });
+    if (tooSoon(dom.zip, res.map(function (e) { return e.result.id; }).join()) || dom.zip.getAttribute('aria-busy') === 'true') return;
     if (res.length < 2) return;
     dom.zip.setAttribute('aria-busy', 'true');
     setMsg(dom.zip, 'Making the ZIP…');
@@ -1663,7 +1689,7 @@ faq:
     return new File([buf], 'sample.wav', { type: 'audio/wav' });
   }
   dom.sample.addEventListener('click', function () {
-    if (tooSoon(dom.sample)) return;
+    if (tooSoon(dom.sample, 'sample')) return;
     addFiles([sampleFile()]);
   });
 

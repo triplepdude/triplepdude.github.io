@@ -71,8 +71,14 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const waitWave = (p = page) => p.waitForFunction(() => document.getElementById('m2m-wave-msg').textContent === '' &&
     document.getElementById('m2m-peak').textContent !== '', null, { timeout: 20000 });
   const download = async (action, p = page) => {
-    const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 20000 }), action()]);
-    return { name: dl.suggestedFilename(), bytes: fs.readFileSync(await dl.path()) };
+    // Names the line of the test that asked, which a timeout's stack does not.
+    const caller = (new Error().stack.split('\n')[2] || '').trim();
+    try {
+      const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 20000 }), action()]);
+      return { name: dl.suggestedFilename(), bytes: fs.readFileSync(await dl.path()) };
+    } catch (e) {
+      throw new Error(`${String(e.message).split('\n')[0]} (download ${caller})`);
+    }
   };
   const convert = async (p = page) => { await p.click('#m2m-convert'); await waitIdle(p); };
   // The site scrolls smoothly, so a focused element may still be moving: wait
@@ -398,9 +404,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const half = a.win[2].rms[0] / a.win[0].rms[0];
   assert.ok(half > 0.3 && half < 0.75, `halfway through the fade in the level is about half: ${half}`);
   assert.ok(a.win[3].rms[0] < 0.3 * a.win[0].rms[0], `fade out ends quiet: ${a.win[3].rms[0]}`);
-  // A quick second press on Download saves the file once. (The page ignores
-  // presses for 1.5 s after a download, so first let the last one age.)
-  await page.waitForTimeout(1600);
+  // A quick second press on Download saves the file once, but a new result
+  // can be saved at once. The page's clock is stopped 10 s ahead until the
+  // M4A below has been saved, so every press counts as quick.
+  await page.evaluate(() => { const t = Date.now() + 10000; window.__realNow = Date.now; Date.now = () => t; });
   let downloads = 0;
   const countDl = () => downloads++;
   page.on('download', countDl);
@@ -439,6 +446,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await text('#m2m-convert'), 'Save original audio');
   await convert();
   const m4a = await download(() => row('clip.mp4').locator('.m2m-dl').click());
+  await page.evaluate(() => { Date.now = window.__realNow; });
   assert.equal(m4a.name, 'clip.m4a');
   const mp4 = mp4Samples(m4a.bytes);
   assert.ok(mp4.stsd.includes(Buffer.from('mp4a')), 'the track is AAC (mp4a)');
@@ -460,7 +468,9 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await row('clip.mp4').locator('.m2m-edit').getAttribute('aria-pressed'), 'false');
   await page.check('#m2m-f-wav');
   await waitWave();
-  await typeInto('#m2m-start', '0.25');
+  // A value that arrives without an input event (as when a browser restores a
+  // form) is read when converting.
+  await page.$eval('#m2m-start', el => { el.value = '0.25'; });
   await page.focus('#m2m-h-end');
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
   assert.equal(await page.inputValue('#m2m-end'), '0:00.700');
@@ -527,9 +537,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal((await card('phone.mov')).info, '0:02.000 · AAC · 44.1 kHz · mono');
   assert.equal((await card('two-langs.mkv')).info, '0:01.994 · Opus · 48 kHz · mono · 2 audio tracks');
   await row('two-langs.mkv').locator('.m2m-edit').click();
-  assert.deepEqual(await page.$$eval('#m2m-track option', o => o.map(x => x.textContent)),
+  assert.deepEqual(await page.$$eval('#m2m-tracks .check', l => l.map(x => x.textContent.trim())),
     ['1, English, Opus, mono', '2, French, Commentaire, Opus, mono']);
-  await page.selectOption('#m2m-track', '1');
+  assert.equal(await page.isChecked('#m2m-track-0'), true, 'the file\'s default track comes first');
+  await page.focus('#m2m-track-0');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.isChecked('#m2m-track-1'), true, 'the arrow key chooses the second track');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'm2m-track-1', 'the chosen track keeps the focus');
   await waitWave();
   await page.click('#m2m-speech');
   assert.equal(await page.inputValue('#m2m-bitrate'), '96');
@@ -604,9 +618,11 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await typeInto('#m2m-artist', mega);
   await typeInto('#m2m-album', mega);
   const spent = (await threadMs()) - before;
-  assert.ok(spent < 1500, `seven megabyte pastes took ${Math.round(spent)} ms of main-thread time`);
+  assert.ok(spent < 1000, `seven megabyte pastes took ${Math.round(spent)} ms of main-thread time`);
   assert.equal(await text('#m2m-time-error'), 'Type the end as minutes:seconds, such as 1:05.5, or as seconds, such as 65.5.');
   assert.equal(await text('#m2m-fade-error'), 'Type the fade-in length in seconds, such as 2 or 0.5.');
+  // What a script or an input method puts past maxlength is cut, never inside an emoji.
+  assert.deepEqual(await page.$$eval('#m2m-edit input[type=text]', l => l.map(x => x.value.length)), [40, 40, 12, 12, 199, 200, 200]);
   await typeInto('#m2m-start', '0');
   await typeInto('#m2m-end', '6');
   await typeInto('#m2m-fadein', '');
@@ -726,8 +742,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal((await card('long-claim.m4a', op)).msg, 'This browser has to decode the whole sound track at once, which works up to 60 minutes on this device. Choose Original audio, or use a current version of Chrome, Edge, Firefox (on a computer) or Safari (26 or later).');
   await old.close();
 
-  // ---------- A phone: touch drag, tap to convert ----------
-  const phone = await browser.newContext({ ...devices['Pixel 7'], acceptDownloads: true });
+  // ---------- A phone in a decimal-comma locale: touch drag, tap to convert ----------
+  const phone = await browser.newContext({ ...devices['Pixel 7'], locale: 'de-DE', acceptDownloads: true });
   const pp = await phone.newPage();
   watch(pp);
   await pp.goto(page.url());
@@ -741,15 +757,25 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const tcdp = await phone.newCDPSession(pp);
   const touch = (type, x, y) => tcdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
   const y = pbox.y + pbox.height / 2;
+  // A finger moves at a finger's pace and rests before it lifts. (Moves sent
+  // all at once end in a fling, and Chrome then swallows the next tap.)
   await touch('touchStart', ph.x + ph.width / 2, y);
-  for (let i = 1; i <= 6; i++) await touch('touchMove', ph.x + ph.width / 2 - (ph.x + ph.width / 2 - (pbox.x + pbox.width / 2)) * i / 6, y);
+  for (let i = 1; i <= 6; i++) {
+    await touch('touchMove', ph.x + ph.width / 2 - (ph.x + ph.width / 2 - (pbox.x + pbox.width / 2)) * i / 6, y);
+    await pp.waitForTimeout(40);
+  }
+  await pp.waitForTimeout(300);
   await touch('touchEnd');
   near(+(await pp.getAttribute('#m2m-h-end', 'aria-valuenow')), 4, 0.05, 'end dragged to the middle with a finger');
   assert.equal(await pp.inputValue('#m2m-end'), await pp.getAttribute('#m2m-h-end', 'aria-valuetext'));
+  assert.equal(await pp.evaluate(() => (1.5).toLocaleString()), '1,5', 'the browser uses a decimal comma');
+  await typeInto('#m2m-start', '1,5', pp);
+  assert.equal(await pp.textContent('#m2m-len'), '0:02.500');
+  assert.equal((await card('sample.wav', pp)).info, '0:08.000 · PCM · 44.1 kHz · stereo', 'the page writes numbers the same way in every locale');
   await pp.tap('#m2m-convert');
   await waitIdle(pp);
   const phoneMp3 = await download(() => row('sample.wav', pp).locator('.m2m-dl').tap(), pp);
-  checkMp3(phoneMp3.bytes, { kbps: 192, sr: 44100, mono: false, seconds: 3.99 }, 'sample.mp3 on a phone');
+  checkMp3(phoneMp3.bytes, { kbps: 192, sr: 44100, mono: false, seconds: 2.5 }, 'sample.mp3 on a phone');
   const overflow = await pp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(overflow <= 1, `no sideways scroll on a phone with a result (${overflow}px)`);
   await phone.close();

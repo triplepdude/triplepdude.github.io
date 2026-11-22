@@ -181,7 +181,9 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal((await errOf('#crp-w')).invalid, 'true');
   await type('#crp-w', '٢٠٠'); // Arabic-Indic digits
   assert.deepEqual(await errOf('#crp-w'), { invalid: null, msg: '' });
-  assert.equal(await fields(), '7,3,200,55');
+  assert.equal(await fields(), '7,3,٢٠٠,55', 'the field keeps what was typed while it is being edited');
+  await page.$eval('#crp-w', el => el.dispatchEvent(new Event('change', { bubbles: true })));
+  assert.equal(await fields(), '7,3,200,55', 'leaving the field writes the number back in plain digits');
   await type('#crp-w', '1.000');
   assert.equal((await errOf('#crp-w')).msg, 'The width can be at most 300 px, the width of the picture.', '1.000 is a thousand');
   await type('#crp-w', '250');
@@ -203,25 +205,25 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.selectOption('#crp-ratio', '4:5');
   assert.equal(await fields(), '70,0,160,200');
   await page.click('#crp-swap');
-  assert.equal(await fields(), '61,11,179,143', 'swapped to 5:4 with about the same area');
+  assert.equal(await fields(), '50,20,200,160', 'swapped to 5:4 with the same area (32,000 px)');
   assert.match(await info(), /\(5:4\)/);
   await type('#crp-w', '250');
-  assert.equal(await fields(), '25,0,250,200', 'the height follows at 5:4');
+  assert.equal(await fields(), '50,0,250,200', 'the height follows at 5:4 and the box moves up to fit');
   await type('#crp-h', '201');
   assert.equal((await errOf('#crp-h')).msg, 'The height can be at most 200 px, the height of the picture.');
   await type('#crp-w', '251');
   assert.equal((await errOf('#crp-w')).msg, 'At 5:4 the width can be at most 250 px, because the picture is 200 px tall.');
   await type('#crp-w', '100');
-  assert.equal(await fields(), '25,0,100,80');
+  assert.equal(await fields(), '50,0,100,80', 'the top-left corner stays');
   await page.selectOption('#crp-ratio', 'custom');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'crp-custom');
   await type('#crp-custom', 'abc');
   assert.deepEqual(await errOf('#crp-custom'), { invalid: 'true', msg: 'Enter the ratio as width:height, such as 21:9 or 1.91:1.' });
   await type('#crp-custom', '3,5:1');
   assert.deepEqual(await errOf('#crp-custom'), { invalid: null, msg: '' });
-  assert.equal(await fields(), '0,57,300,86', 'a decimal comma: 3.5:1, as wide as the picture');
+  assert.equal(await fields(), '0,0,300,86', 'a decimal comma: 3.5:1, as wide as the picture, centred near the old box');
   await type('#crp-custom', '1.91:1');
-  assert.equal(await fields(), '0,22,300,157');
+  assert.equal(await fields(), '0,0,300,157');
   assert.match(await info(), /\(1\.91:1\)/);
   await page.selectOption('#crp-ratio', 'original');
   assert.equal(await fields(), '0,0,300,200');
@@ -252,7 +254,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.evaluate(() => window.__live), 1, 'the live summary is written once, when the drag ends');
   await dragFrom(at(150, 100), at(120, 90)); // move
   assert.equal(await fields(), '45,40,200,130');
-  await dragFrom(at(45, 100), at(5, 100)); // west edge, past the picture
+  await dragFrom(at(45, 100), at(-10, 100)); // west edge, past the picture
   assert.equal(await fields(), '0,40,245,130', 'the edge stops at the picture');
   await dragFrom(at(290, 10), at(260, 30)); // outside: a new box
   assert.equal(await fields(), '260,10,30,20');
@@ -305,8 +307,10 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // flip-h, flip-v and a turn: back to a plain half turn plus a turn = three quarter turns of the original, mirrored twice
   const m = await page.evaluate(() => document.querySelector('#crp-info').textContent);
   assert.match(m, /^Crop \d+ × \d+ px/);
-  await page.click('#crp-rotate'); await page.click('#crp-rotate'); await page.click('#crp-rotate');
-  // Three more turns and the two mirrors make a half turn in all.
+  // Both mirrors make a half turn, so with the two turns so far the picture is upright again;
+  // two more turns make a half turn.
+  assert.match(await info(), / at \d+, \d+\./);
+  await page.click('#crp-rotate'); await page.click('#crp-rotate');
   await type('#crp-x', '0'); await type('#crp-y', '0'); await type('#crp-w', '300'); await type('#crp-h', '200');
   p = await png();
   checkGrid(p, null, (i, j) => [299 - i, 199 - j], 'half turn');
@@ -315,7 +319,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   checkGrid(p, null, (i, j) => [i, j], 'back upright');
 
   // ---------- Output size, DPI and format ----------
-  await type('#crp-x', '30'); await type('#crp-y', '40'); await type('#crp-w', '200'); await type('#crp-h', '100');
+  await type('#crp-w', '200'); await type('#crp-h', '100'); await type('#crp-x', '30'); await type('#crp-y', '40');
+  assert.equal(await fields(), '30,40,200,100');
   await page.selectOption('#crp-size', 'set');
   assert.equal(await page.inputValue('#crp-ow'), '200');
   assert.equal(await page.inputValue('#crp-oh'), '100');
@@ -331,7 +336,10 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const c = p.px(10, 10);
   assert.ok(near(c, [30 + 20 + 0.5, 40 + 20 + 0.5, 60, 255], 2), `halved pixel ${c}`);
   await type('#crp-ow', '400');
-  assert.match(await page.textContent('#crp-out-hint'), /enlarged and may look soft/);
+  // The summary follows after a short pause in typing.
+  await page.waitForFunction(() => /enlarged and may look soft/.test(document.querySelector('#crp-out-hint').textContent));
+  assert.equal(await page.textContent('#crp-out-hint'), 'The crop covers 200 × 100 px of your picture, so it is enlarged and may look soft.');
+  assert.equal(await info(), 'Crop 200 × 100 px (2:1) at 30, 40. Saves as a 400 × 200 px PNG.');
   await type('#crp-ow', '20000');
   assert.equal((await errOf('#crp-ow')).msg, 'The output can be at most 16,384 pixels a side and 100 megapixels.');
   await page.selectOption('#crp-size', 'crop');
@@ -402,18 +410,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.match(svg, /^<svg [^>]*viewBox="20 10 100 80"/);
   assert.match(svg, /width="100" height="80"/);
   assert.match(svg, /<circle cx="25" cy="25" r="10" fill="#00ff00"\/>/, 'the drawing itself is untouched');
-  // Drawn: output (i, j) is image pixel (20 + i, 10 + j); the image is the SVG at 2x.
+  // Drawn: output (i, j) is image pixel (20 + i, 10 + j). In image pixels the red half is x < 100,
+  // the blue half x >= 100, and the green disc has its centre at 50, 50 and a radius of 20.
   const rendered = await page.evaluate(async text => {
     const img = new Image();
     img.src = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
     await img.decode();
     const c = Object.assign(document.createElement('canvas'), { width: 100, height: 80 }), g = c.getContext('2d');
     g.drawImage(img, 0, 0);
-    return [[30, 40], [50, 40], [85, 40], [5, 5]].map(([x, y]) => Array.from(g.getImageData(x, y, 1, 1).data));
+    return [[5, 5], [30, 40], [85, 40], [60, 40]].map(([x, y]) => Array.from(g.getImageData(x, y, 1, 1).data));
   }, svg);
   assert.deepEqual(rendered[0], [255, 0, 0, 255], 'red left half');
-  assert.deepEqual(rendered[1], [0, 255, 0, 255], 'disc centre at image 70, 50');
+  assert.deepEqual(rendered[1], [0, 255, 0, 255], 'disc centre at image 50, 50');
   assert.deepEqual(rendered[2], [0, 0, 255, 255], 'blue right half');
+  assert.deepEqual(rendered[3], [255, 0, 0, 255], 'red, 30 px right of the disc centre');
   await page.selectOption('#crp-format', 'png');
   await page.selectOption('#crp-size', 'set');
   await type('#crp-ow', '400');
@@ -421,9 +431,10 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.doesNotMatch(await page.textContent('#crp-out-hint'), /enlarged/, 'an SVG is drawn at any size');
   p = await png();
   assert.deepEqual([p.w, p.h], [400, 320]);
-  assert.deepEqual(p.px(200, 160), [0, 255, 0, 255], 'disc centre, drawn sharp at 4x');
-  assert.deepEqual(p.px(200, 160 - 4 * 2 * 9), [0, 255, 0, 255]);
-  assert.deepEqual(p.px(200, 160 - 4 * 2 * 11), [255, 0, 0, 255]);
+  // At 4x the disc centre is at 120, 160 and its radius is 80 output pixels.
+  assert.deepEqual(p.px(120, 160), [0, 255, 0, 255], 'disc centre, drawn sharp at 4x');
+  assert.deepEqual(p.px(120, 160 - 76), [0, 255, 0, 255], 'inside the disc, 4 px from its edge');
+  assert.deepEqual(p.px(120, 160 - 84), [255, 0, 0, 255], 'outside the disc, 4 px from its edge');
   await page.selectOption('#crp-size', 'crop');
   await page.selectOption('#crp-format', 'same');
 

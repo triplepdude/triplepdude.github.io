@@ -2,7 +2,7 @@
 title: "Wheel Spinner: Spin the Wheel to Pick a Name"
 description: Spin a wheel to pick a random name, number or yes or no. Paste a list, add weights, remove winners and share the wheel as a link. Runs in your browser.
 category: Generators
-keywords: [wheel spinner, spin the wheel, random name picker, random wheel, name picker wheel, yes or no wheel, number wheel 1 to 10, weighted wheel spinner, prize wheel spinner, wheel of names, decision wheel, raffle wheel, random names picker, roulette wheel]
+keywords: [wheel spinner, spin the wheel, random name picker, random wheel, name picker wheel, yes or no wheel, number wheel 1 to 10, weighted wheel spinner, prize wheel spinner, wheel of names, decision wheel, wheel decider, raffle wheel, random names picker, roulette wheel]
 howto: |
   ## How to use the wheel spinner
 
@@ -280,13 +280,14 @@ Omar</textarea>
     maybe: 'Yes\nNo\nMaybe',
     ten: '1\n2\n3\n4\n5\n6\n7\n8\n9\n10'
   };
-  var THEMES = {
+  // Looked up by the name in the page address, so no inherited name such as "constructor" is a theme.
+  var THEMES = Object.assign(Object.create(null), {
     bright: ['#e63946', '#f4a261', '#e9c46a', '#2a9d8f', '#277da1', '#7b2cbf', '#43aa8b', '#f15bb5'],
     pastel: ['#ffadad', '#ffd6a5', '#fdffb6', '#caffbf', '#9bf6ff', '#a0c4ff', '#bdb2ff', '#ffc6ff'],
     ocean: ['#03045e', '#00b4d8', '#0077b6', '#90e0ef', '#023e8a', '#48cae4', '#0096c7', '#caf0f8'],
     forest: ['#1b4332', '#95d5b2', '#2d6a4f', '#d8f3dc', '#40916c', '#b7e4c7', '#081c15', '#74c69d'],
     mono: ['#111111', '#f2f2f2', '#555555', '#c8c8c8']
-  };
+  });
 
   var ta = $('#ws-entries'), canvas = $('#ws-wheel'), ctx = canvas.getContext('2d');
   var spinBtn = $('#ws-spin'), fullBtn = $('#ws-full'), stage = $('#ws-stage');
@@ -779,7 +780,8 @@ Omar</textarea>
       return new TextDecoder('windows-1252').decode(bytes);
     }
   }
-  function openFile(file) {
+  // count is how many files were dropped at once; only the first is opened.
+  function openFile(file, count) {
     if (!file) return;
     setText(fileMsg, '');
     if (spin) return;
@@ -801,7 +803,13 @@ Omar</textarea>
         setText(fileMsg, file.name + ' has ' + fmt(text.length) + ' characters, more than the ' + fmt(MAX_CHARS) + ' the wheel reads.');
         return;
       }
+      // A file with nothing to spin leaves the list as it was.
+      if (!/\S/.test(text)) {
+        setText(fileMsg, file.name + (text ? ' has only blank lines' : ' is empty') + ', so the list was kept.');
+        return;
+      }
       replaceList(text, 'open');
+      if (count > 1) setText(fileMsg, 'Only ' + file.name + ', the first of the ' + fmt(count) + ' files, was opened. To spin the names from several lists, paste them all into the box.');
     }, function () {
       setText(fileMsg, file.name + ' could not be read.');
     });
@@ -824,25 +832,38 @@ Omar</textarea>
     ta.classList.remove('is-over');
     if (!hasFiles(e)) return;
     e.preventDefault();
-    openFile(e.dataTransfer.files[0]);
+    openFile(e.dataTransfer.files[0], e.dataTransfer.files.length);
   });
   // A file dropped anywhere else would replace the page and lose the wheel.
   document.addEventListener('dragover', function (e) { if (hasFiles(e)) e.preventDefault(); });
   document.addEventListener('drop', function (e) { if (hasFiles(e)) e.preventDefault(); });
 
   // ---------- Sound, made by the browser ----------
-  var audio = null;
+  // The sound runs only around a spin: pressing Spin resumes it (a click or key press, which
+  // Safari on iPhone asks for), and half a second after a spin's last tone has ended it is
+  // suspended, so the browser stops working on silence until the next spin.
+  var audio = null, soundEnd = 0, restTimer = 0;
   function audioCtx() {
     if (!audio) {
       var C = window.AudioContext || window.webkitAudioContext;
       if (!C) return null;
       try { audio = new C(); } catch (e) { return null; }
     }
+    clearTimeout(restTimer);
     if (audio.state === 'suspended') {
       var p = audio.resume();
       if (p && p.catch) p.catch(function () {});
     }
     return audio;
+  }
+  function rest() {
+    if (!audio) return;
+    clearTimeout(restTimer);
+    restTimer = setTimeout(function () {
+      if (spin || audio.state !== 'running') return;
+      var p = audio.suspend();
+      if (p && p.catch) p.catch(function () {});
+    }, Math.max(0, soundEnd - audio.currentTime) * 1000 + 500);
   }
   function tone(a, freq, start, length, type, peak) {
     var o = a.createOscillator(), g = a.createGain();
@@ -855,6 +876,7 @@ Omar</textarea>
     g.connect(a.destination);
     o.start(start);
     o.stop(start + length + 0.02);
+    soundEnd = Math.max(soundEnd, start + length + 0.02);
   }
   function tick() {
     var a = soundBox.checked && audioCtx();
@@ -978,12 +1000,13 @@ Omar</textarea>
   }
 
   function ease(p) { p = Math.min(1, Math.max(0, p)); return 1 - Math.pow(1 - p, 3); }
-  // Each slice that passes a point brings an edge and a name, up to three changes of
-  // luminance, and three flashes a second are six changes. So the wheel is soft while more
-  // than SOFT of its narrowest slices would pass a point in the coming second, sharp once
-  // fewer than SHARP would, and blends between; as the wheel only slows down, it never
-  // softens again. Fast or slow, the winner and where the wheel stops do not change.
-  var SOFT = 1.5, SHARP = 1;
+  // Each slice that passes a point brings an edge and a name, whose letters change the
+  // luminance there several times. So the wheel is soft while more than SOFT of its narrowest
+  // slices would pass a point in the coming second, sharp once fewer than SHARP would, and
+  // blends between; as the wheel only slows down, it never softens again. Measured on every
+  // frame of a spin, no 15 px square of the wheel then flashes more than three times a second.
+  // Fast or slow, the winner and where the wheel stops do not change.
+  var SOFT = 1, SHARP = 0.5;
   function step(now) {
     if (!spin) return;
     var t = now - spin.t0, span = spin.to - spin.from;
@@ -1031,6 +1054,7 @@ Omar</textarea>
     if (!dialog.open) dialog.showModal();
     $('#ws-dlg-close').focus();
     chime();
+    rest();
     if (s.animate && confettiBox.checked) confetti();
   }
 

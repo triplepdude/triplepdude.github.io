@@ -11,8 +11,9 @@ howto: |
      open. A sample picture is shown until you do.
   2. Move over the picture: the magnifier shows the pixels around the
      pointer, enlarged, with the one you will pick outlined. Click to pick
-     it. On a phone, touch the picture, slide your finger until the
-     magnifier above it shows the right pixel, and lift.
+     it. On a phone, tap a pixel to pick it, or touch and hold until the
+     magnifier appears above your finger, slide to the right pixel and
+     lift; a swipe scrolls the page.
   3. Copy the code you need. Every pick is added to **Picked colours**,
      newest first.
 
@@ -98,10 +99,10 @@ faq:
 .icp-wrap { position: relative; min-width: 0; }
 .icp-stage { display: flex; justify-content: center; margin: 0 0 8px; }
 /* Served at the sample picture's 960 × 640, so its box is kept before the script sizes it.
-   A swipe on the picture scrolls the page and two fingers zoom; touch and hold aims. */
+   A swipe on the picture scrolls (or pans a zoomed page) and two fingers zoom; touch and hold aims. */
 .icp-canvas {
   display: block; max-width: 100%; max-height: max(200px, min(70vh, 640px)); cursor: crosshair; border-radius: 4px;
-  touch-action: pan-y pinch-zoom; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+  touch-action: manipulation; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
   background: repeating-conic-gradient(var(--border) 0% 25%, var(--surface) 0% 50%) 0 0 / 16px 16px;
 }
 .icp-canvas.is-pixelated { image-rendering: pixelated; }
@@ -470,7 +471,7 @@ faq:
 
   // A mouse or pen aims at once. A finger only aims once it has been held still for HOLD ms:
   // then the magnifier comes up above it and the colour is picked where it lifts. A quick tap
-  // picks at once, and a swipe scrolls the page (the canvas allows vertical panning).
+  // picks at once, and a swipe scrolls the page (the canvas lets the browser pan and zoom).
   var HOLD = 300, press = null;
   function endPress() { if (press) { clearTimeout(press.timer); press = null; } }
   cv.addEventListener('pointerdown', function (e) {
@@ -734,7 +735,8 @@ faq:
   var paletteSoon = TT.debounce(renderPalette, 30);
   palList.addEventListener('click', function (e) {
     var b = e.target.closest('.icp-pal');
-    if (!b) return;
+    // While busy, the list can still show the colours of the picture before.
+    if (!b || palList.hasAttribute('aria-busy')) return;
     var c = palette[Number(b.dataset.i)].c, f = show(c, 'From the palette');
     addHistory(c);
     say(f.hex + ' picked from the palette.');
@@ -1020,9 +1022,11 @@ faq:
       return { w: w, h: h, data: px.data, view: px.view, res: null, fmt: await TTImage.sniff(file), orientation: 1, scaledFrom: k < 1 ? [bm.width, bm.height] : null };
     } finally { bm.close(); }
   }
-  async function load(file) {
+  // count: how many files were dropped or pasted together. Only the first is opened, and the page says so.
+  async function load(file, count) {
     if (!file) return;
     var run = ++loadRun, name = file.name || 'Pasted image', o = null, why = '', profile = '';
+    var others = count > 1 ? 'Only the first of the ' + count + ' files was ' : '';
     errBox.textContent = '';
     try {
       o = await fullRead(file);
@@ -1032,12 +1036,13 @@ faq:
     }
     if (o) { try { profile = await profileOf(new Uint8Array(await file.slice(0, 1 << 20).arrayBuffer())); } catch (e) { profile = ''; } }
     if (run !== loadRun) { if (o && o.res) TTImage.release(o.res); return; }
-    if (!o) { errBox.textContent = '“' + name + '” could not be opened. ' + why; return; }
+    if (!o) { errBox.textContent = '“' + name + '” could not be opened. ' + why + (others ? ' ' + others + 'tried.' : ''); return; }
     setImage({ name: name, w: o.w, h: o.h, data: o.data, raw: null, view: o.view, res: o.res, file: file, orientation: o.orientation, profile: profile });
     var f = TTImage.formats[o.fmt], notes = (o.warnings || []).filter(function (w) { return WARN[w]; }).map(function (w) { return WARN[w] + ' '; }).join('');
+    if (others) notes += others + 'opened. ';
     setText($('#icp-name'), name);
     setText($('#icp-info'), o.scaledFrom
-      ? 'Read at ' + o.w + ' × ' + o.h + ' px, scaled down from ' + o.scaledFrom[0] + ' × ' + o.scaledFrom[1] + (o.byBrowser ? ' because the full image is too large for this browser' : ', as images over ' + DECODE_MAX / 1e6 + ' megapixels are read at a smaller size') + '; positions are in the smaller copy.'
+      ? 'Read at ' + o.w + ' × ' + o.h + ' px, scaled down from ' + o.scaledFrom[0] + ' × ' + o.scaledFrom[1] + (o.byBrowser ? ' because the full image is too large for this browser' : ', as images over ' + DECODE_MAX / 1e6 + ' megapixels are read at a smaller size') + '; positions are in the smaller copy.' + (others ? ' ' + others + 'opened.' : '')
       : o.w + ' × ' + o.h + ' px' + (f ? ', ' + f.label : '') + (profile ? ', ' + profile + ' profile' : '') + '. ' + notes + 'Drop or paste another image to replace it.');
     var c = colourAt(aim.x, aim.y, sampleSize());
     c.fromImage = true;
@@ -1104,13 +1109,13 @@ faq:
     if (!hasFiles(e)) return;
     e.preventDefault();
     bar.classList.remove('is-over');
-    load(e.dataTransfer.files[0]);
+    load(e.dataTransfer.files[0], e.dataTransfer.files.length);
   });
   document.addEventListener('paste', function (e) {
-    var f = e.clipboardData && Array.prototype.filter.call(e.clipboardData.files || [], function (x) { return /^image\//.test(x.type); })[0];
-    if (!f) return;
+    var fs = e.clipboardData ? Array.prototype.filter.call(e.clipboardData.files || [], function (x) { return /^image\//.test(x.type); }) : [];
+    if (!fs.length) return;
     e.preventDefault();
-    load(f);
+    load(fs[0], fs.length);
   });
 
   var relayout = TT.debounce(function () { layout(); if (!loupe.hidden) hideLoupe(); }, 100);

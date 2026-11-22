@@ -2,7 +2,7 @@
 title: "Random Number Generator: 1 to 100, No Repeats"
 description: Generate one random number or a list in any range, with or without repeats, sorted, whole or decimal. Made in your browser by its secure random generator.
 category: Generators
-keywords: [random number generator, random number generator 1 to 100, random number generator no repeats, random number list generator, lottery number generator, unique random numbers, random number picker, dice roller, random number between 1 and 10]
+keywords: [random number generator, random number generator 1 to 100, random number generator no repeats, random number list generator, lottery number generator, unique random numbers, random number picker, dice roller, random number between 1 and 10, coin flip, flip a coin, heads or tails, rng, raffle number generator, random number shuffle]
 howto: |
   ## How to generate random numbers
 
@@ -73,8 +73,8 @@ faq:
     a: It uses your browser's cryptographically secure generator, an algorithm that is seeded with unpredictable data collected by your device. That is not "true" randomness measured from a physical process such as atmospheric noise, but its results cannot be predicted in practice, which is why the same kind of generator is used to create encryption keys.
   - q: Can I use it to draw a raffle or giveaway winner fairly?
     a: Yes. Number the entries from 1 upwards, set the maximum to the number of entries, set how many winners you need and tick No repeats. Every entry then has the same chance. The page keeps no record of a draw, so draw in front of the people taking part, or record your screen, if you may have to prove the result. To draw from a list of names instead, or to show the draw on a big screen, use the [wheel spinner](/wheel-spinner/), which picks the winner from a pasted list in the same secure, unbiased way.
-  - q: What is the difference between pseudo-random and true random numbers?
-    a: A pseudo-random generator is a formula that turns a starting value, the seed, into a long stream of numbers, and the same seed always gives the same stream. A true random generator measures a physical process such as electronic or atmospheric noise. A cryptographically secure generator combines the two, a formula seeded with unpredictable data that the device gathers from physical events, so its output cannot be predicted by anyone who does not know the seed.
+  - q: How do I make random numbers in Excel or Google Sheets?
+    a: "Type =RANDBETWEEN(1,100) for a whole number from 1 to 100, both included, or =RAND() for a decimal from 0 up to but not including 1. Both change each time the sheet recalculates, for example when you edit any cell, so copy the cells and paste them as values to keep a draw. For a list without repeats this page is simpler: tick No repeats."
   - q: Why did the same number come up twice?
     a: With repeats allowed every draw is independent, so a number that has just come up is exactly as likely as any other the next time. On a dice that is 1 chance in 6 for every roll, and in seven rolls at least one number must repeat. Tick No repeats if every number has to be different.
   - q: Are my numbers saved or sent anywhere?
@@ -85,6 +85,7 @@ faq:
 .rn-main > .field { flex: 1 1 110px; }
 .rn-main { margin-bottom: 8px; }
 .rn-unique { margin-bottom: 0; }
+.rn-sign-hint { margin: -2px 0 12px; }
 /* A box with a mistake gets a thicker edge as well as the danger colour; the message names it. */
 .rn input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
 .rn-out { min-height: 82px; max-height: 340px; margin-bottom: 12px; overflow-y: auto; font-size: 1.05rem; line-height: 1.6; font-variant-numeric: tabular-nums; }
@@ -126,17 +127,18 @@ faq:
   <div class="row rn-main">
     <div class="field">
       <label for="rn-min">Minimum</label>
-      <input type="text" id="rn-min" inputmode="decimal" autocomplete="off" spellcheck="false" value="1" aria-describedby="rn-msg">
+      <input type="text" id="rn-min" inputmode="decimal" autocomplete="off" spellcheck="false" value="1" aria-describedby="rn-sign-hint rn-msg">
     </div>
     <div class="field">
       <label for="rn-max">Maximum</label>
-      <input type="text" id="rn-max" inputmode="decimal" autocomplete="off" spellcheck="false" value="100" aria-describedby="rn-msg">
+      <input type="text" id="rn-max" inputmode="decimal" autocomplete="off" spellcheck="false" value="100" aria-describedby="rn-sign-hint rn-msg">
     </div>
     <div class="field">
       <label for="rn-count">How many numbers</label>
       <input type="text" id="rn-count" inputmode="numeric" autocomplete="off" spellcheck="false" value="1" aria-describedby="rn-msg">
     </div>
   </div>
+  <p class="hint rn-sign-hint" id="rn-sign-hint">The range can be negative: type a minus sign, as in -50.</p>
   <div class="checks rn-unique">
     <label class="check"><input type="checkbox" id="rn-unique" aria-describedby="rn-msg"> No repeats (every number different)</label>
   </div>
@@ -211,6 +213,12 @@ faq:
   var typeEl = $('#rn-type'), placesEl = $('#rn-places'), orderEl = $('#rn-order'), sepEl = $('#rn-sep');
   var msgEl = $('#rn-msg'), outEl = $('#rn-out'), labelEl = $('#rn-out-label'), infoEl = $('#rn-info'), statusEl = $('#rn-status');
   var copyBtn = $('#rn-copy'), csvBtn = $('#rn-csv'), coinNote = $('#rn-coin-note');
+  // The number keypad of iPhones and iPads has no minus key, so there the two ends of the range,
+  // which may be negative, get the ordinary keyboard, whose number keys include the minus sign.
+  if (/^iP(hone|od|ad)/.test(navigator.platform) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+    minEl.inputMode = 'text';
+    maxEl.inputMode = 'text';
+  }
   var PRESETS = { ten: ['1', '10', '1', false, 'drawn'], hundred: ['1', '100', '1', false, 'drawn'], dice: ['1', '6', '1', false, 'drawn'],
     coin: ['1', '2', '1', false, 'drawn'], lottery: ['1', '49', '6', true, 'asc'] };
   var coin = false, draw = null, timer = null;
@@ -511,8 +519,18 @@ faq:
       if (failed && how === 'now') c.field.focus();
       return;
     }
+    // The box being typed in keeps its place on the screen while the list above it grows or
+    // shrinks, so on a phone it does not slide under the keyboard.
+    var typed = how === 'typing' && [minEl, maxEl, countEl].indexOf(document.activeElement) >= 0 ? document.activeElement : null;
+    var top = typed ? typed.getBoundingClientRect().top : 0;
     draw = { values: sample(c), p: c.p, coin: c.coin, info: describe(c) };
     show();
+    if (typed) {
+      var moved = typed.getBoundingClientRect().top - top;
+      if (Math.abs(moved) >= 1) {
+        try { window.scrollBy({ top: moved, behavior: 'instant' }); } catch (e) { window.scrollBy(0, moved); }
+      }
+    }
     // Up to ten results are read out; a longer list is summed up (coin flips as heads and tails).
     if (!opening) announce(draw.texts.length <= 10 ? draw.label + ': ' + draw.texts.join(', ') : draw.coin ? infoEl.textContent : group(String(draw.texts.length)) + ' numbers generated.', how === 'typing');
     if (how === 'now') reveal();
