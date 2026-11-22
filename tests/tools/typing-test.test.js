@@ -68,12 +68,17 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.locator('#tt-text .tt-w').nth(1).locator('.tt-ok').count(), w[1].length);
   assert.equal(await page.locator('#tt-text .tt-w .tt-bad, #tt-text .tt-w .tt-extra').count(), 0);
   assert.equal(await text('#tt-acc'), '100.0%');
-  // The caret cannot be moved back: arrow keys and Home do nothing, typing goes on at the end.
+  assert.equal(await caret(), `1:${w[1].length}:`, 'the caret follows the last letter typed');
+  // The caret cannot be moved back: a click in the text, arrow keys and Home
+  // do nothing, typing goes on at the end.
+  const tb = await page.locator('#tt-box').boundingBox();
+  await page.mouse.click(tb.x + 20, tb.y + tb.height / 2);
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('Home');
   await page.keyboard.type('#');
   assert.equal(await value(), w[0] + ' ' + w[1] + '#');
   assert.equal(await page.locator('#tt-text .tt-w').nth(1).locator('.tt-extra').textContent(), '#');
+  assert.equal(await caret(), `1:${w[1].length + 1}:`);
   const keysSoFar = (w[0] + ' ' + w[1]).length + 1;
   const tenths = Math.floor((2000 * (keysSoFar - 1) + keysSoFar) / (2 * keysSoFar));
   assert.equal(await text('#tt-acc'), `${Math.floor(tenths / 10)}.${tenths % 10}%`);
@@ -82,8 +87,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.press('Backspace');
   await page.keyboard.press('Backspace');
   assert.equal(await value(), w[0] + ' ' + w[1].slice(0, -2));
+  assert.equal(await caret(), `1:${w[1].length - 2}:${w[1][w[1].length - 2]}`, 'the caret stands before the next letter');
   await page.keyboard.type(' ');
   assert.equal(await page.locator('#tt-text .tt-w').nth(1).locator('.tt-miss').count(), 2, 'the two letters skipped are marked');
+  assert.equal(await caret(), `2:0:${w[2][0]}`);
+  // Two wrong letters in the next word, then Backspace back into this one:
+  // the next word is shown as not typed again.
+  await page.keyboard.type('##');
+  assert.equal(await page.locator('#tt-text .tt-w').nth(2).locator('.tt-bad').count(), 2);
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Backspace');
+  assert.equal(await page.locator('#tt-text .tt-w').nth(2).locator('.tt-l').count(), 0, 'the word after the caret is plain again');
+  assert.equal(await page.locator('#tt-text .tt-w').nth(1).locator('.tt-miss').count(), 0, 'a word being typed has no skipped letters');
+  assert.equal(await caret(), `1:${w[1].length - 2}:${w[1][w[1].length - 2]}`);
+  await page.keyboard.type(' ');
+  assert.equal(await page.locator('#tt-text .tt-w').nth(1).locator('.tt-miss').count(), 2);
   // Esc throws the test away and deals new words.
   await page.keyboard.press('Escape');
   assert.equal(await value(), '');
