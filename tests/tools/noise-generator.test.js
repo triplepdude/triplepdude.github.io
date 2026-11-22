@@ -69,6 +69,24 @@ function analyse(blocks, sr, kw, centres) {
     bands: bandP.map(p => dB(p / ref)),
   };
 }
+// Short-term loudness through one block [L, R]: K-weighted power in windows of
+// win seconds (half overlapping, after 4096 samples for the filters to
+// settle), as dB from the block's median window.
+function swing([L, R], sr, kw, win) {
+  const k = x => biquad(biquad(x, kw[0][0], kw[0][1]), kw[1][0], kw[1][1]);
+  const a = k(L), b = k(R), n = Math.round(win * sr), out = [];
+  for (let i = 4096; i + n <= a.length; i += n >> 1) {
+    let s = 0;
+    for (let j = i; j < i + n; j++) s += a[j] * a[j] + b[j] * b[j];
+    out.push(dB(s / n));
+  }
+  const med = out.slice().sort((p, q) => p - q)[out.length >> 1];
+  return { min: Math.min(...out) - med, max: Math.max(...out) - med };
+}
+function highpass(fc, sr) { // Audio EQ Cookbook, Q 0.7071: [b, a]
+  const w = 2 * Math.PI * fc / sr, c = Math.cos(w), al = Math.sin(w) / Math.SQRT2, a0 = 1 + al;
+  return [[(1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0], [1, -2 * c / a0, (1 - al) / a0]];
+}
 function slope(levels, freqs) { // least-squares dB per octave
   const x = freqs.map(Math.log2), mx = x.reduce((a, b) => a + b) / x.length, my = levels.reduce((a, b) => a + b) / levels.length;
   let sxy = 0, sxx = 0;
@@ -393,10 +411,68 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   near(R.tones['brown-12'].lufs - R.colours.brown.lufs, -0.5, 0.1, 'expected.py: darker brown is capped, not boosted');
   await setRange('#ng-tone', 0);
 
+  // ---- Tone jumps and colour changes hold the loudness: no swell, no dip ----
+  // One block from the speakers, ending secs after fn() on the audio clock.
+  const around = async (fn, secs) => {
+    const t0 = await page.evaluate(() => window.__tap.ctx.currentTime);
+    await fn();
+    await page.waitForFunction(t => window.__tap.ctx.currentTime >= t, t0 + secs, { timeout: 10000 });
+    const c = await capture(1);
+    return { block: c.blocks[0], kw: X.rates[String(c.sr)].kweight, sr: c.sr };
+  };
+  // Home and End (or a click on the slider's track) jump the tone by 24 dB:
+  // the level follows the tone as it glides, so every 20 ms stays within
+  // 2 dB (violet used to swell by 8 dB, white by 4).
+  for (const [key, c, from, press, to] of [['7', 'violet', 12, 'Home', '-12'], ['1', 'white', -12, 'End', '12']]) {
+    await blur();
+    await page.keyboard.press(key);
+    await setRange('#ng-tone', from);
+    await settle();
+    await page.focus('#ng-tone');
+    const a = await around(() => page.keyboard.press(press), 0.4);
+    assert.equal(await page.inputValue('#ng-tone'), to);
+    const s = swing(a.block, a.sr, a.kw, 0.02);
+    assert.ok(s.max < 2 && s.min > -2, `${c}, tone ${from} to ${to}: the loudness swings from ${s.min.toFixed(1)} to +${s.max.toFixed(1)} dB (20 ms windows)`);
+  }
+  // A colour change cross-fades at a constant power (the colours are
+  // independent and equally loud), so it does not dip half-way (pink and
+  // grey dipped by 1 dB, white and brown by 2.5).
+  await setRange('#ng-tone', 0);
+  await blur();
+  await page.keyboard.press('2');
+  await settle();
+  const dips = [];
+  for (const key of ['5', '2', '5', '2']) {
+    const a = await around(() => page.keyboard.press(key), 0.5);
+    dips.push(swing(a.block, a.sr, a.kw, 0.05).min);
+    await page.waitForTimeout(700);
+  }
+  const dip = dips.reduce((p, q) => p + q) / dips.length;
+  assert.ok(dip > -0.55, `pink and grey cross-fades dip by ${dip.toFixed(2)} dB (mean of ${dips.map(d => d.toFixed(2)).join(', ')}; 50 ms windows)`);
+  // The cross-fade takes 0.4 s rather than switching at once (which clicks):
+  // from brown to violet the treble above 4 kHz builds up over it.
+  await page.keyboard.press('3');
+  await settle();
+  {
+    const a = await around(() => page.keyboard.press('7'), 0.6), hp = highpass(4000, a.sr);
+    const y = biquad(biquad(a.block[0], hp[0], hp[1]), hp[0], hp[1]), n = Math.round(0.01 * a.sr), p = [];
+    for (let i = 4096; i + n <= y.length; i += n) p.push(meanSq(y.subarray(i, i + n)));
+    const full = p.slice(-6).sort((u, v) => u - v)[3];
+    // (Up to 60% of the full level: steady violet hardly ever dips that low in 10 ms.)
+    const rising = p.filter(v => v > 0.1 * full && v < 0.6 * full).length;
+    assert.ok(rising >= 8, `brown to violet: the treble rose from 10% to 60% of its full level in ${rising * 10} ms (a 400 ms cross-fade takes about 200 ms)`);
+  }
+  await page.keyboard.press('2');
+  await settle();
+  assert.equal(await text('#ng-big'), 'Pink noise');
+
   // ---- Volume ramps are anchored too ----
   const vol = await page.evaluate(() => window.__calls('vol'));
   const vr = vol.filter(c => c[0] === 'linearRampToValueAtTime');
   assert.equal(vr[vr.length - 1][1], 1, 'volume 100% is a gain of 1');
+  // A volume change glides over 50 ms, so dragging the slider does not crackle.
+  const vi = vol.lastIndexOf(vr[vr.length - 1]);
+  near(vol[vi][2] - vol[vi - 1][2], 0.05, 0.001, 'volume ramp length (s)');
 
   // ---- Sleep timer (minutes), booked on the audio clock ----
   await page.selectOption('#ng-timer', '15');
@@ -530,6 +606,35 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.equal(await announced('Stopped'), 'Stopped');
   await page.keyboard.press(' ');
   await playing();
+  // Clicking a colour or a slider focuses it: Space still plays and stops
+  // there, and the digits still pick a colour, with Shift too (as French
+  // keyboards type them).
+  await page.click('label.ng-col:has(input[value="violet"])');
+  assert.equal(await page.evaluate(() => document.activeElement.value), 'violet');
+  await page.keyboard.press(' ');
+  assert.equal(await text('#ng-play'), 'Play', 'Space on a focused colour did not stop the noise');
+  await page.focus('#ng-tone');
+  await page.keyboard.press(' ');
+  await playing();
+  assert.equal(await page.inputValue('#ng-tone'), '0');
+  await page.evaluate(() => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: '4', code: 'Digit4', shiftKey: true, bubbles: true, cancelable: true })));
+  assert.equal(await text('#ng-big'), 'Green noise', 'a digit typed with Shift did not pick a colour');
+  await page.keyboard.press('7');
+  assert.equal(await text('#ng-big'), 'Violet noise');
+  // Space held down stops once, without flicking on and off as it repeats.
+  await blur();
+  await page.keyboard.down(' ');
+  await page.keyboard.down(' ');
+  await page.keyboard.up(' ');
+  assert.equal(await text('#ng-play'), 'Play', 'a repeating Space toggled the sound again');
+  await page.keyboard.press(' ');
+  await playing();
+  // Arrows on the sleep-timer list choose a timer, not the volume.
+  const volBefore = await page.inputValue('#ng-vol');
+  await page.focus('#ng-timer');
+  await page.keyboard.press('ArrowDown');
+  assert.deepEqual([await page.inputValue('#ng-timer'), await page.inputValue('#ng-vol')], ['15', volBefore]);
+  await page.selectOption('#ng-timer', '0');
   // Digits do not change the colour while typing a time.
   await page.selectOption('#ng-timer', 'clock');
   await page.focus('#ng-at');
@@ -609,6 +714,10 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // ---- Stop ----
   await page.click('#ng-play');
   assert.equal(await text('#ng-play'), 'Play');
+  // Stop fades out over 0.25 s (from an anchor), never cuts off with a click.
+  const envStop = await page.evaluate(() => window.__calls('env')).then(c => c.slice(-2));
+  assert.deepEqual([envStop[0][0], envStop[1][0], envStop[1][1]], ['setValueAtTime', 'linearRampToValueAtTime', 0], `stop: ${JSON.stringify(envStop)}`);
+  near(envStop[1][2] - envStop[0][2], 0.25, 0.001, 'stop fade-out length (s)');
   await page.waitForFunction(() => window.__log.contexts[0].state === 'suspended', null, { timeout: 3000 });
   assert.deepEqual(await page.evaluate(() => [document.getElementById('ng-keep').paused, window.__log.session.slice(-1)[0], window.__log.wake, window.__log.contexts.length]), [true, 'auto', 0, 1]);
 
@@ -740,6 +849,34 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await p.selectOption('#ng-timer', 'clock');
     await p.fill('#ng-at', '06:30');
     assert.equal((await p.locator('#ng-tinfo').textContent()).replace(/\s/g, ' '), 'Stops at 6:30 AM tomorrow (8 h 30 min from now) once you press Play.');
+    await ctx.close();
+  }
+
+  // ---- After the sleep timer's fade, the stop stays silent ----
+  // A clock time 9 s ahead fades out over the time left, down to silence on
+  // the audio clock; the stop that follows must not bring the level back up
+  // as it fades out (it swelled to 18 dB below the noise for 0.25 s).
+  {
+    const { ctx, p } = await extraPage({ timezoneId: 'Europe/London', locale: 'en-GB' });
+    await p.clock.install({ time: new Date('2026-06-01T21:59:51Z') }); // 22:59:51 BST
+    await p.goto(url);
+    await setRangeOn(p, '#ng-vol', 100);
+    await p.selectOption('#ng-timer', 'clock');
+    await p.fill('#ng-at', '23:00');
+    await p.click('#ng-play');
+    await p.waitForFunction(() => document.getElementById('ng-live').textContent === 'Playing');
+    await p.waitForFunction(() => document.getElementById('ng-play').textContent === 'Play', null, { timeout: 20000 });
+    assert.equal(await p.locator('#ng-tinfo').textContent(), 'Stopped by the sleep timer at 23:00.');
+    // The context is suspended 0.35 s after the stop, so the speakers' last
+    // 0.7 s hold the end of the fade and the whole stop.
+    await p.waitForFunction(() => window.__log.contexts[0].state === 'suspended', null, { timeout: 5000 });
+    const g = await p.evaluate(() => window.__grab());
+    let peak = 0;
+    for (const b64 of [g.L, g.R]) {
+      const b = Buffer.from(b64, 'base64'), x = new Float32Array(b.buffer, b.byteOffset, b.length / 4);
+      for (const v of x) peak = Math.max(peak, Math.abs(v));
+    }
+    assert.ok(dB(peak * peak) < -80, `after the sleep timer's fade the noise came back, peaking at ${dB(peak * peak).toFixed(1)} dBFS`);
     await ctx.close();
   }
 
