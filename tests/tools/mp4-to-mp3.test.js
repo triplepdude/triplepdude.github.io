@@ -294,6 +294,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await timeErr(), 'Minutes and seconds go up to 59: write 1:15 rather than 0:75.');
   await typeInto('#m2m-start', '5,95');
   assert.equal(await timeErr(), 'The start must be at least 0.1 seconds before the end (0:06.000).');
+  // Digits from a phone set to Arabic-Indic digits, with the Arabic decimal mark.
+  await typeInto('#m2m-start', '\u0660:\u0660\u0661\u066B\u0662');
+  assert.equal(await timeErr(), '', 'Arabic-Indic digits');
+  assert.equal(await page.getAttribute('#m2m-h-start', 'aria-valuenow'), '1.2');
   await typeInto('#m2m-start', '0,500');
   assert.equal(await timeErr(), '', '0,500 is half a second, not 500');
   assert.equal(await page.getAttribute('#m2m-start', 'aria-invalid'), null);
@@ -306,6 +310,20 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.getAttribute('#m2m-h-end', 'aria-valuetext'), '0:06.000', '5.9999 s rounds to 6.000');
   await typeInto('#m2m-end', '0:00.55');
   assert.equal(await timeErr(), 'The end must be at least 0.1 seconds after the start (0:00.500).');
+  await typeInto('#m2m-end', '5.5');
+  assert.equal(await text('#m2m-len'), '0:05.000');
+  // A start that was refused keeps its message when the end is changed next.
+  await typeInto('#m2m-start', 'abc');
+  await typeInto('#m2m-end', '5');
+  assert.equal(await timeErr(), 'Type the start as minutes:seconds, such as 1:05.5, or as seconds, such as 65.5.', 'the start is still wrong');
+  assert.equal(await page.getAttribute('#m2m-start', 'aria-invalid'), 'true');
+  // A start refused for lying past the end takes effect once the end moves past it.
+  await typeInto('#m2m-start', '5,5');
+  assert.equal(await timeErr(), 'The start must be at least 0.1 seconds before the end (0:05.000).');
+  await typeInto('#m2m-end', '5.9');
+  assert.equal(await timeErr(), '');
+  assert.equal(await page.getAttribute('#m2m-h-start', 'aria-valuenow'), '5.5');
+  await typeInto('#m2m-start', '0,500');
   await typeInto('#m2m-end', '5.5');
   assert.equal(await text('#m2m-len'), '0:05.000');
   // ↑ and ↓ in a time field, then the value is tidied when the field is left.

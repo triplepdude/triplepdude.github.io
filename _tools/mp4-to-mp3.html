@@ -407,15 +407,23 @@ faq:
     return false;
   }
 
-  // Times: [[h:]m:]s with a dot or a comma before the decimals. Only the digits
-  // 0-9 count; there are no thousands separators in a time.
+  // Times: [[h:]m:]s with a dot or a comma before the decimals. There are no
+  // thousands separators in a time. Digits typed in Arabic-Indic, Persian or
+  // full-width form (a phone set to those digits types them) count as 0-9;
+  // other look-alikes, such as a raised ², do not.
+  function normDigits(s) {
+    return s.replace(/[\uFF10-\uFF19]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFF10 + 48); })
+      .replace(/[\u0660-\u0669]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x0660 + 48); })
+      .replace(/[\u06F0-\u06F9]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x06F0 + 48); })
+      .replace(/\uFF1A/g, ':').replace(/[\uFF0E\u066B]/g, '.').replace(/\uFF0C/g, ',');
+  }
   function fracMs(f) {
     if (!f) return 0;
     var ms = +(f + '00').slice(0, 3);
     return f.length > 3 && +f.charAt(3) >= 5 ? ms + 1 : ms;
   }
   function parseTime(text) {
-    var s = String(text).slice(0, 40).trim();
+    var s = normDigits(String(text).slice(0, 40)).trim();
     if (!s) return { error: 'empty' };
     if (/\s/.test(s)) return { error: 'format' };
     var parts = s.split(':');
@@ -433,7 +441,7 @@ faq:
     return { ms: ms };
   }
   function parseSeconds(text) {
-    var s = String(text).slice(0, 20).trim();
+    var s = normDigits(String(text).slice(0, 20)).trim();
     if (!s) return { ms: 0 };
     var m = /^(\d{0,5})(?:[.,](\d{0,9}))?$/.exec(s);
     if (!m || (m[1] === '' && !m[2])) return { error: 'format' };
@@ -880,7 +888,7 @@ faq:
     if (r.error === 'sixty') return 'Minutes and seconds go up to 59: write 1:15 rather than 0:75.';
     return 'Type the ' + label + ' as minutes:seconds, such as 1:05.5, or as seconds, such as 65.5.';
   }
-  function onTimeInput(which) {
+  function onTimeInput(which, alone) {
     var e = current;
     if (!editorOn()) return;
     var field = which === 'start' ? dom.start : dom.end;
@@ -895,6 +903,10 @@ faq:
     }
     showTimeError(null, '');
     setEdge(which, r.ms, true);
+    // The other field may hold text that was refused, or a time that only now
+    // fits: check it again, so its message stays (or it takes effect).
+    var ow = which === 'start' ? 'end' : 'start', ro = parseTime((ow === 'start' ? dom.start : dom.end).value);
+    if (!alone && (ro.error || ro.ms !== e.sel[ow])) onTimeInput(ow, true);
     return true;
   }
   function timesValid() {
