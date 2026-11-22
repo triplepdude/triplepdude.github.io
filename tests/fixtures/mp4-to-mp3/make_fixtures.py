@@ -18,6 +18,11 @@ Signals (amplitudes are of the sine, so RMS = amplitude / sqrt 2):
   protected.mp4  2 s AAC with CENC (cenc-aes-ctr) encryption, like DRM.
   silent-video.mp4  1 s of H.264 with no audio track.
   not-media.mp4  plain text with a video name.
+  cut-short.mp4  clip.mp4 with its index moved to the front, cut off after
+             50,000 bytes, like a copy or download that did not finish: the
+             index lists 6 s of sound, the data holds less than 3 s.
+  cover.m4a  1 s of AAC 44.1 kHz mono, 440 Hz, with a 32x32 JPEG cover and
+             the title "Cover test".
   long-claim.m4a  0.1 s of AAC whose sample table claims 61.5 minutes, for
              the length limit of browsers that decode a whole track at once.
 """
@@ -72,6 +77,13 @@ ff('-f', 'lavfi', '-i', "aevalsrc='0.4*sin(2*PI*440*t)':s=48000:d=2",
 ff(*VIDEO, '-t', '1', *X264, 'silent-video.mp4')
 with open(os.path.join(HERE, 'not-media.mp4'), 'w') as f:
     f.write('This is a text file with a video name, not a video.\n')
+ff('-i', 'clip.mp4', '-c', 'copy', '-movflags', '+faststart', 'cut-short.mp4')
+with open(os.path.join(HERE, 'cut-short.mp4'), 'r+b') as f:
+    f.truncate(50000)
+ff('-f', 'lavfi', '-i', 'color=c=0xc81e3c:s=32x32', '-frames:v', '1', 'cover.jpg')
+ff('-f', 'lavfi', '-i', "aevalsrc='0.4*sin(2*PI*440*t)':s=44100:d=1", '-i', 'cover.jpg',
+   '-map', '0:a', '-map', '1', '-c:a', 'aac', '-b:a', '64k', '-ac', '1', '-c:v', 'copy',
+   '-disposition:v', 'attached_pic', '-metadata', 'title=Cover test', 'cover.m4a')
 
 
 def boxes(buf, off, end):
@@ -124,6 +136,21 @@ expected['clip.mp4']['packets'] = [{'pts': float(p['pts_time']), 'dur': float(p[
                                     for p in pk['packets']]
 
 
+def incomplete_and_cover():
+    """cut-short.mp4: the samples ffmpeg can decode from what is left (its
+    index still claims 6 s). cover.m4a: the SHA-256 of the JPEG inside it."""
+    pcm = subprocess.run(['ffmpeg', '-v', 'error', '-i', 'cut-short.mp4', '-map', '0:a', '-f', 's16le', '-'],
+                         cwd=HERE, capture_output=True, check=True).stdout
+    out = {'cut-short.mp4': {'size': os.path.getsize(os.path.join(HERE, 'cut-short.mp4')),
+                             'listed_duration': float(probe('cut-short.mp4', '-show_format')['format']['duration']),
+                             'decoded_samples': len(pcm) // 4}}
+    with open(os.path.join(HERE, 'cover.jpg'), 'rb') as f:
+        out['cover.m4a'] = {'size': os.path.getsize(os.path.join(HERE, 'cover.m4a')),
+                            'jpeg_sha256': hashlib.sha256(f.read()).hexdigest()}
+    os.remove(os.path.join(HERE, 'cover.jpg'))
+    return out
+
+
 def peak_db(name, start=None, end=None):
     """Overall peak of the decoded audio in dBFS, as ffmpeg's astats reports it."""
     af = (f'atrim={start}:{end},' if start is not None else '') + 'astats=metadata=0'
@@ -141,6 +168,7 @@ with open(os.path.join(HERE, 'chirp.wav'), 'rb') as f:
     data = f.read()
 expected['chirp.wav']['data_offset'] = data.index(b'data') + 8
 expected['chirp.wav']['sha256'] = hashlib.sha256(data).hexdigest()
+expected.update(incomplete_and_cover())
 with open(os.path.join(HERE, 'expected.json'), 'w') as f:
     json.dump(expected, f, indent=1)
     f.write('\n')

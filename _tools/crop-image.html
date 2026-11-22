@@ -21,10 +21,9 @@ howto: |
 
   Type the width and height, here 1080 and 1350, and move the box over the
   part you want: the file then holds exactly those pixels of your photo. To
-  keep more of a large photo, pick **Instagram 4:5** under Ready-made size:
-  the box keeps that shape at any size and the crop is scaled to 1080 × 1350.
-  A box smaller than the output size is enlarged and looks soft; the page
-  says so.
+  keep more of a large photo, pick **Instagram 1080 × 1350** under Ready-made
+  size: the box keeps the 4:5 shape at any size and the crop is then scaled
+  to that size. A smaller box is enlarged and looks soft; the page says so.
 
   ## Sizes for social media and prints
 
@@ -35,20 +34,24 @@ howto: |
   | Use | Pixels | Ratio |
   |---|---|---|
   | Instagram portrait post | 1080 × 1350 | 4:5 |
+  | Instagram tall post | 1080 × 1440 | 3:4 |
   | Instagram square post | 1080 × 1080 | 1:1 |
   | Instagram landscape post | 1080 × 566 | 1.91:1 |
-  | YouTube thumbnail | 1280 × 720 | 16:9 |
+  | YouTube thumbnail | 1280 × 720 or 3840 × 2160 | 16:9 |
   | 4 × 6 in print at 300 dpi | 1800 × 1200 | 3:2 |
   | 5 × 7 in print at 300 dpi | 2100 × 1500 | 7:5 |
   | 8 × 10 in print at 300 dpi | 3000 × 2400 | 5:4 |
 
-  Instagram keeps a photo up to 1080 pixels wide at full quality when its
-  shape lies between 1.91:1 and 4:5. Since January 2025 the profile grid
-  shows each post as a 3:4 thumbnail, which hides the edges of a 4:5 post.
-  YouTube wants 16:9, at least 640 pixels wide, and now suggests 3840 ×
-  2160. For prints, 300 pixels per inch is the usual target. The DPI field
-  only records that number in the file, so printing software picks the right
-  paper size; the pixels stay the same.
+  Instagram keeps a photo's resolution, up to 1080 pixels wide, when its
+  shape lies between 1.91:1 and 3:4, and since January 2025 the profile grid
+  shows each post as a 3:4 thumbnail, which hides the sides of a 4:5 post.
+  Scheduling apps that post through Meta's API stop at 4:5, so 1080 × 1350
+  is safer there. YouTube wants 16:9, at least 640 pixels wide, and suggests
+  3840 × 2160, but a thumbnail uploaded from a phone can be 2 MB at most.
+  For prints, 300 pixels per inch is the usual target. The DPI field only
+  records that number in a JPG, PNG, TIFF or BMP file, so a program that
+  prints at the recorded size prints 1800 × 1200 pixels as 6 × 4 inches;
+  the pixels stay the same.
 
   ## Does cropping lower the quality?
 
@@ -82,7 +85,7 @@ faq:
   - q: Why does my cropped image look blurry?
     a: The box probably covers fewer pixels than the output size, so the crop had to be enlarged. Make the box bigger, lower the output size, or choose Same as the crop. Zooming in on the editor shows the real pixels of your picture.
   - q: Does the cropped photo keep its location and date?
-    a: The GPS location is always removed. The date, camera model and other EXIF details are kept for JPG, PNG and WebP while the box to keep them is ticked; untick it to remove those too, or use the EXIF remover for other files.
+    a: The GPS location is always removed. The date, camera model and other EXIF details are kept when the crop is saved as JPG, PNG or WebP and the box to keep them is ticked; untick it to remove them too. Other formats are saved without them.
 ---
 <style>
 .crp-pick { position: relative; margin: 0 0 16px; }
@@ -118,6 +121,8 @@ faq:
 .crp-box-hint { margin: 0 0 14px; }
 .crp-out { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 16px; }
 .crp-out .field { margin: 0; }
+/* Wide enough for "Original format (WebP)": the quality slider goes below it sooner. */
+.row > .field.crp-fmt { flex-basis: 240px; }
 .crp-q label { display: flex; justify-content: space-between; gap: 8px; }
 .crp-q output { font-weight: 400; color: var(--muted); }
 .crp-info { margin: 0 0 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -184,10 +189,11 @@ faq:
   <label for="crp-preset">Ready-made size</label>
   <select id="crp-preset" autocomplete="off">
     <option value="none" selected>None</option>
-    <option value="ig-portrait">Instagram 4:5, 1080 × 1350</option>
-    <option value="ig-square">Instagram 1:1, 1080 × 1080</option>
-    <option value="ig-landscape">Instagram 1.91:1, 1080 × 566</option>
-    <option value="youtube">YouTube, 1280 × 720</option>
+    <option value="ig-portrait">Instagram 1080 × 1350</option>
+    <option value="ig-tall">Instagram 1080 × 1440</option>
+    <option value="ig-square">Instagram 1080 × 1080</option>
+    <option value="ig-landscape">Instagram 1080 × 566</option>
+    <option value="youtube">YouTube 1280 × 720</option>
     <option value="print-4x6">Print 4 × 6 in, 300 dpi</option>
     <option value="print-5x7">Print 5 × 7 in, 300 dpi</option>
     <option value="print-8x10">Print 8 × 10 in, 300 dpi</option>
@@ -221,7 +227,7 @@ faq:
 <p class="msg error" id="crp-out-error" aria-live="polite"></p>
 
 <div class="row">
-  <div class="field">
+  <div class="field crp-fmt">
     <label for="crp-format">Save as</label>
     <select id="crp-format" autocomplete="off">
       <option value="same" selected>Original format</option>
@@ -274,6 +280,7 @@ faq:
   // Ready-made sizes. Prints turn to match the picture; social sizes keep their shape.
   var PRESETS = {
     'ig-portrait': { ratio: '4:5', w: 1080, h: 1350 },
+    'ig-tall': { ratio: 'custom', custom: [3, 4], w: 1080, h: 1440 },
     'ig-square': { ratio: '1:1', w: 1080, h: 1080 },
     'ig-landscape': { ratio: 'custom', custom: [1080, 566], w: 1080, h: 566 },
     'youtube': { ratio: '16:9', w: 1280, h: 720 },
@@ -299,7 +306,8 @@ faq:
   function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
   function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
   function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
-  function baseName(n) { return (String(n || 'image').replace(/\.[^.]+$/, '') || 'image').slice(0, 120); }
+  // Cut by characters, not UTF-16 units: half an emoji makes Chrome save the file as "download".
+  function baseName(n) { return Array.from(String(n || 'image').replace(/\.[^.]+$/, '') || 'image').slice(0, 120).join(''); }
   function gcd(a, b) { while (b) { var t = a % b; a = b; b = t; } return a; }
 
   // ---------- Affine maps (quarter turns and mirrors only, so integers stay integers) ----------
@@ -517,17 +525,26 @@ faq:
   var coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
 
   // ---------- Fields and text ----------
-  // The field being typed in keeps what is typed, unless force (a new picture, a turn).
+  // The field being typed in keeps what is typed, unless force (a new picture, a turn). A wrong
+  // field that is written over shows the box again, so its message goes too.
   function writeFields(force) {
+    var cleared = false;
     Object.keys(F).forEach(function (k) {
-      if (force || document.activeElement !== F[k]) F[k].value = String(st.box[k]);
+      if (force || document.activeElement !== F[k]) {
+        if (F[k].getAttribute('aria-invalid') === 'true') cleared = true;
+        F[k].value = String(st.box[k]);
+      }
     });
-    if (force) showError(boxErr, boxFields, null, '');
+    if (force || cleared) showError(boxErr, boxFields, null, '');
   }
-  // The output size in pixels for a crop of w x h: the crop's own size, or the typed width with the
-  // height following the ratio (exactly W:H when a ratio is chosen).
+  // The output size in pixels for a crop of w x h: the crop's own size (in the smaller copy of a
+  // picture too big for this browser, as cropCanvas makes it), or the typed width with the height
+  // following the ratio (exactly W:H when a ratio is chosen).
   function outFor(w, h, item) {
-    if (sizeSel.value !== 'set') return { w: w, h: h, set: false };
+    if (sizeSel.value !== 'set') {
+      var k = item && !item.svg && item.k < 1 ? item.k : 1;
+      return { w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)), set: false };
+    }
     var ow = parseWhole(owIn.value), oh = parseWhole(ohIn.value);
     if (!(ow >= 1)) ow = w;
     var R = ratio();
@@ -600,6 +617,8 @@ faq:
       hint.push(from + (it.fmt === 'ico' ? ' icons are at most 256 pixels a side, so this is saved as ' : ' files cannot be saved here, so this is saved as ') + LABEL[key] + '.');
     }
     if (key === 'jpeg' && it.hasAlpha) hint.push('JPG has no transparency, so see-through areas turn white.');
+    // JPG, PNG, BMP and TIFF record the DPI; a WebP only in the camera details it keeps.
+    if (dpi() && !/^(jpeg|png|bmp|tiff)$/.test(key) && !(key === 'webp' && it.exif && exifBox.checked)) hint.push(LABEL[key] + ' files have no DPI setting, so the DPI is not saved.');
     if (it.k < 1 && !it.svg) hint.push('Saved from a ' + it.src.width + ' × ' + it.src.height + ' px copy, the largest this browser can hold.');
     setText(outHint, hint.join(' '));
     // Quality and EXIF controls follow the format.
@@ -773,7 +792,16 @@ faq:
       if (RAW.test(f.name || '')) { skipped.push({ name: f.name, why: 'camera RAW files are not supported' }); return false; }
       return true;
     });
+    // New pictures start upright: a turn or mirror belongs to the pictures it was made for.
+    st.rot = 0; st.flip = false;
     setItem(it);
+    // A print size turns with each new picture, as it does when it is chosen.
+    var pr = PRESETS[presetSel.value];
+    if (pr && pr.print && st.swap !== st.wh > st.ww) {
+      st.swap = !st.swap;
+      var ow = owIn.value; owIn.value = ohIn.value; ohIn.value = ow;
+      applyRatio(true);
+    }
     st.extra = rest.map(function (f) { return { file: f, name: baseName(f.name || 'pasted-image') }; });
     $('#crp-drop-title').textContent = (it.file.name || 'Pasted image') + (st.extra.length ? ' and ' + st.extra.length + ' more' : '');
     $('#crp-drop-hint').textContent = fmtN(it.iw) + ' × ' + fmtN(it.ih) + ' px ' + (TTImage.formats[it.fmt] || { label: '' }).label + '. Choose or drop other images to replace ' + (st.extra.length ? 'them' : 'it') + '.';
@@ -1070,7 +1098,8 @@ faq:
   });
   owIn.addEventListener('input', function () { presetSel.value = 'none'; followOut('w'); checkOut(); scheduleInfo(); });
   ohIn.addEventListener('input', function () { presetSel.value = 'none'; followOut('h'); checkOut(); scheduleInfo(); });
-  dpiIn.addEventListener('input', function () { checkOut(); });
+  dpiIn.addEventListener('input', function () { checkOut(); scheduleInfo(); });
+  exifBox.addEventListener('change', function () { scheduleInfo(true); });
   fmtSel.addEventListener('change', function () { scheduleInfo(true); });
   qIn.addEventListener('input', function () { st.qTouched = true; scheduleInfo(true); });
 
@@ -1138,10 +1167,28 @@ faq:
     g.drawImage(src, r.x * sk, r.y * sk, r.w * sk, r.h * sk, r.x, r.y, r.w, r.h);
     return { canvas: c, from: from };
   }
+  // The kept EXIF has a resolution of its own (cameras write 72 or 300), which some programs read
+  // before the JPG or PNG one: with a DPI typed, it says the same. A copy; the original when the
+  // block has no resolution or cannot be read.
+  function exifWithDpi(exif, d) {
+    if (!exif || !d) return exif;
+    try {
+      var b = new Uint8Array(exif), v = new DataView(b.buffer), le = b[0] === 0x49, ifd = v.getUint32(4, le), n = v.getUint16(ifd, le);
+      for (var i = 0; i < n; i++) {
+        var e = ifd + 2 + 12 * i, tag = v.getUint16(e, le), type = v.getUint16(e + 2, le);
+        if ((tag === 0x011A || tag === 0x011B) && type === 5) { var o = v.getUint32(e + 8, le); v.setUint32(o, d, le); v.setUint32(o + 4, 1, le); }
+        if (tag === 0x0128 && type === 3) v.setUint16(e + 8, 2, le); // inches
+      }
+      return b;
+    } catch (x) { return exif; }
+  }
+  var EXIF_OK = { jpeg: true, png: true, webp: true };
   async function produce(it, key) {
     var geo = geometryFor(it), out = geo.out;
     key = key || outKey(it, out);
     if (key === 'svg') return { blob: new Blob([svgCropped(it, geo, out.w, out.h)], { type: 'image/svg+xml' }), key: key, w: out.w, h: out.h };
+    var d = dpi(), exif = it.exif && exifBox.checked && EXIF_OK[key] ? exifWithDpi(it.exif, d) : null;
+    var opts = { quality: qualityFor(it, key), dpi: d, wasm: key === 'avif', exif: exif, stripGps: true };
     var c, from = null, W = out.w, H = out.h;
     if (it.svg) c = await TTImage.svg.render(svgCropped(it, geo, W, H), W, H);
     else {
@@ -1150,12 +1197,9 @@ faq:
       if (from && !out.set) { W = c.width; H = c.height; }
     }
     try {
-      var blob = await TTImage.encode(c, key, {
-        width: W, height: H, quality: qualityFor(it, key), dpi: dpi(), wasm: key === 'avif',
-        exif: it.exif && exifBox.checked ? it.exif : null, stripGps: true,
-        icoSizes: key === 'ico' ? [Math.max(W, H)] : null
-      });
-      return { blob: blob, key: key, w: W, h: H, from: from };
+      opts.width = W; opts.height = H; opts.icoSizes = key === 'ico' ? [Math.max(W, H)] : null;
+      var blob = await TTImage.encode(c, key, opts);
+      return { blob: blob, key: key, w: W, h: H, from: from, keepsExif: !!exif };
     } finally { c.width = c.height = 0; }
   }
   function fileName(it, r) { return baseName(it.name) + '-cropped.' + EXT[r.key]; }
@@ -1206,23 +1250,34 @@ faq:
       errEl.textContent = perr ? failText(perr) : 'The browser blocked copying the image. Use Download instead.';
     } finally { st.busy = false; }
   });
+  // Everything a crop of the batch is made with. The pictures are cropped one after another, so a
+  // change while the ZIP file is made would mix two settings in it.
+  function batchSettings() {
+    return JSON.stringify([st.box, st.rot, st.flip, ratioSel.value, st.custom, st.swap, sizeSel.value, owIn.value, ohIn.value,
+      dpiIn.value, fmtSel.value, st.qTouched, qIn.value, exifBox.checked]);
+  }
   zipBtn.addEventListener('click', async function (e) {
     if (e.detail > 1 || st.busy || !st.item || !fieldsReady()) return;
     st.busy = true;
     errEl.textContent = '';
-    var all = [st.item].concat(st.extra), files = [], bad = [];
+    var all = [st.item].concat(st.extra), files = [], bad = [], set0 = batchSettings();
+    var changed = function () { if (batchSettings() !== set0) throw friendly('The settings changed while the ZIP file was being made, so it was not saved. Choose Download all (ZIP) again.'); };
     try {
       for (var i = 0; i < all.length; i++) {
         setText(statusEl, 'Cropping image ' + (i + 1) + ' of ' + all.length + '…');
         var x = all[i], it = x === st.item ? x : null;
         try {
           if (!it) it = await loadItem(x.file);
+          changed();
           var r = await produce(it);
-          files.push({ name: fileName(it, r), data: r.blob });
+          // An entry keeps the original file's date only when the picture keeps its EXIF; otherwise it is dated now.
+          files.push({ name: fileName(it, r), data: r.blob, date: r.keepsExif && x.file && x.file.lastModified ? new Date(x.file.lastModified) : null });
         } catch (e) {
+          changed();
           bad.push((x.file && x.file.name || x.name) + ' (' + failText(e).replace(/\.$/, '') + ')');
         } finally { if (it && it !== st.item) freeItem(it); }
       }
+      changed();
       if (!files.length) throw friendly('None of the images could be cropped.');
       setText(statusEl, 'Making the ZIP file…');
       var zip = await TTZip.create(files, { compress: 'auto' });
@@ -1320,12 +1375,14 @@ faq:
   }
   window.addEventListener('resize', function () { sizeEditor(); clampView(); syncZoom(); draw(); });
   // The browser may put back fields and menus from before a reload or Back after this script ran:
-  // the menus are read again and the fields show the box as it is.
+  // the menus are read again and the fields show the box as it is. A box that already has the
+  // ratio (a page kept whole by the back-forward cache) stays as it was.
   window.addEventListener('pageshow', function () {
     customField.hidden = ratioSel.value !== 'custom';
     if (ratioSel.value === 'custom') readCustom();
     showOutFields();
-    if (ratio()) applyRatio(true);
+    var R = ratio(), b = st.box;
+    if (R && b.h !== Math.max(1, Math.round(b.w / R)) && b.w !== Math.max(1, Math.round(b.h * R))) applyRatio(true);
     writeFields(true);
     followOut();
     checkOut();

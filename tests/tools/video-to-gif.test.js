@@ -480,11 +480,24 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // Cancelled while the colours are still being chosen (Make GIF straight after a change), the
   // size estimate still arrives.
   await page.selectOption('#v2g-fps', '12');
-  assert.match(await text('#v2g-summary'), /^1,200 frames · .* · estimating the file size/);
+  assert.equal(await text('#v2g-summary'), '1,200 frames · 64 × 36 px · 1 min 40.00 s · estimating the file size… The video is only 64 px wide, so the GIF is not enlarged.');
   await page.evaluate(() => { document.querySelector('#v2g-make').click(); document.querySelector('#v2g-cancel').click(); });
   await page.waitForFunction(() => !document.querySelector('#v2g-make').disabled);
   assert.equal(await text('#v2g-status'), 'Cancelled. No GIF was made.');
   await estimated(page, 15000);
+  // An encoder that cannot be loaded is reported, and the message goes once a later estimate
+  // works. (A cancelled job ends the encoder, so the next estimate loads it again.)
+  await page.route('**/assets/vendor/gifenc/gifenc.esm.js', route => route.abort());
+  await page.evaluate(() => { document.querySelector('#v2g-make').click(); document.querySelector('#v2g-cancel').click(); });
+  await page.waitForFunction(() => !document.querySelector('#v2g-make').disabled);
+  await page.selectOption('#v2g-fps', '15');
+  await page.waitForFunction(() => document.querySelector('#v2g-error').textContent, null, { timeout: 15000 });
+  assert.equal(await text('#v2g-error'), 'The GIF encoder could not be loaded. Check your connection and try again.');
+  assert.match(await text('#v2g-summary'), / · file size unknown\. /);
+  await page.unroute('**/assets/vendor/gifenc/gifenc.esm.js');
+  await page.selectOption('#v2g-fps', '10');
+  await estimated(page, 15000);
+  assert.equal(await text('#v2g-error'), '', 'the message goes once the encoder loads');
 
   // ---------- A screen recording: "skip unchanged pixels" ----------
   await openVideo(page, 'screen.webm');
@@ -520,11 +533,16 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.uncheck('#v2g-skip');
   const gifF0 = await make(page);
   // The colours stay true to the video in every frame, the last (brightest) ones too: the palette
-  // comes from frames across the selection, and dithering only adds a fine pattern. (A palette
-  // from the first frame alone, or dithering four times as strong, gives errors of 7 to 40.)
+  // comes from frames across the selection, and dithering (which 64 colours need here) only adds a
+  // fine pattern. (Here they are under 2. A palette from the first frame alone gave errors up to 37
+  // at 256 colours, and dithering four times as strong up to 4 at 64 colours.)
   const fadeErr = await fadeError(page, gifF0);
   assert.equal(fadeErr.length, 15);
-  assert.ok(Math.max(...fadeErr) < 4, `fade: colour error per frame ${fadeErr.map(d => d.toFixed(1)).join(' ')}`);
+  assert.ok(Math.max(...fadeErr) < 3, `fade: colour error per frame ${fadeErr.map(d => d.toFixed(1)).join(' ')}`);
+  await page.selectOption('#v2g-colors', '64');
+  const fadeErr64 = await fadeError(page, await make(page));
+  assert.ok(Math.max(...fadeErr64) < 3, `fade, 64 colours: colour error per frame ${fadeErr64.map(d => d.toFixed(1)).join(' ')}`);
+  await page.selectOption('#v2g-colors', '256');
   await page.check('#v2g-skip');
   const gifF1 = await make(page);
   const gF1 = parseGif(gifF1);

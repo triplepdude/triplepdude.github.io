@@ -31,7 +31,7 @@ howto: |
   ## Making a GIF smaller (for Discord)
 
   Discord takes files up to 20 MB on a free account, 50 MB with Nitro Basic
-  and 500 MB with Nitro. A GIF grows with the square of its width, with its
+  and 1 GB with Nitro. A GIF grows with the square of its width, with its
   frame rate and with its length. Sizes of one 6-second test clip, a slow
   pan across a photo:
 
@@ -52,8 +52,8 @@ howto: |
   ## Which frame rate to use
 
   GIF frame times are whole hundredths of a second, so 5, 10, 20 and 25 fps
-  play exactly. At 30 fps the frames alternate between 3 and 4 hundredths,
-  and the tool spreads the rounding so the total length stays right.
+  play exactly. At 30 fps the frames take 3, 4 and 3 hundredths in turn: the
+  tool spreads the rounding so the total length stays right.
   Browsers play a frame time of one hundredth or less as a tenth of a second,
   so no GIF plays faster than 50 fps. 10 to 15 fps suits reactions and memes;
   20 to 30 fps looks smooth but doubles or triples the size.
@@ -390,9 +390,12 @@ faq:
     return h ? h + ':' + String(m).padStart(2, '0') + ':' + sec : m + ':' + sec;
   }
   function spoken(t) {
-    const cs = Math.round(t * 100), m = Math.floor(cs / 6000), s = (cs % 6000) / 100;
-    const sec = s.toFixed(2).replace(/\.?0+$/, '') + (s === 1 ? ' second' : ' seconds');
-    return m ? m + (m === 1 ? ' minute ' : ' minutes ') + sec : sec;
+    const cs = Math.round(t * 100), h = Math.floor(cs / 360000), m = Math.floor(cs / 6000) % 60, s = (cs % 6000) / 100;
+    const out = [];
+    if (h) out.push(h + (h === 1 ? ' hour' : ' hours'));
+    if (m) out.push(m + (m === 1 ? ' minute' : ' minutes'));
+    if (s || !out.length) out.push(s.toFixed(2).replace(/\.?0+$/, '') + (s === 1 ? ' second' : ' seconds'));
+    return out.join(' ');
   }
   function fmtLength(cs) {
     if (cs < 6000) return (cs / 100).toFixed(2) + ' s';
@@ -664,8 +667,9 @@ faq:
   let rvSilent = 0, lastSeekAt = null;
   function seekTo(v, t) {
     return new Promise((resolve, reject) => {
-      let seeked = false, framed = false, done = false, waitTimer = 0, raf = 0, cb = 0;
-      const stuck = setTimeout(() => end(new Error('SEEK')), 20000);
+      let seeked = false, framed = false, done = false, waitTimer = 0, raf = 0, cb = 0, stuck = 0;
+      // A page in the background draws nothing, so only time in front counts towards the limit.
+      const arm = () => { clearTimeout(stuck); stuck = setTimeout(() => { if (!document.hidden) end(new Error('SEEK')); }, 20000); };
       function end(err) {
         if (done) return;
         done = true;
@@ -675,16 +679,20 @@ faq:
         v.removeEventListener('seeked', onSeeked);
         v.removeEventListener('error', onError);
         v.removeEventListener('emptied', onEmptied);
+        document.removeEventListener('visibilitychange', arm);
         if (cb && !framed && v.cancelVideoFrameCallback) v.cancelVideoFrameCallback(cb);
         if (err) reject(err); else resolve(framed);
       }
-      function onError() { end(new Error('DECODE')); }
+      function onError() { const e = new Error('DECODE'); e.at = t; end(e); } // a damaged part of the file
       function onEmptied() { end(STALE); } // another video was opened
       function timedOut() {
         // Three silent waits in a row between moments half a second or more apart (where a new
         // frame is all but certain) mean the browser does not report frames after seeks: use
-        // animation frames from then on.
-        if (lastSeekAt !== null && Math.abs(t - lastSeekAt) >= 0.5) { if (++rvSilent >= 3) rvfc = false; } else rvSilent = 0;
+        // animation frames from then on. A page in the background presents no frames at all, so
+        // waits there say nothing.
+        if (!document.hidden) {
+          if (lastSeekAt !== null && Math.abs(t - lastSeekAt) >= 0.5) { if (++rvSilent >= 3) rvfc = false; } else rvSilent = 0;
+        }
         end();
       }
       function onSeeked() {
@@ -700,6 +708,8 @@ faq:
       v.addEventListener('seeked', onSeeked);
       v.addEventListener('error', onError);
       v.addEventListener('emptied', onEmptied);
+      document.addEventListener('visibilitychange', arm);
+      arm();
       if (rvfc) {
         cb = v.requestVideoFrameCallback(() => {
           framed = true;
@@ -730,27 +740,39 @@ faq:
     grabCtx.drawImage(cap, s.crop.x, s.crop.y, s.crop.w, s.crop.h, 0, 0, s.w, s.h);
     return grabCtx.getImageData(0, 0, s.w, s.h).data;
   }
-  // Phones and browsers stop drawing video in a tab that is not in front, so capture waits.
+  // Phones and browsers stop drawing video in a tab that is not in front, so capture waits (the
+  // film strip and the size estimate too, which have no job).
   function whileVisible(job) {
-    if (!document.hidden || job.cancelled) return Promise.resolve();
-    showProgressText('Paused: bring this page back to the front to carry on.');
-    announce('Paused while the page is in the background.');
+    if (!document.hidden || (job && job.cancelled)) return Promise.resolve();
+    if (job) {
+      showProgressText('Paused: bring this page back to the front to carry on.');
+      announce('Paused while the page is in the background.');
+    }
     return new Promise(resolve => {
-      job.wake = function () {
-        if (document.hidden && !job.cancelled) return;
-        document.removeEventListener('visibilitychange', job.wake);
-        job.wake = null;
+      const wake = function () {
+        if (document.hidden && !(job && job.cancelled)) return;
+        document.removeEventListener('visibilitychange', wake);
+        if (job) job.wake = null;
         resolve();
       };
-      document.addEventListener('visibilitychange', job.wake);
+      if (job) job.wake = wake;
+      document.addEventListener('visibilitychange', wake);
     });
+  }
+  // After a decoding error (a damaged part of the file) a video element shows nothing more until
+  // the file is loaded into it again.
+  async function revive(v) {
+    if (!v.error || !S.url) return;
+    await loadInto(v, S.url);
+    await findDuration(v);
   }
   async function grabAt(s, t, job) {
     for (;;) {
       if (job && job.cancelled) throw CANCELLED;
-      if (job) await whileVisible(job);
+      await whileVisible(job);
+      await revive(cap);
       await seekTo(cap, t);
-      if (!document.hidden || !job) return grab(s);
+      if (!document.hidden) return grab(s);
     }
   }
 
@@ -805,10 +827,15 @@ faq:
     const gen = ++anaGen, token = S.token;
     try {
       const a = await analyse(s, () => gen !== anaGen || token !== S.token || S.busy);
-      if (gen === anaGen && token === S.token) { S.analysis = a; refreshSummary(); }
+      if (gen === anaGen && token === S.token) {
+        S.analysis = a;
+        if (errBox.dataset.kind === 'estimate') setError(''); // a message from an earlier estimate
+        refreshSummary();
+      }
     } catch (e) {
       if (e === STALE || gen !== anaGen || token !== S.token) return;
-      if (e && (e.code === 'LOAD' || e.code === 'NO_WORKER')) showError(e);
+      S.analysis = { key, failed: true }; // not tried again until something changes
+      if (e && (e.code === 'LOAD' || e.code === 'NO_WORKER' || e.message === 'DECODE')) showError(e, 'estimate');
       refreshSummary();
     }
   }
@@ -823,19 +850,23 @@ faq:
     parts.push('<b>' + nf.format(s.total) + (s.total === 1 ? ' frame' : ' frames') + '</b>');
     parts.push(s.w + ' × ' + s.h + ' px');
     parts.push(fmtLength(csAt(s.total, s.fps)));
-    let size;
+    let size, waiting = false;
     const a = S.analysis && S.analysis.key === contentKey(s) ? S.analysis : null;
     if (s.total > MAX_FRAMES) size = 'too many frames';
+    else if (a && a.failed) size = 'file size unknown';
     else if (a) { const est = estimate(s, a); size = est.exact ? fmtBytes(est.bytes) + (est.bytes < 1000 ? '' : ' (' + nf.format(est.bytes) + ' bytes)') : 'about ' + fmtBytes(est.bytes); }
-    else size = 'estimating the file size…';
+    else { size = 'estimating the file size…'; waiting = true; }
     parts.push(size);
     let text = parts.join(' · ');
-    if (s.limited) text += '. The width is reduced to keep each frame under 2.1 megapixels.';
-    else if (s.upscaleCap) text += '. The ' + (s.crop.whole ? 'video' : 'cropped part') + ' is only ' + s.upscaleCap + ' px wide, so the GIF is not enlarged.';
+    const stop = waiting ? ' ' : '. ';
+    if (s.limited) text += stop + 'The width is reduced to keep each frame under 2.1 megapixels.';
+    else if (s.upscaleCap) text += stop + 'The ' + (s.crop.whole ? 'video' : 'cropped part') + ' is only ' + s.upscaleCap + ' px wide, so the GIF is not enlarged.';
     summary.innerHTML = text;
     if (s.total > MAX_FRAMES) setError('That is ' + nf.format(s.total) + ' frames; a GIF can have at most ' + nf.format(MAX_FRAMES) + ' here. Shorten the selection, lower the frame rate or raise the speed.');
     else if (errBox.dataset.kind === 'frames') setError('');
     clearTimeout(liveTimer);
+    // Read out once the size is known, so that one change is not announced twice.
+    if (waiting) return;
     liveTimer = setTimeout(() => {
       const plain = summary.textContent;
       if (summaryLive.textContent !== plain) summaryLive.textContent = plain;
@@ -846,17 +877,17 @@ faq:
     if (errBox.textContent !== text) errBox.textContent = text;
     errBox.dataset.kind = text ? (kind || 'frames') : '';
   }
-  function showError(e) {
+  function showError(e, kind) {
     const code = e && e.code;
     let text;
     if (code === 'NO_WORKER') text = 'This browser cannot run the GIF encoder. Use a current version of Chrome, Edge, Firefox or Safari.';
     else if (code === 'LOAD') text = 'The GIF encoder could not be loaded. Check your connection and try again.';
     else if (code === 'TOO_BIG') text = 'The GIF passed ' + fmtBytes(MAX_BYTES) + ', so it was stopped. Make it shorter, narrower or slower (fewer frames per second).';
     else if (code === 'ENCODE') text = 'The GIF encoder stopped, most likely for lack of memory. Make the GIF shorter or narrower.';
-    else if (e && e.message === 'DECODE') text = 'The video could not be decoded at ' + spoken(S.start) + ' or later. The file may be damaged.';
+    else if (e && e.message === 'DECODE') text = 'The video could not be decoded at ' + spoken(e.at != null ? e.at : S.start) + '. The file may be damaged there: choose a part that ends before it.';
     else if (e && e.message === 'SEEK') text = 'The video stopped responding while frames were read. Try again, or try another browser.';
     else text = 'The GIF could not be made: ' + ((e && e.message) || 'unknown error') + '.';
-    setError(text, 'job');
+    setError(text, kind || 'job');
   }
 
   // ---------- Layout of the trim bar and crop frame ----------
@@ -1023,6 +1054,7 @@ faq:
     const done = () => { clearTimeout(pvTimer); vid.removeEventListener('seeked', done); pvBusy = false; layoutHead(); pumpPreview(); };
     vid.addEventListener('seeked', done);
     pvTimer = setTimeout(done, 3000);
+    if (vid.error && S.url) vid.src = S.url; // stopped by a damaged part of the file: load it again
     vid.currentTime = t;
   }
   let playing = false, playRaf = 0;
@@ -1035,6 +1067,7 @@ faq:
   function startPlay() {
     if (!S.ready || S.busy) return;
     const s = settings();
+    if (vid.error && S.url) vid.src = S.url;
     vid.playbackRate = s.speed;
     if (vid.currentTime < S.start || vid.currentTime >= S.end) vid.currentTime = S.start + NUDGE;
     playing = true;
@@ -1052,6 +1085,7 @@ faq:
     layoutHead();
   }
   playBtn.addEventListener('click', () => { if (playing) stopPlay(); else startPlay(); });
+  vid.addEventListener('error', stopPlay);
   vid.addEventListener('seeked', layoutHead);
 
   // ---------- Trim bar: pointer and keyboard ----------
@@ -1068,21 +1102,37 @@ faq:
     else if (hEnd.contains(e.target)) which = 'end';
     else which = Math.abs(t - S.start) <= Math.abs(t - S.end) ? 'start' : 'end';
     e.preventDefault();
-    stopPlay();
     // Grabbed by its handle, an edge keeps its distance from the finger; a press on the strip
     // moves the nearer edge there.
     const onHandle = hStart.contains(e.target) || hEnd.contains(e.target);
     drag = { id: e.pointerId, which, offset: onHandle ? (which === 'start' ? S.start : S.end) - t : 0 };
     try { track.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    (which === 'start' ? hStart : hEnd).focus({ preventScroll: true });
-    if (!onHandle) setEdge(which, t);
+    // A finger on the strip may be scrolling the page (the browser then cancels the pointer), so
+    // there the edge moves only on a tap or once the finger goes sideways.
+    if (e.pointerType === 'touch' && !onHandle) drag.tap = { x: e.clientX, y: e.clientY, t };
+    else grabEdge(onHandle ? null : t);
   });
+  function grabEdge(t) {
+    if (!S.ready || S.busy) return;
+    stopPlay();
+    (drag.which === 'start' ? hStart : hEnd).focus({ preventScroll: true });
+    if (t !== null) setEdge(drag.which, t);
+  }
   track.addEventListener('pointermove', e => {
     if (!drag || e.pointerId !== drag.id) return;
+    if (drag.tap) {
+      const dx = Math.abs(e.clientX - drag.tap.x), dy = Math.abs(e.clientY - drag.tap.y);
+      if (dx < 8 || dx < dy) return;
+      drag.tap = null;
+      grabEdge(timeAt(e.clientX));
+      return;
+    }
     setEdge(drag.which, timeAt(e.clientX) + drag.offset);
   });
   ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => track.addEventListener(type, e => {
-    if (drag && e.pointerId === drag.id) drag = null;
+    if (!drag || e.pointerId !== drag.id) return;
+    if (type === 'pointerup' && drag.tap) grabEdge(drag.tap.t);
+    drag = null;
   }));
   [[hStart, 'start'], [hEnd, 'end']].forEach(([el, which]) => {
     el.addEventListener('keydown', e => {
@@ -1282,8 +1332,11 @@ faq:
     try {
       await withCapture(async () => {
         for (let i = 0; i < N; i++) {
+          await whileVisible(null);
           if (token !== S.token || S.busy) return;
+          await revive(cap);
           await seekTo(cap, (i + 0.5) * S.dur / N);
+          if (document.hidden) { i--; continue; } // sent to the background meanwhile: again
           ctx.drawImage(cap, 0, 0, tw, th);
           imgs[i].src = c.toDataURL('image/jpeg', 0.7);
         }
@@ -1367,7 +1420,7 @@ faq:
     lockScreen();
     try {
       let a = S.analysis && S.analysis.key === contentKey(s) ? S.analysis : null;
-      if (!a) { a = await analyse(s, () => job.cancelled, job); S.analysis = a; }
+      if (!a || a.failed) { a = await analyse(s, () => job.cancelled, job); S.analysis = a; }
       if (job.cancelled) throw CANCELLED;
       const out = await encode(s, a, job);
       showResult(out, s);
@@ -1383,6 +1436,7 @@ faq:
       refreshSummary();
       if (lost) { if (S.gif && S.gif.job === job) dlBtn.focus(); else makeBtn.focus(); }
       if (S.ready && !S.thumbsDone) makeThumbs(S.token);
+      else scheduleAnalysis(); // the job may have stopped before its estimate was made
     }
   }
   async function encode(s, a, job) {

@@ -412,10 +412,12 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await setRange('#ng-tone', 0);
 
   // ---- Tone jumps and colour changes hold the loudness: no swell, no dip ----
-  // One block from the speakers, ending secs after fn() on the audio clock.
+  // One block (0.7 s) from the speakers, ending secs (audio clock) after the
+  // change fn() makes reaches the sound engine, so a busy page cannot shift it.
   const around = async (fn, secs) => {
-    const t0 = await page.evaluate(() => window.__tap.ctx.currentTime);
+    const n = await page.evaluate(() => window.__log.posts.length);
     await fn();
+    const t0 = await (await page.waitForFunction(k => window.__log.posts.length > k && window.__tap.ctx.currentTime, n, { timeout: 5000 })).jsonValue();
     await page.waitForFunction(t => window.__tap.ctx.currentTime >= t, t0 + secs, { timeout: 10000 });
     const c = await capture(1);
     return { block: c.blocks[0], kw: X.rates[String(c.sr)].kweight, sr: c.sr };
@@ -429,7 +431,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await setRange('#ng-tone', from);
     await settle();
     await page.focus('#ng-tone');
-    const a = await around(() => page.keyboard.press(press), 0.4);
+    const a = await around(() => page.keyboard.press(press), 0.3);
     assert.equal(await page.inputValue('#ng-tone'), to);
     const s = swing(a.block, a.sr, a.kw, 0.02);
     assert.ok(s.max < 2 && s.min > -2, `${c}, tone ${from} to ${to}: the loudness swings from ${s.min.toFixed(1)} to +${s.max.toFixed(1)} dB (20 ms windows)`);
@@ -454,10 +456,15 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.keyboard.press('3');
   await settle();
   {
-    const a = await around(() => page.keyboard.press('7'), 0.6), hp = highpass(4000, a.sr);
-    const y = biquad(biquad(a.block[0], hp[0], hp[1]), hp[0], hp[1]), n = Math.round(0.01 * a.sr), p = [];
-    for (let i = 4096; i + n <= y.length; i += n) p.push(meanSq(y.subarray(i, i + n)));
-    const full = p.slice(-6).sort((u, v) => u - v)[3];
+    // Treble power in 10 ms windows; the full level from a later block.
+    const treble = a => {
+      const hp = highpass(4000, a.sr), y = biquad(biquad(a.block[0], hp[0], hp[1]), hp[0], hp[1]), n = Math.round(0.01 * a.sr), p = [];
+      for (let i = 4096; i + n <= y.length; i += n) p.push(meanSq(y.subarray(i, i + n)));
+      return p;
+    };
+    const p = treble(await around(() => page.keyboard.press('7'), 0.3));
+    await page.waitForFunction(t => window.__tap.ctx.currentTime >= t, await page.evaluate(() => window.__tap.ctx.currentTime) + 0.9, { timeout: 10000 });
+    const c = await capture(1), later = treble({ block: c.blocks[0], sr: c.sr }).sort((u, v) => u - v), full = later[later.length >> 1];
     // (Up to 60% of the full level: steady violet hardly ever dips that low in 10 ms.)
     const rising = p.filter(v => v > 0.1 * full && v < 0.6 * full).length;
     assert.ok(rising >= 8, `brown to violet: the treble rose from 10% to 60% of its full level in ${rising * 10} ms (a 400 ms cross-fade takes about 200 ms)`);
@@ -863,6 +870,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await setRangeOn(p, '#ng-vol', 100);
     await p.selectOption('#ng-timer', 'clock');
     await p.fill('#ng-at', '23:00');
+    await p.clock.setSystemTime(new Date('2026-06-01T21:59:51Z')); // however long loading took
     await p.click('#ng-play');
     await p.waitForFunction(() => document.getElementById('ng-live').textContent === 'Playing');
     await p.waitForFunction(() => document.getElementById('ng-play').textContent === 'Play', null, { timeout: 20000 });
