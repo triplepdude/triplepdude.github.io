@@ -553,11 +553,20 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     const mask = page.locator('#sc-bin dd').nth(rows.indexOf('Netmask'));
     assert.equal((await mask.textContent()).split('.')[3], m[2], 'the /26 netmask ends in ' + m[2]);
     assert.equal((await mask.locator('.sc-n').textContent()).replace(/\./g, ''), '1'.repeat(26), 'the network part is bold');
-    // British spelling in all the page shows and says (the search keywords are not shown), and the guide
-    // names the summary tool by its heading.
-    const said = await page.evaluate(() => [document.body.innerText, document.querySelector('meta[name="description"]').content]
-      .concat([...document.querySelectorAll('[aria-label]')].map(e => e.getAttribute('aria-label'))).join('\n'));
-    assert.doesNotMatch(said, /summariz|recogniz/i);
+    // British spelling in all the page shows and says, the FAQ answers included (innerText leaves out
+    // a closed <details>; the search keywords are not shown), and the guide names the summary tool by
+    // its heading.
+    const { said, answers } = await page.evaluate(() => {
+      const shut = [...document.querySelectorAll('details:not([open])')];
+      shut.forEach(d => { d.open = true; });
+      const said = [document.title, document.body.innerText, document.querySelector('meta[name="description"]').content]
+        .concat([...document.querySelectorAll('[aria-label], [placeholder], [title]')].flatMap(e => ['aria-label', 'placeholder', 'title'].map(a => e.getAttribute(a) || ''))).join('\n');
+      const answers = [...document.querySelectorAll('.faq-answer')].map(a => a.innerText.trim());
+      shut.forEach(d => { d.open = false; });
+      return { said, answers };
+    });
+    assert.ok(answers.length && answers.every(a => a && said.includes(a)), 'the FAQ answers are read');
+    assert.doesNotMatch(said, /summariz|recogniz/i, 'American spelling: ' + (said.match(/.{0,40}(summariz|recogniz).{0,40}/i) || [''])[0]);
     assert.ok(guide.includes('Summarise merges a list of networks'), 'the guide names the tool as its heading does');
     assert.equal(await page.textContent('h2:has(+ .field #sc-agg-in)'), 'Summarise networks');
     const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));

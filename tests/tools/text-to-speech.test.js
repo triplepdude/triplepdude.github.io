@@ -579,7 +579,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   await page.click('#tts-play');
   assert.equal(await text('#tts-stall'), '');
   await page.waitForFunction(() => document.querySelector('#tts-stall').textContent, null, { timeout: 25000 });
-  assert.equal(await text('#tts-stall'), 'Nothing has been heard for 20 seconds. Online voices sometimes stop without warning: press Next to carry on, or Stop and choose a voice without the Online label.');
+  assert.equal(await text('#tts-stall'), 'The voice has not moved on for 20 seconds. Online voices sometimes stop without warning: press Next to carry on, or Stop and choose a voice without the Online label.');
   await page.click('#tts-stop');
   assert.equal(await text('#tts-stall'), '');
   await pick('Microsoft David');
@@ -608,7 +608,14 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.match(await faq('Is my text uploaded or saved anywhere?'), /The one exception is a voice marked Online, for which your browser itself sends the text to Google or Microsoft/);
   const guide = (await page.locator('.prose').textContent()).replace(/\s+/g, ' ');
   assert.match(guide, /up to 1,000,000 characters at a time/);
-  assert.match(guide, /The page starts with a voice on your device and shows a notice whenever an online voice is chosen\./);
+  assert.match(guide, /The page starts with a voice on your device when there is one, and shows a notice whenever an online voice is chosen\./);
+  // Homepage search (index.html) matches every typed word against title, description and keywords.
+  const home = await (await page.request.get(base + '/')).text();
+  const hay = (home.match(/<li data-search="([^"]*)">\s*<a[^>]*href="\/text-to-speech\/"/) || [])[1] || '';
+  assert.ok(hay, 'the homepage lists the page');
+  for (const q of ['tts', 'read aloud', 'text to voice', 'read out loud', 'speech synthesis', 'voice reader', 'txt file']) {
+    assert.ok(q.split(' ').every(w => hay.includes(w)), `the homepage search finds nothing for "${q}"`);
+  }
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
   assert.deepEqual(links, ['/image-to-text/', '/speaker-test/']);
   for (const href of links) {

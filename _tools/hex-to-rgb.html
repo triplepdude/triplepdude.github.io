@@ -1,0 +1,818 @@
+---
+title: "HEX to RGB Converter: RGB to HEX, HSL, CMYK"
+description: Convert HEX to RGB and back, or to HSL, HWB, OKLCH and CMYK, with CSS code to copy, colour names and contrast with white and black. Runs in your browser.
+category: Developer
+keywords: [hex to rgb, rgb to hex, color converter, hex color code, rgb to hsl, hex to hsl, rgba to hex, oklch converter, cmyk to rgb]
+howto: |
+  ## How to use the converter
+
+  Type or paste a colour in any form: `#FF5733`, `FF5733`, the short `#F53`,
+  `#FF573380` with transparency, `rgb(255 87 51)`, three numbers such as
+  `255, 87, 51`, `hsl()`, `hwb()`, `oklch()`, `oklab()`, `cmyk()` or a CSS
+  name such as `tomato`. You can also change the red, green and blue boxes,
+  hue, saturation and lightness, or the CMYK percentages, or use the colour
+  picker. Each line of CSS converts back to exactly the same HEX code. The
+  page address keeps the colour, so you can bookmark it or send the link.
+
+  ## Converting HEX to RGB by hand
+
+  A HEX code is three pairs of base-16 digits: red, green and blue. The digits
+  0 to 9 count as themselves and A to F as 10 to 15. Multiply the first digit
+  of a pair by 16 and add the second:
+
+  | Pair | Working | Value |
+  |---|---|---|
+  | FF | 15 × 16 + 15 | 255 |
+  | 57 | 5 × 16 + 7 | 87 |
+  | 33 | 3 × 16 + 3 | 51 |
+
+  So `#FF5733` is `rgb(255, 87, 51)`. To go the other way, divide by 16:
+  87 ÷ 16 is 5 remainder 7, so 87 is `57`. A three-digit code doubles each
+  digit, so `#F53` is `#FF5533`. The case of the letters does not matter.
+  For other base-16 numbers, use the
+  [binary translator](/binary-translator/).
+
+  ## 8-digit HEX and transparency
+
+  `#RRGGBBAA` adds a fourth pair for alpha: `00` is fully transparent and
+  `FF` fully opaque. `80` is 128 ÷ 255, about 50%. Browsers have read it
+  since Chrome 62, Firefox 49, Safari 10 and Edge 79. Android puts alpha
+  first instead, as `#AARRGGBB`; the ARGB line gives that order, and the
+  converter reads `0x` with eight digits that way too.
+
+  ## HSL, HWB and OKLCH
+
+  HSL gives a hue angle (0 is red, 120 green, 240 blue), a saturation and a
+  lightness. Keeping the hue and changing the lightness gives lighter and
+  darker shades of one colour, which is what it is used for in CSS. Its
+  lightness does not match what the eye sees, though: yellow and blue at 50%
+  look very different. OKLCH, supported since Chrome 111, Firefox 113 and
+  Safari 15.4, fixes that, so equal steps in lightness look equal. It can
+  also describe colours that HEX cannot hold; such a colour is brought into
+  range by lowering its chroma at the same lightness and hue, as in the CSS
+  Color 4 specification.
+
+  ## CMYK is only a rough guide
+
+  The CMYK line uses the simple formula K = 1 − max(R, G, B) and
+  C = (1 − R − K) ÷ (1 − K), the same for M and Y. Real print colours depend
+  on the inks, the paper and the press, so design software converts with
+  the printer's ICC colour profile, and very bright screen colours cannot be
+  printed at all. Ask your printer for their profile before sending files.
+
+  ## Contrast for text
+
+  WCAG 2.2 asks for a contrast ratio of at least 4.5:1 for normal text and
+  3:1 for large text (18 point, or 14 point bold) at level AA, and 7:1 and
+  4.5:1 at level AAA. Ratios are not rounded up, so 4.49:1 fails. To take
+  colours from a photo or screenshot, use the
+  [image colour picker](/image-color-picker/).
+faq:
+  - q: What is #FF5733 in RGB?
+    a: "It is rgb(255, 87, 51): FF is 255, 57 is 87 and 33 is 51. In HSL it is hsl(10.6, 100%, 60%), a strong red-orange. Black text on it has a contrast ratio of 6.66:1 and white text only 3.15:1."
+  - q: Are HEX and RGB the same colour?
+    a: Yes. Both give the same red, green and blue values from 0 to 255 in the sRGB colour space; HEX writes them in base 16 and rgb() in base 10. That makes 256 × 256 × 256 = 16,777,216 possible colours.
+  - q: Are HEX colour codes case-sensitive?
+    a: "No. #ff5733, #FF5733 and #Ff5733 are the same colour in CSS and HTML. Tick Lowercase HEX if your code style asks for lower case."
+  - q: Is the colour I enter sent anywhere?
+    a: No. Every conversion runs in your browser and nothing is uploaded or stored. The colour is kept only in the page address after the # sign, which browsers never send to the site.
+---
+<style>
+.hx-top { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 8px; }
+.hx-sw { position: relative; width: 132px; height: 132px; border: 1px solid var(--field-border); border-radius: 12px; overflow: hidden;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--border) 0 50%) 0 0 / 18px 18px; forced-color-adjust: none; }
+.hx-sw > span { position: absolute; inset: 0; }
+.hx-sw.hx-none > span { background: none !important; }
+.hx-in-row { display: flex; gap: 8px; align-items: stretch; }
+.hx-in-row input[type="text"] { flex: 1 1 auto; min-width: 0; font-size: 18px; }
+.hx-in-row input[type="color"] { flex: 0 0 56px; }
+.hx-read { margin: 0 0 12px; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.hx-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 12px; margin: 8px 0 12px; }
+.hx-g { margin: 0; padding: 10px 12px 2px; min-width: 0; border: 1px solid var(--border); border-radius: 10px; }
+.hx-g legend { padding: 0 4px; font-size: 14px; font-weight: 700; }
+.hx-g legend .hint { font-weight: 400; }
+.hx-fs { display: grid; grid-template-columns: repeat(auto-fit, minmax(66px, 1fr)); gap: 8px; }
+.hx-fs .field { margin-bottom: 8px; gap: 4px; }
+.hx-fs .field > label { font-size: 13px; overflow-wrap: anywhere; }
+.hx-fs input { padding-left: 8px; padding-right: 6px; font-variant-numeric: tabular-nums; }
+.hx-g .msg { margin: 0 0 8px; }
+.hx-h { margin: 24px 0 10px; font-size: 1.1rem; }
+.hx-sep { margin: 24px 0 0; border: 0; border-top: 1px solid var(--border); }
+table.data.hx-out th { width: 11rem; vertical-align: middle; }
+table.data.hx-out th small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+table.data.hx-out td { vertical-align: middle; }
+table.data.hx-out td.hx-v { font-family: var(--mono); font-size: 15px; overflow-wrap: anywhere; }
+table.data.hx-out td.hx-c { width: 1%; text-align: right; white-space: nowrap; }
+.hx-con { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; margin-bottom: 12px; }
+.hx-cbox { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.hx-sample { padding: 14px; font-size: 20px; font-weight: 700; forced-color-adjust: none; }
+.hx-sample small { display: block; font-size: 14px; font-weight: 400; }
+.hx-cbox p { margin: 0; padding: 10px 14px; font-size: 14px; }
+.hx-cbox b { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+table.data.hx-work td, table.data.hx-work th { font-variant-numeric: tabular-nums; }
+table.data.hx-work td.mono { font-size: 15px; }
+.hx-names { margin-top: 24px; border: 1px solid var(--border); border-radius: 10px; }
+.hx-names > summary { padding: 11px 14px; font-weight: 600; cursor: pointer; }
+.hx-names[open] > summary { border-bottom: 1px solid var(--border); }
+.hx-names-in { padding: 12px 14px 0; }
+.hx-dot { display: inline-block; width: 28px; height: 28px; border: 1px solid var(--field-border); border-radius: 6px; vertical-align: middle; forced-color-adjust: none; }
+table.data.hx-ntab td { vertical-align: middle; }
+table.data.hx-ntab td.hx-code { font-family: var(--mono); font-size: 13px; }
+table.data.hx-ntab .btn { justify-content: flex-start; text-align: left; overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .hx-top { grid-template-columns: 1fr; }
+  .hx-sw { width: 100%; height: 72px; }
+  table.data.hx-out, .hx-out tbody, .hx-out tr { display: block; }
+  table.data.hx-out tr { position: relative; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  table.data.hx-out th, table.data.hx-out td { display: block; width: auto; padding: 0; border: 0; }
+  table.data.hx-out th { min-height: 36px; padding-right: 80px; }
+  table.data.hx-out td.hx-c { position: absolute; top: 8px; right: 0; width: auto; }
+  table.data.hx-work th, table.data.hx-work td, table.data.hx-ntab th, table.data.hx-ntab td { padding: 8px 5px; }
+}
+</style>
+
+<div class="hx-top">
+  <div class="hx-sw" id="hx-sw" aria-hidden="true"><span id="hx-sw-c"></span></div>
+  <div>
+    <div class="field">
+      <label for="hx-in">Colour code</label>
+      <div class="hx-in-row">
+        <input type="text" id="hx-in" class="mono" value="#FF5733" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="hx-msg hx-read">
+        <input type="color" id="hx-pick" value="#ff5733" aria-label="Pick a colour">
+      </div>
+      <span class="hint">HEX such as #FF5733, #F53 or #FF573380, rgb(), hsl(), hwb(), oklch(), oklab(), cmyk(), three numbers, or a colour name</span>
+    </div>
+    <p class="msg error" id="hx-msg"></p>
+    <p class="hx-read" id="hx-read"></p>
+  </div>
+</div>
+
+<div class="hx-groups">
+  <fieldset class="hx-g">
+    <legend>RGB <span class="hint">0–255, alpha in %</span></legend>
+    <div class="hx-fs">
+      <div class="field"><label for="hx-r">Red</label><input type="text" id="hx-r" inputmode="decimal" autocomplete="off" aria-describedby="hx-rgb-msg"></div>
+      <div class="field"><label for="hx-g">Green</label><input type="text" id="hx-g" inputmode="decimal" autocomplete="off" aria-describedby="hx-rgb-msg"></div>
+      <div class="field"><label for="hx-b">Blue</label><input type="text" id="hx-b" inputmode="decimal" autocomplete="off" aria-describedby="hx-rgb-msg"></div>
+      <div class="field"><label for="hx-a">Alpha</label><input type="text" id="hx-a" inputmode="decimal" autocomplete="off" aria-describedby="hx-rgb-msg"></div>
+    </div>
+    <p class="msg error" id="hx-rgb-msg"></p>
+  </fieldset>
+  <fieldset class="hx-g">
+    <legend>HSL <span class="hint">hue in degrees, others in %</span></legend>
+    <div class="hx-fs">
+      <div class="field"><label for="hx-h">Hue</label><input type="text" id="hx-h" inputmode="decimal" autocomplete="off" aria-describedby="hx-hsl-msg"></div>
+      <div class="field"><label for="hx-s">Saturation</label><input type="text" id="hx-s" inputmode="decimal" autocomplete="off" aria-describedby="hx-hsl-msg"></div>
+      <div class="field"><label for="hx-l">Lightness</label><input type="text" id="hx-l" inputmode="decimal" autocomplete="off" aria-describedby="hx-hsl-msg"></div>
+    </div>
+    <p class="msg error" id="hx-hsl-msg"></p>
+  </fieldset>
+  <fieldset class="hx-g">
+    <legend>CMYK <span class="hint">in %</span></legend>
+    <div class="hx-fs">
+      <div class="field"><label for="hx-c">Cyan</label><input type="text" id="hx-c" inputmode="decimal" autocomplete="off" aria-describedby="hx-cmyk-msg"></div>
+      <div class="field"><label for="hx-m">Magenta</label><input type="text" id="hx-m" inputmode="decimal" autocomplete="off" aria-describedby="hx-cmyk-msg"></div>
+      <div class="field"><label for="hx-y">Yellow</label><input type="text" id="hx-y" inputmode="decimal" autocomplete="off" aria-describedby="hx-cmyk-msg"></div>
+      <div class="field"><label for="hx-k">Black</label><input type="text" id="hx-k" inputmode="decimal" autocomplete="off" aria-describedby="hx-cmyk-msg"></div>
+    </div>
+    <p class="msg error" id="hx-cmyk-msg"></p>
+  </fieldset>
+</div>
+<div class="checks">
+  <label class="check"><input type="checkbox" id="hx-lower"> Lowercase HEX</label>
+  <label class="check"><input type="checkbox" id="hx-modern"> Space-separated rgb() and hsl()</label>
+</div>
+
+<div class="table-wrap">
+  <table class="data hx-out" aria-label="The colour in every format">
+    <tbody>
+      <tr><th scope="row">HEX</th><td class="hx-v" id="hx-o-hex">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-hex" aria-label="Copy HEX">Copy</button></td></tr>
+      <tr><th scope="row">HEX with alpha<small>#RRGGBBAA</small></th><td class="hx-v" id="hx-o-hex8">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-hex8" aria-label="Copy HEX with alpha">Copy</button></td></tr>
+      <tr id="hx-short-row"><th scope="row">Short HEX</th><td class="hx-v" id="hx-o-short">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-short" aria-label="Copy short HEX">Copy</button></td></tr>
+      <tr><th scope="row">RGB</th><td class="hx-v" id="hx-o-rgb">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-rgb" aria-label="Copy RGB">Copy</button></td></tr>
+      <tr><th scope="row">HSL</th><td class="hx-v" id="hx-o-hsl">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-hsl" aria-label="Copy HSL">Copy</button></td></tr>
+      <tr><th scope="row">HWB</th><td class="hx-v" id="hx-o-hwb">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-hwb" aria-label="Copy HWB">Copy</button></td></tr>
+      <tr><th scope="row">OKLCH</th><td class="hx-v" id="hx-o-oklch">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-oklch" aria-label="Copy OKLCH">Copy</button></td></tr>
+      <tr><th scope="row">OKLab</th><td class="hx-v" id="hx-o-oklab">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-oklab" aria-label="Copy OKLab">Copy</button></td></tr>
+      <tr><th scope="row">HSV / HSB<small>not CSS</small></th><td class="hx-v" id="hx-o-hsv">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-hsv" aria-label="Copy HSV">Copy</button></td></tr>
+      <tr><th scope="row">CMYK<small>simple formula, not for print</small></th><td class="hx-v" id="hx-o-cmyk">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-cmyk" aria-label="Copy CMYK">Copy</button></td></tr>
+      <tr><th scope="row">ARGB HEX<small>#AARRGGBB, Android</small></th><td class="hx-v" id="hx-o-argb">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-argb" aria-label="Copy ARGB HEX">Copy</button></td></tr>
+      <tr><th scope="row">Decimal<small>0xRRGGBB as one number</small></th><td class="hx-v" id="hx-o-int">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-int" aria-label="Copy decimal">Copy</button></td></tr>
+      <tr><th scope="row" id="hx-name-h">CSS name</th><td class="hx-v" id="hx-o-name">–</td><td class="hx-c"><button class="btn secondary small" type="button" data-copy-target="#hx-o-name" aria-label="Copy CSS name">Copy</button></td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="actions">
+  <button class="btn small" type="button" id="hx-copy-all">Copy all formats</button>
+</div>
+<p class="msg ok" id="hx-note"></p>
+<p class="visually-hidden" id="hx-status" role="status"></p>
+
+<hr class="hx-sep">
+<h2 class="hx-h">Contrast with white and black text</h2>
+<div class="hx-con">
+  <div class="hx-cbox"><div class="hx-sample" id="hx-s-w" style="color: #fff">White text<small>Body text on this colour</small></div><p><b id="hx-cw">–</b> <span id="hx-cw-v"></span></p></div>
+  <div class="hx-cbox"><div class="hx-sample" id="hx-s-b" style="color: #000">Black text<small>Body text on this colour</small></div><p><b id="hx-cb">–</b> <span id="hx-cb-v"></span></p></div>
+</div>
+<p class="hint" id="hx-best"></p>
+
+<hr class="hx-sep">
+<h2 class="hx-h" id="hx-work-h">HEX to RGB by hand</h2>
+<p class="hint" id="hx-work-note"></p>
+<div class="table-wrap">
+  <table class="data hx-work" aria-labelledby="hx-work-h">
+    <thead><tr><th scope="col">Channel</th><th scope="col">HEX</th><th scope="col">Working</th><th scope="col">Value</th></tr></thead>
+    <tbody id="hx-work"></tbody>
+  </table>
+</div>
+<p class="hint">The digits 0–9 count as themselves and A–F as 10–15.</p>
+
+<details class="hx-names" id="hx-names">
+  <summary>All 148 CSS colour names</summary>
+  <div class="hx-names-in">
+    <div class="field">
+      <label for="hx-filter">Filter by name or HEX</label>
+      <input type="search" id="hx-filter" autocomplete="off" spellcheck="false" placeholder="e.g. blue or FF">
+    </div>
+    <p class="hint" id="hx-n-count" aria-live="polite"></p>
+    <div class="table-wrap">
+      <table class="data hx-ntab" aria-label="CSS colour names">
+        <thead><tr><th scope="col"><span class="visually-hidden">Sample</span></th><th scope="col">Name</th><th scope="col">HEX and RGB</th></tr></thead>
+        <tbody id="hx-n-body"></tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<script>
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  // The 148 named colours of CSS Color Module Level 4.
+  var NAMES = {};
+  'aliceblue:f0f8ff antiquewhite:faebd7 aqua:00ffff aquamarine:7fffd4 azure:f0ffff beige:f5f5dc bisque:ffe4c4 black:000000 blanchedalmond:ffebcd blue:0000ff blueviolet:8a2be2 brown:a52a2a burlywood:deb887 cadetblue:5f9ea0 chartreuse:7fff00 chocolate:d2691e coral:ff7f50 cornflowerblue:6495ed cornsilk:fff8dc crimson:dc143c cyan:00ffff darkblue:00008b darkcyan:008b8b darkgoldenrod:b8860b darkgray:a9a9a9 darkgreen:006400 darkgrey:a9a9a9 darkkhaki:bdb76b darkmagenta:8b008b darkolivegreen:556b2f darkorange:ff8c00 darkorchid:9932cc darkred:8b0000 darksalmon:e9967a darkseagreen:8fbc8f darkslateblue:483d8b darkslategray:2f4f4f darkslategrey:2f4f4f darkturquoise:00ced1 darkviolet:9400d3 deeppink:ff1493 deepskyblue:00bfff dimgray:696969 dimgrey:696969 dodgerblue:1e90ff firebrick:b22222 floralwhite:fffaf0 forestgreen:228b22 fuchsia:ff00ff gainsboro:dcdcdc ghostwhite:f8f8ff gold:ffd700 goldenrod:daa520 gray:808080 green:008000 greenyellow:adff2f grey:808080 honeydew:f0fff0 hotpink:ff69b4 indianred:cd5c5c indigo:4b0082 ivory:fffff0 khaki:f0e68c lavender:e6e6fa lavenderblush:fff0f5 lawngreen:7cfc00 lemonchiffon:fffacd lightblue:add8e6 lightcoral:f08080 lightcyan:e0ffff lightgoldenrodyellow:fafad2 lightgray:d3d3d3 lightgreen:90ee90 lightgrey:d3d3d3 lightpink:ffb6c1 lightsalmon:ffa07a lightseagreen:20b2aa lightskyblue:87cefa lightslategray:778899 lightslategrey:778899 lightsteelblue:b0c4de lightyellow:ffffe0 lime:00ff00 limegreen:32cd32 linen:faf0e6 magenta:ff00ff maroon:800000 mediumaquamarine:66cdaa mediumblue:0000cd mediumorchid:ba55d3 mediumpurple:9370db mediumseagreen:3cb371 mediumslateblue:7b68ee mediumspringgreen:00fa9a mediumturquoise:48d1cc mediumvioletred:c71585 midnightblue:191970 mintcream:f5fffa mistyrose:ffe4e1 moccasin:ffe4b5 navajowhite:ffdead navy:000080 oldlace:fdf5e6 olive:808000 olivedrab:6b8e23 orange:ffa500 orangered:ff4500 orchid:da70d6 palegoldenrod:eee8aa palegreen:98fb98 paleturquoise:afeeee palevioletred:db7093 papayawhip:ffefd5 peachpuff:ffdab9 peru:cd853f pink:ffc0cb plum:dda0dd powderblue:b0e0e6 purple:800080 rebeccapurple:663399 red:ff0000 rosybrown:bc8f8f royalblue:4169e1 saddlebrown:8b4513 salmon:fa8072 sandybrown:f4a460 seagreen:2e8b57 seashell:fff5ee sienna:a0522d silver:c0c0c0 skyblue:87ceeb slateblue:6a5acd slategray:708090 slategrey:708090 snow:fffafa springgreen:00ff7f steelblue:4682b4 tan:d2b48c teal:008080 thistle:d8bfd8 tomato:ff6347 turquoise:40e0d0 violet:ee82ee wheat:f5deb3 white:ffffff whitesmoke:f5f5f5 yellow:ffff00 yellowgreen:9acd32'.split(' ').forEach(function (p) { var i = p.indexOf(':'); NAMES[p.slice(0, i)] = p.slice(i + 1); });
+  var MAX_IN = 100;
+
+  // ----- Colour maths (matrices from the CSS Color 4 sample code) -----
+  function lin(v) { var a = Math.abs(v); return a <= 0.04045 ? v / 12.92 : (v < 0 ? -1 : 1) * Math.pow((a + 0.055) / 1.055, 2.4); }
+  function gam(v) { var a = Math.abs(v); return a > 0.0031308 ? (v < 0 ? -1 : 1) * (1.055 * Math.pow(a, 1 / 2.4) - 0.055) : 12.92 * v; }
+  function mul(M, v) { return [0, 1, 2].map(function (i) { return M[i][0] * v[0] + M[i][1] * v[1] + M[i][2] * v[2]; }); }
+  var RGB_XYZ = [[506752 / 1228815, 87881 / 245763, 12673 / 70218], [87098 / 409605, 175762 / 245763, 12673 / 175545], [7918 / 409605, 87881 / 737289, 1001167 / 1053270]];
+  var XYZ_RGB = [[12831 / 3959, -329 / 214, -1974 / 3959], [-851781 / 878810, 1648619 / 878810, 36519 / 878810], [705 / 12673, -2585 / 12673, 705 / 667]];
+  var XYZ_LMS = [[0.8190224379967030, 0.3619062600528904, -0.1288737815209879], [0.0329836539323885, 0.9292868615863434, 0.0361446663506424], [0.0481771893596242, 0.2642395317527308, 0.6335478284694309]];
+  var LMS_LAB = [[0.2104542683093140, 0.7936177747023054, -0.0040720430116193], [1.9779985324311684, -2.4285922420485799, 0.4505937096174110], [0.0259040424655478, 0.7827717124575296, -0.8086757549230774]];
+  var LMS_XYZ = [[1.2268798758459243, -0.5578149944602171, 0.2813910456659647], [-0.0405757452148008, 1.1122868032803170, -0.0717110580655164], [-0.0763729366746601, -0.4214933324022432, 1.5869240198367816]];
+  var LAB_LMS = [[1, 0.3963377773761749, 0.2158037573099136], [1, -0.1055613458156586, -0.0638541728258133], [1, -0.0894841775298119, -1.2914855480194092]];
+  function rgbToOklab(rgb) { return mul(LMS_LAB, mul(XYZ_LMS, mul(RGB_XYZ, rgb.map(lin))).map(Math.cbrt)); }
+  function oklabToRgb(lab) { return mul(XYZ_RGB, mul(LMS_XYZ, mul(LAB_LMS, lab).map(function (c) { return c * c * c; }))).map(gam); }
+  function lchToLab(L, C, H) { var h = H * Math.PI / 180; return [L, C * Math.cos(h), C * Math.sin(h)]; }
+  function labToLch(l) { var h = Math.atan2(l[2], l[1]) * 180 / Math.PI; return [l[0], Math.hypot(l[1], l[2]), h < 0 ? h + 360 : h]; }
+  function clip(rgb) { return rgb.map(function (v) { return Math.min(1, Math.max(0, v)); }); }
+  function inGamut(rgb) { return rgb.every(function (v) { return v >= -1e-5 && v <= 1 + 1e-5; }); }
+  function dE(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
+  // CSS Color 4 gamut mapping (binary search with local MINDE): lower the chroma
+  // at the same lightness and hue until the clipped colour is within one just
+  // noticeable difference. Returns sRGB values from 0 to 1 and the chroma used.
+  function gamutMap(L, C, H) {
+    if (L >= 1) return { rgb: [1, 1, 1], C: 0 };
+    if (L <= 0) return { rgb: [0, 0, 0], C: 0 };
+    var rgb = oklabToRgb(lchToLab(L, C, H));
+    if (inGamut(rgb)) return { rgb: clip(rgb), C: C };
+    var JND = 0.02, EPS = 0.0001, cur = lchToLab(L, C, H), clipped = clip(rgb);
+    if (dE(rgbToOklab(clipped), cur) < JND) return { rgb: clipped, C: C };
+    var lo = 0, hi = C, loIn = true, chroma = C;
+    while (hi - lo > EPS) {
+      chroma = (lo + hi) / 2;
+      cur = lchToLab(L, chroma, H);
+      var r = oklabToRgb(cur);
+      if (loIn && inGamut(r)) { lo = chroma; continue; }
+      clipped = clip(r);
+      var E = dE(rgbToOklab(clipped), cur);
+      if (E < JND) {
+        if (JND - E < EPS) return { rgb: clipped, C: chroma };
+        loIn = false; lo = chroma;
+      } else hi = chroma;
+    }
+    return { rgb: clipped, C: chroma };
+  }
+  function hslToRgb(h, s, l) {
+    function f(n) { var k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }
+    return [f(0), f(8), f(4)];
+  }
+  function rgbToHsl(c) {
+    var r = c[0], g = c[1], b = c[2], max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, l = (max + min) / 2, h = 0, s = 0;
+    if (d) {
+      s = l <= 0 || l >= 1 ? 0 : (max - l) / Math.min(l, 1 - l);
+      h = 60 * (max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4);
+    }
+    return [h, s, l];
+  }
+  function hwbToRgb(h, w, b) {
+    if (w + b >= 1) { var g = w / (w + b); return [g, g, g]; }
+    return hslToRgb(h, 1, 0.5).map(function (c) { return c * (1 - w - b) + w; });
+  }
+  function hsvToRgb(h, s, v) { var l = v * (1 - s / 2); return hslToRgb(h, l <= 0 || l >= 1 ? 0 : (v - l) / Math.min(l, 1 - l), l); }
+  function cmykToRgb(c, m, y, k) { return [(1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)]; }
+  function to8(rgb) { return rgb.map(function (v) { return Math.round(Math.min(1, Math.max(0, v)) * 255); }); }
+
+  // ----- Formatting: the fewest decimals that convert back to the same colour -----
+  function num(v, d) {
+    var s = v.toFixed(d);
+    if (s.indexOf('.') !== -1) s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return s === '-0' ? '0' : s;
+  }
+  function hue(v, d) { var s = num(v, d); return Number(s) >= 360 ? '0' : s; }
+  function same(a, b) { return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]; }
+  function shortest(vals, base, back, target, isHue) {
+    var t;
+    for (var k = 0; k <= 4; k++) {
+      t = vals.map(function (v, i) { return isHue && isHue[i] ? hue(v, base[i] + k) : num(v, base[i] + k); });
+      if (same(to8(back(t.map(Number))), target)) return t;
+    }
+    return t;
+  }
+  function alphaText(a8, pct) {
+    for (var d = 0; d <= 3; d++) {
+      var v = pct ? a8 / 2.55 : a8 / 255, s = num(v, d);
+      if (Math.round((pct ? Number(s) / 100 : Number(s)) * 255) === a8) return s;
+    }
+    return num(a8 / 255, 4);
+  }
+  function hex2(n) { return (n < 16 ? '0' : '') + n.toString(16); }
+
+  // ----- Reading what the visitor types -----
+  var NUM = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(%|deg|grad|rad|turn)?$/;
+  function tok(t) {
+    if (t === 'none') return { v: 0, u: '' };
+    var m = NUM.exec(t);
+    return m ? { v: parseFloat(m[1]), u: m[2] || '' } : null;
+  }
+  function deg(t) {
+    var f = { '': 1, deg: 1, grad: 0.9, rad: 180 / Math.PI, turn: 360 }[t.u];
+    if (f === undefined) return null;
+    var v = t.v * f;
+    return ((v % 360) + 360) % 360;
+  }
+  function err(text) { return { error: text }; }
+  function clean(s) {
+    return s.replace(/[！-～]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+      .replace(/[   -   　]/g, ' ')
+      .replace(/[﻿​-‍⁠]/g, '')
+      .replace(/[−‒–]/g, '-')
+      .replace(/°/g, 'deg')
+      .trim().toLowerCase();
+  }
+  var EXAMPLES = ' Try #FF5733, rgb(255, 87, 51), hsl(11, 100%, 60%) or tomato.';
+  function parseColour(raw) {
+    raw = String(raw == null ? '' : raw);
+    if (raw.length > MAX_IN * 3) return err('That is too long for a colour code (' + MAX_IN + ' characters at most).');
+    var s = clean(raw);
+    if (!s) return null;
+    if (s.length > MAX_IN) return err('That is too long for a colour code (' + MAX_IN + ' characters at most).');
+    // CSS copied with its property name, quotes, !important or a semicolon.
+    s = s.replace(/^[a-z-]+\s*:\s*(?=\S)/, '').replace(/\s*!important$/, '').replace(/\s*;$/, '').replace(/^(['"])(.*)\1$/, '$2').trim();
+    var m;
+    if ((m = /^(#|0x)?([0-9a-f]*)$/.exec(s)) && (m[1] || m[2])) {
+      var h = m[2], n = h.length;
+      if (!n) return err('Type the digits after the ' + m[1] + ', such as ' + m[1] + 'FF5733.');
+      if (m[1] === '0x') {
+        if (n !== 6 && n !== 8) return err('A 0x colour has 6 digits (0xRRGGBB) or 8 with alpha first (0xAARRGGBB); this one has ' + n + '.');
+        var a0 = n === 8 ? h.slice(0, 2) : 'ff', rest = n === 8 ? h.slice(2) : h;
+        return done(rest + a0, n === 8 ? 'Read as 0xAARRGGBB, alpha first as in Android code: alpha ' + a0.toUpperCase() + ', colour #' + rest.toUpperCase() + '.' : 'Read as HEX #' + h.toUpperCase() + '.');
+      }
+      if (n === 3 || n === 4) {
+        var full = h.split('').map(function (c) { return c + c; }).join('');
+        return done(full, 'Short HEX #' + h.toUpperCase() + ', the same as #' + full.toUpperCase() + (m[1] ? '.' : ' (read as HEX).'), h);
+      }
+      if (n === 6 || n === 8) return done(h, 'Read as HEX #' + h.toUpperCase() + (n === 8 ? ', with alpha ' + h.slice(6).toUpperCase() + ' last.' : '.'));
+      return err('A HEX colour has 3, 4, 6 or 8 digits; this one has ' + n + '.');
+    }
+    if (s.charAt(0) === '#') return err('A HEX colour uses only the digits 0–9 and the letters A–F.');
+    if (NAMES[s]) return done(NAMES[s], 'CSS colour name ' + s + '.');
+    if (s === 'transparent') return done('00000000', 'transparent: black with 0% alpha.');
+    // Three or four bare numbers are red, green, blue (and alpha).
+    if (/^\(?\s*[\d.+-]/.test(s) && !/[a-z(]{2}/.test(s)) {
+      var parts = s.replace(/^\(\s*|\s*\)$/g, '').split(/\s*[,;\s]\s*/);
+      if (parts.length === 3 || parts.length === 4) {
+        var res = rgbFrom(parts.map(tok), parts.length === 4 ? tok(parts[3]) : null, parts.slice(0, 3).map(tok));
+        if (res.error) return res;
+        return fromRgb(res, 'Read as red, green and blue: ' + res.text + '.');
+      }
+      return err('Three numbers are read as red, green and blue; this has ' + parts.length + '.' + EXAMPLES);
+    }
+    if (!(m = /^([a-z-]+)\s*\((.*)\)$/.exec(s))) return err('Not a colour code or a CSS colour name.' + EXAMPLES);
+    var fn = m[1], body = m[2].trim();
+    if (/^(lab|lch|color|color-mix|light-dark|device-rgb)$/.test(fn) || /\bfrom\b/.test(body)) return err(fn + '() is not converted here. Use HEX, rgb(), hsl(), hwb(), oklch() or oklab().');
+    var want = { rgb: 3, rgba: 3, hsl: 3, hsla: 3, hwb: 3, hsv: 3, hsb: 3, oklch: 3, oklab: 3, cmyk: 4, 'device-cmyk': 4 }[fn];
+    if (!want) return err(fn + '() is not a colour function this converter knows.' + EXAMPLES);
+    var a, al = null;
+    if (body.indexOf(',') !== -1) {
+      a = body.split(',').map(function (x) { return x.trim(); });
+      if (a.length === want + 1) al = a.pop();
+    } else {
+      var sl = body.split('/');
+      if (sl.length > 2) return err('Only one / may separate the alpha.');
+      a = sl[0].trim().split(/\s+/);
+      if (sl.length === 2) al = sl[1].trim();
+    }
+    var label = fn.replace(/a$/, '');
+    if (a.length !== want || a.some(function (x) { return !tok(x); })) return err(label + '() takes ' + want + ' numbers, then an optional alpha.');
+    var T = a.map(tok), A = al === null ? null : tok(al);
+    if (al !== null && !A) return err('The alpha must be a number from 0 to 1, or a percentage.');
+    var alpha = alphaOf(A);
+    if (alpha.error) return alpha;
+    function pct(t, name, lo, hi) {
+      if (t.u !== '' && t.u !== '%') return { error: name + ' must be a percentage.' };
+      if (t.v < (lo || 0) || t.v > (hi || 100)) return { error: name + ' goes from ' + (lo || 0) + '% to ' + (hi || 100) + '%.' };
+      return { v: t.v / 100 };
+    }
+    function angleOf(t) { var d = deg(t); return d === null ? { error: 'The hue must be an angle, such as 11 or 11deg.' } : { v: d }; }
+    var x, y, z, k, H;
+    if (label === 'rgb') {
+      var r0 = rgbFrom(T, A, T);
+      return r0.error ? r0 : fromRgb(r0, 'rgb(): ' + r0.text + '.');
+    }
+    if (label === 'hsl' || label === 'hwb' || label === 'hsv' || label === 'hsb') {
+      H = angleOf(T[0]); if (H.error) return H;
+      var n1 = { hsl: 'Saturation', hwb: 'Whiteness', hsv: 'Saturation', hsb: 'Saturation' }[label], n2 = { hsl: 'Lightness', hwb: 'Blackness', hsv: 'Value', hsb: 'Brightness' }[label];
+      x = pct(T[1], n1); if (x.error) return x;
+      y = pct(T[2], n2); if (y.error) return y;
+      var rgbF = label === 'hsl' ? hslToRgb(H.v, x.v, y.v) : label === 'hwb' ? hwbToRgb(H.v, x.v, y.v) : hsvToRgb(H.v, x.v, y.v);
+      return fromFloat(rgbF, alpha.a8, label + '(): hue ' + num(H.v, 4) + '°, ' + n1.toLowerCase() + ' ' + num(x.v * 100, 4) + '%, ' + n2.toLowerCase() + ' ' + num(y.v * 100, 4) + '%' + alpha.text + '.');
+    }
+    if (label === 'cmyk' || label === 'device-cmyk') {
+      var asPct = T.some(function (t) { return t.u === '%' || t.v > 1; });
+      var v4 = [];
+      for (var i = 0; i < 4; i++) {
+        if (T[i].u !== '' && T[i].u !== '%') return err('CMYK values must be numbers from 0 to 1 or percentages.');
+        var v = asPct ? T[i].v / 100 : T[i].v;
+        if (v < 0 || v > 1) return err('CMYK values go from 0% to 100%.');
+        v4.push(v);
+      }
+      return fromFloat(cmykToRgb(v4[0], v4[1], v4[2], v4[3]), alpha.a8, 'CMYK: cyan ' + num(v4[0] * 100, 4) + '%, magenta ' + num(v4[1] * 100, 4) + '%, yellow ' + num(v4[2] * 100, 4) + '%, black ' + num(v4[3] * 100, 4) + '%' + alpha.text + '.');
+    }
+    // oklch() and oklab(): lightness 0 to 1 or a percentage; 100% chroma is 0.4.
+    var Lt = T[0];
+    if (Lt.u !== '' && Lt.u !== '%') return err('The lightness must be a number from 0 to 1 or a percentage.');
+    var L = Lt.u === '%' ? Lt.v / 100 : Lt.v;
+    if (L < 0 || L > 1) return err('The lightness of ' + label + '() goes from 0 to 1, or 0% to 100%.');
+    if (label === 'oklch') {
+      var Ct = T[1];
+      if (Ct.u !== '' && Ct.u !== '%') return err('The chroma must be a number, such as 0.2.');
+      var C = Ct.u === '%' ? Ct.v * 0.004 : Ct.v;
+      if (C < 0 || C > 0.5) return err('The chroma of oklch() goes from 0 to 0.5 here (0.4 is 100%).');
+      H = angleOf(T[2]); if (H.error) return H;
+      return fromLch(L, C, H.v, alpha, 'oklch(): lightness ' + num(L, 4) + ', chroma ' + num(C, 4) + ', hue ' + num(H.v, 3) + '°' + alpha.text + '.');
+    }
+    var ab = [T[1], T[2]].map(function (t) { return t.u === '%' ? t.v * 0.004 : t.u === '' ? t.v : NaN; });
+    if (ab.some(function (v) { return Number.isNaN(v) || v < -0.5 || v > 0.5; })) return err('The a and b of oklab() go from −0.5 to 0.5 here (0.4 is 100%).');
+    var lch = labToLch([L, ab[0], ab[1]]);
+    return fromLch(L, lch[1], lch[2], alpha, 'oklab(): lightness ' + num(L, 4) + ', a ' + num(ab[0], 4) + ', b ' + num(ab[1], 4) + alpha.text + '.');
+  }
+  function alphaOf(A) {
+    if (!A) return { a8: 255, text: '' };
+    if (A.u !== '' && A.u !== '%') return err('The alpha must be a number from 0 to 1, or a percentage.');
+    var v = A.u === '%' ? A.v / 100 : A.v;
+    if (v < 0 || v > 1) return err('The alpha goes from 0 to 1, or 0% to 100%.');
+    return { a8: Math.round(v * 255), text: ', alpha ' + num(v * 100, 2) + '%' };
+  }
+  // Red, green and blue from three tokens (numbers 0-255 or percentages) and an optional alpha.
+  function rgbFrom(T, A, shown) {
+    var names = ['Red', 'Green', 'Blue'], out = [];
+    for (var i = 0; i < 3; i++) {
+      var t = T[i];
+      if (!t || (t.u !== '' && t.u !== '%')) return err('Red, green and blue must be numbers from 0 to 255, or percentages.' + EXAMPLES);
+      var v = t.u === '%' ? t.v / 100 * 255 : t.v;
+      if (v < 0 || v > 255) return err(names[i] + ' is ' + num(t.v, 4) + t.u + '; red, green and blue go from 0 to 255 (or 0% to 100%).');
+      out.push(v / 255);
+    }
+    var al = alphaOf(A);
+    if (al.error) return al;
+    return { rgb: out, a8: al.a8, text: 'red ' + num(out[0] * 255, 4) + ', green ' + num(out[1] * 255, 4) + ', blue ' + num(out[2] * 255, 4) + al.text };
+  }
+  function done(hex, readAs, shortCode) {
+    var v = [0, 2, 4, 6].map(function (i) { return parseInt(hex.substr(i, 2) || 'ff', 16); });
+    return { rgb8: v.slice(0, 3), a8: v[3], readAs: readAs, short: shortCode || '' };
+  }
+  function fromRgb(res, readAs) { return fromFloat(res.rgb, res.a8, readAs); }
+  function fromFloat(rgb, a8, readAs) { return { rgb8: to8(rgb), a8: a8, readAs: readAs }; }
+  function fromLch(L, C, H, alpha, readAs) {
+    var g = gamutMap(L, C, H);
+    var res = { rgb8: to8(g.rgb), a8: alpha.a8, readAs: readAs };
+    if (g.C < C - 1e-4) res.readAs += ' That is outside the sRGB range that HEX can hold, so it is shown with chroma ' + num(g.C, 3) + ', the nearest colour at the same lightness and hue.';
+    return res;
+  }
+
+  // ----- Every format, from the 8-bit colour -----
+  var lower = $('#hx-lower'), modern = $('#hx-modern');
+  function H(s) { return lower.checked ? s.toLowerCase() : s.toUpperCase(); }
+  function formats(c) {
+    var t = c.rgb8, f = t.map(function (v) { return v / 255; }), a8 = c.a8, opaque = a8 === 255, al = alphaText(a8, false);
+    var hex6 = '#' + H(t.map(hex2).join('')), hex8 = hex6 + H(hex2(a8));
+    var o = { hex: hex6, hex8: hex8 };
+    var pairs = t.concat([a8]).map(hex2);
+    o.short = pairs.every(function (p, i) { return (i < 3 || !opaque) ? p[0] === p[1] : true; })
+      ? '#' + H(pairs.slice(0, opaque ? 3 : 4).map(function (p) { return p[0]; }).join('')) : '';
+    var sep = modern.checked ? ' ' : ', ';
+    o.rgb = opaque ? (modern.checked ? 'rgb(' + t.join(' ') + ')' : 'rgb(' + t.join(', ') + ')')
+      : modern.checked ? 'rgb(' + t.join(' ') + ' / ' + al + ')' : 'rgba(' + t.join(', ') + ', ' + al + ')';
+    var hsl = rgbToHsl(f), hs = shortest([hsl[0], hsl[1] * 100, hsl[2] * 100], [0, 0, 0], function (v) { return hslToRgb(v[0], v[1] / 100, v[2] / 100); }, t, [true]);
+    o.hslParts = hs;
+    o.hsl = (opaque || modern.checked ? 'hsl(' : 'hsla(') + hs[0] + sep + hs[1] + '%' + sep + hs[2] + '%' + (opaque ? ')' : (modern.checked ? ' / ' : ', ') + al + ')');
+    var hw = shortest([hsl[0], Math.min.apply(null, f) * 100, (1 - Math.max.apply(null, f)) * 100], [0, 0, 0], function (v) { return hwbToRgb(v[0], v[1] / 100, v[2] / 100); }, t, [true]);
+    o.hwb = 'hwb(' + hw[0] + ' ' + hw[1] + '% ' + hw[2] + '%' + (opaque ? ')' : ' / ' + al + ')');
+    var lab = rgbToOklab(f), lch = labToLch(lab);
+    if (lch[1] < 1e-4) { lch[1] = 0; lch[2] = 0; lab[1] = lab[2] = 0; }
+    var lc = shortest(lch, [2, 2, 0], function (v) { return gamutMap(v[0], v[1], v[2]).rgb; }, t, [false, false, true]);
+    o.oklch = 'oklch(' + lc.join(' ') + (opaque ? ')' : ' / ' + al + ')');
+    var lb = shortest(lab, [2, 2, 2], function (v) { var x = labToLch(v); return gamutMap(x[0], x[1], x[2]).rgb; }, t);
+    o.oklab = 'oklab(' + lb.join(' ') + (opaque ? ')' : ' / ' + al + ')');
+    var mx = Math.max.apply(null, f), mn = Math.min.apply(null, f);
+    var hv = shortest([hsl[0], mx ? (mx - mn) / mx * 100 : 0, mx * 100], [0, 0, 0], function (v) { return hsvToRgb(v[0], v[1] / 100, v[2] / 100); }, t, [true]);
+    o.hsv = 'hsv(' + hv[0] + ', ' + hv[1] + '%, ' + hv[2] + '%)';
+    var K = 1 - mx, cm = K >= 1 ? [0, 0, 0, 100] : [(1 - f[0] - K) / (1 - K) * 100, (1 - f[1] - K) / (1 - K) * 100, (1 - f[2] - K) / (1 - K) * 100, K * 100];
+    var ck = shortest(cm, [0, 0, 0, 0], function (v) { return cmykToRgb(v[0] / 100, v[1] / 100, v[2] / 100, v[3] / 100); }, t);
+    o.cmykParts = ck;
+    o.cmyk = 'cmyk(' + ck.join('%, ') + '%)';
+    o.argb = '#' + H(hex2(a8)) + hex6.slice(1);
+    o.int = String(t[0] * 65536 + t[1] * 256 + t[2]);
+    var exact = null, hx = t.map(hex2).join('');
+    for (var nm in NAMES) if (NAMES[nm] === hx) { exact = nm; break; }
+    if (exact && opaque) { o.name = exact; o.nameExact = true; }
+    else {
+      var best = null, bd = Infinity;
+      for (var n2 in NAMES) { var d = dE(nameLab(n2), lab); if (d < bd) { bd = d; best = n2; } }
+      o.name = best; o.nameExact = false;
+    }
+    o.alphaPct = alphaText(a8, true);
+    return o;
+  }
+  var labCache = {};
+  function nameLab(n) {
+    if (!labCache[n]) labCache[n] = rgbToOklab([0, 2, 4].map(function (i) { return parseInt(NAMES[n].substr(i, 2), 16) / 255; }));
+    return labCache[n];
+  }
+
+  // WCAG 2.2 relative luminance and contrast. Ratios are cut, never rounded up.
+  function lum(t) { var l = t.map(function (v) { return lin(v / 255); }); return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]; }
+  function ratioText(r) { return (Math.floor(r * 100 + 1e-9) / 100).toFixed(2) + ':1'; }
+  function verdict(r) {
+    return r >= 7 ? 'Passes AA and AAA.' : r >= 4.5 ? 'Passes AA; AAA only for large text.' : r >= 3 ? 'Passes AA only for large text.' : 'Fails, even for large text.';
+  }
+
+  // ----- The page -----
+  var inp = $('#hx-in'), pick = $('#hx-pick');
+  var GROUPS = { rgb: ['#hx-r', '#hx-g', '#hx-b', '#hx-a'], hsl: ['#hx-h', '#hx-s', '#hx-l'], cmyk: ['#hx-c', '#hx-m', '#hx-y', '#hx-k'] };
+  var OUT = ['hex', 'hex8', 'short', 'rgb', 'hsl', 'hwb', 'oklch', 'oklab', 'hsv', 'cmyk', 'argb', 'int', 'name'];
+  var cur = null, source = 'main', dirty = false;
+
+  // A number typed into one of the small boxes: a point or a comma for decimals,
+  // an optional % or ° sign. Anything else (5², 1e3, "3 4") is refused.
+  function parseNum(raw) {
+    var s = String(raw == null ? '' : raw);
+    if (s.length > 20) return NaN;
+    s = s.replace(/[，．０-９％]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+      .replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 0x0660); })
+      .replace(/[۰-۹]/g, function (c) { return String(c.charCodeAt(0) - 0x06F0); })
+      .replace(/٫/g, '.').replace(/[−–]/g, '-').trim().replace(/\s*(%|°|deg)$/, '');
+    if (!s) return null;
+    var m = /^(-?)(\d{1,7})(?:[.,](\d{1,6}))?$/.exec(s) || /^(-?)()[.,](\d{1,6})$/.exec(s);
+    return m ? Number(m[1] + (m[2] || '0') + '.' + (m[3] || '0')) : NaN;
+  }
+  var LIMITS = {
+    '#hx-r': [0, 255, 'Red'], '#hx-g': [0, 255, 'Green'], '#hx-b': [0, 255, 'Blue'], '#hx-a': [0, 100, 'Alpha'],
+    '#hx-h': [-1e6, 1e6, 'Hue'], '#hx-s': [0, 100, 'Saturation'], '#hx-l': [0, 100, 'Lightness'],
+    '#hx-c': [0, 100, 'Cyan'], '#hx-m': [0, 100, 'Magenta'], '#hx-y': [0, 100, 'Yellow'], '#hx-k': [0, 100, 'Black']
+  };
+  function readGroup(g) {
+    var vals = [], bad = null, empty = false;
+    var ids = GROUPS[g].concat(g === 'rgb' ? [] : ['#hx-a']);
+    ids.forEach(function (id) {
+      var v = parseNum($(id).value), lim = LIMITS[id];
+      if (v === null) { if (id === '#hx-a') v = 100; else { empty = true; return vals.push(null); } }
+      if (Number.isNaN(v) || v < lim[0] || v > lim[1]) {
+        if (!bad) bad = { id: id, text: id === '#hx-h' ? 'Enter the hue in degrees, such as 11.' : lim[2] + ' must be a number from ' + lim[0] + ' to ' + lim[1] + (lim[1] === 100 ? ' (%)' : '') + '.' };
+        if (g !== 'rgb' && id === '#hx-a') bad.msg = '#hx-rgb-msg';
+      }
+      vals.push(v);
+    });
+    if (bad) return { bad: bad };
+    if (empty) return { empty: true };
+    var a8 = Math.round(vals[vals.length - 1] / 100 * 255), rgb;
+    if (g === 'rgb') rgb = vals.slice(0, 3).map(function (v) { return v / 255; });
+    else if (g === 'hsl') rgb = hslToRgb(((vals[0] % 360) + 360) % 360, vals[1] / 100, vals[2] / 100);
+    else rgb = cmykToRgb(vals[0] / 100, vals[1] / 100, vals[2] / 100, vals[3] / 100);
+    return { colour: { rgb8: to8(rgb), a8: a8, readAs: '' } };
+  }
+
+  function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+  function setVal(id, v) { var el = $(id); if (el.value !== v) el.value = v; }
+  function setInvalid(el, on) { if (on) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); }
+
+  function update(showErrors) {
+    var res, msgFor = {};
+    // The main box.
+    if (source === 'main') {
+      res = parseColour(inp.value);
+      var mainErr = res && res.error ? res.error : '';
+      setInvalid(inp, mainErr && (showErrors || inp.getAttribute('aria-invalid') === 'true'));
+      setText($('#hx-msg'), inp.getAttribute('aria-invalid') === 'true' ? mainErr : '');
+      cur = res && !res.error ? res : null;
+      setText($('#hx-read'), cur ? cur.readAs : res ? '' : 'Type or paste a colour to convert it.');
+    } else {
+      var g = readGroup(source);
+      if (g.bad) {
+        var el = $(g.bad.id), on = showErrors || el.getAttribute('aria-invalid') === 'true';
+        msgFor[g.bad.msg || '#hx-' + source + '-msg'] = on ? g.bad.text : '';
+        GROUPS[source].concat(['#hx-a']).forEach(function (id) { setInvalid($(id), on && id === g.bad.id); });
+        cur = null;
+        setText($('#hx-read'), '');
+      } else {
+        GROUPS[source].concat(['#hx-a']).forEach(function (id) { setInvalid($(id), false); });
+        cur = g.colour || null;
+        setText($('#hx-read'), g.empty ? 'Fill in every ' + source.toUpperCase() + ' box to see the colour.' : '');
+      }
+      setInvalid(inp, false);
+      setText($('#hx-msg'), '');
+    }
+    // Boxes of the other groups are rewritten from the colour, so none of them is wrong any more.
+    Object.keys(GROUPS).forEach(function (g) {
+      if (g !== source) GROUPS[g].forEach(function (id) { if (id !== '#hx-a' || source === 'main') setInvalid($(id), false); });
+    });
+    ['#hx-rgb-msg', '#hx-hsl-msg', '#hx-cmyk-msg'].forEach(function (id) { setText($(id), msgFor[id] || ''); });
+    draw();
+    if (dirty) { saveSoon(); announce(); }
+  }
+
+  function draw() {
+    var o = cur ? formats(cur) : null;
+    OUT.forEach(function (k) {
+      var td = $('#hx-o-' + k);
+      setText(td, o ? (o[k] || '–') : '–');
+      td.parentElement.querySelector('button').disabled = !o || !o[k];
+    });
+    $('#hx-short-row').hidden = !!o && !o.short;
+    setText($('#hx-name-h').firstChild, o && !o.nameExact ? 'Nearest CSS name' : 'CSS name');
+    $('#hx-o-name').parentElement.querySelector('button').setAttribute('aria-label', o && !o.nameExact ? 'Copy nearest CSS name' : 'Copy CSS name');
+    $('#hx-copy-all').disabled = !o;
+    var sw = $('#hx-sw'), sc = $('#hx-sw-c');
+    sw.classList.toggle('hx-none', !o);
+    sc.style.background = o ? 'rgba(' + cur.rgb8.join(', ') + ', ' + (cur.a8 / 255) + ')' : '';
+    if (o) {
+      // Every other box shows the same colour; the box being typed in is left alone.
+      if (source !== 'main') setVal('#hx-in', cur.a8 === 255 ? o.hex : o.hex8);
+      if (source !== 'pick') pick.value = '#' + cur.rgb8.map(hex2).join('');
+      if (source !== 'rgb') { setVal('#hx-r', String(cur.rgb8[0])); setVal('#hx-g', String(cur.rgb8[1])); setVal('#hx-b', String(cur.rgb8[2])); setVal('#hx-a', o.alphaPct); }
+      if (source !== 'hsl') { setVal('#hx-h', o.hslParts[0]); setVal('#hx-s', o.hslParts[1]); setVal('#hx-l', o.hslParts[2]); }
+      if (source !== 'cmyk') { setVal('#hx-c', o.cmykParts[0]); setVal('#hx-m', o.cmykParts[1]); setVal('#hx-y', o.cmykParts[2]); setVal('#hx-k', o.cmykParts[3]); }
+    }
+    // Contrast, with the colour made opaque.
+    var bg = o ? 'rgb(' + cur.rgb8.join(', ') + ')' : '';
+    $('#hx-s-w').style.background = bg; $('#hx-s-b').style.background = bg;
+    if (o) {
+      var L = lum(cur.rgb8), rw = 1.05 / (L + 0.05), rb = (L + 0.05) / 0.05;
+      setText($('#hx-cw'), ratioText(rw)); setText($('#hx-cw-v'), verdict(rw));
+      setText($('#hx-cb'), ratioText(rb)); setText($('#hx-cb-v'), verdict(rb));
+      setText($('#hx-best'), (rb >= rw ? 'Black' : 'White') + ' text is easier to read on this colour.' + (cur.a8 < 255 ? ' Contrast is measured with the colour fully opaque; transparency changes it.' : ''));
+    } else {
+      ['#hx-cw', '#hx-cb'].forEach(function (id) { setText($(id), '–'); });
+      ['#hx-cw-v', '#hx-cb-v', '#hx-best'].forEach(function (id) { setText($(id), ''); });
+    }
+    // Working, pair by pair.
+    var tb = $('#hx-work'), rows = [];
+    if (o) {
+      var hx = o.hex8.slice(1).toUpperCase();
+      ['Red', 'Green', 'Blue', 'Alpha'].forEach(function (name, i) {
+        if (i === 3 && cur.a8 === 255) return;
+        var p = hx.substr(i * 2, 2), d1 = parseInt(p[0], 16), d2 = parseInt(p[1], 16), v = d1 * 16 + d2;
+        rows.push([name, p, d1 + ' × 16 + ' + d2, i === 3 ? v + ' ÷ 255 = ' + alphaText(v, false) + ' (' + o.alphaPct + '%)' : String(v)]);
+      });
+    }
+    var key = JSON.stringify(rows);
+    if (tb.dataset.key !== key) {
+      tb.textContent = '';
+      rows.forEach(function (r) {
+        var tr = document.createElement('tr');
+        r.forEach(function (c, i) { var td = document.createElement(i ? 'td' : 'th'); if (!i) td.scope = 'row'; if (i === 1) td.className = 'mono'; td.textContent = c; tr.appendChild(td); });
+        tb.appendChild(tr);
+      });
+      tb.dataset.key = key;
+    }
+    var note = 'Enter a colour to see the working.';
+    if (o) {
+      var code = o.hex8.slice(0, cur.a8 === 255 ? 7 : 9).toUpperCase();
+      note = code + ' becomes ' + o.rgb + '.';
+      if (source === 'main' && cur.short) note = 'The short code #' + cur.short.toUpperCase() + ' writes each digit once; doubled it is ' + code + ', which becomes ' + o.rgb + '.';
+    }
+    setText($('#hx-work-note'), note);
+  }
+
+  // ----- Announcements, the address, copying -----
+  var status = $('#hx-status');
+  var announce = TT.debounce(function () {
+    var t = cur ? formats(cur).hex + ' is ' + formats(cur).rgb + '.' : '';
+    if (status.textContent !== t) status.textContent = t;
+  }, 1000);
+  var showErrorsLater = TT.debounce(function () { update(true); }, 900);
+  var written = null, saveTimer;
+  function hashText() {
+    if (!cur) return null;
+    if (source === 'main') {
+      var v = inp.value.trim();
+      return /^#[0-9a-f]{3,8}$/i.test(v) ? v.slice(1) : encodeURIComponent(v);
+    }
+    var o = formats(cur);
+    return (cur.a8 === 255 ? o.hex : o.hex8).slice(1);
+  }
+  function save() {
+    clearTimeout(saveTimer);
+    if (!dirty) return;
+    var h = hashText();
+    if (h === null || h === written) return;
+    history.replaceState(null, '', '#' + h);
+    written = h;
+  }
+  function saveSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(save, 300); }
+  function fromHash() {
+    var h = location.hash.slice(1), note = $('#hx-note');
+    setText(note, '');
+    if (!h) return null;
+    var t;
+    try { t = decodeURIComponent(h); } catch (e) { t = ''; }
+    if (/^[0-9a-f]{3,8}$/i.test(t)) t = '#' + t;
+    if (t.length > MAX_IN) { setText(note, 'The colour in the page address is longer than ' + MAX_IN + ' characters, so it was not read.'); return null; }
+    return t;
+  }
+  function load() {
+    var t = fromHash();
+    inp.value = t === null ? '#FF5733' : t;
+    written = location.hash.slice(1) || null;
+    source = 'main';
+    update(t !== null);
+  }
+
+  inp.addEventListener('input', function () { source = 'main'; dirty = true; update(false); showErrorsLater(); });
+  inp.addEventListener('change', function () { source = 'main'; update(true); });
+  pick.addEventListener('input', function () {
+    dirty = true;
+    var a8 = cur ? cur.a8 : 255;
+    var hex = pick.value.slice(1) + (a8 === 255 ? '' : hex2(a8));
+    inp.value = '#' + H(hex);
+    source = 'main';
+    update(false);
+  });
+  Object.keys(GROUPS).forEach(function (g) {
+    GROUPS[g].forEach(function (id) {
+      $(id).addEventListener('input', function () { source = g; dirty = true; update(false); showErrorsLater(); });
+      $(id).addEventListener('change', function () { source = g; update(true); });
+    });
+  });
+  [lower, modern].forEach(function (el) { el.addEventListener('change', function () { update(false); drawNames(); }); });
+  $('#hx-copy-all').addEventListener('click', function () {
+    update(true);
+    if (!cur) return;
+    var rows = $$('.hx-out tbody tr').filter(function (tr) { return !tr.hidden; });
+    TT.copy(rows.map(function (tr) { return tr.querySelector('th').firstChild.textContent.trim() + ': ' + tr.querySelector('td').textContent; }).join('\n'), $('#hx-copy-all'));
+  });
+  window.addEventListener('pageshow', function () { update(false); });
+  window.addEventListener('pagehide', save);
+  window.addEventListener('hashchange', function () { if (location.hash.slice(1) !== written) load(); });
+
+  // ----- Named colours -----
+  var nbody = $('#hx-n-body'), filter = $('#hx-filter');
+  function drawNames() {
+    var q = clean(filter.value.slice(0, 40)).replace(/^#/, ''), n = 0, frag = document.createDocumentFragment();
+    Object.keys(NAMES).forEach(function (name) {
+      var hx = NAMES[name];
+      if (q && name.indexOf(q.replace(/\s+/g, '')) === -1 && hx.indexOf(q) === -1) return;
+      n++;
+      var tr = document.createElement('tr'), td0 = document.createElement('td'), dot = document.createElement('span');
+      dot.className = 'hx-dot'; dot.style.background = '#' + hx; td0.appendChild(dot);
+      var td1 = document.createElement('td'), b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn secondary small'; b.textContent = name; b.dataset.name = name;
+      td1.appendChild(b);
+      var td2 = document.createElement('td'); td2.className = 'hx-code';
+      var rgb = [0, 2, 4].map(function (i) { return parseInt(hx.substr(i, 2), 16); });
+      td2.textContent = '#' + H(hx) + ' rgb(' + rgb.join(', ') + ')';
+      tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2);
+      frag.appendChild(tr);
+    });
+    nbody.textContent = '';
+    nbody.appendChild(frag);
+    setText($('#hx-n-count'), q ? n + ' of 148 names match.' : '148 names, A to Z. Choose one to convert it.');
+  }
+  filter.addEventListener('input', drawNames);
+  nbody.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-name]');
+    if (!b) return;
+    inp.value = b.dataset.name;
+    source = 'main'; dirty = true;
+    update(true);
+    inp.focus();
+    TT.announce(b.dataset.name + ' is ' + (cur ? formats(cur).hex : '') + '.');
+  });
+
+  drawNames();
+  load();
+})();
+</script>

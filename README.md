@@ -71,9 +71,15 @@ tools automatically.
 Rules the test runner enforces: no requests to other hosts (third-party libraries are vendored in
 `assets/vendor/`), no JavaScript errors, a proper title and description, no horizontal
 scrolling on phones or at 200% zoom, text fields of at least 16 px on touch screens (smaller
-ones make iPhones zoom the page), and no button, label or checkbox whose `touch-action` is `auto`
+ones make iPhones zoom the page), no button, label or checkbox whose `touch-action` is `auto`
 (the shared style sheet sets `manipulation`, so two quick taps press twice instead of zooming;
-a tool may set its own value, such as `none` on a drag handle).
+a tool may set its own value, such as `none` on a drag handle), and, on a page with a text box,
+nothing that skips drawing its content with `content-visibility` (`hidden` or `auto`, or a closed
+`<details>` as Chromium draws it by default): pasting over a long text then takes seconds in
+Chromium, so on such a page (the tool layout adds `has-text-box` when the tool's code mentions a
+`textarea` or `contenteditable`) the shared style sheet hides closed `<details>` with
+`display: none`. Other pages keep the browser's way, so that find in page and a link to a quoted
+passage can still open a closed FAQ item; the runner checks that too.
 
 ```sh
 gem install jekyll -v '~> 3.10' jekyll-seo-tag jekyll-sitemap webrick
