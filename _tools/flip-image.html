@@ -35,8 +35,8 @@ howto: |
   ## Rotating by any angle
 
   Type an angle in degrees: positive numbers turn clockwise, negative ones
-  anticlockwise, and a point or a comma works for decimals, so 2.5 and 2,5
-  are the same. A turn that is not a multiple of 90° leaves empty corners:
+  anticlockwise, and a point or a comma works for decimals. A turn that is
+  not a multiple of 90° leaves empty corners:
 
   - **Enlarge the canvas** keeps the whole picture and fills the corners
     with a colour or leaves them transparent. The new width is
@@ -64,9 +64,10 @@ howto: |
   quality: PNG stores pixels without loss, while JPEG and WebP compress the
   picture again. With **Keep each JPEG's quality** on, the tool reads the
   original's quantisation tables, estimates the quality it was saved at
-  (75 or 90, say) and saves at the same setting, so the file is not bloated
-  by a higher setting or degraded by a lower one. Turning by other angles
-  blends neighbouring pixels, which softens fine detail slightly.
+  and saves at the same setting, so the file is not bloated by a higher
+  setting or degraded by a lower one. Turning by other angles blends
+  neighbouring pixels, which softens fine detail slightly. A picture too
+  large for your browser is saved smaller, and the page says so.
 
   For a strictly lossless JPEG rotation, desktop tools such as jpegtran
   rearrange the compressed data itself; that is exact only when the width
@@ -120,6 +121,8 @@ faq:
 @media (pointer: coarse) { .fl-pick { min-height: 44px; } }
 .fl-row-info { color: var(--muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .fl-row-info.is-error { color: var(--danger); }
+.fl-row-note { font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.fl-row-note:empty { display: none; }
 .fl-row .btn.small { flex: 0 0 auto; }
 .fl-row .fl-x { width: 36px; padding: 0; }
 @media (max-width: 480px) { .fl-row { gap: 8px; padding: 6px; } .fl-row .fl-dl { padding: 0 10px; } }
@@ -277,6 +280,13 @@ faq:
   var canSave = { webp: true, avif: false };
   var ORIENT = { 2: 'mirrored', 3: 'turned 180°', 4: 'flipped upside down', 5: 'mirrored and turned 90° anticlockwise',
     6: 'turned 90° clockwise', 7: 'mirrored and turned 90° clockwise', 8: 'turned 90° anticlockwise' };
+  // What the decoder warns about a file. It is still saved; the note is shown in its row and with the options.
+  var WARN = {
+    truncated: 'The file seems to be cut off, so part of the picture may be blank.',
+    hdr: 'This is an HDR photo. It is saved without tone mapping, so it may look flat or washed out compared with an HDR screen.',
+    'hdr-mapped': 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.',
+    foreignObject: 'The HTML inside this SVG (a <foreignObject> element) is left out: this browser does not allow it to be drawn.'
+  };
 
   // The transform: mirrored left to right first (when mirror is on), then turned q quarter turns and
   // fine degrees clockwise. Every button acts on the picture as it is shown, so a flip changes the turn too.
@@ -441,40 +451,173 @@ faq:
 
   // The finished file for one image with the settings as they are now.
   async function produce(it) {
-    var src = await sourceOf(it), geo = geometry(it.w, it.h), key = outKey(it);
-    if (geo.W > MAX_SIDE || geo.H > MAX_SIDE || geo.W * geo.H > MAX_OUT) {
-      throw friendly('Turned this way the image would be ' + geo.W + ' × ' + geo.H + ' pixels, more than this tool can create (16,384 per side, 100 megapixels). Crop off the corners instead.');
-    }
-    var c = document.createElement('canvas');
-    c.width = geo.W;
-    c.height = geo.H;
-    var g = c.getContext('2d');
-    if (!g) throw friendly('Your browser could not create an image this large.');
+    var key = outKey(it);
+    it.saved = null;
+    var out = await render(it), c = out.canvas;
     try {
-      draw(g, src, it.w, it.h, geo);
       var blob = await TTImage.encode(c, key, {
         quality: qualityFor(it, key), background: NO_ALPHA[key] ? cornerFill() || '#ffffff' : null, wasm: key === 'avif',
-        icoSizes: key === 'ico' ? [Math.max(geo.W, geo.H)] : null
+        icoSizes: key === 'ico' ? [Math.max(out.w, out.h)] : null
       });
-      return { blob: blob, key: key, w: geo.W, h: geo.H, name: baseName(it.name) + '-' + suffix() + '.' + EXT[key] };
+      if (out.from) it.saved = { sig: sig(), text: 'Saved at ' + out.w + ' × ' + out.h + ' px, scaled down from ' + out.from[0] + ' × ' + out.from[1] + ', because the full image is too large for this browser.' };
+      return { blob: blob, key: key, w: out.w, h: out.h, from: out.from, name: baseName(it.name) + '-' + suffix() + '.' + EXT[key] };
     } finally {
       c.width = c.height = 0;
     }
   }
+  // The flip and turn as they are now; a note about a saved file holds only while they stay the same.
+  function sig() { return [st.mirror, st.q, st.fine, cornersSel.value].join(); }
+
+  // ---------- canvases this browser can draw on ----------
+  // Safari leaves a canvas over its size limit (an area of 4096 × 4096 or 8192 × 8192 pixels on iPhones and
+  // iPads, depending on the version) blank instead of failing, so a pixel at its far corner is written and
+  // read back first.
+  // limit holds the largest area seen to work and the smallest seen to stay blank.
+  var limit = { ok: 0, bad: Infinity };
+  function newCanvas(w, h) {
+    var c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    return c;
+  }
+  function failedAt(a) {
+    limit.bad = Math.min(limit.bad, a);
+    if (limit.ok >= limit.bad) limit.ok = 0;
+  }
+  // The canvas's 2D context, or null when this browser cannot draw on it.
+  function usable(c) {
+    var a = c.width * c.height, g = null;
+    if (a < limit.bad) {
+      try {
+        g = c.getContext('2d');
+        if (g) {
+          var x = c.width - 1, y = c.height - 1;
+          g.fillStyle = '#010203';
+          g.fillRect(x, y, 1, 1);
+          if (g.getImageData(x, y, 1, 1).data[3] === 255) g.clearRect(x, y, 1, 1); else g = null;
+        }
+      } catch (e) { g = null; }
+    }
+    if (g) limit.ok = Math.max(limit.ok, a); else failedAt(a);
+    return g;
+  }
+  function fits(w, h) {
+    var a = w * h;
+    if (a <= limit.ok) return true;
+    if (a >= limit.bad) return false;
+    var c = newCanvas(w, h), ok = !!usable(c);
+    c.width = c.height = 0;
+    return ok;
+  }
+  // The largest scale below 1 at which this browser can draw both a copy of the picture and the result:
+  // down by half the area at a time from 16 megapixels until both fit, then up towards the limit.
+  function fitScale(it) {
+    function at(k) {
+      var sw = Math.max(1, Math.floor(it.w * k)), sh = Math.max(1, Math.floor(it.h * k)), geo = geometry(sw, sh);
+      return fits(sw, sh) && fits(geo.W, geo.H) ? { sw: sw, sh: sh, geo: geo } : null;
+    }
+    var full = geometry(it.w, it.h), area = Math.max(it.w * it.h, full.W * full.H);
+    var lo = 0, hi = 1, best = null, k = Math.min(0.99, Math.sqrt(Math.max(limit.ok, 16e6) / area));
+    while (!best && k * Math.min(it.w, it.h) >= 16) {
+      if ((best = at(k))) lo = k; else { hi = k; k /= Math.SQRT2; }
+    }
+    while (best && hi / lo > 1.01) {
+      var m = (lo + hi) / 2, r = at(m);
+      if (r) { best = r; lo = m; } else hi = m;
+    }
+    return best;
+  }
+  // Whether a copy came back blank, as one made on a canvas the browser could not draw on does:
+  // an opaque picture must stay opaque, and any picture must show something. It is looked at up to
+  // 1024 px a side and drawn smoothly, so a small mark on a transparent picture still shows.
+  function blank(src, opaque) {
+    var k = Math.min(1, 1024 / Math.max(src.width, src.height));
+    var w = Math.max(1, Math.round(src.width * k)), h = Math.max(1, Math.round(src.height * k));
+    var c = newCanvas(w, h), g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(src, 0, 0, w, h);
+    var d = g.getImageData(0, 0, w, h).data, any = false, solid = true;
+    c.width = c.height = 0;
+    for (var i = 3; i < d.length; i += 4) { if (d[i]) any = true; if (d[i] < 250) solid = false; }
+    return opaque ? !solid : !any;
+  }
+  // The picture flipped and turned on a canvas: at full size where this browser can draw it, else the
+  // largest copy it can. from is the full size when it was scaled down.
+  async function render(it) {
+    var geo = geometry(it.w, it.h), src = null, c, g;
+    if (geo.W > MAX_SIDE || geo.H > MAX_SIDE || geo.W * geo.H > MAX_OUT) {
+      throw friendly('Turned this way the image would be ' + geo.W + ' × ' + geo.H + ' pixels, more than this tool can create (16,384 per side, 100 megapixels). Crop off the corners instead.');
+    }
+    if (it.canvas || it.w * it.h < limit.bad) {
+      try { src = await sourceOf(it); } catch (e) {
+        if (!(e && e.code === 'TOO_BIG')) throw e;
+        failedAt(it.w * it.h);
+      }
+    }
+    if (src) {
+      c = newCanvas(geo.W, geo.H);
+      if ((g = usable(c))) {
+        draw(g, src, it.w, it.h, geo);
+        return { canvas: c, w: geo.W, h: geo.H, from: null };
+      }
+      c.width = c.height = 0;
+    }
+    var s = fitScale(it), copy = s && await scaledCopy(it, s.sw, s.sh);
+    c = copy && newCanvas(s.geo.W, s.geo.H);
+    g = c && usable(c);
+    if (!g) {
+      if (c) c.width = c.height = 0;
+      throw friendly('The image (' + geo.W + ' × ' + geo.H + ' pixels) is larger than this browser can handle. Try a desktop browser.');
+    }
+    draw(g, copy, s.sw, s.sh, s.geo);
+    return { canvas: c, w: s.geo.W, h: s.geo.H, from: [geo.W, geo.H] };
+  }
 
   // ---------- images ----------
+  async function resOf(it) {
+    if (!it.res) it.res = await TTImage.decode(it.file, { canvas: false, maxPixels: DECODE_MAX });
+    return it.res;
+  }
   // The full-size upright picture on the page. Only the previewed image keeps it.
   async function sourceOf(it) {
-    if (it.sample) return it.canvas;
     if (it.canvas) return it.canvas;
-    if (!it.res) it.res = await TTImage.decode(it.file, { canvas: false, maxPixels: DECODE_MAX });
-    it.canvas = await TTImage.toCanvas(it.res);
+    it.canvas = await TTImage.toCanvas(await resOf(it));
     return it.canvas;
+  }
+  // A smaller upright copy for a browser that cannot hold the full size, made in the decoder's worker;
+  // null when this browser cannot make that either.
+  async function scaledCopy(it, w, h) {
+    if (it.sample) return it.canvas;
+    if (it.copy && it.copy.width === w && it.copy.height === h) return it.copy;
+    if (it.copy) { it.copy.close(); it.copy = null; }
+    // null when the decoder cannot make it either (TOO_BIG).
+    function make() {
+      return resOf(it).then(function (res) { return TTImage.encode(res, 'png', { width: w, height: h }); })
+        .catch(function (e) { if (e && e.code === 'TOO_BIG') return null; throw e; });
+    }
+    var blob;
+    try { blob = await make(); } catch (e) {
+      // The decoder's worker was restarted (out of memory, say): open the file once more.
+      if (!(e && e.code === 'GONE')) throw e;
+      TTImage.release(it.res);
+      it.res = null;
+      blob = await make();
+    }
+    if (!blob) return null;
+    var bmp = await createImageBitmap(blob);
+    // A JPEG that is cut off is opaque, except where its data ends.
+    if (blank(bmp, !it.hasAlpha && (it.warnings || []).indexOf('truncated') < 0)) {
+      bmp.close();
+      return null;
+    }
+    it.copy = bmp;
+    return bmp;
   }
   function releaseSrc(it) {
     if (!it || it.sample) return;
     if (it.res) { TTImage.release(it.res); it.res = null; }
     if (it.canvas) { it.canvas.width = it.canvas.height = 0; it.canvas = null; }
+    if (it.copy) { it.copy.close(); it.copy = null; }
   }
   function viewSize(w, h) {
     var k = Math.min(1, VIEW_MAX / Math.max(w, h));
@@ -484,8 +627,7 @@ faq:
   async function viewOf(it) {
     if (it.view) return it.view;
     var vs = viewSize(it.w, it.h);
-    if (!it.res) it.res = await TTImage.decode(it.file, { canvas: false, maxPixels: DECODE_MAX });
-    var blob = await TTImage.encode(it.res, it.hasAlpha ? 'png' : 'bmp', { width: vs[0], height: vs[1] });
+    var blob = await TTImage.encode(await resOf(it), it.hasAlpha ? 'png' : 'bmp', { width: vs[0], height: vs[1] });
     it.view = await createImageBitmap(blob);
     return it.view;
   }
@@ -510,12 +652,20 @@ faq:
     var token = ++paintToken, it = current || sample, v;
     try { v = it.sample ? it.canvas : await viewOf(it); } catch (e) { if (token === paintToken) showError(it, e); return; }
     if (token !== paintToken) return;
-    var vw = v.width, vh = v.height, geo = geometry(vw, vh);
+    var vw = v.width, vh = v.height, dw = vw, dh = vh, geo = geometry(vw, vh), side = Math.ceil((vw + vh) / Math.SQRT2);
+    // The After canvas stays within what this browser can draw on; no turn needs more than side × side.
+    if (!fits(side, side)) {
+      for (var k = 0.9; !fits(geo.W, geo.H) && k > 0.05; k *= 0.9) {
+        dw = Math.max(1, Math.round(vw * k));
+        dh = Math.max(1, Math.round(vh * k));
+        geo = geometry(dw, dh);
+      }
+    }
     beforeCv.width = vw; beforeCv.height = vh;
     beforeCv.getContext('2d').drawImage(v, 0, 0);
     afterCv.width = geo.W; afterCv.height = geo.H;
     // The After preview shows what will be saved: a JPEG's transparent areas are filled in.
-    draw(afterCv.getContext('2d'), v, vw, vh, geo, NO_ALPHA[outKey(it)] ? cornerFill() || '#ffffff' : null);
+    draw(afterCv.getContext('2d'), v, dw, dh, geo, NO_ALPHA[outKey(it)] ? cornerFill() || '#ffffff' : null);
     fit(beforeCv);
     fit(afterCv);
   }
@@ -557,8 +707,9 @@ faq:
     setText(noteEl, notesFor(it, key, geo).join(' '));
     updateRows();
   }
+  function warnings(it) { return (it.warnings || []).map(function (w) { return WARN[w]; }); }
   function notesFor(it, key, geo) {
-    var notes = [], fill = cornerFill();
+    var notes = warnings(it), fill = cornerFill();
     if (usesOwnQuality(it, key)) notes.push('Saved at quality ' + it.jpegQ + ', the setting this JPEG was saved with.');
     if (fmtSel.value === 'webp' && key !== 'webp') notes.push('Your browser cannot save WebP images, so this is a PNG.');
     if (NO_ALPHA[key] && (it.hasAlpha || (!geo.exact && !geo.crop && !fill))) notes.push(LABEL[key] + ' cannot store transparency, so transparent areas become ' + (fill ? 'the corner colour' : 'white') + '.');
@@ -644,11 +795,18 @@ faq:
     var geo = geometry(it.w, it.h), key = outKey(it), f = TTImage.formats[it.fmt];
     return it.w + '\u00a0×\u00a0' + it.h + ' ' + (f ? f.label : '') + ' → ' + geo.W + '\u00a0×\u00a0' + geo.H + ' ' + LABEL[key];
   }
+  // A file's own notes stand out in a batch without a preview: the decoder's warnings, and a save
+  // that had to be scaled down, while the flip and turn stay as they were for it.
+  function rowNote(it) {
+    var notes = warnings(it);
+    if (it.saved && !it.error && it.saved.sig === sig()) notes.push(it.saved.text);
+    return notes.join(' ');
+  }
   function buildRow(it) {
     var li = document.createElement('li');
     li.className = 'fl-row';
     li.dataset.id = it.id;
-    li.innerHTML = '<span class="fl-thumb"><img alt=""></span><div class="fl-row-main"><button type="button" class="fl-pick"></button><div class="fl-row-info"></div></div>' +
+    li.innerHTML = '<span class="fl-thumb"><img alt=""></span><div class="fl-row-main"><button type="button" class="fl-pick"></button><div class="fl-row-info"></div><div class="fl-row-note"></div></div>' +
       '<span class="fl-acts"><button type="button" class="btn secondary small fl-dl">Download</button>' +
       '<button type="button" class="btn secondary small fl-x"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span>';
     $('img', li).src = it.thumb;
@@ -670,6 +828,7 @@ faq:
       var info = $('.fl-row-info', it.el);
       setText(info, rowInfo(it));
       info.classList.toggle('is-error', !!it.error);
+      setText($('.fl-row-note', it.el), rowNote(it));
       $('img', it.el).style.transform = tf;
       TT.$$('button', it.el).forEach(function (b) { b.disabled = busy; });
     });
@@ -751,7 +910,8 @@ faq:
       var r = await produce(it);
       it.error = null;
       TT.download(r.name, r.blob);
-      statusEl.textContent = 'Saved ' + r.name + ' (' + r.w + ' × ' + r.h + ' px, ' + fmtBytes(r.blob.size) + ').';
+      statusEl.textContent = 'Saved ' + r.name + ' (' + r.w + ' × ' + r.h + ' px, ' + fmtBytes(r.blob.size) + ')' + (r.from
+        ? ', scaled down from ' + r.from[0] + ' × ' + r.from[1] + ' because the full image is too large for this browser.' : '.');
     } catch (e) {
       statusEl.textContent = '';
       errBox.textContent = e && (e.friendly || e.code) ? e.message : 'The image could not be saved, probably because this device ran out of memory.';
@@ -770,26 +930,33 @@ faq:
       errBox.textContent = 'Your browser cannot copy images to the clipboard. Use Download instead.';
       return;
     }
-    var it = current || sample, geo = geometry(it.w, it.h);
+    var it = current || sample, out = null, why = null;
     var png = (async function () {
-      var src = await sourceOf(it), c = document.createElement('canvas');
-      c.width = geo.W; c.height = geo.H;
-      draw(c.getContext('2d'), src, it.w, it.h, geo);
-      try { return await TTImage.encode(c, 'png'); } finally { c.width = c.height = 0; }
+      try {
+        out = await render(it);
+        return await TTImage.encode(out.canvas, 'png');
+      } catch (e) {
+        why = e;
+        throw e;
+      } finally {
+        if (out) out.canvas.width = out.canvas.height = 0;
+      }
     })();
+    png.catch(function () { /* reported below */ });
     try {
       // The clipboard takes PNG in every browser, whatever format is chosen for downloads.
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
       TT.flash(copyBtn, 'Copied!');
-      statusEl.textContent = 'Copied a ' + geo.W + ' × ' + geo.H + ' px PNG. Paste it into any app that accepts images.';
+      statusEl.textContent = 'Copied a ' + out.w + ' × ' + out.h + ' px PNG' + (out.from ? ', scaled down from ' + out.from[0] + ' × ' + out.from[1] +
+        ' because the full image is too large for this browser' : '') + '. Paste it into any app that accepts images.';
     } catch (e) {
-      errBox.textContent = 'The browser did not allow copying the image. Use Download instead.';
+      errBox.textContent = why && (why.friendly || why.code) ? why.message : 'The browser did not allow copying the image. Use Download instead.';
     }
   });
 
   zipBtn.addEventListener('click', async function () {
     if (items.length < 2 || !ready()) return;
-    var had = document.activeElement === zipBtn, todo = items.slice(), files = [], bad = 0;
+    var had = document.activeElement === zipBtn, todo = items.slice(), files = [], bad = 0, scaled = 0;
     busy = true;
     errBox.textContent = '';
     updateRows();
@@ -800,6 +967,7 @@ faq:
         try {
           var r = await produce(it);
           it.error = null;
+          if (r.from) scaled++;
           files.push({ name: r.name, data: r.blob, date: it.file.lastModified ? new Date(it.file.lastModified) : undefined });
         } catch (e) {
           it.error = e && (e.friendly || e.code) ? e.message : 'This image could not be saved.';
@@ -814,6 +982,7 @@ faq:
         var zipName = (st.mirror ? 'flipped' : 'rotated') + '-images.zip', zip = await TTZip.create(files, { compress: 'auto' });
         TT.download(zipName, zip);
         statusEl.textContent = 'Saved ' + zipName + ': ' + files.length + (files.length === 1 ? ' image, ' : ' images, ') + fmtBytes(zip.size) + '.' +
+          (scaled ? ' ' + scaled + (scaled === 1 ? ' image was' : ' images were') + ' scaled down because the full size is too large for this browser; see the list.' : '') +
           (bad ? ' ' + bad + (bad === 1 ? ' image' : ' images') + ' could not be saved; see the list.' : '');
       } else {
         statusEl.textContent = 'None of the images could be saved; see the list.';
@@ -835,6 +1004,7 @@ faq:
     var it = { id: nextId++, file: file, name: name, size: file.size, res: res, el: null, error: null };
     try {
       it.fmt = res.format; it.w = res.width; it.h = res.height; it.hasAlpha = !!res.hasAlpha;
+      it.warnings = (res.warnings || []).filter(function (w) { return WARN[w]; });
       it.orientation = res.orientation || 1; it.animated = !!res.animated; it.pages = res.images || 1;
       it.jpegQ = it.fmt === 'jpeg' ? jpegQuality(new Uint8Array(await file.slice(0, 262144).arrayBuffer())) : null;
       var k = Math.min(1, 80 / Math.max(it.w, it.h));
@@ -863,7 +1033,7 @@ faq:
     statusEl.textContent = added.length > 1 ? 'Added ' + added.length + ' images.' : '';
     added.forEach(function (it) { items.push(it); if (it !== added[0]) { TTImage.release(it.res); it.res = null; } });
     if (bad.length === 1) errBox.textContent = '“' + bad[0].name + '” could not be opened. ' + (bad[0].why || 'It is not an image this browser can open.');
-    else if (bad.length) errBox.textContent = bad.length + ' files could not be opened: ' + bad.map(function (b) { return b.name; }).join(', ') + '.';
+    else if (bad.length) errBox.textContent = bad.length + ' files could not be opened: ' + bad.map(function (b) { return b.name + (b.why ? ' (' + b.why.replace(/\.$/, '') + ')' : ''); }).join('; ') + '.';
     if (added.length) {
       select(added[0]);
       if (hadFocus) $('#fl-another').focus();

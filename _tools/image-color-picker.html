@@ -36,7 +36,8 @@ howto: |
   rgba(255, 0, 0, 0.5). The CMYK figures use the plain formula
   K = 1 − max(R, G, B) ÷ 255, which knows nothing about ink or paper;
   printers convert with a profile for their press, so ask them for exact
-  values.
+  values. To convert a code you already have, or to check its contrast with
+  white and black text, use the [HEX to RGB converter](/hex-to-rgb/).
 
   ## One pixel or an average
 
@@ -242,6 +243,13 @@ faq:
   var histList = $('#icp-history'), palList = $('#icp-palette'), palNote = $('#icp-pal-note');
 
   var DECODE_MAX = 40e6, SCALED_MAX = 16e6, VIEW_MAX = 2048, SAMPLE_MAX = 262144, HISTORY_MAX = 30, R = 5;
+  // What the decoder warns about a file, said in the line under its name and read out when it opens.
+  var WARN = {
+    truncated: 'The file seems to be cut off, so part of the picture may be blank.',
+    hdr: 'This is an HDR photo. The colours are read from a standard-range copy made without tone mapping, so they can differ from what an HDR screen shows.',
+    'hdr-mapped': 'This is an HDR image. The colours are read from the standard-range copy the browser made of it, so they can differ from what an HDR screen shows.',
+    foreignObject: 'The HTML inside this SVG (a <foreignObject> element) is left out: this browser does not allow it to be drawn.'
+  };
   // img: { name, w, h, data (sRGB as the browser shows it), raw (stored values, when asked for), view, res, file, orientation }
   var img = null, aim = { x: 0, y: 0 }, cur = null, history = [], palette = [], palFor = '', loadRun = 0, dragging = null;
 
@@ -814,7 +822,7 @@ faq:
       try { data = readPixels(src, w, h); } catch (e) { throw Object.assign(new Error('The image is too large for this browser to read its pixels.'), { code: 'TOO_BIG', browser: true }); }
       var k = Math.min(1, VIEW_MAX / Math.max(w, h));
       var view = k === 1 ? src : await createImageBitmap(src, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'high' });
-      return { w: w, h: h, data: data, view: view, res: res, fmt: res.format, orientation: res.orientation || 1 };
+      return { w: w, h: h, data: data, view: view, res: res, fmt: res.format, orientation: res.orientation || 1, warnings: res.warnings || [] };
     } catch (e) {
       TTImage.release(res);
       throw e;
@@ -852,17 +860,18 @@ faq:
     if (run !== loadRun) { if (o && o.res) TTImage.release(o.res); return; }
     if (!o) { errBox.textContent = '“' + name + '” could not be opened. ' + why; return; }
     setImage({ name: name, w: o.w, h: o.h, data: o.data, raw: null, view: o.view, res: o.res, file: file, orientation: o.orientation, profile: profile });
-    var f = TTImage.formats[o.fmt];
+    var f = TTImage.formats[o.fmt], notes = (o.warnings || []).filter(function (w) { return WARN[w]; }).map(function (w) { return WARN[w] + ' '; }).join('');
     setText($('#icp-name'), name);
     setText($('#icp-info'), o.scaledFrom
       ? 'Read at ' + o.w + ' × ' + o.h + ' px, scaled down from ' + o.scaledFrom[0] + ' × ' + o.scaledFrom[1] + (o.byBrowser ? ' because the full image is too large for this browser' : ', as images over ' + DECODE_MAX / 1e6 + ' megapixels are read at a smaller size') + '; positions are in the smaller copy.'
-      : o.w + ' × ' + o.h + ' px' + (f ? ', ' + f.label : '') + (profile ? ', ' + profile + ' profile' : '') + '. Drop or paste another image to replace it.');
+      : o.w + ' × ' + o.h + ' px' + (f ? ', ' + f.label : '') + (profile ? ', ' + profile + ' profile' : '') + '. ' + notes + 'Drop or paste another image to replace it.');
     var c = colourAt(aim.x, aim.y, sampleSize());
     c.fromImage = true;
     img.picked = { x: aim.x, y: aim.y };
     show(c, whereText(aim.x, aim.y));
     placeMarker(aim.x, aim.y);
-    say('Opened ' + name + ', ' + o.w + ' by ' + o.h + ' pixels.');
+    // The line under the name is not read out, so the decoder's notes are said here too.
+    say(('Opened ' + name + ', ' + o.w + ' by ' + o.h + ' pixels. ' + notes).trim());
   }
   function sample() {
     var c = document.createElement('canvas');
