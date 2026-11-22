@@ -484,6 +484,13 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   f = await save();
   assert.equal(f.name, 'cut-copy.jpg');
   assert.deepEqual(dims(f.buf), [120, 90]);
+  // damaged.png is a 64x48 RGB PNG whose image data breaks half way (a copy of the
+  // image converter's fixture): it is saved with a note, not refused as a blank picture.
+  await page.click('#fl-clear');
+  await load(['damaged.png']);
+  assert.ok((await text('#fl-note')).startsWith('The file seems to be damaged, so part of the picture may be blank.'), await text('#fl-note'));
+  f = await save();
+  assert.deepEqual(dims(f.buf), [64, 48]);
   for (const [n, note] of [['pq.avif', MAPPED], ['hdr-pq.heic', HDR]]) {
     await page.click('#fl-clear');
     await load([n]);

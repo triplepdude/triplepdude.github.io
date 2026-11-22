@@ -525,6 +525,45 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   near(px[1], [224, 0, 0, 255], 2, 'last column of the red half');
   assert.equal(px[2][3], 0, 'first column past the edge is transparent');
 
+  // ---------- A damaged PNG, ICO files holding a PNG, colour profiles ----------
+  // (made by make_decoder_fixtures.py in this folder)
+  //   damaged.png       64x48 RGB gradient (x*4, y*5, 128) damaged from the middle of its
+  //                     image data: the checksum fails and the bottom half is left blank
+  //   png512-in.ico     its directory says 256x256, it holds a 512x512 PNG: left half
+  //                     (20,60,200), right half (240,140,20)
+  //   png48-dir256.ico  its directory says 256x256, it holds a 48x48 (20,160,60) PNG
+  //   p3.png            Display P3 profile in an iCCP chunk
+  //   jpg-to-png/p3.jpg, webp-to-png/p3.webp   Display P3 profile
+  //   image-to-pdf/p3-split.jpg   Display P3 profile over several APP2 segments
+  await page.click('#imc-clear');
+  await page.selectOption('#imc-format', 'jpeg');
+  const other = (dir, f) => path.join(fixtures, '..', dir, f);
+  await page.setInputFiles('#imc-file', [fx('damaged.png'), fx('png512-in.ico'), fx('png48-dir256.ico'), fx('p3.png'),
+    other('jpg-to-png', 'p3.jpg'), other('webp-to-png', 'p3.webp'), other('image-to-pdf', 'p3-split.jpg'), fx('trailing.png')]);
+  await page.waitForFunction(() => /^8 of 8 converted\.$/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 30000 });
+  assert.match(await rowText(0), /damaged\.jpg PNG 64×48.*seems to be damaged, so part of the picture may be blank/);
+  assert.doesNotMatch(await rowText(0), /Transparent areas/, 'an RGB PNG has no transparent areas to fill');
+  near((await pixels((await download(0)).data, [[32, 5]]))[0], [128, 25, 128, 255], 12, 'damaged.png, top half');
+  assert.match(await rowText(1), /png512-in\.jpg ICO 512×512/);
+  assert.doesNotMatch(await rowText(1), /Transparent areas/, 'the PNG inside the ICO is drawn, not a blank picture');
+  px = await pixels((await download(1)).data, [[100, 256], [400, 256]]);
+  near(px[0], [20, 60, 200, 255], 10, 'PNG in an ICO, left half');
+  near(px[1], [240, 140, 20, 255], 10, 'PNG in an ICO, right half');
+  assert.match(await rowText(2), /png48-dir256\.jpg ICO 48×48/);
+  near((await pixels((await download(2)).data, [[24, 24]]))[0], [20, 160, 60, 255], 10, '48 px PNG in an ICO');
+  for (const k of [3, 4, 5, 6]) assert.match(await rowText(k), /Colours were converted to sRGB from the file’s wide-gamut profile\./, `row ${k}: ${await rowText(k)}`);
+  assert.doesNotMatch(await rowText(7), /Colours were converted|damaged/, 'an untagged, intact PNG');
+  // An ICO holding a PNG over the 100-megapixel limit is refused by that PNG's size.
+  const bigIco = await page.evaluate(async () => {
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0x75, 0x30, 0, 0, 0x75, 0x30, 8, 2, 0, 0, 0, 0, 0, 0, 0]);
+    const ico = new Uint8Array(22 + png.length), dv = new DataView(ico.buffer);
+    dv.setUint16(2, 1, true); dv.setUint16(4, 1, true); dv.setUint16(10, 1, true); dv.setUint16(12, 32, true);
+    dv.setUint32(14, png.length, true); dv.setUint32(18, 22, true);
+    ico.set(png, 22);
+    try { TTImage.release(await TTImage.decode(new File([ico], 'big.ico'), { canvas: false })); return 'decoded'; } catch (e) { return e.code; }
+  });
+  assert.equal(bigIco, 'TOO_BIG', 'a 30000x30000 PNG inside an ICO');
+
   // A setting changed while files are still decoding: each file is decoded
   // once, not once per setting (the second decode used to leak the first).
   await page.click('#imc-clear');

@@ -368,11 +368,13 @@ faq:
   var QUALITY_FLOOR = 0.4, EXACT_FLOOR = 0.05;
   // What the decoder found in the file itself, in the image converter's words.
   var CUT = 'The file seems to be cut off, so part of the picture may be blank.';
+  var DAMAGED = 'The file seems to be damaged, so part of the picture may be blank.';
   var HDR = {
     hdr: 'This is an HDR photo. It was converted without tone mapping, so it may look flat or washed out compared with an HDR screen.',
     'hdr-mapped': 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.'
   };
   function isCut(it) { return !!it.warnings && it.warnings.indexOf('truncated') >= 0; }
+  function isDamaged(it) { return !!it.warnings && it.warnings.indexOf('damaged') >= 0; }
 
   var items = [], current = null, nextId = 1, pastedCount = 0, lastEdited = 'w', renderToken = 0;
   var result = null, resultUrl = null, busy = false, addError = '', renderError = '';
@@ -706,7 +708,7 @@ faq:
     } finally {
       if (done) done();
     }
-    var notes = isCut(it) ? [CUT] : [];
+    var notes = isCut(it) ? [CUT] : isDamaged(it) ? [DAMAGED] : [];
     if (s.fmt !== 'same' && KEY_OF[s.fmt] !== key) notes.push('Your browser cannot save ' + LABEL[KEY_OF[s.fmt]] + ' images, so this is a ' + LABEL[key] + ' file.');
     if (NO_ALPHA[key] && it.hasAlpha && !bgFill(s)) notes.push(LABEL[key] + ' cannot store transparency, so the background is white. Save as PNG or WebP to keep it transparent.');
     else if (t.fit === 'pad' && s.bg === 'transparent' && NO_ALPHA[key]) notes.push(LABEL[key] + ' cannot store transparency, so the background is white. Save as PNG or WebP to keep it transparent.');
@@ -836,8 +838,8 @@ faq:
       var info = $('.ri-row-info', it.el);
       info.textContent = rowInfo(it, s);
       info.classList.toggle('is-error', !!it.error);
-      // A cut-off file is named in its row too, so it stands out in a batch without a preview.
-      $('.ri-row-note', it.el).textContent = isCut(it) && !it.error ? CUT : '';
+      // A cut-off or damaged file is named in its row too, so it stands out in a batch without a preview.
+      $('.ri-row-note', it.el).textContent = it.error ? '' : isCut(it) ? CUT : isDamaged(it) ? DAMAGED : '';
       $('.ri-pick', it.el).disabled = busy;
       $('.ri-dl', it.el).disabled = busy;
       $('.ri-x', it.el).disabled = busy;

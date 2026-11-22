@@ -283,6 +283,7 @@ faq:
   // What the decoder warns about a file. It is still saved; the note is shown in its row and with the options.
   var WARN = {
     truncated: 'The file seems to be cut off, so part of the picture may be blank.',
+    damaged: 'The file seems to be damaged, so part of the picture may be blank.',
     hdr: 'This is an HDR photo. It is saved without tone mapping, so it may look flat or washed out compared with an HDR screen.',
     'hdr-mapped': 'This is an HDR image. The browser mapped it into standard range, so highlights look less brilliant than on an HDR screen.',
     foreignObject: 'The HTML inside this SVG (a <foreignObject> element) is left out: this browser does not allow it to be drawn.'
@@ -605,8 +606,8 @@ faq:
     }
     if (!blob) return null;
     var bmp = await createImageBitmap(blob);
-    // A JPEG that is cut off is opaque, except where its data ends.
-    if (blank(bmp, !it.hasAlpha && (it.warnings || []).indexOf('truncated') < 0)) {
+    // A JPEG that is cut off, or a PNG that is damaged, is opaque except where its data ends.
+    if (blank(bmp, !it.hasAlpha && !(it.warnings || []).some(function (w) { return w === 'truncated' || w === 'damaged'; }))) {
       bmp.close();
       return null;
     }
