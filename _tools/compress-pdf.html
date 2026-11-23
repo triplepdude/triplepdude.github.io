@@ -1,6 +1,6 @@
 ---
 title: "Compress PDF: Reduce PDF File Size Online"
-description: Make PDF files smaller by shrinking oversized pictures, keeping text, links, forms and tags. Levels or a size limit; it runs in your browser.
+description: Compress PDF files by shrinking oversized pictures while keeping text, links, forms and tags. Pick a level or a size limit; nothing is uploaded.
 category: Image & PDF
 keywords: [compress pdf, pdf compress, pdf compressor, reduce pdf size, pdf size reducer, reduce pdf file size, how to compress a pdf, compress pdf to 1mb, compress pdf to 100kb]
 howto: |
@@ -43,7 +43,7 @@ howto: |
 
   ## Getting under 1 MB, or any limit
 
-  **Fit a size** tries the levels from the sharpest, 220 ppi, down to
+  **Fit a size** searches seven levels, from the sharpest, 220 ppi, down to
   72 ppi at quality 50, and keeps the sharpest copy that fits. 1 MB counts
   as 1,000,000 bytes, so the copy also passes a limit of 1,048,576. If even
   the smallest copy is too big, what is left is mostly text, fonts or
@@ -58,7 +58,8 @@ howto: |
   - Its pictures are already at or below the level: try **Strong**.
   - It is a PDF/X file for print, whose CMYK pictures are kept as they are.
 
-  A copy is offered only when it is at least 1% smaller.
+  A copy is offered only when it is at least 1% smaller, or when **Fit a
+  size** gets it under the limit you chose.
 
   ## Before you send the copy
 
@@ -75,7 +76,7 @@ faq:
   - q: Is my PDF uploaded to a server?
     a: "No. The page reads, compresses and saves your files with JavaScript on your own device, and nothing is kept after you close the tab. Online compressors such as Smallpdf, iLovePDF and Adobe's upload the file; Smallpdf deletes it after an hour and keeps its Moderate and Strong levels for paying users."
   - q: Does compressing a PDF lower its quality?
-    a: Only pictures change, and only those sharper than the level needs. Text and drawings stay as sharp as before at any zoom. At Recommended, photos and scans stay sharp on screen and in office prints, while Strong softens small print in scans; the preview lets you switch between the copy and the original at actual size.
+    a: "Only pictures change: those sharper than the level needs are reduced to it, and photos stored without loss become JPEGs. Text and drawings stay as sharp as before at any zoom. At Recommended, photos and scans stay sharp on screen and in office prints, while Strong softens small print in scans; the preview lets you switch between the copy and the original at actual size."
   - q: Can I compress a password-protected PDF?
     a: Yes, with the password that opens it. The copy keeps the same passwords, encryption and restrictions. A file whose author forbids changes also needs its permissions password, the second password set when it was protected.
   - q: How big can an email attachment be?
@@ -987,8 +988,9 @@ faq:
 
     function newDict(ctx, c, entries) {
       var d = ctx.obj({});
-      var drop = { Length: 1, Filter: 1, DecodeParms: 1, Width: 1, Height: 1, BitsPerComponent: 1, ColorSpace: 1, Decode: 1, SMaskInData: 1 };
-      c.obj.dict.entries().forEach(function (kv) { if (!drop[kv[0].decodeText()]) d.set(kv[0], kv[1]); });
+      // An array, not an object: a key such as /constructor must not be taken for one of these.
+      var drop = ['Length', 'Filter', 'DecodeParms', 'Width', 'Height', 'BitsPerComponent', 'ColorSpace', 'Decode', 'SMaskInData'];
+      c.obj.dict.entries().forEach(function (kv) { if (drop.indexOf(kv[0].decodeText()) < 0) d.set(kv[0], kv[1]); });
       Object.keys(entries).forEach(function (k) { if (entries[k] !== undefined) d.set(N(k), entries[k]); });
       return d;
     }
@@ -1494,13 +1496,16 @@ faq:
           });
         }
       };
+      // A buffer the browser cannot allocate ("Array buffer allocation failed", "out of memory")
+      // is a lack of memory, not a damaged or missing file.
+      var memory = function (e) { return !!e && (e.name === 'RangeError' || e.name === 'InternalError') && /memory|allocat/i.test(String(e.message)); };
       var holder = { bytes: null };
-      try { holder.bytes = new Uint8Array(await msg.file.arrayBuffer()); } catch (readErr) { scope.postMessage({ type: 'error', id: id, code: 'GONE' }); return; }
+      try { holder.bytes = new Uint8Array(await msg.file.arrayBuffer()); } catch (readErr) { scope.postMessage({ type: 'error', id: id, code: memory(readErr) ? 'MEMORY' : 'GONE' }); return; }
       try {
         var r = await compressKit(scope.PDFLib, unlocker, io).run(holder, msg.password || '', msg.settings);
         scope.postMessage({ type: 'done', id: id, result: r });
       } catch (err) {
-        scope.postMessage({ type: 'error', id: id, code: err && err.code || 'READ', reason: err && err.reason, restrictions: err && err.restrictions, message: String(err && err.message || err) });
+        scope.postMessage({ type: 'error', id: id, code: err && err.code || (memory(err) ? 'MEMORY' : 'READ'), reason: err && err.reason, restrictions: err && err.restrictions, message: String(err && err.message || err) });
       }
     }
   }
@@ -1522,7 +1527,7 @@ faq:
     recommended: { ppi: 150, quality: 75, text: 'Pictures sharper than 150 ppi are reduced to it, at quality 75. Sharp on screens and in office prints: right for email and uploads.' },
     strong: { ppi: 100, quality: 60, text: 'Pictures sharper than 100 ppi are reduced to it, at quality 60. The smallest files; small print in scans turns soft.' },
     custom: { text: 'Choose the resolution and JPEG quality yourself.' },
-    fit: { text: 'Tries the levels from sharpest to smallest and keeps the sharpest copy within the size you choose below. 1 MB is 1,000,000 bytes here.' }
+    fit: { text: 'Searches the levels from 220 down to 72 ppi for the sharpest copy within the size you choose below. 1 MB is 1,000,000 bytes here.' }
   };
   var LADDER = [{ ppi: 220, quality: 85 }, { ppi: 200, quality: 80 }, { ppi: 150, quality: 75 }, { ppi: 120, quality: 70 },
     { ppi: 100, quality: 60 }, { ppi: 85, quality: 55 }, { ppi: 72, quality: 50 }];
@@ -1548,12 +1553,16 @@ faq:
     }
     return false;
   }
-  var lastSaid = '';
+  // Messages that come within a moment of each other are said together, so that a second one
+  // does not cut off the first.
+  var lastSaid = '', sayQueue = [], sayTimer = 0;
   function say(text, force) {
     if (!text || (text === lastSaid && !force)) return;
     lastSaid = text;
+    sayQueue.push(text);
+    if (sayTimer) return;
     statusEl.textContent = '';
-    setTimeout(function () { statusEl.textContent = text; }, 60);
+    sayTimer = setTimeout(function () { sayTimer = 0; statusEl.textContent = sayQueue.join(' '); sayQueue = []; }, 60);
   }
   function setError(t) { errBox.textContent = t || ''; }
   // Digits only, from any script's digit block; anything else (a decimal comma or point, a
@@ -1664,7 +1673,8 @@ faq:
       var x = c.getContext('2d', { willReadFrequently: true });
       x.fillStyle = '#fff';
       x.fillRect(0, 0, m.w, m.h);
-      return page.render({ canvasContext: x, canvas: c, viewport: page.getViewport({ scale: 1 }), background: '#ffffff', annotationMode: 0 }).promise.then(function () {
+      // The print intent draws without requestAnimationFrame, which a background tab pauses.
+      return page.render({ canvasContext: x, canvas: c, viewport: page.getViewport({ scale: 1 }), background: '#ffffff', annotationMode: 0, intent: 'print' }).promise.then(function () {
         var px = x.getImageData(0, 0, m.w, m.h).data.buffer;
         c.width = c.height = 1;
         return px;
@@ -1813,7 +1823,7 @@ faq:
     f.status = 'error';
     if (code === 'UNSUPPORTED') f.text = Object.prototype.hasOwnProperty.call(REASONS, err.reason) ? REASONS[err.reason] : REASONS.revision;
     else if (code === 'GONE') f.text = 'The file could not be read. It may have been moved or deleted.';
-    else if (code === 'CRASH') f.text = 'The browser ran out of memory. Try this file on a computer, or split it first.';
+    else if (code === 'CRASH' || code === 'MEMORY') f.text = 'The browser ran out of memory. Try this file on a computer, or split it first.';
     else if (code === 'NOPAGES') f.text = 'This PDF has no pages, so there is nothing to compress.';
     else if (code === 'CHECK') f.text = 'The compressed copy did not open correctly, so it is not offered. Your original is unchanged.';
     else f.text = 'This file is damaged or is not a valid PDF.';
@@ -1855,6 +1865,9 @@ faq:
     if (main === 'bw') return 'Its pictures are black-and-white scans, which are already compressed as far as they go.';
     if (main === 'cmyk') return 'Its CMYK pictures must stay CMYK in a ' + (r.standard || 'print') + ' file, so they are left as they are.';
     if (main === 'sharp' || main === 'small') return 'Its pictures are already at or below this level’s resolution, or too small to matter.';
+    if (main === 'drawn') return 'Its pictures are drawings or screenshots, which stay lossless, and none is sharper than this level.';
+    if (main === 'kind') return 'Its pictures are of kinds this page leaves as they are, such as indexed colours, 16-bit samples or colour masks.';
+    if (main === 'decode' || main === 'damaged') return 'Its pictures could not be decoded here, so they are left as they are.';
     if (main === 'jpx') return 'Its pictures are JPEG 2000, which this page leaves as they are.';
     if (main === 'unplaced') return 'Its pictures are used in ways this page leaves alone, such as patterns and masks.';
     if (main === 'huge') return 'Its pictures are too large to decode in this browser.';
@@ -1903,6 +1916,7 @@ faq:
   }
   function needsPassword(f) { return f.status === 'needs-password' || f.status === 'needs-owner'; }
   function refreshUi() {
+    var had = document.activeElement;
     var outs = files.filter(function (f) { return f.output; });
     listEl.hidden = !files.length;
     root.classList.toggle('has-files', files.length > 0);
@@ -1912,15 +1926,26 @@ faq:
     var blocked = !running && !!settings().error;
     cancelBtn.hidden = !pending || blocked;
     goBtn.hidden = pending || !files.some(function (f) { return f.status === 'cancelled'; });
-    if (!files.some(needsPassword)) hideUnlock();
+    // The password box stays while a typed password is being tried, so the focus stays in it.
+    var trying = !!passwordRound && passwordRound.some(function (f) { return files.indexOf(f) >= 0 && (f.status === 'waiting' || f.status === 'working'); });
+    if (!files.some(needsPassword) && !trying) hideUnlock();
     var s = summary();
     if (sumEl.textContent !== s) sumEl.textContent = s;
+    // The focus was on a control that is now hidden (Cancel when the run ends, the password box
+    // once every file is open): it moves on to the copies, never to a button that clears them.
+    if (had && had !== document.body && root.contains(had) && (had.hidden || had.closest('[hidden]'))) {
+      var dl = files.filter(function (f) { return f.output; }).map(function (f) { return f.dl; })[0];
+      (!zipBtn.hidden ? zipBtn : dl || $('#cp-choose')).focus();
+    }
   }
   function summary() {
     if (!files.length) return '';
     var outs = files.filter(function (f) { return f.output; });
     var left = files.filter(function (f) { return f.status === 'waiting' || f.status === 'working'; }).length;
     if (left) return !running && settings().error ? 'Fix the setting above to compress ' + plural(left, 'file', 'files') + '.' : 'Compressing: ' + plural(left, 'file', 'files') + ' to go.';
+    // Files stopped by Cancel, or by PDF tools that did not load, were never compressed.
+    var stopped = files.filter(function (f) { return f.status === 'cancelled'; }).length;
+    if (!outs.length && stopped) return plural(stopped, 'file', 'files') + ' not compressed yet: press Compress.';
     if (!outs.length) return files.length > 1 ? 'None of the ' + plural(files.length, 'file', 'files') + ' came out smaller.' : '';
     var a = 0, b = 0;
     outs.forEach(function (f) { a += f.size; b += f.output.blob.size; });
@@ -1972,6 +1997,7 @@ faq:
     });
     refreshUi();
     say(plural(all.length, 'file', 'files') + ' added.', true);
+    var batch = files.slice(-all.length);
     return Promise.all(added.map(function (f) {
       return f.file.slice(0, 1024).arrayBuffer().then(function (head) {
         if (files.indexOf(f) < 0) return;
@@ -1979,7 +2005,11 @@ faq:
         else { f.status = 'waiting'; f.text = settings().error ? 'Waiting: fix the setting above.' : 'Waiting…'; }
         row(f);
       }, function () { f.status = 'error'; f.mood = 'bad'; f.text = 'The file could not be read. It may have been moved or deleted.'; row(f); });
-    })).then(function () { schedule(); });
+    })).then(function () {
+      // A file refused at once (empty, too big, not a PDF) is said too, not only shown.
+      batch.forEach(function (f) { if (f.status === 'error' && files.indexOf(f) >= 0) say(f.name + ': ' + f.text, true); });
+      schedule();
+    });
   }
 
   // ---------- settings changes ----------
@@ -2175,15 +2205,18 @@ faq:
       if (f.status === 'working' || f.status === 'waiting') { f.status = 'cancelled'; f.mood = ''; f.text = f === (r && r.f) ? 'Cancelled.' : 'Not compressed: cancelled.'; f.note = f.bigNote || ''; row(f); }
     });
     passwordRound = null;
+    // The button that takes Cancel's place gets the focus before Cancel is hidden.
+    goBtn.hidden = false;
+    goBtn.focus();
     refreshUi();
     say('Cancelled. Press Compress to start again.', true);
-    goBtn.focus();
   }
   function compressAgain() {
     files.forEach(function (f) { if (f.status === 'cancelled') { f.status = 'waiting'; f.mood = ''; f.text = 'Waiting…'; row(f); } });
+    cancelBtn.hidden = false;
+    cancelBtn.focus();
     refreshUi();
     schedule();
-    cancelBtn.focus();
   }
   function clearAll() {
     generation++;
@@ -2196,6 +2229,7 @@ faq:
     showPwError('');
     setError('');
     lastSaid = '';
+    sayQueue = [];   // what was about to be said about the files cleared is not said any more
     refreshUi();
     say('The list is empty.');
     $('#cp-choose').focus();
@@ -2217,8 +2251,10 @@ faq:
   qIn.addEventListener('change', settingsChanged);
   greyIn.addEventListener('change', settingsChanged);
   limitSel.addEventListener('change', settingsChanged);
-  goBtn.addEventListener('click', compressAgain);
-  cancelBtn.addEventListener('click', cancelAll);
+  // Compress and Cancel take each other's place, so the second click of a double click would land
+  // on the other one and undo the first: only a first click counts (a key press has detail 0).
+  goBtn.addEventListener('click', function (e) { if (e.detail < 2) compressAgain(); });
+  cancelBtn.addEventListener('click', function (e) { if (e.detail < 2) cancelAll(); });
   zipBtn.addEventListener('click', downloadZip);
   clearBtn.addEventListener('click', clearAll);
   pwGo.addEventListener('click', tryPassword);

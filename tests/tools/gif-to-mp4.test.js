@@ -11,6 +11,8 @@ const { devices } = require('playwright');
 // show a GIF, checked against ImageMagick's -coalesce wherever ImageMagick shows GIFs as browsers
 // do (see the list in that script). Here the page's frames (assets/js/gif-frames.js, with the
 // browser's ImageDecoder and, with ImageDecoder removed, with omggif) must hash to those frames.
+// The edge-*.gif files (make_edge_fixtures.py) bend the rules further; for them the reference is
+// what Chromium's own ImageDecoder shows, frame by frame.
 // The MP4s are read back three ways that share no code with the page: the boxes are parsed below
 // (sizes, frame durations, sample bytes), tests/fixtures/gif-to-mp4/verify.py runs ffprobe and
 // decodes them with ffmpeg against ImageMagick's frames (PSNR), and Chromium's <video> plays them.
@@ -308,6 +310,56 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.equal(withId['damaged.gif'].ended, 'omggif', 'where ImageDecoder refuses a frame, omggif checks it too');
     assert.equal(withId['unusual.gif'].ended, 'imagedecoder');
 
+    // ---------- GIFs that bend the rules: the same frames as Chromium's own decoder ----------
+    // make_edge_fixtures.py writes them (LZW data that stops early, a full code table without a
+    // clear code, two GCEs before an image, a GCE of 5 bytes, a stray byte, no trailer, no palette
+    // ...). Chromium's ImageDecoder, frame by frame, is the reference: TTGif must show the same
+    // frames and stop at the frame it refuses, with ImageDecoder here and with omggif below.
+    const edges = fs.readdirSync(fixtures).filter(f => /^edge-.*\.gif$/.test(f)).sort();
+    assert.ok(edges.length >= 20, `the edge-*.gif files are there: ${edges.length}`);
+    const edgeRef = await page.evaluate(async files => {
+      const out = {};
+      for (const [name, data] of files) {
+        const r = { hashes: [], refusedAt: null, size: null };
+        const dec = new ImageDecoder({ data: Uint8Array.from(atob(data), c => c.charCodeAt(0)), type: 'image/gif', colorSpaceConversion: 'none' });
+        await dec.tracks.ready;
+        await dec.completed.catch(() => {});
+        for (let i = 0; i < dec.tracks.selectedTrack.frameCount; i++) {
+          let vf;
+          try { vf = (await dec.decode({ frameIndex: i, completeFramesOnly: true })).image; } catch (e) { r.refusedAt = i; break; }
+          const c = new OffscreenCanvas(vf.displayWidth, vf.displayHeight);
+          const g = c.getContext('2d', { willReadFrequently: true });
+          g.drawImage(vf, 0, 0);
+          r.size = [vf.displayWidth, vf.displayHeight];
+          vf.close();
+          const h = new Uint8Array(await crypto.subtle.digest('SHA-256', g.getImageData(0, 0, c.width, c.height).data));
+          r.hashes.push([...h.slice(0, 8)].map(b => b.toString(16).padStart(2, '0')).join(''));
+        }
+        dec.close();
+        out[name] = r;
+      }
+      return out;
+    }, edges.map(n => [n, b64(n)]));
+    const checkEdges = (got, label) => {
+      for (const n of edges) {
+        const g = got[n], want = edgeRef[n];
+        assert.ok(!g.error, `${label} ${n}: ${g.error}`);
+        assert.deepEqual(g.sizes, [], `${label} ${n}: frame objects`);
+        assert.deepEqual([g.info.width, g.info.height], want.size, `${label} ${n}: the canvas Chromium shows`);
+        assert.deepEqual(g.hashes, want.hashes, `${label} ${n}: the frames Chromium shows`);
+        assert.equal(g.damagedAt, want.refusedAt, `${label} ${n}: it stops at the frame Chromium refuses`);
+      }
+    };
+    const edgeId = await engine(page, edges, 'auto');
+    checkEdges(edgeId, 'ImageDecoder');
+    assert.deepEqual(edges.filter(n => edgeRef[n].refusedAt !== null), ['edge-bad-code-late.gif', 'edge-empty-data.gif', 'edge-mincode9.gif', 'edge-short-lzw.gif', 'edge-short-noeoi.gif'], 'Chromium refuses the frames with damaged LZW data');
+    assert.deepEqual(edgeId['edge-two-gce.gif'].info.durations, [100, 200, 100], 'of two GCEs before an image, the second counts');
+    assert.deepEqual(edgeId['edge-layers.gif'].info.durations, [100, 100, 100, 100, 100, 100], 'delays of 0 play as 100 ms');
+    for (const [n, frames, cut] of [['edge-stray00.gif', 1, true], ['edge-gce5.gif', 1, true], ['edge-notrailer.gif', 2, true], ['edge-trailing.gif', 2, false]]) {
+      assert.deepEqual([edgeId[n].info.frameCount, edgeId[n].info.truncated], [frames, cut], `${n}: ${frames} frames, ${cut ? '' : 'not '}cut short`);
+    }
+    assert.equal(edgeId['edge-netscape-odd.gif'].plays, 1, 'a loop block whose first sub-block is not the loop count: one play');
+
     // ---------- Default settings: a GIF of odd size with varied frame times ----------
     await addFiles(fx('timing.gif'));
     assert.equal(await text('#g2m-file-error'), '', 'a GIF clears the earlier message');
@@ -537,6 +589,26 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
       if (crc32(z.data) !== null) assert.equal(z.crc >>> 0, crc32(z.data) >>> 0, `${z.name}: CRC`);
     });
     assert.match(await text('#g2m-status'), /^Downloading gif-to-mp4\.zip: 9 MP4s, [\d.]+ KB\.$/);
+    // A setting changed while the ZIP is being made clears the MP4s in it: that ZIP is not saved.
+    await page.evaluate(() => {
+      const real = TTZip.create;
+      window.zipGate = new Promise(r => { window.openZipGate = r; });
+      TTZip.create = async (...a) => { await window.zipGate; return real(...a); };
+    });
+    let zips = 0;
+    const countZip = () => zips++;
+    page.on('download', countZip);
+    await page.waitForTimeout(1600);
+    await page.click('#g2m-zip');
+    await page.waitForFunction(() => document.querySelector('#g2m-zip').getAttribute('aria-busy') === 'true');
+    await page.selectOption('#g2m-quality', 'medium');
+    await page.evaluate(() => window.openZipGate());
+    await page.waitForFunction(() => !document.querySelector('#g2m-zip').hasAttribute('aria-busy'));
+    await page.waitForTimeout(500);
+    page.off('download', countZip);
+    assert.equal(zips, 0, 'a ZIP of MP4s that a changed setting cleared is not saved');
+    assert.equal(await text('#g2m-status'), 'The settings changed, so the 9 MP4s were cleared. Press Convert to MP4 to make them again.');
+    await page.selectOption('#g2m-quality', 'high');
 
     // Enlarged 2x, each GIF pixel has a colour sample of its own: at Best, every frame of the
     // unusual GIFs (disposal, interlacing, local palettes, frames past the edge, Plain Text
@@ -644,13 +716,37 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await addFiles({ name: 'long.gif', mimeType: 'image/gif', buffer: long });
     await page.click('#g2m-convert');
     await page.waitForFunction(() => /frame (\d+) of/.test(document.querySelector('#g2m-progress-text').textContent));
+    // GIFs dropped or pasted while a job runs are not added; a message that can be seen (not only
+    // one for screen readers) says so, and it goes when the job ends.
+    const busyAdd = 'Wait until converting ends, then add the GIFs again.';
+    await page.evaluate(b => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([Uint8Array.from(atob(b), c => c.charCodeAt(0))], 'dropped.gif', { type: 'image/gif' }));
+      document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, b64('still.gif'));
+    assert.equal(await text('#g2m-file-error'), busyAdd, 'a GIF dropped during a job: the visible message says why it was not added');
+    assert.ok(await page.isVisible('#g2m-file-error'));
+    await page.evaluate(() => { document.querySelector('#g2m-file-error').textContent = ''; });
+    const pasted = await page.evaluate(b => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([Uint8Array.from(atob(b), c => c.charCodeAt(0))], 'pasted.gif', { type: 'image/gif' }));
+      const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+      document.body.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    }, b64('still.gif'));
+    assert.equal(await text('#g2m-file-error'), busyAdd, 'a GIF pasted during a job: the same message');
+    assert.ok(pasted, 'the paste is taken by the page');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.g2m-file').length), 1, 'nothing is added during a job');
     await page.click('#g2m-cancel');
     await page.waitForFunction(() => document.querySelector('#g2m-cancel').hidden, null, { timeout: 30000 });
+    assert.equal(await text('#g2m-file-error'), '', 'the message goes when the job ends');
     row = await rowOf('long.gif');
     assert.deepEqual([row.state, row.result, row.msg], ['Ready to convert', null, '']);
     assert.equal(await text('#g2m-status'), 'Converting was cancelled.');
     assert.equal(await text('#g2m-error'), '');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'g2m-convert', 'focus goes back to Convert to MP4');
+    await page.waitForTimeout(300);
+    assert.deepEqual([(await rowOf('long.gif')).state, await page.isHidden('#g2m-progress')], ['Ready to convert', true], 'nothing of the cancelled job shows up afterwards');
     // A double click on Convert starts one job, which then finishes.
     await page.dblclick('#g2m-convert');
     await page.waitForFunction(() => document.querySelector('#g2m-cancel').hidden, null, { timeout: 120000 });
@@ -741,6 +837,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     const withOmg = await engine(np, names, 'auto');
     checkEngine(withOmg, 'omggif');
     assert.ok(names.every(n => withOmg[n].started === 'omggif'));
+    const edgeOmg = await engine(np, edges, 'auto');
+    checkEdges(edgeOmg, 'omggif');
+    assert.ok(edges.every(n => edgeOmg[n].started === 'omggif'));
     assert.ok(nReq.some(u => u.endsWith('/assets/vendor/omggif/omggif.js')), 'omggif is loaded from this site');
     await addFiles([fx('real.gif'), fx('unusual.gif')], np);
     await convert(np);
@@ -756,6 +855,29 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await convert(np);
     assert.equal((await rowOf('x.gif', np)).msg, 'The GIF decoder could not be loaded. Check your connection and try again.');
     await np.unroute('**/omggif.js');
+    // omggif that never arrives (a stalled connection): Cancel still ends the job.
+    await np.route('**/omggif.js', () => {});
+    await np.goto(url);
+    await addFiles({ name: 'y.gif', mimeType: 'image/gif', buffer: read('pixel-art.gif') }, np);
+    await np.click('#g2m-convert');
+    await np.waitForFunction(() => !document.querySelector('#g2m-cancel').hidden);
+    await np.waitForTimeout(500);
+    await np.click('#g2m-cancel');
+    await np.waitForFunction(() => document.querySelector('#g2m-cancel').hidden, null, { timeout: 15000 }).catch(() => {});
+    assert.ok(await np.isHidden('#g2m-cancel'), 'Cancel ends a job whose GIF decoder never arrives');
+    assert.deepEqual([await text('#g2m-status', np), (await rowOf('y.gif', np)).state], ['Converting was cancelled.', 'Ready to convert']);
+    // The same in TTGif itself, for the pages that use it: an abort ends the wait for omggif.
+    const aborted = await np.evaluate(async b => {
+      const rd = await TTGif.open(new Blob([Uint8Array.from(atob(b), c => c.charCodeAt(0))]), { decoder: 'omggif' });
+      const ac = new AbortController();
+      const next = rd.frames({ signal: ac.signal }).next().then(() => 'a frame', e => e.name);
+      setTimeout(() => ac.abort(), 300);
+      const r = await Promise.race([next, new Promise(ok => setTimeout(() => ok('still waiting'), 5000))]);
+      rd.close();
+      return r;
+    }, b64('pixel-art.gif'));
+    assert.equal(aborted, 'AbortError', 'TTGif: an abort ends the wait for omggif to load');
+    await np.unrouteAll({ behavior: 'ignoreErrors' });
     await noId.close();
     assert.deepEqual(nProblems.filter(m => !/omggif/.test(m)), [], 'no errors without ImageDecoder');
 
@@ -822,6 +944,54 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.equal(await text('#g2m-error', bp), '');
     assert.match((await rowOf('long.gif', bp)).result, / · 400 frames$/, 'the job finished in the background');
     await bgCtx.close();
+
+    // ---------- An encoder that stops answering ----------
+    // A hardware encoder can stop giving frames back without an error. After a minute in front
+    // with nothing, the job ends with a message instead of waiting for ever.
+    const stuckCtx = await browser.newContext();
+    const stuck = await stuckCtx.newPage();
+    await stuck.clock.install();
+    await stuck.addInitScript(() => {
+      VideoEncoder.prototype.encode = function () {};
+      VideoEncoder.prototype.flush = function () { return new Promise(() => {}); };
+    });
+    await stuck.goto(url);
+    await addFiles(fx('timing.gif'), stuck);
+    await stuck.click('#g2m-convert');
+    await stuck.waitForFunction(() => /frame 13 of 13/.test(document.querySelector('#g2m-progress-text').textContent));
+    await stuck.clock.fastForward(70000);
+    await stuck.waitForFunction(() => document.querySelector('#g2m-cancel').hidden, null, { timeout: 15000 }).catch(() => {});
+    assert.ok(await stuck.isHidden('#g2m-cancel'), 'a job whose encoder stops answering ends after a minute');
+    row = await rowOf('timing.gif', stuck);
+    assert.deepEqual([row.state, row.msg, await text('#g2m-status', stuck)],
+      ['Not converted', 'Converting stopped: no frame came for a minute. Try again, or try another browser.', 'Converting stopped responding. See the message under the GIF.']);
+    await stuckCtx.close();
+
+    // ---------- A slow connection: the video encoder takes over a minute to load ----------
+    // Only a job that gets no frame for a minute has stopped; time spent loading the encoder's
+    // code (which has its own error when it fails) does not count.
+    const slowCtx = await browser.newContext({ acceptDownloads: true });
+    const slow = await slowCtx.newPage();
+    await slow.clock.install();
+    let letLoad;
+    const held = new Promise(r => { letLoad = r; });
+    await slow.route('**/assets/vendor/mediabunny/mediabunny.min.js', async r => { await held; await r.continue(); });
+    await slow.goto(url);
+    await addFiles(fx('loop3.gif'), slow);
+    // Cancel works while the code is still on its way.
+    await slow.click('#g2m-convert');
+    await slow.waitForFunction(() => document.querySelector('#g2m-progress-text').textContent === 'Loading the video encoder…');
+    await slow.click('#g2m-cancel');
+    await slow.waitForFunction(() => document.querySelector('#g2m-cancel').hidden, null, { timeout: 15000 }).catch(() => {});
+    assert.ok(await slow.isHidden('#g2m-cancel'), 'Cancel ends a job that waits for the encoder to load');
+    assert.deepEqual([await text('#g2m-status', slow), await text('#g2m-error', slow), (await rowOf('loop3.gif', slow)).state], ['Converting was cancelled.', '', 'Ready to convert']);
+    await slow.click('#g2m-convert');
+    await slow.waitForFunction(() => document.querySelector('#g2m-progress-text').textContent === 'Loading the video encoder…');
+    await slow.clock.fastForward(90000);
+    letLoad();
+    await slow.waitForFunction(() => document.querySelector('#g2m-cancel').hidden, null, { timeout: 60000 });
+    assert.deepEqual([(await rowOf('loop3.gif', slow)).state, (await rowOf('loop3.gif', slow)).msg], ['Converted', ''], 'a slow download of the encoder is not a stalled job');
+    await slowCtx.close();
 
     // ---------- Reduced motion: no autoplay ----------
     const still = await browser.newContext({ reducedMotion: 'reduce' });

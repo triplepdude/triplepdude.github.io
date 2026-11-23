@@ -5,8 +5,12 @@ Files
   omggif.js     omggif.js from the package, unmodified. A classic script: it
                 defines the global GifReader (and GifWriter). It is loaded
                 only inside the Web Worker that assets/js/gif-frames.js
-                starts in browsers without ImageDecoder (Safari before 27.3,
-                and older Chrome and Firefox), never on the page itself.
+                starts where the browser's ImageDecoder is missing (Safari
+                before 27.3, and older Chrome and Firefox) or is not used:
+                for GIFs over 256 MiB, which ImageDecoder would hold in
+                memory whole (on /gif-to-mp4/, over 96 MB on phones), and
+                from a frame that ImageDecoder refuses onwards. It is never
+                loaded on the page itself.
   LICENSE.txt   the MIT licence from the header of omggif.js.
 
   Package:  omggif 1.0.10 (MIT), by Dean McNamee, published 16 July 2019,

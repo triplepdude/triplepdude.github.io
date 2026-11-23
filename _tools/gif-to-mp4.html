@@ -7,11 +7,12 @@ howto: |
   ## How to convert a GIF to MP4
 
   1. Choose GIFs or drop them on the page, as many as you like. Each GIF is
-     read a frame at a time, so a long or large one needs little memory.
+     read a frame at a time, so a long one needs no more memory than a
+     short one.
   2. Set the background, size, plays and quality, then press **Convert to
      MP4**. Each GIF gets a preview, **Download MP4** and **Copy HTML**, plus
-     **Share** on phones that can share files. **Download all (.zip)** saves
-     them together.
+     **Share** where the device can share files, as phones do.
+     **Download all (.zip)** saves them together.
 
   ## How much smaller is the MP4?
 
@@ -50,9 +51,10 @@ howto: |
 
       <video src="cat.mp4" width="480" height="270" autoplay loop muted playsinline></video>
 
-  Browsers generally start a video by itself only when it is muted or has no
-  sound, and Safari also needs `playsinline` to play it within the page.
-  `loop` repeats it like a GIF. To go the other way, use
+  Browsers let a video start by itself when it is muted, so the line has
+  `muted` (the MP4 has no sound anyway), and Safari on iPhone also needs
+  `playsinline` to play it within the page instead of full screen. `loop`
+  repeats it like a GIF. To go the other way, use
   [Video to GIF](/video-to-gif/); for iPhone videos, see
   [MOV to MP4](/mov-to-mp4/).
 
@@ -72,7 +74,7 @@ howto: |
   web pages. Keep the page in front while it converts.
 faq:
   - q: Is my GIF uploaded anywhere?
-    a: "No. Your browser reads the GIF and encodes its frames with its own video encoder, and [Mediabunny](/assets/vendor/mediabunny/README.txt) (MPL-2.0), loaded from this site, writes the MP4 file. Nothing is sent anywhere or stored."
+    a: "No. Your browser reads the GIF (where it cannot, [omggif](/assets/vendor/omggif/README.txt) (MIT) does) and encodes its frames with its own video encoder, and [Mediabunny](/assets/vendor/mediabunny/README.txt) (MPL-2.0) writes the MP4 file. Both are loaded from this site. Nothing is sent anywhere or stored."
   - q: Why does the MP4 look softer than the GIF?
     a: H.264 drops detail that is hard to see, and it smooths the fine dither pattern that GIFs use to fake extra colours. Choose Best for text and screen recordings. Converting cannot add detail the GIF never had.
   - q: Is there a size limit?
@@ -648,19 +650,25 @@ faq:
     if (!busy) dom.drop.classList.add('is-over');
   });
   document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) dom.drop.classList.remove('is-over'); });
+  // GIFs dropped or pasted during a job are not added: the message under Choose GIFs says so
+  // (seen and, being polite, heard), and goes when the job ends.
+  var BUSY_ADD = 'Wait until converting ends, then add the GIFs again.';
   document.addEventListener('drop', function (e) {
     dom.drop.classList.remove('is-over');
     if (!isFileDrag(e)) return;
     e.preventDefault();
-    if (busy) { say('Wait until converting ends, then drop the GIFs again.'); return; }
+    if (busy) { setFileError(BUSY_ADD); return; }
     addFiles(e.dataTransfer.files);
   });
   document.addEventListener('paste', function (e) {
     var t = e.target;
-    if (busy || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && t.type !== 'file')) return;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && t.type !== 'file') return;
     var items = Array.prototype.slice.call((e.clipboardData && e.clipboardData.items) || []);
     var files = items.filter(function (x) { return x.kind === 'file' && x.type === 'image/gif'; }).map(function (x) { return x.getAsFile(); });
-    if (files.length) { e.preventDefault(); addFiles(files); }
+    if (!files.length) return;
+    e.preventDefault();
+    if (busy) setFileError(BUSY_ADD);
+    else addFiles(files);
   });
 
   // ---------- Settings changes ----------
@@ -715,7 +723,12 @@ faq:
     setText(dom.error, '');
     if (!canEncode()) { setText(dom.error, noEncoderText()); return; }
     var s = settings(), key = settingsKey(s);
-    var j = { cancelled: false, abort: new AbortController(), outputs: [], lastFrameAt: Date.now(), visibleSince: document.visibilityState === 'visible' ? Date.now() : 0 };
+    var j = { cancelled: false, abort: new AbortController(), outputs: [], readers: [], lastFrameAt: Date.now(), visibleSince: document.visibilityState === 'visible' ? Date.now() : 0 };
+    // Rejects with CANCELLED once the job is cancelled (Cancel, or the check for a stalled job).
+    // The job's waits race it, so that code which stops answering (a stuck encoder, a download
+    // that never ends) cannot hold the page for ever.
+    j.stop = new Promise(function (resolve, reject) { j.abort.signal.addEventListener('abort', function () { reject(CANCELLED); }); });
+    j.stop.catch(function () {});
     job = j;
     setBusy(true);
     list.forEach(function (e) { e.status = 'queued'; e.error = ''; e.damaged = null; });
@@ -723,13 +736,18 @@ faq:
     dom.cancel.focus();
     lockScreen();
     progress('Loading the video encoder…', null);
-    var done = 0, failed = 0, watchdog = setInterval(function () { checkStall(j); }, 2000);
+    var done = 0, failed = 0, watchdog = 0;
     try {
       try {
-        await loadMb();
+        await Promise.race([loadMb(), j.stop]);
       } catch (err) {
+        if (err === CANCELLED) throw err;
         throw userError('The video encoder could not be loaded. Check your connection and try again.');
       }
+      // The check for a stalled job starts once the encoder's code is here: a slow connection
+      // is not a stalled job, and a failed download has its own message above.
+      j.lastFrameAt = Date.now();
+      watchdog = setInterval(function () { checkStall(j); }, 2000);
       for (var i = 0; i < list.length; i++) {
         var e = list[i];
         if (j.cancelled) break;
@@ -738,7 +756,7 @@ faq:
         e.el.li.setAttribute('aria-current', 'true');
         renderEntry(e);
         try {
-          var r = await convertOne(e, s, j, i, list.length);
+          var r = await Promise.race([convertOne(e, s, j, i, list.length), j.stop]);
           r.key = key;
           e.result = r;
           e.status = 'done';
@@ -762,7 +780,7 @@ faq:
         renderEntry(e);
       }
     } catch (err) {
-      setText(dom.error, err && err.user ? err.message : 'The MP4 could not be made: ' + String((err && err.message) || err) + '.');
+      if (err !== CANCELLED) setText(dom.error, err && err.user ? err.message : 'The MP4 could not be made: ' + String((err && err.message) || err) + '.');
     } finally {
       clearInterval(watchdog);
       list.forEach(function (e) { if (e.status === 'queued' || e.status === 'converting') e.status = 'ready'; });
@@ -770,6 +788,7 @@ faq:
       if (job === j) job = null;
       setBusy(false);
       unlockScreen();
+      if (dom.fileError.textContent === BUSY_ADD) setFileError('');
       updateAll();
       var withResult = entries.filter(function (x) { return x.result; });
       if (j.stalled) say('Converting stopped responding. See the message under the GIF.');
@@ -801,6 +820,7 @@ faq:
     j.cancelled = true;
     j.abort.abort();
     j.outputs.forEach(function (o) { o.cancel().catch(function () {}); });
+    j.readers.forEach(function (rd) { rd.close(); });
   }
   dom.convert.addEventListener('click', convertAll);
   dom.cancel.addEventListener('click', function () {
@@ -827,6 +847,7 @@ faq:
     }
     var big = info.size > 96e6 && phoneLike();
     var rd = await TTGif.open(e.file, { info: info, decoder: big ? 'omggif' : 'auto' });
+    j.readers.push(rd);
     var canvas = document.createElement('canvas');
     canvas.width = p.ew;
     canvas.height = p.eh;
@@ -867,6 +888,7 @@ faq:
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(layer, 0, 0, p.w, p.h);
         await src.add(t / 1000, fr.duration / 1000);
+        if (j.cancelled) throw CANCELLED; // the job has ended: no more progress on the page
         t += fr.duration;
         n++;
         j.lastFrameAt = Date.now();
@@ -971,9 +993,12 @@ faq:
     if (res.length < 2 || dom.zip.getAttribute('aria-busy') === 'true' || tooSoon(dom.zip, res.map(function (e) { return e.result.id; }).join())) return;
     dom.zip.setAttribute('aria-busy', 'true');
     setText(dom.zip, 'Making the ZIP…');
+    var made = res.map(function (e) { return e.result; });
     try {
       await loadScript(ZIP_URL);
-      var blob = await window.TTZip.create(res.map(function (e) { return { name: e.result.name, data: e.result.blob }; }), { compress: 'store' });
+      var blob = await window.TTZip.create(made.map(function (r) { return { name: r.name, data: r.blob }; }), { compress: 'store' });
+      // A setting changed meanwhile cleared these MP4s (and said so): their ZIP is not saved.
+      if (res.some(function (e, i) { return e.result !== made[i]; })) return;
       TT.download('gif-to-mp4.zip', blob);
       setText(dom.error, '');
       say('Downloading gif-to-mp4.zip: ' + plural(res.length, 'MP4', 'MP4s') + ', ' + fmtBytes(blob.size) + '.');

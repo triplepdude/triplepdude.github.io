@@ -7,9 +7,9 @@ const { devices } = require('playwright');
 
 // Fixtures (tests/fixtures/compress-pdf, made by make_fixtures.py with reportlab, pikepdf and
 // Pillow): scans, photos, a CMYK JPEG, an EXIF-rotated JPEG, a tagged PDF with links, bookmarks
-// and a form, pictures drawn in every way the page must handle, PDF/A-1 and PDF/X files,
-// attachments and a signature, linearised, updated and PDF 2.0 files, encrypted copies and
-// damaged files. expected.json says what each marked picture must become at each level,
+// and a form, pictures drawn in every way the page must handle, PDF/A-1 and PDF/X files, a
+// PDF/A-2 file with a CMYK output intent, attachments and a signature, linearised, updated and
+// PDF 2.0 files, encrypted copies and damaged files. expected.json says what each marked picture must become at each level,
 // worked out from its pixel size and the size it is drawn at. Every copy the page writes is
 // checked with libqpdf (pikepdf) and poppler (pdftotext, pdftoppm) by verify.py, when they are
 // installed, and always with PDF.js. Files too big to keep are built below at test time.
@@ -33,7 +33,8 @@ function unzip(buf) {
 }
 
 // A PDF written by hand with a cross-reference table: pages of Helvetica text, each with an
-// optional picture (Flate RGB) drawn at a given size, and an optional attachment.
+// optional picture (Flate RGB) drawn at a given size, and an optional attachment. A picture is
+// marked /TTMark /B unless it names its own mark; keys adds entries to its dictionary.
 function buildPdf(pages, extra = {}) {
   const objs = [null, null, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
   const add = body => { objs.push(body); return objs.length; };
@@ -42,7 +43,7 @@ function buildPdf(pages, extra = {}) {
   for (const sp of pages) {
     let res = '/Font << /F1 3 0 R >>', draw = '';
     if (sp.image) {
-      const im = add(stream(`/Type /XObject /Subtype /Image /Width ${sp.image.w} /Height ${sp.image.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /TTMark /B`, sp.image.data));
+      const im = add(stream(`/Type /XObject /Subtype /Image /Width ${sp.image.w} /Height ${sp.image.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /TTMark /${sp.image.mark || 'B'}${sp.image.keys ? ' ' + sp.image.keys : ''}`, sp.image.data));
       res += ` /XObject << /Im0 ${im} 0 R >>`;
       draw = `q ${sp.image.drawW} 0 0 ${sp.image.drawH} 72 72 cm /Im0 Do Q\n`;
     }
@@ -86,6 +87,22 @@ function photo(w, h, seed) {
   }
   return { w, h, data: zlib.deflateSync(px, { level: 1 }) };
 }
+// Noise in a 16 x 16 tile repeated: a photo to the page (no flat areas, over 256 colours), but
+// Flate stores it in a few KB, where a JPEG takes many times that.
+function tiled(w, h) {
+  const T = 16, tile = Buffer.alloc(T * T * 3), px = Buffer.alloc(w * h * 3);
+  for (let i = 0, s = 5; i < tile.length; i++) { s = (Math.imul(s, 1103515245) + 12345) >>> 0; tile[i] = s >>> 24; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) tile.copy(px, (y * w + x) * 3, ((y % T) * T + (x % T)) * 3, ((y % T) * T + (x % T)) * 3 + 3);
+  return { w, h, data: zlib.deflateSync(px, { level: 9 }) };
+}
+// Announcements of the status region, from now on, in window.__said.
+const listen = p => p.evaluate(() => {
+  window.__said = [];
+  if (window.__listening) return;
+  window.__listening = true;
+  new MutationObserver(() => { const t = document.getElementById('cp-status').textContent; if (t) window.__said.push(t); })
+    .observe(document.getElementById('cp-status'), { childList: true, characterData: true, subtree: true });
+});
 
 module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const fx = n => path.join(fixtures, n);
@@ -425,6 +442,8 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
     if (n !== ENC[ENC.length - 1]) assert.equal(await text('#cp-pw-error'), '', 'a password that opens some of the files is no error');
   }
   assert.equal(await page.isHidden('#cp-unlock'), true, 'the password box goes once every file is open');
+  // The focus was in the password field: it moves on to the copies, not back to the top of the page.
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'cp-zip', 'the focus moves from the password field to Download all');
   for (const n of ENC) {
     const r = await rowOf(n + '.pdf'), got = await download(dlButton(n + '.pdf'));
     const pw = exp[n + '.pdf'].password;
@@ -460,8 +479,66 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
     }
   }
 
+  // ---------- A picture's own dictionary keys survive, also ones named like JavaScript's ----------
+  await clear();
+  {
+    const KEYS = '/constructor (c1) /toString (t1) /valueOf (v1) /hasOwnProperty (h1) /__proto__ (p1) /Private (k1)';
+    fs.writeFileSync(path.join(tmp, 'keys.pdf'), buildPdf([{ text: 'Keys', image: { ...photo(800, 600, 9), drawW: 230, drawH: 172.5, keys: KEYS } }]));
+    await page.setInputFiles('#cp-file', path.join(tmp, 'keys.pdf'));
+    await idle();
+    const got = await download(dlButton('keys.pdf'));
+    // The picture is shrunk (250 ppi to 150), so its dictionary is written anew.
+    const s = got.buf.toString('latin1');
+    for (const k of KEYS.match(/\/\w+ \(\w+\)/g)) assert.ok(s.includes(k), `the shrunk picture keeps ${k}`);
+    const k = 150 * (230 / 72) / 800;
+    if (tools) assert.deepEqual(verify(path.join(tmp, 'keys.pdf'), got.buf).images.copy.B.map(i => [i.w, i.h, i.filter]), [[Math.round(800 * k), Math.round(600 * k), 'DCTDecode']]);
+  }
+
+  // ---------- A picture that would not get 10% smaller is left exactly as it was ----------
+  await clear();
+  {
+    // The tiled picture is drawn at 100 ppi: as a JPEG it would grow from 5 KB to over 100 KB.
+    fs.writeFileSync(path.join(tmp, 'gain.pdf'), buildPdf([{ text: 'Tiled', image: { ...tiled(600, 600), drawW: 432, drawH: 432, mark: 'G' } },
+      { text: 'Photo', image: { ...photo(800, 600, 4), drawW: 230, drawH: 172.5 } }]));
+    await page.setInputFiles('#cp-file', path.join(tmp, 'gain.pdf'));
+    await idle();
+    const got = await download(dlButton('gain.pdf'));
+    if (tools) {
+      const v = verify(path.join(tmp, 'gain.pdf'), got.buf);
+      assert.deepEqual(v.check, []);
+      assert.deepEqual(v.images.copy.G.map(i => [i.filter, i.sha]), v.images.orig.G.map(i => [i.filter, i.sha]), 'the tiled picture is kept as it was');
+      assert.deepEqual(v.images.copy.B.map(i => i.filter), ['DCTDecode'], 'the photo next to it is shrunk');
+    }
+  }
+
+  // ---------- A picture of a kind the page leaves alone: the row gives that reason ----------
+  await clear();
+  {
+    // An inverted /Decode: never re-encoded, so not "losing more than they save".
+    fs.writeFileSync(path.join(tmp, 'kind.pdf'), buildPdf([{ text: 'Inverted', image: { ...photo(800, 600, 6), drawW: 230, drawH: 172.5, keys: '/Decode [1 0 1 0 1 0]' } }]));
+    await page.setInputFiles('#cp-file', path.join(tmp, 'kind.pdf'));
+    await idle();
+    assert.deepEqual(await rowOf('kind.pdf').then(r => [r.state, r.note, r.dl]), ['Already compact: keep your original.',
+      'Its pictures are of kinds this page leaves as they are, such as indexed colours, 16-bit samples or colour masks.', false]);
+  }
+
+  // ---------- PDF/A with a CMYK output intent: its CMYK picture stays CMYK ----------
+  await clear();
+  await page.setInputFiles('#cp-file', fx('pdfa-cmyk.pdf'));
+  await idle();
+  {
+    const r = await rowOf('pdfa-cmyk.pdf');
+    assert.ok(!/RGB/.test(r.note), `no picture becomes RGB in a file that promises CMYK: ${r.note}`);
+    if (r.dl) {
+      assert.equal(r.note, 'It stays marked as PDF/A-2.');
+      const got = await download(dlButton('pdfa-cmyk.pdf'));
+      if (tools) check('pdfa-cmyk.pdf', got.buf, 'recommended');
+    } else assert.match(r.note, /^Its CMYK pictures must stay CMYK in a PDF\/A-2 file/);
+  }
+
   // ---------- Files that cannot be compressed ----------
   await clear();
+  await listen(page);
   const asFile = n => ({ name: n, mimeType: 'application/pdf', buffer: fs.readFileSync(fx(n)) });
   await page.setInputFiles('#cp-file', [asFile('damaged-cut.pdf'), asFile('not-a-pdf.pdf'), { name: 'empty.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(0) },
     { name: 'header-only.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\n%%EOF\n') }]);
@@ -472,6 +549,13 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
     ['empty.pdf', 'This file is empty.', false],
     ['header-only.pdf', 'This file is damaged or is not a valid PDF.', false],
   ]);
+  {
+    // Each refusal is said, not only shown: also the two found as the files are added.
+    const REFUSED = (await rows()).map(r => r.name + ': ' + r.state);
+    await page.waitForFunction(rs => rs.every(r => window.__said.join(' ').includes(r)), REFUSED, { timeout: 5000 }).catch(() => {});
+    const said = (await page.evaluate(() => window.__said)).join(' ');
+    for (const r of REFUSED) assert.ok(said.includes(r), `the status region says "${r}" (it said: ${said})`);
+  }
   // Over 1 GB: refused before it is read (its size is faked).
   await page.evaluate(() => {
     const d = Object.getOwnPropertyDescriptor(Blob.prototype, 'size');
@@ -501,7 +585,8 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
   const cpu = Math.round(await threadMs() - cpu0);
   assert.ok(cpu < 1500, `100 pictures in, the page's own thread has used ${cpu} ms of CPU: the work runs in a worker`);
   assert.equal(await page.isVisible('#cp-cancel'), true);
-  await page.click('#cp-cancel');
+  // A double click cancels once: Compress takes Cancel's place, and the second click must not press it.
+  await page.dblclick('#cp-cancel');
   assert.equal((await rowOf('thousand.pdf')).state, 'Cancelled.');
   assert.equal(await page.isVisible('#cp-go'), true, 'Compress starts again after Cancel');
   assert.equal(await page.isHidden('#cp-cancel'), true);
@@ -510,7 +595,9 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
   await page.waitForTimeout(1500);
   assert.equal((await rowOf('thousand.pdf')).state, stateAfter, 'nothing more happens after Cancel');
   // A level changed while a file is being compressed: the old work is dropped, never shown.
-  await page.click('#cp-go');
+  // Compress is double-clicked: it starts once, and the second click does not press Cancel.
+  await page.dblclick('#cp-go');
+  assert.equal(await page.isVisible('#cp-cancel'), true, 'a double click on Compress does not cancel what it started');
   await page.waitForFunction(() => /^Picture \d+ of 1,000 at 150/.test(document.querySelector('.cp-state').textContent), null, { timeout: 120000 });
   await level('strong');
   await page.waitForFunction(() => /^Picture \d+ of 1,000 at 100/.test(document.querySelector('.cp-state').textContent), null, { timeout: 120000 });
@@ -547,13 +634,19 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
     });
     obs.observe(document.getElementById('cp-files'), { childList: true, characterData: true, subtree: true });
   });
+  await listen(page);
   await page.setInputFiles('#cp-file', fx('photo.pdf'));
   await page.waitForFunction(() => document.querySelector('input[name="cp-level"][value="strong"]').checked);
   await idle();
   {
     const got = await download(dlButton('photo.pdf'));
-    assert.equal((await rowOf('photo.pdf')).state, `${fmt(got.buf.length)}, ${pct(fs.statSync(fx('photo.pdf')).size, got.buf.length)}% smaller.`);
+    const state = (await rowOf('photo.pdf')).state;
+    assert.equal(state, `${fmt(got.buf.length)}, ${pct(fs.statSync(fx('photo.pdf')).size, got.buf.length)}% smaller.`);
     if (tools) check('photo.pdf', got.buf, 'strong', '', { psnr: 26 });
+    // The dropped copy was never shown or said: the only result announced is the one made at Strong.
+    await page.waitForFunction(t => window.__said.join(' ').includes(t), 'photo.pdf: ' + state, { timeout: 5000 }).catch(() => {});
+    const said = (await page.evaluate(() => window.__said)).join('\n');
+    assert.deepEqual(said.match(/photo\.pdf: [^\n]*?smaller\./g), ['photo.pdf: ' + state], `one result is announced, the final one (said: ${said})`);
   }
 
   // ---------- A 100 MB file: a note about memory, and nothing worse ----------
@@ -623,17 +716,15 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
 
   // ---------- The live region: one announcement per file, when its result is known ----------
   await clear();
-  await page.evaluate(() => {
-    window.__said = [];
-    new MutationObserver(() => { const t = document.getElementById('cp-status').textContent; if (t) window.__said.push(t); })
-      .observe(document.getElementById('cp-status'), { childList: true, characterData: true, subtree: true });
-  });
+  await listen(page);
   await page.setInputFiles('#cp-file', fx('scan-grey.pdf'));
   await idle();
   await page.waitForTimeout(300);
   const said = await page.evaluate(() => window.__said);
   const r1 = await rowOf('scan-grey.pdf');
-  assert.deepEqual(said, ['1 file added.', 'scan-grey.pdf: ' + r1.state], 'progress is never announced, the result once');
+  // Messages that come within a moment of each other are said in one go: what matters is that
+  // nothing but these two is said, each once, in this order.
+  assert.equal(said.join(' '), '1 file added. scan-grey.pdf: ' + r1.state, 'progress is never announced, the result once');
 
   // ---------- Back and Forward: the controls the browser restores are read again ----------
   await page.evaluate(() => {
@@ -641,7 +732,7 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   });
   assert.equal(await page.isVisible('#cp-fit'), true);
-  assert.match(await text('#cp-level-hint'), /^Tries the levels from sharpest to smallest/);
+  assert.match(await text('#cp-level-hint'), /^Searches the levels from 220 down to 72 ppi/);
   await idle();
   assert.equal((await rowOf('scan-grey.pdf')).state, 'Already under 500\u00a0KB, so it was left as it is: keep your original.');
 
@@ -652,9 +743,12 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
     let blocked = true;
     await fp.route('**/pdf-lib.min.js', route => (blocked ? route.fulfill({ status: 404, body: 'gone' }) : route.continue()));
     await fp.goto(url);
-    await fp.setInputFiles('#cp-file', fx('photo.pdf'));
+    await fp.setInputFiles('#cp-file', [fx('photo.pdf'), fx('scan-colour.pdf')]);
     await idle(fp);
-    assert.deepEqual(await rowOf('photo.pdf', fp).then(r => [r.state, r.dl]), ['The PDF tools could not load. Check your connection, then press Compress.', false]);
+    for (const n of ['photo.pdf', 'scan-colour.pdf']) {
+      assert.deepEqual(await rowOf(n, fp).then(r => [r.state, r.dl]), ['The PDF tools could not load. Check your connection, then press Compress.', false]);
+    }
+    assert.equal(await fp.textContent('#cp-sum'), '2 files not compressed yet: press Compress.', 'the summary does not say the files failed to get smaller');
     assert.equal(await fp.isVisible('#cp-go'), true);
     blocked = false;
     // The tab is in the background (as when the visitor switches tabs): the work goes on.
@@ -663,9 +757,59 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await fp.click('#cp-go');
+    // Compress is double-clicked: Cancel takes its place, and the second click must not press it.
+    await fp.dblclick('#cp-go');
+    assert.equal(await fp.isVisible('#cp-cancel'), true, 'a double click on Compress does not cancel what it started');
+    assert.equal(await fp.evaluate(() => document.activeElement.id), 'cp-cancel', 'Compress hands the focus to Cancel, which takes its place');
     await idle(fp);
     assert.match((await rowOf('photo.pdf', fp)).state, /^\S+\u00a0KB, \d+% smaller\.$/);
+    // Cancel went when the work was done: the focus moves on to the copies, not to the top of the page.
+    assert.equal(await fp.evaluate(() => document.activeElement.id), 'cp-zip', 'the focus moves on to Download all');
+    await ctx.close();
+  }
+
+  // ---------- A background tab: the browser holds back animation frames, and the work goes on ----------
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await ctx.addInitScript(() => {
+      // As browsers run a hidden tab: requestAnimationFrame callbacks wait until it is shown again.
+      let hidden = false;
+      const held = [], raf = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = cb => { if (hidden) { held.push(cb); return 0; } return raf(cb); };
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
+      window.__hide = h => { hidden = h; document.dispatchEvent(new Event('visibilitychange')); if (!h) held.splice(0).forEach(cb => raf(cb)); };
+    });
+    const hp = await ctx.newPage();
+    await hp.goto(url);
+    await hp.evaluate(() => window.__hide(true));
+    await hp.setInputFiles('#cp-file', [fx('cmyk.pdf'), fx('photo.pdf')]);
+    // Polled on a timer: Playwright polls on animation frames by default, and those are held.
+    const done = await hp.waitForFunction(() => {
+      const r = [...document.querySelectorAll('.cp-file')];
+      return r.length === 2 && document.getElementById('cp-cancel').hidden && r.every(e => !/\u2026$/.test(e.querySelector('.cp-state').textContent));
+    }, null, { timeout: 60000, polling: 250 }).then(() => true, () => false);
+    const states = await hp.$$eval('.cp-state', l => l.map(e => e.textContent));
+    assert.ok(done && states.every(s => /% smaller\.$/.test(s)), `both files are compressed in a background tab, the CMYK picture too: ${JSON.stringify(states)}`);
+    await ctx.close();
+  }
+
+  // ---------- Out of memory: said as such, not as a damaged file ----------
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await ctx.addInitScript(() => {
+      // The worker cannot have the buffers it asks for, as on a phone short of memory: its copies of
+      // parts of the file fail the way Chromium fails an allocation.
+      const make = URL.createObjectURL.bind(URL);
+      const short = 'var s = Uint8Array.prototype.slice; Uint8Array.prototype.slice = function (a, b) { var e = b === undefined ? this.length : b;' +
+        ' if (e - (a || 0) > 20000) throw new RangeError("Array buffer allocation failed"); return s.apply(this, arguments); };\n';
+      URL.createObjectURL = b => make(b instanceof Blob && b.type === 'text/javascript' ? new Blob([short, b], { type: 'text/javascript' }) : b);
+    });
+    const mp = await ctx.newPage();
+    await mp.goto(url);
+    await mp.setInputFiles('#cp-file', fx('photo.pdf'));
+    await idle(mp);
+    assert.deepEqual(await rowOf('photo.pdf', mp).then(r => [r.state, r.dl]), ['The browser ran out of memory. Try this file on a computer, or split it first.', false]);
     await ctx.close();
   }
 

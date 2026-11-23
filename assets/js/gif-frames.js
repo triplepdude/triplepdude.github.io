@@ -601,7 +601,12 @@
   }
 
   async function* workerFrames(rd, from, to, signal) {
-    await startWorker(rd);
+    if (signal && signal.aborted) throw abortError();
+    // Starting waits for omggif to load in the worker, which a stalled connection can stretch
+    // without end: an abort ends that wait too.
+    await (signal ? Promise.race([startWorker(rd), new Promise(function (resolve, reject) {
+      signal.addEventListener('abort', function () { reject(abortError()); }, { once: true });
+    })]) : startWorker(rd));
     var id = ++jobSeq, info = rd.info;
     rd.worker.postMessage({ cmd: 'run', id: id, from: from, to: to, credit: 2 });
     var finished = false;

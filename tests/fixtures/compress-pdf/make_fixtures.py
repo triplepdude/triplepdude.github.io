@@ -36,6 +36,7 @@ the level needs, keeping its proportions.
   pdfa1.pdf         PDF/A-1b markings (XMP pdfaid part 1, sRGB output intent), classic
                     cross-reference table, PDF 1.4
   pdfx.pdf          PDF/X-1a markings and a CMYK JPEG, which must keep its colour space
+  pdfa-cmyk.pdf     PDF/A-2b with a CMYK output intent and a CMYK JPEG, which stays CMYK too
   attach.pdf        an attached file and a signature field (fake signature)
   linear.pdf        tagged.pdf linearised
   update.pdf        a file with an incremental update that replaces page 1's text
@@ -556,6 +557,27 @@ def make_pdfa():
     expect('pdfx.pdf', 'X', SAME)
 
 
+def make_pdfa_cmyk():
+    """PDF/A-2b with a CMYK output intent (pdf.js's CGATS001 profile, vendored in the site):
+    its CMYK JPEG may not become RGB either."""
+    pdf = pikepdf.open(io.BytesIO(text_pdf((612, 792), lambda n: ['Press copy', 'PDFA-CMYK-MARK'])))
+    pdf.Root.Metadata = pdf.make_stream(XMP_A1.replace('<pdfaid:part>1</pdfaid:part>', '<pdfaid:part>2</pdfaid:part>').encode('utf-8'),
+                                        Type=Name.Metadata, Subtype=Name.XML)
+    icc = open(os.path.join(HERE, '..', '..', '..', 'assets', 'vendor', 'pdfjs-resources', 'iccs', 'CGATS001Compat-v2-micro.icc'), 'rb').read()
+    prof = pdf.make_stream(icc, N=4)
+    pdf.Root.OutputIntents = Array([Dictionary(Type=Name.OutputIntent, S=Name.GTS_PDFA1, OutputConditionIdentifier=String('CGATS TR 001'),
+                                               DestOutputProfile=prof)])
+    cm = np.zeros((450, 600, 4), np.uint8)
+    cm[..., 0] = np.linspace(0, 255, 600)[None, :]
+    cm[..., 2] = np.linspace(255, 0, 450)[:, None]
+    cm[..., 3] = (np.asarray(photo(600, 450, 42).convert('L')) // 3)
+    img = image(pdf, jpeg(Image.fromarray(cm, 'CMYK'), 85), 600, 450, Name.DeviceCMYK, 'Y', Decode=Array([1, 0, 1, 0, 1, 0, 1, 0]))
+    add_image_to_page(pdf, pdf.pages[0], 'ImY', img, '144 0 0 108 54 400')
+    save(pdf, 'pdfa-cmyk.pdf', object_stream_mode=pikepdf.ObjectStreamMode.disable, force_version='1.7', compress_streams=True,
+         fix_metadata_version=False)
+    expect('pdfa-cmyk.pdf', 'Y', SAME)
+
+
 # ---------- attachments and a signature ----------
 def make_attach():
     pdf = pikepdf.open(io.BytesIO(text_pdf((612, 792), lambda n: ['With attachment', 'ATTACH-MARK'])))
@@ -701,6 +723,7 @@ if __name__ == '__main__':
     make_placement()
     make_kinds()
     make_pdfa()
+    make_pdfa_cmyk()
     make_attach()
     make_structures()
     make_encrypted()
