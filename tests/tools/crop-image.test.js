@@ -601,6 +601,34 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   for (let i = 0; i < 3; i++) await page.click('#crp-rotate');
   await page.selectOption('#crp-ratio', 'free');
 
+  // ---------- Nothing is saved while a new picture is opening ----------
+  // The pictures shown are about to be replaced, so Download, Copy and the ZIP wait for the new one
+  // instead of saving the old crop. Its decoding waits until the three have been clicked.
+  await page.evaluate(() => {
+    const real = TTImage.decode;
+    window.openGate = new Promise(r => { window.releaseOpen = r; });
+    TTImage.decode = async function () { await window.openGate; TTImage.decode = real; return real.apply(this, arguments); };
+  });
+  let early = 0;
+  const onEarly = () => early++;
+  page.on('download', onEarly);
+  await page.setInputFiles('#crp-file', path.join(fixtures, 'small.png'));
+  await page.waitForFunction(() => document.querySelector('#crp-status').textContent === 'Opening small.png…');
+  for (const sel of ['#crp-download', '#crp-copy', '#crp-zip']) {
+    await page.evaluate(() => { document.querySelector('#crp-error').textContent = ''; });
+    await page.click(sel);
+    assert.equal(await page.textContent('#crp-error'), 'Please wait until the new picture has opened, then try again.', `${sel} while a picture is opening`);
+  }
+  assert.equal(await page.textContent('#crp-status'), 'Opening small.png…');
+  await page.evaluate(() => window.releaseOpen());
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'small.png');
+  page.off('download', onEarly);
+  assert.equal(early, 0, 'nothing was saved while the picture was opening');
+  assert.equal(await page.textContent('#crp-error'), '', 'the message goes once the picture is open');
+  assert.equal(await page.textContent('#crp-download'), 'Download PNG');
+  assert.equal((await download()).name, 'small-cropped.png', 'then the new picture is saved');
+  await openFile(['grid.png', 'small.png'], 'grid.png and 1 more');
+
   // ---------- Files that cannot be cropped ----------
   await page.setInputFiles('#crp-file', { name: 'oops.png', mimeType: 'image/png', buffer: Buffer.from('not an image at all') });
   await page.waitForFunction(() => document.querySelector('#crp-error').textContent.length > 0);
