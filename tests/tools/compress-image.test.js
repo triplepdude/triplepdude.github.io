@@ -721,8 +721,26 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(guide, /For photos, JPG or WebP keeps far more detail at the same size\. To convert PNG photos to JPG with no target size, use the PNG to JPG converter, which shows how much smaller each file gets\./);
   assert.match(guide, /Rotation: the turn a phone recorded is applied to the pixels, so the photo stays upright\. To turn or mirror a picture yourself, use Flip Image\./);
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/resize-image/', '/png-to-jpg/', '/remove-exif-data/', '/flip-image/']);
+  assert.deepEqual(links, ['/resize-image/', '/png-to-jpg/', '/remove-exif-data/', '/flip-image/', '/compress-pdf/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }
+
+  // The colour reducer lives in assets/js/png-kit.js, shared with PDF to PNG. Should that file fail
+  // to load, a smaller PNG cannot be made: each image says to reload the page (not that it is too
+  // large), and the page goes on working, Clear included, without a script error.
+  const unkit = await page.context().browser().newContext({ viewport: { width: 1280, height: 900 } });
+  const noKit = await unkit.newPage();
+  const scriptErrors = [];
+  noKit.on('pageerror', e => scriptErrors.push(e.message));
+  await noKit.route('**/assets/js/png-kit.js', r => r.abort());
+  await noKit.goto(url);
+  await noKit.selectOption('#cmpi-format', 'png');
+  await noKit.setInputFiles('#cmpi-file', [path.join(fixtures, 'gradient.png'), path.join(fixtures, 'logo.png')]);
+  await noKit.waitForFunction(() => [...document.querySelectorAll('li[data-id]')].filter(li => li.dataset.state === 'error').length === 2, null, { timeout: 20000 });
+  assert.deepEqual(await noKit.$$eval('li[data-id] .hint', l => l.map(e => e.textContent)), Array(2).fill('Part of this page did not load. Reload the page and try again.'));
+  await noKit.click('#cmpi-clear');
+  assert.equal(await noKit.$$eval('li[data-id]', l => l.length), 0);
+  assert.deepEqual(scriptErrors, []);
+  await unkit.close();
 };

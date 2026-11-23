@@ -317,7 +317,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match(guide, /so 1,000 words is about 2 or 4 pages\. To test your own layout, use the lorem ipsum generator for an exact number of words\./);
   // The reading-time answer in the FAQ links text to speech and the typing test.
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/lorem-ipsum-generator/', '/text-to-speech/', '/typing-test/']);
+  assert.deepEqual(links, ['/pdf-to-text/', '/lorem-ipsum-generator/', '/text-to-speech/', '/typing-test/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }

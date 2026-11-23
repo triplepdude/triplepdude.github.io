@@ -1,0 +1,140 @@
+{%- comment -%}
+  Styles and markup of the PDF page tools (PDF to JPG, PDF to PNG): the drop area, the password
+  prompt, the open file, the page list field, the Convert row and the page thumbnails. Their script
+  is _includes/pdf-pages.js. A page includes each part once, with its own prefix for ids and
+  classes, and puts its own options between "file" and "pick":
+
+    <style>
+    {% raw %}{% include pdf-pages.html part="css" p="p2j" %}{% endraw %}
+    ...the page's own rules...
+    </style>
+    <div class="p2j is-empty" id="p2j">
+      {% raw %}{% include pdf-pages.html part="top" p="p2j" %}{% endraw %}
+      <div id="p2j-work" hidden>
+        {% raw %}{% include pdf-pages.html part="file" p="p2j" %}{% endraw %}
+        ...the page's own options...
+        {% raw %}{% include pdf-pages.html part="pick" p="p2j" %}{% endraw %}
+      </div>
+    </div>
+
+  part     css, top, file or pick.
+  p        the prefix of every id and class (p2j: #p2j-file, .p2j-page and so on).
+  hint     top: the line under the drop button. Default "Pages are turned into images on your
+           device; nothing is uploaded."
+  legend   pick: the hint above the thumbnails. Default: how to pick pages by click, drag and touch.
+  actions  pick: more buttons for the Convert row, as HTML, put between Convert and Cancel.
+  Text values are plain text, in double quotes (single quotes when the text holds a double quote).
+{%- endcomment -%}
+{%- assign pdfp = include.p -%}
+{%- if include.part == 'css' -%}
+.{{ pdfp }}-drop { margin: 0 0 16px; padding: 24px 16px; text-align: center; background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px; transition: border-color 0.15s ease, background-color 0.15s ease; }
+.{{ pdfp }}.is-empty .{{ pdfp }}-drop { padding: 48px 16px; }
+/* Once a PDF is open, the drop area shows only while a file is dragged over the page. */
+.{{ pdfp }}:not(.is-empty) .{{ pdfp }}-drop:not(.is-over) { display: none; }
+.{{ pdfp }}-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.{{ pdfp }}-drop p { margin: 10px 0 0; }
+.{{ pdfp }}-drop .hint { margin-top: 4px; }
+.{{ pdfp }}-drop .{{ pdfp }}-sample { margin-top: 14px; }
+.{{ pdfp }}-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.{{ pdfp }}-file-main { flex: 1 1 220px; min-width: 0; }
+.{{ pdfp }}-file-name { font-weight: 600; overflow-wrap: anywhere; }
+.{{ pdfp }}-file-meta { color: var(--muted); font-size: 14px; }
+.{{ pdfp }}-unlock { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin: 0 0 16px; }
+.{{ pdfp }}-unlock .field { flex: 1 1 220px; min-width: 0; max-width: 360px; margin: 0; }
+.{{ pdfp }}-unlock label { overflow-wrap: anywhere; }
+.{{ pdfp }}-unlock .msg { flex: 1 1 100%; margin: 0; }
+.{{ pdfp }}-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 20px; align-items: start; }
+.{{ pdfp }}-opts > .field, .{{ pdfp }}-opts > fieldset { margin-bottom: 14px; }
+.{{ pdfp }}-format { min-width: 0; margin: 0; padding: 0; border: 0; }
+.{{ pdfp }}-format legend { margin: 0 0 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.{{ pdfp }}-seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.{{ pdfp }}-seg label { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 6px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--field-border); border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.{{ pdfp }}-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.{{ pdfp }}-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.{{ pdfp }}-seg .{{ pdfp }}-tick { display: none; flex: none; }
+.{{ pdfp }}-seg label:has(input:checked) .{{ pdfp }}-tick { display: block; }
+.{{ pdfp }}-seg.is-off label { opacity: 0.5; cursor: not-allowed; }
+.{{ pdfp }}-pagesel { max-width: 520px; }
+.{{ pdfp }}-quick { gap: 8px; margin-bottom: 8px; }
+.{{ pdfp }}-plan { min-height: 1.6em; margin: 4px 0 12px; font-weight: 600; overflow-wrap: anywhere; }
+.{{ pdfp }}-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 16px; }
+.{{ pdfp }}-progress progress { flex: 1 1 160px; height: 8px; accent-color: var(--accent); }
+.{{ pdfp }}-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 20px 0 6px; font-size: 1.1rem; }
+.{{ pdfp }}-h small { color: var(--muted); font-size: 14px; font-weight: 400; }
+.{{ pdfp }}-legend { margin: 0 0 10px; }
+.{{ pdfp }}-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.{{ pdfp }}-page { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.{{ pdfp }}-page.is-selected { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.{{ pdfp }}-page:not(.is-selected) .{{ pdfp }}-thumb img { opacity: 0.55; }
+.{{ pdfp }}-thumb { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 3 / 4; overflow: hidden; background: var(--surface-2); border-radius: 6px; }
+.{{ pdfp }}-thumb img { display: block; max-width: 90%; max-height: 90%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.3); pointer-events: none; }
+.{{ pdfp }}-thumb img:not([src]) { width: 66%; height: 82%; }
+.{{ pdfp }}-wait { position: absolute; color: var(--muted); font-size: 12px; }
+.{{ pdfp }}-num { position: absolute; bottom: 4px; left: 4px; min-width: 24px; height: 22px; padding: 0 6px; background: var(--text); color: var(--surface); border-radius: 11px; font-size: 12px; font-weight: 700; line-height: 22px; text-align: center; }
+.{{ pdfp }}-check { position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; margin: 0; pointer-events: none; }
+.{{ pdfp }}-info { min-height: 18px; margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.{{ pdfp }}-info strong { color: var(--text); font-weight: 600; }
+.{{ pdfp }}-page.is-working .{{ pdfp }}-info { color: var(--text); font-weight: 600; }
+.{{ pdfp }}-dl { width: 100%; margin-top: 6px; }
+.{{ pdfp }}.is-sweeping, .{{ pdfp }}.is-sweeping * { cursor: cell !important; }
+@media (max-width: 480px) {
+  .{{ pdfp }}-pages { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+/* On a phone the status line is two lines high, so the longer message written when a conversion
+   ends ("Saved … with 3 images, …") does not push the form down. */
+@media (max-width: 600px) {
+  #{{ pdfp }}-status:not(:empty) { display: flex; align-items: center; min-height: calc(3.2em + 20px); }
+}
+{%- elsif include.part == 'top' -%}
+<input type="file" id="{{ pdfp }}-file" class="visually-hidden" accept="application/pdf,.pdf" tabindex="-1" aria-label="Choose a PDF file">
+  <div class="{{ pdfp }}-drop" id="{{ pdfp }}-drop">
+    <button class="btn" type="button" id="{{ pdfp }}-choose">Choose a PDF file</button>
+    <p>or drop it anywhere on this page</p>
+    <p class="hint">{{ include.hint | default: 'Pages are turned into images on your device; nothing is uploaded.' | escape }}</p>
+    <button class="btn secondary small {{ pdfp }}-sample" type="button" id="{{ pdfp }}-sample">Try it with a sample PDF</button>
+  </div>
+  <p class="msg error" id="{{ pdfp }}-error" role="alert"></p>
+  <p class="msg ok" id="{{ pdfp }}-status" role="status"></p>
+
+  <div class="{{ pdfp }}-unlock" id="{{ pdfp }}-unlock" hidden>
+    <div class="field">
+      <label for="{{ pdfp }}-pw" id="{{ pdfp }}-pw-label">Password</label>
+      <input type="password" id="{{ pdfp }}-pw" autocomplete="off" maxlength="1024" aria-describedby="{{ pdfp }}-pw-error">
+    </div>
+    <button class="btn" type="button" id="{{ pdfp }}-pw-go">Open</button>
+    <p class="msg error" id="{{ pdfp }}-pw-error" aria-live="polite"></p>
+  </div>
+{%- elsif include.part == 'file' -%}
+<div class="{{ pdfp }}-file">
+      <div class="{{ pdfp }}-file-main">
+        <div class="{{ pdfp }}-file-name" id="{{ pdfp }}-name"></div>
+        <div class="{{ pdfp }}-file-meta" id="{{ pdfp }}-meta"></div>
+      </div>
+      <button class="btn secondary small" type="button" id="{{ pdfp }}-another">Choose another PDF</button>
+    </div>
+{%- elsif include.part == 'pick' -%}
+<div class="field {{ pdfp }}-pagesel">
+      <label for="{{ pdfp }}-pages">Pages to convert</label>
+      <input type="text" id="{{ pdfp }}-pages" autocomplete="off" spellcheck="false" aria-describedby="{{ pdfp }}-pages-hint {{ pdfp }}-pages-error">
+      <span class="hint" id="{{ pdfp }}-pages-hint">For example 1-3, 5. You can also click pages below.</span>
+      <p class="msg error" id="{{ pdfp }}-pages-error" aria-live="polite"></p>
+    </div>
+    <div class="actions {{ pdfp }}-quick">
+      <button class="btn secondary small" type="button" data-pick="all">Select all</button>
+      <button class="btn secondary small" type="button" data-pick="none">Select none</button>
+    </div>
+
+    <p class="{{ pdfp }}-plan" id="{{ pdfp }}-plan" role="status"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="{{ pdfp }}-go">Convert</button>
+      {%- if include.actions %}
+      {{ include.actions }}
+      {%- endif %}
+      <button class="btn secondary" type="button" id="{{ pdfp }}-cancel" hidden>Cancel</button>
+    </div>
+    <div class="{{ pdfp }}-progress" id="{{ pdfp }}-progress" hidden><progress id="{{ pdfp }}-bar" max="100" value="0" aria-label="Converting progress"></progress><span class="hint" id="{{ pdfp }}-pct"></span></div>
+
+    <h2 class="{{ pdfp }}-h">Pages <small id="{{ pdfp }}-count"></small></h2>
+    <p class="hint {{ pdfp }}-legend">{{ include.legend | default: 'Click pages to pick them, or drag across several. On a touch screen, tap a page, or touch and hold one and then drag. Shift+click picks every page up to the one you click.' | escape }}</p>
+    <ol class="{{ pdfp }}-pages" id="{{ pdfp }}-grid" aria-label="Pages of the PDF"></ol>
+{%- endif -%}
