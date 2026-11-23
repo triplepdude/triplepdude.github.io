@@ -181,10 +181,22 @@
  *                 'ulaw' or 'alaw' (G.711, 8 bits), as wavWriter() writes
  *       sampleRate  WAV: the rate to write (default the sound's own)
  *       rf64      WAV: RF64 even under 4 GB (past 4 GB it is RF64 anyway)
+ *       writable  MP3: a WritableStream that takes { type: 'write',
+ *                 position, data } chunks, such as the
+ *                 FileSystemWritableFileStream of a handle from
+ *                 showSaveFilePicker(). The MP3 is written into it as it is
+ *                 encoded, so it is never held in memory, and the stream is
+ *                 closed at the end (aborted on an error or a cancel). The
+ *                 file is the same, byte for byte, as the Blob convert()
+ *                 gives without it: the ID3v2.3 tag, room for the Info
+ *                 frame, the frames as the encoder makes them (their count,
+ *                 positions and CRC taken as they pass), the ID3v1 tag, and
+ *                 the Info frame put in its room once the length is known.
  *       onProgress(fraction)
  *     promise resolves { blob, ext ('mp3' | 'wav' | 'm4a'), mime, sampleRate,
  *     channels, samples (MP3, WAV: per channel, as written), kbps (MP3),
- *     sampleFormat (WAV) }. Rejects with CANCELLED, NO_DECODE, TOO_LONG,
+ *     sampleFormat (WAV) }; with writable, blob is null, streamed is true
+ *     and size is the bytes written. Rejects with CANCELLED, NO_DECODE, TOO_LONG,
  *     NOT_AAC, TOO_BIG, NO_ENCODER or CANNOT_COPY, or another error.
  *     MP3 and WAV are made by the engine's own pipeline: the sound decoded a
  *     piece at a time from the start of the selection, cut to the sample,
@@ -1205,6 +1217,67 @@
       musicCrc: crc16(body), toc: function (size) { return mp3Toc(fr, 0, fr.count, size); } });
     return concatBytes([u8.subarray(0, fr.info ? fr.info.pos : fr.start), frame, body, u8.subarray(fr.end)]);
   }
+  // An MP3 written into `writable` (convert()'s o.writable) as it is made, as
+  // finishMp3() lays it out: the ID3v2.3 tag, room for the Info frame, the
+  // frames, the ID3v1 tag. mediabunny writes the frames alone (no Xing frame
+  // of its own) through .sink; their count, positions and CRC are taken as
+  // they pass, and .finish(samples) puts in the room the Info frame that
+  // mp3Gapless() writes, then closes the stream. .abort() discards it.
+  function mp3Stream(writable, tags, sampleRate, channels, kbps) {
+    var id = sampleRate >= 32000 ? 3 : sampleRate >= 16000 ? 2 : 0, sri = MP3_RATES_BY_ID[id].indexOf(sampleRate);
+    var head = tags ? id3v23(tags) : new Uint8Array(0), tail = tags ? id3v1(tags) : null, mode = channels === 1 ? 3 : 1;
+    var room = mp3InfoFrame({ id: id, sampleRateIndex: sri, mode: mode, kbps: kbps, frames: 0, bytes: 0, toc: new Uint8Array(100) }).length;
+    var fw = writable.getWriter(), base = head.length + room, done = false;
+    var s = { bytes: 0, crc: 0, count: 0, next: 0, pos: new Float64Array(4096), size: new Uint32Array(4096), carry: new Uint8Array(0), h0: null, cbr: true, lost: false };
+    if (head.length) fw.write({ type: 'write', position: 0, data: head }).catch(function () {});
+    // Frame headers as the bytes pass; one may straddle two writes.
+    function track(d) {
+      var off = s.bytes, carry = s.carry;
+      var at = function (q) { return q >= off ? d[q - off] : carry[carry.length - (off - q)]; };
+      while (!s.lost && s.next + 4 <= off + d.length) {
+        var h = mp3Header(new Uint8Array([at(s.next), at(s.next + 1), at(s.next + 2), at(s.next + 3)]), 0);
+        if (!h || !h.size) { s.lost = true; break; }
+        if (s.count === s.pos.length) {
+          var p2 = new Float64Array(s.pos.length * 2), z2 = new Uint32Array(s.pos.length * 2);
+          p2.set(s.pos); z2.set(s.size); s.pos = p2; s.size = z2;
+        }
+        if (!s.h0) s.h0 = h; else if (h.kbps !== s.h0.kbps) s.cbr = false;
+        s.pos[s.count] = s.next; s.size[s.count] = h.size; s.count++;
+        s.next += h.size;
+      }
+      var all = carry.length + d.length, keep = new Uint8Array(Math.min(3, all));
+      for (var i = 0; i < keep.length; i++) keep[i] = at(off + d.length - keep.length + i);
+      s.carry = keep;
+    }
+    s.sink = new WritableStream({
+      write: function (chunk) {
+        var d = chunk && chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
+        if (chunk.position !== s.bytes) throw new Error('The MP3 frames were not written in order.');
+        s.crc = crc16(d, 0, d.length, s.crc);
+        track(d);
+        s.bytes += d.length;
+        return fw.write({ type: 'write', position: base + chunk.position, data: d });
+      },
+      close: function () {}, abort: function () {}
+    });
+    s.finish = async function (samples) {
+      var h = s.h0;
+      if (!h || s.lost || s.next !== s.bytes) throw new Error('The MP3 frames could not be read back.');
+      var padding = Math.max(0, Math.min(4095, s.count * h.spf - LAME_DELAY - samples));
+      var o = { id: h.id, sampleRateIndex: h.sampleRateIndex, mode: h.mode, modeExtension: h.modeExtension, priv: h.priv, flags: h.flags,
+        kbps: s.cbr ? h.kbps : null, vbr: !s.cbr, frames: s.count, bytes: s.bytes, delay: LAME_DELAY, padding: padding, musicCrc: s.crc,
+        toc: function (size) { return mp3Toc({ pos: s.pos, size: s.size }, 0, s.count, size); } };
+      var frame = mp3InfoFrame(o);
+      if (frame.length !== room) { o.kbps = kbps; o.vbr = false; frame = mp3InfoFrame(o); }
+      await fw.write({ type: 'write', position: head.length, data: frame });
+      if (tail) await fw.write({ type: 'write', position: base + s.bytes, data: tail });
+      done = true;
+      await fw.close();
+      return base + s.bytes + (tail ? tail.length : 0);
+    };
+    s.abort = function () { if (!done) { done = true; return fw.abort().catch(function () {}); } };
+    return s;
+  }
   // The main data that frame k takes from the frames before it (its
   // main_data_begin bytes, the bit reservoir), held in frames of silence
   // to put in front of frame k in place of the frames those bytes come
@@ -1958,7 +2031,10 @@
       var p = job.conv ? job.conv.cancel() : job.onCancel ? job.onCancel() : null;
       return Promise.resolve(p).catch(function () {});
     };
-    job.promise = run(m, ti, o || {}, job).catch(function (err) {
+    job.promise = run(m, ti, o || {}, job).catch(async function (err) {
+      // A file given to write into is never left open: discarded unwritten.
+      var w = o && o.writable;
+      if (w) await (job.stream ? job.stream.abort() : w.locked ? null : w.abort().catch(function () {}));
       if (err && err.code === 'CANCELLED') throw err;
       if (job.cancelled || isCancel(err)) throw coded('CANCELLED', 'Conversion cancelled.', { cause: err });
       throw err;
@@ -2026,9 +2102,12 @@
     if (job.cancelled) throw coded('CANCELLED', 'Conversion cancelled.');
     var a = src.base + sel.start / 1000, b = sel.end < t.durMs ? src.base + sel.end / 1000 : t.decodable ? t.end : Infinity;
     var span = len > 0 ? len : 0.001, out = null, enc = null, wav = null, rs = null, inRate = 0, inCh = 0, vol = fx.vol, gain = null;
-    var kept = 0, outN = 0, lastYield = performance.now();
+    var kept = 0, outN = 0, lastYield = performance.now(), stream = null;
     if (fmt === 'mp3') {
-      out = new MB.Output({ format: new MB.Mp3OutputFormat(), target: new MB.BufferTarget() });
+      // Into o.writable as it is made (mp3Stream), else into memory.
+      if (o.writable) stream = job.stream = mp3Stream(o.writable, tags, outRate, ch, plan.kbps);
+      out = stream ? new MB.Output({ format: new MB.Mp3OutputFormat({ xingHeader: false }), target: new MB.StreamTarget(stream.sink) })
+        : new MB.Output({ format: new MB.Mp3OutputFormat(), target: new MB.BufferTarget() });
       enc = new MB.AudioSampleSource({ codec: 'mp3', quality: new MB.Quality({ bitrate: plan.kbps * 1000 }) });
       out.addAudioTrack(enc);
       await out.start();
@@ -2114,7 +2193,11 @@
         enc.close();
         await out.finalize();
         result.kbps = plan.kbps;
-        result.blob = finishMp3(out.target.buffer, tags, { sampleRate: outRate, channels: ch, kbps: plan.kbps, samples: outN });
+        if (stream) {
+          result.size = await stream.finish(outN);
+          result.blob = null;
+          result.streamed = true;
+        } else result.blob = finishMp3(out.target.buffer, tags, { sampleRate: outRate, channels: ch, kbps: plan.kbps, samples: outN });
       }
       return result;
     } catch (err) {

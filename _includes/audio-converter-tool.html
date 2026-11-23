@@ -24,6 +24,8 @@
                ignored; none left gives the default. Messages that suggest
                another format name only formats on offer. Without SIMD (no
                MP3 encoder) the first other format is chosen instead of MP3.
+               With one format the Format choice is not shown, and without
+               SIMD a page that offers only MP3 converts nothing and says why.
   hint         The small line in the drop zone. Default "MP4, MOV, WebM,
                MKV, M4A, MP3, WAV, OGG or FLAC. Only the audio is read, so
                long phone videos of several GB work. Links and protected
@@ -46,6 +48,45 @@
                Default 192; another value also gives 192.
   channels     Starting channel choice: keep (as in the file) or mono.
                Default keep.
+  presets      MP3 preset buttons, separated by spaces, shown in their own
+               "Presets" row above the bitrate: music ("Music: 192 kbps",
+               channels as in the file), speech96 ("Speech: 96 kbps mono")
+               and speech64 ("Speech: 64 kbps mono"). Each sets the bitrate
+               and channel fields. Default: no row, and the hub's one button
+               "Speech: 96 kbps mono" beside the channels.
+  tags         basic or all. basic (the default) writes the title, artist
+               and album of the Tags fields and the cover. all also keeps
+               the file's other tags (album artist, composer, date, genre,
+               track and disc numbers, comment, lyrics), listed in a "Keep
+               the file's other tags" checkbox, ticked to start with, under
+               the fields.
+  saving       show: a converted file's line compares the sizes ("105.8 MB
+               WAV → 14.4 MB MP3, 86% smaller"; of the part selected, when
+               trimmed), a line above the results adds up two or more, the
+               size estimate says how much smaller the result will be, and
+               the MP3 hint compares a minute with 16-bit WAV at 44.1 kHz.
+               Default: sizes only.
+  stream       big: an MP3 estimated at 200 MB or more is written straight
+               to a file the visitor chooses, as it converts, where the
+               browser has showSaveFilePicker (Chrome and Edge 86 on a
+               computer, Chrome 132 on Android): Convert asks where to save
+               the first such file, one a press, and converts it with the
+               files that need no asking. Where it has not, an MP3 is built
+               in memory up to TTAudio.limits.wav (2 GB, 300 MB on a phone),
+               and a bigger one is not converted: its file says why. Default:
+               every MP3 is built in memory, with no limit.
+  wav          details: for WAV files the line under the name gives the bit
+               depth ("PCM 24-bit", "32-bit float"), RF64 and BWF (a bext
+               chunk); a note says when the header stated the wrong length
+               and the sound was read to its real end, and a header that
+               cannot be used is named in plain words (no format chunk, no
+               channels or rate, a bit depth such as 12); a WAV that holds MP3
+               is saved as the MP3 inside, unchanged (cut without
+               re-encoding when trimmed), unless the visitor unticks "Save
+               the MP3 inside as it is" in the editor; the size estimate
+               says when the rate changes; the MP3 hint says MP3 has no bit
+               depth; the file picker also offers .bwf and .rf64 files.
+               Default: WAV files are shown and converted like any other.
 
   Adding parameters (pair pages). Follow the pattern above: read the value
   into an acv_ variable below (strip, downcase, a default for unknown
@@ -54,9 +95,11 @@
   places are marked "Pair-page options": WAV bit depth and sample rate (add
   sampleFormat and sampleRate to convertOptions(), which the size estimate
   and TTAudio.convert both read; the engine writes 16 and 24-bit, float,
-  µ-law and A-law and resamples), presets (beside the Speech button, which
-  is the hub's one preset), and a switch that writes no tags (pass tags:
-  null to TTAudio.convert in convertOne()).
+  µ-law and A-law and resamples), presets (the presets parameter, or beside
+  the Speech button, which is the hub's one preset), and a switch that
+  writes no tags (pass tags: null to TTAudio.convert in convertOne()). The
+  script of presets, tags, saving, stream and wav is in its section "WAV to
+  MP3 options".
 
   The element ids (m2m-...) are fixed, so a page holds one converter.
   Liquid runs over this file: the script must not contain a double opening
@@ -86,6 +129,24 @@
 {%- unless acv_source == 'audio' -%}{%- assign acv_source = 'video' -%}{%- endunless -%}
 {%- assign acv_hint = include.hint | default: 'MP4, MOV, WebM, MKV, M4A, MP3, WAV, OGG or FLAC. Only the audio is read, so long phone videos of several GB work. Links and protected (DRM) files cannot be converted.' -%}
 {%- assign acv_title = include.drop_title | default: 'Drop videos or audio files here' -%}
+{%- comment -%} WAV to MP3 options: presets, tags, saving, stream, wav. {%- endcomment -%}
+{%- assign acv_pknown = 'music speech96 speech64' | split: ' ' -%}
+{%- assign acv_praw = include.presets | default: '' | strip | downcase | split: ' ' -%}
+{%- assign acv_plist = '' -%}
+{%- for acv_p in acv_praw -%}
+  {%- if acv_pknown contains acv_p -%}
+    {%- unless acv_plist contains acv_p -%}{%- assign acv_plist = acv_plist | append: acv_p | append: ' ' -%}{%- endunless -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- assign acv_presets = acv_plist | strip | split: ' ' -%}
+{%- assign acv_tags = include.tags | default: 'basic' | strip | downcase -%}
+{%- unless acv_tags == 'all' -%}{%- assign acv_tags = 'basic' -%}{%- endunless -%}
+{%- assign acv_saving = include.saving | default: '' | strip | downcase -%}
+{%- unless acv_saving == 'show' -%}{%- assign acv_saving = '' -%}{%- endunless -%}
+{%- assign acv_stream = include.stream | default: '' | strip | downcase -%}
+{%- unless acv_stream == 'big' -%}{%- assign acv_stream = '' -%}{%- endunless -%}
+{%- assign acv_wav = include.wav | default: '' | strip | downcase -%}
+{%- unless acv_wav == 'details' -%}{%- assign acv_wav = '' -%}{%- endunless -%}
 <style>
 .m2m-drop { display: grid; justify-items: center; gap: 10px; margin: 0 0 16px; padding: 20px 14px; border: 2px dashed var(--field-border); border-radius: 12px; background: var(--surface-2); text-align: center; }
 .m2m-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
@@ -137,6 +198,17 @@
 .m2m-trim summary { padding: 6px 0; font-weight: 600; cursor: pointer; }
 .m2m-trim[open] summary { margin-bottom: 8px; }
 {%- endif %}
+{%- if acv_presets.size > 0 %}
+.m2m-presets { margin: 0 0 12px; }
+.m2m-presets > .label { display: block; margin-bottom: 6px; }
+.m2m-presets .actions { margin: 0; }
+{%- endif %}
+{%- if acv_saving == 'show' %}
+.m2m-total { margin: 0 0 12px; font-weight: 600; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+{%- endif %}
+{%- if acv_wav == 'details' %}
+.m2m-file-note { margin: 0; overflow-wrap: anywhere; }
+{%- endif %}
 @media (pointer: coarse) {
   .m2m-tags summary{% if acv_trim == 'folded' %}, .m2m-trim summary{% endif %} { padding-block: 10px; }
 }
@@ -153,7 +225,7 @@
       <button class="btn" type="button" id="m2m-open" aria-describedby="m2m-drop-hint m2m-file-error">Choose files…</button>
       <button class="btn secondary" type="button" id="m2m-sample">Try a sample sound</button>
     </div>
-    <input type="file" id="m2m-file" hidden multiple accept="video/*,audio/*,.mp4,.m4v,.mov,.qt,.webm,.mkv,.mka,.m4a,.m4b,.mp3,.wav,.ogg,.oga,.opus,.flac,.aac,.ts,.mts,.m2ts,.3gp">
+    <input type="file" id="m2m-file" hidden multiple accept="video/*,audio/*,.mp4,.m4v,.mov,.qt,.webm,.mkv,.mka,.m4a,.m4b,.mp3,.wav,.ogg,.oga,.opus,.flac,.aac,.ts,.mts,.m2ts,.3gp{% if acv_wav == 'details' %},.bwf,.rf64{% endif %}">
     <p class="hint" id="m2m-drop-hint">{{ acv_hint | escape }}</p>
   </div>
   <p class="msg error" id="m2m-file-error" role="alert"></p>
@@ -169,6 +241,9 @@
   <section id="m2m-edit" aria-labelledby="m2m-edit-h" hidden>
     <h2 class="m2m-h" id="m2m-edit-h">{% if acv_trim == 'folded' %}Edit{% else %}Trim{% endif %} <span id="m2m-edit-name"></span></h2>
     <fieldset class="m2m-fs" id="m2m-edit-fs">
+{%- if acv_wav == 'details' %}
+    <label class="check m2m-note" id="m2m-asis-row" hidden><input type="checkbox" id="m2m-asis" checked> Save the MP3 inside as it is, without re-encoding</label>
+{%- endif %}
     <fieldset class="m2m-fs" id="m2m-track-field" hidden>
       <legend>Audio track</legend>
       <div class="checks m2m-tracks" id="m2m-tracks"></div>
@@ -228,6 +303,9 @@
       <span class="hint" id="m2m-peak"></span>
     </div>
     <p class="hint m2m-note" id="m2m-copy-note"{% unless acv_fmt == 'copy' %} hidden{% endunless %}>Original audio is copied as it is, so fades, volume and mono are not applied.</p>
+{%- if acv_wav == 'details' %}
+    <p class="hint m2m-note" id="m2m-asis-note" hidden>The MP3 inside is saved as it is: a cut is made between its frames without re-encoding, and fades, volume, mono and the bitrate are not applied.</p>
+{%- endif %}
 {%- if acv_trim == 'folded' %}
     </details>
 {%- endif %}
@@ -239,7 +317,17 @@
         <div class="field"><label for="m2m-album">Album</label><input type="text" id="m2m-album" autocomplete="off" maxlength="200"></div>
       </div>
       <label class="check" id="m2m-cover-row" hidden><input type="checkbox" id="m2m-cover" checked> Keep the cover art from the file</label>
+{%- if acv_tags == 'all' %}
+      <label class="check" id="m2m-more-row" hidden><input type="checkbox" id="m2m-more" checked> <span>Keep the file's other tags: <span id="m2m-more-list"></span></span></label>
+{%- assign acv_tagfmt = '' -%}
+{%- for acv_f in acv_offer -%}
+{%- case acv_f -%}{%- when 'mp3' -%}{%- assign acv_tagfmt = acv_tagfmt | append: '|ID3 tags in MP3' -%}{%- when 'copy' -%}{%- assign acv_tagfmt = acv_tagfmt | append: '|iTunes tags in M4A' -%}{%- when 'wav' -%}{%- assign acv_tagfmt = acv_tagfmt | append: '|RIFF INFO and ID3 tags in WAV' -%}{%- endcase -%}
+{%- endfor -%}
+{%- assign acv_tagfmt = acv_tagfmt | remove_first: '|' | split: '|' %}
+      <p class="hint m2m-note">Saved as {% if acv_offer.size == 1 and acv_offer[0] == 'mp3' %}ID3 tags (version 2.3, and version 1 for old players){% else %}{{ acv_tagfmt | join: ', ' }}{% endif %}.</p>
+{%- else %}
       <p class="hint m2m-note">Saved as ID3 tags in MP3, iTunes tags in M4A, and RIFF INFO or ID3 tags in WAV. Only what you see here is written.</p>
+{%- endif %}
     </details>
     <p class="hint m2m-note" id="m2m-estimate"></p>
     </fieldset>
@@ -248,7 +336,7 @@
   <section aria-labelledby="m2m-out-h">
     <h2 class="m2m-h" id="m2m-out-h">Output</h2>
     <fieldset class="m2m-fs" id="m2m-out-fs">
-      <fieldset class="m2m-fs">
+      <fieldset class="m2m-fs"{% if acv_offer.size == 1 %} hidden{% endif %}>
         <legend>Format</legend>
         <div class="checks">
 {%- for acv_f in acv_offer %}
@@ -263,6 +351,23 @@
 {%- endfor %}
         </div>
       </fieldset>
+{%- if acv_presets.size > 0 %}
+      <div class="m2m-presets" id="m2m-presets" role="group" aria-labelledby="m2m-presets-label"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>
+        <span class="label" id="m2m-presets-label">Presets</span>
+        <div class="actions">
+{%- for acv_p in acv_presets %}
+{%- case acv_p %}
+{%- when 'music' %}
+          <button class="btn secondary" type="button" id="m2m-p-music" data-kbps="192" data-mono="0">Music: 192 kbps</button>
+{%- when 'speech96' %}
+          <button class="btn secondary" type="button" id="m2m-p-speech96" data-kbps="96" data-mono="1">Speech: 96 kbps mono</button>
+{%- when 'speech64' %}
+          <button class="btn secondary" type="button" id="m2m-p-speech64" data-kbps="64" data-mono="1">Speech: 64 kbps mono</button>
+{%- endcase %}
+{%- endfor %}
+        </div>
+      </div>
+{%- endif %}
       <div class="row" id="m2m-opts">
         <div class="field" id="m2m-bitrate-field"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>
           <label for="m2m-bitrate">MP3 bitrate</label>
@@ -280,7 +385,9 @@
           </select>
         </div>
         {%- comment -%} Pair-page options: WAV bit depth and sample rate fields go here, shown only for WAV, and presets beside the Speech button. {%- endcomment %}
+{%- if acv_presets.size == 0 %}
         <button class="btn secondary" type="button" id="m2m-speech"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>Speech: 96 kbps mono</button>
+{%- endif %}
       </div>
       <p class="hint m2m-note" id="m2m-format-hint"></p>
     </fieldset>
@@ -294,6 +401,9 @@
     </div>
     <p class="msg error" id="m2m-error" role="alert"></p>
     <p class="visually-hidden" id="m2m-status" role="status"></p>
+{%- if acv_saving == 'show' %}
+    <p class="m2m-total" id="m2m-total" hidden></p>
+{%- endif %}
     <div class="m2m-results actions" id="m2m-results" hidden>
       <button class="btn" type="button" id="m2m-zip">Download all (.zip)</button>
     </div>
@@ -313,7 +423,13 @@
   var CONF = {
     formats: {{ acv_offer | jsonify }},
     source: {{ acv_source | jsonify }},
-    trim: {{ acv_trim | jsonify }}
+    trim: {{ acv_trim | jsonify }},
+    // WAV to MP3 options (see the header and the section of that name).
+    presets: {{ acv_presets | jsonify }},
+    tags: {{ acv_tags | jsonify }},
+    saving: {{ acv_saving | jsonify }},
+    stream: {{ acv_stream | jsonify }},
+    wav: {{ acv_wav | jsonify }}
   };
 
   function $(id) { return document.getElementById(id); }
@@ -342,7 +458,9 @@
     outFs: $('m2m-out-fs'), bitrate: $('m2m-bitrate'), bitrateField: $('m2m-bitrate-field'), channels: $('m2m-channels'), channelsField: $('m2m-channels-field'),
     speech: $('m2m-speech'), fCopy: $('m2m-f-copy'), fMp3: $('m2m-f-mp3'), formatHint: $('m2m-format-hint'),
     convert: $('m2m-convert'), cancel: $('m2m-cancel'), progress: $('m2m-progress'), bar: $('m2m-bar'), progressText: $('m2m-progress-text'),
-    error: $('m2m-error'), status: $('m2m-status'), results: $('m2m-results'), zip: $('m2m-zip'), zipNote: $('m2m-zip-note')
+    error: $('m2m-error'), status: $('m2m-status'), results: $('m2m-results'), zip: $('m2m-zip'), zipNote: $('m2m-zip-note'),
+    presets: $('m2m-presets'), more: $('m2m-more'), moreRow: $('m2m-more-row'), moreList: $('m2m-more-list'), total: $('m2m-total'),
+    asIs: $('m2m-asis'), asIsRow: $('m2m-asis-row'), asIsNote: $('m2m-asis-note')
   };
 
   var entries = [];
@@ -537,7 +655,7 @@
     var warned = kept.filter(function (e) { return convertible(e) && entryMsg(e); }).length, has = warned === 1 ? ' has' : ' have';
     if (added.length === 1 && one) {
       say(one.status === 'error' ? one.name + ': ' + one.error : 'Added ' + one.name + ': ' + fmtTime(one.durMs) + ', ' + A.codecName(one.t) + ' ' + A.channelsText(one.t.ch) + '.' +
-        (entryMsg(one) ? ' ' + entryMsg(one) : ''));
+        (entryMsg(one) ? ' ' + entryMsg(one) : '') + (one.noteEl && one.noteEl.textContent ? ' ' + one.noteEl.textContent : ''));
     } else if (added.length > 1) {
       say('Added ' + added.length + ' files' + (bad ? ', ' + bad + ' of them cannot be ' + formatWord() : '') +
         (warned ? (bad ? ' and ' + warned + ' more' + has : ', ' + warned + ' of them' + has) + ' a warning' : '') + (bad || warned ? ': see the message under each.' : '.'));
@@ -600,9 +718,11 @@
         (offered('mp3') ? 'MP3, ' : '') + 'mono or a shorter selection.';
     }
     if (code === 'NO_ENCODER') {
+      if (!others(err.format)) return 'This browser cannot write ' + (LABELS[err.format] || 'this format') + '. Use a current version of Chrome, Edge, Firefox or Safari (16.4 or later).';
       return err.format === 'mp3' && others('mp3') ? 'This browser cannot write MP3 here. Choose ' + others('mp3') + '.' : 'This browser cannot write this format. Choose another one.';
     }
     if (code === 'CANNOT_COPY') return 'This sound cannot be copied without re-encoding.' + (others('copy') ? ' Choose ' + others('copy') + '.' : '');
+    if (CONF.wav === 'details' && !code) { var damaged = wavDamage(err); if (damaged) return damaged; }
     return A.describe(err, e && e.media ? e.media.drm : '');
   }
 
@@ -615,18 +735,19 @@
   }
   function fileInfo(e) {
     if (!e.t) return '';
-    var t = e.t, bits = [fmtTime(e.durMs), A.codecName(t)];
+    var t = e.t, bits = [fmtTime(e.durMs), CONF.wav === 'details' && wavLabel(e) || A.codecName(t)];
     if (t.sr) bits.push(fmtKhz(t.sr));
     bits.push(A.channelsText(t.ch));
     if (t.bitrate >= 1000 && t.codec && !/^pcm-/.test(t.codec)) bits.push(Math.round(t.bitrate / 1000) + ' kbps');
     if (e.tracks.length > 1) bits.push(e.tracks.length + ' audio tracks');
+    if (CONF.wav === 'details') bits = bits.concat(wavExtras(e));
     return bits.join(' · ');
   }
   function stateText(e) {
     if (e.status === 'reading') return 'Reading…';
     if (e.status === 'error') return '';
     if (e.status === 'converting') return 'Converting… ' + Math.floor(e.progress * 100) + '%';
-    if (e.result) return 'Converted: ' + e.result.name + ', ' + fmtBytes(e.result.blob.size);
+    if (e.result) return resultText(e);
     if (e.status === 'failed' || !convertible(e)) return '';
     var trimmed = e.sel.start > 0 || e.sel.end < e.durMs;
     return 'Ready' + (trimmed ? ', from ' + fmtTime(e.sel.start) + ' to ' + fmtTime(e.sel.end) : '');
@@ -636,6 +757,7 @@
       var li = e.li = el('li', 'm2m-file');
       li.appendChild(e.nameEl = el('p', 'm2m-file-name'));
       li.appendChild(e.infoEl = el('p', 'm2m-file-info'));
+      if (CONF.wav === 'details') li.appendChild(e.noteEl = el('p', 'hint m2m-file-note'));
       li.appendChild(e.stateEl = el('p', 'm2m-file-state'));
       // Not a live region: a summary that names the files goes to the status line.
       e.msgEl = el('p', 'msg error m2m-file-msg');
@@ -654,11 +776,12 @@
     setMsg(e.nameEl, e.name);
     setMsg(e.infoEl, fileInfo(e));
     e.infoEl.hidden = !e.t;
+    if (e.noteEl) { setMsg(e.noteEl, wavNote(e)); e.noteEl.hidden = !e.noteEl.textContent; }
     setMsg(e.stateEl, stateText(e));
     e.stateEl.hidden = !stateText(e);
     e.stateEl.classList.toggle('is-done', !!e.result);
     setMsg(e.msgEl, entryMsg(e));
-    e.dlBtn.hidden = !e.result;
+    e.dlBtn.hidden = !e.result || !e.result.blob;
     if (e.result) e.dlBtn.setAttribute('aria-label', 'Download ' + e.result.name);
     e.editBtn.hidden = entries.length < 2 || e.status === 'error' || e.status === 'reading';
     e.editBtn.setAttribute('aria-label', 'Edit ' + e.name);
@@ -675,6 +798,7 @@
     var copy = settings.format === 'copy';
     if (!copy && !canDecode(e)) return noDecodeText(e);
     if (copy && e.t.codec !== 'aac') return copyText(e);
+    if (tooBig(e)) return tooBigText(e);
     var notes = [];
     if (e.t.listed > e.t.end) notes.push(shortText(e));
     if (!copy && e.t.ch > 2 && e.t.ch !== 4 && e.t.ch !== 6) notes.push(layoutText(e));
@@ -763,6 +887,7 @@
     dom.album.value = e.tags.album;
     dom.coverRow.hidden = !e.images.length;
     dom.cover.checked = e.keepCover;
+    syncOptions(e);
     setMsg(dom.scaleEnd, fmtShort(e.durMs));
     updateSelectionUI();
     updateVolumeUI();
@@ -888,7 +1013,7 @@
   }
 
   function effects(e) {
-    var copy = settings.format === 'copy';
+    var copy = settings.format === 'copy' || asIs(e);
     return { vol: copy ? 1 : e.vol / 100, fadeIn: copy ? 0 : e.fadeIn / 1000, fadeOut: copy ? 0 : e.fadeOut / 1000, mono: !copy && settings.mono };
   }
 
@@ -903,7 +1028,7 @@
   // The levels the result will have: as stereo, or as the Mono mix.
   function levels(e) {
     var p = e.peaks;
-    return p && settings.mono ? { min: p.monoMin, max: p.monoMax, done: p.done } : p;
+    return p && settings.mono && !asIs(e) ? { min: p.monoMin, max: p.monoMax, done: p.done } : p;
   }
   function selectionPeak(e) {
     return A.peak(e.peaks, e.sel.start / e.durMs, e.sel.end / e.durMs, settings.mono);
@@ -912,7 +1037,7 @@
     var e = current;
     if (!editorOn()) return;
     var text = '';
-    if (settings.format !== 'copy' && e.peaks && e.peaks.done) {
+    if (settings.format !== 'copy' && !asIs(e) && e.peaks && e.peaks.done) {
       var peak = selectionPeak(e), g = e.vol / 100;
       if (peak <= 0) text = 'The selection is silent.';
       else if (g === 0) text = 'At 0% the result is silent.';
@@ -936,20 +1061,22 @@
     if (!editorOn()) return;
     var bytes = estimateBytes(e);
     var ext = settings.format === 'mp3' ? 'mp3' : settings.format === 'wav' ? 'wav' : 'm4a';
-    var text = bytes > 0 ? 'Estimated size: about ' + fmtBytes(bytes) + ' as ' + e.base + '.' + ext + '.' : '';
+    var text = bytes > 0 ? 'Estimated size: about ' + fmtBytes(bytes) + ' as ' + e.base + '.' + ext + (CONF.saving === 'show' ? savingVs(e, bytes) : '') + '.' : '';
     // MP3 at 8 to 24 kHz holds less than the bitrate asked for.
     var plan = A.mp3Plan(e.t.sr, settings.kbps);
-    if (text && settings.format === 'mp3' && plan.kbps < settings.kbps) {
+    if (text && settings.format === 'mp3' && !asIs(e) && plan.kbps < settings.kbps) {
       text += ' Its sound is at ' + fmtKhz(plan.sampleRate) + ', where MP3 goes up to ' + plan.kbps + ' kbps, so it is saved at ' + plan.kbps + ' kbps.';
     }
+    if (text) text += estimateNotes(e, plan);
     setMsg(dom.estimate, text);
   }
-  function estimateBytes(e) { return A.estimate(e.media, e.ti, convertOptions(e)); }
+  function estimateBytes(e) { return asIs(e) ? asIsBytes(e) : A.estimate(e.media, e.ti, convertOptions(e)); }
 
   function updateModeUI() {
-    var copy = settings.format === 'copy';
-    [dom.fadeIn, dom.fadeOut, dom.vol].forEach(function (f) { f.disabled = copy || busy; });
+    var copy = settings.format === 'copy', still = copy || (editorOn() && asIs(current));
+    [dom.fadeIn, dom.fadeOut, dom.vol].forEach(function (f) { f.disabled = still || busy; });
     dom.copyNote.hidden = !copy;
+    if (dom.asIsNote) dom.asIsNote.hidden = copy || !still;
     var e = current;
     dom.play.disabled = !editorOn() || !canDecode(e);
     updatePeakUI();
@@ -1304,7 +1431,9 @@
   function formatHint() {
     var s = settings;
     if (s.format === 'mp3') {
-      return 'MP3 at ' + s.kbps + ' kbps' + (s.mono ? ' mono' : '') + ' takes about ' + (s.kbps * 60 / 8000).toFixed(2) + ' MB a minute. A higher bitrate cannot add detail that the source does not have.';
+      return 'MP3 at ' + s.kbps + ' kbps' + (s.mono ? ' mono' : '') + ' takes about ' + (s.kbps * 60 / 8000).toFixed(2) + ' MB a minute' + mp3VsWav(s) +
+        '. A higher bitrate cannot add detail that the source does not have.' +
+        (CONF.wav === 'details' ? ' MP3 has no bit depth: a 24-bit or 32-bit float WAV gives an MP3 of the same size as a 16-bit one.' : '');
     }
     if (s.format === 'wav') {
       return '16-bit WAV stores the decoded sound without compressing it again, but takes about ' + (s.mono ? '5.3' : '10.6') +
@@ -1315,7 +1444,8 @@
   function updateAll() {
     var copy = settings.format === 'copy';
     dom.bitrateField.hidden = settings.format !== 'mp3';
-    dom.speech.hidden = settings.format !== 'mp3';
+    if (dom.speech) dom.speech.hidden = settings.format !== 'mp3';
+    if (dom.presets) dom.presets.hidden = settings.format !== 'mp3';
     dom.channelsField.hidden = copy;
     var rest = others('mp3', 'and');
     setMsg(dom.formatHint, formatHint() + (SIMD || !offered('mp3') ? '' : ' MP3 needs a newer browser (with WebAssembly SIMD, such as Safari 16.4 or later)' +
@@ -1335,6 +1465,7 @@
   }
   function convertible(e) {
     if (!e.t || e.t.drm || (e.status !== 'ready' && e.status !== 'failed')) return false;
+    if ((settings.format === 'mp3' && !SIMD && !asIs(e)) || tooBig(e)) return false;
     return settings.format === 'copy' ? e.t.codec === 'aac' : canDecode(e);
   }
   function pendingEntries() {
@@ -1350,12 +1481,257 @@
   document.querySelectorAll('input[name="m2m-format"]').forEach(function (r) { r.addEventListener('change', function () { stopPlay(); readSettings(); draw(); }); });
   dom.bitrate.addEventListener('change', readSettings);
   dom.channels.addEventListener('change', function () { stopPlay(); readSettings(); });
-  dom.speech.addEventListener('click', function () {
+  if (dom.speech) dom.speech.addEventListener('click', function () {
     dom.bitrate.value = '96';
     dom.channels.value = 'mono';
     readSettings();
     say('Speech settings: MP3 at 96 kbps, mono.');
   });
+
+  // ---------- WAV to MP3 options (presets, tags, saving, stream, wav) ----------
+  // Presets set the bitrate and channel fields.
+  if (dom.presets) dom.presets.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var mono = b.getAttribute('data-mono') === '1';
+      dom.bitrate.value = b.getAttribute('data-kbps');
+      dom.channels.value = mono ? 'mono' : 'keep';
+      stopPlay();
+      readSettings();
+      say(b.textContent.replace(/:.*$/, '') + ' settings: MP3 at ' + settings.kbps + ' kbps, ' + (mono ? 'mono.' : 'channels as in the file.'));
+    });
+  });
+
+  // tags=all: the file's other tags, kept unless the visitor unticks them.
+  var MORE = [['date', 'date'], ['genre', 'genre'], ['albumArtist', 'album artist'], ['composer', 'composer'], ['comment', 'comment'], ['lyrics', 'lyrics']];
+  function moreTags(e, t) {
+    var f = e.media && e.media.tags;
+    if (!f) return t;
+    MORE.forEach(function (k) { t[k[0]] = f[k[0]] || ''; });
+    ['track', 'tracks', 'disc', 'discs'].forEach(function (k) { t[k] = f[k] || 0; });
+    return t;
+  }
+  function moreText(e) {
+    var f = e.media && e.media.tags, out = [];
+    if (!f) return '';
+    MORE.forEach(function (k) {
+      var v = String(f[k[0]] || '').replace(/\s+/g, ' ').trim();
+      if (!v) return;
+      out.push(k[0] === 'lyrics' ? 'lyrics' : k[1] + ' “' + (v.length > 40 ? cut(v, 39) + '…' : v) + '”');
+    });
+    if (f.track) out.splice(Math.min(out.length, 2), 0, 'track ' + f.track + (f.tracks ? ' of ' + f.tracks : ''));
+    if (f.disc) out.splice(Math.min(out.length, 3), 0, 'disc ' + f.disc + (f.discs ? ' of ' + f.discs : ''));
+    return out.join(', ');
+  }
+
+  // wav=details: MP3 sound in a WAV is saved as the MP3 it is.
+  function asIs(e) {
+    return CONF.wav === 'details' && !!(e && e.media && e.media.wav && e.media.wav.mp3) && e.asIs !== false && settings.format === 'mp3';
+  }
+  function asIsBytes(e) {
+    var w = e.media.wav;
+    return Math.round((w.dataEnd - w.dataStart) * lenMs(e) / (e.durMs || 1)) + 300;
+  }
+  function userError(text) { var x = new Error(text); x.userText = text; return x; }
+  async function saveMp3Inside(e) {
+    var tags = tagsFor(e), w = e.media.wav, blob;
+    if (e.sel.start <= 0 && e.sel.end >= e.durMs) blob = A.wavMp3(e.media, tags);
+    else {
+      var r = await A.readMp3(e.media.file.slice(w.dataStart, w.dataEnd)), sr = e.t.sr;
+      var c = r.frames && A.mp3Cut(r.bytes, r.frames, Math.round(e.sel.start * sr / 1000), Math.round(e.sel.end * sr / 1000));
+      if (!c) throw userError('This part of the MP3 inside could not be cut without re-encoding. Untick “Save the MP3 inside as it is” to re-encode it.');
+      var v1 = A.id3v1(tags);
+      blob = new Blob([A.id3v23(tags), c.bytes].concat(v1 ? [v1] : []), { type: 'audio/mpeg' });
+    }
+    var used = new Set();
+    entries.forEach(function (x) { if (x.result) used.add(x.result.name.toLowerCase()); });
+    return { id: ++resultSeq, blob: blob, name: uniqueName(e.base + '.mp3', used), fmt: 'mp3' };
+  }
+  function syncOptions(e) {
+    if (dom.asIsRow) {
+      dom.asIsRow.hidden = !(e.media && e.media.wav && e.media.wav.mp3) || settings.format !== 'mp3';
+      dom.asIs.checked = e.asIs !== false;
+    }
+    if (dom.moreRow) {
+      var t = moreText(e);
+      dom.moreRow.hidden = !t;
+      setMsg(dom.moreList, t);
+      dom.more.checked = e.keepMore !== false;
+    }
+  }
+  if (dom.asIs) dom.asIs.addEventListener('change', function () {
+    if (!editorOn()) return;
+    current.asIs = dom.asIs.checked;
+    stopPlay();
+    invalidate(current);
+    updateAll();
+    updateVolumeUI();
+    draw();
+  });
+  if (dom.more) dom.more.addEventListener('change', function () {
+    if (!editorOn()) return;
+    current.keepMore = dom.more.checked;
+    invalidate(current);
+  });
+  // The codec as a WAV states it, with the bit depth MP3 does not keep.
+  function wavLabel(e) {
+    var w = e.media && e.media.wav, f = w && w.fmt;
+    if (!f) return '';
+    if (w.mp3) return 'MP3 in a WAV';
+    if (f.codec === 1) return 'PCM ' + (f.validBits > 0 && f.validBits < f.bits ? f.validBits : f.bits) + '-bit';
+    if (f.codec === 3) return f.bits + '-bit float';
+    return '';
+  }
+  function wavExtras(e) {
+    var w = e.media && e.media.wav, out = [];
+    if (!w || !w.fmt) return out;
+    if (w.rf64) out.push('RF64');
+    if (w.chunks.some(function (c) { return c.id === 'bext'; })) out.push('BWF');
+    return out;
+  }
+  // mediabunny's sentences about a WAV header it cannot use, in plain words.
+  function wavDamage(err) {
+    var msg = String(err && err.message || ''), bits = /Unsupported WAVE PCM bit depth \((\d{1,3})\)/.exec(msg);
+    if (bits) return 'This WAV file holds ' + bits[1] + '-bit sound, which this page cannot read. An audio editor can save it again as 16 or 24-bit WAV.';
+    if (/Invalid WAVE file - missing "fmt " chunk/.test(msg)) return 'This WAV file is damaged: it has no format chunk, which says how its sound is stored, so the sound cannot be read.';
+    if (/Invalid WAVE file - channel count, sample rate and block align must be positive/.test(msg)) return 'This WAV file is damaged: its header states no channels or no sample rate, so the sound cannot be read.';
+    return '';
+  }
+  // What the engine did about a header that stated the wrong length.
+  function wavNote(e) {
+    var w = e.media && e.media.wav;
+    if (!w || !w.fmt || e.status === 'error') return '';
+    var dur = fmtTime(e.durMs);
+    if (w.mp3 && asIs(e)) return 'This WAV holds MP3 sound, which is saved as it is, without re-encoding.';
+    switch (w.repaired) {
+      case 'zero': return 'Its header was never finished, as when a recorder stops suddenly, so the sound is read to the end of the file: ' + dur + '.';
+      case 'unknown': return 'Its header does not state how long the sound is, as some recorders leave it while recording, so the sound is read to the end of the file: ' + dur + '.';
+      case 'short':
+        return e.file.size > 4294967295 && !w.rf64 ? 'A plain WAV cannot state sizes over 4 GB, so this header is wrong. The sound is read to the end of the file: ' + dur + '.'
+          : 'Its header states less sound than the file holds, so all of it is read: ' + dur + '.';
+      case 'past-end': return 'Its header states more sound than the file holds, perhaps a copy that did not finish, so it is read to where the sound stops: ' + dur + '.';
+      case 'riff': return 'Its header states the wrong file size, so the sound is read to its real end: ' + dur + '.';
+    }
+    return '';
+  }
+
+  // saving=show: sizes before and after.
+  function sourceBytes(e) {
+    var w = e.media && e.media.wav;
+    if (e.sel.start <= 0 && e.sel.end >= e.durMs) return e.file.size;
+    if (w && w.fmt && !w.mp3 && w.fmt.byteRate > 0) return Math.round((e.sel.end - e.sel.start) / 1000 * w.fmt.byteRate);
+    return Math.round(e.file.size * (e.sel.end - e.sel.start) / (e.durMs || 1));
+  }
+  function sourceLabel(e) {
+    var x = /\.([a-z0-9]{2,4})$/i.exec(e.file.name || ''), ext = x ? x[1].toUpperCase() : '';
+    if (e.media && e.media.container === 'wav') return ext === 'BWF' || ext === 'RF64' ? ext : 'WAV';
+    return ext || A.codecName(e.t);
+  }
+  // [phrase, the word that joins it to what it is compared with]
+  function change(from, to) {
+    if (!(from > 0) || !(to >= 0)) return ['', ''];
+    if (to < from) {
+      var p = Math.min(99, Math.round((1 - to / from) * 100));
+      return p >= 1 ? [p + '% smaller', 'than'] : ['about the same size', 'as'];
+    }
+    var q = to / from;
+    if (q >= 2) return [(Math.floor(q * 10) / 10) + ' times the size', 'of'];
+    var r = Math.round((q - 1) * 100);
+    return r >= 1 ? [r + '% bigger', 'than'] : ['about the same size', 'as'];
+  }
+  function resultSize(e) { return e.result.blob ? e.result.blob.size : e.result.size; }
+  function savingText(e) {
+    var from = sourceBytes(e), to = resultSize(e), c = change(from, to);
+    var text = fmtBytes(from) + ' ' + sourceLabel(e) + ' → ' + fmtBytes(to) + ' ' + String(e.result.fmt || '').toUpperCase() + (c[0] ? ', ' + c[0] : '');
+    return e.sel.start <= 0 && e.sel.end >= e.durMs ? text : fmtTime(lenMs(e)) + ' of ' + fmtTime(e.durMs) + ': ' + text;
+  }
+  function savingVs(e, bytes) {
+    var c = change(sourceBytes(e), bytes);
+    return c[0] ? ', ' + c[0] + ' ' + c[1] + (e.sel.start <= 0 && e.sel.end >= e.durMs ? ' the ' : ' that part of the ') + sourceLabel(e) : '';
+  }
+  function resultText(e) {
+    var r = e.result, head = (r.streamed ? 'Saved: ' : 'Converted: ') + r.name;
+    return CONF.saving === 'show' ? head + '. ' + savingText(e) + '.' : head + ', ' + fmtBytes(resultSize(e));
+  }
+  // The sizes of several results added up: "211.6 MB WAV → 28.8 MB MP3, 86% smaller".
+  function sumText(res) {
+    var from = 0, to = 0, ins = new Set(), outs = new Set();
+    res.forEach(function (e) { from += sourceBytes(e); to += resultSize(e); ins.add(sourceLabel(e)); outs.add(String(e.result.fmt || '').toUpperCase()); });
+    var one = function (set) { return set.size === 1 ? ' ' + Array.from(set)[0] : ''; }, c = change(from, to);
+    return fmtBytes(from) + one(ins) + ' → ' + fmtBytes(to) + one(outs) + (c[0] ? ', ' + c[0] : '');
+  }
+  function totalText() {
+    var res = entries.filter(function (e) { return e.result; });
+    return CONF.saving === 'show' && res.length > 1 ? 'All ' + res.length + ' files: ' + sumText(res) + '.' : '';
+  }
+  function mp3VsWav(s) {
+    if (CONF.saving !== 'show') return '';
+    var wav = s.mono ? 5292000 : 10584000, c = change(wav, s.kbps * 7500);
+    return c[0] ? ', ' + c[0].replace(' smaller', ' less') + ' ' + c[1] + ' 16-bit ' + (s.mono ? 'mono' : 'stereo') + ' WAV at 44.1 kHz (' + fmtBytes(wav) + ')' : '';
+  }
+  function doneOne(e) {
+    var r = e.result;
+    if (CONF.saving !== 'show' && !r.streamed) return r.name + ' is ready to download, ' + fmtBytes(resultSize(e)) + '.';
+    return r.name + (r.streamed ? ' is saved' : ' is ready to download') + (CONF.saving === 'show' ? ': ' + savingText(e) : ', ' + fmtBytes(resultSize(e))) + '.';
+  }
+  // What is left to do with the files converted: the hub's sentence, unless
+  // some were written to files as they converted.
+  function downloadText(list, done, withResult) {
+    var saved = list.filter(function (e) { return e.result && e.result.streamed; }).length;
+    if (!saved) return ' Download them one by one' + (withResult.length > 1 ? ' or all as a ZIP.' : '.');
+    if (saved === done) return ' All of them are saved.';
+    return ' Download the ' + (done - saved > 1 ? 'others one by one' + (!dom.results.hidden ? ' or all as a ZIP.' : '.') : 'other one with its button.');
+  }
+  function doneMany(list) {
+    var res = list.filter(function (e) { return e.result; });
+    return CONF.saving === 'show' && res.length > 1 ? ': ' + sumText(res) : '';
+  }
+
+  // stream=big: an MP3 too big to build in memory is written to a file.
+  var STREAM_FROM = 200e6;
+  var CAN_STREAM = CONF.stream === 'big' && typeof window.showSaveFilePicker === 'function';
+  var picking = false;
+  function bigMp3(e) { return CONF.stream === 'big' && settings.format === 'mp3' && !asIs(e) && !!e.media && estimateBytes(e) >= STREAM_FROM; }
+  function tooBig(e) { return !CAN_STREAM && bigMp3(e) && estimateBytes(e) > WAV_LIMIT; }
+  function tooBigText(e) {
+    var limit = WAV_LIMIT >= 1e9 ? WAV_LIMIT / 1e9 + ' GB' : WAV_LIMIT / 1e6 + ' MB';
+    return 'As MP3 this would be about ' + fmtBytes(estimateBytes(e)) + ', more than the ' + limit + (A.PHONE ? ' a phone' : ' this browser') +
+      ' can build in memory. Choose a lower bitrate, Mono or a shorter part' + (dom.trim ? ' (under Trim, fades and volume)' : '') + ', or use Chrome' +
+      (A.PHONE ? ' on Android, or Chrome or Edge on a computer' : ' or Edge') + ', which can write a big MP3 straight to a file as it converts.';
+  }
+  function estimateNotes(e, plan) {
+    var text = '';
+    if (CONF.wav === 'details' && settings.format === 'mp3' && !asIs(e) && plan.sampleRate !== e.t.sr) {
+      text += ' MP3 has no ' + fmtKhz(e.t.sr) + ', so its sound is resampled to ' + fmtKhz(plan.sampleRate) + '.';
+    }
+    if (CAN_STREAM && bigMp3(e)) text += ' An MP3 this big is written straight to a file as it converts: Convert asks where to save it.';
+    return text;
+  }
+  function moreToSave() {
+    var n = CAN_STREAM ? pendingEntries().filter(bigMp3).length : 0;
+    return n ? ' ' + (n === 1 ? 'One more file is' : n + ' more files are') + ' written straight to a file: press Convert to choose where.' : '';
+  }
+  // Asks where to save the first big MP3 (a save dialog needs a press of its
+  // own); returns the files to convert now, or null when none was chosen.
+  async function chooseSaveFile(list) {
+    var pick = list.filter(bigMp3)[0];
+    picking = true;
+    try {
+      pick.saveTo = await window.showSaveFilePicker({ suggestedName: pick.base + '.mp3', types: [{ description: 'MP3 audio', accept: { 'audio/mpeg': ['.mp3'] } }] });
+    } catch (err) {
+      if (err && err.name === 'AbortError') say('Nothing was converted: no file was chosen to save ' + pick.name + ' in.');
+      else setMsg(dom.error, 'No file could be opened to save ' + pick.name + ' in (' + cut(String(err && err.message || err), 120) + ').');
+      return null;
+    } finally {
+      picking = false;
+    }
+    return list.filter(function (e) { return e === pick || !bigMp3(e); });
+  }
+  // A failure to write the file chosen, said as such; the engine's own errors as they are.
+  function saveError(save, err) {
+    if (err && err.userText) return err;
+    if (err && err.name && !/^(NotAllowed|QuotaExceeded|NoModificationAllowed|InvalidState|NotFound|NotReadable|Security|Abort)Error$/.test(err.name)) return err;
+    return userError('The MP3 could not be written to ' + save.name + ' (' + cut(String(err && err.message || err), 120) + '). Check the space left on the device, then convert it again.');
+  }
 
   // ---------- Converting ----------
   function uniqueName(name, used) {
@@ -1375,24 +1751,32 @@
     t.artist = e.tags.artist;
     t.album = e.tags.album;
     if (e.keepCover) t.images = e.images;
+    if (CONF.tags === 'all' && e.keepMore !== false) moreTags(e, t);
     return t;
   }
 
   async function convertOne(e, onProgress) {
+    if (asIs(e)) return saveMp3Inside(e);
     var o = convertOptions(e);
     o.tags = tagsFor(e);
     o.onProgress = onProgress;
+    var save = e.saveTo || null;
+    e.saveTo = null;
+    if (save) {
+      try { o.writable = await save.createWritable(); } catch (err) { throw saveError(save, err); }
+    }
     var job = activeJob = A.convert(e.media, e.ti, o);
     if (cancelRequested) job.cancel();
     var r;
-    try { r = await job.promise; } finally { if (activeJob === job) activeJob = null; }
+    try { r = await job.promise; } catch (err) { throw save && !A.isCancel(err) && !cancelRequested ? saveError(save, err) : err; } finally { if (activeJob === job) activeJob = null; }
+    if (r.streamed) return { id: ++resultSeq, blob: null, size: r.size, name: save.name, streamed: true, fmt: r.ext };
     var used = new Set();
     entries.forEach(function (x) { if (x.result) used.add(x.result.name.toLowerCase()); });
-    return { id: ++resultSeq, blob: r.blob, name: uniqueName(e.base + '.' + r.ext, used) };
+    return { id: ++resultSeq, blob: r.blob, name: uniqueName(e.base + '.' + r.ext, used), fmt: r.ext };
   }
 
   async function convertAll() {
-    if (busy) return;
+    if (busy || picking) return;
     setMsg(dom.error, '');
     if (editorOn() && settings.format !== 'copy' && (!timesValid() || !checkFades(true))) {
       if (dom.trim) dom.trim.open = true;
@@ -1406,6 +1790,11 @@
     }
     var list = pendingEntries();
     if (!list.length) return;
+    // stream=big: where to write the first MP3 too big to build in memory.
+    if (CAN_STREAM && list.some(bigMp3)) {
+      list = await chooseSaveFile(list);
+      if (!list) return;
+    }
     try { await A.load(); } catch (err) { setMsg(dom.error, A.text.load); return; }
     busy = true;
     cancelRequested = false;
@@ -1458,13 +1847,13 @@
     updateAll();
     var withResult = entries.filter(function (x) { return x.result; });
     if (cancelRequested) say('Conversion cancelled.' + (done ? ' ' + done + ' file' + (done > 1 ? 's were' : ' was') + ' converted before that.' : ''));
-    else if (list.length === 1 && done === 1) say(list[0].result.name + ' is ready to download, ' + fmtBytes(list[0].result.blob.size) + '.');
-    else if (done) say(done + ' of ' + list.length + ' files converted' + (failed ? ', ' + failed + ' could not be' : '') + '. Download them one by one' + (withResult.length > 1 ? ' or all as a ZIP.' : '.'));
+    else if (list.length === 1 && done === 1) say(doneOne(list[0]) + moreToSave());
+    else if (done) say(done + ' of ' + list.length + ' files converted' + (failed ? ', ' + failed + ' could not be' : '') + doneMany(list) + '.' + downloadText(list, done, withResult) + moreToSave());
     else if (list.length === 1 && failed) say(list[0].name + ': ' + list[0].convError);
     else say('Nothing was converted: see the message under each file.');
     var first = list.filter(function (x) { return x.result; })[0];
     if (hadFocus) {
-      if (first) (withResult.length > 1 && !dom.results.hidden ? dom.zip : first.dlBtn).focus();
+      if (first) (withResult.length > 1 && !dom.results.hidden ? dom.zip : !first.dlBtn.hidden ? first.dlBtn : !dom.convert.disabled ? dom.convert : dom.open).focus();
       else if (!dom.convert.disabled) dom.convert.focus();
       else dom.open.focus();
     }
@@ -1479,18 +1868,19 @@
 
   // ---------- Downloads ----------
   function downloadEntry(e, btn) {
-    if (!e.result || tooSoon(btn, e.result)) return;
+    if (!e.result || !e.result.blob || tooSoon(btn, e.result)) return;
     TT.download(e.result.name, e.result.blob);
   }
   function updateResults() {
-    var res = entries.filter(function (e) { return e.result; });
+    var res = entries.filter(function (e) { return e.result && e.result.blob; });
+    if (dom.total) { setMsg(dom.total, totalText()); dom.total.hidden = !dom.total.textContent; }
     var total = res.reduce(function (n, e) { return n + e.result.blob.size; }, 0);
     dom.results.hidden = res.length < 2 || total > ZIP_LIMIT;
     dom.zipNote.hidden = !(res.length > 1 && total > ZIP_LIMIT);
     setMsg(dom.zipNote, res.length > 1 && total > ZIP_LIMIT ? 'Together the files take ' + fmtBytes(total) + ', too much for one ZIP on this device, so download them one by one.' : '');
   }
   dom.zip.addEventListener('click', async function () {
-    var res = entries.filter(function (e) { return e.result; });
+    var res = entries.filter(function (e) { return e.result && e.result.blob; });
     if (tooSoon(dom.zip, res.map(function (e) { return e.result.id; }).join()) || dom.zip.getAttribute('aria-busy') === 'true') return;
     if (res.length < 2) return;
     dom.zip.setAttribute('aria-busy', 'true');

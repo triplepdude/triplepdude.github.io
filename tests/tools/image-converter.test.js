@@ -165,6 +165,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match((await page.textContent('.prose')).replace(/\s+/g, ' '),
     /Orientation\. A photo tagged as rotated is saved upright, so it looks the same everywhere; Flip Image turns or mirrors pictures any other way\./);
   assert.ok(guideLinks.includes('/flip-image/'), 'the guide links to /flip-image/');
+  // WebP is made by libwebp, loaded from this site on the first WebP save: the FAQ names it.
+  const faqText = (await page.textContent('.faq')).replace(/\s+/g, ' ');
+  assert.match(faqText, /The only extra downloads are the HEIC and TIFF decoders and the WebP and AVIF encoders, each fetched from this site the first time it is needed\./);
+  assert.match(faqText, /Browsers create JPG and PNG files themselves, and WebP comes from libwebp, a small encoder \(about 140 KB\) compiled to WebAssembly\./);
+  // "About 140 KB": the loader and the wasm file, gzipped as GitHub Pages serves them.
+  const webpKB = ['webp_enc_simd.js', 'webp_enc_simd.wasm'].reduce((n, f) => n + zlib.gzipSync(fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'vendor', 'webp', f))).length, 0) / 1000;
+  assert.ok(webpKB > 120 && webpKB < 160, 'the WebP encoder is ' + webpKB + ' KB gzipped');
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', 'flip-image.html')), '_tools/flip-image.html exists');
 
   const summary = () => page.textContent('#imc-summary');

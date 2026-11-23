@@ -63,6 +63,90 @@ function flatPng(w, h, rgb) {
   const idat = zlib.deflateSync(Buffer.concat(Array.from({ length: h }, () => line)), { level: 9 });
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))]);
 }
+// An 8-bit RGBA PNG of the given pixels, with extra chunks before IDAT: [[type, Buffer], ...].
+function rgbaPng(w, h, px, extra = []) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4), crc = Buffer.alloc(4), body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    len.writeUInt32BE(data.length);
+    crc.writeUInt32BE(zlib.crc32(body) >>> 0);
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
+  const rows = Buffer.concat(Array.from({ length: h }, (_, y) => Buffer.concat([Buffer.from([0]), px.subarray(y * w * 4, (y + 1) * w * 4)])));
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), ...extra.map(([t, d]) => chunk(t, d)), chunk('IDAT', zlib.deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+// RGBA pixels of an 8-bit, non-interlaced RGB or RGBA PNG (what Chromium's screenshots are).
+function readPng(b) {
+  let o = 8, w = 0, h = 0, ct = 0;
+  const idat = [];
+  while (o < b.length) {
+    const n = b.readUInt32BE(o), t = b.toString('latin1', o + 4, o + 8), d = b.subarray(o + 8, o + 8 + n);
+    if (t === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); ct = d[9]; if (d[8] !== 8 || d[12] || (ct !== 2 && ct !== 6)) throw new Error('readPng: 8-bit RGB(A) only'); }
+    if (t === 'IDAT') idat.push(d);
+    o += 12 + n;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(idat)), bpp = ct === 6 ? 4 : 3, stride = w * bpp, out = Buffer.alloc(w * h * 4);
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], cur = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let k = 0; k < stride; k++) {
+      const a = k >= bpp ? cur[k - bpp] : 0, up = prev[k], c = k >= bpp ? prev[k - bpp] : 0;
+      const p = a + up - c, pa = Math.abs(p - a), pb = Math.abs(p - up), pc = Math.abs(p - c);
+      cur[k] = (cur[k] + [0, a, up, (a + up) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? up : c][f]) & 255;
+    }
+    for (let x = 0; x < w; x++) for (let k = 0; k < 4; k++) out[(y * w + x) * 4 + k] = k < bpp ? cur[x * bpp + k] : 255;
+    prev = cur;
+  }
+  return { w, h, data: out };
+}
+// The vendored libwebp build, run here in Node on the same pixels with libwebp's own
+// default lossless effort (quality 75, method 4, as cwebp -lossless uses).
+async function libwebpLossless(tmp, { w, h, data }) {
+  const vendor = path.join(__dirname, '..', '..', 'assets', 'vendor', 'webp');
+  const mjs = path.join(tmp, 'webp_enc_simd.mjs');
+  fs.copyFileSync(path.join(vendor, 'webp_enc_simd.js'), mjs);
+  const encoder = (await import(require('url').pathToFileURL(mjs).href)).default;
+  const M = await encoder({ wasmBinary: fs.readFileSync(path.join(vendor, 'webp_enc_simd.wasm')), noInitialRun: true, print() {}, printErr() {} });
+  const out = M.encode(new Uint8Array(data), w, h, {
+    quality: 75, target_size: 0, target_PSNR: 0, method: 4, sns_strength: 50, filter_strength: 60, filter_sharpness: 0, filter_type: 1, partitions: 0, segments: 4, pass: 1,
+    show_compressed: 0, preprocessing: 0, autofilter: 0, partition_limit: 0, alpha_compression: 1, alpha_filtering: 1, alpha_quality: 100, lossless: 1, exact: 0,
+    image_hint: 0, emulate_jpeg_size: 0, thread_level: 0, low_memory: 0, near_lossless: 100, use_delta_palette: 0, use_sharp_yuv: 0
+  });
+  return Buffer.from(out);
+}
+// A version 2 RGB display profile made of a lookup table alone (A2B0, mft2), with no
+// rXYZ/rTRC matrix tags: gamma 2.2 curves into a 2 x 2 x 2 grid holding the XYZ of Display P3's
+// primaries. Chromium converts the colours of an image tagged with it, through the table.
+function lutProfile() {
+  const s15 = v => { const b = Buffer.alloc(4); b.writeInt32BE(Math.round(v * 65536)); return b; };
+  const u16 = a => { const b = Buffer.alloc(2 * a.length); a.forEach((v, i) => b.writeUInt16BE(v, 2 * i)); return b; };
+  const P3 = [[0.515102, 0.291965, 0.157153], [0.241182, 0.692236, 0.066582], [-0.00105, 0.041882, 0.784378]];
+  const curve = Array.from({ length: 256 }, (_, i) => Math.round(Math.pow(i / 255, 2.2) * 65535));
+  const grid = [];
+  for (const r of [0, 1]) for (const g of [0, 1]) for (const b of [0, 1]) for (let k = 0; k < 3; k++) grid.push(Math.round(Math.max(0, P3[k][0] * r + P3[k][1] * g + P3[k][2] * b) / (1 + 32767 / 32768) * 65535));
+  const a2b = Buffer.concat([Buffer.from('mft2\0\0\0\0', 'latin1'), Buffer.from([3, 3, 2, 0]), ...[1, 0, 0, 0, 1, 0, 0, 0, 1].map(s15), u16([256, 2]),
+    u16(curve), u16(curve), u16(curve), u16(grid), u16([0, 65535, 0, 65535, 0, 65535])]);
+  const text = Buffer.from('LUT P3 (test)\0', 'latin1'), lenB = Buffer.alloc(4);
+  lenB.writeUInt32BE(text.length);
+  const desc = Buffer.concat([Buffer.from('desc\0\0\0\0', 'latin1'), lenB, text, Buffer.alloc(8 + 2 + 1 + 67)]);
+  const wtpt = Buffer.concat([Buffer.from('XYZ \0\0\0\0', 'latin1'), s15(0.9642), s15(1), s15(0.8249)]);
+  const tags = [['desc', desc], ['wtpt', wtpt], ['A2B0', a2b]];
+  let off = 128 + 4 + 12 * tags.length;
+  const table = [Buffer.from([0, 0, 0, tags.length])], data = [];
+  for (const [sig, t] of tags) {
+    const pad = (4 - (off % 4)) % 4;
+    if (pad) { data.push(Buffer.alloc(pad)); off += pad; }
+    const e = Buffer.alloc(12);
+    e.write(sig, 0, 'latin1'); e.writeUInt32BE(off, 4); e.writeUInt32BE(t.length, 8);
+    table.push(e); data.push(t); off += t.length;
+  }
+  const head = Buffer.alloc(128);
+  head.writeUInt32BE(off, 0); head.write('lcms', 4, 'latin1'); head[8] = 2; head[9] = 0x20;
+  head.write('mntrRGB XYZ ', 12, 'latin1'); head.write('acsp', 36, 'latin1');
+  s15(0.9642).copy(head, 68); s15(1).copy(head, 72); s15(0.8249).copy(head, 76);
+  return Buffer.concat([head, ...table, ...data]);
+}
 // The converter's own size format, to compare the rows with the files.
 function fmtBytes(n) {
   if (n < 1000) return n + ' B';
@@ -131,11 +215,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     // The guide names the real controls and messages.
     assert.match(guide, /Tick Leave files that are not smaller out of the ZIP to download only the ones worth replacing\./);
     assert.match(guide, /is marked “Larger than the original: keep the PNG”/);
-    assert.match(guide, /Lossless files over 4 megapixels use a faster setting, about 1% larger\./);
+    // Every lossless file gets libwebp's full effort: no faster setting that makes screenshots larger.
+    assert.doesNotMatch(guide, /faster setting|megapixels use/);
     assert.deepEqual(await page.$$eval('.faq summary', s => s.map(e => e.textContent.trim())), [
       'Is PNG to WebP lossless?', 'Does WordPress accept WebP images?', 'Can I convert PNG to WebP on an iPhone?', 'Are my PNG files uploaded?']);
     const faq = (await page.textContent('.faq')).replace(/\s+/g, ' ');
     assert.match(faq, /With Lossless chosen, as it is when the page opens, yes: decode the WebP and you get the PNG’s pixels back, transparency included\./);
+    // The exception, which gamma1.png shows below: a gAMA chunk the browser applies.
+    assert.match(faq, /a PNG with a gamma setting that browsers apply \(an old gAMA chunk\) is saved with the colours your browser shows\./);
     assert.match(faq, /On a phone, lossless files are limited to 13 megapixels to fit in its memory, and larger pictures are scaled down with a note\./);
 
     const rows = page.locator('.imc-item');
@@ -179,7 +266,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await page.setInputFiles('#imc-file', FILES.map(fx));
     await settled(FILES.length);
     assert.match(await page.textContent('#imc-summary'), /^16 of 18 converted, 2 failed\. In total [\d.]+ KB → [\d.]+ KB \(\d+% smaller\)\. 2 files are not smaller than their originals\.$/);
-    await page.waitForFunction(() => document.querySelector('#imc-status').textContent === 'Converted 16 images to WebP. 2 could not be converted. 2 are not smaller than the original.');
+    await page.waitForFunction(() => /^Converted 16 images to WebP\. 2 could not be converted\. In total [\d.]+ KB → [\d.]+ KB \(\d+% smaller\)\. 2 are not smaller than the original\.$/.test(document.querySelector('#imc-status').textContent));
     assert.ok(requests.some(u => /\/assets\/vendor\/webp\/webp_enc(_simd)?\.wasm$/.test(u)), 'the WebP encoder loads on the first WebP');
     assert.ok(!requests.some(u => /avif_enc/.test(u)), 'the AVIF encoder is not loaded');
 
@@ -305,7 +392,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await rerun(() => page.keyboard.press('ArrowDown'));
     assert.equal(await page.$eval('input[name="imc-mode"]:checked', r => r.value), 'lossy');
     assert.equal(await page.isVisible('#imc-quality-field'), true, 'the quality slider shows for lossy');
-    assert.equal(await page.textContent('#imc-note'), 'Lossy: much smaller files for photos, with a little loss of detail; transparency is still kept exactly. For photos, Lossy makes far smaller files.');
+    // The page's own note (use Lossy for photos) is for Lossless only: Lossy does not say it twice.
+    assert.equal(await page.textContent('#imc-note'), 'Lossy: much smaller files for photos, with a little loss of detail; transparency is still kept exactly.');
     z = await zipNow();
     entries = unzip(z.data);
     const lossy = Object.fromEntries(['logo.webp', 'photo.webp', 'screenshot.webp', 'flat.webp'].map(n => [n, riff(entries[n])]));
@@ -324,6 +412,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await page.focus('#imc-quality');
     await rerun(async () => { for (let i = 0; i < 20; i++) await page.keyboard.press('ArrowLeft'); });
     assert.equal(await page.textContent('#imc-quality-out'), '60%');
+    // The new result is announced once it is known: the sizes changed, so the live region says
+    // the new total (the counts alone may read the same as before, and would not be spoken).
+    await page.waitForFunction(() => {
+      const m = /In total [\d.]+ [KM]?B → [\d.]+ [KM]?B( \([^)]*\))?\./.exec(document.querySelector('#imc-summary').textContent);
+      return m && document.querySelector('#imc-status').textContent.includes(m[0]);
+    }, null, { timeout: 5000 }).catch(async () => assert.fail('the re-conversion at 60% is not announced: ' + await page.textContent('#imc-status')));
     const at60 = (await download(2)).data;
     assert.ok(at60.length < photoLossy, `quality 60 (${at60.length}) should be smaller than 80 (${photoLossy})`);
     // The choice survives a trip to another format and back.
@@ -337,7 +431,73 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     const again = await download(2);
     assert.deepEqual([riff(again.data).chunks.join(), again.data.length], ['VP8L', losslessSize['photo.webp']], 'lossless again, the same file as before');
 
-    // ---------- A picture over WebP's 16,383 pixels, and one over 4 megapixels ----------
+    // ---------- Colour chunks: lossless keeps the stored pixels wherever the browser shows them ----------
+    // ImageMagick writes cHRM without gAMA into every PNG; browsers use cHRM only together with
+    // gAMA, so such a file is shown as stored and must come out exactly, semi-transparent
+    // pixels included. With gAMA as well, the browser changes the colours: the WebP holds those.
+    {
+      const W = 40, H = 24, px = Buffer.alloc(W * H * 4);
+      for (let i = 0; i < W * H; i++) px.set([(i * 37) & 255, (i * 91 + 7) & 255, (i * 53 + 101) & 255, (i * 29 + 1) & 255], i * 4);
+      const CHRM = Buffer.alloc(32);
+      [31270, 32900, 64000, 33000, 30000, 60000, 15000, 6000].forEach((v, i) => CHRM.writeUInt32BE(v, i * 4));
+      const GAMA = Buffer.alloc(4);
+      GAMA.writeUInt32BE(45455);
+      const ramp = Buffer.alloc(256 * 2 * 4);
+      for (let x = 0; x < 256; x++) { ramp.set([x, 0, 0, 255], x * 4); ramp.set([0, x, 255 - x, 255], (256 + x) * 4); }
+      const pts = [[5, 0], [15, 0], [40, 0], [128, 0], [250, 0], [3, 1], [60, 1], [200, 1]];
+      const stored = i => Array.from(ramp.subarray((pts[i][1] * 256 + pts[i][0]) * 4, (pts[i][1] * 256 + pts[i][0]) * 4 + 4));
+      const magick = rgbaPng(W, H, px, [['cHRM', CHRM], ['bKGD', Buffer.from([0, 255, 0, 255, 0, 255])]]);
+      const gamaChrm = rgbaPng(256, 2, ramp, [['gAMA', GAMA], ['cHRM', CHRM]]);
+      // A transparent picture with a Display P3 profile, as a Mac's window screenshots are.
+      const macShot = rgbaPng(W, H, px, [['iCCP', Buffer.concat([Buffer.from('Display P3\0\0', 'latin1'), zlib.deflateSync(fs.readFileSync(fx('p3.icc')))])]]);
+      // A profile made of a lookup table alone (no matrix tags).
+      const lutPng = rgbaPng(256, 2, ramp, [['iCCP', Buffer.concat([Buffer.from('LUT P3\0\0', 'latin1'), zlib.deflateSync(lutProfile())])]]);
+      await page.click('#imc-clear');
+      await page.setInputFiles('#imc-file', [{ name: 'magick.png', mimeType: 'image/png', buffer: magick }, { name: 'gama-chrm.png', mimeType: 'image/png', buffer: gamaChrm },
+        { name: 'mac-shot.png', mimeType: 'image/png', buffer: macShot }, { name: 'lut.png', mimeType: 'image/png', buffer: lutPng }]);
+      await settled(4);
+      const m = await download(0), gc = await download(1), mac = await download(2), lut = await download(3);
+      assert.deepEqual(riff(m.data).chunks, ['VP8L']);
+      if (pillow) {
+        fs.writeFileSync(path.join(tmp, 'magick.png'), magick);
+        const r = verify([[path.join(tmp, 'magick.png'), m.data]])[0];
+        assert.deepEqual([r.maxDiff, r.alphaDiff], [0, 0], 'a PNG with cHRM but no gAMA (as ImageMagick writes) keeps its exact pixels: ' + JSON.stringify(r));
+      }
+      // gAMA and cHRM: the WebP shows what Chromium shows of the PNG (which is not what is stored).
+      const shown = await chromePixels(gamaChrm, pts);
+      assert.ok(shown.some((c, i) => c.join() !== stored(i).join()), 'Chromium applies gAMA with cHRM');
+      assert.deepEqual(await chromePixels(gc.data, pts), shown, 'gAMA with cHRM: as Chromium shows the PNG');
+      // Profile and transparency together: VP8X flags both, and both survive.
+      const macInfo = riff(mac.data);
+      assert.deepEqual([macInfo.chunks, macInfo.flags, macInfo.alphaBit], [['VP8X', 'ICCP', 'VP8L'], 0x30, 1]);
+      assert.ok(macInfo.iccp.equals(fs.readFileSync(fx('p3.icc'))), 'the profile is copied');
+      if (pillow) {
+        fs.writeFileSync(path.join(tmp, 'mac-shot.png'), macShot);
+        const r = verify([[path.join(tmp, 'mac-shot.png'), mac.data]])[0];
+        assert.deepEqual([r.maxDiff, r.alphaDiff, r.icc, r.iccName], [0, 0, r.srcIcc, 'Display P3 (test)'], 'P3 with transparency, exactly: ' + JSON.stringify(r));
+      }
+      // The lookup-table profile: the browser converts the colours through the table, so the
+      // WebP holds the colours it shows, not the stored ones (which would look different untagged).
+      const lutShown = await chromePixels(lutPng, pts);
+      assert.ok(lutShown.some((c, i) => c.join() !== stored(i).join()), 'Chromium converts colours through a lookup-table profile');
+      assert.deepEqual(await chromePixels(lut.data, pts), lutShown, 'a lookup-table profile: the WebP shows what Chromium shows of the PNG');
+      // Lossy keeps the profile and the transparency too.
+      await rerun(() => page.check('#imc-mode-field input[value="lossy"]'));
+      const macLossy = await download(2), ml = riff(macLossy.data);
+      assert.deepEqual([ml.chunks, ml.flags], [['VP8X', 'ICCP', 'ALPH', 'VP8'], 0x30], 'lossy: profile and transparency');
+      if (pillow) assert.equal(verify([[path.join(tmp, 'mac-shot.png'), macLossy.data]])[0].alphaDiff, 0, 'lossy keeps the alpha of a P3 picture exactly');
+      await rerun(() => page.check('#imc-mode-field input[value="lossless"]'));
+    }
+
+    // ---------- A picture over WebP's 16,383 pixels, and a screenshot over 4 megapixels ----------
+    // A high-DPI screenshot (2880 × 1800, as a 1440 × 900 screen at 2x makes) is the page's
+    // main use: it gets libwebp's full lossless effort. A faster setting (quality 25, method 1)
+    // made such screenshots 24 to 62% larger.
+    const sctx = await page.context().browser().newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+    const sp = await sctx.newPage();
+    await sp.goto(url);
+    const shotPng = await sp.screenshot();
+    await sctx.close();
     await page.click('#imc-clear');
     await page.waitForFunction(() => document.querySelector('#imc-status').textContent === 'All images removed.');
     const cdp = await page.context().newCDPSession(page);
@@ -346,28 +506,73 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     const t0 = await threadMs();
     await page.setInputFiles('#imc-file', [
       { name: 'tall.png', mimeType: 'image/png', buffer: flatPng(1280, 20000, [30, 90, 150]) },
-      { name: 'big.png', mimeType: 'image/png', buffer: flatPng(2500, 2000, [200, 40, 90]) }]);
+      { name: 'shot2x.png', mimeType: 'image/png', buffer: shotPng }]);
     await settled(2);
     const busyMs = await threadMs() - t0;
     // Decoding and encoding run in workers: the page itself stays free.
-    assert.ok(busyMs < 2500, `main thread busy for ${Math.round(busyMs)} ms while converting 30 megapixels`);
-    assert.match(await rowText(0), /^tall\.webp PNG 1280×20000, [\d.]+ KB → WebP 1048×16383, [\d.]+ K?B \((over )?\d+% smaller\) Scaled down to 1048×16383: a WebP can be at most 16,383 pixels wide or high\. Over 4 megapixels, so libwebp’s faster lossless setting was used: about 2\.4 times quicker, for a file about 1% larger\.$/);
+    assert.ok(busyMs < 2500, `main thread busy for ${Math.round(busyMs)} ms while converting 31 megapixels`);
+    assert.match(await rowText(0), /^tall\.webp PNG 1280×20000, [\d.]+ KB → WebP 1049×16383, [\d.]+ K?B \((over )?\d+% smaller\) Scaled down to 1049×16383: a WebP can be at most 16,383 pixels wide or high\.$/);
     const tall = await download(0);
-    assert.deepEqual([riff(tall.data).w, riff(tall.data).h, riff(tall.data).chunks.join()], [1048, 16383, 'VP8L']);
+    assert.deepEqual([riff(tall.data).w, riff(tall.data).h, riff(tall.data).chunks.join()], [1049, 16383, 'VP8L']);
     assert.deepEqual((await chromePixels(tall.data, [[500, 16000]]))[0], [30, 90, 150, 255]);
-    assert.match(await rowText(1), /^big\.webp PNG 2500×2000, .* → WebP 2500×2000, .* Over 4 megapixels, so libwebp’s faster lossless setting was used: about 2\.4 times quicker, for a file about 1% larger\.$/);
+    // A thin strip keeps its shape: 16384 × 2 becomes 16383 × 2, not 16383 × 1.
+    await page.setInputFiles('#imc-file', [{ name: 'strip.png', mimeType: 'image/png', buffer: flatPng(16384, 2, [250, 120, 0]) }]);
+    await settled(3);
+    assert.match(await rowText(2), /^strip\.webp PNG 16384×2, .* → WebP 16383×2, .* Scaled down to 16383×2: a WebP can be at most 16,383 pixels wide or high\.$/);
+    const strip = riff((await download(2)).data);
+    assert.deepEqual([strip.w, strip.h], [16383, 2]);
+    assert.match(await rowText(1), /^shot2x\.webp PNG 2880×1800, [\d.]+ KB → WebP 2880×1800, [\d.]+ KB \(\d+% smaller\)$/);
+    const shot = await download(1);
+    const want = await libwebpLossless(tmp, readPng(shotPng));
+    assert.equal(riff(shot.data).chunks.join(), 'VP8L');
+    assert.ok(shot.data.length <= want.length * 1.02, `a 5-megapixel screenshot: ${shot.data.length} bytes, libwebp's default lossless effort makes ${want.length}`);
+    if (pillow) {
+      fs.writeFileSync(path.join(tmp, 'shot2x.png'), shotPng);
+      assert.deepEqual((({ maxDiff, alphaDiff }) => [maxDiff, alphaDiff])(verify([[path.join(tmp, 'shot2x.png'), shot.data]])[0]), [0, 0], 'the screenshot, exactly');
+    }
 
     // ---------- Removing a file stops its encoder; nothing it made is offered ----------
+    // A photo-like picture that libwebp takes a few seconds over (lossless, 3.8 megapixels,
+    // under the 256 MB after which an idle encoder is closed anyway).
+    const SW = 2400, SH = 1600, slowPx = Buffer.alloc(SW * SH * 4);
+    for (let y = 0, seed = 12345; y < SH; y++) for (let x = 0; x < SW; x++) {
+      const i = (y * SW + x) * 4, v = 128 + 60 * Math.sin(x / 37) + 50 * Math.cos(y / 53), r = () => (seed = (seed * 1103515245 + 12345) >>> 0) % 12;
+      slowPx.set([v + r(), 255 - v + r(), (x + y) / 30 + r(), 255], i);
+    }
+    const slowPng = rgbaPng(SW, SH, slowPx);
+    const encoderLoads = () => requests.filter(u => /\/assets\/vendor\/webp\/webp_enc(_simd)?\.wasm$/.test(u)).length;
+    const converting = () => page.waitForFunction(() => /Converting to WebP/.test(document.querySelector('.imc-item .imc-meta').textContent), null, { timeout: 20000 });
     await page.click('#imc-clear');
-    await page.setInputFiles('#imc-file', [{ name: 'slow.png', mimeType: 'image/png', buffer: flatPng(3000, 3000, [10, 20, 30]) }]);
-    await page.waitForFunction(() => /Loading the WebP encoder|Converting to WebP/.test(document.querySelector('.imc-item .imc-meta').textContent), null, { timeout: 20000 });
+    await page.setInputFiles('#imc-file', [fx('logo.png')]);
+    await settled(1);
+    let loads = encoderLoads();
+    await page.click('#imc-clear');
+    await page.setInputFiles('#imc-file', [{ name: 'slow.png', mimeType: 'image/png', buffer: slowPng }]);
+    await converting();
     await page.click('.imc-item [data-act="rm"]');
     assert.equal(await page.textContent('#imc-status'), 'slow.png removed.');
     assert.equal(await page.locator('.imc-item').count(), 0);
-    // The encoder is ready again for the next file.
+    // The encoder is ready again for the next file: a fresh one, as the busy one was closed.
     await page.setInputFiles('#imc-file', [fx('logo.png')]);
     await settled(1);
     assert.match(await rowText(0), /^logo\.webp PNG 120×80, 3\.4 KB → WebP 120×80/);
+    assert.equal(encoderLoads(), loads + 1, 'removing a file mid-way stops its encoder (a new one loads for the next file)');
+
+    // ---------- A setting changed mid-way: the old job is stopped, and only the new file is offered ----------
+    await page.click('#imc-clear');
+    await page.setInputFiles('#imc-file', [{ name: 'slow.png', mimeType: 'image/png', buffer: slowPng }]);
+    await converting();
+    loads = encoderLoads();
+    await page.check('#imc-mode-field input[value="lossy"]');
+    assert.deepEqual(await page.$eval('.imc-item [data-act="dl"]', b => [b.disabled, b.getAttribute('aria-label')]), [true, 'Download slow.png (not ready)']);
+    await settled(1);
+    const mid = await download(0);
+    assert.deepEqual(riff(mid.data).chunks, ['VP8'], 'the file made after the change is lossy');
+    assert.ok((await rowText(0)).includes('→ WebP 2400×1600, ' + fmtBytes(mid.data.length) + ' ('), 'the row gives the size of the file offered');
+    assert.equal(encoderLoads(), loads + 1, 'the lossless job was stopped when the setting changed');
+    await page.check('#imc-mode-field input[value="lossless"]');
+    await settled(1);
+    await page.click('#imc-clear');
 
     // ---------- Safari 15 to 16.3: its canvas cannot write WebP, and it has no WebAssembly SIMD ----------
     // libwebp makes the file instead, from the build without SIMD.
@@ -429,13 +634,18 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await pp.setInputFiles('#imc-file', [{ name: 'phone.png', mimeType: 'image/png', buffer: flatPng(4000, 3500, [250, 200, 0]) }]);
     await settled(1, pp);
     assert.match((await pp.locator('.imc-item').nth(0).innerText()).replace(/\s+/g, ' '),
-      /phone\.webp PNG 4000×3500, .* → WebP 3854×3372, .* Scaled down to 3854×3372: lossless WebP files are made here up to 13 megapixels on a phone, to fit in its memory\./);
+      /phone\.webp PNG 4000×3500, .* → WebP 3854×3373, .* Scaled down to 3854×3373: lossless WebP files are made here up to 13 megapixels on a phone, to fit in its memory\./);
     const [pdl] = await Promise.all([pp.waitForEvent('download'), pp.locator('.imc-item [data-act="dl"]').tap()]);
     const pw = riff(fs.readFileSync(await pdl.path()));
-    assert.deepEqual([pw.w, pw.h, pw.chunks.join()], [3854, 3372, 'VP8L']);
+    assert.deepEqual([pw.w, pw.h, pw.chunks.join()], [3854, 3373, 'VP8L']);
     // Lossy by touch.
     await pp.tap('#imc-mode-field label:has-text("Lossy")');
     await pp.waitForFunction(() => /→ WebP 4000×3500/.test(document.querySelector('.imc-item').textContent) && !/working/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 60000 });
+    // A recent iPhone's photo at its default 24 MP (5712 × 4284, 24.5 megapixels) is made at
+    // full size on the phone, not scaled down by 1%.
+    await pp.setInputFiles('#imc-file', [{ name: 'iphone.png', mimeType: 'image/png', buffer: flatPng(5712, 4284, [90, 140, 60]) }]);
+    await pp.waitForFunction(() => /^2 of 2 converted/.test(document.querySelector('#imc-summary').textContent) && !/working/.test(document.querySelector('#imc-summary').textContent), null, { timeout: 60000 });
+    assert.match((await pp.locator('.imc-item').nth(1).innerText()).replace(/\s+/g, ' '), /^iphone\.webp PNG 5712×4284, .* → WebP 5712×4284, [^S]*$/);
     const small = await pp.$$eval('#imc-choose, #imc-zip, #imc-clear, .imc-item .btn, #imc-mode-field .check, .imc-skip, #imc-quality, #imc-format, #imc-resize', els => els.filter(e => e.getBoundingClientRect().height < 44).map(e => e.id || e.className));
     assert.deepEqual(small, [], 'controls under 44 px on a phone');
     assert.deepEqual(errs, []);

@@ -464,7 +464,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---- Guide links point at tools of this site ----
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/split-pdf/', '/merge-pdf/', '/pdf-to-jpg/']);
+  assert.deepEqual(links, ['/split-pdf/', '/merge-pdf/', '/rotate-pdf/', '/pdf-to-jpg/', '/pdf-to-text/']);
   for (const href of links) assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), href);
   assert.match(await page.textContent('.faq'), /17 U\.S\.C\. §1201/);
 

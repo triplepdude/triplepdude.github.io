@@ -1329,6 +1329,64 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   lt = lameTag(Buffer.from(written[2]));
   assert.deepEqual([written[2].length, lt.tag, lt.toc, lt.crcOk], [72, 'Info', null, true], 'at 8 kbps an Info frame keeps the stream\'s bitrate without a table of contents');
 
+  // ---------- An MP3 written into a file as it is made (convert()'s writable) ----------
+  // The file a stream like FileSystemWritableFileStream receives is the Blob
+  // made in memory, byte for byte: MPEG-1, 2 and 2.5, mono and stereo, with
+  // and without tags, cut or whole. It is closed once written, and aborted,
+  // never closed, on a cancel or on an error (also one before any writing).
+  const streamedMp3 = await page.evaluate(async ([chirp, ulaw, low]) => {
+    const fileOf = (b64, name) => new File([Uint8Array.from(atob(b64), ch => ch.charCodeAt(0))], name);
+    const sink = slow => {
+      const s = { bytes: new Uint8Array(0), closed: false, aborted: false };
+      s.ws = new WritableStream({
+        async write(c) {
+          if (slow) await new Promise(r => setTimeout(r, slow));
+          const end = c.position + c.data.byteLength;
+          if (end > s.bytes.length) { const b = new Uint8Array(end); b.set(s.bytes); s.bytes = b; }
+          s.bytes.set(new Uint8Array(c.data.buffer, c.data.byteOffset, c.data.byteLength), c.position);
+        },
+        close() { s.closed = true; }, abort() { s.aborted = true; }
+      });
+      return s;
+    };
+    const tags = TTAudio.emptyTags();
+    tags.title = 'Streamed ☕'; tags.date = '2019'; tags.track = 2;
+    const out = [];
+    for (const [b64, name, o] of [[chirp, 'chirp.wav', { kbps: 192, tags }], [chirp, 'chirp.wav', { kbps: 64, mono: true, tags: null, sel: { start: 100, end: 900 } }],
+      [ulaw, 'ulaw.wav', { kbps: 96, tags }], [low, 'info-utf8.wav', { kbps: 32, tags }]]) {
+      const m = await TTAudio.open(fileOf(b64, name));
+      const mem = new Uint8Array(await (await TTAudio.convert(m, 0, Object.assign({ format: 'mp3' }, o)).promise).blob.arrayBuffer());
+      const s = sink(), r = await TTAudio.convert(m, 0, Object.assign({ format: 'mp3', writable: s.ws }, o)).promise;
+      const id3 = mem[0] === 73 && mem[1] === 68 && mem[2] === 51 ? mem[3] : 0, v1 = String.fromCharCode(...mem.subarray(mem.length - 128, mem.length - 125)) === 'TAG';
+      out.push({ name, tagsOut: [id3, v1], same: mem.length === s.bytes.length && mem.every((v, i) => v === s.bytes[i]),
+        size: r.size === mem.length, blob: r.blob, streamed: r.streamed, closed: s.closed, aborted: s.aborted, sr: r.sampleRate });
+      TTAudio.close(m);
+    }
+    // Ten seconds of a tone, cancelled once writing has started.
+    const sr = 44100, pcm = new Int16Array(10 * sr), h = new DataView(new ArrayBuffer(44)), w = (q, t) => { for (let i = 0; i < 4; i++) h.setUint8(q + i, t.charCodeAt(i)); };
+    for (let i = 0; i < pcm.length; i++) pcm[i] = Math.round(9000 * Math.sin(2 * Math.PI * 440 * i / sr));
+    w(0, 'RIFF'); h.setUint32(4, 36 + 2 * pcm.length, true); w(8, 'WAVE'); w(12, 'fmt '); h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+    h.setUint32(24, sr, true); h.setUint32(28, 2 * sr, true); h.setUint16(32, 2, true); h.setUint16(34, 16, true); w(36, 'data'); h.setUint32(40, 2 * pcm.length, true);
+    const m = await TTAudio.open(new File([h.buffer, pcm], 'ten.wav')), s = sink(200), job = TTAudio.convert(m, 0, { format: 'mp3', kbps: 128, writable: s.ws });
+    while (!s.bytes.length) await new Promise(r => setTimeout(r, 20));
+    job.cancel();
+    let code = '';
+    try { await job.promise; } catch (e) { code = e.code; }
+    out.push({ name: 'cancelled', code, closed: s.closed, aborted: s.aborted });
+    const e = sink();
+    try { await TTAudio.convert(m, 3, { format: 'mp3', writable: e.ws }).promise; } catch (x) { code = x.name; }
+    out.push({ name: 'no such track', code, closed: e.closed, aborted: e.aborted, written: e.bytes.length });
+    TTAudio.close(m);
+    return out;
+  }, [b64('chirp.wav'), b64('ulaw.wav'), b64('info-utf8.wav')]);
+  assert.deepEqual(streamedMp3.slice(0, 4).map(r => [r.name, r.sr, r.same, r.size, r.blob, r.streamed, r.closed, r.aborted]), [
+    ['chirp.wav', 44100, true, true, null, true, true, false], ['chirp.wav', 44100, true, true, null, true, true, false],
+    ['ulaw.wav', 16000, true, true, null, true, true, false], ['info-utf8.wav', 8000, true, true, null, true, true, false]],
+  'written as it is made: the same bytes as in memory, then closed');
+  assert.deepEqual(streamedMp3.slice(0, 4).map(r => r.tagsOut), [[3, true], [0, false], [3, true], [3, true]], 'with the tags (ID3v2.3 and ID3v1), and without them when none are given');
+  assert.deepEqual(streamedMp3.slice(4), [{ name: 'cancelled', code: 'CANCELLED', closed: false, aborted: true },
+    { name: 'no such track', code: 'TypeError', closed: false, aborted: true, written: 0 }], 'a cancel or an error aborts the stream, never closes it');
+
   // ---------- MP3 to WAV: exactly the samples that were encoded ----------
   // A LAME tag gives the encoder's delay and the padding after the last
   // sample; mediabunny drops the delay but not the padding. Without a tag

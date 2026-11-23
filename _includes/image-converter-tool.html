@@ -33,8 +33,9 @@
                  or keep (keep all). Default strip; an unknown value leaves the
                  first option, strip, selected.
   note           Sentences added to the note under the options while the
-                 starting format is selected (say, when to keep PNG instead).
-                 They follow the format's own note. Default none.
+                 starting format is selected (say, when to keep PNG instead),
+                 and with webp_mode, while the starting mode is too. They follow
+                 the format's own note. Default none.
   animated_note  Sentences added after "Animated image: only the first frame
                  was converted." in the message of each animated input (GIF,
                  APNG, WebP or AVIF), such as what keeps every frame. Default
@@ -373,7 +374,7 @@
     if (f === 'avif' && !cannot.avif) n.push('AVIF is encoded by libavif, which loads once (about 3.5 MB); a large photo takes a few seconds. Its quality scale differs from JPG’s: 60 to 70% comes close to a JPG at 85 to 90%, in about half the size.');
     if (f === 'webp' && MODES && !cannot.webp) n.push(s.lossless ? 'Lossless: every pixel, transparency included, is kept exactly.' : 'Lossy: much smaller files for photos, with a little loss of detail; transparency is still kept exactly.');
 {%- if imc_note != '' %}
-    if (f === '{{ imc_fmt }}') n.push({{ imc_note | jsonify | replace: '</', '<\/' }});
+    if (f === '{{ imc_fmt }}'{% if imc_mode != '' %} && modeValue() === '{{ imc_mode }}'{% endif %}) n.push({{ imc_note | jsonify | replace: '</', '<\/' }});
 {%- endif %}
     var raw = resizeVal.value.trim(), sized = resizeSel.value !== 'none' && !s.preset && f !== 'ico';
     var unreadable = sized && raw !== '' && isNaN(readSize(raw, resizeSel.value));
@@ -436,6 +437,12 @@
   function zipItems() {
     return items.filter(function (i) { return i.state === 'done' && !(skipBox && skipBox.checked && notSmaller(i)); });
   }
+  // The total size before and after, as the summary and the announcement give it.
+  function totalText(finished) {
+    var before = 0, after = 0;
+    finished.forEach(function (i) { before += i.file.size; after += i.blob.size; });
+    return 'In total ' + fmtBytes(before) + ' → ' + fmtBytes(after) + change(before, after) + '.';
+  }
   function refreshBar() {
     var finished = items.filter(function (i) { return i.state === 'done'; }), done = finished.length;
     var bad = items.filter(function (i) { return i.state === 'error'; }).length;
@@ -445,9 +452,8 @@
     clearBtn.disabled = !items.length;
     var text = done + ' of ' + items.length + ' converted' + (bad ? ', ' + bad + ' failed' : '') + (busy ? ', working…' : '.');
     if (COMPARE && done && !busy) {
-      var before = 0, after = 0, larger = finished.filter(notSmaller).length;
-      finished.forEach(function (i) { before += i.file.size; after += i.blob.size; });
-      text += ' In total ' + fmtBytes(before) + ' → ' + fmtBytes(after) + change(before, after) + '.';
+      var larger = finished.filter(notSmaller).length;
+      text += ' ' + totalText(finished);
       if (larger) {
         text += ' ' + (larger === 1 ? '1 file is' : larger + ' files are') + ' not smaller than ' + (larger === 1 ? 'its original' : 'their originals') +
           (skipBox.checked ? (larger === done ? ', so there is nothing for the ZIP.' : ', so the ZIP leaves ' + (larger === 1 ? 'it' : 'them') + ' out.') : '.');
@@ -464,6 +470,9 @@
     var to = ' to ' + LABEL[settings().fmt] + '.', larger = finished.filter(notSmaller).length;
     say(!done ? (bad === 1 ? 'The image could not be converted' : 'None of the ' + bad + ' images could be converted') + to :
       'Converted ' + done + (done === 1 ? ' image' : ' images') + to + (bad ? ' ' + bad + ' could not be converted.' : '') +
+      // With compare="true" the new total is said too, so a re-conversion (another mode or
+      // quality) is heard even when the counts read as before.
+      (COMPARE ? ' ' + totalText(finished) : '') +
       (larger ? ' ' + (larger === 1 ? '1 is' : larger + ' are') + ' not smaller than the original.' : ''));
   }, 400);
 
@@ -539,7 +548,7 @@
     it.state = 'working';
     it.stage = 'Reading…';
     it.progress = 10;
-    // Removing the file or changing a setting stops its WebP or AVIF encoder mid-way.
+    // Removing the file or changing a setting stops its WebP encoder mid-way (an AVIF one finishes unseen).
     it.ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     paint(it);
     convert(it, gen).then(function () { it.busy = false; running--; refreshBar(); announce(); pump(); });
@@ -632,7 +641,10 @@
     var lim = TTImage.webpLimits(lossless), k = Math.min(1, lim.side / Math.max(t.w, t.h)), why = 'side';
     if (lim.wasm && t.w * t.h * k * k > lim.pixels) { k = Math.sqrt(lim.pixels / (t.w * t.h)); why = 'pixels'; }
     if (k >= 1) return null;
-    var w = Math.max(1, Math.floor(t.w * k)), h = Math.max(1, Math.floor(t.h * k));
+    // Rounded, so a thin strip keeps its shape (16384 × 2 becomes 16383 × 2); rounded down
+    // only where rounding would pass a limit.
+    var w = Math.max(1, Math.round(t.w * k)), h = Math.max(1, Math.round(t.h * k));
+    if (w > lim.side || h > lim.side || (lim.wasm && w * h > lim.pixels)) { w = Math.max(1, Math.floor(t.w * k)); h = Math.max(1, Math.floor(t.h * k)); }
     return {
       t: { w: w, h: h },
       note: 'Scaled down to ' + w + '×' + h + ': ' + (why === 'side' ? 'a WebP can be at most 16,383 pixels wide or high.' :
@@ -677,7 +689,6 @@
     if (PROFILE && d.cmyk) n.push('This is a CMYK JPG, made for print: its colours were converted to RGB (sRGB).');
     if (s.fmt === 'webp' && it.depth === 16) n.push('16-bit PNG: WebP holds 8 bits a channel, so each colour was rounded to 8 bits.');
     if (fit) n.push(fit.note);
-    if (s.lossless && t.w * t.h > 4e6 && TTImage.webpLimits(true).wasm) n.push('Over 4 megapixels, so libwebp’s faster lossless setting was used: about 2.4 times quicker, for a file about 1% larger.');
     if (d.warnings && d.warnings.indexOf('truncated') >= 0) n.push('The file seems to be cut off, so part of the picture may be blank.');
     if (d.warnings && d.warnings.indexOf('damaged') >= 0) n.push('The file seems to be damaged, so part of the picture may be blank.');
     if (d.warnings && d.warnings.indexOf('foreignObject') >= 0) n.push('The HTML inside this SVG (a <foreignObject> element) is left out: this browser does not allow it to be converted to an image.');

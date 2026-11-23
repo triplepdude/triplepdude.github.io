@@ -163,7 +163,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     await page.setInputFiles('#imc-file', FILES.map(fx));
     await settled(FILES.length);
     assert.match(await page.textContent('#imc-summary'), /^10 of 12 converted, 2 failed\. In total [\d.]+ KB → [\d.]+ KB \(\d+% smaller\)\.$/);
-    await page.waitForFunction(() => document.querySelector('#imc-status').textContent === 'Converted 10 images to WebP. 2 could not be converted.');
+    await page.waitForFunction(() => /^Converted 10 images to WebP\. 2 could not be converted\. In total [\d.]+ [KM]B → [\d.]+ [KM]B \(\d+% smaller\)\.$/.test(document.querySelector('#imc-status').textContent));
     assert.equal(await rowText(10), 'empty.jpg 0 B The file is empty (0 bytes).');
     assert.match(await rowText(11), /^notes\.jpg 36 B This is not a supported image\./);
 
@@ -235,8 +235,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.match(T['small.webp'], /^small\.webp HEIC 64×48, /);
     assert.deepEqual(R['small.webp'].chunks, ['VP8']);
     // The panorama: WebP's 16,383 px limit, scaled to fit and said so.
-    assert.match(T['pano.webp'], /^pano\.webp JPG 20000×200, [\d.]+ KB → WebP 16383×163, .* Scaled down to 16383×163: a WebP can be at most 16,383 pixels wide or high\./);
-    assert.deepEqual([R['pano.webp'].w, R['pano.webp'].h], [16383, 163]);
+    assert.match(T['pano.webp'], /^pano\.webp JPG 20000×200, [\d.]+ KB → WebP 16383×164, .* Scaled down to 16383×164: a WebP can be at most 16,383 pixels wide or high\./);
+    assert.deepEqual([R['pano.webp'].w, R['pano.webp'].h], [16383, 164]);
     const pano = await chromePixels(entries['pano.webp'], [[4, 80], [16378, 80]]);
     near(pano[0], [0, 120, 255, 255], 10, 'pano left'); near(pano[1], [255, 120, 0, 255], 10, 'pano right');
     assert.deepEqual(await page.$$eval('.imc-flag', fs => fs.map(f => f.textContent).filter(Boolean)), [], 'nothing grew at 80%');

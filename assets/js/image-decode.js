@@ -132,19 +132,23 @@
  *   - A PNG decode() result saved at its own size is read from the file's bytes
  *     in that worker (not through a canvas, whose premultiplied alpha changes
  *     the colour of semi-transparent pixels), when the browser would show its
- *     pixels unchanged: no gAMA other than 1/2.2 and no cHRM unless an sRGB or
- *     iCCP chunk overrides them, no cICP, not both sRGB and iCCP, no EXIF
- *     rotation, an animation's first frame is its default image, and its
- *     colours were not converted (no profile, or keepProfile: the profile then
- *     goes into the WebP).
- *   - Lossless above 4 megapixels uses libwebp quality 25 and method 1 (2.4 times
- *     faster than 75 and 4, about 1% larger).
+ *     pixels unchanged: no gAMA other than 1/2.2, and no cHRM with a gAMA,
+ *     unless an sRGB or iCCP chunk overrides them (browsers ignore cHRM
+ *     without gAMA, as ImageMagick writes it), no cICP, not both sRGB and
+ *     iCCP, no profile of lookup tables alone (the browser converts through
+ *     them), no EXIF rotation, an animation's first frame is its default image,
+ *     and its colours were not converted (no profile, or keepProfile: the
+ *     profile then goes into the WebP).
+ *   - Lossless always uses libwebp's default effort (quality 75, method 4, as
+ *     cwebp -lossless does): its faster settings save little time on
+ *     screenshots and make them 24 to 62% larger.
  *   - Limits (TTImage.webpLimits(lossless) -> { side, pixels, phone, wasm }: wasm
  *     is whether libwebp can run here; the pixel limits apply to it): 16,383
  *     pixels a side; lossless up to 30 megapixels and lossy up to 50, or 13
- *     and 24 on a phone (a coarse pointer, or navigator.deviceMemory of 4 GB
- *     or less): lossless needs about 35 bytes of encoder memory per pixel
- *     (12 MP: 440 MB), lossy about 13. Beyond them encode() rejects with
+ *     and 25 on a phone (a coarse pointer, or navigator.deviceMemory of 4 GB
+ *     or less; 25 takes a recent iPhone's 24 MP photo, 5712 x 4284, whole):
+ *     lossless needs about 35 bytes of encoder memory per pixel (12 MP:
+ *     440 MB), lossy about 13. Beyond them encode() rejects with
  *     TOO_BIG; a page scales to fit first and says so.
  * TTImage.resize(canvasOrImage, width, height) -> canvas   (on the page); throws
  *   TOO_BIG where a canvas it needs is over this browser's size limit.
@@ -2554,7 +2558,8 @@
   }
   function webpLimits(lossless) {
     var phone = phoneLike();
-    return { side: WEBP_SIDE, pixels: lossless ? (phone ? 13e6 : 30e6) : (phone ? 24e6 : 50e6), phone: phone, wasm: wasmWorkers() };
+    // Lossy 25 MP on a phone: a recent iPhone's default photo (5712 x 4284, 24.5 MP) fits whole.
+    return { side: WEBP_SIDE, pixels: lossless ? (phone ? 13e6 : 30e6) : (phone ? 25e6 : 50e6), phone: phone, wasm: wasmWorkers() };
   }
   // The libwebp worker, a module worker: serialised, so it uses nothing from outside.
   // A message holds RGBA pixels (buffer) or a PNG file (png) to read them from.
@@ -2595,14 +2600,16 @@
   // Straight (not premultiplied) 8-bit RGBA of a PNG read from its bytes, as
   // { w, h, data, icc } (icc: its RGB iCCP profile, or null), or null where the
   // browser would show other colours than those stored (gAMA other than 1/2.2,
-  // cHRM, a grey profile) or where this reader does not follow the file (a
-  // damaged stream, a palette index past the palette, an animation whose first
-  // frame is not the default image): the canvas is used then. 16-bit samples
-  // keep their high byte, as Chrome and Pillow do. Runs in the WebP worker.
+  // cHRM with a gAMA, a grey profile, a profile of lookup tables alone) or where
+  // this reader does not follow the file (a damaged stream, a palette index past
+  // the palette, an animation whose first frame is not the default image): the
+  // canvas is used then. 16-bit samples keep their high byte, as Chrome and
+  // Pillow do. Runs in the WebP worker.
   async function pngPixels(blob) {
     if (typeof DecompressionStream !== 'function') return null;
     var b = new Uint8Array(await blob.arrayBuffer()), n = b.length;
-    var u32 = function (o) { return ((b[o] << 24) >>> 0) + (b[o + 1] << 16) + (b[o + 2] << 8) + b[o + 3]; };
+    var u32of = function (a, o) { return ((a[o] << 24) >>> 0) + (a[o + 1] << 16) + (a[o + 2] << 8) + a[o + 3]; };
+    var u32 = function (o) { return u32of(b, o); };
     var tag = function (o) { return String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]); };
     var inflate = function (parts) { return new Response(new Blob(parts).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer(); };
     if (n < 45 || u32(0) !== 0x89504E47 || u32(4) !== 0x0D0A1A0A || tag(12) !== 'IHDR') return null;
@@ -2637,7 +2644,11 @@
       if (z < 1 || z > 79 || iccp[z + 1] !== 0) return null;
       icc = new Uint8Array(await inflate([iccp.subarray(z + 2)]));
       if (icc.length < 132 || String.fromCharCode(icc[16], icc[17], icc[18], icc[19]) !== 'RGB ' || ct === 0 || ct === 4) return null;
-    } else if (!srgb && (chrm || (gama && Math.abs(gama - 45455) > 1))) return null;
+      // Only a matrix profile (rXYZ ... bTRC) is one decode() reads, as sRGB or as kept with the
+      // pixels; with lookup tables alone the browser converts the colours in its own way.
+      for (var tn = u32of(icc, 128), tags = {}, ti = 0; ti < tn && ti < 100 && 144 + 12 * ti <= icc.length; ti++) tags[String.fromCharCode(icc[132 + 12 * ti], icc[133 + 12 * ti], icc[134 + 12 * ti], icc[135 + 12 * ti])] = 1;
+      if (!(tags.rXYZ && tags.gXYZ && tags.bXYZ && tags.rTRC && tags.gTRC && tags.bTRC)) return null;
+    } else if (!srgb && gama && (chrm || Math.abs(gama - 45455) > 1)) return null;
     var raw = new Uint8Array(await inflate(idat));
     var bits = ch * depth, bpp = Math.max(1, bits >> 3), out = new Uint8Array(w * h * 4), at = 0;
     var passes = il ? [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] : [[0, 0, 1, 1]];
@@ -2784,11 +2795,11 @@
       st.worker.postMessage(msg, transfer || []);
     });
   }
-  // WebPConfig for the encode binding, which needs every field.
-  function webpOptions(lossless, quality, pixels) {
-    var big = lossless && pixels > 4e6;
+  // WebPConfig for the encode binding, which needs every field. Lossless uses
+  // libwebp's default effort at every size (see WEBP above).
+  function webpOptions(lossless, quality) {
     return {
-      quality: lossless ? (big ? 25 : 75) : Math.round(quality * 100), target_size: 0, target_PSNR: 0, method: big ? 1 : 4,
+      quality: lossless ? 75 : Math.round(quality * 100), target_size: 0, target_PSNR: 0, method: 4,
       sns_strength: 50, filter_strength: 60, filter_sharpness: 0, filter_type: 1, partitions: 0, segments: 4, pass: 1,
       show_compressed: 0, preprocessing: 0, autofilter: 0, partition_limit: 0, alpha_compression: 1, alpha_filtering: 1,
       alpha_quality: 100, lossless: lossless ? 1 : 0, exact: 0, image_hint: 0, emulate_jpeg_size: 0, thread_level: 0,
@@ -2835,7 +2846,7 @@
     if (fmt === 'webp' && wasmWorkers() && (o.wasm || !(await canEncode('webp')))) {
       var lim = webpLimits(lossless);
       if (W * H > lim.pixels) throw fail('TOO_BIG', (lossless ? 'Lossless WebP' : 'WebP') + ' files can be made here up to ' + lim.pixels / 1e6 + ' megapixels' + (lim.phone ? ' on a phone' : '') + '; this image is ' + (W * H / 1e6).toFixed(1) + '. Choose a smaller size.');
-      var wo = webpOptions(lossless, job.quality, W * H), r = null;
+      var wo = webpOptions(lossless, job.quality), r = null;
       // A PNG at its own size: its pixels come from its bytes, exactly. Not when its
       // colours were converted to sRGB (a profile decoded without keepProfile):
       // those come from the canvas. A kept profile goes with its stored colours.
