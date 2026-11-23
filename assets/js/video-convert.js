@@ -20,9 +20,11 @@
  *
  *   TTVideo.probe(file) -> Promise<Info>
  *       Reads a file's container, tracks and tags, and what this browser can
- *       do with them. Never rejects: a file that cannot be used comes back
+ *       do with them (also a QuickTime movie with no ftyp box, as QuickTime 6
+ *       and earlier wrote). Never rejects: a file that cannot be used comes back
  *       with info.error = { code, detail }. Codes: 'empty'; 'not-video' (not
- *       MOV, MP4, M4V, 3GP, WebM or MKV); 'no-index' (an MP4 or MOV whose
+ *       MOV, MP4, M4V, 3GP, WebM or MKV); 'photo' (a HEIF or AVIF picture,
+ *       detail 'heic' or 'avif'); 'no-index' (an MP4 or MOV whose
  *       index, the moov box, is missing: cut off or never finished);
  *       'no-tracks'; 'protected' (DRM); 'damaged' (the index cannot be read
  *       or points outside the file, or reading took over 30 s); 'library'
@@ -42,7 +44,8 @@
  *         label (a display name), canDecode, bitrate, duration, first,
  *         packets; video: width, height (as shown, after rotation),
  *         codedWidth, codedHeight, rotation, hdr, colour, alpha, frameRate,
- *         canH264 (this browser can encode H.264 at the even size); audio:
+ *         canH264 (this browser can encode H.264 at the even size), loadFailed
+ *         (ProRes: the decoder did not load); audio:
  *         sampleRate, channels, language, canAac ('native' | 'wasm' | null) }.
  *
  *   TTVideo.plan(info, choice) -> Plan
@@ -59,7 +62,9 @@
  *         [Step], notes: [{ code, track?, ... }], reencode, needs: { aac,
  *         prores }, bytes (estimated size), seconds (estimated time) }, with
  *         Step = { id, action: 'copy' | 'h264' | 'aac' | 'drop', bitrate?,
- *         crop? (to the even size H.264 needs) }. Refusal codes: 'error' (see
+ *         crop? (to the even size H.264 needs; HDR video always gets one, since
+ *         mediabunny maps HDR to standard range only when it redraws frames) }.
+ *         Refusal codes: 'error' (see
  *         info.error), 'no-video', 'video-codec' (an unknown codec, such as
  *         Motion JPEG), 'prores' (no H.264 encoder for it here),
  *         'video-undecodable'. Note codes: 'hevc', 'h264-unavailable',
@@ -79,7 +84,8 @@
  *       visible), 'lost-track' (with .kind and .reason: mediabunny left out a
  *       track it was asked to keep, which it reports as a valid conversion),
  *       'check' (the finished index failed the engine's own check: a track
- *       came out missing, empty or too short), 'memory', 'write' or 'failed'.
+ *       came out missing, empty or too short), 'library' (the AAC encoder or
+ *       the ProRes decoder did not load), 'memory', 'write' or 'failed'.
  *       Cancelling settles the promise at once, even while a read hangs.
  *       Nothing is committed to a file or a Blob unless the check passed.
  *
@@ -207,7 +213,9 @@
     ['ulaw', 'µ-law'], ['alaw', 'A-law']]);
   var UNKNOWN_AUDIO = new Map([['alac', 'Apple Lossless (ALAC)'], ['apac', 'Apple Spatial Audio (APAC)'], ['samr', 'AMR'], ['sawb', 'AMR-WB'],
     ['ima4', 'IMA ADPCM'], ['qdm2', 'QDesign Music 2'], ['qdmc', 'QDesign Music'], ['qclp', 'QCELP'], ['agsm', 'GSM'], ['mac3', 'MACE 3:1'], ['mac6', 'MACE 6:1'],
-    ['dtsc', 'DTS'], ['dtsh', 'DTS-HD'], ['dtsl', 'DTS-HD'], ['mlpa', 'Dolby TrueHD'], ['ac-4', 'Dolby AC-4'], ['mha1', 'MPEG-H 3D Audio'], ['mhm1', 'MPEG-H 3D Audio']]);
+    ['dtsc', 'DTS'], ['dtsh', 'DTS-HD'], ['dtsl', 'DTS-HD'], ['mlpa', 'Dolby TrueHD'], ['ac-4', 'Dolby AC-4'], ['mha1', 'MPEG-H 3D Audio'], ['mhm1', 'MPEG-H 3D Audio'],
+    // QuickTime's own entries for MPEG audio, which mediabunny does not read in a MOV ('ms\0U', lower-cased and without its NUL)
+    ['.mp3', 'MP3'], ['msu', 'MP3'], ['.mp2', 'MP2'], ['.mp1', 'MP1']]);
   function cleanId(id) {
     return typeof id === 'string' ? id.replace(/[^\x20-\x7e]/g, '').slice(0, 8) : '';
   }
@@ -312,6 +320,62 @@
     }
     return null;
   }
+  // A QuickTime movie written before QuickTime 7 can start without the ftyp box (with 'wide',
+  // 'mdat' or 'moov'). It is read through a copy made of slices of itself, so nothing is copied,
+  // with an ftyp box in front and the chunk offsets in its index moved by that box's 20 bytes.
+  // Returns null for anything else.
+  var FTYP_QT = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 113, 116, 32, 32, 0, 0, 2, 0, 113, 116, 32, 32]);
+  async function addFtyp(file) {
+    var pos = 0, size = file.size;
+    for (var i = 0; i < 5000 && pos + 8 <= size; i++) {
+      var h = await readBytes(file, pos, Math.min(size, pos + 16));
+      var len = u32(h, 0), type = fourcc(h, 4), head = 8;
+      if (len === 1) { if (h.byteLength < 16) return null; len = u64(h, 8); head = 16; }
+      else if (len === 0) len = size - pos;
+      if (!i && !/^(wide|free|skip|mdat|moov|pnot|junk)$/.test(type)) return null;
+      if (len < head || pos + len > size || !/^[\x20-\x7e]{4}$/.test(type)) return null;
+      if (type === 'moov') {
+        if (len > MOOV_MAX) return null;
+        var bytes = new Uint8Array(await file.slice(pos, pos + len).arrayBuffer());
+        var v = new DataView(bytes.buffer), shift = FTYP_QT.length, ok = true;
+        var walk = function (from, to) {
+          eachBox(v, from, to, function (t, s, e) {
+            if (/^(trak|mdia|minf|stbl)$/.test(t)) { walk(s, e); return; }
+            if (t !== 'stco' && t !== 'co64') return;
+            var wide = t === 'co64', n = s + 8 <= e ? u32(v, s + 4) : 0;
+            if (s + 8 + n * (wide ? 8 : 4) > e) { ok = false; return false; }
+            for (var k = 0; k < n; k++) {
+              var o = s + 8 + k * (wide ? 8 : 4);
+              if (!wide) {
+                if (u32(v, o) + shift > 0xffffffff) { ok = false; return false; }
+                v.setUint32(o, u32(v, o) + shift);
+              } else {
+                var x = u64(v, o) + shift;
+                v.setUint32(o, Math.floor(x / 4294967296));
+                v.setUint32(o + 4, x % 4294967296);
+              }
+            }
+          });
+        };
+        walk(head, len);
+        if (!ok) return null;
+        return new File([FTYP_QT, file.slice(0, pos), bytes, file.slice(pos + len)], file.name || 'video.mov',
+          { type: 'video/quicktime', lastModified: file.lastModified });
+      }
+      pos += len;
+    }
+    return null;
+  }
+  // 'heic' or 'avif' for a HEIF photo (an iPhone's HEIC) or an AVIF image, from the brands in its ftyp box.
+  async function photoKind(file) {
+    var h = await readBytes(file, 0, Math.min(file.size, 96));
+    if (h.byteLength < 16 || fourcc(h, 4) !== 'ftyp') return null;
+    var brands = [fourcc(h, 8)];
+    for (var o = 16; o + 4 <= Math.min(h.byteLength, u32(h, 0)); o += 4) brands.push(fourcc(h, o));
+    if (brands.some(function (b) { return /^avi[fs]$/.test(b); })) return 'avif';
+    if (brands.some(function (b) { return /^(heic|heix|heim|heis|hevc|hevx|mif1|msf1)$/.test(b); })) return 'heic';
+    return null;
+  }
 
   // ---------- Probing ----------
   var FORMATS = null;
@@ -352,7 +416,7 @@
     try {
       await withTimeout(read(info), PROBE_SECONDS, 'damaged');
     } catch (e) {
-      info.error = { code: info.isProtected ? 'protected' : e && e.code && /^(empty|not-video|no-index|no-tracks|protected|damaged)$/.test(e.code) ? e.code : 'damaged',
+      info.error = { code: info.isProtected ? 'protected' : e && e.code && /^(empty|not-video|photo|no-index|no-tracks|protected|damaged)$/.test(e.code) ? e.code : 'damaged',
         detail: String((e && e.message) || e).slice(0, 160) };
     }
     if (info.error && info.input) { try { info.input.dispose(); } catch (x) { /* already closed */ } info.input = null; }
@@ -361,18 +425,31 @@
 
   async function read(info) {
     var file = info.file;
-    var input = info.input = new MB.Input({
-      source: new MB.BlobSource(file, { handleUnhandledError: function () {} }),
-      formats: formats(),
-      formatOptions: { isobmff: { resolveKeyId: function () { info.isProtected = true; throw err('protected'); } } }
-    });
-    if (!(await input.canRead())) throw err('not-video');
+    var open = function (blob) {
+      return (info.input = new MB.Input({
+        source: new MB.BlobSource(blob, { handleUnhandledError: function () {} }),
+        formats: formats(),
+        formatOptions: { isobmff: { resolveKeyId: function () { info.isProtected = true; throw err('protected'); } } }
+      }));
+    };
+    var input = open(file);
+    if (!(await input.canRead())) {
+      // mediabunny wants an ftyp box first, which older QuickTime movies do not have.
+      var withFtyp = await attempt(function () { return addFtyp(file); }, null);
+      if (!withFtyp) throw err('not-video');
+      input.dispose();
+      input = open(withFtyp);
+      if (!(await input.canRead())) throw err('not-video');
+    }
     var format = await input.getFormat();
     info.format = format === MB.QTFF ? 'mov' : format === MB.MP4 ? 'mp4' : format === MB.WEBM ? 'webm' : 'mkv';
     info.isobmff = info.format === 'mov' || info.format === 'mp4';
     var index = info.isobmff ? await attempt(function () { return scanIndex(file); }, null) : null;
     var tracks = await input.getTracks();
     if (!tracks.length) {
+      // A HEIC photo or an AVIF image is an ISO file too, but holds pictures, not tracks.
+      var photo = info.isobmff ? await attempt(function () { return photoKind(file); }, null) : null;
+      if (photo) throw err('photo', photo);
       if (info.isobmff && (!index || index.cut)) throw err('no-index');
       throw err('no-tracks');
     }
@@ -459,7 +536,7 @@
     for (var i = 0; i < info.videos.length; i++) {
       var v = info.videos[i];
       if (v.codec === 'prores' && typeof VideoFrame !== 'undefined') {
-        try { await loadProres(); v.canDecode = await v.track.canDecode(); } catch (e) { v.canDecode = false; }
+        try { await loadProres(); v.canDecode = await v.track.canDecode(); } catch (e) { v.canDecode = false; v.loadFailed = true; }
       }
       v.canH264 = false;
       if (v.codec && v.canDecode) {
@@ -509,9 +586,13 @@
   }
   // Software speeds measured in Chromium on a 4-core laptop-class machine:
   // copying about 300 MB/s, H.264 encoding about 65 frames/s of 1080p.
+  // ProRes is decoded in WebAssembly first, which takes about as long again:
+  // 1080p ProRes 422 HQ (79 and 230 Mbps) went at 25 to 37 frames/s, so each
+  // 1080p frame counts 15 ms more (33 frames/s in all).
   function encodeSeconds(v, seconds) {
-    var fps = 65 * (1920 * 1080) / Math.max(1, v.width * v.height);
-    return seconds * (v.frameRate || 30) / Math.min(600, fps);
+    var scale = Math.max(1, v.width * v.height) / (1920 * 1080);
+    var perFrame = Math.max(1 / 600, scale / 65) + (v.codec === 'prores' ? scale * 0.015 : 0);
+    return seconds * (v.frameRate || 30) * perFrame;
   }
 
   function plan(info, choice) {
@@ -519,6 +600,8 @@
     var p = { ok: false, refuse: null, video: [], audio: [], notes: [], reencode: false, needs: { aac: false, prores: false }, bytes: 0, seconds: 0 };
     if (info.error) { p.refuse = { code: 'error' }; return p; }
     var span = info.truncated ? info.truncated.at : info.duration;
+    // How long a track runs in the MP4: a picture or a sound can stop before the other.
+    var length = function (t) { return Math.max(0, Math.min(span, t.duration || span) - Math.max(0, t.first || 0)); };
     if (!info.videos.length) { p.refuse = { code: 'no-video' }; return p; }
     var matroska = !info.isobmff;
     info.videos.forEach(function (v, i) {
@@ -541,13 +624,19 @@
           step.crop = { left: 0, top: 0, width: size.width, height: size.height };
           p.notes.push({ code: 'odd-size', track: v, width: size.width, height: size.height });
         }
-        if (v.hdr) p.notes.push({ code: 'hdr-sdr', track: v });
+        if (v.hdr) {
+          // Left to itself, the encoder takes the HDR frames as they are and the H.264 keeps the HDR
+          // colour tags in 8 bits. Drawn on a canvas (which a crop makes mediabunny do), they are
+          // mapped to standard range, as the note says.
+          if (!step.crop) step.crop = { left: 0, top: 0, width: size.width, height: size.height };
+          p.notes.push({ code: 'hdr-sdr', track: v });
+        }
         if (v.alpha) p.notes.push({ code: 'alpha', track: v });
         p.reencode = true;
-        p.bytes += step.bitrate / 8 * span;
-        p.seconds += encodeSeconds(v, span);
+        p.bytes += step.bitrate / 8 * length(v);
+        p.seconds += encodeSeconds(v, length(v));
       } else if (step.action === 'copy') {
-        p.bytes += (v.bitrate || 0) / 8 * span;
+        p.bytes += (v.bitrate || 0) / 8 * length(v);
         if (v.codec === 'hevc') p.notes.push({ code: 'hevc', track: v });
         if (v.hdr) p.notes.push({ code: 'hdr-kept', track: v, dolbyVision: info.dolbyVision && v.codec === 'hevc' });
       }
@@ -571,11 +660,11 @@
         if (a.canAac === 'wasm') p.needs.aac = true;
         p.notes.push({ code: 'audio-aac', track: a });
         p.reencode = true;
-        p.bytes += step.bitrate / 8 * span;
-        p.seconds += span / 20;
+        p.bytes += step.bitrate / 8 * length(a);
+        p.seconds += length(a) / 20;
       } else if (COPY_AUDIO.test(a.codec) || /^pcm-(s16|s24|s32|f32|f64)/.test(a.codec)) {
         step.action = 'copy';
-        p.bytes += (a.bitrate || 0) / 8 * span;
+        p.bytes += (a.bitrate || 0) / 8 * length(a);
         if (reencode) p.notes.push({ code: 'aac-unavailable', track: a });
         else if (!PLAIN_AUDIO.test(a.codec)) p.notes.push({ code: 'audio-copied', track: a });
       } else {
@@ -770,9 +859,11 @@
       var verdict = null, lastProgress = Date.now(), stalled = false, watch = null;
       warnings.length = 0;
       try {
-        await load();
-        if (steps.needs.prores) await loadProres();
-        if (steps.needs.aac) await loadAac();
+        try {
+          await load();
+          if (steps.needs.prores) await loadProres();
+          if (steps.needs.aac) await loadAac();
+        } catch (e) { throw err('library', e && e.message); }
         if (canceled) throw err('canceled');
         var vOpts = new Map(), aOpts = new Map(), expected = [];
         var span = info.truncated ? info.truncated.at : info.duration;
@@ -788,7 +879,8 @@
             if (v.codec === 'prores' && cs && cs.matrix && cs.primaries && cs.transfer) o.process = tagColour(cs);
           }
           vOpts.set(s.id, o);
-          expected.push({ handler: 'vide', seconds: Math.max(0, span - Math.max(0, v.first)) });
+          // A video track can end before the sound (or the movie) does: it is checked against its own length.
+          expected.push({ handler: 'vide', seconds: Math.max(0, Math.min(span, v.duration || span) - Math.max(0, v.first)) });
         });
         steps.audio.forEach(function (s) {
           var a = info.audios.filter(function (x) { return x.id === s.id; })[0];

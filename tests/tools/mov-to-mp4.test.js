@@ -582,7 +582,8 @@ async function run({ page, open, assert, fixtures, url, tmp }) {
   assert.equal(c.download, false);
   assert.ok(c.notes.includes('H.264 needs an even width and height, so the H.264 video is 1364 × 766: it loses the last column or row of pixels.'), c.notes.join(' | '));
   c = await card('iphone-hevc.mov');
-  assert.ok(c.notes.includes('This browser cannot decode HEVC, so the video is copied as HEVC. Safari on a Mac, iPhone or iPad, and Chrome or Edge on most Windows PCs and Macs, can make H.264 from it.'), c.notes.join(' | '));
+  // (Edge on Windows decodes HEVC only with the HEVC Video Extensions, so it is not named here.)
+  assert.ok(c.notes.includes('This browser cannot decode HEVC, so the video is copied as HEVC. Safari on a Mac, iPhone or iPad, and Chrome on most Windows PCs and Macs, can make H.264 from it.'), c.notes.join(' | '));
   assert.match(c.state, /^Done: /, 'a result whose plan did not change stays');
   assert.match((await card('screen.webm')).notes.join(' '), /Re-encoding is not offered for WebM and MKV files here/);
   assert.equal(await page.textContent('#mvp-convert'), 'Convert 3 files to MP4');
@@ -765,10 +766,29 @@ async function run({ page, open, assert, fixtures, url, tmp }) {
   const memFacts = await page.evaluate(buildBigMov, [intra, 7200, 40000, 'memory.mov']);
   await addBig(['memory.mov']);
   await waitRead();
+  // The stream that builds the MP4 must make each write wait while its queue is full, so that
+  // a Blob slower than the conversion (here 20 ms a chunk) holds only a few 4 MiB chunks back.
+  // (The chunks live outside the JavaScript heap, so the heap peak below would not show them.)
+  await page.evaluate(() => {
+    window.__queued = 0;
+    const enqueue = ReadableStreamDefaultController.prototype.enqueue, R = window.Response;
+    ReadableStreamDefaultController.prototype.enqueue = function (chunk) {
+      enqueue.call(this, chunk);
+      if (chunk && chunk.byteLength >= 1 << 20) window.__queued = Math.max(window.__queued, 2 - this.desiredSize);
+    };
+    window.Response = function (body, init) {
+      if (body instanceof ReadableStream) body = body.pipeThrough(new TransformStream({ transform: (c, out) => new Promise(r => setTimeout(() => { out.enqueue(c); r(); }, 20)) }));
+      return new R(body, init);
+    };
+    window.Response.prototype = R.prototype;
+    window.__unslow = () => { ReadableStreamDefaultController.prototype.enqueue = enqueue; window.Response = R; };
+  });
   const heap2 = heapWatch();
   await page.click('#mvp-convert');
   await waitIdle();
   const heapPeak2 = await heap2.stop();
+  const queued = await page.evaluate(() => { window.__unslow(); return window.__queued; });
+  assert.ok(queued >= 1 && queued <= 3, `at most 3 chunks wait for a slow Blob (${queued})`);
   assert.ok(heapPeak2 < 250e6, `JavaScript heap peaked at ${Math.round(heapPeak2 / 1e6)} MB for a ${Math.round(memFacts.size / 1e6)} MB file`);
   assert.match((await card('memory.mov')).state, /^Done: memory\.mp4, 30\d\.\d MB$/);
   const mem = await downloadOf('memory.mov');
@@ -923,4 +943,135 @@ async function run({ page, open, assert, fixtures, url, tmp }) {
   assert.match((await card('av1-opus.mp4')).plan, /^Re-encode the video to H\.264 and the sound to AAC/, 'the plan follows the restored choice');
   said = await page.evaluate(() => window.__live.filter(x => x[0] === 'mvp-status').map(x => x[1]));
   assert.ok(said.every((t, i) => i === 0 || t !== said[i - 1]), 'no announcement repeated');
+
+  // ===================================================================================
+  // 12. More files: a picture that stops before the sound, an older QuickTime movie with no
+  //     ftyp box, a HEIC photo and an AVIF image, sound the page cannot read, three files with
+  //     the same name, and 10-bit HDR made into H.264.
+  // ===================================================================================
+  await row('av1-opus.mp4').locator('.mvp-remove').click();
+  await page.check('#mvp-v-copy');
+  await add(['short-video.mov', 'old-quicktime.mov', 'IMG_0001.HEIC', 'photo.avif', 'alac-only.mov', 'mp3-in-mov.mov']);
+  c = await card('IMG_0001.HEIC');
+  assert.deepEqual([c.plan, c.refused, c.msg], ['Not supported', true, 'This is a HEIC photo, not a video. The video of a Live Photo is a separate MOV file. To turn it into a JPG, use HEIC to JPG.'], 'a photo is called a photo');
+  assert.equal(await row('IMG_0001.HEIC').locator('.mvp-file-msg a').getAttribute('href'), '/heic-to-jpg/');
+  c = await card('photo.avif');
+  assert.deepEqual([c.plan, c.refused, c.msg], ['Not supported', true, 'This is an AVIF image, not a video. To turn it into a JPG, use AVIF to JPG.']);
+  assert.equal(await row('photo.avif').locator('.mvp-file-msg a').getAttribute('href'), '/avif-to-jpg/');
+  for (const [name, label] of [['alac-only.mov', 'Apple Lossless (ALAC)'], ['mp3-in-mov.mov', 'MP3']]) {
+    c = await card(name);
+    assert.match(c.plan, /^Copy the video, without its sound · about [\d.]+ KB$/, `${name}: the plan says the MP4 is silent`);
+    assert.deepEqual(c.notes, [`Left out: a sound track in ${label}, which this page cannot read.`, 'The MP4 will have no sound.'], name);
+  }
+  c = await card('short-video.mov');
+  assert.equal(c.tracks, 'Video: H.264 · Sound: AAC mono');
+  const shortPlan = +/about (\d+) KB$/.exec(c.plan)[1];
+  assert.match((await card('old-quicktime.mov')).plan, /^Copy, quality unchanged · about \d+ KB$/, 'a movie without an ftyp box is read');
+  await page.click('#mvp-convert');
+  await waitIdle();
+  assert.equal(await status(), '4 of 4 files converted. Download them with the buttons under each file or all as a ZIP.');
+  // 1 s of picture and 5 s of sound: both copied whole, and the size estimate counts the picture's second only.
+  const shortSrc = facts(fx('short-video.mov'));
+  const shortOut = await downloadOf('short-video.mov');
+  out = facts(shortOut.file);
+  assert.equal(samePackets(shortSrc, out, 'video', 0, 'short picture').count, 30, 'every video packet');
+  assert.equal(samePackets(shortSrc, out, 'audio', 0, 'longer sound').count, shortSrc.streams[1].packets.length, 'every sound packet');
+  near(out.duration, 5, 0.05, 'the MP4 runs as long as its sound');
+  near(shortPlan, fs.statSync(shortOut.file).size / 1000, fs.statSync(shortOut.file).size / 1000 * 0.25, 'size estimate');
+  // The engine's own check of a finished MP4 (TTVideo.checkIndex, which later pages use too): a
+  // track that is missing, extra or much shorter than expected fails it.
+  const verdicts = await page.evaluate(b64 => {
+    const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+    const check = (...want) => TTVideo.checkIndex(bytes, want.map(([handler, seconds]) => ({ handler, seconds })));
+    return [check(['vide', 1], ['soun', 5]), check(['vide', 5], ['soun', 5]), check(['vide', 1], ['soun', 5], ['soun', 5]), check(['vide', 1])].map(r => [r.ok, r.why]);
+  }, fs.readFileSync(shortOut.file).toString('base64'));
+  assert.deepEqual(verdicts.map(v => v[0]), [true, false, false, false], JSON.stringify(verdicts));
+  assert.match(verdicts[1][1], /^vide track 1 lasts 1\.0\d s of 5\.00 s$/);
+  assert.deepEqual([verdicts[2][1], verdicts[3][1]], ['soun: 1 of 2 tracks', 'soun: 1 of 0 tracks']);
+  // No ftyp box: copied packet for packet, with the date in its index.
+  const oldSrc = facts(fx('old-quicktime.mov'));
+  out = facts((await downloadOf('old-quicktime.mov')).file);
+  assert.equal(fs.readFileSync(fx('old-quicktime.mov')).toString('latin1', 4, 8), 'wide', 'the source starts without ftyp');
+  assert.equal(out.brand, 'isom');
+  for (const kind of ['video', 'audio']) assert.equal(samePackets(oldSrc, out, kind, 0, 'old QuickTime').count, oldSrc.streams.find(s => s.type === kind).packets.length, `every ${kind} packet`);
+  assert.equal(out.tags.creation_time, '2004-05-06T07:08:09.000000Z');
+  for (const name of ['alac-only.mov', 'mp3-in-mov.mov']) {
+    out = facts((await downloadOf(name)).file);
+    assert.deepEqual(out.streams.map(s => s.type), ['video'], `${name}: the picture only, as the plan said`);
+    assert.equal(samePackets(facts(fx(name)), out, 'video', 0, name).count, 30);
+  }
+  // Three files called clip.mov (or CLIP.MOV) from different folders: three different MP4 names.
+  await page.click('#mvp-clear');
+  const clipBytes = ['iphone-hevc.mov', 'rotated-180.mov', 'aac-alac.mov'].map(n => fs.readFileSync(fx(n)));
+  await page.setInputFiles('#mvp-file', [['clip.mov', 0], ['clip.mov', 1], ['CLIP.MOV', 2]].map(([name, i]) => ({ name, mimeType: 'video/quicktime', buffer: clipBytes[i] })));
+  await waitRead();
+  await page.click('#mvp-convert');
+  await waitIdle();
+  const clipNames = [];
+  for (let i = 0; i < 3; i++) clipNames.push((await download(() => page.locator('.mvp-dl').nth(i).click())).name);
+  assert.deepEqual(clipNames, ['clip.mp4', 'clip (2).mp4', 'CLIP (3).mp4'], 'each MP4 has its own name');
+  // Files removed while the batch waits (here, for a place to save a big MP4) are not counted:
+  // neither one already converted nor one still waiting its turn.
+  await page.click('#mvp-clear');
+  await page.evaluate(mockPicker);
+  await page.evaluate(buildBigMov, [intra, 15000, 40000, 'big.mov']);
+  await page.evaluate(b64 => {
+    const small = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+    const dt = new DataTransfer();
+    for (const f of [new File([small], 'first.mov'), new File([small], 'second.mov'), window.__big['big.mov'].file, new File([small], 'last.mov')]) dt.items.add(f);
+    const input = document.getElementById('mvp-file');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change'));
+  }, fs.readFileSync(fx('iphone-hevc.mov')).toString('base64'));
+  await waitRead();
+  await page.click('#mvp-convert');
+  await page.waitForSelector('#mvp-ask:not([hidden])', { timeout: 60000 });
+  assert.match((await card('first.mov')).state, /^Done: first\.mp4/);
+  await row('first.mov').locator('.mvp-remove').click();
+  await row('last.mov').locator('.mvp-remove').click();
+  await page.click('#mvp-ask-save');
+  await waitIdle();
+  assert.equal(await status(), '2 of 2 files converted. Download them with the buttons under each file.', 'the removed files are not counted');
+  assert.match((await card('big.mov')).state, /^Saved as big\.mp4, 6\d\d\.\d MB$/);
+  await page.evaluate(() => { window.__big = {}; window.__saves.length = 0; delete window.showSaveFilePicker; });
+  await page.click('#mvp-clear');
+  // "Plays everywhere" for 10-bit HDR that this browser decodes: the note says it becomes standard
+  // range, and so it does: the H.264 is not tagged HLG or PQ.
+  await page.check('#mvp-v-h264');
+  await add(['vp9-hlg10.mp4', 'av1-pq10.mp4']);
+  for (const name of ['vp9-hlg10.mp4', 'av1-pq10.mp4']) assert.ok((await card(name)).notes.includes('HDR becomes standard range (SDR) in H.264, so the picture can look duller.'), name);
+  await page.click('#mvp-convert');
+  await waitIdle();
+  for (const name of ['vp9-hlg10.mp4', 'av1-pq10.mp4']) {
+    const r = await downloadOf(name);
+    const v = facts(r.file).streams[0];
+    assert.deepEqual([v.codec, v.width, v.height, /^yuvj?420p$/.test(v.pix_fmt)], ['h264', 320, 180, true], `${name}: 8-bit H.264`);
+    assert.equal(v.primaries, 'bt709', `${name}: standard-range colours, not ${v.primaries}`);
+    assert.ok(/^(bt709|iec61966-2-1|smpte170m)$/.test(v.transfer), `${name}: a standard-range transfer, not ${v.transfer}`);
+    fr = py('frames', fx(name), r.file);
+    assert.equal(fr.frames[1], fr.frames[0], `${name}: every frame`);
+    assert.deepEqual(fr.times[1].map(t => t.toFixed(3)), fr.times[0].map(t => t.toFixed(3)), `${name}: frame times`);
+    const shown = await plays(r.url);
+    assert.deepEqual([shown.w, shown.h], [320, 180], `${name}: Chromium shows it`);
+    assert.ok(shown.frames > 0, `${name}: Chromium decodes frames`);
+  }
+
+  // ===================================================================================
+  // 13. The ProRes decoder or the AAC encoder does not load (a dropped connection): the page says
+  //     so, rather than blaming the browser's H.264 encoder or the file.
+  // ===================================================================================
+  const offline = await page.context().newPage();
+  await offline.route(/mediabunny-(aac-encoder|prores)\.min\.js$/, r => r.abort());
+  await offline.goto(url);
+  await add(['prores422-pcm24.mov', 'h264-pcm16.mov'], offline);
+  const noLibrary = 'The converter could not be loaded. Check the connection and reload the page.';
+  c = await card('prores422-pcm24.mov', offline);
+  assert.deepEqual([c.plan, c.msg], ['Not supported', noLibrary], 'no ProRes decoder');
+  assert.match((await card('h264-pcm16.mov', offline)).plan, /^Copy the video, re-encode the sound to AAC/);
+  await offline.click('#mvp-convert');
+  await waitIdle(offline);
+  c = await card('h264-pcm16.mov', offline);
+  assert.deepEqual([c.state, c.msg, c.download], ['Not converted', noLibrary, false], 'no AAC encoder');
+  assert.equal(await status(offline), 'h264-pcm16.mov: ' + noLibrary);
+  await offline.close();
 }

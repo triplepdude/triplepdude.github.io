@@ -240,10 +240,69 @@ def make():
          '-g', '1', '-bf', '0', '-crf', '30', '-pix_fmt', 'yuv420p', out('intra.mov')])
 
 
+def strip_ftyp(src, dst):
+    """Writes `src` without its ftyp box, as QuickTime 6 and earlier wrote movies, with the
+    chunk offsets in its index moved back by the box's size."""
+    data = open(src, 'rb').read()
+    size, kind = struct.unpack('>I4s', data[:8])
+    assert kind == b'ftyp'
+    data = bytearray(data[size:])
+
+    def walk(start, end):
+        p = start
+        while p + 8 <= end:
+            n, t = struct.unpack('>I4s', data[p:p + 8])
+            if t in (b'moov', b'trak', b'mdia', b'minf', b'stbl'):
+                walk(p + 8, p + n)
+            elif t == b'stco':
+                for i in range(struct.unpack('>I', data[p + 12:p + 16])[0]):
+                    o = p + 16 + 4 * i
+                    struct.pack_into('>I', data, o, struct.unpack('>I', data[o:o + 4])[0] - size)
+            p += n
+    walk(0, len(data))
+    open(dst, 'wb').write(data)
+
+
+def make_more():
+    """Files added after the first version of the page."""
+    tmp = tempfile.mkdtemp()
+    T = lambda n: os.path.join(tmp, n)
+
+    # 19. A clip whose picture stops after 1 s while its sound runs for 5 s.
+    run(video_in(320, 180, 30, 1) + tone(440, 5) + ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '32', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '64k', '-ac', '1', '-f', 'mov', out('short-video.mov')])
+
+    # 20. 10-bit HDR that Chromium decodes: VP9 profile 2 with HLG, and AV1 with PQ, both BT.2020.
+    hdr = ['-pix_fmt', 'yuv420p10le', '-color_primaries', 'bt2020', '-colorspace', 'bt2020nc']
+    run(video_in(320, 180, 30, 1) + ['-c:v', 'libvpx-vp9', '-profile:v', '2', '-b:v', '600k', '-deadline', 'realtime', '-cpu-used', '8']
+        + hdr + ['-color_trc', 'arib-std-b67', out('vp9-hlg10.mp4')])
+    run(video_in(320, 180, 30, 1) + ['-c:v', 'libaom-av1', '-cpu-used', '8', '-crf', '40', '-b:v', '0']
+        + hdr + ['-color_trc', 'smpte2084', out('av1-pq10.mp4')])
+
+    # 21. Pictures, not videos: an iPhone's HEIC photo (needs pip install pillow-heif) and an AVIF image.
+    from PIL import Image
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    Image.new('RGB', (64, 48), (200, 120, 40)).save(out('IMG_0001.HEIC'), quality=50)
+    run(['-f', 'lavfi', '-i', 'testsrc2=size=64x48', '-frames:v', '1', '-c:v', 'libaom-av1', '-cpu-used', '8', '-still-picture', '1',
+         '-f', 'avif', out('photo.avif')])
+
+    # 22. An older QuickTime movie: no ftyp box, so it starts with 'wide', then the media data.
+    run(video_in(320, 180, 30, 1) + tone(440, 1) + ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '32', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '64k', '-ac', '1', '-metadata', 'creation_time=2004-05-06T07:08:09Z', '-f', 'mov', T('qt7.mov')])
+    strip_ftyp(T('qt7.mov'), out('old-quicktime.mov'))
+
+    # 23. Sound the page cannot read, and nothing else: Apple Lossless, and MP3 in a MOV ('.mp3').
+    for name, codec in [('alac-only.mov', ['-c:a', 'alac']), ('mp3-in-mov.mov', ['-c:a', 'libmp3lame', '-b:a', '64k'])]:
+        run(video_in(160, 90, 30, 1) + tone(440, 1) + ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '32', '-pix_fmt', 'yuv420p',
+            '-ac', '1'] + codec + ['-f', 'mov', out(name)])
+
+
 def main():
     make()
+    make_more()
     for n in sorted(os.listdir(HERE)):
-        if n.endswith(('.mov', '.mp4', '.webm')):
+        if n.endswith(('.mov', '.mp4', '.webm', '.HEIC', '.avif')):
             print(f'{os.path.getsize(out(n)):>8}  {n}')
 
 

@@ -23,7 +23,7 @@ howto: |
 
   | In the MOV | In the MP4 |
   |---|---|
-  | H.264, HEVC, VP9 or AV1 video; AAC, MP3 or Opus sound | Copied as they are |
+  | H.264, HEVC, VP9 or AV1 video; AAC or Opus sound | Copied as they are |
   | Rotation, HDR colour, trims, recording date and time | Kept |
   | Uncompressed (PCM) sound | Re-encoded to AAC |
   | ProRes video | Re-encoded to H.264 |
@@ -44,8 +44,9 @@ howto: |
 
   A new container does not change the codec, so choose **Plays everywhere**
   to re-encode HEVC to H.264, which every device plays. That works where the
-  browser can decode HEVC: Safari, and Chrome or Edge on most Windows PCs and
-  Macs. It takes longer than a copy: a 4-core computer re-encoded 1080p at 65
+  browser can decode HEVC: Safari, Chrome on most Windows PCs and Macs, and
+  Edge on a Mac, or on Windows with the HEVC Video Extensions. It takes longer
+  than a copy: a 4-core computer re-encoded 1080p at 65
   to 80 frames a second, more than twice as fast as the video plays; phones
   and 4K take longer. HDR becomes standard range.
 
@@ -173,6 +174,7 @@ faq:
 
   var ZIP_URL = new URL({{ '/assets/js/zip.js' | relative_url | jsonify }}, location.href).href;
   var MP3_PAGE = {{ '/mp4-to-mp3/' | relative_url | jsonify }};
+  var PHOTO_PAGES = { heic: [{{ '/heic-to-jpg/' | relative_url | jsonify }}, 'HEIC to JPG'], avif: [{{ '/avif-to-jpg/' | relative_url | jsonify }}, 'AVIF to JPG'] };
   function $(id) { return document.getElementById(id); }
   var V = window.TTVideo;
   var PHONE = V.isPhone;
@@ -265,6 +267,9 @@ faq:
   };
   function refusalText(e) {
     var r = e.plan.refuse;
+    if (r.code === 'error' && e.info.error.code === 'photo') {
+      return e.info.error.detail === 'avif' ? 'This is an AVIF image, not a video.' : 'This is a HEIC photo, not a video. The video of a Live Photo is a separate MOV file.';
+    }
     if (r.code === 'error') return ERRORS[e.info.error.code] || ERRORS.damaged;
     if (r.code === 'no-video') return 'This file has sound but no video.';
     var t = r.track;
@@ -273,6 +278,7 @@ faq:
         (/MJPEG/.test(t.label) ? ' Free desktop programs such as HandBrake can convert Motion JPEG.' : '');
     }
     if (r.code === 'prores') {
+      if (t.loadFailed) return ERRORS.library;
       if (typeof VideoEncoder === 'undefined') return 'Its video is ' + t.label + ', which MP4 players do not show, and this browser cannot re-encode video. Open this page in Chrome, Edge, Firefox or Safari on a computer to turn it into H.264.';
       return 'Its video is ' + t.label + ' at ' + t.width + ' × ' + t.height + ', and this browser’s H.264 encoder does not take that size, so it cannot be turned into an MP4 that plays.';
     }
@@ -313,8 +319,10 @@ faq:
     var v = p.video[0].action, audio = p.audio.filter(function (s) { return s.action !== 'drop'; });
     var aac = audio.some(function (s) { return s.action === 'aac'; });
     var text;
-    if (v === 'h264') text = 'Re-encode the video to H.264' + (aac ? ' and the sound to AAC' : audio.length ? ', copy the sound' : '');
+    var silent = p.audio.length && !audio.length;
+    if (v === 'h264') text = 'Re-encode the video to H.264' + (aac ? ' and the sound to AAC' : audio.length ? ', copy the sound' : silent ? ', without its sound' : '');
     else if (aac) text = 'Copy the video, re-encode the sound to AAC';
+    else if (silent) text = 'Copy the video, without its sound';
     else text = 'Copy, quality unchanged';
     if (p.bytes > 0) text += ' · about ' + fmtBytes(p.bytes);
     if (p.reencode && p.seconds >= 20) text += ' · ' + fmtWait(p.seconds);
@@ -333,7 +341,7 @@ faq:
           break;
         case 'h264-unavailable':
           out.push(t.codec === 'hevc' && !n.decode
-            ? 'This browser cannot decode HEVC, so the video is copied as HEVC. Safari on a Mac, iPhone or iPad, and Chrome or Edge on most Windows PCs and Macs, can make H.264 from it.'
+            ? 'This browser cannot decode HEVC, so the video is copied as HEVC. Safari on a Mac, iPhone or iPad, and Chrome on most Windows PCs and Macs, can make H.264 from it.'
             : 'This browser cannot re-encode this video to H.264, so it is copied as it is.');
           break;
         case 'h264-webm':
@@ -404,6 +412,7 @@ faq:
       return 'The converter could not copy all of this file' + (err.kind === 'video' || /vide/.test(err.message || '') ? ' (its video)' : '') +
         ': the file may be damaged. Nothing was saved.';
     }
+    if (c === 'library') return ERRORS.library;
     if (c === 'stalled') return 'The conversion stopped making progress, so it was stopped: the file may be damaged.';
     if (c === 'memory') return 'The browser ran out of memory. Close other tabs and try again, or convert this file on a computer.';
     if (c === 'write') return 'The MP4 could not be saved' + (err.message ? ' (' + cut(err.message, 100) + ')' : '') + '. Check the free space and try again.';
@@ -467,10 +476,16 @@ faq:
     if (e.msgEl._text !== msg) {
       e.msgEl._text = msg;
       e.msgEl.textContent = msg;
-      if (e.plan && e.plan.refuse && e.plan.refuse.code === 'no-video' && !e.convError) {
-        e.msgEl.appendChild(document.createTextNode(' To save its sound, use '));
-        var a = el('a', null, 'MP4 to MP3');
-        a.href = MP3_PAGE;
+      var refuse = !e.convError && e.plan && e.plan.refuse, link = null;
+      if (refuse && refuse.code === 'no-video') link = [' To save its sound, use ', MP3_PAGE, 'MP4 to MP3'];
+      if (refuse && refuse.code === 'error' && e.info.error.code === 'photo') {
+        var to = PHOTO_PAGES[e.info.error.detail === 'avif' ? 'avif' : 'heic'];
+        link = [' To turn it into a JPG, use ', to[0], to[1]];
+      }
+      if (link) {
+        e.msgEl.appendChild(document.createTextNode(link[0]));
+        var a = el('a', null, link[2]);
+        a.href = link[1];
         e.msgEl.appendChild(a);
         e.msgEl.appendChild(document.createTextNode('.'));
       }
@@ -715,6 +730,11 @@ faq:
         renderEntry(e);
       }
     }
+    // A file removed while the batch ran is not counted.
+    list = list.filter(function (x) { return entries.indexOf(x) >= 0; });
+    done = list.filter(function (x) { return x.result; }).length;
+    failed = list.filter(function (x) { return x.convError; }).length;
+    skipped = list.filter(function (x) { return x.skipped; }).length;
     var hadFocus = document.activeElement === dom.cancel || document.activeElement === document.body || document.activeElement === dom.askSave || document.activeElement === dom.askSkip;
     endAsk({ skip: true });
     busy = false;
@@ -728,6 +748,7 @@ faq:
     else if (list.length === 1 && failed) say(list[0].name + ': ' + list[0].convError);
     else if (skipped && !failed) say('Nothing was converted: no place to save was chosen.');
     else if (list.length) say('Nothing was converted: see the message under each file.');
+    else if (!dom.error.textContent) say('Nothing was converted: the files were removed.');
     if (hadFocus) {
       var first = list.filter(function (x) { return x.result && x.result.blob; })[0];
       if (first) (withResult.length > 1 && !dom.results.hidden ? dom.zip : first.dlBtn).focus();
