@@ -43,19 +43,19 @@ howto: |
   ### What is green noise?
 
   Green noise has no standard definition. Sleep sites use the name for noise
-  concentrated around 500 Hz. Here it is pink noise through a broad band-pass
-  filter centred on 500 Hz, which rolls off the deep bass and the high treble.
-  Grey noise follows the ISO 226 equal-loudness contour at 40 phon, louder
-  where the ear is less sensitive, so every pitch sounds about as loud.
+  concentrated around 500 Hz. Here it is pink noise through a broad 500 Hz
+  band-pass filter, rolling off the deep bass and high treble. Grey noise
+  follows the ISO 226 40-phon equal-loudness contour, louder where the ear is
+  less sensitive, so every pitch sounds about as loud.
   Following it exactly would boost 20 Hz by 60 dB, so the bass boost stops at
   20 dB.
 
   ## Sleep timer
 
   Choose 15 minutes to 8 hours, or a clock time. The countdown starts when you
-  press Play. The sound fades out over the last 2 minutes on the audio clock,
-  so it fades on time even if the phone slows the page down; then playback
-  stops.
+  press Play, or at once if the noise is playing. The sound fades out over the
+  last 2 minutes on the audio clock, so it fades on time even if the phone
+  slows the page down; then playback stops.
 
   ## Playing with the screen locked
 
@@ -86,7 +86,7 @@ faq:
   - q: Is white noise safe for babies?
     a: Keep it quiet, far away and short. When 14 infant sleep machines were measured at full volume (Pediatrics, 2014), all were louder than 50 dBA at 30 cm, the limit recommended for hospital nurseries, and three exceeded 85 dBA. Put the phone or speaker as far from the cot as practical, never in or on it, use a low volume and set the timer to stop the noise once your baby is asleep. A 2026 study in which pink noise reduced REM sleep in adults also cautions against using such noise indiscriminately with newborns and toddlers.
   - q: Does brown noise help with ADHD?
-    a: "No study has tested it yet: a 2024 meta-analysis of noise and ADHD found none with brown noise. Across 13 studies, white or pink noise slightly improved performance on laboratory attention tasks in children and young adults with ADHD or many ADHD symptoms, and slightly worsened it in those without. Noise is not a treatment for ADHD, so talk to a doctor about care."
+    a: "Nobody has shown that it does: a 2024 meta-analysis of noise and ADHD found no study of brown noise at all. Across 13 studies, white or pink noise slightly improved performance on laboratory attention tasks in children and young adults with ADHD or many ADHD symptoms, and slightly worsened it in those without. Noise is not a treatment for ADHD, so talk to a doctor about care."
   - q: Can white noise help with tinnitus?
     a: It may make it less noticeable. The NHS advises against total silence, because listening to soft music or sounds (sound therapy) may distract you from tinnitus. See a GP if you have tinnitus regularly, it is getting worse or it bothers you; ask for an urgent appointment if it beats in time with your pulse, and go to A&E or call 999 if it follows a head injury or comes with sudden hearing loss, weakness in your face or a spinning feeling. To match the pitch of a ringing tinnitus, use the [tone generator](/tone-generator/).
   - q: Is anything recorded, uploaded or stored?
@@ -246,7 +246,8 @@ faq:
   // ---------- The sound engine ----------
   // Self-contained: its source text also runs inside the AudioWorklet, where
   // there is no page and no crypto. Left and right take turns drawing from one
-  // random stream (xoshiro128**, period 2^128 - 1), so the noise never repeats.
+  // random stream (xoshiro128**, period 2^128 - 1), so the noise never repeats;
+  // while colours cross-fade each draws its own, so they are independent.
   function ngEngine(sr, seed) {
     'use strict';
     const TAU = 2 * Math.PI;
@@ -320,50 +321,68 @@ faq:
     function toneCoef(t) {
       return t < 0 ? coef('hs', 800, t, Math.SQRT1_2) : t > 0 ? coef('ls', 800, -t, Math.SQRT1_2) : [1, 0, 0, 0, 0];
     }
-    const XF = 1 / Math.round(0.4 * sr), GS = 1 - Math.exp(-1 / (0.02 * sr)), TSTEP = 24 * 128 / (0.05 * sr);
-    const tk = [1, 0, 0, 0, 0], tL = biquad(tk), tR = biquad(tk);
-    let voices = [], main = null, tone = 0, toneT = 0;
-    // A colour change cross-fades for 0.4 s: the new colour's weight rises
-    // while the others share what is left, so the weights always add up to 1.
+    const XF = 1 / Math.round(0.4 * sr), GS = 1 - Math.exp(-1 / (0.001 * sr)), TSTEP = 24 * 128 / (0.2 * sr);
+    let voices = [], main = null, toneT = 0;
+    // A colour's level at the tone its glide has reached (t): in dB, a straight
+    // line from where the glide started (ta, ga) to its target (tt, g1),
+    // bending at tone 0 (gz) if it crosses it, as the loudness of a tone does.
+    function along(v) {
+      const a = v.ta, b = v.tt, t = v.t;
+      if (t === b || a === b || !(v.ga > 0 && v.gz > 0)) return v.g1;
+      if (a * b < 0) return t * a > 0 ? v.ga * Math.pow(v.gz / v.ga, 1 - t / a) : v.gz * Math.pow(v.g1 / v.gz, t / b);
+      return v.ga * Math.pow(v.g1 / v.ga, (t - a) / (b - a));
+    }
+    // Each colour has its own tone filter, and only the one playing glides to
+    // a new tone: colours fading out keep their tone and level, so changing
+    // the colour and the tone together neither swells nor dips. A colour
+    // change cross-fades for 0.4 s: the new colour (at the new tone) gains a
+    // share of the power while the others share what is left, so the power
+    // (and, the colours being equally loud and independent, the loudness)
+    // stays put.
     function set(m) {
       if (typeof m.tone === 'number' && m.tone === m.tone) toneT = Math.max(-12, Math.min(12, m.tone));
       if (typeof m.colour !== 'string') return;
       let v = null;
       for (let i = 0; i < voices.length; i++) if (voices[i].name === m.colour) v = voices[i];
+      const g = typeof m.gain === 'number' && m.gain >= 0 ? m.gain : v ? v.g1 : 0;
+      const gz = typeof m.gain0 === 'number' && m.gain0 >= 0 ? m.gain0 : g;
       if (!v) {
-        v = { name: m.colour, l: make(m.colour), r: make(m.colour), g: m.gain, gt: m.gain, w: voices.length ? 0 : 1 };
+        const k = toneCoef(toneT);
+        v = { name: m.colour, l: make(m.colour), r: make(m.colour), k: k, kl: biquad(k), kr: biquad(k), t: toneT, ta: toneT, tt: toneT, g: g, gb: g, ga: g, g1: g, gz: gz, w: voices.length ? 0 : 1 };
         voices.push(v);
+      } else if (v.tt !== toneT || v.g1 !== g) {
+        // A new glide, from the tone and level reached so far.
+        v.ta = v.t; v.ga = v.gb; v.tt = toneT; v.g1 = g; v.gz = gz;
       }
-      if (typeof m.gain === 'number' && m.gain >= 0) v.gt = m.gain;
       main = v;
     }
     function render(L, R, n) {
       for (let i0 = 0; i0 < n; i0 += 128) {
-        const i1 = Math.min(n, i0 + 128);
-        if (tone !== toneT) {
-          tone = Math.abs(toneT - tone) <= TSTEP ? toneT : tone + (toneT > tone ? TSTEP : -TSTEP);
-          const k = toneCoef(tone);
-          for (let j = 0; j < 5; j++) tk[j] = k[j];
+        const i1 = Math.min(n, i0 + 128), m = main;
+        if (m.t !== m.tt) {
+          m.t = Math.abs(m.tt - m.t) <= TSTEP ? m.tt : m.t + (m.tt > m.t ? TSTEP : -TSTEP);
+          const k = toneCoef(m.t);
+          for (let j = 0; j < 5; j++) m.k[j] = k[j];
         }
+        for (let j = 0; j < voices.length; j++) voices[j].gb = along(voices[j]);
         for (let i = i0; i < i1; i++) {
-          if (main.w < 1) {
-            main.w = Math.min(1, main.w + XF);
+          if (m.w < 1) {
+            m.w = Math.min(1, m.w + XF);
             let rest = 0;
-            for (let j = 0; j < voices.length; j++) if (voices[j] !== main) rest += voices[j].w;
-            const f = rest > 0 ? (1 - main.w) / rest : 0;
-            for (let j = 0; j < voices.length; j++) if (voices[j] !== main) voices[j].w *= f;
+            for (let j = 0; j < voices.length; j++) if (voices[j] !== m) rest += voices[j].w;
+            const f = rest > 0 ? (1 - m.w) / rest : 0;
+            for (let j = 0; j < voices.length; j++) if (voices[j] !== m) voices[j].w *= f;
           }
-          const wl = rnd(), wr = rnd();
           let yl = 0, yr = 0;
           for (let j = 0; j < voices.length; j++) {
             const v = voices[j];
-            v.g += (v.gt - v.g) * GS;
-            const a = v.w * v.g;
-            yl += a * v.l(wl); yr += a * v.r(wr);
+            v.g += (v.gb - v.g) * GS;
+            const a = (v.w < 1 ? Math.sqrt(v.w) : 1) * v.g;
+            yl += a * v.kl(v.l(rnd())); yr += a * v.kr(v.r(rnd()));
           }
-          L[i] = tL(yl); R[i] = tR(yr);
+          L[i] = yl; R[i] = yr;
         }
-        if (voices.length > 1) voices = voices.filter(function (v) { return v === main || v.w > 1e-7; });
+        if (voices.length > 1) voices = voices.filter(function (v) { return v === m || v.w > 1e-7; });
       }
     }
     // Impulse response of a colour at a tone setting (the levels are worked out from it).
@@ -507,10 +526,13 @@ faq:
   }
   // Every ramp starts from a fixed point: cancel what was booked, then set the
   // value it has now (Firefox and the spec otherwise start a ramp from an
-  // older event, which can jump).
+  // older event, which can jump). The value is read first: Firefox works it
+  // out from what is booked, so after the cancel it would miss the ramp in
+  // progress.
   function anchor(p, t, v) {
+    if (v === undefined) v = p.value;
     p.cancelScheduledValues(t);
-    p.setValueAtTime(v === undefined ? p.value : v, t);
+    p.setValueAtTime(v, t);
   }
   function rampTo(p, v, secs) {
     const t = au.ctx.currentTime;
@@ -549,7 +571,8 @@ faq:
     return ctx.audioWorklet.addModule(url).then(function () { return 'worklet'; }, function () { return 'buffers'; })
       .then(function (kind) { URL.revokeObjectURL(url); return kind; });
   }
-  function settings() { return { colour: st.colour, tone: st.tone, gain: gainFor(st.colour, st.tone) }; }
+  // The level at tone 0 too, which a tone glide passes through.
+  function settings() { return { colour: st.colour, tone: st.tone, gain: gainFor(st.colour, st.tone), gain0: gainFor(st.colour, 0) }; }
   function buildSource(kind) {
     if (au.src) return;
     if (kind === 'worklet') {
@@ -734,7 +757,7 @@ faq:
     st.mode = 'stopped';
     st.intShown = false;
     const endedAt = why === 'timer' ? tm.endAt : 0;
-    disarm();
+    disarm(true);
     keepPause();
     session('auto');
     if (au) {
@@ -917,11 +940,14 @@ faq:
     if (want && !tm.iv) tm.iv = setInterval(tick, 1000);
     else if (!want && tm.iv) { clearInterval(tm.iv); tm.iv = 0; }
   }
-  function disarm() {
+  // A timer turned off or changed brings the level back up; a stop holds it
+  // where the fade had got to (Play sets it back to full), so the noise does
+  // not swell again while the stop fades out.
+  function disarm(hold) {
     const had = tm.endAt;
     tm.endAt = 0;
     ticker();
-    if (au && had) rampTo(au.fader.gain, 1, 0.5);
+    if (au && had) { if (hold) anchor(au.fader.gain, au.ctx.currentTime); else rampTo(au.fader.gain, 1, 0.5); }
   }
   // Starts the countdown from now. While the sound is interrupted the
   // countdown runs on, and its fade is booked once the sound is back.
@@ -1194,22 +1220,24 @@ faq:
       const r = root.getBoundingClientRect();
       if (r.bottom < 0 || r.top > window.innerHeight) return;
     }
-    const k = e.key, input = tag === 'INPUT';
-    if (/^[1-7]$/.test(k) && !e.shiftKey) {
-      // Digits still type into the time field.
-      if (input && t.type !== 'radio' && t.type !== 'range') return;
+    // A colour radio or a slider (focused by clicking one) takes the digits
+    // and Space too; the time field keeps them for typing.
+    const k = e.key, input = tag === 'INPUT', field = input && t.type !== 'radio' && t.type !== 'range';
+    // (French keyboards type digits with Shift.)
+    if (/^[1-7]$/.test(k)) {
+      if (field) return;
       e.preventDefault();
       pick(COLOURS[+k - 1], true);
       return;
     }
-    // Arrows and Space keep their usual jobs in sliders, radios and fields.
-    if (input) return;
     if (k === ' ' || k === 'Spacebar') {
-      if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space presses those
+      if (field || tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return; // Space presses those
       e.preventDefault();
       if (!e.repeat) toggle();
       return;
     }
+    // Arrows keep their usual jobs in sliders, radios and fields.
+    if (input) return;
     if (k === 'ArrowLeft' || k === 'ArrowRight') { e.preventDefault(); stepColour(k === 'ArrowRight' ? 1 : -1, true); return; }
     if (k === 'ArrowUp' || k === 'ArrowDown') { e.preventDefault(); setVolume(st.vol + (k === 'ArrowUp' ? 5 : -5), true); }
   });

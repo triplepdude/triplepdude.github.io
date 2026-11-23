@@ -10,6 +10,8 @@ const zlib = require('zlib');
 // /GoTo action. locked.pdf needs the password "open sesame" (AES-256), restricted.pdf has only an
 // owner password (AES-128), sixty.pdf has 60 pages, damaged.pdf is not a PDF inside. shared.pdf has
 // 3 pages that share one resource dictionary with all three pictures, and form fields with one parent.
+// make_passwords.py makes pdfdoc-password.pdf (AES-128, open password "café€" in PDFDocEncoding) and
+// utf8-password.pdf (AES-256, open password "パスワード１２３" in UTF-8), 2 pages each.
 // The tool writes with pdf-lib; outputs are read back with pdf.js, an independent reader, for page
 // order (markers), sizes, /Rotate, links and encryption. A file's size shows whose pictures it holds:
 // a plain page copy follows page 1's link and carries a hidden copy of page 10 with its picture.
@@ -198,6 +200,32 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(out.name, 'restricted-page-2.pdf');
   pdf = await inspect(out.buf);
   assert.deepEqual([pdf.encrypted, pdf.pages.length, pdf.pages[0].mark], [false, 1, 'RESTRICTED-MARK-02']);
+
+  // ---- Open passwords with characters outside ASCII (make_passwords.py) ----
+  // pdfdoc-password.pdf (AES-128) keeps "café€" in PDFDocEncoding, where € is 0xA0. PDF.js takes
+  // the low byte of each character (0xAC for €), so the page asks it again with the bytes the
+  // unlocker tries; before, the password was "not right". utf8-password.pdf (AES-256) keeps
+  // "パスワード１２３" in UTF-8 as typed, with full-width digits: PDF.js opened it, but the unlocker
+  // tried only the NFKC form (ASCII digits), and the split then asked for the password again.
+  for (const [name, password, mark] of [['pdfdoc-password.pdf', 'café€', 'PDFDOC-MARK-02'], ['utf8-password.pdf', 'パスワード１２３', 'UNICODE-MARK-02']]) {
+    await page.setInputFiles('#spl-file', fx(name));
+    await page.waitForSelector('#spl-unlock:not([hidden])');
+    await page.fill('#spl-pw', password);
+    await page.press('#spl-pw', 'Enter');
+    await page.waitForFunction(() => / is open: 2 pages, unlocked\./.test(document.getElementById('spl-status').textContent) || /not right/.test(document.getElementById('spl-pw-error').textContent));
+    assert.equal(await text('#spl-pw-error'), '', name + ': the password opens it');
+    assert.equal(await text('#spl-status'), name + ' is open: 2 pages, unlocked.');
+    await page.fill('#spl-ranges', '2');
+    // The split either downloads the file or says why it could not.
+    const download = page.waitForEvent('download').catch(() => null);
+    await page.click('#spl-split');
+    const failed = page.waitForFunction(() => document.getElementById('spl-error').textContent !== '').catch(() => null);
+    const dl = await Promise.race([download, failed.then(() => null)]);
+    assert.equal(await text('#spl-error'), '', name + ': split with the same password');
+    assert.equal(dl.suggestedFilename(), name.replace('.pdf', '-page-2.pdf'));
+    pdf = await inspect(fs.readFileSync(await dl.path()));
+    assert.deepEqual([pdf.encrypted, pdf.pages.map(p => p.mark)], [false, [mark]], name + ': page 2, decrypted');
+  }
 
   // ---- ten.pdf: the suggested halves, labels and the summary ----
   await page.fill('#spl-ranges', '');

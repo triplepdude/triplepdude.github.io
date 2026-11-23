@@ -61,6 +61,21 @@ function unzip(buf) {
   return files;
 }
 
+// The modified time of each ZIP entry from its central directory record (MS-DOS format: local
+// time in 2-second steps), as [year, month, day, hours, minutes, seconds].
+function zipDates(buf) {
+  let e = buf.length - 22;
+  while (buf.readUInt32LE(e) !== 0x06054b50) e--;
+  let p = buf.readUInt32LE(e + 16);
+  const dates = {};
+  for (let i = 0, n = buf.readUInt16LE(e + 10); i < n; i++) {
+    const time = buf.readUInt16LE(p + 12), date = buf.readUInt16LE(p + 14), nameLen = buf.readUInt16LE(p + 28);
+    dates[buf.toString('utf8', p + 46, p + 46 + nameLen)] = [(date >> 9) + 1980, (date >> 5) & 15, date & 31, time >> 11, (time >> 5) & 63, (time & 31) * 2];
+    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return dates;
+}
+
 // JPEG segments: the first luminance DQT table, and the EXIF IFD0 tags (number -> value or offset).
 function jpegInfo(buf) {
   const info = { luma: null, exif: null };
@@ -76,20 +91,33 @@ function jpegInfo(buf) {
         p += 1 + size;
       }
     }
-    if (m === 0xe1 && buf.toString('latin1', i + 4, i + 10) === 'Exif\0\0') {
-      const t = i + 10, le = buf.toString('latin1', t, t + 2) === 'II';
-      const u16 = o => (le ? buf.readUInt16LE(t + o) : buf.readUInt16BE(t + o)), u32 = o => (le ? buf.readUInt32LE(t + o) : buf.readUInt32BE(t + o));
-      const ifd = u32(4), count = u16(ifd), tags = {};
-      for (let k = 0; k < count; k++) {
-        const e = ifd + 2 + k * 12, tag = u16(e), type = u16(e + 2), n = u32(e + 4);
-        if (type === 2) tags[tag] = buf.toString('latin1', n > 4 ? t + u32(e + 8) : t + e + 8, (n > 4 ? t + u32(e + 8) : t + e + 8) + n - 1);
-        else tags[tag] = type === 3 ? u16(e + 8) : u32(e + 8);
-      }
-      info.exif = tags;
-    }
+    if (m === 0xe1 && buf.toString('latin1', i + 4, i + 10) === 'Exif\0\0') info.exif = tiffTags(buf, i + 10);
     i += 2 + len;
   }
   return info;
+}
+
+// The IFD0 tags of an EXIF block (TIFF layout) that starts at offset t of buf.
+function tiffTags(buf, t) {
+  const le = buf.toString('latin1', t, t + 2) === 'II';
+  const u16 = o => (le ? buf.readUInt16LE(t + o) : buf.readUInt16BE(t + o)), u32 = o => (le ? buf.readUInt32LE(t + o) : buf.readUInt32BE(t + o));
+  const ifd = u32(4), count = u16(ifd), tags = {};
+  for (let k = 0; k < count; k++) {
+    const e = ifd + 2 + k * 12, tag = u16(e), type = u16(e + 2), n = u32(e + 4);
+    if (type === 2) tags[tag] = buf.toString('latin1', n > 4 ? t + u32(e + 8) : t + e + 8, (n > 4 ? t + u32(e + 8) : t + e + 8) + n - 1);
+    else if (type === 5) tags[tag] = [u32(u32(e + 8)), u32(u32(e + 8) + 4)]; // a rational: numerator, denominator
+    else tags[tag] = type === 3 ? u16(e + 8) : u32(e + 8);
+  }
+  return tags;
+}
+
+// The EXIF IFD0 tags of a WebP file, from its EXIF chunk (RIFF), or null.
+function webpExif(buf) {
+  for (let o = 12; o + 8 <= buf.length; o += 8 + buf.readUInt32LE(o + 4) + (buf.readUInt32LE(o + 4) & 1)) {
+    if (buf.toString('latin1', o, o + 4) !== 'EXIF') continue;
+    return tiffTags(buf, buf.toString('latin1', o + 8, o + 14) === 'Exif\0\0' ? o + 14 : o + 8);
+  }
+  return null;
 }
 
 module.exports = async ({ page, open, assert, fixtures, url, base }) => {
@@ -203,6 +231,14 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await fields(), '7,3,250,55');
   await type('#crp-x', '60');
   assert.equal((await errOf('#crp-x')).msg, 'X can be at most 50: the picture is 300 px wide and the box 250.');
+  // Moving the box writes its real X over the wrong one, and the message goes with it, so saving
+  // is not refused over a field that shows a right value.
+  await page.focus('#crp-editor');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await fields(), '6,3,250,55');
+  assert.deepEqual(await errOf('#crp-x'), { invalid: null, msg: '' }, 'the X message goes once the box is moved');
+  await type('#crp-x', '60');
+  assert.equal((await errOf('#crp-x')).invalid, 'true');
   await type('#crp-x', '50');
   assert.deepEqual(await errOf('#crp-x'), { invalid: null, msg: '' });
   await page.click('#crp-error'); // the error stays until the next action
@@ -281,6 +317,15 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Shift+ArrowDown');
   assert.equal(await fields(), '21,30,40,40');
+  // Keys pressed in a row give a screen reader one summary, once they pause, not one for each key.
+  const keys = k => page.$eval('#crp-editor', (el, k) => { for (let i = 0; i < 3; i++) el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }, k);
+  await page.evaluate(() => { window.__live = 0; });
+  await keys('ArrowRight');
+  assert.equal(await fields(), '24,30,40,40');
+  await page.waitForFunction(() => / at 24, 30\./.test(document.querySelector('#crp-info').textContent));
+  assert.equal(await page.evaluate(() => window.__live), 1, 'the live summary is written once for three keys in a row');
+  await keys('ArrowLeft');
+  assert.equal(await fields(), '21,30,40,40');
   const prevented = await page.$eval('#crp-editor', el => {
     const e = new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true, cancelable: true });
     el.dispatchEvent(e);
@@ -300,8 +345,22 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.doesNotMatch(await page.textContent('#crp-zoom-val'), /Fit/);
   await page.keyboard.press('0');
   assert.match(await page.textContent('#crp-zoom-val'), /^Fit/);
-  // The keyboard alone: Tab from the editor reaches the zoom buttons, and Enter presses them.
-  await type('#crp-x', '10'); await type('#crp-y', '20'); await type('#crp-w', '30'); await type('#crp-h', '40');
+  // The mouse wheel zooms in too.
+  const eb = await ed.boundingBox();
+  await page.mouse.move(eb.x + eb.width / 2, eb.y + eb.height / 2);
+  await page.mouse.wheel(0, -240);
+  await page.waitForFunction(() => !/Fit/.test(document.querySelector('#crp-zoom-val').textContent));
+  await page.keyboard.press('0');
+  assert.match(await page.textContent('#crp-zoom-val'), /^Fit/);
+  // With a ratio, Alt + arrow keys resize the box and keep the ratio.
+  await page.selectOption('#crp-ratio', '4:3');
+  assert.equal(await fields(), '0,0,267,200');
+  await ed.focus();
+  await page.keyboard.press('Alt+Shift+ArrowLeft');
+  await page.keyboard.press('Alt+ArrowUp');
+  assert.equal(await fields(), '0,0,256,192', 'ten narrower, then one less tall, at 4:3');
+  await page.selectOption('#crp-ratio', 'free');
+  await type('#crp-w', '30'); await type('#crp-h', '40'); await type('#crp-x', '10'); await type('#crp-y', '20');
 
   // ---------- Turning and mirroring ----------
   await page.click('#crp-rotate');
@@ -330,6 +389,11 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.click('#crp-rotate'); await page.click('#crp-rotate');
   p = await png();
   checkGrid(p, null, (i, j) => [i, j], 'back upright');
+  // A turn belongs to the pictures it was made for: the next picture opened starts upright.
+  await page.click('#crp-rotate');
+  await openFile('small.png');
+  assert.equal(await fields(), '15,10,120,80', 'small.png (150 × 100) is shown as it is, not turned');
+  await openFile('grid.png');
 
   // ---------- Output size, DPI and format ----------
   await type('#crp-w', '200'); await type('#crp-h', '100'); await type('#crp-x', '30'); await type('#crp-y', '40');
@@ -339,6 +403,15 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.inputValue('#crp-oh'), '100');
   await type('#crp-ow', '100');
   assert.equal(await page.inputValue('#crp-oh'), '50');
+  // A wrong height is written over as soon as the box moves, and its message goes with it, so
+  // saving is not refused over a field that shows a right value.
+  await type('#crp-oh', 'abc');
+  assert.equal((await errOf('#crp-oh')).invalid, 'true');
+  await page.focus('#crp-editor');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.inputValue('#crp-oh'), '50');
+  assert.deepEqual(await errOf('#crp-oh'), { invalid: null, msg: '' }, 'the height shows a right value again, so it is no longer marked wrong');
   await type('#crp-dpi', '0');
   assert.deepEqual(await errOf('#crp-dpi'), { invalid: 'true', msg: 'Enter the DPI as a whole number from 1 to 65,535, such as 300, or leave it empty.' });
   await type('#crp-dpi', '300');
@@ -361,6 +434,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await type('#crp-x', '0'); await type('#crp-y', '0');
   await page.selectOption('#crp-format', 'jpeg');
   assert.equal(await page.textContent('#crp-download'), 'Download JPG');
+  assert.equal(await page.textContent('#crp-out-hint'), 'JPG has no transparency, so see-through areas turn white.');
   assert.equal(await page.isVisible('#crp-q-field'), true);
   let d = await download();
   assert.equal(d.name, 'grid-cropped.jpg');
@@ -371,6 +445,10 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   d = await download();
   assert.equal(d.name, 'grid-cropped.webp');
   assert.equal(d.buf.toString('latin1', 8, 12), 'WEBP');
+  // A WebP has no DPI field (and grid.png no camera details to hold one): the page says so.
+  await type('#crp-dpi', '300');
+  await page.waitForFunction(() => /WebP files have no DPI setting, so the DPI is not saved\./.test(document.querySelector('#crp-out-hint').textContent), null, { timeout: 5000 });
+  await type('#crp-dpi', '');
   await page.selectOption('#crp-format', 'same');
 
   // ---------- A JPEG photo: upright, same quality, no GPS ----------
@@ -395,6 +473,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   d = await download();
   assert.equal(jpegInfo(d.buf).exif, null, 'no EXIF at all once unticked');
   await page.check('#crp-exif');
+  // A WebP has no DPI field: the DPI goes into the resolution of the camera details it keeps.
+  await page.selectOption('#crp-format', 'webp');
+  await type('#crp-dpi', '300');
+  d = await download();
+  const we = webpExif(d.buf);
+  assert.deepEqual([we[0x010f], we[0x011a], we[0x011b], we[0x0128]], ['TestCam', [300, 1], [300, 1], 2], 'the WebP’s camera details say 300 dpi');
+  assert.equal(await page.textContent('#crp-out-hint'), '');
+  // Camera details without a resolution (image-converter/rotated.jpg has none) cannot hold it.
+  await openFile('../image-converter/rotated.jpg', 'rotated.jpg');
+  assert.equal(await page.isVisible('#crp-exif'), true);
+  assert.equal(await page.textContent('#crp-out-hint'), 'WebP files have no DPI setting, so the DPI is not saved.');
+  await page.selectOption('#crp-format', 'same');
+  await type('#crp-dpi', '');
+  await openFile('photo.jpg');
   // The quality slider, once moved, applies.
   await page.$eval('#crp-quality', el => { el.value = '50'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   assert.equal(await page.textContent('#crp-q-out'), '50');
@@ -411,6 +503,16 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   px = await pixels(d.buf, [[5, 5]]);
   assert.deepEqual(px.px[0], [255, 0, 0, 255]);
   assert.deepEqual([px.w, px.h], [32, 24]);
+
+  // ---------- An icon stays an icon, which is square: the summary gives its real size ----------
+  await openFile('icon.ico');
+  assert.equal(await info(), 'Crop 24 × 18 px (4:3) at 3, 3. Saves as a 24 × 24 px ICO.');
+  assert.equal(await page.textContent('#crp-out-hint'), 'Icons are square, so the crop is centred on a see-through 24 × 24 px icon.');
+  d = await download();
+  assert.equal(d.name, 'icon-cropped.ico');
+  // ICONDIR: reserved 0, type 1, one image; its entry is 24 x 24.
+  assert.deepEqual([d.buf.readUInt16LE(0), d.buf.readUInt16LE(2), d.buf.readUInt16LE(4), d.buf[6], d.buf[7]], [0, 1, 1, 24, 24]);
+  assert.match(await page.textContent('#crp-status'), /^Saved icon-cropped\.ico: 24 × 24 px, /);
 
   // ---------- SVG stays a vector ----------
   await openFile('logo.svg');
@@ -450,6 +552,28 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual(p.px(120, 160 - 84), [255, 0, 0, 255], 'outside the disc, 4 px from its edge');
   await page.selectOption('#crp-size', 'crop');
   await page.selectOption('#crp-format', 'same');
+  // Turned clockwise, the box (20, 10, 100 x 80) turns with the drawing, and the SVG gets the turn as
+  // a transform: output (i, j) shows image pixel (20 + j, 89 - i).
+  await page.click('#crp-rotate');
+  assert.equal(await fields(), '10,20,80,100');
+  d = await download();
+  const turnedSvg = await page.evaluate(async text => {
+    const img = new Image();
+    img.src = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+    await img.decode();
+    const c = Object.assign(document.createElement('canvas'), { width: 80, height: 100 }), g = c.getContext('2d');
+    g.drawImage(img, 0, 0);
+    return [[5, 5], [39, 30], [40, 95]].map(([x, y]) => Array.from(g.getImageData(x, y, 1, 1).data));
+  }, d.buf.toString('utf8'));
+  assert.deepEqual(turnedSvg, [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]], 'image (25, 84) red, (50, 50) the disc centre, (115, 49) blue');
+  // A drawing cropped to more pixels than a canvas can hold asks for a smaller output size.
+  await page.setInputFiles('#crp-file', { name: 'huge.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="30000" height="30000" viewBox="0 0 2 2"><rect width="2" height="2" fill="#00f"/></svg>') });
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'huge.svg');
+  await page.selectOption('#crp-format', 'png');
+  await page.click('#crp-download');
+  await page.waitForFunction(() => document.querySelector('#crp-error').textContent);
+  assert.equal(await page.textContent('#crp-error'), 'This browser cannot make a picture of 24,000 × 24,000 px. Choose Set width and height under Output size and enter a smaller size.');
+  await page.selectOption('#crp-format', 'same');
 
   // ---------- Batch: the same relative crop for each picture, in one ZIP ----------
   await openFile(['grid.png', 'small.png'], 'grid.png and 1 more');
@@ -479,6 +603,96 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   });
   assert.deepEqual(clip, { size: [120, 80], px: gridAt(60, 40) });
 
+  // ---------- ZIP entries: dates, names, and settings changed while it is made ----------
+  // Dropped Files carry a set modified time (setInputFiles cannot set one).
+  const taken = new Date(2021, 2, 4, 5, 6, 8).getTime(), longName = 'a'.repeat(119) + '😀😀.png';
+  await page.evaluate(list => {
+    const dt = new DataTransfer();
+    for (const f of list) dt.items.add(new File([Uint8Array.from(atob(f.b64), c => c.charCodeAt(0))], f.name, { type: f.type, lastModified: f.time }));
+    document.querySelector('#crp-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [['grid.png', 'grid.png', 'image/png'], ['photo.jpg', 'photo.jpg', 'image/jpeg'], ['small.png', longName, 'image/png']]
+    .map(([file, name, type]) => ({ name, type, time: taken, b64: fs.readFileSync(path.join(fixtures, file)).toString('base64') })));
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'grid.png and 2 more');
+  // grid.png has no EXIF, but the JPG after it has: the choice is offered for the batch.
+  assert.equal(await page.isVisible('#crp-exif'), true, 'the EXIF box shows for a batch whose first picture has none');
+  const age = t => Math.abs(Date.now() - new Date(t[0], t[1] - 1, t[2], t[3], t[4], t[5]).getTime());
+  d = await download('#crp-zip');
+  let dates = zipDates(d.buf);
+  assert.deepEqual(Object.keys(dates), ['grid-cropped.png', 'photo-cropped.jpg', 'a'.repeat(119) + '😀-cropped.png'], 'a long name is cut between characters, not inside the emoji');
+  assert.deepEqual(dates['photo-cropped.jpg'], [2021, 3, 4, 5, 6, 8], 'the JPG keeps its EXIF, so its entry keeps the file’s date');
+  assert.ok(age(dates['grid-cropped.png']) < 120e3, `a picture without EXIF is dated now: ${dates['grid-cropped.png']}`);
+  await page.uncheck('#crp-exif');
+  dates = zipDates((await download('#crp-zip')).buf);
+  assert.ok(age(dates['photo-cropped.jpg']) < 120e3, `without its EXIF the JPG is dated now: ${dates['photo-cropped.jpg']}`);
+  await page.check('#crp-exif');
+  // Turning the picture while the ZIP is made would mix two crops in it: it stops instead.
+  // The second picture's decoding waits until the turn is made.
+  await page.evaluate(() => {
+    const real = TTImage.decode;
+    window.zipGate = new Promise(r => { window.openZipGate = r; });
+    TTImage.decode = async function () { await window.zipGate; TTImage.decode = real; return real.apply(this, arguments); };
+  });
+  let zipSaves = 0;
+  const onZipSave = () => zipSaves++;
+  page.on('download', onZipSave);
+  await page.click('#crp-zip');
+  await page.waitForFunction(() => document.querySelector('#crp-status').textContent === 'Cropping image 2 of 3…');
+  await page.click('#crp-rotate');
+  await page.evaluate(() => window.openZipGate());
+  await page.waitForFunction(() => document.querySelector('#crp-error').textContent || /^Saved/.test(document.querySelector('#crp-status').textContent));
+  page.off('download', onZipSave);
+  assert.equal(await page.textContent('#crp-error'), 'The settings changed while the ZIP file was being made, so it was not saved. Choose Download all (ZIP) again.');
+  assert.equal(zipSaves, 0, 'no ZIP is saved');
+  for (let i = 0; i < 3; i++) await page.click('#crp-rotate');
+  // A ratio and a turn apply to every picture: each gets the largest box of that ratio that the
+  // relative size allows, centred at the same relative place, turned and mirrored the same way.
+  await page.selectOption('#crp-ratio', '1:1');
+  await page.click('#crp-rotate'); await page.click('#crp-flip-v');
+  await type('#crp-w', '100'); await type('#crp-x', '20'); await type('#crp-y', '150');
+  assert.equal(await fields(), '20,150,100,100');
+  const turnedZip = unzip((await download('#crp-zip')).buf);
+  const ts = decodePng(turnedZip['a'.repeat(119) + '😀-cropped.png'], assert);
+  assert.deepEqual([ts.w, ts.h], [50, 50], 'small.png: half the width, so half the box');
+  // Turned clockwise and mirrored top to bottom, small.png (150 x 100) shows (149 - y, 99 - x) at (x, y);
+  // the box is at 10, 75.
+  checkGrid(ts, null, (i, j) => [74 - j, 89 - i], 'zip: turned, mirrored and square');
+  await page.click('#crp-flip-v');
+  for (let i = 0; i < 3; i++) await page.click('#crp-rotate');
+  await page.selectOption('#crp-ratio', 'free');
+
+  // ---------- Nothing is saved while a new picture is opening ----------
+  // The pictures shown are about to be replaced, so Download, Copy and the ZIP wait for the new one
+  // instead of saving the old crop. Its decoding waits until the three have been clicked.
+  await page.evaluate(() => {
+    const real = TTImage.decode;
+    window.openGate = new Promise(r => { window.releaseOpen = r; });
+    TTImage.decode = async function () { await window.openGate; TTImage.decode = real; return real.apply(this, arguments); };
+  });
+  let early = 0;
+  const onEarly = () => early++;
+  page.on('download', onEarly);
+  await page.setInputFiles('#crp-file', path.join(fixtures, 'small.png'));
+  await page.waitForFunction(() => document.querySelector('#crp-status').textContent === 'Opening small.png…');
+  for (const sel of ['#crp-download', '#crp-copy', '#crp-zip']) {
+    await page.evaluate(() => { document.querySelector('#crp-error').textContent = ''; });
+    await page.click(sel);
+    assert.equal(await page.textContent('#crp-error'), 'Please wait until the new picture has opened, then try again.', `${sel} while a picture is opening`);
+  }
+  assert.equal(await page.textContent('#crp-status'), 'Opening small.png…');
+  await page.evaluate(() => window.releaseOpen());
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'small.png');
+  page.off('download', onEarly);
+  assert.equal(early, 0, 'nothing was saved while the picture was opening');
+  assert.equal(await page.textContent('#crp-error'), '', 'the message goes once the picture is open');
+  assert.equal(await page.textContent('#crp-download'), 'Download PNG');
+  assert.equal((await download()).name, 'small-cropped.png', 'then the new picture is saved');
+  // A camera RAW file among the pictures opened is left out of the batch, and the page says so.
+  const payload = n => ({ name: n, mimeType: 'image/png', buffer: fs.readFileSync(path.join(fixtures, n)) });
+  await page.setInputFiles('#crp-file', [payload('grid.png'), { name: 'IMG_0002.NEF', mimeType: 'image/x-nikon-nef', buffer: Buffer.from('MM\0*fake raw') }, payload('small.png')]);
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent.startsWith('grid.png'));
+  assert.equal(await page.textContent('#crp-drop-title'), 'grid.png and 1 more');
+  assert.equal(await page.textContent('#crp-error'), 'Skipped IMG_0002.NEF (camera RAW files are not supported).');
+
   // ---------- Files that cannot be cropped ----------
   await page.setInputFiles('#crp-file', { name: 'oops.png', mimeType: 'image/png', buffer: Buffer.from('not an image at all') });
   await page.waitForFunction(() => document.querySelector('#crp-error').textContent.length > 0);
@@ -490,6 +704,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.getAttribute('#crp-file', 'aria-invalid'), 'true');
   assert.equal(await page.getAttribute('#crp-file', 'aria-describedby'), 'crp-error');
 
+  // ---------- A picture pasted with Ctrl+V opens; text pasted into a field stays text ----------
+  const paste = (b64, sel) => page.evaluate(([b64, sel]) => {
+    const dt = new DataTransfer();
+    if (b64) dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], 'image.png', { type: 'image/png' }));
+    else dt.setData('text/plain', '42');
+    const e = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+    document.querySelector(sel).dispatchEvent(e);
+    return e.defaultPrevented;
+  }, [b64, sel]);
+  assert.equal(await paste(null, '#crp-dpi'), false, 'text pasted into the DPI field is left to the field');
+  assert.equal(await paste(fs.readFileSync(path.join(fixtures, 'small.png')).toString('base64'), 'body'), true);
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'image.png');
+  assert.match(await page.textContent('#crp-drop-hint'), /^150 × 100 px PNG\./);
+
   // ---------- Files the decoder warns about ----------
   // A PNG damaged half way (from the image converter's fixtures) and a Display P3 JPG.
   const otherFile = (dir, n, type) => ({ name: n, mimeType: type, buffer: fs.readFileSync(path.join(fixtures, '..', dir, n)) });
@@ -500,11 +728,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.waitForFunction(() => /^p3\.jpg/.test(document.querySelector('#crp-drop-title').textContent));
   assert.match(await page.textContent('#crp-note'), /Colours were converted to sRGB from the picture’s wide-gamut profile\./);
 
-  // ---------- A print size on a portrait photo turns with it ----------
+  // ---------- A print size on a portrait photo turns with it, also when chosen before it was opened ----------
+  const outSize = async () => [await page.inputValue('#crp-ow'), await page.inputValue('#crp-oh'), await page.inputValue('#crp-dpi')];
+  // A wrong custom ratio is left behind when a ready-made size of another ratio hides its field:
+  // it no longer counts, so saving is not refused over a field that cannot be seen.
+  await page.selectOption('#crp-ratio', 'custom');
+  await type('#crp-custom', 'abc');
+  await page.selectOption('#crp-preset', 'print-4x6');
+  assert.equal(await page.isHidden('#crp-custom-field'), true);
+  assert.deepEqual(await errOf('#crp-custom'), { invalid: null, msg: '' }, 'the hidden custom ratio is not marked wrong');
+  assert.deepEqual(await outSize(), ['1800', '1200', '300'], 'the square p3.jpg gets the landscape print');
   await openFile('photo.jpg');
   assert.equal(await page.getAttribute('#crp-file', 'aria-invalid'), null);
-  await page.selectOption('#crp-preset', 'print-4x6');
-  assert.deepEqual([await page.inputValue('#crp-ow'), await page.inputValue('#crp-oh'), await page.inputValue('#crp-dpi')], ['1200', '1800', '300']);
+  assert.equal(await page.inputValue('#crp-preset'), 'print-4x6');
+  assert.deepEqual(await outSize(), ['1200', '1800', '300'], 'the print turns for the portrait photo opened next');
   assert.equal(await fields(), '0,0,80,120', 'the largest 2:3 box');
   assert.equal(await info(), 'Crop 80 × 120 px (2:3) at 0, 0. Saves as a 1200 × 1800 px JPG.');
   d = await download();
@@ -514,6 +751,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // pHYs/JFIF: 300 dpi in the JFIF header (units 1 = dots per inch)
   const jfif = d.buf.indexOf(Buffer.from('JFIF\0'));
   assert.ok(jfif > 0 && d.buf[jfif + 7] === 1 && d.buf.readUInt16BE(jfif + 8) === 300 && d.buf.readUInt16BE(jfif + 10) === 300, '300 dpi recorded');
+  // The camera details kept say 300 dpi too: photo.jpg's EXIF says 72, which some programs read first.
+  const res = jpegInfo(d.buf).exif;
+  assert.deepEqual([res[0x011a], res[0x011b], res[0x0128]], [[300, 1], [300, 1], 2], 'the EXIF resolution follows the DPI');
+  // Instagram's tallest post: 3:4, 1080 x 1440.
+  await page.selectOption('#crp-preset', 'ig-tall');
+  assert.deepEqual([await page.inputValue('#crp-ratio'), await page.inputValue('#crp-custom'), ...(await outSize()).slice(0, 2)], ['custom', '3:4', '1080', '1440']);
+  assert.equal(await fields(), '0,7,80,107', 'the largest 3:4 box');
 
   // ---------- The keyboard alone ----------
   await page.selectOption('#crp-preset', 'none');
@@ -545,6 +789,11 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const sq = (await fields()).split(',').map(Number);
   assert.equal(sq[2], sq[3], `pageshow applies the restored 1:1 ratio: ${sq}`);
   assert.match(await info(), /\(1:1\)/);
+  // A page the back-forward cache kept whole keeps the box the user made: it has the ratio already.
+  await type('#crp-w', '20'); await type('#crp-x', '3'); await type('#crp-y', '4');
+  assert.equal(await fields(), '3,4,20,20');
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  assert.equal(await fields(), '3,4,20,20', 'Back does not make the box as large as it can be');
 
   // ---------- A phone: drag a handle with a finger, pinch to zoom ----------
   const ctx = await page.context().browser().newContext({ ...devices['Pixel 7'] });
@@ -567,14 +816,99 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const pf = (await phone.evaluate(() => ['x', 'y', 'w', 'h'].map(k => document.querySelector('#crp-' + k).value))).map(Number);
   assert.deepEqual(pf.slice(0, 2), [120, 80], 'the opposite corner stays');
   assert.ok(Math.abs(pf[2] - 860) <= 8 && Math.abs(pf[3] - 540) <= 8, `the south-east handle followed the finger: ${pf}`);
+  // Handles are 44 px touch targets: a finger landing 10 px below and right of the corner, outside
+  // the box, still takes the handle instead of drawing a new box.
+  const se = P(pf[0] + pf[2], pf[1] + pf[3]), off = { x: se.x + 10, y: se.y + 10 };
+  await touch('touchStart', [off]);
+  for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: off.x - 40 * i / 6, y: off.y - 40 * i / 6 }]);
+  await touch('touchEnd', []);
+  const pf2 = (await phone.evaluate(() => ['x', 'y', 'w', 'h'].map(k => document.querySelector('#crp-' + k).value))).map(Number);
+  assert.deepEqual(pf2.slice(0, 2), [120, 80], `a finger beside the corner takes the handle: ${pf2}`);
+  assert.ok(pf2[2] < pf[2] - 40 && pf2[3] < pf[3] - 40, `the corner moved with the finger: ${pf2}`);
   const mid = P(600, 400);
   await touch('touchStart', [{ x: mid.x - 20, y: mid.y }, { x: mid.x + 20, y: mid.y }]);
   for (let i = 1; i <= 6; i++) await touch('touchMove', [{ x: mid.x - 20 - 12 * i, y: mid.y }, { x: mid.x + 20 + 12 * i, y: mid.y }]);
   await touch('touchEnd', []);
   assert.doesNotMatch(await phone.textContent('#crp-zoom-val'), /Fit/, 'a pinch zooms in');
   const after = (await phone.evaluate(() => ['x', 'y', 'w', 'h'].map(k => document.querySelector('#crp-' + k).value))).map(Number);
-  assert.deepEqual(after, pf, 'a pinch does not move the box');
+  assert.deepEqual(after, pf2, 'a pinch does not move the box');
   const small = await phone.$$eval('.crp-bar .btn', l => Math.min(...l.map(b => b.getBoundingClientRect().height)));
   assert.ok(small >= 44, `buttons are at least 44 px tall on a touch screen: ${small}`);
+  // No menu cuts off the option it shows, at any phone or tablet width: each menu is at least as
+  // wide as a copy of it holding only that option, at its natural width. With a JPG open, the
+  // format menu says "Original format (JPG)" beside the quality slider.
+  await phone.setInputFiles('#crp-file', path.join(fixtures, 'photo.jpg'));
+  await phone.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'photo.jpg');
+  await phone.selectOption('#crp-size', 'set');
+  const cut = [];
+  for (let w = 320; w <= 760; w += 8) {
+    await phone.setViewportSize({ width: w, height: 800 });
+    cut.push(...await phone.evaluate(w => {
+      const out = [];
+      for (const s of document.querySelectorAll('.tool-card select')) {
+        if (!s.offsetParent) continue;
+        for (const o of s.options) {
+          if (o.disabled) continue;
+          const c = s.cloneNode(false);
+          c.removeAttribute('id');
+          c.appendChild(o.cloneNode(true));
+          c.style.cssText = 'width: auto !important; position: absolute; visibility: hidden';
+          s.parentNode.appendChild(c);
+          const need = c.getBoundingClientRect().width, have = s.getBoundingClientRect().width;
+          c.remove();
+          if (need > have + 0.5) out.push(`${w} px: ${s.id} "${o.textContent}" (${Math.round(have)} of ${Math.round(need)} px)`);
+        }
+      }
+      return out;
+    }, w));
+  }
+  assert.deepEqual(cut, [], 'menus that cut off their text');
   await ctx.close();
+
+  // ---------- A picture larger than the browser's canvas (here 1.2 megapixels, as an older iPhone has 16.7) ----------
+  // It is cropped from the largest copy that fits, and the summary gives the size actually saved.
+  const lctx = await page.context().browser().newContext({ acceptDownloads: true });
+  await lctx.addInitScript(() => {
+    const real = HTMLCanvasElement.prototype.getContext;
+    // Like Safari: a 2D canvas over the limit draws nothing and reads back transparent. Firefox
+    // also limits each side (to 32,767 pixels), here to 4,000.
+    HTMLCanvasElement.prototype.getContext = function (type, options) {
+      if (type !== '2d' || (this.width * this.height <= 1.2e6 && this.width <= 4000 && this.height <= 4000)) return real.call(this, type, options);
+      return real.call(Object.assign(document.createElement('canvas'), { width: 1, height: 1 }), type, options);
+    };
+  });
+  const lp = await lctx.newPage();
+  await lp.goto(url);
+  await lp.setInputFiles('#crp-file', path.join(fixtures, 'big.png'));
+  await lp.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'big.png', null, { timeout: 60000 });
+  assert.equal(await lp.textContent('#crp-note'), 'This picture (1,600 × 1,000 px) is larger than this browser can edit at full size, so it is cropped from a 1,264 × 790 px copy.');
+  assert.equal(await lp.textContent('#crp-info'), 'Crop 1280 × 800 px (8:5) at 160, 100. Saves as a 1011 × 632 px PNG.', 'the size of the copy’s crop, not of the full picture');
+  assert.equal(await lp.textContent('#crp-out-hint'), 'Saved from a 1264 × 790 px copy, the largest this browser can hold.', 'nothing is enlarged');
+  const [bdl] = await Promise.all([lp.waitForEvent('download'), lp.click('#crp-download')]);
+  const bp = decodePng(fs.readFileSync(await bdl.path()), assert);
+  assert.deepEqual([bp.w, bp.h], [1011, 632]);
+  // The quadrants of big.png meet at 800, 500: here at (800 - 160) * 0.79 = 506 and (500 - 100) * 0.79 = 316.
+  assert.deepEqual([bp.px(250, 150), bp.px(760, 150), bp.px(250, 480), bp.px(760, 480)], [[230, 30, 30, 255], [30, 200, 40, 255], [30, 60, 220, 255], [240, 220, 20, 255]]);
+  assert.match(await lp.textContent('#crp-status'), /^Saved big-cropped\.png: 1011 × 632 px, [\d.]+ KB\. It was made from a smaller copy/);
+  // Set to the full crop's size, the copy's pixels are enlarged, and the page says whose pixels they are.
+  await lp.selectOption('#crp-size', 'set');
+  await lp.$eval('#crp-ow', el => { el.value = '1280'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await lp.waitForFunction(() => /enlarged/.test(document.querySelector('#crp-out-hint').textContent));
+  assert.equal(await lp.textContent('#crp-out-hint'), 'The crop covers 1011 × 632 px of the smaller copy, so it is enlarged and may look soft. Saved from a 1264 × 790 px copy, the largest this browser can hold.');
+  await lp.selectOption('#crp-size', 'crop');
+  // A canvas too wide for the browser says nothing about pictures of a smaller area: after a
+  // 6,000 px wide drawing cannot be saved at full size, grid.png still is.
+  await lp.setInputFiles('#crp-file', { name: 'wide.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="6000" height="10"><rect width="6000" height="10" fill="#00f"/></svg>') });
+  await lp.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'wide.svg');
+  await lp.selectOption('#crp-format', 'png');
+  await lp.click('#crp-download');
+  await lp.waitForFunction(() => document.querySelector('#crp-error').textContent);
+  assert.match(await lp.textContent('#crp-error'), /^This browser cannot make a picture of 4,800 × 8 px\./);
+  await lp.setInputFiles('#crp-file', path.join(fixtures, 'grid.png'));
+  await lp.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'grid.png');
+  const [gdl] = await Promise.all([lp.waitForEvent('download'), lp.click('#crp-download')]);
+  const gp = decodePng(fs.readFileSync(await gdl.path()), assert);
+  assert.deepEqual([gp.w, gp.h], [240, 160], 'grid.png is saved at full size, not from a smaller copy');
+  checkGrid(gp, null, (i, j) => [30 + i, 20 + j], 'grid.png after a canvas too wide');
+  await lctx.close();
 };

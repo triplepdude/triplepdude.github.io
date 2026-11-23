@@ -11,7 +11,8 @@ const zlib = require('zlib');
 // pdf-lib), checking page order, text, /Rotate, links and encryption. Sizes are in points: A4 595 x 842,
 // Letter 612 x 792. ten.pdf and shared.pdf are copies of the Split PDF tool's fixtures (made by
 // tests/fixtures/split-pdf/make_fixtures.py, described where they are used); fonts.pdf is made by
-// make_fonts.py here.
+// make_fonts.py here, and pdfdoc-password.pdf (RC4 128-bit, open password "café€" in PDFDocEncoding)
+// and utf8-password.pdf (AES-256, open password "パスワード１２３" in UTF-8) by make_passwords.py.
 
 // The text of a PDF file with every Flate stream inflated (object streams too), to search it.
 function allText(buf) {
@@ -406,4 +407,31 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   });
   assert.ok(thumb.japanese.dark > 0.05, `the Japanese line is drawn (${thumb.japanese.dark.toFixed(3)} of its box is dark)`);
   assert.ok(thumb.cyan.rgb[0] < 40 && thumb.cyan.rgb[1] > 120 && thumb.cyan.rgb[2] > 200, `the CMYK box is cyan (${thumb.cyan.rgb})`);
+
+  // ---- Open passwords with characters outside ASCII (make_passwords.py) ----
+  // pdfdoc-password.pdf (RC4 128-bit) keeps "café€" in PDFDocEncoding, where € is 0xA0. PDF.js takes
+  // the low byte of each character (0xAC for €), so the page asks it again with the bytes the
+  // unlocker tries; before, the password was "wrong". utf8-password.pdf (AES-256) keeps
+  // "パスワード１２３" in UTF-8 as typed, with full-width digits: PDF.js opened it, but the unlocker
+  // tried only the NFKC form (ASCII digits), and the merge then asked for the password again.
+  await page.click('#mpdf-clear');
+  await page.setInputFiles('#mpdf-file', [fx('pdfdoc-password.pdf'), fx('utf8-password.pdf')]);
+  await page.waitForFunction(() => document.querySelectorAll('.mpdf-unlock input').length === 2);
+  for (const [name, password] of [['pdfdoc-password.pdf', 'café€'], ['utf8-password.pdf', 'パスワード１２３']]) {
+    await page.fill('.mpdf-unlock input', password);
+    await page.press('.mpdf-unlock input', 'Enter');
+    await page.waitForFunction(n => document.getElementById('mpdf-status').textContent === 'Unlocked ' + n + ': 2 pages added.' ||
+      /wrong password/.test(document.getElementById('mpdf-files').textContent), name);
+    assert.doesNotMatch(await page.textContent('#mpdf-files'), /wrong password/, name + ': the password opens it');
+  }
+  assert.deepEqual(await labels(), ['pdfdoc-password 1', 'pdfdoc-password 2', 'utf8-password 1', 'utf8-password 2']);
+  // The merge either downloads the file or says why it could not.
+  const download = page.waitForEvent('download').catch(() => null);
+  await page.click('#mpdf-merge');
+  const failed = page.waitForFunction(() => document.getElementById('mpdf-error').textContent !== '').catch(() => null);
+  const dl = await Promise.race([download, failed.then(() => null)]);
+  assert.equal(await page.textContent('#mpdf-error'), '', 'merged with the same passwords');
+  pdf = await inspect(fs.readFileSync(await dl.path()));
+  assert.equal(pdf.encrypted, false);
+  assert.deepEqual(pdf.pages.map(p => p.text), ['PDFDoc 1 PDFDOC-MARK-01', 'PDFDoc 2 PDFDOC-MARK-02', 'Unicode 1 UNICODE-MARK-01', 'Unicode 2 UNICODE-MARK-02']);
 };

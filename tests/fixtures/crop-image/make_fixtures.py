@@ -5,9 +5,14 @@ grid.png    300 x 200: every pixel its own colour, R = x % 256, G = y,
             checked pixel by pixel. The 20 x 20 corner at 0,0 is transparent.
 small.png   150 x 100, the same pattern, for the batch (a second size).
 photo.jpg   stored 120 x 80 at JPEG quality 77 with EXIF Orientation 6 (shown
-            turned 90 degrees clockwise, 80 x 120), camera details and a GPS
-            block. Stored quadrants: red, green / blue, yellow.
+            turned 90 degrees clockwise, 80 x 120), camera details, a 72 dpi
+            resolution as cameras write it, and a GPS block. Stored quadrants:
+            red, green / blue, yellow.
+big.png     1600 x 1000 in four flat quadrants (red, green / blue, yellow), for
+            a browser whose canvas cannot hold it (the test limits it).
 anim.gif    two frames, 40 x 30: red, then blue.
+icon.ico    one 30 x 23 PNG entry (a 40 x 30 red picture fitted into 30 x 30),
+            for an icon whose crop is not square.
 logo.svg    200 x 100 px, viewBox 0 0 100 50: red left half, blue right half,
             a green disc of radius 10 at (25, 25).
 expected.json  the luminance quantisation table libjpeg writes at quality 77
@@ -47,6 +52,9 @@ exif[0x0112] = 6            # Orientation: turn 90 degrees clockwise to show
 exif[0x010F] = 'TestCam'    # Make
 exif[0x0110] = 'Model 1'    # Model
 exif[0x0132] = '2026:11:01 10:20:30'
+exif[0x011A] = 72.0         # XResolution
+exif[0x011B] = 72.0         # YResolution
+exif[0x0128] = 2            # ResolutionUnit: inches
 gps = {1: 'N', 2: (51.0, 30.0, 0.0), 3: 'W', 4: (0.0, 7.0, 0.0)}
 exif[0x8825] = gps
 ph.save(out('photo.jpg'), quality=77, exif=exif.tobytes())
@@ -73,6 +81,13 @@ quads = {
     'top_left': list(up.getpixel((20, 30))), 'top_right': list(up.getpixel((60, 30))),
     'bottom_left': list(up.getpixel((20, 90))), 'bottom_right': list(up.getpixel((60, 90))),
 }
+
+big = Image.new('RGB', (1600, 1000))
+for (qx, qy), c in cols.items():
+    big.paste(c, (qx * 800, qy * 500, qx * 800 + 800, qy * 500 + 500))
+big.save(out('big.png'))
+
+Image.new('RGBA', (40, 30), (200, 30, 30, 255)).save(out('icon.ico'), sizes=[(30, 30)])
 
 f1, f2 = Image.new('RGB', (40, 30), (255, 0, 0)), Image.new('RGB', (40, 30), (0, 0, 255))
 f1.save(out('anim.gif'), save_all=True, append_images=[f2], duration=200, loop=0)

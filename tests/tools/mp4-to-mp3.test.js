@@ -44,6 +44,22 @@ module.exports = async ({ page, open, assert, fixtures }) => {
         return Promise.resolve({ release() { window.__wake.released++; return Promise.resolve(); }, addEventListener() {} });
       };
     }
+    // Safari's audio session (iOS mutes web audio in silent mode unless it is 'playback').
+    window.__session = [];
+    let sessionType = 'auto';
+    Object.defineProperty(navigator, 'audioSession', { configurable: true, value: {
+      get type() { return sessionType; }, set type(v) { sessionType = v; window.__session.push(v); }
+    } });
+    // What screen readers are told: every change to a live region.
+    window.__live = [];
+    document.addEventListener('DOMContentLoaded', () => new MutationObserver(ms => {
+      const seen = new Set();
+      for (const m of ms) {
+        const n = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+        const live = n && n.closest('[role=alert],[role=status],[aria-live]');
+        if (live && live.textContent && !seen.has(live)) { seen.add(live); window.__live.push(live.textContent); }
+      }
+    }).observe(document.body, { subtree: true, childList: true, characterData: true }));
   };
   await page.addInitScript(instrument);
   // Listening from the start lets Playwright intercept the file picker before
@@ -224,6 +240,36 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     return { ftyp: boxes.ftyp, stsd: boxes.stsd, samples: out };
   }
   const sha = b => crypto.createHash('sha256').update(b).digest('hex');
+  // The picture inside an ID3 APIC frame: after the encoding, MIME type, picture type and description.
+  const apicImage = body => {
+    let q = body.indexOf(0, 1) + 2;
+    if (body[0] === 1 || body[0] === 2) { while (body[q] || body[q + 1]) q += 2; q += 2; } else q = body.indexOf(0, q) + 1;
+    return body.subarray(q);
+  };
+  const mmss = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
+  // Pixels of the waveform drawn in the colour that marks distortion.
+  const redPixels = (p = page) => p.evaluate(() => {
+    const cv = document.getElementById('m2m-canvas'), probe = document.createElement('canvas').getContext('2d');
+    probe.fillStyle = getComputedStyle(document.getElementById('m2m')).getPropertyValue('--danger').trim();
+    probe.fillRect(0, 0, 1, 1);
+    const [r, g, b] = probe.getImageData(0, 0, 1, 1).data, d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] === r && d[i + 1] === g && d[i + 2] === b) n++;
+    return n;
+  });
+  // A RIFF WAVE file of 16-bit PCM made from one function per channel.
+  const dropWav = (name, sr, seconds, chans, p = page) => p.evaluate(([name, sr, seconds, chans]) => {
+    const fns = chans.map(src => new Function('t', 'return ' + src));
+    const n = Math.round(sr * seconds), ch = fns.length, buf = new ArrayBuffer(44 + n * ch * 2), v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n * ch * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, ch, true); v.setUint32(24, sr, true); v.setUint32(28, sr * ch * 2, true); v.setUint16(32, ch * 2, true); v.setUint16(34, 16, true);
+    w(36, 'data'); v.setUint32(40, n * ch * 2, true);
+    for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) v.setInt16(44 + (i * ch + c) * 2, Math.round(fns[c](i / sr) * 32767), true);
+    const dt = new DataTransfer();
+    dt.items.add(new File([buf], name, { type: 'audio/wav' }));
+    document.getElementById('m2m-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [name, sr, seconds, chans]);
 
   // ---------- Initial state: nothing loaded until a file is added ----------
   assert.equal(await text('#m2m-convert'), 'Convert to MP3');
@@ -237,6 +283,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // ---------- Files that cannot be converted, each with its reason ----------
   await page.setInputFiles('#m2m-file', ['protected.mp4', 'silent-video.mp4', 'not-media.mp4', 'dolby.mkv'].map(F));
   await waitRead();
+  await page.waitForFunction(() => document.getElementById('m2m-status').textContent !== '');
+  assert.equal(await text('#m2m-status'), 'Added 4 files, 4 of them cannot be converted to MP3: see the message under each.');
   assert.equal(await page.evaluate(() => typeof window.Mediabunny), 'object');
   assert.equal((await card('protected.mp4')).msg, 'This file is protected with DRM (encrypted), so its sound cannot be read. Films and music bought or rented from a store are usually protected.');
   assert.equal((await card('silent-video.mp4')).msg, 'This video has no sound track, so there is no audio to save.');
@@ -249,8 +297,12 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await text('#m2m-wave-msg'), 'No waveform: this browser cannot decode AC-3 (Dolby Digital) audio. You can still type the start and end.');
   assert.equal(await page.isDisabled('#m2m-play'), true);
   assert.equal(await page.isDisabled('#m2m-convert'), true, 'nothing here can be converted to MP3');
+  await page.evaluate(() => { window.__live = []; });
   await page.check('#m2m-f-copy');
   assert.equal((await card('dolby.mkv')).msg, 'Its audio is AC-3 (Dolby Digital), not AAC, so it cannot be copied into an .m4a file. Choose MP3 or WAV for this file.');
+  // Screen readers hear one sentence that says what the change means, not
+  // every file's message without its file name.
+  assert.deepEqual(await page.evaluate(() => window.__live), ['One file cannot be saved as original audio: see the message under it.']);
   assert.equal(await page.isDisabled('#m2m-convert'), true);
   await page.check('#m2m-f-mp3');
   assert.equal(await page.locator('.m2m-file').count(), 4);
@@ -258,6 +310,43 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.locator('.m2m-file').count(), 0);
   assert.equal(await page.isVisible('#m2m-files-sec'), false);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'm2m-open');
+
+  // ---------- Incomplete and empty files say so ----------
+  // cut-short.mp4 is clip.mp4 cut off after 50,000 bytes: its index still lists
+  // 6 s of sound, but the data holds only what ffmpeg decodes from it.
+  const shortSec = exp['cut-short.mp4'].decoded_samples / 48000;
+  await page.setInputFiles('#m2m-file', F('cut-short.mp4'));
+  await waitRead();
+  c = await card('cut-short.mp4');
+  assert.equal(c.info.split(' · ')[0], mmss(shortSec), 'the length is what the file holds, not what its index lists');
+  const SHORT = `This file is incomplete, perhaps a copy or download that did not finish: it should hold 0:06.000 of sound, but its data stops at ${mmss(shortSec)}. That part can still be converted.`;
+  assert.equal(c.msg, SHORT);
+  assert.equal(await text('#m2m-status'), `Added cut-short.mp4: ${mmss(shortSec)}, AAC stereo. ${SHORT}`);
+  assert.equal(await page.inputValue('#m2m-end'), mmss(shortSec));
+  await page.check('#m2m-f-wav');
+  await convert();
+  const shortWav = parseWav((await download(() => row('cut-short.mp4').locator('.m2m-dl').click())).bytes);
+  assert.equal(shortWav.data.length / 2, exp['cut-short.mp4'].decoded_samples, 'the WAV holds every sample there is, and no more');
+  await page.check('#m2m-f-mp3');
+  // The first half of clip.mp4 has no index at all (it is at the end), a WAV
+  // header with no samples has an empty sound track, and a copy of
+  // cut-short.mp4 can be converted, with a warning.
+  await page.evaluate(([b64, b64short]) => {
+    const clip = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+    const head = new DataView(new ArrayBuffer(44)), w = (o, s) => { for (let i = 0; i < s.length; i++) head.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); head.setUint32(4, 36, true); w(8, 'WAVEfmt '); head.setUint32(16, 16, true); head.setUint16(20, 1, true); head.setUint16(22, 2, true);
+    head.setUint32(24, 44100, true); head.setUint32(28, 176400, true); head.setUint16(32, 4, true); head.setUint16(34, 16, true); w(36, 'data');
+    const dt = new DataTransfer();
+    dt.items.add(new File([clip.subarray(0, clip.length >> 1)], 'half.mp4', { type: 'video/mp4' }));
+    dt.items.add(new File([head.buffer], 'empty.wav', { type: 'audio/wav' }));
+    dt.items.add(new File([Uint8Array.from(atob(b64short), ch => ch.charCodeAt(0))], 'cut-short copy.mp4', { type: 'video/mp4' }));
+    document.getElementById('m2m-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [fs.readFileSync(F('clip.mp4')).toString('base64'), fs.readFileSync(F('cut-short.mp4')).toString('base64')]);
+  await waitRead();
+  assert.equal((await card('half.mp4')).msg, 'No sound or video was found in this file. It may be incomplete, such as a copy or download that did not finish, or damaged.');
+  assert.equal((await card('empty.wav')).msg, 'Its sound track is empty, so there is no audio to save. The file may be incomplete or damaged.');
+  assert.equal(await text('#m2m-status'), 'Added 3 files, 2 of them cannot be converted to MP3 and 1 more has a warning: see the message under each.');
+  await page.click('#m2m-clear');
 
   // ---------- Keyboard: Choose files opens the file picker ----------
   await page.focus('#m2m-open');
@@ -440,6 +529,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await text('#m2m-play'), 'Stop');
   await page.waitForFunction(() => window.__starts.length > 0, null, { timeout: 5000 });
   await page.waitForFunction(() => document.getElementById('m2m-play').textContent === 'Play selection', null, { timeout: 8000 });
+  assert.deepEqual(await page.evaluate(() => window.__session), ['playback', 'auto'],
+    'playing asks for media playback, which iOS lets through in silent mode, then gives the sound back');
   const starts = await page.evaluate(() => window.__starts);
   const played = starts.reduce((s, x) => s + x.dur, 0);
   near(played, 1, 0.03, 'seconds of sound scheduled for the 1 s selection');
@@ -454,6 +545,28 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   c = await card('clip.mp4');
   assert.equal(c.download, false, 'the old MP3 is dropped when the volume changes');
   assert.equal(c.state, 'Ready, from 0:02.500 to 0:03.500');
+  // Play pressed while the audio context is still waking up (a phone can take
+  // a while, for example after a call), then the channels are changed: the
+  // button and the audio session go back at once, and stay back.
+  await page.evaluate(() => {
+    const state = Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'state'), resume = AudioContext.prototype.resume;
+    let release;
+    const gate = new Promise(r => { release = r; });
+    Object.defineProperty(BaseAudioContext.prototype, 'state', { configurable: true, get() { return 'suspended'; } });
+    AudioContext.prototype.resume = function () { return gate.then(() => resume.call(this)).then(() => { window.__resumed = true; }); };
+    window.__wakeContext = () => { Object.defineProperty(BaseAudioContext.prototype, 'state', state); AudioContext.prototype.resume = resume; release(); };
+    window.__session = []; window.__starts = []; window.__resumed = false;
+  });
+  await page.click('#m2m-play');
+  assert.equal(await text('#m2m-play'), 'Stop', 'the button offers Stop while the sound is starting');
+  await page.selectOption('#m2m-channels', 'mono');
+  assert.equal(await text('#m2m-play'), 'Play selection');
+  await page.evaluate(() => window.__wakeContext());
+  await page.waitForFunction(() => window.__resumed);
+  assert.equal(await text('#m2m-play'), 'Play selection', 'the button is not left on Stop once the context wakes up');
+  assert.deepEqual(await page.evaluate(() => window.__session), ['playback', 'auto'], 'the sound is given back to other apps');
+  assert.equal(await page.evaluate(() => window.__starts.length), 0, 'nothing plays');
+  await page.selectOption('#m2m-channels', 'keep');
 
   // ---------- Original audio: AAC packets copied byte for byte ----------
   await page.check('#m2m-f-copy');
@@ -712,8 +825,87 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await text('#m2m-estimate'), 'Estimated size: about 2.22 GB as long.wav.');
   await convert();
   assert.equal((await card('long.wav')).msg, 'As WAV this would be about 2.22 GB, more than the 2.00 GB this device can build in memory. Choose MP3, mono or a shorter selection.');
-  assert.equal(await text('#m2m-status'), 'Nothing was converted: see the message under each file.');
+  assert.equal(await text('#m2m-status'), 'long.wav: As WAV this would be about 2.22 GB, more than the 2.00 GB this device can build in memory. Choose MP3, mono or a shorter selection.');
   await page.click('[aria-label="Remove long.wav"]');
+
+  // ---------- Cover art in every format; surround and other channel layouts ----------
+  await page.setInputFiles('#m2m-file', F('cover.m4a'));
+  await waitRead();
+  await waitWave();
+  assert.equal(await page.isChecked('#m2m-cover'), true, 'the cover is kept by default');
+  await convert();
+  const coverWav = parseWav((await download(() => row('cover.m4a').locator('.m2m-dl').click())).bytes);
+  assert.equal(coverWav.data.length, 44100, 'the WAV ends with the 1 s of sound the file holds, not with the AAC encoder\'s padding after it');
+  assert.ok(coverWav.id3 && coverWav.id3.APIC, 'a WAV keeps the cover too (in an ID3 chunk, as RIFF INFO holds no pictures)');
+  assert.equal(sha(apicImage(coverWav.id3.APIC)), exp['cover.m4a'].jpeg_sha256, 'the cover picture, byte for byte');
+  assert.equal(coverWav.id3.TIT2, 'Cover test');
+  await page.check('#m2m-f-mp3');
+  await convert();
+  m = parseMp3((await download(() => row('cover.m4a').locator('.m2m-dl').click())).bytes);
+  assert.equal(sha(apicImage(m.tags.APIC)), exp['cover.m4a'].jpeg_sha256, 'the MP3 keeps the cover');
+  await page.uncheck('#m2m-cover');
+  await convert();
+  m = parseMp3((await download(() => row('cover.m4a').locator('.m2m-dl').click())).bytes);
+  assert.equal(m.tags.APIC, undefined, 'unticked, the cover is left out');
+  await page.check('#m2m-f-wav');
+  await page.click('[aria-label="Remove cover.m4a"]');
+  // Only mono, stereo, quad and 5.1 are mixed down; of other layouts two channels are kept.
+  await dropWav('centre.wav', 48000, 1, ['0', '0', '0.3 * Math.sin(2 * Math.PI * 440 * t)']);
+  await waitRead();
+  await waitWave();
+  c = await card('centre.wav');
+  assert.equal(c.info, '0:01.000 · PCM · 48 kHz · 3 channels');
+  assert.equal(c.msg, 'Its sound has 3 channels, and MP3 and WAV keep only the first two (usually front left and right; with Mono only the first), so sound that is only in the others, such as speech in a centre channel, is lost.');
+  assert.equal(await text('#m2m-peak'), 'The selection is silent.', 'the readout is of the two channels that are kept');
+  // 5.1 with the same tone at 0.5 in left, centre and left surround: mixed to
+  // stereo the left is L + 0.707 (C + SL), 1.207 times as loud.
+  const tone = '0.5 * Math.sin(2 * Math.PI * 440 * t)';
+  await dropWav('surround.wav', 48000, 1, [tone, '0', tone, '0', tone, '0']);
+  await waitRead();
+  await row('surround.wav').locator('.m2m-edit').click();
+  await waitWave();
+  assert.equal((await card('surround.wav')).msg, '');
+  assert.equal(await text('#m2m-peak'), 'At this volume the loudest parts go above full scale and will distort. 80% is the most without distortion.');
+  await page.focus('#m2m-vol');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowLeft');
+  await convert();
+  const mixed = parseWav((await download(() => row('surround.wav').locator('.m2m-dl').click())).bytes);
+  const loudest = mixed.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0);
+  assert.equal(mixed.channels, 2);
+  assert.ok(loudest > 0.95 * 32767 && loudest < 32767, `at 80% the stereo mix peaks just below full scale: ${loudest}`);
+  // The tone in left, right and centre alike: the stereo mix (L + 0.707 C)
+  // peaks at 0.854, the mono mix (0.707 (L + R) + C) at 1.207, so the readout
+  // follows the Channels setting.
+  await dropWav('front.wav', 48000, 1, [tone, tone, tone, '0', '0', '0']);
+  await waitRead();
+  await row('front.wav').locator('.m2m-edit').click();
+  await waitWave();
+  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −1.4 dB of full scale. Up to 115% stays clear of distortion.', 'the stereo result does not distort');
+  assert.equal(await redPixels(), 0, 'nothing on the waveform is marked as distorting');
+  await convert();
+  const front = parseWav((await download(() => row('front.wav').locator('.m2m-dl').click())).bytes);
+  near(front.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0) / 32767, 0.854, 0.01, 'peak of the stereo mix');
+  await page.selectOption('#m2m-channels', 'mono');
+  assert.equal(await text('#m2m-peak'), 'At this volume the loudest parts go above full scale and will distort. 80% is the most without distortion.', 'the mono mix does');
+  assert.ok(await redPixels() > 1000, 'and the waveform marks it');
+  await page.selectOption('#m2m-channels', 'keep');
+  // A quiet file: the readout stops at the slider's 400%; at 0% it says silent.
+  await dropWav('quiet.wav', 48000, 1, ['0.1 * Math.sin(2 * Math.PI * 440 * t)', '0.1 * Math.sin(2 * Math.PI * 440 * t)']);
+  await waitRead();
+  await row('quiet.wav').locator('.m2m-edit').click();
+  await waitWave();
+  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −20.0 dB of full scale. Up to 400% stays clear of distortion.');
+  await page.focus('#m2m-vol');
+  await page.keyboard.press('Home');
+  assert.equal(await text('#m2m-peak'), 'At 0% the result is silent.');
+  await page.click('#m2m-clear');
+  // MP3 at 192 kbps needs MPEG-1, so sound at 22.05 kHz is made at 44.1 kHz.
+  await dropWav('low-rate.wav', 22050, 1, ['0.4 * Math.sin(2 * Math.PI * 440 * t)']);
+  await waitRead();
+  await page.check('#m2m-f-mp3');
+  await convert();
+  checkMp3((await download(() => row('low-rate.wav').locator('.m2m-dl').click())).bytes, { kbps: 192, sr: 44100, mono: true, seconds: 1 }, 'low-rate.mp3');
+  await page.click('[aria-label="Remove low-rate.wav"]');
 
   // ---------- Fields the browser restores on Back are read again ----------
   await page.evaluate(() => { document.getElementById('m2m-f-mp3').checked = true; document.getElementById('m2m-bitrate').value = '320'; window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
@@ -737,11 +929,31 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const old = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
   const op = await old.newPage();
   watch(op);
-  await op.addInitScript(() => { delete window.AudioDecoder; delete window.AudioEncoder; });
+  await op.addInitScript(instrument);
+  await op.addInitScript(() => {
+    delete window.AudioDecoder;
+    delete window.AudioEncoder;
+    // Holds every whole-track decode until the test lets them go.
+    let release;
+    const gate = new Promise(r => { release = r; });
+    window.__releaseDecode = release;
+    const decode = BaseAudioContext.prototype.decodeAudioData;
+    BaseAudioContext.prototype.decodeAudioData = function (...args) { return gate.then(() => decode.apply(this, args)); };
+  });
   await op.goto(page.url());
   await op.setInputFiles('#m2m-file', [F('clip.mp4'), F('long-claim.m4a')]);
   await waitRead(op);
+  // Stop pressed while the sound is still being decoded puts the button back.
+  await op.click('#m2m-play');
+  assert.equal(await op.textContent('#m2m-play'), 'Stop');
+  await op.click('#m2m-play');
+  assert.equal(await op.textContent('#m2m-play'), 'Play selection', 'Stop works before the sound has been read');
+  await op.evaluate(() => window.__releaseDecode());
   await waitWave(op);
+  await op.click('#m2m-play');
+  await op.waitForFunction(() => window.__starts.length > 0, null, { timeout: 5000 });
+  await op.click('#m2m-play');
+  assert.equal(await op.textContent('#m2m-play'), 'Play selection');
   assert.equal(await op.textContent('#m2m-peak'), `Loudest point at this volume: −${Math.abs(peakAll).toFixed(1)} dB of full scale. Up to ${Math.floor(100 / 10 ** (peakAll / 20) / 5) * 5}% stays clear of distortion.`);
   await typeInto('#m2m-start', '4.5', op);
   await typeInto('#m2m-end', '5.5', op);
@@ -794,8 +1006,42 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await waitIdle(pp);
   const phoneMp3 = await download(() => row('sample.wav', pp).locator('.m2m-dl').tap(), pp);
   checkMp3(phoneMp3.bytes, { kbps: 192, sr: 44100, mono: false, seconds: 2.5 }, 'sample.mp3 on a phone');
+  // A finger that scrolls the page across the waveform moves no handle; a tap
+  // moves the nearer one, and a sideways drag on the waveform moves it along.
+  const handlesNow = () => pp.evaluate(() => ['m2m-h-start', 'm2m-h-end'].map(id => document.getElementById(id).getAttribute('aria-valuenow')));
+  const held = await handlesNow();
+  await pp.locator('#m2m-trackbox').scrollIntoViewIfNeeded();
+  await settle(pp);
+  let tb = await pp.locator('#m2m-trackbox').boundingBox();
+  const scrolledFrom = await pp.evaluate(() => scrollY);
+  const sx = tb.x + tb.width * 0.3, sy = tb.y + tb.height * 0.9;
+  await touch('touchStart', sx, sy);
+  for (let i = 1; i <= 8; i++) {
+    await touch('touchMove', sx + 1, sy - i * 20);
+    await pp.waitForTimeout(40);
+  }
+  await pp.waitForTimeout(300);
+  await touch('touchEnd');
+  await settle(pp);
+  assert.ok(await pp.evaluate(y => scrollY > y, scrolledFrom), 'the swipe scrolled the page');
+  assert.deepEqual(await handlesNow(), held, 'a finger scrolling the page over the waveform moves no handle');
+  await pp.locator('#m2m-trackbox').scrollIntoViewIfNeeded();
+  await settle(pp);
+  tb = await pp.locator('#m2m-trackbox').boundingBox();
+  await pp.touchscreen.tap(tb.x + tb.width * 0.875, tb.y + tb.height * 0.8);
+  near(+(await pp.getAttribute('#m2m-h-end', 'aria-valuenow')), 7, 0.05, 'a tap at 7 s moves the end there');
+  await touch('touchStart', tb.x + tb.width * 0.0625, tb.y + tb.height * 0.8);
+  for (let i = 1; i <= 6; i++) {
+    await touch('touchMove', tb.x + tb.width * (0.0625 + 0.0625 * i / 6), tb.y + tb.height * 0.8);
+    await pp.waitForTimeout(40);
+  }
+  await pp.waitForTimeout(300);
+  await touch('touchEnd');
+  near(+(await pp.getAttribute('#m2m-h-start', 'aria-valuenow')), 1, 0.05, 'a sideways drag from 0.5 s takes the start to 1 s');
   const overflow = await pp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(overflow <= 1, `no sideways scroll on a phone with a result (${overflow}px)`);
+  await pp.tap('#m2m-f-wav');
+  assert.match(await pp.textContent('#m2m-format-hint'), / Limit on this device: 300\.0 MB per file\.$/, 'a phone builds smaller WAV files');
   await phone.close();
 
   assert.deepEqual(problems, []);

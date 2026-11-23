@@ -3,7 +3,7 @@
 
   python3 make_fixtures.py            (needs Pillow, ffmpeg and ffprobe)
 
-Every frame of frames.webm, screen.webm and rotated.mp4 carries its own number
+Every frame of frames.webm, screen.webm, rotated.mp4 and damaged.mp4 carries its own number
 as 7 black or white blocks (bit 0 on the left), so a test can read which video
 frame each GIF frame shows. The expected frame for a GIF frame is worked out
 here from the frame timestamps that ffprobe reports, not from the page's code:
@@ -92,6 +92,28 @@ def fade_clip(path, n, fps):
         encode(d, fps, path, 'vp9', 30)
 
 
+def damaged_clip(path):
+    """The coded clip as H.264 (one key frame, B-frames), cut off halfway through its 46th packet,
+    as an interrupted download or copy leaves a file: the header still gives 3 seconds, but the
+    picture data ends after about 1.4 s. Chromium reports a decoding error past that point."""
+    with tempfile.TemporaryDirectory() as d:
+        full = os.path.join(d, 'full.mp4')
+        coded_clip(full, 90, 30, codec='h264', gop=250)
+        rows = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=size,pos',
+                               '-of', 'csv=p=0', full], check=True, capture_output=True, text=True).stdout.split()
+        size, pos = (int(x) for x in rows[45].split(','))
+        with open(full, 'rb') as f:
+            data = f.read()
+    with open(path, 'wb') as f:
+        f.write(data[:pos + size // 2])
+
+
+def hour_clip(path):
+    """A still picture for 62 minutes, one frame every 10 seconds: times past an hour."""
+    run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x406080:s=32x18:r=1/10', '-t', '3725',
+         '-c:v', 'libvpx-vp9', '-g', '1000', '-crf', '50', '-b:v', '0', path])
+
+
 def pts(path):
     out = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=pts_time',
                           '-of', 'csv=p=0', path], check=True, capture_output=True, text=True).stdout
@@ -155,6 +177,8 @@ def main():
          '-f', 'webm', os.path.join(HERE, 'recorded.webm')])
     run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-c:a', 'libopus',
          os.path.join(HERE, 'sound.webm')])
+    damaged_clip(os.path.join(HERE, 'damaged.mp4'))
+    hour_clip(os.path.join(HERE, 'hour.webm'))
     rnd = random.Random(41)
     with open(os.path.join(HERE, 'broken.mp4'), 'wb') as f:
         f.write(bytes(rnd.randrange(256) for _ in range(4096)))
@@ -182,6 +206,7 @@ def main():
         scenario('screen', 'screen.webm', '0', '2', 10, 1),
         scenario('rotated', 'rotated.mp4', '0', '1', 10, 1),
         scenario('recorded', 'recorded.webm', '0', '3', 10, 1, timing='frames.webm'),
+        scenario('damaged', 'damaged.mp4', '0', '1', 10, 1),
     ]
     blocks = {
         'coded': [[10 + 44 * i + 20, 30] for i in range(7)],

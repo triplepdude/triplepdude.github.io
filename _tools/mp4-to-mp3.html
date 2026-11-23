@@ -46,9 +46,11 @@ howto: |
   | 320 kbps | 2.40 MB | the most detail MP3 can keep |
 
   A higher bitrate keeps more of what the source has, but cannot bring back
-  what the video's own compression removed. The source's bitrate is shown
-  under each file name. Surround sound is mixed down to stereo, and **Mono**
-  averages the two channels, which halves the size of a WAV.
+  what the video's own compression removed. When a file states its bitrate,
+  it is shown under the file name. Quad and 5.1 surround sound are mixed
+  down to stereo; other layouts, such as 7.1, keep only their first two
+  channels, while **Original audio** keeps them all. **Mono** averages the
+  two channels, which halves the size of a WAV.
 
   ## On iPhone and Android
 
@@ -312,6 +314,7 @@ faq:
     ['ac3', 'AC-3 (Dolby Digital)'], ['eac3', 'E-AC-3 (Dolby Digital Plus)'], ['dts', 'DTS'], ['truehd', 'Dolby TrueHD'],
     ['ulaw', 'µ-law'], ['alaw', 'A-law']]);
   var PROTECTED_TEXT = 'This file is protected with DRM (encrypted), so its sound cannot be read. Films and music bought or rented from a store are usually protected.';
+  var NO_TRACKS_TEXT = 'No sound or video was found in this file. It may be incomplete, such as a copy or download that did not finish, or damaged.';
   var LINK_TEXT = 'Links cannot be converted: this page only reads files on your device. Save the video to your device first, if you own it or may use it, then choose it here.';
 
   var dom = {
@@ -551,9 +554,16 @@ faq:
       renderEntry(e);
       updateAll();
     }
-    var good = added.filter(function (e) { return e.status !== 'error' && entries.indexOf(e) >= 0; });
-    if (added.length === 1 && good.length === 1) say('Added ' + good[0].name + ': ' + fmtTime(good[0].durMs) + ', ' + codecName(good[0].t) + ' ' + channelsText(good[0].t.ch) + '.');
-    else if (added.length > 1) say('Added ' + added.length + ' files' + (good.length < added.length ? ', ' + (added.length - good.length) + ' of them cannot be converted.' : '.'));
+    var kept = added.filter(function (e) { return entries.indexOf(e) >= 0; }), one = kept[0];
+    var bad = kept.filter(function (e) { return !convertible(e); }).length;
+    var warned = kept.filter(function (e) { return convertible(e) && entryMsg(e); }).length, has = warned === 1 ? ' has' : ' have';
+    if (added.length === 1 && one) {
+      say(one.status === 'error' ? one.name + ': ' + one.error : 'Added ' + one.name + ': ' + fmtTime(one.durMs) + ', ' + codecName(one.t) + ' ' + channelsText(one.t.ch) + '.' +
+        (entryMsg(one) ? ' ' + entryMsg(one) : ''));
+    } else if (added.length > 1) {
+      say('Added ' + added.length + ' files' + (bad ? ', ' + bad + ' of them cannot be ' + formatWord() : '') +
+        (warned ? (bad ? ' and ' + warned + ' more' + has : ', ' + warned + ' of them' + has) + ' a warning' : '') + (bad || warned ? ': see the message under each.' : '.'));
+    }
   }
 
   async function probe(e) {
@@ -569,9 +579,10 @@ faq:
       var tracks = await e.input.getAudioTracks();
       if (!tracks.length) {
         var videos = await e.input.getVideoTracks();
-        throw userError(videos.length ? 'This video has no sound track, so there is no audio to save.' : 'This file has no audio track.');
+        throw userError(videos.length ? 'This video has no sound track, so there is no audio to save.' : NO_TRACKS_TEXT);
       }
       var primary = await e.input.getPrimaryAudioTrack();
+      var indexed = (await e.input.getFormat()) instanceof MB.IsobmffInputFormat;
       for (var i = 0; i < tracks.length; i++) {
         var tr = tracks[i];
         var internal = await tr.getInternalCodecId();
@@ -580,6 +591,13 @@ faq:
           sr: await tr.getSampleRate(), ch: await tr.getNumberOfChannels(), lang: await tr.getLanguageCode(), name: clean(await tr.getName()),
           first: await tr.getFirstTimestamp(), end: await tr.computeDuration(), bitrate: (await tr.getAverageBitrate()) || (await tr.getBitrate()) || 0
         };
+        // MP4 and MOV files list their samples in an index. In a file that was
+        // cut short the index promises more sound than there is, so the sound
+        // ends with the last sample whose data is in the file.
+        info.listed = info.end;
+        if (indexed && info.internal !== 'enca') {
+          try { info.end = await readableEnd(tr, info.first, info.end); } catch (x) { if (e.isProtected) throw x; }
+        }
         info.encrypted = info.internal === 'enca';
         info.decodable = !info.encrypted && !!info.codec && (await tr.canDecode());
         info.whole = !info.decodable && !info.encrypted && !!info.codec && typeof AudioDecoder === 'undefined' && typeof OfflineAudioContext !== 'undefined';
@@ -588,6 +606,7 @@ faq:
       }
       if (e.tracks[e.ti].encrypted) { e.isProtected = true; throw userError(PROTECTED_TEXT); }
       useTrack(e, e.ti);
+      if (!(e.durMs > 0)) throw userError('Its sound track is empty, so there is no audio to save. The file may be incomplete or damaged.');
       var tags = await e.input.getMetadataTags();
       e.tags = { title: clean(tags.title) || e.base, artist: clean(tags.artist), album: clean(tags.album) };
       e.images = (tags.images || []).filter(function (im) { return im && im.data && /^image\/(jpeg|png|gif|webp)$/i.test(im.mimeType || ''); });
@@ -598,6 +617,26 @@ faq:
       if (e.input) { try { e.input.dispose(); } catch (x) { /* already gone */ } }
       e.input = null;
     }
+  }
+
+  // The end of the last sample whose data is in the file. A file that was cut
+  // short loses its tail, so every sample after the first missing one is
+  // missing too, and halving the gap finds it in a few reads.
+  async function readableEnd(tr, first, end) {
+    var sink = new MB.EncodedPacketSink(tr);
+    if (await sink.getPacket(Infinity)) return end;
+    var p = await sink.getPacket(first);
+    if (!p) return first;
+    var lo = p.timestamp, hi = end;
+    while (hi - lo > 0.001) {
+      var mid = (lo + hi) / 2, q = await sink.getPacket(mid);
+      if (q) { p = q; lo = mid; } else hi = mid;
+    }
+    return p.timestamp + p.duration;
+  }
+  function shortText(e) {
+    return 'This file is incomplete, perhaps a copy or download that did not finish: it should hold ' + fmtTime((e.t.listed - e.t0) * 1000) +
+      ' of sound, but its data stops at ' + fmtTime(e.durMs) + '. That part can still be converted.';
   }
 
   function useTrack(e, i) {
@@ -721,8 +760,8 @@ faq:
       li.appendChild(e.nameEl = el('p', 'm2m-file-name'));
       li.appendChild(e.infoEl = el('p', 'm2m-file-info'));
       li.appendChild(e.stateEl = el('p', 'm2m-file-state'));
+      // Not a live region: a summary that names the files goes to the status line.
       e.msgEl = el('p', 'msg error m2m-file-msg');
-      e.msgEl.setAttribute('role', 'alert');
       li.appendChild(e.msgEl);
       var acts = el('div', 'm2m-file-actions');
       e.dlBtn = el('button', 'btn small m2m-dl', 'Download');
@@ -741,9 +780,7 @@ faq:
     setMsg(e.stateEl, stateText(e));
     e.stateEl.hidden = !stateText(e);
     e.stateEl.classList.toggle('is-done', !!e.result);
-    var msg = e.status === 'error' ? e.error : e.convError || (e.t && !canDecode(e) && settings.format !== 'copy' ? noDecodeText(e) : '') ||
-      (e.t && settings.format === 'copy' && e.t.codec !== 'aac' ? copyText(e) : '');
-    setMsg(e.msgEl, msg);
+    setMsg(e.msgEl, entryMsg(e));
     e.dlBtn.hidden = !e.result;
     if (e.result) e.dlBtn.setAttribute('aria-label', 'Download ' + e.result.name);
     e.editBtn.hidden = entries.length < 2 || e.status === 'error' || e.status === 'reading';
@@ -753,6 +790,25 @@ faq:
     e.rmBtn.disabled = busy && e.status === 'converting';
     if (current === e) e.li.setAttribute('aria-current', 'true'); else e.li.removeAttribute('aria-current');
   }
+  function entryMsg(e) {
+    if (e.status === 'error') return e.error;
+    if (e.convError) return e.convError;
+    if (!e.t) return '';
+    var copy = settings.format === 'copy';
+    if (!copy && !canDecode(e)) return noDecodeText(e);
+    if (copy && e.t.codec !== 'aac') return copyText(e);
+    var notes = [];
+    if (e.t.listed > e.t.end) notes.push(shortText(e));
+    if (!copy && e.t.ch > 2 && e.t.ch !== 4 && e.t.ch !== 6) notes.push(layoutText(e));
+    return notes.join(' ');
+  }
+  // The converter mixes quad and 5.1 down to stereo; of other layouts it keeps
+  // the first channels as they are.
+  function layoutText(e) {
+    return 'Its sound has ' + e.t.ch + ' channels, and MP3 and WAV keep only the first two (usually front left and right; with Mono only the first), ' +
+      'so sound that is only in the others, such as speech in a centre channel, is lost.' + (e.t.codec === 'aac' ? ' Original audio keeps every channel.' : '');
+  }
+  function formatWord() { return settings.format === 'copy' ? 'saved as original audio' : 'converted to ' + (settings.format === 'mp3' ? 'MP3' : 'WAV'); }
   function copyText(e) {
     return 'Its audio is ' + codecName(e.t) + ', not AAC, so it cannot be copied into an .m4a file. Choose MP3 or WAV for this file.';
   }
@@ -974,8 +1030,14 @@ faq:
     dom.vol.setAttribute('aria-valuetext', e.vol + '%, ' + fmtDb(g));
     updatePeakUI();
   }
-  function selectionPeak(e) {
+  // The levels the result will have: surround sound mixed to mono can be
+  // louder than either side of its stereo mix, so it has levels of its own.
+  function levels(e) {
     var p = e.peaks;
+    return p && settings.mono && p.monoMin ? { min: p.monoMin, max: p.monoMax, done: p.done } : p;
+  }
+  function selectionPeak(e) {
+    var p = levels(e);
     if (!p) return -1;
     var b0 = Math.floor(e.sel.start / e.durMs * BUCKETS), b1 = Math.ceil(e.sel.end / e.durMs * BUCKETS), m = 0;
     for (var b = Math.max(0, b0); b < Math.min(BUCKETS, b1); b++) {
@@ -991,11 +1053,12 @@ faq:
     if (settings.format !== 'copy' && e.peaks && e.peaks.done) {
       var peak = selectionPeak(e), g = e.vol / 100;
       if (peak <= 0) text = 'The selection is silent.';
+      else if (g === 0) text = 'At 0% the result is silent.';
       else if (peak * g > 1.0001) {
         var safe = Math.floor(100 / peak / 5) * 5;
         text = 'At this volume the loudest parts go above full scale and will distort. ' + safe + '% is the most without distortion.';
       } else {
-        text = 'Loudest point at this volume: ' + dbFs(peak * g) + '. Up to ' + (Math.floor(100 / peak / 5) * 5) + '% stays clear of distortion.';
+        text = 'Loudest point at this volume: ' + dbFs(peak * g) + '. Up to ' + Math.min(400, Math.floor(100 / peak / 5) * 5) + '% stays clear of distortion.';
       }
     }
     setMsg(dom.peak, text);
@@ -1042,6 +1105,29 @@ faq:
     }
     setMsg(dom.waveMsg, text);
   }
+  // The channels as the result will have them, for the waveform and the peak:
+  // quad and 5.1 mixed down the way the converter mixes them (the Web Audio
+  // rules), as stereo and as mono, other layouts cut to their first two
+  // channels.
+  var planes = [];
+  function heard(s, n) {
+    var ch = s.numberOfChannels, k = ch === 4 || ch === 6 ? ch : Math.min(ch, 2), P = planes;
+    for (var c = 0; c < k; c++) {
+      if (!P[c] || P[c].length < n) P[c] = new Float32Array(Math.max(n, 4096));
+      s.copyTo(P[c], { planeIndex: c, format: 'f32-planar', frameCount: n });
+    }
+    if (k < 4) return P.slice(0, k);
+    var L = new Float32Array(n), R = new Float32Array(n), M = new Float32Array(n), a = Math.SQRT1_2;
+    for (var i = 0; i < n; i++) {
+      if (k === 4) { L[i] = 0.5 * (P[0][i] + P[2][i]); R[i] = 0.5 * (P[1][i] + P[3][i]); M[i] = 0.5 * (L[i] + R[i]); }
+      else {
+        L[i] = P[0][i] + a * (P[2][i] + P[4][i]);
+        R[i] = P[1][i] + a * (P[2][i] + P[5][i]);
+        M[i] = a * (P[0][i] + P[1][i]) + P[2][i] + 0.5 * (P[4][i] + P[5][i]);
+      }
+    }
+    return [L, R, M];
+  }
   async function scan(e) {
     var token = ++e.scanToken;
     waveMessage();
@@ -1052,25 +1138,27 @@ faq:
     }
     if (token !== e.scanToken) return;
     var p = e.peaks = { min: new Float32Array(BUCKETS).fill(Infinity), max: new Float32Array(BUCKETS).fill(-Infinity), filled: 0, done: false };
-    var dur = e.durMs / 1000 || 0.001, scratch = new Float32Array(4096), lastDraw = 0;
+    var dur = e.durMs / 1000 || 0.001, lastDraw = 0;
     try {
       var sink = new MB.AudioSampleSink(src.track);
       for await (var s of sink.samples(src.base, src.base + dur)) {
         if (token !== e.scanToken) { s.close(); break; }
-        var n = s.numberOfFrames, sr = s.sampleRate, t = s.timestamp - src.base;
-        if (scratch.length < n) scratch = new Float32Array(n);
-        for (var c = 0; c < s.numberOfChannels; c++) {
-          s.copyTo(scratch, { planeIndex: c, format: 'f32-planar', frameCount: n });
-          var i = 0;
+        var n = s.numberOfFrames, sr = s.sampleRate, t = s.timestamp - src.base, lines = heard(s, n);
+        for (var c = 0; c < lines.length; c++) {
+          var scratch = lines[c], i = 0, mins = p.min, maxs = p.max;
+          if (c === 2) {
+            if (!p.monoMin) { p.monoMin = new Float32Array(BUCKETS).fill(Infinity); p.monoMax = new Float32Array(BUCKETS).fill(-Infinity); }
+            mins = p.monoMin; maxs = p.monoMax;
+          }
           while (i < n) {
             var b = Math.floor((t + i / sr) / dur * BUCKETS);
             if (b >= BUCKETS) break;
             var iEnd = b < 0 ? Math.ceil(-t * sr) : Math.min(n, Math.ceil(((b + 1) * dur / BUCKETS - t) * sr));
             if (iEnd <= i) iEnd = i + 1;
             if (b >= 0) {
-              var lo = p.min[b], hi = p.max[b];
+              var lo = mins[b], hi = maxs[b];
               for (var k = i; k < iEnd; k++) { var v = scratch[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
-              p.min[b] = lo; p.max[b] = hi;
+              mins[b] = lo; maxs[b] = hi;
             }
             i = iEnd;
           }
@@ -1113,7 +1201,7 @@ faq:
     var mid = H / 2, amp = H / 2 * 0.92;
     g.fillStyle = css('--border');
     g.fillRect(0, Math.floor(mid), W, Math.max(1, Math.round(dpr)));
-    var p = e.peaks;
+    var p = levels(e);
     if (!p) return;
     var fx = effects(e), len = lenMs(e) / 1000, gain = gainFn(fx.vol, fx.fadeIn, fx.fadeOut, len);
     var wave = css('--accent'), dim = css('--muted'), danger = css('--danger');
@@ -1142,26 +1230,46 @@ faq:
     var f = r.width ? (clientX - r.left) / r.width : 0;
     return Math.round(Math.max(0, Math.min(1, f)) * current.durMs / 10) * 10;
   }
-  dom.wave.addEventListener('pointerdown', function (ev) {
-    if (!editorOn() || ev.button > 0 || dom.editFs.disabled) return;
-    var handle = ev.target.closest('.m2m-handle');
-    var ms = msAt(ev.clientX);
-    var which = handle ? (handle === dom.hStart ? 'start' : 'end')
-      : Math.abs(ms - current.sel.start) <= Math.abs(ms - current.sel.end) ? 'start' : 'end';
-    if (!handle && ms < current.sel.start) which = 'start';
-    if (!handle && ms > current.sel.end) which = 'end';
+  function nearer(ms) {
+    if (ms < current.sel.start) return 'start';
+    if (ms > current.sel.end) return 'end';
+    return Math.abs(ms - current.sel.start) <= Math.abs(ms - current.sel.end) ? 'start' : 'end';
+  }
+  function startDrag(ev, which, ms) {
     drag = { which: which, id: ev.pointerId };
     try { dom.wave.setPointerCapture(ev.pointerId); } catch (x) { /* not capturable */ }
     (which === 'start' ? dom.hStart : dom.hEnd).focus({ preventScroll: true });
-    if (!handle) setEdge(which, ms);
+    if (ms != null) setEdge(which, ms);
+  }
+  dom.wave.addEventListener('pointerdown', function (ev) {
+    if (!editorOn() || ev.button > 0 || dom.editFs.disabled) return;
+    var handle = ev.target.closest('.m2m-handle');
+    // A finger put down on the waveform may be starting to scroll the page,
+    // which the waveform allows: nothing moves until it lifts without
+    // scrolling (a tap) or moves sideways.
+    if (!handle && ev.pointerType !== 'mouse') { drag = { pending: true, id: ev.pointerId, x: ev.clientX, y: ev.clientY }; return; }
+    var ms = msAt(ev.clientX);
+    startDrag(ev, handle ? (handle === dom.hStart ? 'start' : 'end') : nearer(ms), handle ? null : ms);
     ev.preventDefault();
   });
   dom.wave.addEventListener('pointermove', function (ev) {
     if (!drag || ev.pointerId !== drag.id) return;
+    if (drag.pending) {
+      var dx = Math.abs(ev.clientX - drag.x);
+      if (dx >= 10 && dx > Math.abs(ev.clientY - drag.y)) startDrag(ev, nearer(msAt(drag.x)), msAt(ev.clientX));
+      return;
+    }
     setEdge(drag.which, msAt(ev.clientX));
   });
   function endDrag(ev) { if (drag && ev.pointerId === drag.id) drag = null; }
-  dom.wave.addEventListener('pointerup', endDrag);
+  dom.wave.addEventListener('pointerup', function (ev) {
+    if (drag && drag.pending && ev.pointerId === drag.id && editorOn() && !dom.editFs.disabled &&
+        Math.abs(ev.clientX - drag.x) < 10 && Math.abs(ev.clientY - drag.y) < 10) {
+      var ms = msAt(drag.x);
+      startDrag(ev, nearer(ms), ms);
+    }
+    endDrag(ev);
+  });
   dom.wave.addEventListener('pointercancel', endDrag);
   [dom.hStart, dom.hEnd].forEach(function (h) {
     h.addEventListener('keydown', function (ev) {
@@ -1249,8 +1357,16 @@ faq:
 
   // ---------- Playing the selection ----------
   var ac = null, play = null, playToken = 0;
+  // Safari 16.4+: iOS mutes web audio in silent mode unless it is media
+  // playback; 'auto' gives the sound back to other apps afterwards.
+  function session(type) {
+    try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch (x) { /* not offered */ }
+  }
   function stopPlay() {
     playToken++;
+    // Also while the sound is still being read (before anything plays), so
+    // the button never stays on Stop.
+    if (dom.play.textContent !== 'Play selection') { dom.play.textContent = 'Play selection'; session('auto'); }
     if (!play) return;
     var p = play;
     play = null;
@@ -1258,7 +1374,6 @@ faq:
     try { p.gain.disconnect(); } catch (x) { /* ignore */ }
     cancelAnimationFrame(p.raf);
     dom.playhead.hidden = true;
-    dom.play.textContent = 'Play selection';
   }
   function envelope(p, from) {
     var e = p.e, fx = effects(e), g = p.gain.gain, T = p.startAt, L = p.len;
@@ -1280,11 +1395,16 @@ faq:
     var token = playToken;
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
+    session('playback');
+    // Stop from here on, so anything that stops the sound while the audio
+    // context wakes up (which can take a while on a phone) also puts the
+    // button and the audio session back.
+    dom.play.textContent = 'Stop';
     if (!ac) ac = new AC();
     if (ac.state !== 'running') { try { await ac.resume(); } catch (x) { /* blocked */ } }
-    dom.play.textContent = 'Stop';
+    if (token !== playToken) return;
     var src;
-    try { src = await decodeSource(e); } catch (err) { if (token === playToken) { dom.play.textContent = 'Play selection'; setMsg(dom.waveMsg, messageFor(err, e)); } return; }
+    try { src = await decodeSource(e); } catch (err) { if (token === playToken) { stopPlay(); setMsg(dom.waveMsg, messageFor(err, e)); } return; }
     if (token !== playToken) return;
     var fx = effects(e);
     var gain = ac.createGain();
@@ -1349,9 +1469,16 @@ faq:
     };
     if (next.format === 'mp3' && !SIMD) { next.format = 'wav'; $('m2m-f-wav').checked = true; }
     var changed = next.format !== settings.format || next.kbps !== settings.kbps || next.mono !== settings.mono;
+    var newFormat = next.format !== settings.format, newMono = next.mono !== settings.mono;
     settings = next;
     if (changed) entries.forEach(invalidate);
     updateAll();
+    // Surround sound has levels of its own as mono.
+    if (newMono) draw();
+    if (newFormat) {
+      var n = entries.filter(function (e) { return e.status !== 'error' && e.t && !convertible(e); }).length;
+      if (n) say((n === 1 ? 'One file' : n + ' files') + ' cannot be ' + formatWord() + ': see the message under ' + (n === 1 ? 'it.' : 'each.'));
+    }
   }
   function formatHint() {
     var s = settings;
@@ -1466,8 +1593,9 @@ faq:
         format = new MB.Mp3OutputFormat(); ext = 'mp3'; mime = 'audio/mpeg';
         audio = { codec: 'mp3', quality: new MB.Quality({ bitrate: settings.kbps * 1000 }), sampleRate: mp3Rate(e.t.sr), numberOfChannels: ch };
       } else {
-        // RIFF INFO holds only ISO 8859-1 text: other letters go in an ID3 chunk instead.
-        var t = tagsFor(e), plain = [t.title, t.artist, t.album].every(function (v) { return !v || /^[\u0000-\u00FF]*$/.test(v); });
+        // RIFF INFO holds only ISO 8859-1 text and no pictures: other letters
+        // and a cover go in an ID3 chunk instead.
+        var t = tagsFor(e), plain = !t.images && [t.title, t.artist, t.album].every(function (v) { return !v || /^[\u0000-\u00FF]*$/.test(v); });
         format = new MB.WavOutputFormat({ metadataFormat: plain ? 'info' : 'id3' }); ext = 'wav'; mime = 'audio/wav';
         audio = { codec: 'pcm-s16', numberOfChannels: ch, forceTranscode: true };
       }
@@ -1478,6 +1606,10 @@ faq:
     var trim = {};
     if (e.sel.start > 0) trim.start = src.base + e.sel.start / 1000;
     if (e.sel.end < e.durMs) trim.end = src.base + e.sel.end / 1000;
+    // Sound decoded a piece at a time ends where the file says it does,
+    // without the padding an AAC encoder adds after the last sample (up to
+    // about 46 ms). A whole-track decode is kept as the browser made it.
+    else if (fmt !== 'copy' && e.t.decodable) trim.end = e.t.end;
     var out = new MB.Output({ format: format, target: new MB.BufferTarget() });
     var conv = await MB.Conversion.init({
       input: src.input, output: out, showWarnings: false, trim: trim, copy: copy,
@@ -1573,6 +1705,7 @@ faq:
     if (cancelRequested) say('Conversion cancelled.' + (done ? ' ' + done + ' file' + (done > 1 ? 's were' : ' was') + ' converted before that.' : ''));
     else if (list.length === 1 && done === 1) say(list[0].result.name + ' is ready to download, ' + fmtBytes(list[0].result.blob.size) + '.');
     else if (done) say(done + ' of ' + list.length + ' files converted' + (failed ? ', ' + failed + ' could not be' : '') + '. Download them one by one' + (withResult.length > 1 ? ' or all as a ZIP.' : '.'));
+    else if (list.length === 1 && failed) say(list[0].name + ': ' + list[0].convError);
     else say('Nothing was converted: see the message under each file.');
     var first = list.filter(function (x) { return x.result; })[0];
     if (hadFocus) {

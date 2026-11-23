@@ -46,6 +46,45 @@ const { chromium } = require('playwright');
 
 const ROOT = path.resolve(__dirname, '..');
 const TESTS = path.join(__dirname, 'tools');
+
+// Each run builds into its own temp dir (tools-site-*). It is removed when the
+// run ends, also when it fails, crashes or is stopped with Ctrl+C or a
+// timeout's SIGTERM. A run killed outright (SIGKILL) cannot clean up, so each
+// run also removes the dirs of runs whose process has gone: their owner file
+// names a dead process id, or, for dirs from before owner files, they are
+// over six hours old.
+const WORK_PREFIX = 'tools-site-';
+const OWNER_FILE = 'owner.pid';
+const workDirs = new Set();
+function removeWorkDirs() {
+  for (const dir of workDirs) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* already gone */ }
+    workDirs.delete(dir);
+  }
+}
+function processAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+function sweepStaleWorkDirs() {
+  let names = [];
+  try { names = fs.readdirSync(os.tmpdir()).filter(n => n.startsWith(WORK_PREFIX)); } catch (e) { return; }
+  for (const name of names) {
+    const dir = path.join(os.tmpdir(), name);
+    try {
+      const owner = path.join(dir, OWNER_FILE);
+      const pid = fs.existsSync(owner) ? Number(fs.readFileSync(owner, 'utf8')) : 0;
+      const stale = pid > 0 ? !processAlive(pid) : Date.now() - fs.statSync(dir).mtimeMs > 6 * 3600e3;
+      if (stale) fs.rmSync(dir, { recursive: true, force: true });
+    } catch (e) { /* another run may be removing it too */ }
+  }
+}
+// Playwright's own handlers close the browser on SIGTERM and SIGHUP without
+// exiting; these run first, remove the temp dir and exit, and Playwright's
+// exit handler then kills the browser.
+process.on('exit', removeWorkDirs);
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
+  process.on(signal, () => { removeWorkDirs(); process.exit(code); });
+}
 const SKIP = new Set(['.git', '_site', '.jekyll-cache', 'node_modules', 'tests', '_tools', 'vendor']);
 
 // SKIP applies to top-level entries only (assets/vendor must still be copied).
@@ -100,7 +139,10 @@ const CODE_SAMPLE = [
 
 // Builds into a private temp dir so several runs can happen at once.
 function build(onlySlugs) {
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'tools-site-'));
+  sweepStaleWorkDirs();
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), WORK_PREFIX));
+  workDirs.add(work);
+  fs.writeFileSync(path.join(work, OWNER_FILE), String(process.pid));
   const src = path.join(work, 'src');
   copyDir(ROOT, src);
   fs.mkdirSync(path.join(src, '_tools'));
@@ -913,7 +955,7 @@ async function main() {
     .map(slug => ({ slug, file: path.join(TESTS, slug + '.test.js') }));
   for (const t of testFiles) if (!fs.existsSync(t.file)) throw new Error(`Missing test file tests/tools/${t.slug}.test.js`);
 
-  const { out, work } = build(only);
+  const { out } = build(only);
   const server = await serve(out);
   // Fake camera/microphone so device-test tools can be exercised headlessly.
   const browser = await chromium.launch({
@@ -983,7 +1025,7 @@ async function main() {
 
   await browser.close();
   server.close();
-  fs.rmSync(work, { recursive: true, force: true });
+  removeWorkDirs();
   console.log(`\n${total - failed}/${total} passed`);
   process.exit(failed ? 1 : 0);
 }
