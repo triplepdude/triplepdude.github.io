@@ -2,7 +2,7 @@
 title: "PDF to JPG Converter: Save Pages as Images"
 description: Convert PDF pages to JPG or PNG images at 72 to 600 DPI, pick pages and JPG quality, and save them all in a ZIP. It runs in your browser; nothing is uploaded.
 category: Image & PDF
-keywords: [pdf to jpg, convert pdf to jpg, pdf to image, pdf to jpeg, save pdf as jpg, pdf page to jpg, high resolution pdf to jpg, pdf to pictures, pdf to photos]
+keywords: [pdf to jpg, convert pdf to jpg, pdf to image, pdf to jpeg, pdf to png, save pdf as jpg, pdf page to jpg, high resolution pdf to jpg, pdf to pictures, pdf to photos]
 howto: |
   ## How to convert a PDF to JPG
 
@@ -54,8 +54,7 @@ howto: |
   files for photos. Only PNG can be transparent: tick **Transparent
   background** to leave the parts of the page where nothing is drawn see
   through, which suits logos and diagrams. Pages that paint their own white
-  background stay white; [PDF to PNG](/pdf-to-png/) can make that white
-  transparent too, trim the margins or use fewer colours.
+  background stay white.
 
   ## Why is the JPG blurry?
 
@@ -80,20 +79,100 @@ faq:
   - q: Can I convert a password-protected PDF?
     a: Yes. A PDF that opens without a password but blocks printing or copying is converted directly. For a PDF that needs a password to open, type that password when asked; it is used only on your device.
   - q: Can I get the original pictures out of a PDF instead of whole pages?
-    a: "Yes, with [PDF to PNG](/pdf-to-png/): choose **Pictures in the PDF** there to save each photo or image at its own pixel size. This tool saves each whole page as one image, so a photo on a page comes out at the resolution you choose."
+    a: Not with this tool, which saves each whole page as one image. A photo on a page comes out at the resolution you choose, so pick 300 DPI or more to keep most of a photo's detail.
 ---
 <style>
-{% include pdf-pages.html part="css" p="p2j" %}
+.p2j-drop { margin: 0 0 16px; padding: 24px 16px; text-align: center; background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px; transition: border-color 0.15s ease, background-color 0.15s ease; }
+.p2j.is-empty .p2j-drop { padding: 48px 16px; }
+/* Once a PDF is open, the drop area shows only while a file is dragged over the page. */
+.p2j:not(.is-empty) .p2j-drop:not(.is-over) { display: none; }
+.p2j-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.p2j-drop p { margin: 10px 0 0; }
+.p2j-drop .hint { margin-top: 4px; }
+.p2j-drop .p2j-sample { margin-top: 14px; }
+.p2j-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.p2j-file-main { flex: 1 1 220px; min-width: 0; }
+.p2j-file-name { font-weight: 600; overflow-wrap: anywhere; }
+.p2j-file-meta { color: var(--muted); font-size: 14px; }
+.p2j-unlock { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin: 0 0 16px; }
+.p2j-unlock .field { flex: 1 1 220px; min-width: 0; max-width: 360px; margin: 0; }
+.p2j-unlock label { overflow-wrap: anywhere; }
+.p2j-unlock .msg { flex: 1 1 100%; margin: 0; }
+.p2j-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 20px; align-items: start; }
+.p2j-opts > .field, .p2j-opts > fieldset { margin-bottom: 14px; }
+.p2j-format { min-width: 0; margin: 0; padding: 0; border: 0; }
+.p2j-format legend { margin: 0 0 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.p2j-seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.p2j-seg label { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 6px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--field-border); border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.p2j-seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.p2j-seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.p2j-seg .p2j-tick { display: none; flex: none; }
+.p2j-seg label:has(input:checked) .p2j-tick { display: block; }
+.p2j-seg.is-off label { opacity: 0.5; cursor: not-allowed; }
 .p2j-q-head { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; }
 .p2j-q output { font-variant-numeric: tabular-nums; }
 .p2j-transp { align-self: end; margin-bottom: 14px; }
+.p2j-pagesel { max-width: 520px; }
+.p2j-quick { gap: 8px; margin-bottom: 8px; }
+.p2j-plan { min-height: 1.6em; margin: 4px 0 12px; font-weight: 600; overflow-wrap: anywhere; }
+.p2j-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 16px; }
+.p2j-progress progress { flex: 1 1 160px; height: 8px; accent-color: var(--accent); }
+.p2j-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 20px 0 6px; font-size: 1.1rem; }
+.p2j-h small { color: var(--muted); font-size: 14px; font-weight: 400; }
+.p2j-legend { margin: 0 0 10px; }
+.p2j-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.p2j-page { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.p2j-page.is-selected { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.p2j-page:not(.is-selected) .p2j-thumb img { opacity: 0.55; }
+.p2j-thumb { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 3 / 4; overflow: hidden; background: var(--surface-2); border-radius: 6px; }
+.p2j-thumb img { display: block; max-width: 90%; max-height: 90%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.3); pointer-events: none; }
+.p2j-thumb img:not([src]) { width: 66%; height: 82%; }
+.p2j-wait { position: absolute; color: var(--muted); font-size: 12px; }
+.p2j-num { position: absolute; bottom: 4px; left: 4px; min-width: 24px; height: 22px; padding: 0 6px; background: var(--text); color: var(--surface); border-radius: 11px; font-size: 12px; font-weight: 700; line-height: 22px; text-align: center; }
+.p2j-check { position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; margin: 0; pointer-events: none; }
+.p2j-info { min-height: 18px; margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.p2j-info strong { color: var(--text); font-weight: 600; }
+.p2j-page.is-working .p2j-info { color: var(--text); font-weight: 600; }
+.p2j-dl { width: 100%; margin-top: 6px; }
+.p2j.is-sweeping, .p2j.is-sweeping * { cursor: cell !important; }
+@media (max-width: 480px) {
+  .p2j-pages { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+/* On a phone the status line is two lines high, so the longer message written when a conversion
+   ends ("Saved … with 3 JPG images, …") does not push the form down. */
+@media (max-width: 600px) {
+  #p2j-status:not(:empty) { display: flex; align-items: center; min-height: calc(3.2em + 20px); }
+}
 </style>
 
 <div class="p2j is-empty" id="p2j">
-  {% include pdf-pages.html part="top" p="p2j" %}
+  <input type="file" id="p2j-file" class="visually-hidden" accept="application/pdf,.pdf" tabindex="-1" aria-label="Choose a PDF file">
+  <div class="p2j-drop" id="p2j-drop">
+    <button class="btn" type="button" id="p2j-choose">Choose a PDF file</button>
+    <p>or drop it anywhere on this page</p>
+    <p class="hint">Pages are turned into images on your device; nothing is uploaded.</p>
+    <button class="btn secondary small p2j-sample" type="button" id="p2j-sample">Try it with a sample PDF</button>
+  </div>
+  <p class="msg error" id="p2j-error" role="alert"></p>
+  <p class="msg ok" id="p2j-status" role="status"></p>
+
+  <div class="p2j-unlock" id="p2j-unlock" hidden>
+    <div class="field">
+      <label for="p2j-pw" id="p2j-pw-label">Password</label>
+      <input type="password" id="p2j-pw" autocomplete="off" maxlength="1024" aria-describedby="p2j-pw-error">
+    </div>
+    <button class="btn" type="button" id="p2j-pw-go">Open</button>
+    <p class="msg error" id="p2j-pw-error" aria-live="polite"></p>
+  </div>
 
   <div id="p2j-work" hidden>
-    {% include pdf-pages.html part="file" p="p2j" %}
+    <div class="p2j-file">
+      <div class="p2j-file-main">
+        <div class="p2j-file-name" id="p2j-name"></div>
+        <div class="p2j-file-meta" id="p2j-meta"></div>
+      </div>
+      <button class="btn secondary small" type="button" id="p2j-another">Choose another PDF</button>
+    </div>
 
     <div class="p2j-opts">
       <fieldset class="p2j-format">
@@ -127,73 +206,949 @@ faq:
       <label class="check p2j-transp" id="p2j-transp-row" hidden><input type="checkbox" id="p2j-transp" autocomplete="off"> Transparent background</label>
     </div>
 
-    {% include pdf-pages.html part="pick" p="p2j" %}
+    <div class="field p2j-pagesel">
+      <label for="p2j-pages">Pages to convert</label>
+      <input type="text" id="p2j-pages" autocomplete="off" spellcheck="false" aria-describedby="p2j-pages-hint p2j-pages-error">
+      <span class="hint" id="p2j-pages-hint">For example 1-3, 5. You can also click pages below.</span>
+      <p class="msg error" id="p2j-pages-error" aria-live="polite"></p>
+    </div>
+    <div class="actions p2j-quick">
+      <button class="btn secondary small" type="button" data-pick="all">Select all</button>
+      <button class="btn secondary small" type="button" data-pick="none">Select none</button>
+    </div>
+
+    <p class="p2j-plan" id="p2j-plan" role="status"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="p2j-go">Convert</button>
+      <button class="btn secondary" type="button" id="p2j-cancel" hidden>Cancel</button>
+    </div>
+    <div class="p2j-progress" id="p2j-progress" hidden><progress id="p2j-bar" max="100" value="0" aria-label="Converting progress"></progress><span class="hint" id="p2j-pct"></span></div>
+
+    <h2 class="p2j-h">Pages <small id="p2j-count"></small></h2>
+    <p class="hint p2j-legend">Click pages to pick them, or drag across several. On a touch screen, tap a page, or touch and hold one and then drag. Shift+click picks every page up to the one you click.</p>
+    <ol class="p2j-pages" id="p2j-grid" aria-label="Pages of the PDF"></ol>
   </div>
 </div>
 
 <script src="{{ '/assets/js/zip.js' | relative_url }}"></script>
-<script src="{{ '/assets/js/png-kit.js' | relative_url }}"></script>
 <script>
-{% include pdf-pages.js %}
 (function () {
   'use strict';
+  var PDFJS_URL = new URL({{ '/assets/vendor/pdfjs/pdf.min.js' | relative_url | jsonify }}, location.href).href;
+  var PDFJS_WORKER = new URL({{ '/assets/vendor/pdfjs/pdf.worker.min.js' | relative_url | jsonify }}, location.href).href;
+  var PDFJS_WASM = new URL({{ '/assets/vendor/pdfjs/wasm/' | relative_url | jsonify }}, location.href).href;
+  var PDFJS_RES = new URL({{ '/assets/vendor/pdfjs-resources/' | relative_url | jsonify }}, location.href).href;
   {% raw %}
   var $ = TT.$, $$ = TT.$$;
-  var dpiSel = $('#p2j-dpi'), customIn = $('#p2j-custom'), qIn = $('#p2j-quality'), transpBox = $('#p2j-transp');
+  var root = $('#p2j'), fileInput = $('#p2j-file'), dropZone = $('#p2j-drop'), work = $('#p2j-work'), grid = $('#p2j-grid');
+  var errBox = $('#p2j-error'), statusBox = $('#p2j-status'), planBox = $('#p2j-plan');
+  var dpiSel = $('#p2j-dpi'), customIn = $('#p2j-custom'), qIn = $('#p2j-quality'), transpBox = $('#p2j-transp'), pagesIn = $('#p2j-pages');
+  var goBtn = $('#p2j-go'), cancelBtn = $('#p2j-cancel'), progressBox = $('#p2j-progress'), bar = $('#p2j-bar'), pct = $('#p2j-pct');
+  var unlockBox = $('#p2j-unlock'), pwIn = $('#p2j-pw'), pwErr = $('#p2j-pw-error');
+  var FIELDS = [customIn, pagesIn];
+  var MAX_FILE = 1024 * 1024 * 1024, MAX_TEXT = 10000;
+  // The most pixels one page may have: a canvas this big needs 256 MB (touch devices: 144 MB). The
+  // browser may allow fewer, which is checked on the canvas itself before drawing.
+  var TOUCH = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  var MAX_PIXELS = TOUCH ? 36e6 : 64e6, MAX_SIDE = 32767;
+
+  var doc = null;      // the open PDF: { id, file, name, size, pdf, n, password, encrypted, sizes }
+  var pending = null;  // a PDF that is being opened
+  // Convert does nothing while a chosen file is checked or opened: that PDF replaces the one on screen,
+  // and a page drawn from the old one would be saved under the new name.
+  var checking = 0, opening = null;
+  var cards = [];      // per page: { el, img, cb, info, dl, thumb, queued, last }
+  var selected = [];   // per page, always read from the page field
+  var done = [];       // per page: { key, blob, w, h, dpi } made with the settings in key
+  var anchor = -1, busy = false, nextId = 1, errTimer = 0, current = null;
+
+  // ---------- small helpers ----------
+  var NUM = new Intl.NumberFormat('en-GB');
+  // A no-break space keeps a size and its unit on one line: "23 KB", never "23" and "KB".
+  function fmtBytes(n) {
+    if (n < 1024) return n + '\u00a0B';
+    if (n < 1048576) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + '\u00a0KB';
+    return (n / 1048576).toFixed(n < 10485760 ? 2 : 1) + '\u00a0MB';
+  }
+  function plural(n, one, many) { return NUM.format(n) + ' ' + (n === 1 ? one : many); }
+  function setError(t) { errBox.textContent = t || ''; }
+  // An error whose message is written for visitors. Other messages, such as PDF.js's "Invalid page
+  // request.", are written for programmers and are never shown.
+  function friendly(text) { var e = new Error(text); e.friendly = true; return e; }
+  var REPAIR = 'It may be damaged; try saving it again from the app that made it.';
+  function say(t, again) {
+    t = t || '';
+    if (statusBox.textContent !== t) { statusBox.textContent = t; return; }
+    if (again && t) { statusBox.textContent = ''; setTimeout(function () { statusBox.textContent = t; }, 60); }
+  }
+  function baseName(n) { return String(n || '').replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').trim() || 'document'; }
+  function shorten(s, max) { var cps = Array.from(s); return cps.length > max ? cps.slice(0, max).join('') + '…' : s; }
+  function dash(a, b) { return a === b ? String(a) : a + '–' + b; }
   function format() { var r = $('input[name="p2j-format"]:checked'); return r && r.value === 'png' ? 'png' : 'jpg'; }
+
+  // ---------- page lists: "1-3, 5, 8-end" (as in the Split PDF tool) ----------
+  var DASHES = '-‐‑‒–—―−﹘﹣－~～〜';
+  var SEPS = ',;，、；،؛';
+  function digitOf(c) {
+    if (c >= 48 && c <= 57) return c - 48;
+    if (c >= 0xFF10 && c <= 0xFF19) return c - 0xFF10;
+    if (c >= 0x660 && c <= 0x669) return c - 0x660;
+    if (c >= 0x6F0 && c <= 0x6F9) return c - 0x6F0;
+    return -1;
+  }
+  function tokenize(s) {
+    var toks = [], i = 0;
+    while (i < s.length) {
+      var c = s.charCodeAt(i), ch = s[i];
+      if (digitOf(c) >= 0) {
+        var v = '';
+        while (i < s.length && digitOf(s.charCodeAt(i)) >= 0) { v += digitOf(s.charCodeAt(i)); i++; }
+        toks.push({ t: 'num', v: v });
+      } else if (DASHES.indexOf(ch) >= 0) { toks.push({ t: 'dash' }); i++; }
+      else if (SEPS.indexOf(ch) >= 0) { toks.push({ t: 'sep' }); i++; }
+      else if (/\s/.test(ch)) { i++; }
+      else if (/[a-z]/i.test(ch)) {
+        var w = '';
+        while (i < s.length && /[a-z]/i.test(s[i])) { w += s[i]; i++; }
+        var lw = w.toLowerCase();
+        if (lw === 'end' || lw === 'last') toks.push({ t: 'end' });
+        else if (lw === 'to') toks.push({ t: 'dash' });
+        else if (lw === 'and') toks.push({ t: 'sep' });
+        else if (lw === 'all') toks.push({ t: 'all' });
+        else return { error: '“' + shorten(w, 24) + '” is not a page number. Use numbers, dashes and commas, such as 1-3, 5.' };
+      } else {
+        var cp = String.fromCodePoint(s.codePointAt(i));
+        // A character that does not show (a zero-width space, a control character) is named by its code.
+        if (/[\p{C}\p{M}]/u.test(cp)) cp = 'A hidden character (U+' + s.codePointAt(i).toString(16).toUpperCase().padStart(4, '0') + ')';
+        else cp = '“' + cp + '”';
+        return { error: cp + ' cannot be used in a page list. Use numbers, dashes and commas, such as 1-3, 5.' };
+      }
+    }
+    return { toks: toks };
+  }
+  var ONE_DASH = 'A range has one dash, as in 4-7. Separate ranges with commas: 1-3, 5.';
+  function parseList(text, n) {
+    if (text.length > MAX_TEXT) return { error: 'This list is ' + NUM.format(text.length) + ' characters long. Keep it under ' + NUM.format(MAX_TEXT) + ' characters.' };
+    var tk = tokenize(text);
+    if (tk.error) return tk;
+    var toks = tk.toks, items = [], k = 0;
+    function atom(t) { return t && (t.t === 'num' || t.t === 'end'); }
+    function val(t) { if (t.t === 'end') return n; var v = t.v.replace(/^0+(?=\d)/, ''); return v.length > 9 ? Infinity : parseInt(v, 10); }
+    function shown(t) { return t.t === 'end' ? 'end' : shorten(t.v.replace(/^0+(?=\d)/, ''), 12); }
+    while (k < toks.length) {
+      var t = toks[k], a = null, b = null, at = null, bt = null;
+      if (t.t === 'sep') { k++; continue; }
+      if (t.t === 'all') {
+        items.push({ a: 1, b: n });
+        k++;
+        if (toks[k] && toks[k].t === 'dash') return { error: ONE_DASH };
+        continue;
+      }
+      if (atom(t)) { at = t; a = val(t); k++; }
+      if (toks[k] && toks[k].t === 'dash') {
+        k++;
+        if (toks[k] && toks[k].t === 'dash') return { error: 'Two dashes in a row: write a range as 4-7.' };
+        // "5-all" is not read as 5-end followed by every page.
+        if (toks[k] && toks[k].t === 'all') return { error: 'A range ends with a page number or “end”, as in 5-end.' };
+        if (atom(toks[k])) { bt = toks[k]; b = val(toks[k]); k++; }
+        else if (a === null) return { error: 'A dash needs a page number before or after it, as in 4-7.' };
+        else b = n;
+        if (a === null) a = 1;
+        // "1-3-5" is not read as 1-3 and an open range -5.
+        if (toks[k] && toks[k].t === 'dash') return { error: ONE_DASH };
+      } else if (a === null) {
+        return { error: 'A page list starts with a page number, such as 1-3, 5.' };
+      } else b = a;
+      if (a === 0 || b === 0) return { error: 'There is no page 0: the first page is 1.' };
+      if (a > n || b > n) {
+        var big = a > n ? at : bt;
+        return { error: 'Page ' + (big ? shown(big) : NUM.format(Math.max(a, b))) + ' does not exist: this PDF has ' + plural(n, 'page', 'pages') + '.' };
+      }
+      items.push({ a: a, b: b });
+    }
+    return { items: items };
+  }
+  function compact(list) {
+    var out = [], i = 0;
+    while (i < list.length) {
+      var a = list[i], b = a;
+      while (i + 1 < list.length && list[i + 1] === b + 1) { i++; b++; }
+      out.push(a === b ? String(a) : a + '-' + b);
+      i++;
+    }
+    return out.join(', ');
+  }
+  function listText(pages) {
+    var runs = [], i = 0;
+    while (i < pages.length) {
+      var a = pages[i], b = a;
+      while (i + 1 < pages.length && pages[i + 1] === b + 1) { i++; b++; }
+      runs.push(dash(a, b));
+      i++;
+    }
+    if (runs.length > 5) runs = runs.slice(0, 3).concat(['…', runs[runs.length - 1]]);
+    return runs.length === 1 ? runs[0] : runs.slice(0, -1).join(', ') + ' and ' + runs[runs.length - 1];
+  }
+
   // ---------- settings, read from the controls every time ----------
   function settings() {
     var fmt = format(), dpi, err = null;
     if (dpiSel.value === 'custom') {
-      var typed = E.readWhole(customIn.value);
-      dpi = typed.error ? NaN : typed.n;
-      if (typed.error === 'chars') err = 'Enter a whole number of DPI from 10 to 1200.';
-      else if (!(dpi >= 10 && dpi <= 1200)) err = 'Enter a resolution from 10 to 1200 DPI.';
+      var s = customIn.value.trim(), v = '';
+      if (s.length > 12) err = 'Enter a whole number of DPI from 10 to 1200.';
+      for (var i = 0; !err && i < s.length; i++) {
+        var d = digitOf(s.charCodeAt(i));
+        if (d < 0) err = 'Enter a whole number of DPI from 10 to 1200.';
+        else v += d;
+      }
+      if (!err && !v) err = 'Enter a resolution from 10 to 1200 DPI.';
+      dpi = err ? NaN : parseInt(v, 10);
+      if (!err && !(dpi >= 10 && dpi <= 1200)) err = 'Enter a resolution from 10 to 1200 DPI.';
     } else dpi = parseInt(dpiSel.value, 10);
     var q = Math.min(100, Math.max(10, parseInt(qIn.value, 10) || 90));
     var transparent = fmt === 'png' && transpBox.checked;
-    return { format: fmt, dpi: dpi, quality: q, transparent: transparent, errors: err ? [{ field: customIn, text: err }] : [],
+    return { format: fmt, dpi: dpi, quality: q, transparent: transparent, error: err,
       key: [fmt, dpi, fmt === 'jpg' ? q : '', transparent ? 't' : ''].join('|') };
   }
-  // Shows the options that apply; also run after Back or Forward, when the browser may put earlier
-  // values back into the controls once this script has run.
-  function sync() {
+  // The pages to convert, read from the page field; also updates the ticks on the thumbnails.
+  function pickedPages() {
+    var r = parseList(pagesIn.value, doc.n);
+    if (r.error) return { error: r.error };
+    var on = new Uint8Array(doc.n);
+    r.items.forEach(function (it) { var lo = Math.min(it.a, it.b), hi = Math.max(it.a, it.b); for (var q = lo; q <= hi; q++) on[q - 1] = 1; });
+    var list = [];
+    for (var q = 0; q < doc.n; q++) { selected[q] = !!on[q]; if (on[q]) list.push(q + 1); }
+    if (!list.length) return { error: 'Select at least one page: click it below or type its number.', empty: true, pages: list };
+    return { pages: list };
+  }
+  // Pixel size of a page at a DPI, and the DPI actually used when the browser cannot hold that many pixels.
+  function pixelsFor(size, dpi) {
+    var w = Math.max(1, Math.round(size.w * dpi / 72)), h = Math.max(1, Math.round(size.h * dpi / 72)), used = dpi;
+    var k = Math.min(1, Math.sqrt(MAX_PIXELS / (w * h)), MAX_SIDE / w, MAX_SIDE / h);
+    if (k < 1) {
+      used = Math.max(1, Math.floor(dpi * k + 1e-9));
+      w = Math.max(1, Math.round(size.w * used / 72));
+      h = Math.max(1, Math.round(size.h * used / 72));
+    }
+    return { w: w, h: h, dpi: used };
+  }
+
+  // ---------- pdf.js, loaded on first use ----------
+  var pdfjs = null, pdfjsWorker = null, pdfjsLoading = null;
+  function loadPdfjs() {
+    if (pdfjsLoading) return pdfjsLoading;
+    pdfjsLoading = import(PDFJS_URL).then(function (lib) {
+      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      pdfjs = lib;
+      pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
+      return lib;
+    }, function () {
+      pdfjsLoading = null;
+      throw friendly('The PDF reader could not load. Check your connection and try again.');
+    });
+    return pdfjsLoading;
+  }
+  function openPdf(d, password) {
+    return loadPdfjs().then(function (lib) {
+      return d.file.arrayBuffer().then(function (buf) {
+        var task = lib.getDocument({
+          data: new Uint8Array(buf), password: password || undefined, worker: pdfjsWorker, verbosity: 0,
+          wasmUrl: PDFJS_WASM, cMapUrl: PDFJS_RES + 'cmaps/', cMapPacked: true,
+          standardFontDataUrl: PDFJS_RES + 'standard_fonts/', iccUrl: PDFJS_RES + 'iccs/'
+        });
+        d.task = task;
+        return task.promise;
+      });
+    });
+  }
+
+  // ---------- opening a file ----------
+  function isPdf(bytes) {
+    var head = new Uint8Array(bytes, 0, Math.min(1024, bytes.byteLength));
+    for (var i = 0; i + 4 < head.length; i++) {
+      if (head[i] === 0x25 && head[i + 1] === 0x50 && head[i + 2] === 0x44 && head[i + 3] === 0x46 && head[i + 4] === 0x2D) return true;
+    }
+    return false;
+  }
+  function chooseFiles(list, how) {
+    var all = Array.prototype.slice.call(list || []);
+    if (!all.length) return Promise.resolve();
+    var file = all[0];
+    // The PDF on screen is being converted; the message is cleared when that ends.
+    if (busy) { setError('Wait until the conversion finishes, or press Cancel, then ' + (how || 'choose') + ' ' + file.name + ' again.'); return Promise.resolve(); }
+    var note = all.length > 1 ? 'This tool converts one PDF at a time, so only ' + file.name + ' was opened.' : '';
+    setError('');
+    if (file.size > MAX_FILE) { setError(file.name + ' is larger than 1 GB.'); return Promise.resolve(); }
+    if (!file.size) { setError(file.name + ' is empty.'); return Promise.resolve(); }
+    checking++;
+    return file.slice(0, 1024).arrayBuffer().then(function (head) {
+      checking--;
+      if (!isPdf(head)) { setError(file.name + ' is not a PDF file.'); return; }
+      var d = { id: nextId++, file: file, name: file.name, size: file.size, password: '' };
+      pending = d;
+      hideUnlock();
+      say('Opening ' + file.name + '…');
+      return tryOpen(d, '').then(function () { if (note && doc === d) setError(note); });
+    }, function () { checking--; setError(file.name + ' could not be read.'); });
+  }
+  function failOpen(d, text) {
+    pending = null;
+    hideUnlock();
+    say('');
+    setError(text);
+  }
+  // PDF.js's message is read to tell the cause, never shown.
+  function openError(d, err) {
+    var why = err ? (err.name || '') + ' ' + (err.message || '') : '';
+    if (err && err.friendly) return err.message;
+    if (/Invalid PDF|FormatError|Invalid XRef|InvalidPDF/i.test(why)) return d.name + ' is damaged or is not a valid PDF.';
+    if (/encryption|security handler/i.test(why)) return d.name + ' uses a kind of encryption this tool cannot open.';
+    return d.name + ' could not be opened. ' + REPAIR;
+  }
+  function tryOpen(d, password) {
+    opening = d;
+    function settled() { if (opening === d) opening = null; }
+    return openPdf(d, password).then(function (pdf) {
+      if (pending !== d) { pdf.loadingTask.destroy(); return; }
+      // Some broken exporters write a PDF whose page tree is empty (PDF.js reads a /Count of -1 as is).
+      if (!(pdf.numPages >= 1)) { pdf.loadingTask.destroy(); failOpen(d, d.name + ' has no pages, so there is nothing to convert. ' + REPAIR); return; }
+      var info = {};
+      return pdf.getMetadata().then(function (meta) { info = meta && meta.info || {}; }, function () { /* metadata is optional */ })
+        // The first page's size is known before the summary is first written, so it is announced once.
+        .then(function () { return pdf.getPage(1); }).then(function (first) {
+          if (pending !== d) { pdf.loadingTask.destroy(); return; }
+          pending = null;
+          d.password = password || '';
+          d.encrypted = !!info.EncryptFilterName;
+          showDoc(d, pdf, first);
+        }).catch(function (err) {
+          if (pending !== d) return;
+          failOpen(d, openError(d, err));
+        });
+    }, function (err) {
+      if (pending !== d) return;
+      if (err && err.name === 'PasswordException') { showUnlock(d, !!password); return; }
+      failOpen(d, openError(d, err));
+    }).then(settled, function (err) { settled(); throw err; });
+  }
+  function showUnlock(d, wrong) {
+    unlockBox.hidden = false;
+    $('#p2j-pw-label').textContent = 'Password for ' + d.name;
+    if (wrong) {
+      pwErr.textContent = 'That password is not right. Check it and try again.';
+      pwIn.setAttribute('aria-invalid', 'true');
+    } else {
+      pwErr.textContent = '';
+      pwIn.removeAttribute('aria-invalid');
+      pwIn.value = '';
+    }
+    say(wrong ? '' : d.name + ' is protected with a password. Enter the password that opens it.');
+    pwIn.focus();
+    if (wrong) pwIn.select();
+  }
+  function hideUnlock() {
+    unlockBox.hidden = true;
+    pwErr.textContent = '';
+    pwIn.removeAttribute('aria-invalid');
+    pwIn.value = '';
+  }
+  function unlock() {
+    var d = pending;
+    if (!d || busy) return;
+    if (!pwIn.value) {
+      pwErr.textContent = 'Type the password first.';
+      pwIn.setAttribute('aria-invalid', 'true');
+      pwIn.focus();
+      return;
+    }
+    say('Opening ' + d.name + '…');
+    tryOpen(d, pwIn.value);
+  }
+  function closeDoc() {
+    if (doc && doc.pdf) doc.pdf.loadingTask.destroy();
+    cards.forEach(function (c) { if (c.thumb) URL.revokeObjectURL(c.thumb); if (observer) observer.unobserve(c.el); });
+    cards = [];
+    thumbQueue = [];
+    done = [];
+    grid.textContent = '';
+    doc = null;
+  }
+  function showDoc(d, pdf, first) {
+    closeDoc();
+    hideUnlock();
+    d.pdf = pdf;
+    d.n = pdf.numPages;
+    d.sizes = new Array(d.n);
+    doc = d;
+    noteSize(d, 0, first);
+    selected = new Array(d.n).fill(true);
+    anchor = -1;
+    pagesIn.value = compact(Array.from({ length: d.n }, function (_, i) { return i + 1; }));
+    $('#p2j-name').textContent = d.name;
+    $('#p2j-meta').textContent = plural(d.n, 'page', 'pages') + ' · ' + fmtBytes(d.size) + (d.encrypted ? ' · unlocked' : '');
+    $('#p2j-count').textContent = plural(d.n, 'page', 'pages');
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < d.n; i++) frag.appendChild(buildCard(i));
+    grid.appendChild(frag);
+    root.classList.remove('is-empty');
+    work.hidden = false;
+    refresh(true);
+    say(d.name + ' is open: ' + plural(d.n, 'page', 'pages') + (d.encrypted ? ', unlocked' : '') + '.');
+    readSizes(d);
+  }
+  // Page sizes in points (with /Rotate and /UserUnit applied), read in the background for the
+  // pixel size shown on each page.
+  function readSizes(d) {
+    var i = 0;
+    function next() {
+      if (doc !== d || i >= d.n) return;
+      var k = i++;
+      if (d.sizes[k]) { next(); return; }
+      d.pdf.getPage(k + 1).then(function (page) {
+        noteSize(d, k, page);
+        if (k % 50 === 49) setTimeout(next, 0); else next();
+      }, function () { next(); });
+    }
+    next();
+  }
+  function noteSize(d, k, page) {
+    if (d.sizes[k]) return;
+    var vp = page.getViewport({ scale: 1 });
+    d.sizes[k] = { w: vp.width, h: vp.height };
+    if (doc === d && !renderQueued) {
+      renderQueued = true;
+      requestAnimationFrame(function () { renderQueued = false; render(); });
+    }
+  }
+  var renderQueued = false;
+
+  // ---------- thumbnails, drawn when they scroll into view ----------
+  var thumbQueue = [], thumbBusy = 0;
+  var observer = 'IntersectionObserver' in window ? new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      observer.unobserve(en.target);
+      var c = cards[Number(en.target.dataset.i)];
+      if (c && c.el === en.target) queueThumb(c, Number(en.target.dataset.i));
+    });
+  }, { rootMargin: '300px 0px' }) : null;
+  function queueThumb(c, i) {
+    if (c.thumb || c.queued) return;
+    c.queued = true;
+    thumbQueue.push({ c: c, i: i, d: doc });
+    pumpThumbs();
+  }
+  function pumpThumbs() {
+    while (thumbBusy < 2 && thumbQueue.length && !busy) {
+      var job = thumbQueue.shift();
+      if (job.d !== doc) continue;
+      thumbBusy++;
+      drawThumb(job).catch(function () { /* the placeholder stays */ }).then(function () { thumbBusy--; pumpThumbs(); });
+    }
+  }
+  function drawThumb(job) {
+    var d = job.d, c = job.c;
+    return d.pdf.getPage(job.i + 1).then(function (page) {
+      noteSize(d, job.i, page);
+      var base = page.getViewport({ scale: 1 });
+      var target = 170 * Math.min(2, window.devicePixelRatio || 1);
+      var vp = page.getViewport({ scale: Math.min(4, target / Math.max(base.width, base.height)) });
+      var canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(vp.width));
+      canvas.height = Math.max(1, Math.round(vp.height));
+      var ctx = canvas.getContext('2d', { alpha: false });
+      return page.render({ canvasContext: ctx, canvas: canvas, viewport: vp }).promise.then(function () {
+        page.cleanup();
+        return new Promise(function (resolve) { canvas.toBlob(resolve, 'image/jpeg', 0.82); });
+      }).then(function (blob) {
+        canvas.width = canvas.height = 0;
+        if (!blob || d !== doc) return;
+        c.thumb = URL.createObjectURL(blob);
+        c.img.src = c.thumb;
+        var w = TT.$('.p2j-wait', c.el);
+        if (w) w.remove();
+      });
+    });
+  }
+  function buildCard(i) {
+    var li = document.createElement('li');
+    li.className = 'p2j-page';
+    li.dataset.i = i;
+    li.innerHTML = '<div class="p2j-thumb"><img alt="" draggable="false"><span class="p2j-wait">Loading…</span>' +
+      '<span class="p2j-num"><span class="visually-hidden">Page </span>' + (i + 1) + '</span>' +
+      '<input type="checkbox" class="p2j-check"></div><p class="p2j-info"></p>' +
+      '<button type="button" class="btn secondary small p2j-dl" hidden>Download</button>';
+    var c = { el: li, img: TT.$('img', li), cb: TT.$('.p2j-check', li), info: TT.$('.p2j-info', li), dl: TT.$('.p2j-dl', li), last: {} };
+    c.cb.setAttribute('aria-label', 'Page ' + (i + 1));
+    c.cb.dataset.i = i;
+    c.dl.dataset.i = i;
+    cards[i] = c;
+    if (observer) observer.observe(li); else queueThumb(c, i);
+    return li;
+  }
+
+  // ---------- drawing the state ----------
+  function put(c, key, fn, value) {
+    if (c.last[key] === value) return;
+    c.last[key] = value;
+    fn(value);
+  }
+  function infoHtml(i, st) {
+    var r = done[i], size = doc.sizes[i];
+    if (r && r.key === st.key) return '<strong>' + r.w + ' × ' + r.h + '</strong> · ' + fmtBytes(r.blob.size) + (r.dpi !== st.dpi ? '<br>at ' + r.dpi + ' DPI' : '');
+    if (!size || st.error) return '';
+    var px = pixelsFor(size, st.dpi);
+    return px.w + ' × ' + px.h + ' px' + (px.dpi !== st.dpi ? '<br>at ' + px.dpi + ' DPI' : '');
+  }
+  function render() {
+    if (!doc) return null;
+    var st = settings(), pk = pickedPages();
+    var fmt = st.format.toUpperCase();
+    $('#p2j-custom-field').hidden = dpiSel.value !== 'custom';
+    $('#p2j-q-field').hidden = st.format !== 'jpg';
+    $('#p2j-transp-row').hidden = st.format !== 'png';
+    var qv = $('#p2j-qval');
+    if (qv.textContent !== String(st.quality)) qv.textContent = String(st.quality);
+    // Images made with other settings are dropped at once, so a Download button never gives an old image.
+    for (var i = 0; i < done.length; i++) if (done[i] && done[i].key !== st.key) done[i] = null;
+    cards.forEach(function (c, i) {
+      var on = !!selected[i];
+      if (c.cb.checked !== on) c.cb.checked = on;
+      put(c, 'sel', function (v) { c.el.classList.toggle('is-selected', v); }, on);
+      put(c, 'info', function (v) { c.info.innerHTML = v; }, c.working ? 'Converting…' : infoHtml(i, st));
+      var r = done[i];
+      put(c, 'dl', function (v) { c.dl.hidden = !v; }, !!r);
+      put(c, 'dlName', function (v) { c.dl.setAttribute('aria-label', v); }, r ? 'Download page ' + (i + 1) + ' as ' + fmt + ', ' + fmtBytes(r.blob.size) : '');
+      put(c, 'busy', function (v) { c.cb.disabled = v; }, busy);
+    });
+    var text = '';
+    if (!st.error && !(pk.error && !pk.empty)) {
+      if (pk.empty) text = pk.error;
+      else {
+        var n = pk.pages.length, first = doc.sizes[pk.pages[0] - 1];
+        text = (n === doc.n ? (n === 1 ? 'The page' : 'All ' + NUM.format(n) + ' pages') : (n === 1 ? 'Page ' : 'Pages ') + listText(pk.pages)) +
+          ' to ' + fmt + ' at ' + st.dpi + ' DPI' + (st.format === 'jpg' ? ', quality ' + st.quality : st.transparent ? ', transparent' : '') + '.';
+        if (first) {
+          var px = pixelsFor(first, st.dpi);
+          text += ' Page ' + pk.pages[0] + ' becomes ' + NUM.format(px.w) + ' × ' + NUM.format(px.h) + ' pixels' + (px.dpi !== st.dpi ? ', at ' + px.dpi + ' DPI as it is very large' : '') + '.';
+        }
+      }
+    }
+    if (planBox.textContent !== text) planBox.textContent = text;
+    var label = pk.error || st.error ? 'Convert' : 'Convert ' + (pk.pages.length === 1 ? 'page ' + pk.pages[0] : plural(pk.pages.length, 'page', 'pages')) + ' to ' + fmt;
+    if (goBtn.textContent !== label) goBtn.textContent = label;
+    return { st: st, pk: pk };
+  }
+  function showFieldError(field, text) {
+    var box = $('#' + field.id + '-error');
+    if (box.textContent !== text) box.textContent = text;
+    if (text) field.setAttribute('aria-invalid', 'true');
+    else field.removeAttribute('aria-invalid');
+  }
+  // A mistake shows after a pause in typing, or at once when Convert is pressed; a message already on
+  // screen is replaced at once, so it never describes an older value.
+  function refresh(now) {
+    var s = render();
+    if (!s) return null;
+    clearTimeout(errTimer);
+    var want = {}, later = false;
+    if (s.st.error) want[customIn.id] = s.st.error;
+    if (s.pk.error && (!s.pk.empty || now === true)) want[pagesIn.id] = s.pk.error;
+    FIELDS.forEach(function (f) {
+      var msg = want[f.id] || '';
+      if (!msg || now === true || $('#' + f.id + '-error').textContent) showFieldError(f, msg);
+      else later = true;
+    });
+    if (later) errTimer = setTimeout(function () { FIELDS.forEach(function (f) { if (want[f.id]) showFieldError(f, want[f.id]); }); }, 700);
+    return s;
+  }
+  function setBusy(on) {
+    busy = on;
+    progressBox.hidden = !on;
+    cancelBtn.hidden = !on;
+    [goBtn, $('#p2j-another'), $('#p2j-choose'), $('#p2j-sample'), dpiSel, qIn, transpBox].concat(FIELDS, $$('input[name="p2j-format"]'), $$('[data-pick]'))
+      .forEach(function (el) { el.disabled = on; });
+    $('#p2j-seg').classList.toggle('is-off', on);
+    render();
+    if (!on) pumpThumbs();
+  }
+
+  // ---------- drawing a page as an image ----------
+  function canvasFits(canvas, ctx, w, h) {
+    if (!ctx) return false;
+    try {
+      ctx.fillStyle = '#010203';
+      ctx.fillRect(w - 1, h - 1, 1, 1);
+      var px = ctx.getImageData(w - 1, h - 1, 1, 1).data;
+      ctx.clearRect(w - 1, h - 1, 1, 1);
+      return px[0] === 1 && px[1] === 2 && px[2] === 3 && px[3] === 255;
+    } catch (e) { return false; }
+  }
+  // Stores the resolution in the file, so the image keeps the page's size when it is placed or printed:
+  // JFIF density in dots per inch for JPG (ITU T.871), a pHYs chunk in pixels per metre for PNG.
+  function withDpi(blob, type, dpi) {
+    var d = Math.max(1, Math.min(65535, Math.round(dpi)));
+    if (type === 'image/jpeg') {
+      return blob.slice(0, 20).arrayBuffer().then(function (buf) {
+        var h = new Uint8Array(buf);
+        if (h[0] !== 0xFF || h[1] !== 0xD8) return blob;
+        var jfif = h[2] === 0xFF && h[3] === 0xE0 && h[6] === 0x4A && h[7] === 0x46 && h[8] === 0x49 && h[9] === 0x46 && h[10] === 0;
+        if (jfif) {
+          h = h.slice();
+          h[13] = 1;
+          h[14] = d >> 8; h[15] = d & 255; h[16] = d >> 8; h[17] = d & 255;
+          return new Blob([h, blob.slice(20)], { type: type });
+        }
+        var app0 = new Uint8Array([0xFF, 0xE0, 0, 16, 0x4A, 0x46, 0x49, 0x46, 0, 1, 1, 1, d >> 8, d & 255, d >> 8, d & 255, 0, 0]);
+        return new Blob([blob.slice(0, 2), app0, blob.slice(2)], { type: type });
+      });
+    }
+    return blob.slice(0, 33).arrayBuffer().then(function (buf) {
+      var h = new Uint8Array(buf);
+      // The signature, then IHDR (13 bytes of data); pHYs must come before the first IDAT.
+      if (h.length < 33 || h[12] !== 0x49 || h[13] !== 0x48 || h[14] !== 0x44 || h[15] !== 0x52) return blob;
+      var ppm = Math.round(d / 0.0254), chunk = new Uint8Array(21), dv = new DataView(chunk.buffer);
+      dv.setUint32(0, 9);
+      chunk.set([0x70, 0x48, 0x59, 0x73], 4);
+      dv.setUint32(8, ppm);
+      dv.setUint32(12, ppm);
+      chunk[16] = 1;
+      dv.setUint32(17, window.TTZip.crc32(chunk.subarray(4, 17)) >>> 0);
+      return new Blob([blob.slice(0, 33), chunk, blob.slice(33)], { type: type });
+    });
+  }
+  function drawPage(d, index, st, job) {
+    return d.pdf.getPage(index + 1).then(function (page) {
+      // Cancel was pressed while the page was being read: nothing is drawn.
+      if (job && job.cancelled) return null;
+      noteSize(d, index, page);
+      var size = d.sizes[index], px = pixelsFor(size, st.dpi), canvas = null, ctx = null;
+      // The browser may hold fewer pixels than MAX_PIXELS: then a smaller DPI is tried.
+      for (var tries = 0; tries < 12; tries++) {
+        canvas = document.createElement('canvas');
+        canvas.width = px.w;
+        canvas.height = px.h;
+        ctx = canvas.getContext('2d', { alpha: st.transparent });
+        if (canvasFits(canvas, ctx, px.w, px.h)) break;
+        canvas.width = canvas.height = 0;
+        ctx = null;
+        var smaller = Math.floor(px.dpi * 0.8);
+        if (smaller < 1) break;
+        px = { w: Math.max(1, Math.round(size.w * smaller / 72)), h: Math.max(1, Math.round(size.h * smaller / 72)), dpi: smaller };
+      }
+      if (!ctx) throw friendly('this browser cannot make an image that large');
+      var vp = page.getViewport({ scale: px.dpi / 72 });
+      var task = page.render({
+        canvasContext: ctx, canvas: canvas, viewport: vp,
+        // Stretches the drawing by less than a pixel, so it fills the whole-pixel canvas exactly.
+        transform: [px.w / vp.width, 0, 0, px.h / vp.height, 0, 0],
+        background: st.transparent ? 'rgba(0,0,0,0)' : '#ffffff'
+      });
+      d.renderTask = task;
+      return task.promise.then(function () {
+        d.renderTask = null;
+        page.cleanup();
+        var type = st.format === 'png' ? 'image/png' : 'image/jpeg';
+        return new Promise(function (resolve) { canvas.toBlob(resolve, type, st.quality / 100); }).then(function (blob) {
+          canvas.width = canvas.height = 0;
+          if (!blob) throw friendly('the image could not be encoded');
+          return withDpi(blob, type, px.dpi);
+        }).then(function (blob) { return { key: st.key, blob: blob, w: px.w, h: px.h, dpi: px.dpi }; });
+      }, function (err) {
+        d.renderTask = null;
+        canvas.width = canvas.height = 0;
+        throw err;
+      });
+    });
+  }
+  function nameFor(i, st) {
+    var w = String(doc.n).length, s = String(i + 1);
+    while (s.length < w) s = '0' + s;
+    return baseName(doc.name) + '-page-' + s + '.' + st.format;
+  }
+  function convert() {
+    if (busy || !doc || checking || opening) return;
+    setError('');
+    var s = refresh(true);
+    if (!s) return;
+    if (s.st.error) { customIn.focus(); return; }
+    if (s.pk.error) { pagesIn.focus(); return; }
+    var st = s.st, pages = s.pk.pages, d = doc, job = current = { cancelled: false }, fails = [], reduced = [];
+    var todo = pages.filter(function (p) { return !(done[p - 1] && done[p - 1].key === st.key); });
+    // The status line keeps its place while converting: emptied, it would move the whole form up,
+    // and down again when the result is written.
+    say('Converting ' + (pages.length === 1 ? 'page ' + pages[0] : plural(pages.length, 'page', 'pages')) + ' to ' + st.format.toUpperCase() + '…');
+    setBusy(true);
+    var k = 0;
+    function step() {
+      if (job.cancelled) return null;
+      bar.value = Math.round(100 * k / Math.max(1, todo.length));
+      if (k >= todo.length) return null;
+      var p = todo[k], c = cards[p - 1];
+      pct.textContent = 'Converting page ' + p + ' (' + (k + 1) + ' of ' + todo.length + ')…';
+      c.working = true;
+      render();
+      return drawPage(d, p - 1, st, job).then(function (r) {
+        c.working = false;
+        if (job.cancelled) return null;
+        done[p - 1] = r;
+        if (r.dpi !== st.dpi) reduced.push(p);
+        k++;
+        render();
+        return step();
+      }, function (err) {
+        c.working = false;
+        if (job.cancelled) return null;
+        fails.push({ page: p, message: err && err.friendly ? err.message : 'it may be damaged' });
+        k++;
+        render();
+        return step();
+      });
+    }
+    Promise.resolve().then(step).then(function () {
+      if (job.cancelled) return null;
+      var ready = pages.filter(function (p) { return done[p - 1] && done[p - 1].key === st.key; });
+      if (!ready.length) return { files: [] };
+      if (ready.length === 1) return { files: ready, name: nameFor(ready[0] - 1, st), blob: done[ready[0] - 1].blob };
+      pct.textContent = 'Making the ZIP file…';
+      var name = baseName(d.name) + '-' + st.format + '.zip';
+      return window.TTZip.create(ready.map(function (p) { return { name: nameFor(p - 1, st), data: done[p - 1].blob }; }), { compress: 'store' })
+        .then(function (zip) { return { files: ready, name: name, blob: zip, zip: true }; });
+    }).then(function (r) {
+      if (job.cancelled || !r) return;
+      current = null;
+      setBusy(false);
+      setError('');
+      if (r.files.length) {
+        TT.download(r.name, r.blob);
+        var fmt = st.format.toUpperCase();
+        var msg = r.zip ? 'Saved ' + r.name + ' with ' + plural(r.files.length, fmt + ' image', fmt + ' images') + ', ' + fmtBytes(r.blob.size) + '.' :
+          'Saved ' + r.name + ': ' + done[r.files[0] - 1].w + ' × ' + done[r.files[0] - 1].h + ' pixels, ' + fmtBytes(r.blob.size) + '.';
+        if (reduced.length) msg += ' ' + (reduced.length === 1 ? 'Page ' + reduced[0] + ' is' : 'Pages ' + listText(reduced) + ' are') + ' too large for ' + st.dpi + ' DPI, so ' + (reduced.length === 1 ? 'it was' : 'they were') + ' converted at ' + (reduced.length === 1 ? done[reduced[0] - 1].dpi + ' DPI' : 'a lower DPI') + ', the most pixels one image can have here.';
+        say(msg, true);
+      } else say('');
+      if (fails.length) setError((fails.length === 1 ? 'Page ' + fails[0].page + ' could not be converted: ' + fails[0].message + '.' : 'Pages ' + listText(fails.map(function (f) { return f.page; })) + ' could not be converted.') + (r.files.length ? (r.files.length === 1 ? ' The other page was saved.' : ' The other pages were saved.') : ''));
+      goBtn.focus();
+    }, function (err) {
+      if (job.cancelled) return;
+      current = null;
+      setBusy(false);
+      say('');
+      // The ZIP maker explains its own limits (65,535 files, 4 GB); anything else is memory running out.
+      setError('The images could not be saved. ' + (err && err.name === 'Error' && err.message ? err.message : 'The device may have run out of memory; try fewer pages or a lower DPI.'));
+    });
+  }
+  function cancel() {
+    if (!busy || !current) return;
+    current.cancelled = true;
+    current = null;
+    if (doc && doc.renderTask) { try { doc.renderTask.cancel(); } catch (e) { /* already finished */ } }
+    cards.forEach(function (c) { c.working = false; });
+    setBusy(false);
+    setError('');
+    var have = done.filter(Boolean).length;
+    say('Cancelled. ' + (have ? plural(have, 'page is', 'pages are') + ' ready to download one by one below.' : 'Nothing was saved.'), true);
+    goBtn.focus();
+  }
+
+  // ---------- selecting pages ----------
+  function writePick() {
+    var list = [];
+    for (var i = 0; i < selected.length; i++) if (selected[i]) list.push(i + 1);
+    pagesIn.value = compact(list);
+  }
+  function setSelection(fn) {
+    for (var i = 0; i < selected.length; i++) selected[i] = !!fn(i, selected[i]);
+    writePick();
+    refresh();
+  }
+  var sweep = null, scrollRaf = 0;
+  function cardAt(x, y) {
+    var el = document.elementFromPoint(x, y), li = el && el.closest ? el.closest('.p2j-page') : null;
+    return li && li.parentNode === grid ? Number(li.dataset.i) : -1;
+  }
+  function beginSweep(s) {
+    s.active = true;
+    s.base = selected.slice();
+    s.value = !selected[s.start];
+    s.last = -1;
+    root.classList.add('is-sweeping');
+    applySweep(s.start);
+    if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScroll);
+  }
+  function applySweep(i) {
+    var s = sweep;
+    if (!s || i < 0 || i === s.last) return;
+    s.last = i;
+    var lo = Math.min(s.start, i), hi = Math.max(s.start, i);
+    for (var j = 0; j < selected.length; j++) selected[j] = j >= lo && j <= hi ? s.value : s.base[j];
+    writePick();
+    render();
+  }
+  function endSweep() {
+    var s = sweep;
+    sweep = null;
+    root.classList.remove('is-sweeping');
+    if (s && s.timer) clearTimeout(s.timer);
+    if (s && s.active) { anchor = s.start; refresh(); }
+  }
+  function autoScroll() {
+    scrollRaf = 0;
+    if (!sweep || !sweep.active) return;
+    var edge = 56, y = sweep.y, h = window.innerHeight, dy = 0;
+    if (y < edge) dy = -Math.ceil((edge - y) / 4);
+    else if (y > h - edge) dy = Math.ceil((y - (h - edge)) / 4);
+    if (dy) { window.scrollBy({ top: dy, behavior: 'instant' }); applySweep(cardAt(sweep.x, sweep.y)); }
+    scrollRaf = requestAnimationFrame(autoScroll);
+  }
+  grid.addEventListener('pointerdown', function (e) {
+    if (busy || !doc || sweep || (e.pointerType === 'mouse' && e.button !== 0) || e.target.closest('button')) return;
+    var li = e.target.closest('.p2j-page');
+    if (!li) return;
+    var i = Number(li.dataset.i);
+    if (e.pointerType === 'touch') {
+      sweep = { pid: e.pointerId, touch: true, start: i, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, active: false };
+      sweep.timer = setTimeout(function () { if (sweep && !sweep.active) beginSweep(sweep); }, 450);
+      return;
+    }
+    e.preventDefault();
+    if (e.shiftKey && anchor >= 0) {
+      var lo = Math.min(anchor, i), hi = Math.max(anchor, i);
+      setSelection(function (j, was) { return (j >= lo && j <= hi) || was; });
+      anchor = i;
+      return;
+    }
+    sweep = { pid: e.pointerId, touch: false, start: i, x: e.clientX, y: e.clientY, active: false };
+    beginSweep(sweep);
+    try { grid.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
+  });
+  grid.addEventListener('pointermove', function (e) {
+    var s = sweep;
+    if (!s || e.pointerId !== s.pid) return;
+    s.x = e.clientX;
+    s.y = e.clientY;
+    if (!s.active) {
+      if (Math.abs(e.clientX - s.x0) + Math.abs(e.clientY - s.y0) > 10) { clearTimeout(s.timer); sweep = null; }
+      return;
+    }
+    applySweep(cardAt(e.clientX, e.clientY));
+  });
+  grid.addEventListener('pointerup', function (e) {
+    var s = sweep;
+    if (!s || e.pointerId !== s.pid) return;
+    if (s.touch && !s.active) {
+      clearTimeout(s.timer);
+      sweep = null;
+      selected[s.start] = !selected[s.start];
+      anchor = s.start;
+      writePick();
+      refresh();
+      return;
+    }
+    endSweep();
+  });
+  grid.addEventListener('pointercancel', function (e) { if (sweep && e.pointerId === sweep.pid) endSweep(); });
+  grid.addEventListener('lostpointercapture', function (e) { if (sweep && !sweep.touch && e.pointerId === sweep.pid) endSweep(); });
+  grid.addEventListener('touchmove', function (e) { if (sweep && sweep.active && e.cancelable) e.preventDefault(); }, { passive: false });
+  grid.addEventListener('contextmenu', function (e) { if (!e.target.closest('button')) e.preventDefault(); });
+  grid.addEventListener('change', function (e) {
+    var cb = e.target.closest('.p2j-check');
+    if (!cb || busy) return;
+    var i = Number(cb.dataset.i);
+    selected[i] = cb.checked;
+    anchor = i;
+    writePick();
+    refresh();
+  });
+  grid.addEventListener('click', function (e) {
+    var b = e.target.closest('.p2j-dl');
+    if (!b || !doc) return;
+    var i = Number(b.dataset.i), st = settings(), r = done[i];
+    if (r && r.key === st.key) TT.download(nameFor(i, st), r.blob);
+  });
+  $$('[data-pick]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var all = b.dataset.pick === 'all';
+      pickedPages();
+      setSelection(function () { return all; });
+    });
+  });
+
+  // ---------- events ----------
+  $('#p2j-choose').addEventListener('click', function () { fileInput.click(); });
+  $('#p2j-another').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    var list = fileInput.files;
+    chooseFiles(list).then(function () { fileInput.value = ''; });
+  });
+  $('#p2j-sample').addEventListener('click', function () { chooseFiles([samplePdf()]); });
+  $('#p2j-pw-go').addEventListener('click', unlock);
+  pwIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); unlock(); } });
+  pwIn.addEventListener('input', function () { if (pwIn.getAttribute('aria-invalid')) { pwErr.textContent = ''; pwIn.removeAttribute('aria-invalid'); } });
+  [customIn, pagesIn, qIn].forEach(function (f) { f.addEventListener('input', function () { refresh(); }); });
+  [dpiSel, transpBox].concat($$('input[name="p2j-format"]')).forEach(function (f) { f.addEventListener('change', function () { refresh(); }); });
+  FIELDS.forEach(function (f) { f.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); convert(); } }); });
+  goBtn.addEventListener('click', convert);
+  cancelBtn.addEventListener('click', cancel);
+
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1; }
+  document.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    // A drop while converting is taken and answered with a message, so the drop area is not shown.
+    e.dataTransfer.dropEffect = 'copy';
+    if (!busy) dropZone.classList.add('is-over');
+  });
+  document.addEventListener('dragleave', function (e) { if (!e.relatedTarget) dropZone.classList.remove('is-over'); });
+  document.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropZone.classList.remove('is-over');
+    chooseFiles(e.dataTransfer.files, 'drop');
+  });
+  // After Back or Forward the browser may put earlier values back into the controls once this
+  // script has run, so everything shown is worked out from them again.
+  function syncControls() {
     $('#p2j-custom-field').hidden = dpiSel.value !== 'custom';
     $('#p2j-q-field').hidden = format() !== 'jpg';
     $('#p2j-transp-row').hidden = format() !== 'png';
-    var qv = $('#p2j-qval'), q = String(Math.min(100, Math.max(10, parseInt(qIn.value, 10) || 90)));
-    if (qv.textContent !== q) qv.textContent = q;
+    $('#p2j-qval').textContent = String(Math.min(100, Math.max(10, parseInt(qIn.value, 10) || 90)));
+    if (doc && !busy) refresh();
   }
-  var E = TTPdfPages({
-    p: 'p2j',
-    settings: settings,
-    fields: [customIn],
-    controls: function () { return [dpiSel, qIn, transpBox].concat($$('input[name="p2j-format"]')); },
-    sync: sync,
-    planText: function (st, pk) {
-      var fmt = st.format.toUpperCase(), first = E.doc().sizes[pk.pages[0] - 1];
-      var text = E.pagesPhrase(pk.pages) + ' to ' + fmt + ' at ' + st.dpi + ' DPI' + (st.format === 'jpg' ? ', quality ' + st.quality : st.transparent ? ', transparent' : '') + '.';
-      if (first) {
-        var px = E.pixelsFor(first, st.dpi);
-        text += ' Page ' + pk.pages[0] + ' becomes ' + E.NUM.format(px.w) + ' × ' + E.NUM.format(px.h) + ' pixels' + (px.dpi !== st.dpi ? ', at ' + px.dpi + ' DPI as it is very large' : '') + '.';
-      }
-      return text;
-    },
-    // ---------- drawing a page as an image ----------
-    convertPage: function (d, index, st, job) {
-      return E.renderPage(d, index, { dpi: st.dpi, alpha: st.transparent, background: st.transparent ? 'rgba(0,0,0,0)' : '#ffffff' }, job).then(function (g) {
-        if (!g) return null;
-        var canvas = g.canvas, px = g.px, type = st.format === 'png' ? 'image/png' : 'image/jpeg';
-        return new Promise(function (resolve) { canvas.toBlob(resolve, type, st.quality / 100); }).then(function (blob) {
-          canvas.width = canvas.height = 0;
-          if (!blob) throw E.friendly('the image could not be encoded');
-          return E.needs('TTPng').withDpi(blob, type, px.dpi);
-        }).then(function (blob) { return { key: st.key, blob: blob, w: px.w, h: px.h, dpi: px.dpi }; });
-      });
+  window.addEventListener('pageshow', syncControls);
+  syncControls();
+
+  // ---------- a sample to try the tool with: three pages written by hand ----------
+  function samplePdf() {
+    var pages = [
+      { w: 595, h: 842, s: '0.93 0.95 0.98 rg 0 0 595 842 re f\n0.12 0.35 0.75 rg 60 560 220 200 re f\n0.90 0.42 0.12 rg 315 560 220 200 re f\n' +
+        '0.15 0.62 0.38 rg 297 330 m 297 396 243 450 177 450 c 111 450 57 396 57 330 c 57 264 111 210 177 210 c 243 210 297 264 297 330 c f\n' +
+        '0.12 0.14 0.17 rg BT /F1 40 Tf 60 120 Td (Sample page 1) Tj ET BT /F2 18 Tf 330 330 Td (Shapes and text) Tj ET' },
+      { w: 842, h: 595, s: '1 1 1 rg 0 0 842 595 re f\n0.95 0.88 0.30 rg 60 300 722 230 re f\n0.55 0.25 0.65 rg 60 60 340 200 re f\n' +
+        '0.12 0.14 0.17 rg BT /F1 44 Tf 90 400 Td (A landscape page) Tj ET BT /F2 18 Tf 440 150 Td (Sample page 2) Tj ET' },
+      { w: 612, h: 792, s: '0.12 0.14 0.17 rg BT /F1 36 Tf 60 680 Td (Sample page 3) Tj ET\n' +
+        'BT /F2 16 Tf 60 640 Td (Nothing is painted behind this text, so it can be transparent as a PNG.) Tj ET\n' +
+        '0.85 0.15 0.20 rg 60 380 492 200 re f' }
+    ];
+    var objs = [], kids = [], i;
+    for (i = 0; i < pages.length; i++) kids.push((5 + 2 * i) + ' 0 R');
+    objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+    objs[2] = '<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + pages.length + ' >>';
+    objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+    objs[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+    for (i = 0; i < pages.length; i++) {
+      var pg = pages[i];
+      objs[5 + 2 * i] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pg.w + ' ' + pg.h + '] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ' + (6 + 2 * i) + ' 0 R >>';
+      objs[6 + 2 * i] = '<< /Length ' + pg.s.length + ' >>\nstream\n' + pg.s + '\nendstream';
     }
-  });
-  [customIn, qIn].forEach(function (f) { f.addEventListener('input', function () { E.refresh(); }); });
-  [dpiSel, transpBox].concat($$('input[name="p2j-format"]')).forEach(function (f) { f.addEventListener('change', function () { E.refresh(); }); });
+    var out = '%PDF-1.4\n', at = [];
+    for (i = 1; i < objs.length; i++) { at[i] = out.length; out += i + ' 0 obj\n' + objs[i] + '\nendobj\n'; }
+    var xref = out.length;
+    out += 'xref\n0 ' + objs.length + '\n0000000000 65535 f \n';
+    for (i = 1; i < objs.length; i++) out += ('000000000' + at[i]).slice(-10) + ' 00000 n \n';
+    out += 'trailer\n<< /Size ' + objs.length + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n';
+    return new File([out], 'sample.pdf', { type: 'application/pdf' });
+  }
   {% endraw %}
 })();
 </script>

@@ -50,7 +50,3 @@ License notice
     Built with Emscripten 4.0.21; the build commands are in the encoder's
     README.md (in its tarball). SHA-256 of the inlined WebAssembly binary:
     a680e507e9d91f1a4dcd6f846b9b94ff1fec7e19ff44e803358c218ddbe446a6
-
-GIF to MP4 (/gif-to-mp4/) loads mediabunny.min.js only, when the first GIF
-is added: the browser's own encoder (WebCodecs) makes the H.264 video, and
-Mediabunny writes the MP4 file around it. The MP3 encoder is not loaded there.

@@ -304,7 +304,6 @@ faq:
 
 <script src="{{ '/assets/js/image-decode.js' | relative_url }}"></script>
 <script src="{{ '/assets/js/zip.js' | relative_url }}"></script>
-<script src="{{ '/assets/js/png-kit.js' | relative_url }}"></script>
 <script>
 (function () {
   'use strict';
@@ -369,9 +368,368 @@ faq:
     $('#cmpi-quality-field .cmpi-qlabel span').textContent = 'Quality (JPG, WebP, AVIF)';
   });
 
-  // Colour quantisation and the indexed PNG ("lossy PNG") come from assets/js/png-kit.js
-  // (TTPng.quantize, in a worker), shared with PDF to PNG.
+  // Colour quantisation and indexed PNG writing ("lossy PNG"). Self-contained: it also runs in
+  // the worker, so it may not use anything from the enclosing scope.
+  // Colours are compared premultiplied (a transparent pixel's colour does not matter) with the
+  // channels weighted roughly by how visible an error in them is.
+  function quantKit() {
+    const WR = 0.667, WG = 1.333, WB = 1.0, WA = 1.0;
+    const NB = 1 << 19;
+    // Histogram bucket of a pixel: 5 bits per premultiplied colour channel, 4 bits of alpha
+    // (at least 1 unless fully transparent, so bucket 0 holds exactly the transparent pixels).
+    const bucket = (r, g, b, a) => ((r >> 3) << 14) | ((g >> 3) << 9) | ((b >> 3) << 4) | (a ? Math.max(1, a >> 4) : 0);
+
+    // The image's own colours if there are at most k of them (straight RGBA, transparent as one).
+    function exactColours(px, k) {
+      const map = new Map(), n = px.length >> 2, v = new Uint32Array(px.buffer, px.byteOffset, n);
+      let last = -1;
+      for (let i = 0; i < n; i++) {
+        const c = px[i * 4 + 3] ? v[i] : 0;
+        if (c === last) continue;
+        last = c;
+        if (!map.has(c)) { if (map.size >= k) return null; map.set(c, map.size); }
+      }
+      return map;
+    }
+
+    function histogram(px) {
+      const cnt = new Uint32Array(NB), sum = new Float64Array(NB * 4), n = px.length >> 2;
+      for (let i = 0, p = 0; i < n; i++, p += 4) {
+        const a = px[p + 3];
+        let r = 0, g = 0, b = 0;
+        if (a === 255) { r = px[p]; g = px[p + 1]; b = px[p + 2]; } else if (a) { const f = a / 255; r = px[p] * f; g = px[p + 1] * f; b = px[p + 2] * f; }
+        const k = bucket(r, g, b, a), s = k * 4;
+        cnt[k]++; sum[s] += r; sum[s + 1] += g; sum[s + 2] += b; sum[s + 3] += a;
+      }
+      let m = 0;
+      for (let k = 1; k < NB; k++) if (cnt[k]) m++;
+      const col = new Float64Array(m * 4), wt = new Float64Array(m), index = new Int32Array(NB).fill(-1);
+      for (let k = 1, j = 0; k < NB; k++) {
+        if (!cnt[k]) continue;
+        const c = cnt[k];
+        wt[j] = c;
+        for (let ch = 0; ch < 4; ch++) col[j * 4 + ch] = sum[k * 4 + ch] / c;
+        index[k] = j++;
+      }
+      return { m, col, wt, index, transparent: cnt[0] };
+    }
+
+    // Median cut on the histogram: split the box with the largest weighted error, along its
+    // widest channel, at the point that leaves the least error on both sides.
+    function medianCut(H, k) {
+      const { m, col, wt } = H, W4 = [WR, WG, WB, WA];
+      const ord = new Int32Array(m);
+      for (let i = 0; i < m; i++) ord[i] = i;
+      function box(s, e) {
+        const b = { s, e, w: 0, sx: [0, 0, 0, 0], sxx: [0, 0, 0, 0], err: 0, axis: 0 };
+        for (let i = s; i < e; i++) {
+          const j = ord[i], w = wt[j];
+          b.w += w;
+          for (let c = 0; c < 4; c++) { const x = col[j * 4 + c]; b.sx[c] += w * x; b.sxx[c] += w * x * x; }
+        }
+        let best = -1;
+        for (let c = 0; c < 4; c++) {
+          const v = W4[c] * Math.max(0, b.sxx[c] - b.sx[c] * b.sx[c] / b.w);
+          b.err += v;
+          if (v > best) { best = v; b.axis = c; }
+        }
+        return b;
+      }
+      const boxes = [box(0, m)];
+      while (boxes.length < k) {
+        let bi = -1;
+        for (let i = 0; i < boxes.length; i++) if (boxes[i].e - boxes[i].s > 1 && boxes[i].err > 0 && (bi < 0 || boxes[i].err > boxes[bi].err)) bi = i;
+        if (bi < 0) break;
+        const B = boxes[bi], ax = B.axis;
+        const part = ord.subarray(B.s, B.e);
+        part.sort((x, y) => col[x * 4 + ax] - col[y * 4 + ax]);
+        let lw = 0, bestAt = -1, bestErr = Infinity;
+        const lx = [0, 0, 0, 0], lxx = [0, 0, 0, 0];
+        for (let i = B.s; i < B.e - 1; i++) {
+          const j = ord[i], w = wt[j];
+          lw += w;
+          for (let c = 0; c < 4; c++) { const x = col[j * 4 + c]; lx[c] += w * x; lxx[c] += w * x * x; }
+          if (col[j * 4 + ax] === col[ord[i + 1] * 4 + ax]) continue;
+          const rw = B.w - lw;
+          let e = 0;
+          for (let c = 0; c < 4; c++) {
+            const rx = B.sx[c] - lx[c], rxx = B.sxx[c] - lxx[c];
+            e += W4[c] * (lxx[c] - lx[c] * lx[c] / lw + rxx - rx * rx / rw);
+          }
+          if (e < bestErr) { bestErr = e; bestAt = i + 1; }
+        }
+        if (bestAt < 0) { B.err = 0; continue; }
+        boxes.splice(bi, 1, box(B.s, bestAt), box(bestAt, B.e));
+      }
+      const pal = new Float64Array(boxes.length * 4);
+      boxes.forEach((b, i) => { for (let c = 0; c < 4; c++) pal[i * 4 + c] = b.sx[c] / b.w; });
+      return pal;
+    }
+
+    // Nearest palette entry. The entries are sorted by green, the most heavily weighted channel;
+    // the search walks outwards from the pixel's green value and stops on each side once the
+    // green difference alone is worse than the best match found.
+    function searcher(pal, n) {
+      const ord = Array.from({ length: n }, (_, i) => i).sort((x, y) => pal[x * 4 + 1] - pal[y * 4 + 1]);
+      const G = Float64Array.from(ord, i => pal[i * 4 + 1]);
+      const P = new Float64Array(n * 4);
+      ord.forEach((o, i) => { for (let c = 0; c < 4; c++) P[i * 4 + c] = pal[o * 4 + c]; });
+      return (r, g, b, a) => {
+        let lo = 0, hi = n;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (G[mid] < g) lo = mid + 1; else hi = mid; }
+        let best = 0, bd = Infinity, i = lo, j = lo - 1;
+        while (i < n || j >= 0) {
+          if (i < n) {
+            const dg = G[i] - g;
+            if (WG * dg * dg >= bd) i = n;
+            else {
+              const q = i * 4, dr = r - P[q], db = b - P[q + 2], da = a - P[q + 3];
+              const d = WR * dr * dr + WG * dg * dg + WB * db * db + WA * da * da;
+              if (d < bd) { bd = d; best = i; }
+              i++;
+            }
+          }
+          if (j >= 0) {
+            const dg = g - G[j];
+            if (WG * dg * dg >= bd) j = -1;
+            else {
+              const q = j * 4, dr = r - P[q], db = b - P[q + 2], da = a - P[q + 3];
+              const d = WR * dr * dr + WG * dg * dg + WB * db * db + WA * da * da;
+              if (d < bd) { bd = d; best = j; }
+              j--;
+            }
+          }
+        }
+        return ord[best];
+      };
+    }
+
+    // A few rounds of k-means on the histogram to settle the colours median cut chose.
+    function refine(H, pal, rounds) {
+      const n = pal.length >> 2, { m, col, wt } = H, assign = new Int32Array(m);
+      for (let r = 0; r <= rounds; r++) {
+        const acc = new Float64Array(n * 5), nearest = searcher(pal, n);
+        for (let j = 0; j < m; j++) {
+          const q = j * 4, i = nearest(col[q], col[q + 1], col[q + 2], col[q + 3]);
+          assign[j] = i;
+          if (r === rounds) continue;
+          const w = wt[j], o = i * 5;
+          acc[o] += w * col[q]; acc[o + 1] += w * col[q + 1]; acc[o + 2] += w * col[q + 2]; acc[o + 3] += w * col[q + 3]; acc[o + 4] += w;
+        }
+        if (r === rounds) break;
+        for (let i = 0; i < n; i++) {
+          const o = i * 5, w = acc[o + 4];
+          if (w) for (let c = 0; c < 4; c++) pal[i * 4 + c] = acc[o + c] / w;
+        }
+      }
+      return assign;
+    }
+
+    // Floyd-Steinberg error diffusion, serpentine, on the premultiplied colour (not on alpha,
+    // which would sprinkle see-through dots into solid areas). Errors are damped a little.
+    function dither(px, w, h, pal, n, transparent) {
+      const out = new Uint8Array(w * h), cache = new Int16Array(NB).fill(-1), D = 0.85, nearest = searcher(pal, n);
+      let cur = new Float32Array((w + 2) * 3), nxt = new Float32Array((w + 2) * 3);
+      for (let y = 0; y < h; y++) {
+        const ltr = !(y & 1), dx = ltr ? 1 : -1;
+        for (let k = 0, x = ltr ? 0 : w - 1; k < w; k++, x += dx) {
+          const i = y * w + x, p = i * 4, a = px[p + 3], e = (x + 1) * 3;
+          if (!a) { out[i] = transparent; continue; }
+          const f = a / 255;
+          const r = Math.min(a, Math.max(0, px[p] * f + cur[e])), g = Math.min(a, Math.max(0, px[p + 1] * f + cur[e + 1])), b = Math.min(a, Math.max(0, px[p + 2] * f + cur[e + 2]));
+          const key = bucket(r, g, b, a);
+          let idx = cache[key];
+          if (idx < 0) idx = cache[key] = nearest(r, g, b, a);
+          out[i] = idx;
+          const q = idx * 4, er = (r - pal[q]) * D, eg = (g - pal[q + 1]) * D, eb = (b - pal[q + 2]) * D;
+          const R = e + dx * 3, L = e - dx * 3;
+          cur[R] += er * 7 / 16; cur[R + 1] += eg * 7 / 16; cur[R + 2] += eb * 7 / 16;
+          nxt[L] += er * 3 / 16; nxt[L + 1] += eg * 3 / 16; nxt[L + 2] += eb * 3 / 16;
+          nxt[e] += er * 5 / 16; nxt[e + 1] += eg * 5 / 16; nxt[e + 2] += eb * 5 / 16;
+          nxt[R] += er / 16; nxt[R + 1] += eg / 16; nxt[R + 2] += eb / 16;
+        }
+        const t = cur; cur = nxt; nxt = t; nxt.fill(0);
+      }
+      return out;
+    }
+
+    const CRC = new Uint32Array(256).map((_, n) => {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      return c >>> 0;
+    });
+    function chunk(type, data) {
+      const out = new Uint8Array(12 + data.length), dv = new DataView(out.buffer);
+      dv.setUint32(0, data.length);
+      for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+      out.set(data, 8);
+      let c = 0xFFFFFFFF;
+      for (let i = 4; i < 8 + data.length; i++) c = CRC[(c ^ out[i]) & 0xFF] ^ (c >>> 8);
+      dv.setUint32(8 + data.length, (c ^ 0xFFFFFFFF) >>> 0);
+      return out;
+    }
+    async function zlib(u) {
+      const parts = [], reader = new Blob([u]).stream().pipeThrough(new CompressionStream('deflate')).getReader();
+      let n = 0;
+      for (;;) { const r = await reader.read(); if (r.done) break; parts.push(r.value); n += r.value.length; }
+      const out = new Uint8Array(n);
+      let o = 0;
+      parts.forEach(p => { out.set(p, o); o += p.length; });
+      return out;
+    }
+    // Indexed-colour PNG (ISO/IEC 15948): PLTE, tRNS for the see-through entries (sorted first),
+    // the smallest bit depth that fits, no row filters (best for palette images).
+    async function writePng(w, h, rgba, n, idx) {
+      const order = Array.from({ length: n }, (_, i) => i).sort((x, y) => (rgba[x * 4 + 3] === 255) - (rgba[y * 4 + 3] === 255) || x - y);
+      const remap = new Uint8Array(n);
+      order.forEach((o, i) => { remap[o] = i; });
+      const plte = new Uint8Array(3 * n);
+      let trns = 0;
+      order.forEach((o, i) => { plte.set([rgba[o * 4], rgba[o * 4 + 1], rgba[o * 4 + 2]], i * 3); if (rgba[o * 4 + 3] < 255) trns = i + 1; });
+      const depth = n <= 2 ? 1 : n <= 4 ? 2 : n <= 16 ? 4 : 8, per = 8 / depth, row = Math.ceil(w / per);
+      const raw = new Uint8Array(h * (row + 1));
+      for (let y = 0; y < h; y++) {
+        const o = y * (row + 1) + 1, s = y * w;
+        if (depth === 8) for (let x = 0; x < w; x++) raw[o + x] = remap[idx[s + x]];
+        else for (let x = 0; x < w; x++) raw[o + ((x / per) | 0)] |= remap[idx[s + x]] << (8 - depth * (x % per + 1));
+      }
+      const ihdr = new Uint8Array(13), dv = new DataView(ihdr.buffer);
+      dv.setUint32(0, w); dv.setUint32(4, h);
+      ihdr[8] = depth; ihdr[9] = 3;
+      const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('PLTE', plte)];
+      if (trns) parts.push(chunk('tRNS', Uint8Array.from(order.slice(0, trns), o => rgba[o * 4 + 3])));
+      parts.push(chunk('IDAT', await zlib(raw)), chunk('IEND', new Uint8Array(0)));
+      let len = 0;
+      parts.forEach(p => { len += p.length; });
+      const out = new Uint8Array(len);
+      let o = 0;
+      parts.forEach(p => { out.set(p, o); o += p.length; });
+      return out;
+    }
+
+    // img = { w, h, px } (straight RGBA); remembers its histogram and palettes between calls.
+    async function png(img, colours, useDither) {
+      const { w, h, px } = img;
+      if (img.exact === undefined) img.exact = exactColours(px, 256);
+      if (img.exact && img.exact.size <= colours) {
+        const map = img.exact, n = map.size, rgba = new Uint8Array(n * 4), idx = new Uint8Array(w * h);
+        const v = new Uint32Array(px.buffer, px.byteOffset, w * h);
+        map.forEach((i, c) => { rgba[i * 4] = c & 255; rgba[i * 4 + 1] = (c >>> 8) & 255; rgba[i * 4 + 2] = (c >>> 16) & 255; rgba[i * 4 + 3] = c >>> 24; });
+        for (let i = 0; i < w * h; i++) idx[i] = map.get(px[i * 4 + 3] ? v[i] : 0);
+        return { bytes: await writePng(w, h, rgba, n, idx), colours: n, exact: true };
+      }
+      if (!img.hist) img.hist = histogram(px);
+      const H = img.hist, reserve = H.transparent ? 1 : 0;
+      img.pals = img.pals || {};
+      let P = img.pals[colours];
+      if (!P) {
+        const pal = medianCut(H, Math.max(1, Math.min(colours - reserve, H.m)));
+        const assign = refine(H, pal, H.m > 150000 ? 1 : 3);
+        P = img.pals[colours] = { pal, assign };
+      }
+      const k = P.pal.length >> 2, n = k + reserve, pal = new Float64Array(n * 4);
+      pal.set(P.pal);
+      const transparent = reserve ? k : 0;
+      let idx;
+      if (useDither) idx = dither(px, w, h, pal, reserve ? n - 1 : n, transparent);
+      else {
+        idx = new Uint8Array(w * h);
+        for (let i = 0, p = 0; i < w * h; i++, p += 4) {
+          const a = px[p + 3];
+          if (!a) { idx[i] = transparent; continue; }
+          let r = px[p], g = px[p + 1], b = px[p + 2];
+          if (a < 255) { const f = a / 255; r *= f; g *= f; b *= f; }
+          idx[i] = P.assign[H.index[bucket(r, g, b, a)]];
+        }
+      }
+      // Premultiplied palette back to straight colour for the file.
+      const rgba = new Uint8Array(n * 4);
+      for (let i = 0; i < k; i++) {
+        const a = Math.round(Math.min(255, Math.max(0, pal[i * 4 + 3])));
+        rgba[i * 4 + 3] = a;
+        if (a) for (let c = 0; c < 3; c++) rgba[i * 4 + c] = Math.round(Math.min(255, Math.max(0, pal[i * 4 + c] * 255 / pal[i * 4 + 3])));
+      }
+      return { bytes: await writePng(w, h, rgba, n, idx), colours: n, exact: false };
+    }
+    return { png };
+  }
+
+  // Runs quantKit in a Web Worker: it decodes the lossless PNG it is given, keeps the pixels of the
+  // last image (the target-size search asks for several palette sizes in a row) and returns the
+  // bytes of the indexed PNG.
+  function quantWorkerMain(makeKit) {
+    const K = makeKit();
+    let img = null;
+    self.onmessage = async e => {
+      const m = e.data;
+      if (m.free) { img = null; return; }
+      try {
+        if (!img || img.key !== m.key) {
+          img = null;
+          const bmp = await createImageBitmap(m.blob);
+          const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d', { willReadFrequently: true });
+          g.drawImage(bmp, 0, 0);
+          img = { key: m.key, w: c.width, h: c.height, px: g.getImageData(0, 0, c.width, c.height).data };
+          bmp.close();
+          c.width = 0;
+        }
+        const r = await K.png(img, m.colours, m.dither);
+        self.postMessage({ id: m.id, bytes: r.bytes, colours: r.colours, exact: r.exact }, [r.bytes.buffer]);
+      } catch (err) {
+        self.postMessage({ id: m.id, error: String((err && err.message) || err) });
+      }
+    };
+  }
   let hold = false; // a number is being typed: wait for it before compressing again
+  let qWorker = null, qId = 0, localKit = null, localImg = null; // qWorker === false: unavailable
+  const qWaiting = new Map();
+  function quantInWorker(msg) {
+    if (qWorker === null) {
+      try {
+        if (typeof Worker !== 'function' || typeof OffscreenCanvas !== 'function') throw new Error('unsupported');
+        const w = new Worker(URL.createObjectURL(new Blob(['(' + quantWorkerMain + ')(' + quantKit + ');'], { type: 'text/javascript' })));
+        w.onmessage = e => { const cb = qWaiting.get(e.data.id); if (cb) { qWaiting.delete(e.data.id); cb(e.data); } };
+        w.onerror = e => {
+          if (e && e.preventDefault) e.preventDefault();
+          w.terminate();
+          qWorker = false;
+          qWaiting.forEach(cb => cb({ error: 'WORKER' }));
+          qWaiting.clear();
+        };
+        qWorker = w;
+      } catch (e) { qWorker = false; }
+    }
+    if (!qWorker) return Promise.reject(new Error('WORKER'));
+    return new Promise((resolve, reject) => {
+      const id = ++qId;
+      qWaiting.set(id, d => (d.error ? reject(new Error(d.error)) : resolve(d)));
+      qWorker.postMessage(Object.assign({ id }, msg));
+    });
+  }
+  // Drop the pixels the quantiser keeps between tries.
+  function quantFree() {
+    localImg = null;
+    if (qWorker) qWorker.postMessage({ free: true });
+  }
+  async function quantize(key, blob, colours, dither) {
+    try {
+      return await quantInWorker({ key, blob, colours, dither });
+    } catch (e) {
+      if (e.message !== 'WORKER') throw e;
+    }
+    // No worker (or it crashed): the same code on the page.
+    if (!localImg || localImg.key !== key) {
+      localImg = null;
+      const bmp = await createImageBitmap(blob), c = document.createElement('canvas');
+      c.width = bmp.width; c.height = bmp.height;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(bmp, 0, 0);
+      localImg = { key, w: c.width, h: c.height, px: g.getImageData(0, 0, c.width, c.height).data };
+      if (bmp.close) bmp.close();
+    }
+    localKit = localKit || quantKit();
+    return localKit.png(localImg, colours, dither);
+  }
 
   // ---------- Images ----------
   function uncache(id) { TTImage.release(cache.get(id)); cache.delete(id); }
@@ -438,7 +796,7 @@ faq:
     const lossless = await losslessPng(it, d, w, h);
     if (level >= LOSSLESS) return { blob: lossless, lossless: true };
     if (typeof CompressionStream !== 'function') throw fail('This browser cannot make smaller PNG files. Choose JPG or WebP, or All (lossless) colours.');
-    const r = await TTPng.quantize(it.id + ':' + w + 'x' + h, lossless, LEVELS[level - 1], dither);
+    const r = await quantize(it.id + ':' + w + 'x' + h, lossless, LEVELS[level - 1], dither);
     return { blob: new Blob([r.bytes], { type: 'image/png' }), colours: r.colours, exact: r.exact };
   }
 
@@ -631,7 +989,7 @@ faq:
         if (e !== CANCEL && g === gen && items.indexOf(it) >= 0) { it.state = 'error'; it.out = null; it.error = message(e); }
       }
       if (items.indexOf(it) >= 0 && it.state !== 'working') paint(it);
-      if (pngCache.key.indexOf(it.id + ':') === 0 && it !== selected) { pngCache = { key: '', blob: null }; TTPng.quantFree(); }
+      if (pngCache.key.indexOf(it.id + ':') === 0 && it !== selected) { pngCache = { key: '', blob: null }; quantFree(); }
     }
     running = false;
     summary();
@@ -866,7 +1224,7 @@ faq:
     items = [];
     selected = null;
     pngCache = { key: '', blob: null };
-    TTPng.quantFree();
+    quantFree();
     before.removeAttribute('src');
     after.removeAttribute('src');
     result.hidden = true;

@@ -5,10 +5,9 @@ const { devices } = require('playwright');
 
 // The samples and the facts checked against them come from
 // tests/fixtures/mp4-to-mp3/make_fixtures.py (ffmpeg and ffprobe): durations,
-// codecs, the SHA-256 of every AAC packet in clip.mp4, peak levels from
-// ffmpeg's astats, and bitrates from ffprobe's packets. Outputs are checked by
-// parsing them here (MPEG frame headers, ID3v2.3, ID3v2.4 and ID3v1 tags, RIFF
-// chunks, MP4 boxes, the ZIP directory) and by
+// codecs, the SHA-256 of every AAC packet in clip.mp4, and peak levels from
+// ffmpeg's astats. Outputs are checked by parsing them here (MPEG frame
+// headers, ID3v2.4 frames, RIFF chunks, MP4 boxes, the ZIP directory) and by
 // decoding them with the browser's own decoder, which shares no code with the
 // LAME encoder that wrote them: duration, tone frequency (zero crossings) and
 // RMS per channel. Source tones in clip.mp4: 440 Hz for 0-2 s, 660 Hz for
@@ -17,12 +16,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const exp = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const F = name => path.join(fixtures, name);
   const near = (a, b, tol, what) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a}, expected ${b} ± ${tol}`);
-  // The bitrate a file's card shows: ffprobe's packets of the first 10 s.
-  const kb = (name, i = 0) => Math.round(exp[name].kbps[i]);
-  const b64 = name => fs.readFileSync(F(name)).toString('base64');
-  // With M2M_DUMP set to a folder, outputs are also saved there, for checks
-  // with other tools (ffprobe, mutagen).
-  const dump = (name, bytes) => { if (process.env.M2M_DUMP) fs.writeFileSync(path.join(process.env.M2M_DUMP, name), bytes); };
 
   const instrument = () => {
     // Bytes read from files, scheduled preview buffers, gain automation and the wake lock.
@@ -119,59 +112,30 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     describedby: await p.getAttribute(sel, 'aria-describedby')
   });
 
-  // MPEG-1, 2 and 2.5 Layer III frame headers, the ID3v2 tag in front of them
-  // and the ID3v1 tag after them.
+  // MPEG-1/2 Layer III frame headers and the ID3v2 tag in front of them.
   const synch = b => ((b[0] & 0x7f) << 21) | ((b[1] & 0x7f) << 14) | ((b[2] & 0x7f) << 7) | (b[3] & 0x7f);
-  // An ID3 string in text encoding enc (0 ISO-8859-1, 1 UTF-16 with a BOM,
-  // 3 UTF-8), without its terminator.
-  function id3String(b, enc) {
-    if (enc === 0) return b.toString('latin1').replace(/\0+$/, '');
-    if (enc === 3) return b.toString('utf8').replace(/\0+$/, '');
-    assert.equal(enc, 1, `text encoding ${enc}`);
-    if (!b.length) return '';
-    assert.ok((b[0] === 0xff && b[1] === 0xfe) || (b[0] === 0xfe && b[1] === 0xff), 'UTF-16 text starts with a byte order mark');
-    const u = Buffer.from(b.subarray(2));
-    if (b[0] === 0xfe) u.swap16();
-    return u.toString('utf16le').replace(/\0+$/, '');
-  }
-  // The first string of b (in encoding enc) and what follows its terminator.
-  function splitString(b, enc) {
-    if (enc !== 1) { const i = b.indexOf(0); return [b.subarray(0, i), b.subarray(i + 1)]; }
-    for (let i = 0; i + 1 < b.length; i += 2) if (!b[i] && !b[i + 1]) return [b.subarray(0, i), b.subarray(i + 2)];
-    return [b, Buffer.alloc(0)];
-  }
   function parseMp3(buf) {
     let off = 0;
-    const tags = {}, enc = {};
+    const tags = {};
     let id3 = 0;
     if (buf.toString('latin1', 0, 3) === 'ID3') {
       id3 = buf[3];
-      if (id3 === 3) assert.equal(buf[5], 0, 'ID3v2.3 flags: no unsynchronisation, extended header or experimental bit');
       const size = synch(buf.subarray(6, 10));
       for (let q = 10; q + 10 <= 10 + size;) {
         const id = buf.toString('latin1', q, q + 4);
         if (!/^[A-Z0-9]{4}$/.test(id)) break;
         const len = id3 === 4 ? synch(buf.subarray(q + 4, q + 8)) : buf.readUInt32BE(q + 4);
         const body = buf.subarray(q + 10, q + 10 + len);
-        if (id3 === 3) assert.equal(buf.readUInt16BE(q + 8), 0, `${id} frame flags`);
-        assert.equal(tags[id], undefined, `one ${id} frame`);
-        if ((id[0] === 'T' && id !== 'TXXX') || id === 'COMM' || id === 'USLT') {
-          // ID3v2.3 has no UTF-8: ISO-8859-1 or UTF-16 with a byte order mark.
-          assert.ok((id3 === 3 ? [0, 1] : [0, 3]).includes(body[0]), `${id} text encoding ${body[0]} in ID3v2.${id3}`);
-          enc[id] = body[0];
-          if (id[0] === 'T') tags[id] = id3String(body.subarray(1), body[0]);
-          else {
-            const [desc, text] = splitString(body.subarray(4), body[0]);
-            tags[id] = { lang: body.toString('latin1', 1, 4), desc: id3String(desc, body[0]), text: id3String(text, body[0]) };
-          }
+        if (id[0] === 'T' && id !== 'TXXX') {
+          assert.equal(body[0] === 3 || body[0] === 0, true, `${id} text encoding ${body[0]}`);
+          tags[id] = (body[0] === 3 ? body.toString('utf8', 1) : body.toString('latin1', 1)).replace(/\0+$/, '');
         } else tags[id] = body;
         q += 10 + len;
       }
       off = 10 + size;
     }
     const BR = { 3: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320], 2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160] };
-    BR[0] = BR[2];
-    const SR = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] };
+    const SR = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000] };
     const frames = [];
     while (off + 4 <= buf.length) {
       const h = buf.readUInt32BE(off);
@@ -183,32 +147,24 @@ module.exports = async ({ page, open, assert, fixtures }) => {
       frames.push({ ver, layer, kbps, sr, mode, tag: buf.toString('latin1', off + 4 + side, off + 8 + side) });
       off += len;
     }
-    // ID3v1.1: text fields padded with zeros, then a zero, the track and the genre.
-    let v1 = null;
-    if (buf.length - off === 128 && buf.toString('latin1', off, off + 3) === 'TAG') {
-      const t = (a, n) => buf.toString('latin1', off + a, off + a + n).replace(/\0+$/, '');
-      v1 = { title: t(3, 30), artist: t(33, 30), album: t(63, 30), year: t(93, 4), comment: t(97, 28), zero: buf[off + 125], track: buf[off + 126], genre: buf[off + 127] };
-    }
-    return { id3, tags, enc, frames, v1, rest: buf.length - off, tail: buf.toString('latin1', off, off + 3) };
+    return { id3, tags, frames, rest: buf.length - off, tail: buf.toString('latin1', off, off + 3) };
   }
-  // MPEG-1 above 32 kHz, MPEG-2 from 16 to 24 kHz, MPEG-2.5 below.
   function checkMp3(buf, { kbps, sr, mono, seconds }, what) {
     const m = parseMp3(buf);
-    const ver = sr >= 32000 ? 3 : sr >= 16000 ? 2 : 0, name = { 3: 'MPEG-1', 2: 'MPEG-2', 0: 'MPEG-2.5' }[ver];
-    assert.equal(m.id3, 3, `${what}: ID3v2.3 tag`);
+    assert.equal(m.id3, 4, `${what}: ID3v2.4 tag`);
     assert.ok(m.frames.length > 3, `${what}: MPEG frames found`);
-    assert.ok(m.rest === 128 && m.v1, `${what}: a 128-byte ID3v1 tag after the last frame (${m.rest} bytes there, starting ${m.tail})`);
+    assert.ok(m.rest === 0 || (m.rest === 128 && m.tail === 'TAG'), `${what}: ${m.rest} bytes after the last frame`);
     assert.ok(['Xing', 'Info'].includes(m.frames[0].tag), `${what}: Xing or Info frame first, got ${m.frames[0].tag}`);
     // The first frame carries the Xing/Info header, not sound; its bitrate only has to fit it.
     for (const [i, f] of m.frames.entries()) {
-      assert.equal(f.ver, ver, `${what}: ${name}`);
+      assert.equal(f.ver, 3, `${what}: MPEG-1`);
       assert.equal(f.layer, 1, `${what}: Layer III`);
       if (i > 0) assert.equal(f.kbps, kbps, `${what}: frame ${i} is ${f.kbps} kbps, not a constant ${kbps} kbps`);
       assert.equal(f.sr, sr, `${what}: ${sr} Hz`);
       assert.equal(f.mode === 3, mono, `${what}: channel mode ${f.mode}`);
     }
     const audioFrames = m.frames.length - 1;
-    const need = Math.ceil(seconds * sr / (ver === 3 ? 1152 : 576));
+    const need = Math.ceil(seconds * sr / 1152);
     assert.ok(audioFrames >= need && audioFrames <= need + 3, `${what}: ${audioFrames} audio frames for ${seconds} s (at least ${need})`);
     return m;
   }
@@ -283,25 +239,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     });
     return { ftyp: boxes.ftyp, stsd: boxes.stsd, samples: out };
   }
-  // iTunes tags of an M4A: moov > udta > meta (a full box) > ilst > item > data.
-  function mp4Tags(buf) {
-    const out = {};
-    (function walk(a, b) {
-      for (let q = a; q + 8 <= b;) {
-        const len = buf.readUInt32BE(q), typ = buf.toString('latin1', q + 4, q + 8);
-        if (len < 8) break;
-        if (typ === 'ilst') {
-          for (let r = q + 8; r + 8 <= q + len;) {
-            const n = buf.readUInt32BE(r), d = r + 8, body = buf.subarray(d + 16, d + buf.readUInt32BE(d));
-            out[buf.toString('latin1', r + 4, r + 8)] = buf.readUInt32BE(d + 8) === 1 ? body.toString('utf8') : body;
-            r += n;
-          }
-        } else if (['moov', 'udta', 'meta'].includes(typ)) walk(q + 8 + (typ === 'meta' ? 4 : 0), q + len);
-        q += len;
-      }
-    })(0, buf.length);
-    return out;
-  }
   const sha = b => crypto.createHash('sha256').update(b).digest('hex');
   // The picture inside an ID3 APIC frame: after the encoding, MIME type, picture type and description.
   const apicImage = body => {
@@ -353,7 +290,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal((await card('silent-video.mp4')).msg, 'This video has no sound track, so there is no audio to save.');
   assert.equal((await card('not-media.mp4')).msg, 'This is not a video or audio file that this page can read. It reads MP4, MOV, WebM, MKV, M4A, MP3, WAV, OGG, FLAC and MPEG-TS files.');
   let c = await card('dolby.mkv');
-  assert.equal(c.info, `0:01.995 · AC-3 (Dolby Digital) · 48 kHz · stereo · ${kb('dolby.mkv')} kbps`, 'the bitrate is measured when the file does not state it');
+  assert.equal(c.info, '0:01.995 · AC-3 (Dolby Digital) · 48 kHz · stereo');
   assert.equal(c.msg, 'This browser cannot decode AC-3 (Dolby Digital) audio, so it cannot make MP3 or WAV from this file.');
   assert.equal(c.state, '', 'a file that cannot become MP3 is not called ready');
   assert.equal(c.current, 'true', 'the only readable file is the one being edited');
@@ -373,99 +310,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.locator('.m2m-file').count(), 0);
   assert.equal(await page.isVisible('#m2m-files-sec'), false);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'm2m-open');
-
-  // ---------- Copy-protected songs and audiobooks ----------
-  // Apple FairPlay ('drms') and Audible ('aavd') sample entries hold
-  // encrypted AAC, which would decode to noise. A .m4p or .aax file that
-  // cannot be read at all is protected too.
-  const FAIRPLAY = 'This file is copy-protected (Apple FairPlay DRM), so it cannot be converted. Apple Music downloads are protected this way, and so are iTunes Store songs bought before April 2009 and never upgraded to iTunes Plus.';
-  const AUDIBLE = 'This file is copy-protected (Audible DRM), so it cannot be converted. Audible audiobooks (.aa and .aax files) are protected this way.';
-  await page.setInputFiles('#m2m-file', ['fairplay.m4a', 'audible.m4b'].map(F));
-  await waitRead();
-  assert.equal(await text('#m2m-status'), 'Added 2 files, 2 of them cannot be converted to MP3: see the message under each.');
-  await page.evaluate(() => {
-    const dt = new DataTransfer();
-    for (const name of ['song.m4p', 'book.aax']) dt.items.add(new File([new Uint8Array(64).fill(7)], name));
-    document.getElementById('m2m-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  });
-  await page.waitForFunction(() => document.querySelectorAll('.m2m-file').length === 4);
-  await waitRead();
-  for (const [name, msg] of [['fairplay.m4a', FAIRPLAY], ['song.m4p', FAIRPLAY], ['audible.m4b', AUDIBLE], ['book.aax', AUDIBLE]]) {
-    c = await card(name);
-    assert.equal(c.msg, msg, `${name} is named as copy-protected`);
-    assert.equal(c.state, '', `${name} is not called ready`);
-  }
-  assert.equal(await page.isVisible('#m2m-edit'), false, 'nothing to edit');
-  assert.equal(await page.isDisabled('#m2m-convert'), true);
-  await page.check('#m2m-f-copy');
-  assert.equal(await page.isDisabled('#m2m-convert'), true, 'nor is the encrypted AAC copied');
-  await page.check('#m2m-f-mp3');
-  await page.click('#m2m-clear');
-
-  // ---------- RIFF INFO text in UTF-8 or in Windows-1252 ----------
-  for (const [name, title, artist] of [['info-utf8.wav', exp['info-utf8.wav'].info.title, exp['info-utf8.wav'].info.artist],
-    ['info-1252.wav', exp['info-1252.wav'].info.INAM, exp['info-1252.wav'].info.IART]]) {
-    await page.setInputFiles('#m2m-file', F(name));
-    await waitRead();
-    assert.deepEqual([await page.inputValue('#m2m-title'), await page.inputValue('#m2m-artist')], [title, artist], `${name}: the INFO text as written`);
-    await page.click(`[aria-label="Remove ${name}"]`);
-  }
-
-  // ---------- Every tag, through the engine: read from MP4, ID3 and Vorbis comments, written as ID3v2.3 and ID3v1 ----------
-  const engine = (name, options) => page.evaluate(async ([data, name, o]) => {
-    const u8 = Uint8Array.from(atob(data), ch => ch.charCodeAt(0));
-    const m = await TTAudio.open(new File([u8], name));
-    const tags = Object.assign({}, m.tags, { images: m.tags.images.map(im => ({ mimeType: im.mimeType, kind: im.kind, bytes: im.data.length })) });
-    let out = null;
-    if (o) {
-      const r = await TTAudio.convert(m, m.primary, Object.assign({ tags: m.tags }, o)).promise;
-      const b = new Uint8Array(await r.blob.arrayBuffer());
-      let s = '';
-      for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
-      out = btoa(s);
-    }
-    TTAudio.close(m);
-    return { tags, out };
-  }, [b64(name), name, options || null]);
-  const T = exp['tags.m4a'].tags;
-  const TAGS = { title: T.title, artist: T.artist, album: T.album, albumArtist: T.album_artist, composer: T.composer, genre: T.genre,
-    comment: T.comment, lyrics: T.lyrics, date: T.date, track: 3, tracks: 12, disc: 1, discs: 2, images: [] };
-  let got = await engine('tags.m4a', { format: 'mp3', kbps: 128 });
-  assert.deepEqual(got.tags, Object.assign({}, TAGS, { images: [{ mimeType: 'image/jpeg', kind: 'coverFront', bytes: got.tags.images[0] && got.tags.images[0].bytes }] }), 'every iTunes tag is read');
-  const tagged = Buffer.from(got.out, 'base64');
-  dump('tags.mp3', tagged);
-  let m = checkMp3(tagged, { kbps: 128, sr: 44100, mono: true, seconds: 0.5 }, 'tags.mp3');
-  assert.deepEqual(Object.keys(m.tags).sort(), ['APIC', 'COMM', 'TALB', 'TCOM', 'TCON', 'TIT2', 'TPE1', 'TPE2', 'TPOS', 'TRCK', 'TYER', 'USLT'], 'the frames of tags.mp3');
-  assert.deepEqual([m.tags.TIT2, m.tags.TPE1, m.tags.TALB, m.tags.TPE2, m.tags.TRCK, m.tags.TPOS, m.tags.TCOM, m.tags.TYER, m.tags.TCON],
-    [T.title, T.artist, T.album, T.album_artist, '3/12', '1/2', T.composer, '2019', 'Jazz'], 'text frames; a year-only date stays a year');
-  assert.deepEqual(m.enc, { TIT2: 1, TPE1: 0, TALB: 0, TPE2: 0, TRCK: 0, TPOS: 0, TCOM: 0, TYER: 0, TCON: 0, COMM: 1, USLT: 1 }, 'ISO-8859-1 where the text fits, else UTF-16');
-  assert.deepEqual(m.tags.COMM, { lang: 'eng', desc: '', text: T.comment });
-  assert.deepEqual(m.tags.USLT, { lang: 'eng', desc: '', text: T.lyrics }, 'the lyrics keep their line break');
-  assert.equal(m.tags.APIC.toString('latin1', 0, 12), '\0image/jpeg\0', 'APIC: ISO-8859-1, MIME type');
-  assert.equal(m.tags.APIC[12], 3, 'APIC: the front cover');
-  assert.equal(sha(apicImage(m.tags.APIC)), exp['tags.m4a'].jpeg_sha256, 'the cover, byte for byte');
-  assert.deepEqual(m.v1, { title: 'Café', artist: T.artist, album: T.album, year: '2019', comment: 'A comment', zero: 0, track: 3, genre: 8 },
-    'ID3v1: text cut where ISO-8859-1 ends, the year, track 3 and genre 8 (Jazz)');
-  for (const [name, date] of [['tags-v24.mp3', '2019'], ['tags-v23.mp3', '2019-05-03'], ['tags.flac', '2019']]) {
-    assert.deepEqual((await engine(name)).tags, Object.assign({}, TAGS, { date }), `${name}: every tag is read`);
-  }
-  const V = exp['tags-v22.mp3'].tags;
-  assert.deepEqual((await engine('tags-v22.mp3')).tags, { title: V.TT2, artist: V.TP1, album: V.TAL, albumArtist: '', composer: V.TCM, genre: V.TCO,
-    comment: '', lyrics: '', date: V.TYE, track: 5, tracks: 9, disc: 0, discs: 0, images: [] }, 'ID3v2.2 is read');
-  // A full date is written as TYER and TDAT (day and month).
-  m = parseMp3(Buffer.from((await engine('tags-v23.mp3', { format: 'mp3', kbps: 64 })).out, 'base64'));
-  assert.deepEqual([m.tags.TYER, m.tags.TDAT], ['2019', '0305']);
-  // M4A and WAV keep every tag too: the year as a year, the disc as 'disk',
-  // lyrics outside ISO-8859-1 in a USLT frame of the right size.
-  const m4aTags = mp4Tags(Buffer.from((await engine('tags.m4a', { format: 'copy' })).out, 'base64'));
-  assert.deepEqual([m4aTags['\u00a9nam'], m4aTags['\u00a9ART'], m4aTags.aART, m4aTags['\u00a9alb'], m4aTags['\u00a9wrt'], m4aTags['\u00a9day'], m4aTags['\u00a9gen'],
-    m4aTags['\u00a9cmt'], m4aTags['\u00a9lyr']], [T.title, T.artist, T.album_artist, T.album, T.composer, '2019', 'Jazz', T.comment, T.lyrics], 'the M4A\'s iTunes tags');
-  assert.deepEqual([m4aTags.trkn.readUInt16BE(2), m4aTags.trkn.readUInt16BE(4), m4aTags.disk.readUInt16BE(2), m4aTags.disk.readUInt16BE(4)], [3, 12, 1, 2], 'track 3/12, disc 1/2');
-  assert.equal(sha(m4aTags.covr), exp['tags.m4a'].jpeg_sha256, 'the M4A\'s cover');
-  const wavTags = parseWav(Buffer.from((await engine('tags.m4a', { format: 'wav' })).out, 'base64')).id3;
-  assert.deepEqual([wavTags.TIT2, wavTags.TPE2, wavTags.TCOM, wavTags.TDRC, wavTags.TRCK, wavTags.TPOS, wavTags.USLT.text],
-    [T.title, T.album_artist, T.composer, '2019', '3/12', '1/2', T.lyrics], 'the WAV\'s ID3 chunk');
-  assert.equal(sha(apicImage(wavTags.APIC)), exp['tags.m4a'].jpeg_sha256, 'the WAV\'s cover');
 
   // ---------- Incomplete and empty files say so ----------
   // cut-short.mp4 is clip.mp4 cut off after 50,000 bytes: its index still lists
@@ -651,17 +495,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Download clip.mp3', 'focus moves to the download');
   let mp3 = await download(() => page.keyboard.press('Enter'));
   assert.equal(mp3.name, 'clip.mp3');
-  m = checkMp3(mp3.bytes, { kbps: 128, sr: 48000, mono: false, seconds: 1 }, 'clip.mp3');
+  let m = checkMp3(mp3.bytes, { kbps: 128, sr: 48000, mono: false, seconds: 1 }, 'clip.mp3');
   assert.equal(m.tags.TIT2, title);
   assert.equal(m.tags.TPE1, 'Ärtist');
   assert.equal(m.tags.TALB, 'Albüm');
-  // ID3v2.3 has no UTF-8: text that fits ISO-8859-1 is written in it, the
-  // rest in UTF-16, which Windows File Explorer reads too.
-  assert.deepEqual([m.enc.TIT2, m.enc.TPE1, m.enc.TALB], [1, 0, 0], 'text encodings of TIT2, TPE1 and TALB');
-  assert.deepEqual(Object.keys(m.tags).sort(), ['TALB', 'TIT2', 'TPE1'], 'only the tags shown are written');
-  // ID3v1 holds ISO-8859-1 only: the title is cut where the emoji begins.
-  assert.deepEqual(m.v1, { title: 'Café', artist: 'Ärtist', album: 'Albüm', year: '', comment: '', zero: 0, track: 0, genre: 255 }, 'the ID3v1 tag');
-  dump('clip.mp3', mp3.bytes);
   assert.equal(c.state, `Converted: clip.mp3, ${(mp3.bytes.length / 1000).toFixed(mp3.bytes.length < 1e4 ? 1 : 0)} KB`);
   // Decoded: 1 s of the 660 Hz part, halved, with 0.25 s fades at both ends.
   let a = await analyse(mp3.bytes, 48000, [[0.35, 0.65], [0, 0.05], [0.1, 0.15], [0.95, 1.0]]);
@@ -828,8 +665,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.click('#m2m-clear');
   await page.setInputFiles('#m2m-file', ['voice.webm', 'phone.mov', 'two-langs.mkv'].map(F));
   await waitRead();
-  assert.equal((await card('phone.mov')).info, `0:02.000 · AAC · 44.1 kHz · mono · ${kb('phone.mov')} kbps`);
-  assert.equal((await card('two-langs.mkv')).info, `0:01.994 · Opus · 48 kHz · mono · ${kb('two-langs.mkv')} kbps · 2 audio tracks`);
+  assert.equal((await card('phone.mov')).info, '0:02.000 · AAC · 44.1 kHz · mono');
+  assert.equal((await card('two-langs.mkv')).info, '0:01.994 · Opus · 48 kHz · mono · 2 audio tracks');
   await row('two-langs.mkv').locator('.m2m-edit').click();
   assert.deepEqual(await page.$$eval('#m2m-tracks .check', l => l.map(x => x.textContent.trim())),
     ['1, English, Opus, mono', '2, French, Commentaire, Opus, mono']);
@@ -883,31 +720,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   checkMp3(big.bytes, { kbps: 192, sr: 48000, mono: false, seconds: 6 }, 'big.mp3');
   const read = await page.evaluate(() => window.__read);
   assert.ok(read < 3e6, `read ${read} bytes of a ${size}-byte file`);
-  // A 4 GB file that states no bitrate: it is measured from the packets of
-  // the first 10 s, without reading the file or walking its whole index.
-  const cdp4 = await page.context().newCDPSession(page);
-  await cdp4.send('Performance.enable');
-  const thread4 = async () => (await cdp4.send('Performance.getMetrics')).metrics.find(x => x.name === 'ThreadTime').value * 1000;
-  const cpu4 = await thread4();
-  await page.evaluate(b64 => {
-    window.__read = 0;
-    const head = new Uint8Array(16), dv = new DataView(head.buffer);
-    dv.setUint32(0, 1);
-    head.set([102, 114, 101, 101], 4);
-    dv.setBigUint64(8, BigInt(4 * 1024 ** 3 + 16));
-    const parts = [new Blob([Uint8Array.from(atob(b64), ch => ch.charCodeAt(0))]), head], zero = new Blob([new Uint8Array(1 << 20)]);
-    for (let i = 0; i < 4096; i++) parts.push(zero);
-    const dt = new DataTransfer();
-    dt.items.add(new File(parts, 'big.mov', { type: 'video/quicktime' }));
-    document.getElementById('m2m-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-  }, b64('phone.mov'));
-  await page.waitForFunction(() => document.querySelectorAll('.m2m-file').length === 2);
-  await waitRead();
-  assert.equal((await card('big.mov')).info, `0:02.000 · AAC · 44.1 kHz · mono · ${kb('phone.mov')} kbps`);
-  const read4 = await page.evaluate(() => window.__read), spent4 = (await thread4()) - cpu4;
-  assert.ok(read4 < 3e6, `read ${read4} bytes of the 4 GB MOV to add it`);
-  assert.ok(spent4 < 1500, `adding the 4 GB MOV took ${Math.round(spent4)} ms of main-thread time`);
-  await page.click('[aria-label="Remove big.mov"]');
 
   // ---------- Links are refused with a reason ----------
   await page.evaluate(() => {
@@ -1045,115 +857,37 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(c.info, '0:01.000 · PCM · 48 kHz · 3 channels');
   assert.equal(c.msg, 'Its sound has 3 channels, and MP3 and WAV keep only the first two (usually front left and right; with Mono only the first), so sound that is only in the others, such as speech in a centre channel, is lost.');
   assert.equal(await text('#m2m-peak'), 'The selection is silent.', 'the readout is of the two channels that are kept');
-  // 5.1 is mixed down as L + 0.707 (C + SL) for stereo and 0.707 (L + R) + C
-  // + 0.5 (SL + SR) for mono, scaled by sqrt(2) - 1 and 1 - 1/sqrt(2) so that
-  // a full-scale file cannot go over full scale. With the same tone at 0.5 in
-  // left, centre and left surround, the stereo left is that tone.
+  // 5.1 with the same tone at 0.5 in left, centre and left surround: mixed to
+  // stereo the left is L + 0.707 (C + SL), 1.207 times as loud.
   const tone = '0.5 * Math.sin(2 * Math.PI * 440 * t)';
-  // The samples dropWav() writes for one channel.
-  const pcm16 = (fn, sr, seconds) => Array.from({ length: Math.round(sr * seconds) }, (_, i) => Math.round(fn(i / sr) * 32767));
-  const toneSrc = pcm16(t => 0.5 * Math.sin(2 * Math.PI * 440 * t), 48000, 1);
-  const K51 = Math.SQRT2 - 1;
   await dropWav('surround.wav', 48000, 1, [tone, '0', tone, '0', tone, '0']);
   await waitRead();
   await row('surround.wav').locator('.m2m-edit').click();
   await waitWave();
   assert.equal((await card('surround.wav')).msg, '');
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −6.0 dB of full scale. Up to 200% stays clear of distortion.');
+  assert.equal(await text('#m2m-peak'), 'At this volume the loudest parts go above full scale and will distort. 80% is the most without distortion.');
   await page.focus('#m2m-vol');
-  for (let i = 0; i < 19; i++) await page.keyboard.press('ArrowRight');
-  assert.equal(await text('#m2m-vol-out'), '195% (+5.8 dB)');
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −0.2 dB of full scale. Up to 200% stays clear of distortion.');
-  assert.equal(await redPixels(), 0, 'nothing on the waveform is marked as distorting');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowLeft');
   await convert();
   const mixed = parseWav((await download(() => row('surround.wav').locator('.m2m-dl').click())).bytes);
   const loudest = mixed.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0);
   assert.equal(mixed.channels, 2);
-  assert.ok(loudest > 0.95 * 32767 && loudest < 32767, `at 195% the stereo mix peaks just below full scale: ${loudest}`);
-  // Sample by sample: left is the tone, right 0.707 of the centre, both scaled by 0.414, at 195%.
-  let worst = 0;
-  for (let i = 0; i < toneSrc.length; i++) {
-    worst = Math.max(worst, Math.abs(mixed.data[2 * i] - toneSrc[i] * 1.95), Math.abs(mixed.data[2 * i + 1] - toneSrc[i] * Math.SQRT1_2 * K51 * 1.95));
-  }
-  assert.ok(worst <= 1.01, `the stereo mix of 5.1: largest difference ${worst} from the expected samples`);
-  // Every channel at full scale: mixed to stereo or to mono it is the channel
-  // itself, at full scale and not over it.
-  const full = 'Math.sin(2 * Math.PI * 440 * t)', fullSrc = pcm16(t => Math.sin(2 * Math.PI * 440 * t), 48000, 1);
-  await dropWav('full.wav', 48000, 1, [full, full, full, full, full, full]);
-  await waitRead();
-  await row('full.wav').locator('.m2m-edit').click();
-  await waitWave();
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: 0.0 dB of full scale. Up to 100% stays clear of distortion.', 'a full-scale 5.1 file does not distort as stereo');
-  assert.equal(await redPixels(), 0, 'nothing on the waveform is marked as distorting');
-  await convert();
-  let fw = parseWav((await download(() => row('full.wav').locator('.m2m-dl').click())).bytes);
-  worst = 0;
-  for (let i = 0; i < fullSrc.length; i++) worst = Math.max(worst, Math.abs(fw.data[2 * i] - fullSrc[i]), Math.abs(fw.data[2 * i + 1] - fullSrc[i]));
-  assert.ok(worst <= 1, `stereo of six equal full-scale channels is that channel: largest difference ${worst}`);
-  await page.selectOption('#m2m-channels', 'mono');
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: 0.0 dB of full scale. Up to 100% stays clear of distortion.', 'nor as mono');
-  assert.equal(await redPixels(), 0);
-  await convert();
-  fw = parseWav((await download(() => row('full.wav').locator('.m2m-dl').click())).bytes);
-  assert.equal(fw.channels, 1);
-  worst = 0;
-  for (let i = 0; i < fullSrc.length; i++) worst = Math.max(worst, Math.abs(fw.data[i] - fullSrc[i]));
-  assert.ok(worst <= 1, `mono of six equal full-scale channels is that channel: largest difference ${worst}`);
-  await page.selectOption('#m2m-channels', 'keep');
-  // The tone in left, right and centre alike: the stereo mix (0.414 (L + 0.707
-  // C)) peaks at 0.354, and so does the mono mix, which is the average of the
-  // stereo mix's two sides.
+  assert.ok(loudest > 0.95 * 32767 && loudest < 32767, `at 80% the stereo mix peaks just below full scale: ${loudest}`);
+  // The tone in left, right and centre alike: the stereo mix (L + 0.707 C)
+  // peaks at 0.854, the mono mix (0.707 (L + R) + C) at 1.207, so the readout
+  // follows the Channels setting.
   await dropWav('front.wav', 48000, 1, [tone, tone, tone, '0', '0', '0']);
   await waitRead();
   await row('front.wav').locator('.m2m-edit').click();
   await waitWave();
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −9.0 dB of full scale. Up to 280% stays clear of distortion.', 'the stereo result does not distort');
+  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −1.4 dB of full scale. Up to 115% stays clear of distortion.', 'the stereo result does not distort');
   assert.equal(await redPixels(), 0, 'nothing on the waveform is marked as distorting');
   await convert();
   const front = parseWav((await download(() => row('front.wav').locator('.m2m-dl').click())).bytes);
-  near(front.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0) / 32767, 0.354, 0.01, 'peak of the stereo mix');
+  near(front.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0) / 32767, 0.854, 0.01, 'peak of the stereo mix');
   await page.selectOption('#m2m-channels', 'mono');
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −9.0 dB of full scale. Up to 280% stays clear of distortion.', 'the mono mix peaks as high');
-  await convert();
-  const frontMono = parseWav((await download(() => row('front.wav').locator('.m2m-dl').click())).bytes);
-  near(frontMono.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0) / 32767, 0.354, 0.01, 'peak of the mono mix');
-  await page.selectOption('#m2m-channels', 'keep');
-  // A loud tone in front left only: 0.414 of it as stereo, 0.207 as mono. The
-  // readout and the waveform's distortion marks follow the Channels setting,
-  // and the files agree with them.
-  await dropWav('left.wav', 48000, 1, ['0.99 * Math.sin(2 * Math.PI * 440 * t)', '0', '0', '0', '0', '0']);
-  await waitRead();
-  await row('left.wav').locator('.m2m-edit').click();
-  await waitWave();
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −7.7 dB of full scale. Up to 240% stays clear of distortion.');
-  await page.focus('#m2m-vol');
-  for (let i = 0; i < 40; i++) await page.keyboard.press('ArrowRight');
-  assert.equal(await text('#m2m-vol-out'), '300% (+9.5 dB)');
-  assert.equal(await text('#m2m-peak'), 'At this volume the loudest parts go above full scale and will distort. 240% is the most without distortion.');
-  assert.ok(await redPixels() > 1000, 'the waveform marks the distortion');
-  await page.selectOption('#m2m-channels', 'mono');
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −4.2 dB of full scale. Up to 400% stays clear of distortion.', 'the mono mix does not distort');
-  assert.equal(await redPixels(), 0, 'and the waveform marks nothing');
-  await convert();
-  const leftMono = parseWav((await download(() => row('left.wav').locator('.m2m-dl').click())).bytes);
-  near(leftMono.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0) / 32767, 0.99 * Math.SQRT1_2 * (1 - Math.SQRT1_2) * 3, 0.005, 'peak of the mono mix at 300%');
-  await page.selectOption('#m2m-channels', 'keep');
-  await convert();
-  const leftStereo = parseWav((await download(() => row('left.wav').locator('.m2m-dl').click())).bytes);
-  const clipped = leftStereo.data.filter((v, i) => i % 2 === 0 && Math.abs(v) >= 32767).length;
-  assert.ok(clipped > 100, `as stereo at 300% it distorts, as the readout says: ${clipped} samples at full scale`);
-  // Left and right in opposite phase: Mono averages them to silence, and the
-  // readout says so rather than giving the level of either side.
-  await dropWav('phase.wav', 48000, 1, ['0.4 * Math.sin(2 * Math.PI * 440 * t)', '-Math.round(0.4 * Math.sin(2 * Math.PI * 440 * t) * 32767) / 32767']);
-  await waitRead();
-  await row('phase.wav').locator('.m2m-edit').click();
-  await waitWave();
-  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −8.0 dB of full scale. Up to 250% stays clear of distortion.');
-  await page.selectOption('#m2m-channels', 'mono');
-  assert.equal(await text('#m2m-peak'), 'The selection is silent.', 'Mono of opposite channels is silent');
-  await convert();
-  const phase = parseWav((await download(() => row('phase.wav').locator('.m2m-dl').click())).bytes);
-  assert.ok(phase.channels === 1 && phase.data.length === 48000 && phase.data.every(v => v === 0), 'and the file is silent too');
+  assert.equal(await text('#m2m-peak'), 'At this volume the loudest parts go above full scale and will distort. 80% is the most without distortion.', 'the mono mix does');
+  assert.ok(await redPixels() > 1000, 'and the waveform marks it');
   await page.selectOption('#m2m-channels', 'keep');
   // A quiet file: the readout stops at the slider's 400%; at 0% it says silent.
   await dropWav('quiet.wav', 48000, 1, ['0.1 * Math.sin(2 * Math.PI * 440 * t)', '0.1 * Math.sin(2 * Math.PI * 440 * t)']);
@@ -1165,44 +899,13 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.keyboard.press('Home');
   assert.equal(await text('#m2m-peak'), 'At 0% the result is silent.');
   await page.click('#m2m-clear');
-  // MP3 has rates from 8 to 48 kHz: MPEG-1 for 32 to 48 kHz (32 to 320 kbps),
-  // MPEG-2 for 16 to 24 kHz (up to 160 kbps), MPEG-2.5 for 8 to 12 kHz (up to
-  // 64 kbps). Sound at those rates keeps its rate, at the bitrate MP3 allows.
+  // MP3 at 192 kbps needs MPEG-1, so sound at 22.05 kHz is made at 44.1 kHz.
   await dropWav('low-rate.wav', 22050, 1, ['0.4 * Math.sin(2 * Math.PI * 440 * t)']);
   await waitRead();
   await page.check('#m2m-f-mp3');
-  assert.equal(await text('#m2m-estimate'), 'Estimated size: about 20 KB as low-rate.mp3. Its sound is at 22.05 kHz, where MP3 goes up to 160 kbps, so it is saved at 160 kbps.');
   await convert();
-  let low = (await download(() => row('low-rate.wav').locator('.m2m-dl').click())).bytes;
-  checkMp3(low, { kbps: 160, sr: 22050, mono: true, seconds: 1 }, 'low-rate.mp3');
-  dump('low-rate.mp3', low);
-  near((await analyse(low, 22050, [[0.2, 0.8]])).win[0].freq[0], 440, 2, 'low-rate.mp3 tone');
+  checkMp3((await download(() => row('low-rate.wav').locator('.m2m-dl').click())).bytes, { kbps: 192, sr: 44100, mono: true, seconds: 1 }, 'low-rate.mp3');
   await page.click('[aria-label="Remove low-rate.wav"]');
-  // A phone recording at 8 kHz with the Speech button (96 kbps mono): 8 kHz at 64 kbps.
-  await dropWav('speech 8k.wav', 8000, 2, ['0.4 * Math.sin(2 * Math.PI * 300 * t)']);
-  await waitRead();
-  await page.click('#m2m-speech');
-  assert.equal(await text('#m2m-estimate'), 'Estimated size: about 16 KB as speech 8k.mp3. Its sound is at 8 kHz, where MP3 goes up to 64 kbps, so it is saved at 64 kbps.');
-  await convert();
-  low = (await download(() => row('speech 8k.wav').locator('.m2m-dl').click())).bytes;
-  checkMp3(low, { kbps: 64, sr: 8000, mono: true, seconds: 2 }, 'speech 8k.mp3');
-  dump('speech8k.mp3', low);
-  a = await analyse(low, 8000, [[0.5, 1.5]]);
-  near(a.dur, 2, 0.1, 'speech 8k.mp3 length');
-  near(a.win[0].freq[0], 300, 2, 'speech 8k.mp3 tone');
-  await page.click('[aria-label="Remove speech 8k.wav"]');
-  // 16 kHz at 96 kbps fits MPEG-2 as it is.
-  await dropWav('w16k.wav', 16000, 1, ['0.4 * Math.sin(2 * Math.PI * 1000 * t)']);
-  await waitRead();
-  assert.equal(await text('#m2m-estimate'), 'Estimated size: about 12 KB as w16k.mp3.');
-  await convert();
-  low = (await download(() => row('w16k.wav').locator('.m2m-dl').click())).bytes;
-  checkMp3(low, { kbps: 96, sr: 16000, mono: true, seconds: 1 }, 'w16k.mp3');
-  dump('w16k.mp3', low);
-  near((await analyse(low, 16000, [[0.2, 0.8]])).win[0].freq[0], 1000, 3, 'w16k.mp3 tone');
-  await page.click('[aria-label="Remove w16k.wav"]');
-  await page.selectOption('#m2m-bitrate', '192');
-  await page.selectOption('#m2m-channels', 'keep');
 
   // ---------- Fields the browser restores on Back are read again ----------
   await page.evaluate(() => { document.getElementById('m2m-f-mp3').checked = true; document.getElementById('m2m-bitrate').value = '320'; window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
@@ -1221,44 +924,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     p.on('pageerror', e => problems.push('page error: ' + e.message));
     p.on('console', x => { if (x.type() === 'error') problems.push('console error: ' + x.text()); });
   };
-
-  // ---------- A streaming decoder without the codec: decodeAudioData reads the whole track ----------
-  // (As in a Firefox without the system's AAC decoder.) mediabunny's AAC
-  // tracks say they cannot be decoded, although AudioDecoder is there.
-  const nodec = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
-  const np = await nodec.newPage();
-  watch(np);
-  await np.addInitScript(() => {
-    window.__wholeDecodes = 0;
-    const decode = BaseAudioContext.prototype.decodeAudioData;
-    BaseAudioContext.prototype.decodeAudioData = function (...args) { window.__wholeDecodes++; return decode.apply(this, args); };
-    let mb;
-    Object.defineProperty(window, 'Mediabunny', { configurable: true, get() { return mb; }, set(v) {
-      mb = v;
-      const can = v.InputAudioTrack.prototype.canDecode;
-      v.InputAudioTrack.prototype.canDecode = async function () { return (await this.getCodec()) === 'aac' ? false : can.call(this); };
-    } });
-  });
-  await np.goto(page.url());
-  assert.equal(await np.evaluate(() => typeof AudioDecoder), 'function', 'AudioDecoder is there');
-  await np.setInputFiles('#m2m-file', F('clip.mp4'));
-  await waitRead(np);
-  c = await card('clip.mp4', np);
-  assert.equal(c.msg, '', 'no "cannot decode" message: decodeAudioData reads the AAC');
-  assert.equal(c.state, 'Ready');
-  await waitWave(np);
-  assert.equal(await np.textContent('#m2m-peak'), `Loudest point at this volume: −${Math.abs(peakAll).toFixed(1)} dB of full scale. Up to ${Math.floor(100 / 10 ** (peakAll / 20) / 5) * 5}% stays clear of distortion.`);
-  await np.click('#m2m-convert');
-  await waitIdle(np);
-  assert.ok(await np.evaluate(() => window.__wholeDecodes) >= 1, 'the sound was decoded whole');
-  const wholeMp3 = await download(() => row('clip.mp4', np).locator('.m2m-dl').click(), np);
-  checkMp3(wholeMp3.bytes, { kbps: 192, sr: 48000, mono: false, seconds: 6 }, 'clip.mp3 decoded whole');
-  a = await analyse(wholeMp3.bytes, 48000, [[0.5, 1.5], [2.5, 3.5], [4.5, 5.5]], np);
-  near(a.dur, 6, 0.08, 'length decoded whole');
-  [440, 660, 880].forEach((f, i) => near(a.win[i].freq[0], f, 3, `tone ${i + 1} decoded whole`));
-  near(a.win[0].rms[0], 0.5 / Math.SQRT2, 0.02, 'left level decoded whole');
-  near(a.win[0].rms[1], 0.25 / Math.SQRT2, 0.012, 'right level decoded whole');
-  await nodec.close();
 
   // ---------- Without a streaming decoder (Safari before 26, Firefox on Android) ----------
   const old = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
@@ -1295,7 +960,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   near(+(await op.textContent('#m2m-peak')).match(/−([\d.]+) dB/)[1], -exp['clip.mp4']['peak_db_4.5_5.5'], 0.15, 'peak of 4.5-5.5 s');
   const longCard = await card('long-claim.m4a', op);
   // 61.5 minutes in the sample table, less the 1024 priming samples (21 ms) that the edit list skips.
-  assert.equal(longCard.info, `1:01:29.979 · AAC · 48 kHz · mono · ${kb('long-claim.m4a')} kbps`);
+  assert.equal(longCard.info, '1:01:29.979 · AAC · 48 kHz · mono');
   await op.click('#m2m-convert');
   await waitIdle(op);
   const oldMp3 = await download(() => row('clip.mp4', op).locator('.m2m-dl').click(), op);

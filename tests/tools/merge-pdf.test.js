@@ -58,9 +58,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await open();
   assert.equal(await page.isVisible('#mpdf-drop'), true);
   assert.equal(await page.isVisible('#mpdf-work'), false);
-  // Rotate PDF turns pages without copying them, keeping bookmarks and form fields: linked where the guide rotates.
-  assert.deepEqual(await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/image-to-pdf/', '/rotate-pdf/', '/split-pdf/', '/pdf-to-jpg/', '/unlock-pdf/']);
-  assert.match(await page.$eval('.prose a[href="/rotate-pdf/"]', a => a.closest('li').textContent), /^Rotate or remove pages:/);
+  assert.deepEqual(await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href'))), ['/image-to-pdf/', '/split-pdf/', '/pdf-to-jpg/', '/unlock-pdf/']);
 
   // Reads a PDF with pdf.js: page texts, rotations, sizes, annotations (link targets as page
   // numbers, with the annotation ids) and whether it is encrypted.
