@@ -74,6 +74,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.getAttribute('#i2t-bar', 'aria-label'), 'Reading progress');
   await page.waitForTimeout(300);
   assert.deepEqual(ocrFiles, [], 'no OCR file is downloaded before the visitor starts');
+  assert.ok(await page.$('.prose a[href="/pdf-to-text/"]'), 'the guide sends PDFs that hold text to PDF to Text');
 
   // ---- The sample, from the keyboard ----
   const seen = [];
@@ -437,6 +438,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.click('#i2t-pw-skip');
   await page.waitForFunction(() => document.querySelector('#i2t-error').textContent !== '');
   assert.equal((await state()).error, 'locked.pdf was skipped: it needs a password.');
+  assert.equal((await state()).options.length, 2, 'nothing added');
+  // A PDF whose author forbids copying its text is not read, from its text or by OCR; PDF to Text
+  // reads it with the permissions password. (The file is PDF to Text's fixture.)
+  await page.setInputFiles('#i2t-file', path.join(fixtures, '..', 'pdf-to-text', 'nocopy.pdf'));
+  await page.waitForFunction(() => /nocopy\.pdf/.test(document.querySelector('#i2t-error').textContent));
+  assert.equal((await state()).error, 'nocopy.pdf was not read: its author does not allow copying its text. With its permissions password, PDF to Text can read it.');
   assert.equal((await state()).options.length, 2, 'nothing added');
 
   // ---- Files that are not pictures ----

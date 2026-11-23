@@ -1,0 +1,1579 @@
+---
+title: "PDF to Text Converter: Extract Text from PDF"
+description: Extract the text of a PDF as paragraphs, lines or a layout that keeps columns and tables, then copy it or save a .txt file. It runs in your browser.
+category: Image & PDF
+keywords: [pdf to text, extract text from pdf, pdf to text converter, pdf to txt, convert pdf to text, how to copy text from a pdf, copy text from pdf, scanned pdf to text]
+howto: |
+  ## How to convert a PDF to text
+
+  1. Press **Choose a PDF file**, or drop a PDF on the box. The text of every
+     page appears in a moment: a 142-page tax guide takes a few seconds.
+  2. Choose how the text is laid out, and type **Pages** such as `1-3, 5` to
+     keep only some of them.
+  3. Press **Copy text** or **Download .txt**. The file is plain UTF-8 text,
+     which any text editor opens. On most phones, **Share** sends it to
+     another app.
+
+  ## Paragraphs, lines or layout
+
+  | Text as | What you get | Good for |
+  |---|---|---|
+  | Paragraphs | Each paragraph on one line, a blank line between them | Documents, translation, reading aloud |
+  | Lines as in the PDF | Every line as it is on the page | Addresses, poems, lists |
+  | Layout | Columns and tables spaced as on the page | Tables, forms, statements |
+
+  Paragraphs joins words split by a hyphen at a line end, closes up headings
+  set with letter spacing (*F I S C A L* becomes *FISCAL*) and turns
+  ligatures such as *ﬁ* into letters. Joining hyphens also joins a compound
+  broken at its own hyphen, so *well-known* can become *wellknown*: untick
+  the option for text full of compounds. In Paragraphs and Lines the cells of
+  a table are separated by a tab, so a table pasted into a spreadsheet keeps
+  its columns.
+
+  Running heads, footers and page numbers that repeat from page to page are
+  left out. **Between pages** puts a blank line, a `--- Page 2 ---` marker or a
+  form feed between pages, the character pdftotext writes there. The values
+  of filled-in form fields can be added after the text of their page.
+
+  ## Why columns come out mixed up
+
+  The text is taken in the order the PDF draws it, which in most documents is
+  the reading order: one column, then the next. A paragraph that
+  runs on into the next column or page is joined again. Magazines and pages
+  with sidebars sometimes draw their text in another order; Layout then puts
+  each line where it is on the page.
+
+  ## Why is the text garbled?
+
+  Some PDFs use fonts that do not say which letter each shape is. Their text
+  comes out as symbols or as �, the replacement character, and the page says
+  which pages are affected. A PDF viewer copies such text the same way,
+  because the letters are not in the file: read those pages with OCR.
+
+  ## Scanned PDFs
+
+  A scan holds pictures of pages, not text. Pages without text are listed,
+  and the page can read them with OCR: Tesseract, the open-source OCR engine,
+  running inside your browser. The first time, about 4.5 MB for English is
+  downloaded from this site, and a dense page takes about ten seconds on a
+  computer. Check what OCR reads, above all names and numbers. For photos
+  and screenshots, use [Image to Text](/image-to-text/).
+
+  ## Locked PDFs
+
+  A PDF that needs a password to open asks for it, and the password stays on
+  your device. When the author of a PDF has forbidden copying its text, this
+  page extracts it only with the file's permissions password, as
+  [Unlock PDF](/unlock-pdf/) does. To count the words, paste the text into the
+  [word counter](/word-counter/).
+faq:
+  - q: Why does text copied from a PDF have a line break after every line?
+    a: A PDF stores each line where it is drawn, not paragraphs, so a viewer copies a line break at the end of every line, and often a hyphen in the middle of a word. Paragraphs on this page puts the lines back together, also across columns and pages.
+  - q: Why can't I copy text from my PDF?
+    a: Often the PDF is a scan, a picture of each page with no text in it; this page lists such pages and can read them with OCR. Sometimes its author has forbidden copying, which many viewers obey; with the permissions password this page extracts the text anyway.
+  - q: How do I get the text of a PDF on a phone?
+    a: Open this page in the phone's browser, press **Choose a PDF file** and pick the PDF from your files or downloads. Then press **Copy text**, or **Share** to send the .txt file to a notes or messaging app.
+  - q: Is my PDF uploaded to a server?
+    a: No. The PDF is opened and read by JavaScript in this page, on your own device, and nothing is sent anywhere or kept after you close the tab. The page downloads its PDF reader, and the OCR engine when you read a scanned page, from this site only.
+---
+<style>
+.p2t-drop {
+  display: grid; justify-items: center; gap: 10px; margin: 0 0 16px; padding: 24px 16px;
+  border: 2px dashed var(--field-border); border-radius: 10px; background: var(--surface-2); text-align: center;
+}
+.p2t-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.p2t-drop p { margin: 0; max-width: 36em; }
+.p2t-drop .actions { justify-content: center; margin: 0; }
+.p2t.has-doc .p2t-drop { justify-items: start; padding: 12px 14px; border-style: solid; border-width: 1px; border-color: var(--border); text-align: left; }
+.p2t.has-doc .p2t-drop .actions { justify-content: flex-start; }
+.p2t-file { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; width: 100%; }
+.p2t-file strong { overflow-wrap: anywhere; }
+.p2t-box { margin: 0 0 16px; padding: 12px 14px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.p2t-box > p { margin: 0 0 12px; }
+.p2t-box .field { max-width: 26em; }
+.p2t-modes { margin: 0 0 12px; padding: 0; border: 0; min-width: 0; }
+.p2t-modes legend { margin: 0 0 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.p2t-modes .checks { margin: 0; }
+.p2t-set { align-items: flex-start; }
+.p2t-set > .field { flex: 1 1 200px; }
+.p2t-set input[type="text"] { font-size: 16px; }
+.p2t-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 8px; }
+.p2t-progress progress { flex: 1 1 160px; min-width: 0; height: 12px; accent-color: var(--accent); }
+.p2t-step { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.p2t-status { min-height: 1.6em; margin: 0 0 12px; font-weight: 600; overflow-wrap: anywhere; }
+.p2t-flags { margin: 0 0 12px; padding: 0; list-style: none; font-size: 14px; }
+.p2t-flags li { margin: 0 0 6px; padding: 6px 12px; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; background: var(--surface-2); overflow-wrap: anywhere; }
+.p2t-flags li.is-warn { border-left-color: var(--danger); }
+.p2t-ocr .row { align-items: flex-end; margin-bottom: 12px; }
+/* Wide enough for the longest language, Chinese (Traditional): the button goes below it where there is less room. */
+.p2t-ocr .row > .field { flex: 1 1 250px; max-width: 340px; }
+.p2t-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin: 8px 0 6px; }
+.p2t-head label { font-size: 14px; font-weight: 600; }
+.p2t-out textarea { min-height: 240px; background: var(--surface-2); }
+.p2t-out textarea.is-layout { font-family: var(--mono); font-size: 13px; line-height: 1.35; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+@media (pointer: coarse) {
+  .p2t-out textarea, .p2t-out textarea.is-layout { font-size: 16px; }
+}
+.p2t-out .actions { margin-top: 12px; }
+.p2t-btn-off { opacity: 0.55; cursor: not-allowed; }
+</style>
+
+<div class="p2t" id="p2t">
+  <div class="p2t-drop" id="p2t-drop">
+    <p id="p2t-intro">Drop a PDF here, or choose one. Its text is read in your browser: nothing is uploaded.</p>
+    <div class="p2t-file" id="p2t-file-line" hidden>
+      <strong id="p2t-name"></strong>
+      <span class="hint" id="p2t-meta"></span>
+    </div>
+    <div class="actions">
+      <button class="btn" type="button" id="p2t-open">Choose a PDF file…</button>
+      <button class="btn secondary" type="button" id="p2t-sample">Try a sample PDF</button>
+    </div>
+    <input type="file" id="p2t-file" hidden accept=".pdf,application/pdf">
+  </div>
+  <p class="msg error" id="p2t-error" role="alert"></p>
+
+  <div class="p2t-box" id="p2t-pw-box" hidden>
+    <div class="field">
+      <label for="p2t-pw" id="p2t-pw-label">Password</label>
+      <input type="password" id="p2t-pw" autocomplete="off" maxlength="1024" aria-describedby="p2t-pw-error">
+    </div>
+    <p class="msg error" id="p2t-pw-error" role="alert"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="p2t-pw-go">Open PDF</button>
+      <button class="btn secondary" type="button" id="p2t-pw-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <div class="p2t-box" id="p2t-lock-box" hidden>
+    <p id="p2t-lock-text"></p>
+    <div class="field">
+      <label for="p2t-owner">Permissions password</label>
+      <input type="password" id="p2t-owner" autocomplete="off" maxlength="1024" aria-describedby="p2t-owner-error p2t-owner-hint">
+      <span class="hint" id="p2t-owner-hint">Also called the owner password. It stays on your device.</span>
+    </div>
+    <p class="msg error" id="p2t-owner-error" role="alert"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="p2t-owner-go">Extract text</button>
+    </div>
+  </div>
+
+  <div id="p2t-work" hidden>
+    <fieldset class="p2t-modes">
+      <legend>Text as</legend>
+      <div class="checks">
+        <label class="check"><input type="radio" name="p2t-mode" value="para" checked> Paragraphs</label>
+        <label class="check"><input type="radio" name="p2t-mode" value="lines"> Lines as in the PDF</label>
+        <label class="check"><input type="radio" name="p2t-mode" value="layout"> Layout (columns spaced)</label>
+      </div>
+    </fieldset>
+    <div class="row p2t-set">
+      <div class="field">
+        <label for="p2t-pages">Pages</label>
+        <input type="text" id="p2t-pages" inputmode="text" autocomplete="off" spellcheck="false" placeholder="All pages" aria-describedby="p2t-pages-error p2t-pages-hint">
+        <span class="hint" id="p2t-pages-hint">Leave empty for all, or type a list such as 1-3, 5.</span>
+        <p class="msg error" id="p2t-pages-error" role="alert"></p>
+      </div>
+      <div class="field">
+        <label for="p2t-breaks">Between pages</label>
+        <select id="p2t-breaks">
+          <option value="blank" selected>Blank line</option>
+          <option value="marker">Page markers</option>
+          <option value="ff">Form feed</option>
+        </select>
+      </div>
+    </div>
+    <div class="checks">
+      <label class="check" id="p2t-hyph-row"><input type="checkbox" id="p2t-hyph" checked> Join words split by a hyphen at a line end</label>
+      <label class="check"><input type="checkbox" id="p2t-hf" checked> Leave out repeated headers and footers</label>
+      <label class="check" id="p2t-fields-row" hidden><input type="checkbox" id="p2t-fields" checked> <span id="p2t-fields-label">Add filled-in form fields</span></label>
+    </div>
+
+    <div class="p2t-progress" id="p2t-progress" hidden>
+      <progress id="p2t-bar" max="100" value="0" aria-label="Progress"></progress>
+      <span class="p2t-step" id="p2t-step"></span>
+      <button class="btn secondary small" type="button" id="p2t-stop">Stop</button>
+    </div>
+    <p class="p2t-status" id="p2t-status" role="status"></p>
+    <div class="actions" id="p2t-continue-row" hidden>
+      <button class="btn secondary" type="button" id="p2t-continue">Read the other pages</button>
+    </div>
+    <ul class="p2t-flags" id="p2t-flags" hidden></ul>
+
+    <div class="p2t-box p2t-ocr" id="p2t-ocr" hidden>
+      <p id="p2t-ocr-text"></p>
+      <div class="row">
+        <div class="field">
+          <label for="p2t-lang">Language of the scanned text</label>
+          <select id="p2t-lang"></select>
+        </div>
+        <button class="btn" type="button" id="p2t-ocr-go">Read with OCR</button>
+      </div>
+      <p class="hint" id="p2t-ocr-size"></p>
+    </div>
+
+    <section class="p2t-out" aria-labelledby="p2t-text-label">
+      <div class="p2t-head">
+        <label for="p2t-text" id="p2t-text-label">Text</label>
+        <span class="hint" id="p2t-count"></span>
+      </div>
+      <textarea id="p2t-text" rows="14" readonly spellcheck="false" autocomplete="off" wrap="soft" dir="ltr"></textarea>
+      <div class="actions">
+        <button class="btn" type="button" id="p2t-copy">Copy text</button>
+        <button class="btn secondary" type="button" id="p2t-download">Download .txt</button>
+        <button class="btn secondary" type="button" id="p2t-share" hidden>Share…</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+{% include ocr-engine.js %}
+</script>
+<script>
+(function () {
+  'use strict';
+  const $ = TT.$;
+  const PDFJS_URL = new URL({{ '/assets/vendor/pdfjs/pdf.min.js' | relative_url | jsonify }}, location.href).href;
+  const PDFJS_WORKER = new URL({{ '/assets/vendor/pdfjs/pdf.worker.min.js' | relative_url | jsonify }}, location.href).href;
+  const PDFJS_WASM = new URL({{ '/assets/vendor/pdfjs/wasm/' | relative_url | jsonify }}, location.href).href;
+  const PDFJS_RES = new URL({{ '/assets/vendor/pdfjs-resources/' | relative_url | jsonify }}, location.href).href;
+  const PDFLIB_URL = new URL({{ '/assets/vendor/pdf-lib/pdf-lib.min.js' | relative_url | jsonify }}, location.href).href;
+  // The sample: a one-page PDF made by tests/fixtures/pdf-to-text/make_fixtures.py (sample.pdf).
+  const SAMPLE = 'JVBERi0xLjMKJb/3ov4KMSAwIG9iago8PCAvUGFnZXMgMiAwIFIgL1R5cGUgL0NhdGFsb2cgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL0NvdW50IDEgL0tpZHMgWyAzIDAgUiBdIC9UeXBlIC9QYWdlcyA+PgplbmRvYmoKMyAwIG9iago8PCAvQ29udGVudHMgNCAwIFIgL01lZGlhQm94IFsgMCAwIDYxMiA3OTIgXSAvUGFyZW50IDIgMCBSIC9SZXNvdXJjZXMgPDwgL0ZvbnQgPDwgL0YxIDUgMCBSIC9GMiA2IDAgUiAvRjMgNyAwIFIgL0Y0IDggMCBSID4+ID4+IC9UeXBlIC9QYWdlID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggNDg1IC9GaWx0ZXIgL0ZsYXRlRGVjb2RlID4+CnN0cmVhbQp4nJWUQZOaQBCF7/kVfcxWGcIMMLC57W70kNqtWC6V+witsOoMNTOE8O/TEEUl65ZepDz0+/q91/CYwtcZB8YgXQHzEkgz8CFtuh8LMfd8H+LQ7x5pDp8f4PXhZf48hcV0/nOR3kH6BtP002OnEgATnYr/rgbjB40FyrxUa3AFgsM/DvQKJMy/z87UGDB/UONeFLCRokhOtqJpsE4btIAyK2BbKux0e/2mQINQOigt5EY2anKZFHiCJVE8ZonkwLIaMl21nYGV0Tva/HeJDRqiOVSwNCg3Fiwq+pehvUwKvSTkiRiTInEgSZXDmy6VJeC23tHT6TVSasaDtCAvlVwjVLWzXZQfWfLveTTmhOGB02VlYSmzDZTKaZI1cm1kVdjJnt9ok5OnaksZLluQl1m0fBQEwRgWDOUXbVVQTNL19SNZ7NvvdpiArak6SSXprP5yGTK+LcGHS9hR7rR2F90GseqTGeIrFZj97ZEhivEaRPBP/OTangqtLcKzbHVNNnRPIg9OLrfYO8mhrr7dIn4s/UUrV1wzGsbCE+J09FdpS/fBwf2PDYdafkhVS9NeB4696GyYTbgf3sLlw9s0w6W5FXycZpMkFmejHO7fmeRx5MUBHD9jr3JXUVf9C8T2An8BZ7xRvgplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL0Jhc2VGb250IC9UaW1lcy1Sb21hbiAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvU3VidHlwZSAvVHlwZTEgL1R5cGUgL0ZvbnQgPj4KZW5kb2JqCjYgMCBvYmoKPDwgL0Jhc2VGb250IC9IZWx2ZXRpY2EgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250ID4+CmVuZG9iago3IDAgb2JqCjw8IC9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250ID4+CmVuZG9iago4IDAgb2JqCjw8IC9CYXNlRm9udCAvVGltZXMtSXRhbGljIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udCA+PgplbmRvYmoKeHJlZgowIDkKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAwMDAwNjQgMDAwMDAgbiAKMDAwMDAwMDEyMyAwMDAwMCBuIAowMDAwMDAwMjgxIDAwMDAwIG4gCjAwMDAwMDA4MzggMDAwMDAgbiAKMDAwMDAwMDkzNyAwMDAwMCBuIAowMDAwMDAxMDM0IDAwMDAwIG4gCjAwMDAwMDExMzYgMDAwMDAgbiAKdHJhaWxlciA8PCAvUm9vdCAxIDAgUiAvU2l6ZSA5IC9JRCBbPDcyYTRmMzYzMjBiZDhkOTcwMmI2OTc3N2E4YWE0OWZiPjw3MmE0ZjM2MzIwYmQ4ZDk3MDJiNjk3NzdhOGFhNDlmYj5dID4+CnN0YXJ0eHJlZgoxMjM2CiUlRU9GCg==';
+  const touch = matchMedia('(pointer: coarse)').matches;
+
+  // The standard security handler shared by the PDF tools (_includes/pdf-unlocker.js): its
+  // pdfjsPasswords for passwords with characters outside ASCII, and, in a worker with pdf-lib,
+  // the check of a permissions password.
+{% include pdf-unlocker.js %}
+  {% raw %}
+  // ---------- The text of a page: lines, paragraphs and layout ----------
+  // PDF.js gives a page's text as pieces in the order the PDF draws them, which is the reading
+  // order of nearly every document (columns one after the other). Each piece is placed in the
+  // page's own frame, as it is shown (with /Rotate): u runs along the text, v down the page.
+  function mul(m, n) {
+    return [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+      m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+  }
+  const RTL_CH = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/g;
+  const LTR_CH = /[A-Za-z\u00c0-\u024f\u0370-\u03ff\u0400-\u04ff]/g;
+  // Chinese and Japanese are written without spaces; PDF.js puts one wherever two characters
+  // stand apart, as in justified lines.
+  const CJK = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\u3000-\\u303f\\uff00-\\uffef\\u30fc';
+  const CJK_GAP = new RegExp('([' + CJK + ']) +(?=[' + CJK + '])', 'gu'), CJK_ONE = new RegExp('[' + CJK + ']', 'u');
+  function geom(it, vt) {
+    const m = mul(vt, it.transform);
+    const len = Math.hypot(m[0], m[1]);
+    const fs = Math.hypot(m[2], m[3]) || it.height || len || 1;
+    let ang = len ? Math.atan2(m[1], m[0]) : 0;
+    const q = Math.round(ang / (Math.PI / 2));
+    let rot;
+    if (Math.abs(ang - q * Math.PI / 2) < 0.09) { rot = ((q % 4) + 4) % 4 * 90; ang = rot * Math.PI / 180; }
+    else rot = 1000 + Math.round(ang * 180 / Math.PI);
+    const c = Math.cos(ang), s = Math.sin(ang);
+    const u = m[4] * c + m[5] * s, v = -m[4] * s + m[5] * c;
+    return { rot, u0: u, u1: u + (it.width || 0), v, fs };
+  }
+  // Lines, in the order the PDF draws them. A line ends where PDF.js says so, where the text
+  // moves to another baseline (by more than half its size: a footnote mark raised a third of the
+  // size stays in its line) or back to the left, or where its direction changes. Text drawn twice
+  // in the same place (a way of making it bold) is kept once. A gap wider than the font size
+  // starts a new piece of the line, which Layout places on its own.
+  function buildLines(items, vt) {
+    const lines = [], recent = [];
+    let cur = null;
+    for (const it of items) {
+      if (typeof it.str !== 'string') continue;
+      const str = it.str;
+      if (!str) { if (it.hasEOL && cur) cur.ended = true; continue; }
+      if (!/\S/.test(str)) {
+        if (cur && !cur.ended) cur.space = true;
+        if (it.hasEOL && cur) cur.ended = true;
+        continue;
+      }
+      const g = geom(it, vt);
+      if (recent.some(r => r.s === str && r.rot === g.rot && Math.abs(r.u0 - g.u0) < 0.2 * g.fs && Math.abs(r.v - g.v) < 0.2 * g.fs)) {
+        if (it.hasEOL && cur) cur.ended = true;
+        continue;
+      }
+      recent.push({ s: str, rot: g.rot, u0: g.u0, v: g.v });
+      if (recent.length > 24) recent.shift();
+      const big = cur ? Math.max(cur.fs, g.fs) : 0;
+      const same = cur && !cur.ended && cur.rot === g.rot && Math.abs(g.v - cur.v) <= 0.5 * big && g.u0 >= cur.u1 - 0.5 * big;
+      if (!same) {
+        cur = { rot: g.rot, v: g.v, fs: g.fs, u0: g.u0, u1: g.u1, segs: [], ended: false, space: false, rtl: 0, ltr: 0 };
+        lines.push(cur);
+      }
+      let seg = cur.segs.length ? cur.segs[cur.segs.length - 1] : null;
+      const gap = g.u0 - cur.u1;
+      if (!seg || gap > 1.2 * g.fs) {
+        seg = { u0: g.u0, u1: g.u1, fs: g.fs, parts: [] };
+        cur.segs.push(seg);
+      }
+      seg.parts.push({ u0: g.u0, s: str, sp: cur.space || gap > 0.15 * g.fs });
+      seg.u1 = Math.max(seg.u1, g.u1);
+      cur.space = false;
+      cur.u0 = Math.min(cur.u0, g.u0);
+      cur.u1 = Math.max(cur.u1, g.u1);
+      // A line's size and baseline are those of its largest text, not of a raised mark.
+      if (g.fs > cur.fs * 1.05) { cur.fs = g.fs; cur.v = g.v; }
+      cur.rtl += (str.match(RTL_CH) || []).length;
+      cur.ltr += (str.match(LTR_CH) || []).length;
+      if (it.hasEOL) cur.ended = true;
+    }
+    lines.forEach(finishLine);
+    const out = lines.filter(l => l.text);
+    // A table row has cells far apart. A justified line whose words are spread wide has them all
+    // the same distance apart, and a lone line with two pieces (a running head) is no table:
+    // those are read as ordinary lines.
+    out.forEach((l, i) => {
+      if (!l.table) return;
+      const gaps = l.segs.slice(1).map((s, k) => s.u0 - l.segs[k].u1);
+      const even = gaps.length >= 2 && Math.max(...gaps) - Math.min(...gaps) < 0.1 * Math.max(...gaps) + 0.5;
+      const near = [out[i - 1], out[i + 1]].some(m => m && m.rot === l.rot && m.table && Math.abs(m.v - l.v) < 3 * l.fs);
+      if (even || (gaps.length < 2 && !near)) { l.table = false; l.tab = l.text; }
+    });
+    return out;
+  }
+  // PDF.js puts the letters of each piece of right-to-left text in reading order, so the pieces
+  // of a right-to-left line are put right to left. Pieces two or more font sizes apart, such as
+  // the cells of a table, are separated by a tab in l.tab (and by a space in l.text).
+  function finishLine(l) {
+    const rtl = l.rtl > l.ltr;
+    l.segs.forEach(s => {
+      const order = s.parts.map((p, i) => i);
+      if (rtl) order.sort((a, b) => s.parts[b].u0 - s.parts[a].u0);
+      let t = '';
+      order.forEach((i, k) => {
+        const sp = k && s.parts[rtl ? order[k - 1] : i].sp;
+        t += (sp && !/\s$/.test(t) && !/^\s/.test(s.parts[i].s) ? ' ' : '') + s.parts[i].s;
+      });
+      s.s = t.replace(/\s+/g, ' ').replace(CJK_GAP, '$1').trim();
+      delete s.parts;
+    });
+    l.segs = l.segs.filter(s => s.s).sort((a, b) => a.u0 - b.u0);
+    const seps = l.segs.map((s, i) => (i && s.u0 - l.segs[i - 1].u1 >= 2 * Math.min(l.fs, s.fs, l.segs[i - 1].fs) ? '\t' : ' '));
+    const order = l.segs.map((s, i) => i);
+    if (rtl) order.reverse();
+    let text = '', tab = '';
+    order.forEach((i, k) => {
+      if (k) { const sep = seps[rtl ? order[k - 1] : i]; text += ' '; tab += sep; }
+      text += l.segs[i].s;
+      tab += l.segs[i].s;
+    });
+    l.text = text.replace(CJK_GAP, '$1');
+    l.tab = tab.replace(CJK_GAP, '$1');
+    l.table = l.tab.includes('\t');
+    delete l.space;
+    delete l.ended;
+  }
+
+  // ---------- Letter-spaced text ----------
+  // PDF.js adds a space wherever two letters stand more than a tenth of the font size apart, so
+  // a heading set with letter spacing comes out as "F I S C A L Y E A R", and a pair of letters
+  // kerned apart as "B UDGET". On a page with such a piece, the glyphs are placed as PDF.js draws
+  // them, and between two letters or digits a space is kept only where the PDF draws a space, or
+  // where the gap is wider than the piece's usual gap between letters by more than 0.12 of the
+  // font size. Next to other characters (dot leaders, brackets) PDF.js's spacing stays.
+  const SPACED = /^\s*\S(?: \S)+\s*$|(?:^|\s)\S(?: \S){2,}(?=\s|$)|(?:^|\s)\p{Lu} \p{Lu}{2,}/u;
+  const WORDCH = /[\p{L}\p{N}]/u;
+  function needsRespace(items) { return items.some(it => typeof it.str === 'string' && SPACED.test(it.str)); }
+  function glyphsOf(ol, OPS, fonts) {
+    const out = [], stack = [];
+    let ctm = [1, 0, 0, 1, 0, 0], tm = [1, 0, 0, 1, 0, 0], x = 0, y = 0, lx = 0, ly = 0;
+    let st = { tc: 0, tw: 0, th: 1, rise: 0, lead: 0, size: 1, dir: 1, fm: [0.001, 0, 0, 0.001, 0, 0], vertical: false };
+    function show(glyphs) {
+      if (st.vertical || !glyphs) return;
+      const f = st.size * st.fm[0], h = st.dir, m = mul(ctm, tm), scale = Math.hypot(m[0], m[1]);
+      let M = 0;
+      for (const g of glyphs) {
+        if (typeof g === 'number') { M -= g * st.size / 1000; continue; }
+        if (!g) continue;
+        const sp = (g.isSpace ? st.tw : 0) + st.tc, w = g.width * f;
+        const x0 = x + M * st.th * h, x1 = x + (M + w) * st.th * h, yy = y + st.rise;
+        out.push({
+          ch: g.unicode || '', space: !!g.isSpace || !/\S/.test(g.unicode || ''),
+          p0: [m[0] * x0 + m[2] * yy + m[4], m[1] * x0 + m[3] * yy + m[5]],
+          p1: [m[0] * x1 + m[2] * yy + m[4], m[1] * x1 + m[3] * yy + m[5]],
+          em: Math.abs(st.size * st.th) * scale, tc: st.tc * st.th * scale
+        });
+        M += w + sp * h;
+      }
+      x += M * st.th;
+    }
+    const fn = ol.fnArray, args = ol.argsArray;
+    for (let i = 0; i < fn.length; i++) {
+      const a = args[i];
+      switch (fn[i]) {
+        case OPS.save: stack.push([ctm, Object.assign({}, st)]); break;
+        case OPS.restore: if (stack.length) [ctm, st] = stack.pop(); break;
+        case OPS.transform: ctm = mul(ctm, a); break;
+        case OPS.paintFormXObjectBegin: stack.push([ctm, Object.assign({}, st)]); if (a && a[0] && a[0].length === 6) ctm = mul(ctm, Array.from(a[0])); break;
+        case OPS.paintFormXObjectEnd: if (stack.length) [ctm, st] = stack.pop(); break;
+        case OPS.beginText: tm = [1, 0, 0, 1, 0, 0]; x = y = lx = ly = 0; break;
+        case OPS.setFont: {
+          let font = null;
+          try { font = fonts.has(a[0]) ? fonts.get(a[0]) : null; } catch (e) { font = null; }
+          st.size = Math.abs(a[1]);
+          st.dir = a[1] < 0 ? -1 : 1;
+          st.fm = (font && font.fontMatrix) || [0.001, 0, 0, 0.001, 0, 0];
+          st.vertical = !!(font && font.vertical);
+          break;
+        }
+        case OPS.setCharSpacing: st.tc = a[0]; break;
+        case OPS.setWordSpacing: st.tw = a[0]; break;
+        case OPS.setHScale: st.th = a[0] / 100; break;
+        case OPS.setLeading: st.lead = -a[0]; break;
+        case OPS.setTextRise: st.rise = a[0]; break;
+        case OPS.setTextMatrix: tm = Array.from(a[0] && a[0].length === 6 ? a[0] : a); x = y = lx = ly = 0; break;
+        case OPS.moveText: x = lx += a[0]; y = ly += a[1]; break;
+        case OPS.setLeadingMoveText: st.lead = a[1]; x = lx += a[0]; y = ly += a[1]; break;
+        case OPS.nextLine: x = lx; y = ly += st.lead; break;
+        case OPS.showText: case OPS.showSpacedText: show(a[0]); break;
+        case OPS.nextLineShowText: x = lx; y = ly += st.lead; show(a[0]); break;
+        case OPS.nextLineSetSpacingShowText: st.tw = a[0]; st.tc = a[1]; x = lx; y = ly += st.lead; show(a[2]); break;
+      }
+    }
+    return out;
+  }
+  function plain(s) { return s.normalize('NFKC').replace(/\s+/g, ''); }
+  function respace(items, glyphs) {
+    let from = 0;
+    for (const it of items) {
+      if (typeof it.str !== 'string' || !SPACED.test(it.str)) continue;
+      // The piece's characters without spaces, and whether PDF.js put a space after each. PDF.js
+      // gives right-to-left text in reading order, the reverse of the order it is drawn in: such a
+      // piece (with no left-to-right letters or digits in it) is compared backwards.
+      const norm = it.str.normalize('NFKC').trim();
+      let want = [], had = [];
+      for (const ch of norm) {
+        if (/\s/.test(ch)) { if (want.length) had[want.length - 1] = true; } else { want.push(ch); had.push(false); }
+      }
+      if (want.length < 2) continue;
+      const back = it.dir === 'rtl';
+      if (back) {
+        if (/[A-Za-z0-9\u00c0-\u024f]/.test(norm)) continue;
+        want = want.reverse();
+        had = want.map((c, k) => !!had[want.length - 2 - k]);
+      }
+      const t = it.transform, fs = Math.hypot(t[2], t[3]) || 1;
+      let start = -1;
+      for (let k = 0; k < glyphs.length; k++) {
+        const j = (from + k) % glyphs.length, gl = glyphs[j];
+        if (gl.space || plain(gl.ch)[0] !== want[0]) continue;
+        if (Math.abs(gl.p0[0] - t[4]) < 0.3 * fs && Math.abs(gl.p0[1] - t[5]) < 0.3 * fs) { start = j; break; }
+      }
+      if (start < 0) continue;
+      // For each boundary between two characters: the gap there, in font sizes and without the
+      // letter spacing, and whether a space was drawn; -1 inside one glyph (a ligature).
+      const gap = [], mark = [];
+      let at = 0, j = start, seen = false, prev = null, ok = true;
+      while (j < glyphs.length && at < want.length) {
+        const q = glyphs[j++];
+        if (q.space) { seen = true; continue; }
+        const cs = Array.from(plain(q.ch));
+        if (!cs.length) continue;
+        if (cs.some((c, n) => want[at + n] !== c)) { ok = false; break; }
+        if (prev) {
+          const ux = prev.p1[0] - prev.p0[0], uy = prev.p1[1] - prev.p0[1], ul = Math.hypot(ux, uy) || 1;
+          const along = ((q.p0[0] - prev.p1[0]) * ux + (q.p0[1] - prev.p1[1]) * uy) / ul;
+          gap[at - 1] = (along - prev.tc) / (prev.em || fs);
+          mark[at - 1] = seen;
+        }
+        for (let n = 0; n < cs.length - 1; n++) { gap[at + n] = -1; mark[at + n] = false; }
+        at += cs.length;
+        prev = q;
+        seen = false;
+      }
+      if (!ok || at !== want.length) continue;
+      const letterGaps = [];
+      for (let b = 0; b < want.length - 1; b++) {
+        if (gap[b] !== -1 && !mark[b] && WORDCH.test(want[b]) && WORDCH.test(want[b + 1])) letterGaps.push(gap[b]);
+      }
+      const base = Math.max(0, median(letterGaps));
+      let s = want[0];
+      for (let n = 1; n < want.length; n++) {
+        const b = n - 1;
+        const sp = WORDCH.test(want[b]) && WORDCH.test(want[n]) ? gap[b] !== -1 && (mark[b] || gap[b] > base + 0.12) : !!had[b];
+        s += (sp ? ' ' : '') + want[n];
+      }
+      it.str = back ? Array.from(s).reverse().join('') : s;
+      from = j;
+    }
+  }
+
+  // ---------- Paragraphs ----------
+  const BULLET = /^(?:[\u2022\u25cf\u25aa\u25e6\u2023\u2043\u25a0\u25a1\u2219\u00b7*\u2013\u2014-]\s|\(?(?:\d{1,2}|[a-z]|[ivx]{1,4})[.)]\s)/iu;
+  const BULLET_SIGN = /^[\u2022\u25cf\u25aa\u25e6\u2023\u2043\u25a0\u25a1\u2219*]/u;
+  // The end of a sentence or a heading, after which a page or column break is not joined.
+  const END = /[.!?:;\u2026\u3002\uff01\uff1f"\u201d\u2019')\]]$/u;
+  function median(a) { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; }
+  function firstWordWidth(l) {
+    const s = l.segs[0], w = (l.text.match(/^\S+/) || [''])[0];
+    const per = s && s.s.length ? (s.u1 - s.u0) / s.s.length : l.fs * 0.5;
+    return Array.from(w).length * per;
+  }
+  // Continues a paragraph across a column or page break: the text before does not end a
+  // sentence, and the text after starts with a small letter.
+  function runsOn(a, b) { return !END.test(a) && (/^\p{Ll}/u.test(b) || (/[\p{L}][-\u2010\u00ad]$/u.test(a) && /^\p{L}/u.test(b))); }
+  // The lines of one page, in paragraphs: [[line, ...], ...]. A paragraph ends where the gap to
+  // the next line is wider than usual, the size of the text changes, the text moves to another
+  // column, a line stops short although the next word would have fitted, a bullet or a number
+  // starts the next line, or the next line is indented (a first-line indent).
+  function paragraphs(lines) {
+    const out = [];
+    if (!lines.length) return out;
+    const pitches = [];
+    for (let i = 1; i < lines.length; i++) {
+      const a = lines[i - 1], b = lines[i], dv = b.v - a.v;
+      if (a.rot === b.rot && Math.abs(a.fs - b.fs) < 0.1 * a.fs && dv > 0.5 * a.fs && dv < 3 * a.fs) pitches.push(dv / a.fs);
+    }
+    const pitch = median(pitches) || 1.2;
+    // Where each line's column ends: the furthest right of the nearby lines of its size that start
+    // where it starts (give or take an indent), so a heading across two columns does not count.
+    const right = lines.map((l, i) => {
+      let r = l.u1;
+      for (let j = Math.max(0, i - 6); j <= Math.min(lines.length - 1, i + 6); j++) {
+        const m = lines[j];
+        if (m.rot !== l.rot || Math.abs(m.fs - l.fs) > 0.15 * l.fs || Math.abs(m.u0 - l.u0) > 3 * l.fs) continue;
+        const ov = Math.min(m.u1, l.u1) - Math.max(m.u0, l.u0);
+        if (ov > 0.5 * Math.min(m.u1 - m.u0, l.u1 - l.u0)) r = Math.max(r, m.u1);
+      }
+      return r;
+    });
+    let cur = [lines[0]];
+    for (let k = 1; k < lines.length; k++) {
+      const p = lines[k - 1], l = lines[k], dv = l.v - p.v, fs = Math.max(p.fs, l.fs);
+      let brk = p.rot !== l.rot || Math.abs(p.fs - l.fs) > 0.15 * fs;
+      // The rows of a table stay together, each on its own line, apart from the text around them.
+      if (p.table || l.table) {
+        if (!(p.table && l.table) || brk || l.v - p.v < 0 || l.v - p.v > 3 * fs) { out.push(cur); cur = [l]; } else cur.push(l);
+        continue;
+      }
+      const moved = dv < 0.5 * Math.min(p.fs, l.fs) || dv > (pitch + 0.45) * fs || l.u0 > p.u1 || l.u1 < p.u0;
+      if (!brk && moved) brk = !(Math.abs(p.fs - l.fs) < 0.05 * fs && runsOn(p.text, l.text));
+      else if (!brk) {
+        if (right[k - 1] - p.u1 > firstWordWidth(l) + 0.6 * p.fs) brk = true;
+        else if (BULLET.test(l.text) && (BULLET_SIGN.test(l.text) || END.test(p.text) || BULLET.test(p.text))) brk = true;
+        else if (l.u0 > p.u0 + 0.8 * p.fs && k + 1 < lines.length && !BULLET.test(p.text)) {
+          const n = lines[k + 1];
+          if (n.rot === l.rot && n.v > l.v && n.u0 < l.u0 - 0.8 * l.fs && Math.abs(n.u0 - p.u0) < 0.8 * p.fs) brk = true;
+        }
+      }
+      if (brk) { out.push(cur); cur = [l]; } else cur.push(l);
+    }
+    out.push(cur);
+    return out;
+  }
+  // The lines of a paragraph as one line. A soft hyphen at a line end is dropped. A word split by
+  // a hyphen at a line end is joined without a space, and without the hyphen when dehyphen is
+  // set and small letters stand on both sides (so Jean-Paul and COVID-19 keep theirs). Chinese
+  // and Japanese lines join without a space.
+  function joinLines(texts, dehyphen) {
+    let out = '';
+    for (const t of texts) {
+      if (!t) continue;
+      if (!out) { out = t; continue; }
+      if (/\u00ad$/.test(out)) { out = out.slice(0, -1) + t; continue; }
+      if (/[\p{L}\p{N}][-\u2010]$/u.test(out) && /^[\p{L}\p{N}]/u.test(t)) {
+        out = (dehyphen && /^\p{Ll}/u.test(t) && /\p{Ll}[-\u2010]$/u.test(out) ? out.slice(0, -1) : out) + t;
+        continue;
+      }
+      // A dash or a slash at a line end joins the next line directly (2010-2020, and/or).
+      if (/[\p{L}\p{N}][\u2013\u2014/]$/u.test(out) && /^[\p{L}\p{N}]/u.test(t)) { out += t; continue; }
+      const a = Array.from(out.slice(-2)).pop(), b = Array.from(t.slice(0, 2))[0];
+      out += CJK_ONE.test(a) && CJK_ONE.test(b) ? t : ' ' + t;
+    }
+    return out.replace(/\u00ad/g, '');
+  }
+
+  // ---------- Layout: columns and tables spaced as on the page ----------
+  // Each piece of text goes at the column of characters that matches its place on the page; one
+  // character is as wide as the median character of the page's text. Rows are lines whose
+  // baselines are within half their size; a gap of a blank line or more between rows becomes one
+  // or two blank lines. Text running another way (a sideways label) follows, laid out on its own.
+  function cellWidth(ch) {
+    const c = ch.codePointAt(0);
+    if (/\p{M}/u.test(ch)) return 0;
+    if ((c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) ||
+      (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) || (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x20000 && c <= 0x3fffd)) return 2;
+    return 1;
+  }
+  function textWidth(s) { let w = 0; for (const ch of s) w += cellWidth(ch); return w; }
+  function layoutText(lines) {
+    if (!lines.length) return '';
+    const groups = new Map();
+    lines.forEach(l => { if (!groups.has(l.rot)) groups.set(l.rot, []); groups.get(l.rot).push(l); });
+    const order = Array.from(groups.keys()).sort((a, b) => groups.get(b).length - groups.get(a).length);
+    return order.map(rot => {
+      const ls = groups.get(rot), per = [];
+      ls.forEach(l => l.segs.forEach(s => { const n = textWidth(s.s); if (Array.from(s.s).length >= 4 && n) per.push((s.u1 - s.u0) / n); }));
+      const cw = median(per) || 0.5 * median(ls.map(l => l.fs)) || 5;
+      const left = Math.min(...ls.map(l => l.u0));
+      const rows = [];
+      ls.slice().sort((a, b) => a.v - b.v || a.u0 - b.u0).forEach(l => {
+        const r = rows[rows.length - 1];
+        if (r && Math.abs(l.v - r.v) <= 0.5 * Math.min(l.fs, r.fs)) r.lines.push(l);
+        else rows.push({ v: l.v, fs: l.fs, lines: [l] });
+      });
+      const steps = [];
+      for (let i = 1; i < rows.length; i++) if (rows[i].v - rows[i - 1].v > 0) steps.push(rows[i].v - rows[i - 1].v);
+      const step = median(steps) || 12;
+      const out = [];
+      rows.forEach((r, i) => {
+        if (i) for (let b = Math.min(2, Math.max(0, Math.round((r.v - rows[i - 1].v) / step) - 1)); b > 0; b--) out.push('');
+        const segs = [];
+        r.lines.forEach(l => {
+          // A right-to-left line keeps its pieces in reading order, at the place of its first.
+          if (l.rtl > l.ltr) segs.push({ u0: l.u0, s: l.text });
+          else l.segs.forEach(s => segs.push(s));
+        });
+        segs.sort((a, b) => a.u0 - b.u0);
+        let line = '', at = 0;
+        segs.forEach(s => {
+          let col = Math.max(0, Math.round((s.u0 - left) / cw));
+          if (at && col < at + 1) col = at + 1;
+          if (col > at) line += ' '.repeat(col - at);
+          line += s.s;
+          at = Math.max(col, at) + textWidth(s.s);
+        });
+        out.push(line.replace(/\s+$/, ''));
+      });
+      return out.join('\n');
+    }).join('\n\n');
+  }
+
+  // ---------- Repeated headers and footers ----------
+  // A line in the top or bottom eighth of a page whose text (with its numbers as #) and size come
+  // back on at least two pages and on 40% of the pages read: a running head, a page number. A
+  // page keeps them when they are all the text it has.
+  function repeatedLines(pgs) {
+    const drop = new Set(), counts = new Map(), keys = new Map();
+    const withText = pgs.filter(p => p.lines.length && !p.ocr);
+    if (withText.length < 2) return drop;
+    withText.forEach(p => {
+      const seen = new Set(), H = p.h || 792;
+      p.lines.forEach(l => {
+        if (l.rot !== 0) return;
+        const band = l.v < 0.125 * H + l.fs ? 't' : l.v > 0.875 * H ? 'b' : '';
+        if (!band) return;
+        const text = l.text.toLowerCase().replace(/\p{N}+/gu, '#').replace(/\b[ivxlc]+\b/g, '#').replace(/\s+/g, ' ').trim();
+        const key = band + '|' + Math.round(l.fs) + '|' + text;
+        keys.set(l, key);
+        if (!seen.has(key)) { seen.add(key); counts.set(key, (counts.get(key) || 0) + 1); }
+      });
+    });
+    const need = Math.max(2, Math.ceil(0.4 * withText.length));
+    // Never the whole text of a page: a page of one line repeated with its number ("Slide 3") keeps it.
+    withText.forEach(p => {
+      const gone = p.lines.filter(l => keys.has(l) && counts.get(keys.get(l)) >= need);
+      if (gone.length < p.lines.length) gone.forEach(l => drop.add(l));
+    });
+    return drop;
+  }
+
+  // ---------- Page state ----------
+  const MAX_FILE = 1024 * 1024 * 1024, BIG_ON_PHONE = 100 * 1024 * 1024, MAX_LIST = 1000;
+  const NUM = new Intl.NumberFormat('en-GB');
+  const root = $('#p2t'), drop = $('#p2t-drop'), openBtn = $('#p2t-open'), sampleBtn = $('#p2t-sample'), fileIn = $('#p2t-file');
+  const intro = $('#p2t-intro'), fileLine = $('#p2t-file-line'), nameEl = $('#p2t-name'), metaEl = $('#p2t-meta');
+  const errEl = $('#p2t-error'), statusEl = $('#p2t-status');
+  const pwBox = $('#p2t-pw-box'), pwIn = $('#p2t-pw'), pwErr = $('#p2t-pw-error'), pwLabel = $('#p2t-pw-label'), pwGo = $('#p2t-pw-go');
+  const lockBox = $('#p2t-lock-box'), lockText = $('#p2t-lock-text'), ownerIn = $('#p2t-owner'), ownerErr = $('#p2t-owner-error'), ownerGo = $('#p2t-owner-go');
+  const work = $('#p2t-work'), pagesIn = $('#p2t-pages'), pagesErr = $('#p2t-pages-error'), breaksSel = $('#p2t-breaks');
+  const hyphRow = $('#p2t-hyph-row'), hyphIn = $('#p2t-hyph'), hfIn = $('#p2t-hf'), fieldsRow = $('#p2t-fields-row'), fieldsIn = $('#p2t-fields'), fieldsLabel = $('#p2t-fields-label');
+  const progressRow = $('#p2t-progress'), bar = $('#p2t-bar'), stepEl = $('#p2t-step'), stopBtn = $('#p2t-stop');
+  const continueRow = $('#p2t-continue-row'), continueBtn = $('#p2t-continue'), flagsEl = $('#p2t-flags');
+  const ocrBox = $('#p2t-ocr'), ocrText = $('#p2t-ocr-text'), langSel = $('#p2t-lang'), ocrGo = $('#p2t-ocr-go'), ocrSize = $('#p2t-ocr-size');
+  const textEl = $('#p2t-text'), countEl = $('#p2t-count'), copyBtn = $('#p2t-copy'), dlBtn = $('#p2t-download'), shareBtn = $('#p2t-share');
+
+  function setText(el, t) { t = t || ''; if (el.textContent !== t) el.textContent = t; }
+  function say(t) { setText(statusEl, t); }
+  function showError(t) { setText(errEl, t); }
+  function plural(n, one, many) { return NUM.format(n) + ' ' + (n === 1 ? one : many || one + 's'); }
+  // Cut by code points, so an emoji is never split in half.
+  function clip(s, n) { const cps = Array.from(String(s)); return cps.length > n ? cps.slice(0, n - 1).join('') + '\u2026' : String(s); }
+  function andList(a) { return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]; }
+  function fmtBytes(n) {
+    if (n < 1024) return plural(n, 'byte');
+    if (n < 1024 * 1024) return NUM.format(Math.round(n / 1024)) + ' KB';
+    return NUM.format(Math.round(n / 1024 / 1024 * 10) / 10) + ' MB';
+  }
+  // Page numbers as a short list: 2, 5-7 and 9.
+  function pageList(nums) {
+    const s = nums.slice().sort((a, b) => a - b), parts = [];
+    for (let i = 0; i < s.length; i++) {
+      let j = i;
+      while (j + 1 < s.length && s[j + 1] === s[j] + 1) j++;
+      if (j > i + 1) parts.push(s[i] + '\u2013' + s[j]);
+      else for (let k = i; k <= j; k++) parts.push(String(s[k]));
+      i = j;
+    }
+    return andList(parts);
+  }
+  function friendly(t) { const e = new Error(t); e.friendly = true; return e; }
+  const REPAIR = 'It may be damaged; try saving it again from the app that made it.';
+  const RESAVE = 'Try saving it again from the app that made it.';
+
+  // The open PDF: { id, file, name, size, pdf, task, n, password, encrypted, restricted, allowed,
+  // hasFields, pages: Map of page number -> page }. A page is { no, lines, fields, letters, bad,
+  // chars, noText, scan, error, ocr, h }.
+  let doc = null, opening = null, nextId = 1, gen = 0;
+  // reading: the text being read ({ gen }); job: OCR running ({ gen, cancel, stopped }). A new
+  // file adds one to gen, so a run for the file before ends at its next step and never shows
+  // its results; the new file's run starts at once.
+  let reading = null, job = null, stopAsked = false, built = '';
+  function busyNow() { return !!((reading && reading.gen === gen) || (job && job.gen === gen)); }
+  let focusAfterStop = false;
+
+  // ---------- PDF.js, loaded on first use ----------
+  let pdfjs = null, pdfjsP = null, pdfWorker = null, pdfjsTries = 0;
+  function loadPdfjs() {
+    if (!pdfjsP) {
+      // The browser remembers a module that failed to load, so a second try asks for it anew.
+      pdfjsP = import(pdfjsTries++ ? PDFJS_URL + '?try=' + pdfjsTries : PDFJS_URL).then(lib => {
+        lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+        pdfjs = lib;
+        pdfWorker = new lib.PDFWorker({ verbosity: 0 });
+        return lib;
+      }, () => {
+        pdfjsP = null;
+        throw friendly('The PDF reader could not be loaded. Check your connection and try again.');
+      });
+    }
+    return pdfjsP;
+  }
+  // A page that stops answering (a damaged file can keep PDF.js's worker busy for ever) is ended
+  // by ending the worker; the next file gets a new one.
+  function resetWorker() {
+    if (pdfWorker) { try { pdfWorker.destroy(); } catch (e) { /* gone */ } }
+    pdfWorker = pdfjs ? new pdfjs.PDFWorker({ verbosity: 0 }) : null;
+  }
+  function isPdf(head) {
+    for (let i = 0; i + 4 < head.length; i++) {
+      if (head[i] === 0x25 && head[i + 1] === 0x50 && head[i + 2] === 0x44 && head[i + 3] === 0x46 && head[i + 4] === 0x2D) return true;
+    }
+    return false;
+  }
+  // What a file that is not a PDF is, when its first bytes say so.
+  function notPdf(name, head) {
+    const h = Array.from(head.slice(0, 8)), at = (sig, o) => sig.every((b, i) => h[(o || 0) + i] === b);
+    let what = '';
+    if (at([0x50, 0x4B, 3, 4])) what = ' It is a ZIP file, or a Word, Excel or PowerPoint document.';
+    else if (at([0xD0, 0xCF, 0x11, 0xE0])) what = ' It is an old Word, Excel or PowerPoint document.';
+    else if (at([0x89, 0x50, 0x4E, 0x47]) || at([0xFF, 0xD8, 0xFF]) || at([0x47, 0x49, 0x46]) || (at([0x52, 0x49, 0x46, 0x46]) && head[8] === 0x57)) what = ' It is a picture: copy its text with Image to Text.';
+    return clip(name, 60) + ' is not a PDF file.' + what;
+  }
+  function passwordError() { return Object.assign(new Error('Incorrect password'), { name: 'PasswordException', code: 2 }); }
+  // PDF.js reads an RC4 or AES-128 password as the low byte of each character, so a password with
+  // a character outside Latin-1 is tried again as the bytes other PDF writers use for it
+  // (_includes/pdf-unlocker.js).
+  function openPdf(d, password) {
+    return loadPdfjs().then(lib => d.file.arrayBuffer().then(buf => {
+      const tries = password ? pdfUnlocker(null).pdfjsPasswords(password) : [];
+      const task = lib.getDocument({
+        data: new Uint8Array(buf), password: tries[0] || undefined, worker: pdfWorker, verbosity: 0,
+        wasmUrl: PDFJS_WASM, cMapUrl: PDFJS_RES + 'cmaps/', cMapPacked: true,
+        standardFontDataUrl: PDFJS_RES + 'standard_fonts/', iccUrl: PDFJS_RES + 'iccs/'
+      });
+      let next = 1;
+      if (tries.length > 1) {
+        task.onPassword = (retry, reason) => {
+          retry(reason === lib.PasswordResponses.INCORRECT_PASSWORD && next < tries.length ? tries[next++] : passwordError());
+        };
+      }
+      d.task = task;
+      return task.promise;
+    }));
+  }
+  // PDF.js's own message tells the cause; it is never shown.
+  function openError(d, err) {
+    if (err && err.friendly) return err.message;
+    const why = err ? (err.name || '') + ' ' + (err.message || '') : '';
+    if (/encryption|security handler|crypt/i.test(why)) return clip(d.name, 60) + ' uses a kind of encryption this page cannot open.';
+    if (/Invalid PDF|FormatError|XRef|InvalidPDF|startxref|Missing|Unexpected/i.test(why)) return clip(d.name, 60) + ' is damaged or is not a valid PDF. ' + RESAVE;
+    return clip(d.name, 60) + ' could not be opened. ' + REPAIR;
+  }
+
+  // ---------- The permissions password, checked in a worker with pdf-lib ----------
+  function lockWorkerMain(scope) {
+    let unlocker = null;
+    scope.onmessage = async function (ev) {
+      const msg = ev.data;
+      if (msg.type === 'init') {
+        try { scope.importScripts(msg.lib); unlocker = pdfUnlocker(scope.PDFLib); scope.postMessage({ type: 'ready' }); }
+        catch (err) { scope.postMessage({ type: 'fatal' }); }
+        return;
+      }
+      try {
+        const bytes = new Uint8Array(await msg.file.arrayBuffer());
+        let owner = false;
+        const info = await unlocker.inspect(bytes);
+        if (info.encrypted && info.emptyOwner) owner = true;
+        else if (info.encrypted && msg.password) {
+          try { owner = (await unlocker.open(bytes, msg.password)).security.access === 'owner'; } catch (e) { if (e.code !== 'PASSWORD') throw e; }
+        }
+        scope.postMessage({ type: 'done', id: msg.id, owner, blank: !!info.emptyOwner });
+      } catch (err) { scope.postMessage({ type: 'error', id: msg.id, code: err && err.code || 'READ' }); }
+    };
+  }
+  let lockWorker = null, lockReady = null, lockId = 0;
+  const lockWaiting = new Map();
+  function stopLockWorker() {
+    lockWaiting.forEach(w => w.reject({ code: 'STOPPED' }));
+    lockWaiting.clear();
+    if (lockWorker) { try { lockWorker.terminate(); } catch (e) { /* gone */ } }
+    lockWorker = null;
+    lockReady = null;
+  }
+  function checkOwner(file, password) {
+    if (!lockReady) {
+      lockReady = new Promise((resolve, reject) => {
+        const src = pdfUnlocker.toString() + '\n(' + lockWorkerMain.toString() + ')(self);';
+        const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+        try { lockWorker = new Worker(url); } catch (e) { lockReady = null; reject({ code: 'START' }); return; }
+        lockWorker.onmessage = e => {
+          const m = e.data;
+          if (m.type === 'ready') { URL.revokeObjectURL(url); resolve(lockWorker); return; }
+          if (m.type === 'fatal') { stopLockWorker(); reject({ code: 'LOAD' }); return; }
+          const w = lockWaiting.get(m.id);
+          if (!w) return;
+          lockWaiting.delete(m.id);
+          if (m.type === 'done') w.resolve(m); else w.reject(m);
+        };
+        lockWorker.onerror = e => { if (e && e.preventDefault) e.preventDefault(); stopLockWorker(); reject({ code: 'CRASH' }); };
+        lockWorker.postMessage({ type: 'init', lib: PDFLIB_URL });
+      });
+    }
+    return lockReady.then(w => new Promise((resolve, reject) => {
+      const id = ++lockId;
+      lockWaiting.set(id, { resolve, reject });
+      w.postMessage({ type: 'check', id, file, password: password || '' });
+    }));
+  }
+
+  // ---------- Opening a file ----------
+  function addFiles(list) {
+    const files = Array.from(list || []).filter(f => f && typeof f.size === 'number');
+    if (!files.length) return;
+    const file = files[0];
+    showError('');
+    if (files.length > 1) showError('This page reads one PDF at a time, so only ' + clip(file.name, 60) + ' was opened.');
+    openFile(file).catch(() => { if (opening && opening.file === file) openFailed(opening); else if (doc && doc.file === file) openFailed(doc); else showError(clip(file.name, 60) + ' could not be opened. ' + REPAIR); });
+  }
+  async function openFile(file) {
+    const name = file.name || 'document.pdf';
+    if (!file.size) { showError(clip(name, 60) + ' is empty: it has 0 bytes.'); return; }
+    if (file.size > MAX_FILE) { showError(clip(name, 60) + ' is larger than 1 GB, too large to read in a browser.'); return; }
+    let head;
+    try { head = new Uint8Array(await file.slice(0, 1024).arrayBuffer()); } catch (e) { showError(clip(name, 60) + ' could not be read.'); return; }
+    if (!isPdf(head)) { showError(notPdf(name, head)); return; }
+    closeDoc();
+    const d = { id: nextId++, file, name, size: file.size, password: '', pages: new Map(), allowed: false };
+    opening = d;
+    say('Opening ' + clip(name, 60) + '\u2026');
+    await tryOpen(d, '');
+  }
+  // Whatever goes wrong while a file opens ends in a message, never in "Opening..." for ever.
+  function openFailed(d) {
+    if (opening === d) opening = null;
+    if (doc === d) closeDoc();
+    hidePassword();
+    say('');
+    showError(clip(d.name, 60) + ' could not be opened. ' + REPAIR);
+  }
+  async function tryOpen(d, password) {
+    let pdf;
+    try {
+      pdf = await openPdf(d, password);
+    } catch (err) {
+      if (opening !== d) return;
+      if (err && err.name === 'PasswordException') { askPassword(d, !!password); return; }
+      opening = null;
+      hidePassword();
+      say('');
+      showError(openError(d, err));
+      return;
+    }
+    const dropped = () => { if (opening === d) return false; try { pdf.loadingTask.destroy(); } catch (e) { /* closed */ } return true; };
+    if (dropped()) return;
+    hidePassword();
+    if (!(pdf.numPages >= 1)) {
+      opening = null;
+      try { pdf.loadingTask.destroy(); } catch (e) { /* closed */ }
+      say('');
+      showError(clip(d.name, 60) + ' has no pages, so there is no text to read. ' + REPAIR);
+      return;
+    }
+    d.pdf = pdf;
+    d.n = pdf.numPages;
+    d.password = password || '';
+    let perms = null, info = null;
+    try { perms = await pdf.getPermissions(); } catch (e) { perms = null; }
+    try { info = (await pdf.getMetadata()).info || null; } catch (e) { info = null; }
+    try { d.hasFields = !!(await pdf.getFieldObjects()); } catch (e) { d.hasFields = false; }
+    if (dropped()) return;
+    opening = null;
+    d.encrypted = !!(info && info.EncryptFilterName);
+    // PDF.js gives the permissions as a Set (an array in older versions) of the allowed flags.
+    const allowed = perms && (typeof perms.has === 'function' ? perms : new Set(Array.from(perms)));
+    d.restricted = !!(allowed && pdfjs && !allowed.has(pdfjs.PermissionFlag.COPY));
+    showDoc(d);
+    if (!d.restricted) { d.allowed = true; startReading(); return; }
+    // Its author does not allow copying its text: as on Unlock PDF, that is lifted only with the
+    // permissions password, or when that password is blank.
+    say('Checking the permissions of ' + clip(d.name, 60) + '\u2026');
+    let r;
+    try { r = await checkOwner(d.file, d.password); } catch (e) { r = null; }
+    if (doc !== d) return;
+    if (r && r.owner) { d.allowed = true; d.lifted = r.blank ? 'blank' : 'given'; startReading(); return; }
+    showLock(d, !r);
+  }
+  function askPassword(d, wrong) {
+    pwBox.hidden = false;
+    setText(pwLabel, 'Password for ' + clip(d.name, 60));
+    if (wrong) {
+      setText(pwErr, 'That password is not right. Check it and try again.');
+      pwIn.setAttribute('aria-invalid', 'true');
+    } else {
+      setText(pwErr, '');
+      pwIn.removeAttribute('aria-invalid');
+      pwIn.value = '';
+    }
+    say(clip(d.name, 60) + ' is locked with a password. Type the password that opens it.');
+    pwIn.focus();
+    if (wrong) pwIn.select();
+  }
+  function hidePassword() {
+    pwBox.hidden = true;
+    setText(pwErr, '');
+    pwIn.removeAttribute('aria-invalid');
+    pwIn.value = '';
+  }
+  pwGo.addEventListener('click', () => {
+    const d = opening;
+    if (!d || pwBox.hidden) return;
+    if (!pwIn.value) {
+      setText(pwErr, 'Type the password first.');
+      pwIn.setAttribute('aria-invalid', 'true');
+      pwIn.focus();
+      return;
+    }
+    say('Opening ' + clip(d.name, 60) + '\u2026');
+    tryOpen(d, pwIn.value).catch(() => openFailed(d));
+  });
+  pwIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pwGo.click(); } });
+  pwIn.addEventListener('input', () => { if (pwIn.getAttribute('aria-invalid') === 'true') { pwIn.removeAttribute('aria-invalid'); setText(pwErr, ''); } });
+  $('#p2t-pw-cancel').addEventListener('click', () => {
+    const d = opening;
+    opening = null;
+    hidePassword();
+    if (d) { say(''); showError(clip(d.name, 60) + ' was not opened: it needs a password.'); }
+    openBtn.focus();
+  });
+
+  function showLock(d, failed) {
+    lockBox.hidden = false;
+    work.hidden = true;
+    setText(lockText, failed
+      ? 'The author of ' + clip(d.name, 60) + ' does not allow copying its text, and its permissions could not be checked. If you have its permissions password, remove the restriction with Unlock PDF first.'
+      : 'The author of ' + clip(d.name, 60) + ' does not allow copying its text. As on Unlock PDF, this page lifts that only with the file\u2019s permissions password.');
+    ownerIn.disabled = failed;
+    ownerGo.disabled = failed;
+    say(failed ? 'The permissions of ' + clip(d.name, 60) + ' could not be checked.' : 'Copying the text of ' + clip(d.name, 60) + ' is not allowed. Type its permissions password to extract it.');
+    if (!failed) ownerIn.focus();
+  }
+  function hideLock() {
+    lockBox.hidden = true;
+    setText(ownerErr, '');
+    ownerIn.removeAttribute('aria-invalid');
+    ownerIn.value = '';
+  }
+  let checking = false;
+  ownerGo.addEventListener('click', async () => {
+    const d = doc;
+    if (!d || d.allowed || checking || lockBox.hidden) return;
+    if (!ownerIn.value) {
+      setText(ownerErr, 'Type the permissions password first.');
+      ownerIn.setAttribute('aria-invalid', 'true');
+      ownerIn.focus();
+      return;
+    }
+    checking = true;
+    say('Checking the password\u2026');
+    let r = null;
+    try { r = await checkOwner(d.file, ownerIn.value); } catch (e) { r = null; } finally { checking = false; }
+    if (doc !== d) return;
+    if (!r) { setText(ownerErr, 'The password could not be checked: the file may be damaged.'); ownerIn.setAttribute('aria-invalid', 'true'); say(''); return; }
+    if (!r.owner) {
+      setText(ownerErr, 'That is not the permissions password of this file. Check it and try again.');
+      ownerIn.setAttribute('aria-invalid', 'true');
+      say('');
+      ownerIn.focus();
+      ownerIn.select();
+      return;
+    }
+    d.allowed = true;
+    d.lifted = 'given';
+    hideLock();
+    work.hidden = false;
+    startReading();
+  });
+  ownerIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); ownerGo.click(); } });
+  ownerIn.addEventListener('input', () => { if (ownerIn.getAttribute('aria-invalid') === 'true') { ownerIn.removeAttribute('aria-invalid'); setText(ownerErr, ''); } });
+
+  function closeDoc() {
+    gen++;
+    stopAsked = true;
+    if (job) job.cancel();
+    if (doc && doc.pdf) { try { doc.pdf.loadingTask.destroy(); } catch (e) { /* closed */ } }
+    if (opening && opening.task) { try { opening.task.destroy(); } catch (e) { /* closed */ } }
+    doc = null;
+    opening = null;
+    hidePassword();
+    hideLock();
+    work.hidden = true;
+    busy(false);
+    root.classList.remove('has-doc');
+    fileLine.hidden = true;
+    intro.hidden = false;
+    setText(openBtn, 'Choose a PDF file\u2026');
+    // The list of pages stays for the next file (it is checked against it when that opens).
+    setPagesError('');
+    continueRow.hidden = true;
+    textEl.value = '';
+    built = '';
+    setText(countEl, '');
+    flagsEl.hidden = true;
+    ocrBox.hidden = true;
+  }
+  function showDoc(d) {
+    doc = d;
+    root.classList.add('has-doc');
+    intro.hidden = true;
+    fileLine.hidden = false;
+    setText(nameEl, d.name);
+    setText(metaEl, plural(d.n, 'page') + ' \u00b7 ' + fmtBytes(d.size) + (d.encrypted && d.password ? ' \u00b7 unlocked' : ''));
+    setText(openBtn, 'Choose another PDF\u2026');
+    work.hidden = !!d.restricted;
+    fieldsRow.hidden = true;
+    const big = touch && d.size > BIG_ON_PHONE;
+    if (big) showError(clip(d.name, 60) + ' is ' + fmtBytes(d.size) + ': a phone may run out of memory with a file this large. If the page stops, read it on a computer.');
+  }
+
+  // ---------- Which pages ----------
+  // Digits may be typed as full-width or Arabic-Indic digits; commas, semicolons and the
+  // ideographic comma separate items, and any dash, a tilde or "to" joins a range. Decimal
+  // points, thousands separators and raised digits are refused rather than guessed at.
+  const DASHES = '-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe58\ufe63\uff0d~\uff5e\u301c';
+  const SEPS = ',;\uff0c\u3001\uff1b\u060c\u061b';
+  function digitOf(c) {
+    if (c >= 48 && c <= 57) return c - 48;
+    if (c >= 0xFF10 && c <= 0xFF19) return c - 0xFF10;
+    if (c >= 0x660 && c <= 0x669) return c - 0x660;
+    if (c >= 0x6F0 && c <= 0x6F9) return c - 0x6F0;
+    return -1;
+  }
+  const LIST_HINT = ' Use numbers, dashes and commas, such as 1-3, 5.';
+  function parseList(text, n) {
+    if (text.length > MAX_LIST) return { error: 'This list is ' + NUM.format(text.length) + ' characters long. Keep it under ' + NUM.format(MAX_LIST) + ' characters.' };
+    const toks = [];
+    for (let i = 0; i < text.length;) {
+      const c = text.charCodeAt(i), ch = text[i];
+      if (digitOf(c) >= 0) {
+        let v = '';
+        while (i < text.length && digitOf(text.charCodeAt(i)) >= 0) { v += digitOf(text.charCodeAt(i)); i++; }
+        toks.push({ t: 'num', v });
+      } else if (DASHES.indexOf(ch) >= 0) { toks.push({ t: 'dash' }); i++; }
+      else if (SEPS.indexOf(ch) >= 0) { toks.push({ t: 'sep' }); i++; }
+      else if (/\s/.test(ch)) i++;
+      else if (/[a-z]/i.test(ch)) {
+        let w = '';
+        while (i < text.length && /[a-z]/i.test(text[i])) { w += text[i]; i++; }
+        const lw = w.toLowerCase();
+        if (lw === 'end' || lw === 'last') toks.push({ t: 'end' });
+        else if (lw === 'to') toks.push({ t: 'dash' });
+        else if (lw === 'and') toks.push({ t: 'sep' });
+        else if (lw === 'all') toks.push({ t: 'all' });
+        else return { error: '\u201c' + clip(w, 24) + '\u201d is not a page number.' + LIST_HINT };
+      } else {
+        let cp = String.fromCodePoint(text.codePointAt(i));
+        // A character that does not show (a zero-width space, a control character) is named by its code.
+        cp = /[\p{C}\p{M}]/u.test(cp) ? 'A hidden character (U+' + text.codePointAt(i).toString(16).toUpperCase().padStart(4, '0') + ')' : '\u201c' + cp + '\u201d';
+        return { error: cp + ' cannot be used in a page list.' + LIST_HINT };
+      }
+    }
+    const pages = [], seen = new Set();
+    const atom = t => t && (t.t === 'num' || t.t === 'end');
+    const val = t => { if (t.t === 'end') return n; const v = t.v.replace(/^0+(?=\d)/, ''); return v.length > 9 ? Infinity : parseInt(v, 10); };
+    const shown = t => t.t === 'end' ? 'end' : clip(t.v.replace(/^0+(?=\d)/, ''), 12);
+    const add = (a, b) => { const step = a <= b ? 1 : -1; for (let p = a; ; p += step) { if (!seen.has(p)) { seen.add(p); pages.push(p); } if (p === b) break; } };
+    for (let k = 0; k < toks.length;) {
+      const t = toks[k];
+      let a = null, b = null, at = null, bt = null;
+      if (t.t === 'sep') { k++; continue; }
+      if (t.t === 'all') { add(1, n); k++; if (toks[k] && toks[k].t === 'dash') return { error: 'A range has one dash, as in 4-7.' }; continue; }
+      if (atom(t)) { at = t; a = val(t); k++; }
+      if (toks[k] && toks[k].t === 'dash') {
+        k++;
+        if (toks[k] && toks[k].t === 'dash') return { error: 'Two dashes in a row: write a range as 4-7.' };
+        if (toks[k] && toks[k].t === 'all') return { error: 'A range ends with a page number or \u201cend\u201d, as in 5-end.' };
+        if (atom(toks[k])) { bt = toks[k]; b = val(toks[k]); k++; }
+        else if (a === null) return { error: 'A dash needs a page number before or after it, as in 4-7.' };
+        else b = n;
+        if (a === null) a = 1;
+        if (toks[k] && toks[k].t === 'dash') return { error: 'A range has one dash, as in 4-7. Separate ranges with commas: 1-3, 5.' };
+      } else if (a === null) {
+        return { error: 'A page list starts with a page number, such as 1-3, 5.' };
+      } else b = a;
+      if (a === 0 || b === 0) return { error: 'There is no page 0: the first page is 1.' };
+      if (a > n || b > n) {
+        const big = a > n ? at : bt;
+        return { error: 'Page ' + (big ? shown(big) : NUM.format(Math.max(a, b))) + ' does not exist: this PDF has ' + plural(n, 'page') + '.' };
+      }
+      add(a, b);
+    }
+    return { pages };
+  }
+  // The pages chosen, in the order typed, or null while the list holds a mistake. An empty list
+  // means every page.
+  let lastGood = null;
+  function wanted() {
+    if (!doc) return [];
+    const t = pagesIn.value.trim();
+    if (!t) return Array.from({ length: doc.n }, (_, i) => i + 1);
+    const r = parseList(t, doc.n);
+    if (r.error) return null;
+    return r.pages.length ? r.pages : Array.from({ length: doc.n }, (_, i) => i + 1);
+  }
+  function setPagesError(t) {
+    setText(pagesErr, t);
+    if (t) pagesIn.setAttribute('aria-invalid', 'true'); else pagesIn.removeAttribute('aria-invalid');
+  }
+  // The list is checked as it is typed, but a mistake is only shown once the visitor leaves the
+  // field or presses Enter (while typing "1-" is not finished yet).
+  function applyPages(show) {
+    if (!doc) return;
+    const t = pagesIn.value.trim();
+    const r = t ? parseList(t, doc.n) : { pages: [] };
+    if (r.error) { if (show) setPagesError(r.error); return; }
+    setPagesError('');
+    const key = (r.pages || []).join(',');
+    if (key === lastGood) return;
+    lastGood = key;
+    continueRow.hidden = true;
+    if (doc.allowed) { build(); pump(); }
+  }
+  pagesIn.addEventListener('input', TT.debounce(() => {
+    if (pagesIn.getAttribute('aria-invalid') === 'true') { const t = pagesIn.value.trim(); if (!t || !parseList(t, doc ? doc.n : 1).error) setPagesError(''); }
+    applyPages(false);
+  }, 350));
+  pagesIn.addEventListener('change', () => applyPages(true));
+  pagesIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyPages(true); } });
+
+  // ---------- Reading the text of the pages ----------
+  function busy(on) {
+    progressRow.hidden = !on;
+    [copyBtn, dlBtn, shareBtn].forEach(b => { b.setAttribute('aria-disabled', String(on)); b.classList.toggle('p2t-btn-off', on); });
+    if (on) continueRow.hidden = true;
+  }
+  function startReading() {
+    const t = pagesIn.value.trim(), r = t ? parseList(t, doc.n) : null;
+    if (r && r.error) { lastGood = null; setPagesError(r.error); say('The list of pages does not fit ' + clip(doc.name, 60) + ': correct it to read the text.'); return; }
+    lastGood = (wanted() || []).join(',');
+    build();
+    pump();
+  }
+  const UNREADABLE = /[\ufffd\ue000-\uf8ff\u{f0000}-\u{10fffd}\u0000-\u0008\u000e-\u001f]/gu;
+  async function readPage(d, no) {
+    const pg = { no, lines: [], fields: [], letters: 0, bad: 0, chars: 0, noText: false, scan: false, error: '', ocr: null, h: 792 };
+    const page = await d.pdf.getPage(no);
+    const vp = page.getViewport({ scale: 1 });
+    pg.h = vp.height;
+    const tc = await page.getTextContent();
+    if (needsRespace(tc.items)) {
+      try { respace(tc.items, glyphsOf(await page.getOperatorList({ annotationMode: pdfjs.AnnotationMode.DISABLE }), pdfjs.OPS, page.commonObjs)); }
+      catch (e) { /* the spacing stays as PDF.js gave it */ }
+    }
+    pg.lines = buildLines(tc.items, vp.transform);
+    const text = pg.lines.map(l => l.text).join('\n');
+    pg.letters = (text.match(/[\p{L}\p{N}]/gu) || []).length;
+    pg.bad = (text.match(UNREADABLE) || []).length;
+    pg.chars = text.replace(/\s+/g, '').length;
+    pg.noText = !pg.letters;
+    // A scan with a few words stored as text (a stamped number): offered for OCR.
+    const v = page.view, area = (v[2] - v[0]) * (v[3] - v[1]);
+    if (pg.letters && pg.letters < area / 5184) pg.scan = await ocr.mostlyPicture(pdfjs, page, text);
+    if (d.hasFields) {
+      try { pg.fields = fieldValues(await page.getAnnotations()); } catch (e) { pg.fields = []; }
+    }
+    page.cleanup();
+    return pg;
+  }
+  // The values of the filled-in form fields of a page, top to bottom: [label, value].
+  function fieldValues(annots) {
+    const out = [], seen = new Set();
+    annots.filter(a => a && a.subtype === 'Widget' && a.fieldName && !a.hidden)
+      .sort((a, b) => (b.rect ? b.rect[3] : 0) - (a.rect ? a.rect[3] : 0) || (a.rect ? a.rect[0] : 0) - (b.rect ? b.rect[0] : 0))
+      .forEach(a => {
+        if (seen.has(a.fieldName)) return;
+        let v = '';
+        if (a.fieldType === 'Tx') v = Array.isArray(a.fieldValue) ? a.fieldValue.join(', ') : String(a.fieldValue || '');
+        else if (a.fieldType === 'Ch') {
+          const vals = Array.isArray(a.fieldValue) ? a.fieldValue : a.fieldValue ? [a.fieldValue] : [];
+          v = vals.map(x => { const o = (a.options || []).find(o => o.exportValue === x); return o ? o.displayValue : x; }).join(', ');
+        } else if (a.fieldType === 'Btn' && (a.checkBox || a.radioButton)) {
+          if (!a.fieldValue || a.fieldValue === 'Off') return;
+          if (a.radioButton) v = String(a.fieldValue);
+          else v = 'Yes';
+        }
+        v = v.replace(/\r\n?/g, '\n').trim();
+        if (!v) return;
+        seen.add(a.fieldName);
+        out.push([String(a.alternativeText || a.fieldName).replace(/\s+/g, ' ').trim(), v]);
+      });
+    return out;
+  }
+  function showStep(done, total) {
+    bar.value = total ? Math.round(done / total * 100) : 0;
+    setText(stepEl, 'Page ' + NUM.format(Math.min(done + 1, total)) + ' of ' + NUM.format(total));
+  }
+  async function pump() {
+    if (busyNow() || !doc || !doc.allowed) return;
+    const d = doc, my = gen;
+    // The pages asked for, then, to tell running heads from text, as many others as make four
+    // pages read (a running head is found on pages that share it).
+    const need = () => {
+      const w = wanted();
+      if (!w) return [];
+      const todo = w.filter(n => !d.pages.has(n)), enough = Math.min(d.n, 4);
+      for (let n = 1; hfIn.checked && n <= d.n && d.pages.size + todo.length < enough; n++) if (!d.pages.has(n) && !todo.includes(n)) todo.push(n);
+      return todo;
+    };
+    if (!need().length) return;
+    const run = reading = { gen: my };
+    stopAsked = false;
+    busy(true);
+    let done = 0, total = need().length;
+    say('Reading the text of ' + clip(d.name, 60) + '\u2026');
+    try {
+      for (;;) {
+        if (stopAsked || my !== gen) break;
+        const todo = need();
+        if (!todo.length) break;
+        total = Math.max(total, done + todo.length);
+        showStep(done, total);
+        const no = todo[0], unwatch = watchPage(d, no);
+        let pg;
+        try {
+          pg = await readPage(d, no);
+        } catch (e) {
+          if (my !== gen) break;
+          pg = { no, lines: [], fields: [], letters: 0, bad: 0, chars: 0, noText: false, scan: false, ocr: null, h: 792, error: 'damaged' };
+        } finally { unwatch(); }
+        if (my !== gen) break;
+        d.pages.set(no, pg);
+        done++;
+      }
+    } finally {
+      if (reading === run) reading = null;
+      if (my === gen) busy(false);
+    }
+    if (my !== gen) return;
+    const stopped = stopAsked && (wanted() || []).some(n => !d.pages.has(n));
+    continueRow.hidden = !stopped;
+    build(true, stopped ? 'Stopped. ' : '');
+    if (document.activeElement === stopBtn || focusAfterStop) (stopped ? continueBtn : copyBtn).focus();
+    focusAfterStop = false;
+  }
+  // Stop ends the reading after the page being read. A page that has not finished 5 seconds
+  // after Stop, or after a minute of reading while the tab is on screen (a damaged file can keep
+  // PDF.js busy for ever), ends the PDF reader, and the file is closed with a message. Time in a
+  // background tab does not count, as the browser slows pages down there.
+  function watchPage(d, no) {
+    let elapsed = 0, waited = 0;
+    const t = setInterval(() => {
+      if (doc !== d) { clearInterval(t); return; }
+      if (stopAsked) waited += 0.5;
+      if (!document.hidden) elapsed += 0.5;
+      if (waited < 5 && elapsed < 60) return;
+      clearInterval(t);
+      const name = clip(d.name, 60), focus = document.activeElement === stopBtn || focusAfterStop;
+      closeDoc();
+      resetWorker();
+      busy(false);
+      say('');
+      showError(waited >= 5 ? 'Page ' + no + ' of ' + name + ' did not stop within 5 seconds, so the file was closed. Open it again to read the rest.'
+        : 'Page ' + no + ' of ' + name + ' was still being read after a minute, so the file was closed. ' + REPAIR);
+      if (focus) openBtn.focus();
+    }, 500);
+    return () => clearInterval(t);
+  }
+  stopBtn.addEventListener('click', () => {
+    focusAfterStop = document.activeElement === stopBtn;
+    if (job && job.gen === gen) { job.cancel(); return; }
+    if (busyNow()) stopAsked = true;
+  });
+  continueBtn.addEventListener('click', () => { continueRow.hidden = true; pump(); });
+
+  // ---------- OCR for pages without text ----------
+  const ocr = TTOcr({ status: t => { if (job && job.gen === gen) say(t); }, progress: v => { if (job && job.gen === gen) bar.value = Math.max(0, Math.min(100, Math.round(v))); }, sizes: () => updateOcrSize() });
+  (function () {
+    const names = Object.keys(ocr.LANGS).sort((a, b) => (a === 'eng' ? -1 : b === 'eng' ? 1 : ocr.LANGS[a][0].localeCompare(ocr.LANGS[b][0])));
+    names.forEach(code => { const o = document.createElement('option'); o.value = code; o.textContent = ocr.LANGS[code][0]; langSel.appendChild(o); });
+    langSel.value = 'eng';
+  })();
+  function ocrLang() { return Object.prototype.hasOwnProperty.call(ocr.LANGS, langSel.value) ? langSel.value : 'eng'; }
+  function updateOcrSize() { setText(ocrSize, ocr.sizeHint([ocrLang()]) + ' About 10 seconds a page on a computer, longer on a phone.'); }
+  // Pages worth reading with OCR: no text, a scan with a few stored words, or text that is mostly
+  // characters its fonts do not map to letters. A page read in another language can be read again.
+  function ocrPages(pgs) { return pgs.filter(p => !p.error && (p.noText || p.scan || (p.bad && p.bad * 10 >= p.chars))); }
+  function ocrCandidates(pgs) { const lang = ocrLang(); return ocrPages(pgs).filter(p => !p.ocr || p.ocrLang !== lang); }
+  ocrGo.addEventListener('click', e => { if (e.detail > 1) return; runOcr(); });
+  langSel.addEventListener('change', () => { updateOcrSize(); if (doc && doc.allowed && !busyNow()) build(false); });
+  async function runOcr() {
+    const d = doc;
+    if (!d || !d.allowed || busyNow()) return;
+    const w = wanted();
+    if (!w) return;
+    const todo = ocrCandidates(w.map(n => d.pages.get(n)).filter(Boolean));
+    if (!todo.length) return;
+    const my = gen, s = { langs: [ocrLang()], psm: '3', enlarge: 'auto', clean: true, bw: false };
+    const fromButton = document.activeElement === ocrGo;
+    let cancel;
+    const cancelP = new Promise((_, reject) => { cancel = () => reject(ocr.stopError()); });
+    cancelP.catch(() => {});
+    const me = job = { gen: my, stopped: false, cancel: () => { me.stopped = true; cancel(); ocr.dropEngine(); } };
+    const guard = p => Promise.race([p, cancelP]);
+    busy(true);
+    let done = 0, failed = 0;
+    try {
+      for (const pg of todo) {
+        if (me.stopped || my !== gen) break;
+        setText(stepEl, 'OCR: page ' + NUM.format(done + 1) + ' of ' + NUM.format(todo.length));
+        say('Reading page ' + pg.no + ' with OCR\u2026');
+        bar.value = 0;
+        try {
+          const page = await guard(d.pdf.getPage(pg.no));
+          const canvas = await guard(ocr.renderPdf(page, ocr.MAX_PX));
+          page.cleanup();
+          const r = await ocr.read(canvas, s, guard, { engineReady: () => { say('Reading page ' + pg.no + ' with OCR\u2026'); } });
+          if (my !== gen) break;
+          pg.ocr = r.result;
+          pg.ocrLang = s.langs[0];
+          done++;
+        } catch (e) {
+          if (e && e.stopped) break;
+          if (e && e.engine) { showError(e.message); break; }
+          failed++;
+          done++;
+        }
+      }
+    } finally {
+      const stopped = me.stopped;
+      if (job === me) job = null;
+      if (my === gen) busy(false);
+      if (my === gen) build(true, stopped ? 'OCR stopped. ' : '');
+    }
+    if (failed && my === gen) showError(plural(failed, 'page') + ' could not be read with OCR: ' + (failed === todo.length ? 'the pictures may be too large for this device.' : 'they may be damaged.'));
+    // Stop and, once its pages are read, the OCR button go: the keyboard focus stays nearby.
+    const f = document.activeElement;
+    if (my === gen && (f === stopBtn || focusAfterStop || (fromButton && (f === document.body || ocrGo.hidden)))) (ocrGo.hidden ? copyBtn : ocrGo).focus();
+    focusAfterStop = false;
+  }
+
+  // ---------- Building the text ----------
+  function mode() { const r = $('input[name="p2t-mode"]:checked'); return r ? r.value : 'para'; }
+  function ocrParas(r) { return r.blocks.reduce((a, bl) => a.concat(bl), []); }
+  // The text of one page in the chosen form: paragraphs [{ t, table }] (one for Lines and Layout).
+  // The rows of a table keep their lines, with a tab between cells.
+  function pageText(pg, m, drop, dehyphen, fields) {
+    let paras;
+    if (pg.ocr) {
+      const ps = ocrParas(pg.ocr);
+      paras = m === 'para' ? ps.map(p => ({ t: joinLines(p, dehyphen) })) : [{ t: ps.map(p => p.join('\n')).join('\n') }];
+    } else {
+      const lines = drop.size ? pg.lines.filter(l => !drop.has(l)) : pg.lines;
+      if (m === 'para') {
+        paras = paragraphs(lines).map(pl => (pl[0].table ? { t: pl.map(l => l.tab).join('\n'), table: true } : { t: joinLines(pl.map(l => l.text), dehyphen) }));
+      } else if (m === 'lines') paras = [{ t: lines.map(l => l.tab).join('\n') }];
+      else paras = [{ t: layoutText(lines) }];
+    }
+    paras = paras.filter(p => p.t);
+    if (fields && pg.fields.length) paras.push({ t: pg.fields.map(f => f[0] + ': ' + f[1]).join('\n'), table: true });
+    return paras;
+  }
+  function buildText() {
+    const w = wanted() || [];
+    const pgs = w.map(n => doc.pages.get(n)).filter(Boolean);
+    const m = mode(), dehyphen = hyphIn.checked, fields = fieldsIn.checked, breaks = breaksSel.value;
+    // Running heads are found on every page read so far, so they also go from a page read alone.
+    const drop = hfIn.checked ? repeatedLines(Array.from(doc.pages.values())) : new Set();
+    const sep = m === 'para' ? '\n\n' : '\n';
+    // Each page's text is kept apart until the end, so a long PDF is put together once.
+    const parts = [];
+    let lastTable = false;
+    pgs.forEach((pg, i) => {
+      const paras = pageText(pg, m, drop, dehyphen, fields), body = paras.map(p => p.t).join(sep);
+      if (breaks === 'marker') { parts.push((i ? '\n\n' : '') + '--- Page ' + pg.no + ' ---' + (body ? '\n' + body : '')); return; }
+      if (breaks === 'ff') { parts.push(body + '\n\f'); return; }
+      if (!paras.length) return;
+      const k = parts.length - 1;
+      // A paragraph cut by the page break is joined again.
+      if (k >= 0 && m === 'para' && !lastTable && !paras[0].table && runsOn(parts[k].slice(-200), paras[0].t)) {
+        const cut = parts[k].lastIndexOf('\n\n') + 2, from = cut >= 2 ? cut : 0;
+        parts[k] = parts[k].slice(0, from) + joinLines([parts[k].slice(from), paras[0].t], dehyphen);
+        if (paras.length > 1) parts.push(sep + paras.slice(1).map(p => p.t).join(sep));
+      } else parts.push((k >= 0 ? '\n\n' : '') + body);
+      lastTable = !!paras[paras.length - 1].table;
+    });
+    const out = parts.join('');
+    return { text: out, pgs };
+  }
+  // Words as the word counter counts them: runs of letters and digits, joined by an apostrophe,
+  // a hyphen or a full stop; one word for each Chinese or Japanese character.
+  const WORDS = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]|(?:(?![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])[\p{L}\p{N}\p{M}])+(?:['\u2019\-\u2010\u2011.,:/_@&](?:(?![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])[\p{L}\p{N}\p{M}])+)*/gu;
+  function countWords(t) { let n = 0; WORDS.lastIndex = 0; while (WORDS.exec(t)) n++; return n; }
+  // Rebuilds the text from the pages read, with the options as they are now. announce: write the
+  // summary in the status line (false: leave it); prefix: put before it ('Stopped. ').
+  function build(announce, prefix) {
+    if (!doc || !doc.allowed) return;
+    syncUi();
+    const { text, pgs } = buildText();
+    built = text;
+    if (textEl.value !== text) {
+      textEl.value = text;
+      textEl.scrollTop = 0;
+      // Right to left for Hebrew and Arabic text (set here: dir="auto" makes Chrome slow on long text).
+      const head = text.slice(0, 5000), rtl = (head.match(/[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/g) || []).length;
+      textEl.dir = rtl * 2 > (head.match(/\p{L}/gu) || []).length ? 'rtl' : 'ltr';
+    }
+    textEl.classList.toggle('is-layout', mode() === 'layout');
+    textEl.wrap = mode() === 'layout' ? 'off' : 'soft';
+    const words = countWords(text);
+    setText(countEl, text ? plural(words, 'word') + ' \u00b7 ' + plural(Array.from(text).length, 'character') : '');
+    fieldsRow.hidden = !pgs.some(p => p.fields.length);
+    const n = pgs.reduce((a, p) => a + p.fields.length, 0);
+    setText(fieldsLabel, 'Add filled-in form fields (' + NUM.format(n) + ')');
+    showFlags(pgs);
+    if (busyNow()) return;
+    const w = wanted() || [];
+    const missing = w.length - pgs.length;
+    let s;
+    if (!pgs.length) s = '';
+    else if (!words && !pgs.some(p => p.ocr)) s = 'No text found on ' + (pgs.length === 1 ? 'page ' + pgs[0].no : 'these ' + plural(pgs.length, 'page')) + ' of ' + clip(doc.name, 60) + '.';
+    else s = clip(doc.name, 60) + ': ' + plural(words, 'word') + ' from ' + plural(pgs.length, 'page') + '.';
+    if (prefix && missing > 0) s += ' ' + plural(missing, 'page') + ' not read yet.';
+    if (s && announce !== false) say((prefix || '') + s);
+  }
+  function showFlags(pgs) {
+    const items = [];
+    const none = pgs.filter(p => p.noText && !p.ocr).map(p => p.no), scan = pgs.filter(p => p.scan && !p.ocr).map(p => p.no);
+    const broken = pgs.filter(p => p.error).map(p => p.no);
+    const bad = pgs.filter(p => p.bad && !p.ocr);
+    const read = pgs.filter(p => p.ocr);
+    if (none.length) {
+      items.push(['warn', none.length === pgs.length && pgs.length > 1 ? 'None of these ' + plural(pgs.length, 'page') + ' has text to copy: the PDF is probably scanned.'
+        : none.length === 1 ? 'Page ' + none[0] + ' has no text to copy: it is probably a scan or a picture.'
+          : 'Pages ' + pageList(none) + ' have no text to copy: they are probably scans or pictures.']);
+    }
+    if (scan.length) items.push(['warn', (scan.length === 1 ? 'Page ' + scan[0] + ' is a scan' : 'Pages ' + pageList(scan) + ' are scans') + ' with only a few words stored as text.']);
+    bad.forEach(p => items.push(['warn', 'Page ' + p.no + ': ' + plural(p.bad, 'character') + ' that ' + (p.bad === 1 ? 'its font does' : 'its fonts do') + ' not match to letters, shown as \ufffd or as symbols' + (p.bad * 10 >= p.chars ? '. Reading the page with OCR may do better.' : '.')]));
+    if (broken.length) items.push(['warn', (broken.length === 1 ? 'Page ' + broken[0] : 'Pages ' + pageList(broken)) + ' could not be read: the file is damaged there.']);
+    if (read.length) {
+      const lines = read.reduce((a, p) => a.concat(p.ocr.lines), []), chars = lines.reduce((a, l) => a + l.text.length, 0);
+      const conf = chars ? Math.round(lines.reduce((a, l) => a + l.conf * l.text.length, 0) / chars) : null;
+      const langs = Array.from(new Set(read.map(p => ocr.LANGS[p.ocrLang][0])));
+      items.push(['', (read.length === 1 ? 'Page ' + read[0].no + ' was' : 'Pages ' + pageList(read.map(p => p.no)) + ' were') + ' read with OCR in ' + andList(langs) +
+        (conf !== null ? ', average confidence ' + conf + '%. Check names, numbers and dates in ' + (read.length === 1 ? 'it.' : 'them.') : ', but no text was found.')]);
+    }
+    if (doc.lifted) items.unshift(['', 'Its author does not allow copying its text; ' + (doc.lifted === 'blank' ? 'its permissions password is blank, so' : 'with its permissions password') + ' the text is read anyway.']);
+    flagsEl.textContent = '';
+    items.forEach(([cls, t]) => { const li = document.createElement('li'); if (cls) li.className = 'is-' + cls; li.textContent = t; flagsEl.appendChild(li); });
+    flagsEl.hidden = !items.length;
+    // The OCR box stays once its pages are read, so that they can be read again in another language.
+    const all = ocrPages(pgs), cand = ocrCandidates(pgs);
+    ocrBox.hidden = !all.length;
+    ocrGo.hidden = !cand.length;
+    ocrSize.hidden = !cand.length;
+    if (cand.length) {
+      setText(ocrText, (cand.length === 1 ? 'Page ' + cand[0].no : plural(cand.length, 'page') + ' (' + pageList(cand.map(p => p.no)) + ')') + ' can be read with OCR, which finds the letters in the picture of a page. OCR makes mistakes: check what it reads.');
+      setText(ocrGo, 'Read ' + (cand.length === 1 ? 'page ' + cand[0].no : plural(cand.length, 'page')) + ' with OCR');
+      updateOcrSize();
+    } else if (all.length) {
+      setText(ocrText, 'To read ' + (all.length === 1 ? 'page ' + all[0].no : 'these pages') + ' again in another language, choose the language.');
+    }
+  }
+
+  // ---------- Options ----------
+  function syncUi() { hyphRow.hidden = mode() !== 'para'; }
+  document.querySelectorAll('input[name="p2t-mode"]').forEach(r => r.addEventListener('change', () => { syncUi(); build(); }));
+  [hyphIn, fieldsIn, breaksSel].forEach(el => el.addEventListener('change', () => build()));
+  // Finding running heads may need a few more pages read.
+  hfIn.addEventListener('change', () => { build(); pump(); });
+  // The browser puts back the options chosen before Back or Forward after this script has run.
+  window.addEventListener('pageshow', () => { syncUi(); if (doc && doc.allowed && !busyNow()) { applyPages(true); build(false); } });
+  syncUi();
+
+  // ---------- Copy, download, share ----------
+  function baseName() {
+    const n = doc ? doc.name.replace(/\.pdf$/i, '') : 'text';
+    // Cut by code points, so an emoji is never split.
+    return Array.from(n.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').trim() || 'text').slice(0, 80).join('');
+  }
+  // Every action works on the text as the options make it now.
+  function current() {
+    if (!doc || !doc.allowed) return null;
+    if (busyNow()) { say('Wait until the reading has finished, or press Stop.'); return null; }
+    if (wanted() === null) { applyPages(true); say('Correct the list of pages first.'); pagesIn.focus(); return null; }
+    build(false);
+    if (!built) { say('There is no text to copy or save yet.'); return null; }
+    return built;
+  }
+  copyBtn.addEventListener('click', () => { const t = current(); if (t !== null) TT.copy(t, copyBtn); });
+  dlBtn.addEventListener('click', e => {
+    if (e.detail > 1) return;
+    const t = current();
+    if (t === null) return;
+    TT.download(baseName() + '.txt', t, 'text/plain;charset=utf-8');
+    say('Downloaded ' + baseName() + '.txt.');
+  });
+  let sharing = false;
+  shareBtn.addEventListener('click', async e => {
+    if (e.detail > 1 || sharing) return;
+    const t = current();
+    if (t === null) return;
+    const file = new File([t], baseName() + '.txt', { type: 'text/plain' });
+    sharing = true;
+    try { await navigator.share({ files: [file], title: baseName() }); }
+    catch (err) { if (!err || err.name !== 'AbortError') say('The text could not be shared. Use Download .txt instead.'); }
+    finally { sharing = false; }
+  });
+  try {
+    shareBtn.hidden = !(touch && navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.txt', { type: 'text/plain' })] }));
+  } catch (e) { shareBtn.hidden = true; }
+
+  // ---------- Choosing and dropping files ----------
+  openBtn.addEventListener('click', () => fileIn.click());
+  fileIn.addEventListener('change', () => { const f = Array.from(fileIn.files || []); fileIn.value = ''; addFiles(f); });
+  sampleBtn.addEventListener('click', e => {
+    if (e.detail > 1) return;
+    const bytes = Uint8Array.from(atob(SAMPLE), c => c.charCodeAt(0));
+    addFiles([new File([bytes], 'sample.pdf', { type: 'application/pdf' })]);
+  });
+  let dragDepth = 0;
+  const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  document.addEventListener('dragenter', e => { if (hasFiles(e)) { dragDepth++; drop.classList.add('is-over'); } });
+  document.addEventListener('dragleave', e => { if (hasFiles(e)) { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) drop.classList.remove('is-over'); } });
+  document.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener('drop', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    drop.classList.remove('is-over');
+    addFiles(e.dataTransfer.files);
+  });
+  {% endraw %}
+})();
+</script>
