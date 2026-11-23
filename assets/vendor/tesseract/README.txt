@@ -1,9 +1,8 @@
-Tesseract.js, OCR in the browser (used by Image to Text and PDF to Text)
-========================================================================
+Tesseract.js, OCR in the browser (used by the Image to Text tool)
+=================================================================
 
-Image to Text and PDF to Text load these files through the shared
-_includes/ocr-engine.js, only when a visitor starts reading a picture or a
-scanned page. Every path is set there (workerPath, corePath, langPath), so
+The Image to Text page loads these files only when a visitor starts reading a
+picture. Every path is set on the page (workerPath, corePath, langPath), so
 nothing is fetched from a CDN, and cacheMethod is 'none', so the language data
 is never stored in IndexedDB. All files are byte-for-byte the published ones.
 

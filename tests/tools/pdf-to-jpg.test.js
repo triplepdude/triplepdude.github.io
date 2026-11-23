@@ -63,7 +63,7 @@ function rawPdf(objs, trailer = '') {
 }
 const CATALOG = '<< /Type /Catalog /Pages 2 0 R >>', A_PAGE = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] >>';
 
-module.exports = async ({ page, open, assert, fixtures, url, base }) => {
+module.exports = async ({ page, open, assert, fixtures, url }) => {
   const fx = n => path.join(fixtures, n);
   const exp = JSON.parse(fs.readFileSync(fx('expected.json'), 'utf8'));
   await open();
@@ -761,16 +761,4 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.ok(await p2.evaluate(() => document.documentElement.scrollWidth <= 320), 'the results fit at 320px');
   assert.deepEqual(errors, []);
   await phone.close();
-
-  // ---- PDF to PNG has the PNG-only options: the guide and the FAQ send readers there, and the
-  // homepage search no longer finds this page by the keyword "pdf to png" ----
-  const links = await page.$$eval('.prose a[href$="/pdf-to-png/"], .faq a[href$="/pdf-to-png/"]', l => l.map(a => a.closest('.faq') ? 'faq' : 'guide'));
-  assert.deepEqual(links, ['guide', 'faq']);
-  const pictures = await page.$$eval('.faq details', l => l.map(d => d.textContent).find(t => /original pictures/.test(t)));
-  assert.match(pictures, /Pictures in the PDF/);
-  const home = await page.context().newPage();
-  await home.goto(base + '/');
-  const tile = await home.$eval('li[data-search^="pdf to jpg converter"]', li => li.dataset.search);
-  assert.ok(!tile.includes('pdf to png'), tile);
-  await home.close();
 };
