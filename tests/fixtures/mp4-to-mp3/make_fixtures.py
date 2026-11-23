@@ -265,6 +265,140 @@ if want('tags-v22.mp3'):
 if want('tags.flac'):
     ff(*SHORT, '-ar', '8000', '-c:a', 'flac', *META, '-fflags', '+bitexact', '-flags:a', '+bitexact', 'tags.flac')
 
+
+# ---------- MP3 frames: LAME tags, CRC, free format, junk, VBRI ----------
+# A chirp of exactly 132,300 samples (3 s at 44.1 kHz), different in each
+# channel, so that any shift or cut shows: left 0.5 sin(2 pi (200 t + 300 t^2)),
+# right 0.3 sin(2 pi (300 t + 200 t^2)). The test makes the same signal.
+CHIRP3 = ['-f', 'lavfi', '-i', "aevalsrc='0.5*sin(2*PI*(200*t+300*t*t))|0.3*sin(2*PI*(300*t+200*t*t))':s=44100:d=3"]
+LAME = ['-c:a', 'libmp3lame', '-fflags', '+bitexact', '-flags:a', '+bitexact']
+CUT_TAGS = ['-metadata', 'title=Cut test', '-metadata', 'artist=Frame Artist']
+if want('lame-cbr.mp3'):
+    ff(*CHIRP3, *LAME, '-b:a', '128k', *CUT_TAGS, '-id3v2_version', '3', '-write_id3v1', '1', 'lame-cbr.mp3')
+# VBR at its best quality, with noise under the chirp so that LAME spends
+# bits as on music (its bit reservoir then spans two frames, as at 128 kbps
+# and above; a pure chirp at a low VBR quality needs five, which an exact
+# cut cannot express in the LAME tag's 12-bit delay).
+NOISY3 = ['-f', 'lavfi', '-i', "aevalsrc='0.4*sin(2*PI*(200*t+300*t*t))+0.15*(random(0)-0.5)|0.25*sin(2*PI*(300*t+200*t*t))+0.15*(random(1)-0.5)':s=44100:d=3"]
+if want('lame-vbr.mp3'):
+    ff(*NOISY3, *LAME, '-q:a', '0', *CUT_TAGS, '-id3v2_version', '3', 'lame-vbr.mp3')
+if want('no-tag.mp3'):
+    ff(*CHIRP3, *LAME, '-b:a', '128k', '-write_xing', '0', '-id3v2_version', '0', 'no-tag.mp3')
+if want('mpeg2.mp3'):
+    ff('-f', 'lavfi', '-i', "aevalsrc='0.5*sin(2*PI*(200*t+100*t*t))':s=22050:d=3", *LAME, '-b:a', '64k', '-id3v2_version', '0', 'mpeg2.mp3')
+# 32 kbps: LAME's bit reservoir then reaches up to seven frames back, more
+# than the 4,095 samples of the LAME tag's delay can skip, so an exact cut
+# puts a frame of silence that holds those bytes in front instead (mp3Donor).
+if want('lame-32k.mp3'):
+    ff(*NOISY3, *LAME, '-b:a', '32k', *CUT_TAGS, '-id3v2_version', '3', 'lame-32k.mp3')
+
+
+def mp3_frames(d):
+    """(offset, header, size) of each MPEG-1/2/2.5 Layer III frame after an ID3v2 tag."""
+    kb = {3: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]}
+    kb[2] = kb[0] = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]
+    sr = {3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000]}
+    p = 10 + ((d[6] & 127) << 21 | (d[7] & 127) << 14 | (d[8] & 127) << 7 | d[9] & 127) if d[:3] == b'ID3' else 0
+    out = []
+    while p + 4 <= len(d) and d[p] == 0xFF and d[p + 1] & 0xE0 == 0xE0:
+        ver = d[p + 1] >> 3 & 3
+        size = (144000 if ver == 3 else 72000) * kb[ver][d[p + 2] >> 4] // sr[ver][d[p + 2] >> 2 & 3] + (d[p + 2] >> 1 & 1)
+        out.append((p, ver, size))
+        p += size
+    return out
+
+
+def mpeg_crc(data):
+    """The CRC-16 of a protected MPEG audio frame: polynomial 0x8005, from 0xFFFF, high bit first."""
+    crc = 0xFFFF
+    for byte in data:
+        for i in range(7, -1, -1):
+            top = crc >> 15 & 1
+            crc = crc << 1 & 0xFFFF
+            if top ^ (byte >> i & 1):
+                crc ^= 0x8005
+    return crc
+
+
+def protect(src_bytes):
+    """Frames with a CRC: the encoder ran without the bit reservoir, so each
+    frame's main data is its own; two of its unused bytes make room for the CRC."""
+    out = bytearray()
+    for p, ver, size in mp3_frames(src_bytes):
+        f = bytearray(src_bytes[p:p + size])
+        side = f[4:36]   # MPEG-1 stereo
+        bits = int.from_bytes(side, 'big')
+        assert bits >> (256 - 9) == 0, 'main_data_begin must be 0'
+        main = sum(bits >> (256 - o - 12) & 0xFFF for o in (20, 79, 138, 197))
+        assert (main + 7) // 8 <= size - 38, 'room for the CRC'
+        f[1] &= 0xFE
+        crc = mpeg_crc(bytes(f[2:4]) + bytes(side))
+        out += bytes(f[:4]) + crc.to_bytes(2, 'big') + bytes(side) + bytes(f[36:size - 2])
+    return bytes(out)
+
+
+if want('crc.mp3'):
+    plain = subprocess.run(['ffmpeg', '-v', 'error', *CHIRP3[:4], '-t', '1', *LAME, '-b:a', '192k', '-reservoir', '0', '-write_xing', '0',
+                            '-id3v2_version', '0', '-f', 'mp3', '-'], cwd=HERE, capture_output=True, check=True).stdout
+    with open(os.path.join(HERE, 'crc.mp3'), 'wb') as f:
+        f.write(protect(plain))
+if want('free.mp3'):
+    # 48 kHz at 128 kbps: every frame is 384 bytes, so the bitrate field can
+    # say "free format" (0) and the frames stay as they are.
+    plain = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', "aevalsrc='0.3*sin(2*PI*440*t)':s=48000:d=0.5", *LAME,
+                            '-b:a', '128k', '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', '-'], cwd=HERE, capture_output=True, check=True).stdout
+    b = bytearray(plain)
+    for p, ver, size in mp3_frames(plain):
+        assert size == 384
+        b[p + 2] &= 0x0F
+    with open(os.path.join(HERE, 'free.mp3'), 'wb') as f:
+        f.write(bytes(b))
+JUNK_FRAMES = 10   # where junk.mp3 has junk between two frames
+if want('junk.mp3'):
+    # An ID3v2 tag, 700 bytes of junk, 1 s of frames with 333 bytes of junk
+    # after the tenth, then an APEv2 tag and an ID3v1 tag.
+    plain = subprocess.run(['ffmpeg', '-v', 'error', *CHIRP3[:4], '-t', '1', *LAME, '-b:a', '128k', '-write_xing', '0',
+                            '-id3v2_version', '0', '-f', 'mp3', '-'], cwd=HERE, capture_output=True, check=True).stdout
+    fr = mp3_frames(plain)
+    cut = fr[JUNK_FRAMES][0]
+    id3 = b'ID3\x03\x00\x00\x00\x00\x00\x15TIT2\x00\x00\x00\x0b\x00\x00\x00Junk test!'
+    junk = bytes((i * 37 + 11) % 251 & 0x7F for i in range(700))
+    item = struct.pack('<II', 5, 0) + b'Title\x00Hello'
+    ape_footer = lambda flags: b'APETAGEX' + struct.pack('<IIII', 2000, len(item) + 32, 1, flags) + b'\x00' * 8
+    ape = ape_footer(0xA0000000) + item + ape_footer(0x80000000)
+    v1 = b'TAG' + b'Junk test'.ljust(30, b'\x00') + b'\x00' * 94 + b'\xff'
+    with open(os.path.join(HERE, 'junk.mp3'), 'wb') as f:
+        f.write(id3 + junk + plain[:cut] + junk[:333] + plain[cut:] + ape + v1)
+if want('vbri.mp3'):
+    # lame-vbr.mp3 with a Fraunhofer VBRI header in place of its Xing frame.
+    with open(os.path.join(HERE, 'lame-vbr.mp3'), 'rb') as f:
+        d = f.read()
+    fr = mp3_frames(d)
+    p, ver, size = fr[0]
+    audio = fr[1:]
+    total = sum(x[2] for x in fr)
+    per = 12
+    entries = [sum(x[2] for x in audio[i * per:(i + 1) * per]) for i in range((len(audio) + per - 1) // per)]
+    vbri = b'VBRI' + struct.pack('>HHHIIHHHH', 1, 576, 75, total, len(audio), len(entries), 1, 2, per) + b''.join(struct.pack('>H', e) for e in entries)
+    frame = bytearray(d[p:p + size])
+    frame[3] = d[audio[0][0] + 3]   # the stream's channel mode, as a Fraunhofer encoder writes it
+    frame[4:] = b'\x00' * (size - 4)
+    frame[36:36 + len(vbri)] = vbri
+    with open(os.path.join(HERE, 'vbri.mp3'), 'wb') as f:
+        f.write(d[:p] + bytes(frame) + d[p + size:fr[-1][0] + fr[-1][2]])
+
+# ---------- WAV files in every format browsers read, and three they do not ----------
+WAV_TONE = ['-f', 'lavfi', '-i', "aevalsrc='0.5*sin(2*PI*440*t)':s=16000:d=0.25"]
+WAV_KINDS = {'pcm8.wav': ['-c:a', 'pcm_u8'], 'pcm24.wav': ['-c:a', 'pcm_s24le'], 'pcm32.wav': ['-c:a', 'pcm_s32le'],
+             'float32.wav': ['-c:a', 'pcm_f32le'], 'float64.wav': ['-c:a', 'pcm_f64le'], 'ulaw.wav': ['-c:a', 'pcm_mulaw'],
+             'alaw.wav': ['-c:a', 'pcm_alaw'], 'rf64.wav': ['-c:a', 'pcm_s16le', '-rf64', 'always'],
+             'ima-adpcm.wav': ['-c:a', 'adpcm_ima_wav'], 'ms-adpcm.wav': ['-c:a', 'adpcm_ms'],
+             'gsm.wav': ['-ar', '8000', '-c:a', 'libgsm_ms'],
+             'mp3-in.wav': ['-c:a', 'libmp3lame', '-b:a', '64k', '-metadata', 'title=MP3 inside', '-metadata', 'artist=Wave Artist']}
+for name, args in WAV_KINDS.items():
+    if want(name):
+        ff(*WAV_TONE, *args, '-fflags', '+bitexact', '-flags:a', '+bitexact', name)
+
 expected = {}
 for name in ['clip.mp4', 'phone.mov', 'voice.webm', 'chirp.wav', 'dolby.mkv', 'two-langs.mkv', 'protected.mp4', 'long-claim.m4a']:
     info = probe(name, '-show_streams', '-show_format')
@@ -348,6 +482,58 @@ expected['tags.m4a']['tags'] = TAGS
 expected['tags-v22.mp3']['tags'] = V22
 expected['info-utf8.wav']['info'] = INFO_UTF8
 expected['info-1252.wav']['info'] = INFO_1252
+
+
+def mp3_facts(name):
+    """What mutagen (an independent reader) finds in an MP3: frames, Xing or
+    VBRI header, LAME delay and padding, and ffprobe's count of packets."""
+    from mutagen.mp3 import MP3
+    from mutagen.mp3._util import XingHeader, VBRIHeader, LAMEHeader
+    with open(os.path.join(HERE, name), 'rb') as f:
+        d = f.read()
+    fr = mp3_frames(d)
+    out = {'size': len(d), 'first_frame': fr[0][0] if fr else None}
+    p, ver, size = fr[0]
+    frame = d[p:p + size]
+    for off in (36, 21, 13):
+        try:
+            import io
+            x = XingHeader(io.BytesIO(frame[off:]))
+            out['xing'] = {'info': x.is_info, 'frames': x.frames, 'bytes': x.bytes, 'toc': list(x.toc)}
+            # mutagen reads LAME tags only from LAME itself; ffmpeg signs its
+            # tag 'Lavc'. The delay and padding are 12 bits each, 21 bytes in.
+            q = p + off + 8 + 4 * bool(x.frames != -1) + 4 * bool(x.bytes != -1) + 100 * bool(x.toc) + 4 * bool(x.vbr_scale != -1)
+            out['xing']['encoder'] = d[q:q + 9].decode('latin1')
+            v = int.from_bytes(d[q + 21:q + 24], 'big')
+            out['xing']['delay'], out['xing']['padding'] = v >> 12, v & 4095
+            break
+        except Exception:
+            pass
+    try:
+        import io
+        v = VBRIHeader(io.BytesIO(frame[36:]))
+        out['vbri'] = {'version': v.version, 'quality': v.quality, 'bytes': v.bytes, 'frames': v.frames, 'toc': list(v.toc)}
+    except Exception:
+        pass
+    pk = probe(name, '-count_packets', '-show_streams', '-select_streams', 'a:0')['streams'][0]
+    out['packets'] = int(pk['nb_read_packets'])
+    out['sample_rate'] = int(pk['sample_rate'])
+    out['channels'] = pk['channels']
+    return out
+
+
+for name in ['lame-cbr.mp3', 'lame-vbr.mp3', 'lame-32k.mp3', 'no-tag.mp3', 'mpeg2.mp3', 'crc.mp3', 'vbri.mp3']:
+    expected[name] = mp3_facts(name)
+for name in ['free.mp3', 'junk.mp3']:
+    expected[name] = {'size': os.path.getsize(os.path.join(HERE, name))}
+expected['junk.mp3']['frames'] = len(mp3_frames(subprocess.run(['ffmpeg', '-v', 'error', *CHIRP3[:4], '-t', '1', *LAME, '-b:a', '128k',
+    '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', '-'], cwd=HERE, capture_output=True, check=True).stdout))
+expected['junk.mp3']['junk_after_frame'] = JUNK_FRAMES
+for name in WAV_KINDS:
+    st = probe(name, '-show_streams')['streams'][0]
+    expected[name] = {'size': os.path.getsize(os.path.join(HERE, name)), 'codec': st['codec_name'], 'sample_rate': int(st['sample_rate']),
+                      'channels': st['channels'], 'bits': int(st.get('bits_per_sample') or 0), 'codec_tag': st.get('codec_tag_string')}
+
 with open(os.path.join(HERE, 'expected.json'), 'w') as f:
     json.dump(expected, f, indent=1, ensure_ascii=False)
     f.write('\n')

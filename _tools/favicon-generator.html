@@ -1,0 +1,1641 @@
+---
+title: "Favicon Generator from Image, Text or Emoji"
+description: "Make favicon.ico, an SVG icon, iPhone and Android icons and a web manifest from a logo, letters or an emoji. Everything runs in your browser."
+category: Image & PDF
+keywords: [favicon generator, favicon.ico generator, favicon creator, favicon maker, text favicon, emoji favicon, svg favicon, apple touch icon generator, favicon size]
+howto: |
+  ## How to make a favicon
+
+  1. Choose **Text** for one to three letters, **Emoji**, or **Image** for a
+     logo in any common format, SVG and HEIC included.
+  2. Pick a background shape and colours. A picture can fit inside the square
+     or fill it: drag it, or use the arrow keys, to choose what stays.
+  3. Check the previews, which are drawn at their real size, then download
+     the ZIP. Put its files in your site's root folder, or the folder you
+     entered, and paste the HTML into the `<head>` of every page.
+
+  ## What size should a favicon be?
+
+  | File | Pixels | Used by |
+  |---|---|---|
+  | favicon.ico | 16, 32, 48 | All browsers, and requests for /favicon.ico |
+  | icon.svg | any | Chrome 80, Firefox 41, Safari 26 and later |
+  | favicon-96x96.png | 96 | Google Search, which takes no SVG |
+  | apple-touch-icon.png | 180 | iPhone and iPad home screens |
+  | icon-192.png, icon-512.png | 192, 512 | Android and installed web apps |
+  | icon-maskable-512.png | 512 | Android's round and squircle masks |
+
+  Browsers use the icons a page declares. When it declares none, they may ask
+  for /favicon.ico at the root of the site instead: the HTML Standard allows
+  it, and the major browsers do it. The snippet gives the ICO `sizes="32x32"`,
+  because without it Chrome may pick the ICO over the SVG. For a site in a
+  subfolder, such as `example.com/blog/`, enter the folder as the base path.
+
+  At 16 pixels detail disappears: one or two bold letters or a simple mark
+  read better than a full logo, as the enlarged 16 px preview shows.
+
+  ## SVG, dark mode and emoji
+
+  An SVG favicon stays sharp at any size and can carry a dark style, a second
+  set of colours for browsers in dark mode. Chrome and Firefox switch to it;
+  Safari keeps the light colours (reported on Safari 26.3 as WebKit bug
+  309949, still open), so the dark tab preview shows both. Letters become
+  outlines, so icon.svg needs no font, except for characters outside the
+  fonts' Latin set, which then use each visitor's own font.
+
+  An emoji favicon keeps the emoji as text in icon.svg, so every device draws
+  its own version, while the PNGs copy your device's artwork. That artwork
+  belongs to the font's maker: Apple's and Samsung's emoji are proprietary,
+  Google's Noto Color Emoji is under the SIL Open Font License and Microsoft's
+  Fluent Emoji are MIT-licensed.
+
+  ## Phones and maskable icons
+
+  iPhones and iPads use apple-touch-icon.png before the manifest's icons and
+  show a transparent one on black, so that file is always filled. Chrome's
+  install prompt asks for a 192 and a 512 px icon in the manifest. Android
+  crops icons to circles and other shapes; a maskable icon keeps its content
+  inside the safe zone, the central circle 80% as wide as the icon, on a
+  background that runs to the edges.
+
+  ## When the old icon keeps showing
+
+  Browsers keep favicons in a cache of their own. In Chrome, a reload that
+  skips the cache (Ctrl+Shift+R, or Cmd+Shift+R on a Mac) fetches it again.
+  Giving the file a new name, or adding `?v=2` to its links, makes every
+  browser fetch the new one, but Google asks for a stable favicon address, so
+  change it rarely.
+
+  To trim a photo before you start, use [Crop Image](/crop-image/); for PNGs
+  of an SVG logo at other sizes, use [SVG to PNG](/svg-to-png/).
+faq:
+  - q: "How do I convert a PNG to an ICO file?"
+    a: "Choose Image, open the PNG and download favicon.ico: it holds the picture at 16, 32 and 48 pixels, each stored as a PNG inside the ICO, which every current browser reads. For a Windows program or shortcut icon, which can use up to 256 pixels, make the ICO with the [image converter](/image-converter/) instead."
+  - q: "Why does Google show no favicon, or an old one, for my site?"
+    a: "Google Search shows one favicon per hostname: the icon declared on the home page, which a site in a subfolder shares. It takes BMP, GIF, ICO, PNG, JPEG, PPM and TIFF files but not SVG, and recommends more than 48 × 48 pixels, which is why the snippet lists the 96 px PNG. Its crawlers must be allowed to fetch the home page and the icon, and recrawling them can take several days to several weeks."
+  - q: "Why does my favicon look blurry?"
+    a: "Browser tabs show it at 16 CSS pixels, so fine lines and small text blur whatever the quality: use bold letters or a simple mark, and check the enlarged 16 px preview. The ICO holds pictures drawn at exactly 16, 32 and 48 pixels, so standard and double-density screens get one made for their size rather than a shrunk copy. A picture smaller than 512 pixels is enlarged for the phone icons and looks soft there, so start from a bigger image or an SVG."
+  - q: "Are my images and text uploaded anywhere?"
+    a: "No. Your image is opened, and every icon is drawn, by this page in your browser; nothing is sent to a server or stored. Apart from its own scripts, the page loads only the font you pick, from this site."
+---
+<style>
+.fav-src { margin: 0 0 16px; padding: 0; border: 0; min-width: 0; }
+.fav-src legend { margin: 0 0 6px; padding: 0; }
+.fav-seg { display: flex; gap: 4px; padding: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+.fav-seg label { position: relative; flex: 1 1 0; min-width: 0; cursor: pointer; }
+.fav-seg input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.fav-seg span {
+  display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 4px 8px;
+  border: 2px solid transparent; border-radius: 7px; color: var(--muted); font-weight: 600; text-align: center; line-height: 1.2;
+}
+.fav-seg label:hover span { color: var(--text); }
+.fav-seg input:checked + span { background: var(--surface); border-color: var(--accent); color: var(--text); box-shadow: var(--shadow); }
+.fav-seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fav-grid { display: grid; grid-template-columns: minmax(0, 1fr) 272px; gap: 8px 24px; align-items: start; }
+.fav-panel > :last-child { margin-bottom: 16px; }
+.fav-row { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; margin: 0 0 16px; }
+.fav-row > .field { flex: 1 1 200px; margin: 0; }
+.fav-row > .field.fav-colour { flex: 0 0 auto; }
+.fav-row.fav-names { align-items: flex-start; }
+.fav-names .msg { margin: 6px 0 0; }
+.fav-cancel { margin: 0 0 12px; }
+.fav-slider label { display: flex; justify-content: space-between; gap: 8px; }
+.fav-slider output { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fav-set { margin: 0 0 16px; padding: 0; border: 0; min-width: 0; }
+.fav-set > legend { margin: 0 0 8px; padding: 0; }
+.fav-set .checks { margin: 0; }
+.fav-emojis { display: flex; flex-wrap: wrap; gap: 6px; }
+.fav-emojis label { position: relative; cursor: pointer; }
+.fav-emojis input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.fav-emojis span {
+  display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); font-size: 24px; line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif;
+}
+.fav-emojis input:checked + span { border: 3px solid var(--accent); background: var(--accent-soft); }
+.fav-emojis input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fav-pick { position: relative; margin: 0 0 12px; }
+.fav-input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.fav-drop {
+  display: grid; place-items: center; gap: 2px; min-height: 96px; padding: 14px 16px;
+  border: 2px dashed var(--border); border-radius: 10px; background: var(--surface-2); text-align: center; cursor: pointer;
+}
+.fav-drop:hover, .fav-drop.is-over { border-color: var(--accent); }
+.fav-input:focus-visible + .fav-drop { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fav-drop strong { overflow-wrap: anywhere; }
+.fav-drop strong span { color: var(--accent); text-decoration: underline; }
+.fav-drop .hint { overflow-wrap: anywhere; }
+.fav-note { margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; background: var(--surface-2); border-left: 3px solid var(--accent); font-size: 14px; overflow-wrap: anywhere; }
+.fav-note:empty { display: none; }
+.fav-style { margin: 0 0 8px; padding: 14px 16px 2px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.fav-style > legend { padding: 0 6px; }
+.fav-style .check { margin: 0 0 12px; }
+.fav-side { position: sticky; top: 12px; }
+.fav-stage-box {
+  position: relative; width: 256px; max-width: 100%; aspect-ratio: 1 / 1; margin: 0 auto 8px; border-radius: 10px; overflow: hidden;
+  background: repeating-conic-gradient(#d9dde3 0 25%, #ffffff 0 50%) 0 0 / 16px 16px; border: 1px solid var(--border);
+}
+.fav-stage { display: block; width: 100%; height: 100%; }
+.fav-stage.is-crop { cursor: grab; touch-action: none; }
+.fav-stage.is-crop.is-dragging { cursor: grabbing; }
+.fav-stage:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.fav-stage-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; color: #3b4250; font-size: 15px; text-align: center; pointer-events: none; }
+.fav-stage-help { margin: 0 0 12px; text-align: center; }
+.fav-crop-bar { display: flex; justify-content: center; margin: 0 0 12px; }
+.fav-h2 { margin: 28px 0 6px; font-size: 1.15rem; }
+.fav-sub { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+.fav-prev { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin: 0 0 8px; }
+.fav-prev figure { margin: 0; min-width: 0; }
+.fav-prev figcaption { margin-top: 6px; color: var(--muted); font-size: 13px; }
+.fav-mock { border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.fav-mock canvas { display: block; flex: 0 0 auto; }
+.fav-bar { display: flex; align-items: flex-end; gap: 2px; min-height: 52px; padding: 10px 8px 0; }
+.fav-bar.is-light { background: #dfe1e5; }
+.fav-bar.is-dark { background: #1f2023; }
+.fav-tab { display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0; height: 36px; padding: 0 10px; border-radius: 8px 8px 0 0; font: 13px/1 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+.is-light .fav-tab { background: #ffffff; color: #1f1f1f; }
+.is-dark .fav-tab { background: #35363a; color: #e8eaed; }
+.fav-tab b { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 400; }
+.fav-tab i { font-style: normal; opacity: 0.8; }
+.fav-serp { padding: 14px; background: #ffffff; color: #202124; font: 14px/1.4 Arial, sans-serif; }
+.fav-serp-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fav-badge { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; background: #f1f3f4; border: 1px solid #dadce0; }
+.fav-serp-site { min-width: 0; }
+.fav-serp-site b, .fav-serp-site span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fav-serp-site b { font-weight: 400; color: #202124; }
+.fav-serp-site span { color: #4d5156; font-size: 12px; }
+.fav-serp-title { margin: 6px 0 2px; color: #1a0dab; font-size: 18px; overflow-wrap: anywhere; }
+.fav-serp-text { margin: 0; color: #4d5156; font-size: 13px; }
+.fav-phones { display: flex; justify-content: space-around; gap: 10px; padding: 16px 10px 12px; background: linear-gradient(160deg, #283a5e, #111a2e); }
+.fav-app { display: grid; justify-items: center; gap: 6px; min-width: 0; width: 84px; color: #ffffff; font: 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; text-align: center; }
+.fav-app span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fav-app small { color: #cfd6e4; font-size: 11px; }
+.fav-ios { border-radius: 22.5%; }
+.fav-android { border-radius: 50%; }
+.fav-px { display: flex; align-items: center; gap: 14px; padding: 12px; background: var(--surface-2); }
+.fav-px canvas { width: 80px; height: 80px; image-rendering: pixelated; image-rendering: crisp-edges; border: 1px solid var(--border);
+  background: repeating-conic-gradient(#d9dde3 0 25%, #ffffff 0 50%) 0 0 / 10px 10px; }
+.fav-px p { margin: 0; font-size: 13px; color: var(--muted); }
+.fav-files { display: grid; gap: 8px; margin: 0 0 16px; padding: 0; list-style: none; }
+.fav-file { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.fav-file code { font-family: var(--mono); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.fav-file .fav-size { margin-left: 8px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.fav-file p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.fav-file.is-off { border-style: dashed; background: var(--surface-2); }
+@media (max-width: 760px) {
+  .fav-grid { grid-template-columns: minmax(0, 1fr); }
+  .fav-side { position: static; grid-row: 1; }
+  .fav-stage-box { width: 220px; }
+}
+@media (max-width: 480px) {
+  .fav-file { grid-template-columns: minmax(0, 1fr); }
+  .fav-file .btn { justify-self: start; }
+  .fav-seg span { padding: 4px; }
+}
+@media (prefers-color-scheme: dark) {
+  .fav-stage-box, .fav-px canvas { background-image: repeating-conic-gradient(#3a3f46 0 25%, #2a2e34 0 50%); }
+  .fav-stage-empty { color: #e3e6ea; }
+}
+</style>
+
+<div id="fav-root" data-fonts="{{ '/assets/vendor/favicon-fonts/' | relative_url }}" data-opentype="{{ '/assets/vendor/opentype/opentype.min.js' | relative_url }}">
+<fieldset class="fav-src">
+  <legend class="label">Make the icon from</legend>
+  <div class="fav-seg">
+    <label><input type="radio" name="fav-src" value="image" id="fav-src-image"><span>Image</span></label>
+    <label><input type="radio" name="fav-src" value="text" id="fav-src-text" checked><span>Text</span></label>
+    <label><input type="radio" name="fav-src" value="emoji" id="fav-src-emoji"><span>Emoji</span></label>
+  </div>
+</fieldset>
+
+<div class="fav-grid">
+  <div class="fav-controls">
+    <div class="fav-panel" id="fav-panel-text">
+      <div class="field">
+        <label for="fav-text">Letters</label>
+        <input type="text" id="fav-text" value="F" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="fav-text-hint fav-text-error">
+        <span class="hint" id="fav-text-hint">1 to 3 characters: an initial, a short name or a number.</span>
+      </div>
+      <p class="msg error" id="fav-text-error" aria-live="polite"></p>
+      <div class="fav-row">
+        <div class="field">
+          <label for="fav-font">Font</label>
+          <select id="fav-font">
+            <option value="inter" selected>Inter</option>
+            <option value="montserrat">Montserrat</option>
+            <option value="nunito">Nunito (rounded)</option>
+            <option value="fraunces">Fraunces (serif)</option>
+            <option value="jetbrains-mono">JetBrains Mono</option>
+          </select>
+        </div>
+        <div class="field fav-colour">
+          <label for="fav-ink">Letter colour</label>
+          <input type="color" id="fav-ink" value="#ffffff">
+        </div>
+      </div>
+      <div class="field fav-slider">
+        <label for="fav-text-size"><span>Letter size</span><output id="fav-text-size-out" for="fav-text-size" aria-hidden="true">60%</output></label>
+        <input type="range" id="fav-text-size" min="30" max="100" step="1" value="60">
+      </div>
+      <p class="fav-note" id="fav-font-note" aria-live="polite"></p>
+    </div>
+
+    <div class="fav-panel" id="fav-panel-emoji" hidden>
+      <fieldset class="fav-set">
+        <legend class="label">Pick an emoji</legend>
+        <div class="fav-emojis" id="fav-emojis"></div>
+      </fieldset>
+      <div class="field">
+        <label for="fav-emoji">Or type or paste any emoji</label>
+        <input type="text" id="fav-emoji" value="&#x1F680;" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="fav-emoji-hint fav-emoji-error">
+        <span class="hint" id="fav-emoji-hint">On a phone, use the emoji keyboard. On Windows press Win + . (full stop); on a Mac, Ctrl + Cmd + Space.</span>
+      </div>
+      <p class="msg error" id="fav-emoji-error" aria-live="polite"></p>
+      <div class="field fav-slider">
+        <label for="fav-emoji-size"><span>Emoji size</span><output id="fav-emoji-size-out" for="fav-emoji-size" aria-hidden="true">84%</output></label>
+        <input type="range" id="fav-emoji-size" min="30" max="100" step="1" value="84">
+      </div>
+      <p class="fav-note" id="fav-emoji-note">Your device’s emoji font draws the emoji. icon.svg keeps it as text, so other devices show their own version of it, while the PNG and ICO files copy the artwork you see here.</p>
+    </div>
+
+    <div class="fav-panel" id="fav-panel-image" hidden>
+      <div class="fav-pick">
+        <input class="fav-input" type="file" id="fav-file" aria-labelledby="fav-drop-title" aria-describedby="fav-drop-hint fav-file-error">
+        <label class="fav-drop" for="fav-file" id="fav-drop">
+          <strong id="fav-drop-title"><span>Choose an image</span> or drop it here</strong>
+          <span class="hint" id="fav-drop-hint">PNG, JPG, SVG, WebP, HEIC, AVIF, GIF, BMP, ICO or TIFF; you can also paste one with Ctrl+V. A square picture of 512 px or more works best.</span>
+        </label>
+      </div>
+      <div class="actions fav-cancel" id="fav-cancel-row" hidden>
+        <button class="btn secondary small" type="button" id="fav-cancel">Cancel</button>
+      </div>
+      <p class="msg error" id="fav-file-error" aria-live="polite"></p>
+      <p class="fav-note" id="fav-file-note" aria-live="polite"></p>
+      <fieldset class="fav-set">
+        <legend class="label">Make it square</legend>
+        <div class="checks">
+          <label class="check"><input type="radio" name="fav-fit" value="pad" checked> Fit inside the square</label>
+          <label class="check"><input type="radio" name="fav-fit" value="crop"> Fill the square and crop</label>
+        </div>
+      </fieldset>
+      <div class="field fav-slider" id="fav-img-size-field">
+        <label for="fav-img-size"><span>Picture size</span><output id="fav-img-size-out" for="fav-img-size" aria-hidden="true">100%</output></label>
+        <input type="range" id="fav-img-size" min="30" max="100" step="1" value="100">
+      </div>
+      <div class="field fav-slider" id="fav-zoom-field" hidden>
+        <label for="fav-zoom"><span>Zoom</span><output id="fav-zoom-out" for="fav-zoom" aria-hidden="true">100%</output></label>
+        <input type="range" id="fav-zoom" min="100" max="400" step="5" value="100">
+      </div>
+    </div>
+
+    <fieldset class="fav-style">
+      <legend class="label">Background</legend>
+      <div class="fav-row">
+        <div class="field">
+          <label for="fav-shape">Shape</label>
+          <select id="fav-shape">
+            <option value="rounded" selected>Rounded</option>
+            <option value="soft">Slightly rounded</option>
+            <option value="circle">Circle</option>
+            <option value="square">Square</option>
+            <option value="none">None (transparent)</option>
+          </select>
+        </div>
+        <div class="field fav-colour">
+          <label for="fav-bg">Colour</label>
+          <input type="color" id="fav-bg" value="#1d4ed8">
+        </div>
+      </div>
+      <div class="fav-row" id="fav-fill-row" hidden>
+        <div class="field fav-colour">
+          <label for="fav-fill">Phone icon fill</label>
+          <input type="color" id="fav-fill" value="#ffffff" aria-describedby="fav-fill-hint">
+        </div>
+        <p class="hint" id="fav-fill-hint">The iPhone and maskable Android icons cannot be transparent, so they get this colour behind the icon.</p>
+      </div>
+      <label class="check"><input type="checkbox" id="fav-dark"> Dark style in icon.svg</label>
+      <div class="fav-row" id="fav-dark-row" hidden>
+        <div class="field fav-colour" id="fav-dark-ink-field">
+          <label for="fav-dark-ink">Dark letter colour</label>
+          <input type="color" id="fav-dark-ink" value="#0b1f4d">
+        </div>
+        <div class="field fav-colour" id="fav-dark-bg-field">
+          <label for="fav-dark-bg">Dark background</label>
+          <input type="color" id="fav-dark-bg" value="#bfdbfe">
+        </div>
+      </div>
+      <p class="hint fav-dark-hint" id="fav-dark-hint">Browsers in dark mode use these colours from icon.svg; the PNG and ICO files keep the light ones.</p>
+    </fieldset>
+  </div>
+
+  <div class="fav-side">
+    <div class="fav-stage-box">
+      <canvas class="fav-stage" id="fav-stage" role="img" aria-label="Your icon" aria-describedby="fav-stage-help"></canvas>
+      <div class="fav-stage-empty" id="fav-stage-empty" hidden></div>
+    </div>
+    <p class="hint fav-stage-help" id="fav-stage-help">Your icon. The checks show transparent areas.</p>
+    <div class="fav-crop-bar" id="fav-crop-bar" hidden>
+      <button class="btn secondary small" type="button" id="fav-centre">Centre the picture</button>
+    </div>
+  </div>
+</div>
+<p class="visually-hidden" id="fav-summary" aria-live="polite"></p>
+
+<h2 class="fav-h2" id="fav-prev-h">Real-size previews</h2>
+<p class="fav-sub">Drawn at the size browsers and phones show them, at your screen’s resolution.</p>
+<div class="fav-prev">
+  <figure>
+    <div class="fav-mock">
+      <div class="fav-bar is-light">
+        <div class="fav-tab"><canvas id="fav-p-tab-light" data-css="16" aria-hidden="true"></canvas><b class="fav-site-name">My site</b><i aria-hidden="true">×</i></div>
+      </div>
+    </div>
+    <figcaption>Browser tab, light</figcaption>
+  </figure>
+  <figure>
+    <div class="fav-mock">
+      <div class="fav-bar is-dark">
+        <div class="fav-tab"><canvas id="fav-p-tab-dark" data-css="16" aria-hidden="true"></canvas><b class="fav-site-name">My site</b><i aria-hidden="true">×</i></div>
+        <div class="fav-tab"><canvas id="fav-p-tab-safari" data-css="16" aria-hidden="true"></canvas><b>Safari</b><i aria-hidden="true">×</i></div>
+      </div>
+    </div>
+    <figcaption id="fav-dark-caption">Browser tab, dark. The right-hand tab is how Safari 26 shows it.</figcaption>
+  </figure>
+  <figure>
+    <div class="fav-mock fav-serp">
+      <div class="fav-serp-head">
+        <span class="fav-badge"><canvas id="fav-p-serp" data-css="18" aria-hidden="true"></canvas></span>
+        <span class="fav-serp-site"><b class="fav-site-name">My site</b><span>https://example.com</span></span>
+      </div>
+      <p class="fav-serp-title">Welcome to <span class="fav-site-name">My site</span></p>
+      <p class="fav-serp-text">The page description that search engines show under the title.</p>
+    </div>
+    <figcaption>Search result: Google Search takes the PNG or ICO, not the SVG</figcaption>
+  </figure>
+  <figure>
+    <div class="fav-mock fav-phones">
+      <div class="fav-app"><canvas class="fav-ios" id="fav-p-ios" data-css="60" aria-hidden="true"></canvas><span class="fav-short-name">My site</span><small>iPhone</small></div>
+      <div class="fav-app"><canvas class="fav-android" id="fav-p-android" data-css="56" aria-hidden="true"></canvas><span class="fav-short-name">My site</span><small>Android</small></div>
+    </div>
+    <figcaption>Home screens: apple-touch-icon.png and the maskable icon in a circle</figcaption>
+  </figure>
+  <figure>
+    <div class="fav-mock fav-px">
+      <canvas id="fav-p-16" width="16" height="16" aria-hidden="true"></canvas>
+      <p>The 16 px picture in favicon.ico, enlarged five times: what survives at this size is what tabs show on standard screens.</p>
+    </div>
+    <figcaption>16 px, enlarged</figcaption>
+  </figure>
+</div>
+
+<h2 class="fav-h2">Your files</h2>
+<div class="fav-row fav-names">
+  <div class="field">
+    <label for="fav-name">Site name</label>
+    <input type="text" id="fav-name" value="My site" autocomplete="off" aria-describedby="fav-name-error">
+    <p class="msg error" id="fav-name-error" aria-live="polite"></p>
+  </div>
+  <div class="field">
+    <label for="fav-short">Short name (optional)</label>
+    <input type="text" id="fav-short" value="" autocomplete="off" placeholder="Same as the site name" aria-describedby="fav-short-hint fav-short-error">
+    <span class="hint" id="fav-short-hint">Shown under the icon on phones, which cut it at about 12 characters.</span>
+    <p class="msg error" id="fav-short-error" aria-live="polite"></p>
+  </div>
+</div>
+<div class="field">
+  <label for="fav-base">Folder on your site</label>
+  <input type="text" id="fav-base" value="/" autocomplete="off" spellcheck="false" inputmode="url" aria-describedby="fav-base-hint fav-base-error">
+  <span class="hint" id="fav-base-hint">Where your site and these files are: / for a site at the root of its domain, or a folder such as /blog/ for a site in a subfolder.</span>
+</div>
+<p class="msg error" id="fav-base-error" aria-live="polite"></p>
+
+<ul class="fav-files" id="fav-files">
+  <li class="fav-file" data-file="favicon.ico"><div><code>favicon.ico</code><span class="fav-size"></span><p>16, 32 and 48 px in one file, for every browser and for the /favicon.ico they request when a page declares no icon.</p></div><button class="btn secondary small" type="button">Download<span class="visually-hidden"> favicon.ico</span></button></li>
+  <li class="fav-file" data-file="icon.svg"><div><code>icon.svg</code><span class="fav-size"></span><p class="fav-svg-line">Sharp at any size in Chrome, Edge, Firefox and Safari 26, and the only file that can switch to a dark style.</p></div><button class="btn secondary small" type="button">Download<span class="visually-hidden"> icon.svg</span></button></li>
+  <li class="fav-file" data-file="favicon-96x96.png"><div><code>favicon-96x96.png</code><span class="fav-size"></span><p>For Google Search, which does not take SVG and recommends an icon larger than 48 px.</p></div><button class="btn secondary small" type="button">Download<span class="visually-hidden"> favicon-96x96.png</span></button></li>
+  <li class="fav-file" data-file="apple-touch-icon.png"><div><code>apple-touch-icon.png</code><span class="fav-size"></span><p>180 px for iPhone and iPad home screens, filled to the edges: iOS would put a transparent icon on black and rounds the corners itself.</p></div><button class="btn secondary small" type="button">Download<span class="visually-hidden"> apple-touch-icon.png</span></button></li>
+  <li class="fav-file" data-file="icon-192.png"><div><code>icon-192.png</code><span class="fav-size"></span><p>Android home screens; Chrome’s install prompt asks for this size in the manifest.</p></div><button class="btn secondary small" type="button">Download<span class="visually-hidden"> icon-192.png</span></button></li>
+  <li class="fav-file" data-file="icon-512.png"><div><code>icon-512.png</code><span class="fav-size"></span><p>Install dialogs and splash screens of installed web apps; Chrome asks for a 512 px icon too.</p></div><button class="btn secondary small" type="button">Download<span class="visually-hidden"> icon-512.png</span></button></li>
+  <li class="fav-file" data-file="icon-maskable-512.png"><div><code>icon-maskable-512.png</code><span class="fav-size"></span><p>For Android launchers that cut icons to a circle or another shape: the icon stays inside the central 80% circle, on a background that runs to the edges.</p></div><button class="btn secondary small" type="button">Download<span class="visually-hidden"> icon-maskable-512.png</span></button></li>
+  <li class="fav-file" data-file="site.webmanifest"><div><code>site.webmanifest</code><span class="fav-size"></span><p>The site’s name, colour and icons, for Android home screens and installed web apps.</p></div><button class="btn secondary small" type="button">Download<span class="visually-hidden"> site.webmanifest</span></button></li>
+</ul>
+<div class="actions">
+  <button class="btn" type="button" id="fav-zip">Download all (ZIP)</button>
+</div>
+<p class="msg error" id="fav-dl-error" aria-live="polite"></p>
+<p class="msg ok" id="fav-status" role="status" aria-live="polite"></p>
+
+<h3 class="fav-h2">HTML for the &lt;head&gt; of every page</h3>
+<pre class="output" id="fav-snippet"></pre>
+<div class="actions">
+  <button class="btn secondary" type="button" id="fav-copy">Copy HTML</button>
+</div>
+<p class="msg error" id="fav-copy-error" aria-live="polite"></p>
+</div>
+
+<script src="{{ '/assets/js/image-decode.js' | relative_url }}"></script>
+<script src="{{ '/assets/js/zip.js' | relative_url }}"></script>
+<script>
+{% raw %}
+(function () {
+  'use strict';
+  var $ = TT.$, $$ = TT.$$;
+  var root = $('#fav-root');
+  var FONT_BASE = root.getAttribute('data-fonts'), OPENTYPE_URL = root.getAttribute('data-opentype');
+
+  var FONTS = [
+    { id: 'inter', name: 'Inter', generic: 'sans-serif' },
+    { id: 'montserrat', name: 'Montserrat', generic: 'sans-serif' },
+    { id: 'nunito', name: 'Nunito', generic: 'sans-serif' },
+    { id: 'fraunces', name: 'Fraunces', generic: 'serif' },
+    { id: 'jetbrains-mono', name: 'JetBrains Mono', generic: 'monospace' }
+  ];
+  var FONT_BY_ID = new Map(FONTS.map(function (f) { return [f.id, f]; }));
+  // Corner radius of each background shape, as a share of the side; none draws no background.
+  var RADIUS = new Map([['rounded', 0.22], ['soft', 0.1], ['circle', 0.5], ['square', 0], ['none', -1]]);
+  var EMOJI_FAMILY = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",sans-serif';
+  var DEVICE_FAMILY = new Map([
+    ['sans-serif', 'system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif'],
+    ['serif', 'Georgia,"Times New Roman",serif'],
+    ['monospace', 'ui-monospace,Menlo,Consolas,"DejaVu Sans Mono",monospace']
+  ]);
+  var EMOJIS = ['🚀', '⭐', '🔥', '💡', '❤️', '🌱', '🍀', '☕', '🍕', '🎨', '📚', '🎵', '🌍', '⚡', '🐱', '🐶', '🦊', '🐝', '🌈', '💎', '🎯', '🧠', '🛠️', '📷', '🏠', '✨', '🌙', '☀️', '🎮', '💬', '🔒', '✅'];
+  // The page works from a copy of a picture: its short side up to 2,048 px (the 512 px file at 4 times zoom),
+  // within 8 megapixels and 8,192 px a side, which phones can hold.
+  var WORK_SHORT = 2048, WORK_PIXELS = 8e6, WORK_SIDE = 8192;
+  function workScale(w, h, most) { return Math.min(most, WORK_SHORT / Math.min(w, h), Math.sqrt(WORK_PIXELS / (w * h)), WORK_SIDE / Math.max(w, h)); }
+  var FILES = ['favicon.ico', 'icon.svg', 'favicon-96x96.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'site.webmanifest'];
+
+  var srcRadios = $$('input[name="fav-src"]'), fitRadios = $$('input[name="fav-fit"]');
+  var panels = { text: $('#fav-panel-text'), emoji: $('#fav-panel-emoji'), image: $('#fav-panel-image') };
+  var textIn = $('#fav-text'), textErr = $('#fav-text-error'), fontSel = $('#fav-font'), inkIn = $('#fav-ink');
+  var textSize = $('#fav-text-size'), textSizeOut = $('#fav-text-size-out'), fontNote = $('#fav-font-note');
+  var emojiBox = $('#fav-emojis'), emojiIn = $('#fav-emoji'), emojiErr = $('#fav-emoji-error');
+  var emojiSize = $('#fav-emoji-size'), emojiSizeOut = $('#fav-emoji-size-out'), emojiNote = $('#fav-emoji-note');
+  var fileIn = $('#fav-file'), drop = $('#fav-drop'), dropTitle = $('#fav-drop-title'), dropHint = $('#fav-drop-hint');
+  var fileErr = $('#fav-file-error'), fileNote = $('#fav-file-note'), cancelRow = $('#fav-cancel-row'), cancelBtn = $('#fav-cancel');
+  var imgSize = $('#fav-img-size'), imgSizeOut = $('#fav-img-size-out'), imgSizeField = $('#fav-img-size-field');
+  var zoomIn = $('#fav-zoom'), zoomOut = $('#fav-zoom-out'), zoomField = $('#fav-zoom-field');
+  var shapeSel = $('#fav-shape'), bgIn = $('#fav-bg'), fillIn = $('#fav-fill'), fillRow = $('#fav-fill-row');
+  var darkBox = $('#fav-dark'), darkRow = $('#fav-dark-row'), darkInkIn = $('#fav-dark-ink'), darkInkField = $('#fav-dark-ink-field');
+  var darkBgIn = $('#fav-dark-bg'), darkBgField = $('#fav-dark-bg-field'), darkHint = $('#fav-dark-hint');
+  var stage = $('#fav-stage'), stageEmpty = $('#fav-stage-empty'), stageHelp = $('#fav-stage-help'), cropBar = $('#fav-crop-bar'), centreBtn = $('#fav-centre');
+  var summaryEl = $('#fav-summary'), darkCaption = $('#fav-dark-caption');
+  var nameIn = $('#fav-name'), shortIn = $('#fav-short'), nameErr = $('#fav-name-error'), shortErr = $('#fav-short-error');
+  var baseIn = $('#fav-base'), baseErr = $('#fav-base-error');
+  var zipBtn = $('#fav-zip'), dlErr = $('#fav-dl-error'), statusEl = $('#fav-status'), snippetEl = $('#fav-snippet');
+  var copyBtn = $('#fav-copy'), copyErr = $('#fav-copy-error');
+
+  // ---------- Small helpers ----------
+  function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+  function setText(node, t) { if (node.textContent !== t) node.textContent = t; }
+  function r2(n) { var v = Math.round(n * 100) / 100; return Object.is(v, -0) ? '0' : String(v); }
+  function xml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function sizeText(n) { return n < 1024 ? n + ' bytes' : (n < 10240 ? (n / 1024).toFixed(1) : String(Math.round(n / 1024))) + ' KB'; }
+  function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function colour(input, fallback) { var v = String(input.value || '').toLowerCase(); return /^#[0-9a-f]{6}$/.test(v) ? v : fallback; }
+  function lum(hex) {
+    var n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(function (v) {
+      v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  function contrast(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function friendly(msg) { var e = new Error(msg); e.friendly = true; return e; }
+  function canvasOf(w, h) { var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; }
+  function later(fn) { if (document.hidden) setTimeout(fn, 0); else requestAnimationFrame(fn); }
+  function showError(msgEl, field, text) {
+    setText(msgEl, text);
+    if (!field) return;
+    if (text) field.setAttribute('aria-invalid', 'true'); else field.removeAttribute('aria-invalid');
+  }
+
+  // Characters as people count them: an accented letter, a flag or a family emoji is one.
+  var segmenter = null;
+  try { if (typeof Intl === 'object' && Intl.Segmenter) segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' }); } catch (e) { segmenter = null; }
+  function graphemes(s) {
+    if (segmenter) return Array.from(segmenter.segment(s), function (x) { return x.segment; });
+    var out = [];
+    Array.from(s).forEach(function (ch) {
+      var cp = ch.codePointAt(0), last = out.length - 1;
+      var joins = last >= 0 && (/\p{M}/u.test(ch) || cp === 0x200D || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) ||
+        (cp >= 0xE0020 && cp <= 0xE007F) || /‍$/.test(out[last]) ||
+        (cp >= 0x1F1E6 && cp <= 0x1F1FF && /^[\u{1F1E6}-\u{1F1FF}]$/u.test(out[last])));
+      if (joins) out[last] += ch; else out.push(ch);
+    });
+    return out;
+  }
+  var RGI = null;
+  try { RGI = new RegExp('^\\p{RGI_Emoji}$', 'v'); } catch (e) { RGI = null; }
+  // The emoji to draw for one character, with the emoji style asked for where a symbol such as ❤ also has a text style; null if it is no emoji.
+  function emojiForm(g) {
+    var plain = g.replace(/︎/g, '');
+    if (RGI) {
+      if (RGI.test(plain)) return plain;
+      return RGI.test(plain + '️') ? plain + '️' : null;
+    }
+    if (/^[\u{1F1E6}-\u{1F1FF}]{2}$/u.test(plain) || /⃣/.test(plain)) return plain;
+    if (!/\p{Extended_Pictographic}/u.test(plain)) return null;
+    return Array.from(plain).length === 1 ? plain + '️' : plain;
+  }
+
+  // ---------- Fonts: loaded only when picked ----------
+  var opentypeP = null, fontCache = new Map();
+  function loadOpentype() {
+    if (!opentypeP) {
+      opentypeP = new Promise(function (resolve, reject) {
+        if (window.opentype) { resolve(window.opentype); return; }
+        var s = document.createElement('script');
+        s.src = OPENTYPE_URL;
+        s.onload = function () { if (window.opentype) resolve(window.opentype); else reject(new Error('opentype')); };
+        s.onerror = function () { reject(new Error('opentype')); };
+        document.head.appendChild(s);
+      });
+      opentypeP.catch(function () { opentypeP = null; });
+    }
+    return opentypeP;
+  }
+  function loadFont(id) {
+    if (!fontCache.has(id)) {
+      var p = Promise.all([loadOpentype(), fetch(FONT_BASE + id + '-latin-700-normal.woff').then(function (r) {
+        if (!r.ok) throw new Error('font ' + r.status);
+        return r.arrayBuffer();
+      })]).then(function (a) { return a[0].parse(a[1]); });
+      fontCache.set(id, p);
+      p.catch(function () { if (fontCache.get(id) === p) fontCache.delete(id); });
+    }
+    return fontCache.get(id);
+  }
+
+  // ---------- State ----------
+  var STYLE_DEFAULTS = {
+    text: { shape: 'rounded', bg: '#1d4ed8', fill: '#ffffff', dark: false, darkInk: '#0b1f4d', darkBg: '#bfdbfe' },
+    emoji: { shape: 'none', bg: '#fde68a', fill: '#ffffff', dark: false, darkInk: '#0b1f4d', darkBg: '#334155' },
+    image: { shape: 'none', bg: '#ffffff', fill: '#ffffff', dark: false, darkInk: '#0b1f4d', darkBg: '#1e293b' }
+  };
+  var st = {
+    source: 'text',
+    style: { text: Object.assign({}, STYLE_DEFAULTS.text), emoji: Object.assign({}, STYLE_DEFAULTS.emoji), image: Object.assign({}, STYLE_DEFAULTS.image) },
+    text: { value: 'F', font: 'inter', ink: '#ffffff', size: 0.6, error: '' },
+    emoji: { value: '🚀', size: 0.84, error: '' },
+    image: null,            // { kind: 'raster' | 'svg', name, w, h, mip: [canvas...], svg, notes }
+    fit: 'pad', imgSize: 1, zoom: 1, cx: 0.5, cy: 0.5,
+    site: { name: 'My site', short: '', base: '/', nameError: '', shortError: '', baseError: '' },
+    opening: 0
+  };
+  var version = 0;          // bumped on every change; a saved file always belongs to the latest version
+  var content = null;       // what is drawn: { key, kind, ... } for the current source, or null
+  var contentError = '';    // why there is nothing to draw
+  var fontInfo = '';        // note about the font
+
+  // ---------- Content: what goes inside the icon ----------
+  // Text the chosen font can write becomes outlines (Path2D in units of a 100 px font, baseline at 0).
+  function outlineContent(font, text, fontId) {
+    var path = font.getPath(text, 0, 0, 100, { kerning: true });
+    var bb = path.getBoundingBox();
+    if (!path.commands.length || !(bb.x2 > bb.x1) || !(bb.y2 > bb.y1)) return null;
+    return { kind: 'path', key: 'path|' + fontId + '|' + text, cmds: path.commands, box: { x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 }, path2d: new Path2D(pathData(path.commands, 1, 0, 0)), text: text, fontId: fontId };
+  }
+  function pathData(cmds, k, ox, oy) {
+    var out = '';
+    cmds.forEach(function (c) {
+      if (c.type === 'M' || c.type === 'L') out += c.type + r2(c.x * k + ox) + ' ' + r2(c.y * k + oy);
+      else if (c.type === 'C') out += 'C' + [c.x1 * k + ox, c.y1 * k + oy, c.x2 * k + ox, c.y2 * k + oy, c.x * k + ox, c.y * k + oy].map(r2).join(' ');
+      else if (c.type === 'Q') out += 'Q' + [c.x1 * k + ox, c.y1 * k + oy, c.x * k + ox, c.y * k + oy].map(r2).join(' ');
+      else if (c.type === 'Z') out += 'Z';
+    });
+    return out;
+  }
+  // Text drawn by the device's own fonts (an emoji, or letters the chosen font lacks): its ink box is
+  // measured on a canvas, in px of a 200 px font with the baseline origin at 0, 0.
+  var MEASURE = 200;
+  function measuredContent(kind, text, weight, family) {
+    var probe = canvasOf(1, 1).getContext('2d');
+    probe.font = weight + ' ' + MEASURE + 'px ' + family;
+    var w = Math.ceil(probe.measureText(text).width) + 2 * MEASURE, h = 3 * MEASURE;
+    var c = canvasOf(w, h), g = c.getContext('2d', { willReadFrequently: true });
+    g.font = probe.font;
+    g.textBaseline = 'alphabetic';
+    g.textAlign = 'left';
+    g.fillStyle = '#000000';
+    g.fillText(text, MEASURE, 2 * MEASURE);
+    var d = g.getImageData(0, 0, w, h).data, x1 = w, y1 = h, x2 = -1, y2 = -1, colourful = 0, inked = 0;
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var i = (y * w + x) * 4;
+        if (d[i + 3] <= 8) continue;
+        if (x < x1) x1 = x;
+        if (x > x2) x2 = x;
+        if (y < y1) y1 = y;
+        if (y > y2) y2 = y;
+        inked++;
+        if (Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]) > 40) colourful++;
+      }
+    }
+    c.width = 0;
+    if (x2 < 0) return null;
+    return {
+      kind: kind, key: kind + '|' + family + '|' + text, text: text, weight: weight, family: family,
+      box: { x1: x1 - MEASURE, y1: y1 - 2 * MEASURE, x2: x2 + 1 - MEASURE, y2: y2 + 1 - 2 * MEASURE }, colour: colourful > inked * 0.05
+    };
+  }
+
+  // ---------- Geometry ----------
+  function shapePath(g, x, y, s, shape) {
+    var r = RADIUS.get(shape);
+    g.beginPath();
+    if (r === 0.5) { g.arc(x + s / 2, y + s / 2, s / 2, 0, Math.PI * 2); return; }
+    if (!(r > 0)) { g.rect(x, y, s, s); return; }
+    r *= s;
+    g.moveTo(x + r, y);
+    g.arcTo(x + s, y, x + s, y + s, r);
+    g.arcTo(x + s, y + s, x, y + s, r);
+    g.arcTo(x, y + s, x, y, r);
+    g.arcTo(x, y, x + s, y, r);
+    g.closePath();
+  }
+  // Where the content goes in an icon of side S: a transform from content units to pixels.
+  function placement(S, c, size) {
+    var bw = c.box.x2 - c.box.x1, bh = c.box.y2 - c.box.y1, k = S * size / Math.max(bw, bh);
+    return { k: k, ox: S / 2 - (c.box.x1 + c.box.x2) / 2 * k, oy: S / 2 - (c.box.y1 + c.box.y2) / 2 * k };
+  }
+  // The square of the picture shown in crop mode, in pixels of the working copy (level 0).
+  function cropSquare(img, zoom, cx, cy) {
+    var side = Math.min(img.w, img.h) / zoom;
+    var x = clamp(cx * img.w - side / 2, 0, img.w - side), y = clamp(cy * img.h - side / 2, 0, img.h - side);
+    return { x: x, y: y, side: side };
+  }
+  // Draws part of a picture smoothly at any scale, from the level of its halving pyramid just above the size needed.
+  function drawMip(g, mip, sx, sy, sw, sh, dx, dy, dw, dh) {
+    var base = mip[0].width, level = 0;
+    while (level + 1 < mip.length && sw * mip[level + 1].width / base >= dw && sh * mip[level + 1].width / base >= dh) level++;
+    var f = mip[level].width / base;
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(mip[level], sx * f, sy * f, sw * f, sh * f, dx, dy, dw, dh);
+  }
+  function buildMip(c) {
+    var mip = [c];
+    while (mip[mip.length - 1].width > 24 && mip[mip.length - 1].height > 24) {
+      var p = mip[mip.length - 1], n = canvasOf(Math.ceil(p.width / 2), Math.ceil(p.height / 2)), g = n.getContext('2d');
+      g.imageSmoothingEnabled = true;
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(p, 0, 0, n.width, n.height);
+      mip.push(n);
+    }
+    return mip;
+  }
+
+  // A snapshot of everything that decides the icon, so a job started now is not changed by later edits.
+  function snapshot() {
+    var s = st.style[st.source];
+    return {
+      version: version, source: st.source, content: content,
+      style: Object.assign({}, s), ink: st.text.ink, darkInk: s.darkInk,
+      size: st.source === 'text' ? st.text.size : st.source === 'emoji' ? st.emoji.size : st.imgSize,
+      fit: st.fit, zoom: st.zoom, cx: st.cx, cy: st.cy
+    };
+  }
+
+  // Draws the content layer (no background) at icon size S, scaled by f about the centre. layer is an
+  // already rendered SVG picture for this size, if the content is a vector picture and exactness counts.
+  function paintContent(g, S, snap, dark, f, layer) {
+    var c = snap.content;
+    if (!c) return;
+    var off = S * (1 - f) / 2, T = S * f;
+    if (layer) { g.drawImage(layer, off, off, T, T); return; }
+    g.save();
+    if (c.kind === 'path') {
+      var p = placement(T, c, snap.size);
+      g.translate(off + p.ox, off + p.oy);
+      g.scale(p.k, p.k);
+      g.fillStyle = dark ? snap.darkInk : snap.ink;
+      g.fill(c.path2d);
+    } else if (c.kind === 'text' || c.kind === 'emoji') {
+      var q = placement(T, c, snap.size), px = MEASURE * q.k;
+      g.font = c.weight + ' ' + px + 'px ' + c.family;
+      g.textBaseline = 'alphabetic';
+      g.textAlign = 'left';
+      g.fillStyle = dark ? snap.darkInk : snap.ink;
+      g.fillText(c.text, off + q.ox, off + q.oy);
+    } else if (c.kind === 'picture') {
+      var img = c.img;
+      if (snap.fit === 'crop') {
+        var sq = cropSquare(img, snap.zoom, snap.cx, snap.cy);
+        drawMip(g, img.mip, sq.x, sq.y, sq.side, sq.side, off, off, T, T);
+      } else {
+        var k = T * snap.size / Math.max(img.w, img.h), dw = img.w * k, dh = img.h * k;
+        drawMip(g, img.mip, 0, 0, img.w, img.h, off + (T - dw) / 2, off + (T - dh) / 2, dw, dh);
+      }
+    }
+    g.restore();
+  }
+
+  // Variants: icon (favicon, 96, 192, 512 and icon.svg), dark (icon.svg's dark style), touch (opaque, filled
+  // to the edges: iOS rounds it), mask (opaque, the icon shrunk into the central 80% circle).
+  function renderIcon(cv, S, snap, variant, layer) {
+    var g = cv.getContext('2d'), s = snap.style, none = s.shape === 'none';
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, cv.width, cv.height);
+    if (!snap.content) {
+      if (!none) { shapePath(g, 0, 0, S, s.shape); g.fillStyle = variant === 'dark' ? s.darkBg : s.bg; g.fill(); }
+      return;
+    }
+    var f = variant === 'mask' ? maskScale(snap) : 1;
+    g.save();
+    if (variant === 'touch' || variant === 'mask') {
+      g.fillStyle = none ? s.fill : s.bg;
+      g.fillRect(0, 0, S, S);
+      if (variant === 'mask' && !none) {
+        var off = S * (1 - f) / 2;
+        shapePath(g, off, off, S * f, s.shape);
+        g.clip();
+      }
+    } else if (!none) {
+      shapePath(g, 0, 0, S, s.shape);
+      g.fillStyle = variant === 'dark' ? s.darkBg : s.bg;
+      g.fill();
+      g.clip();
+    }
+    paintContent(g, S, snap, variant === 'dark', f, layer);
+    g.restore();
+  }
+
+  // How far the drawn icon reaches from its centre, as a share of its side: the maskable icon is shrunk
+  // until that fits the safe zone, a circle of radius 40% (W3C Web App Manifest).
+  var reachCache = { key: '', value: 0.5 };
+  function reachKey(snap) {
+    return [snap.content && snap.content.key, snap.size, snap.style.shape, snap.fit, snap.zoom, snap.cx, snap.cy].join('|');
+  }
+  function maskScale(snap) {
+    var key = reachKey(snap);
+    if (reachCache.key !== key) {
+      var N = 256, c = canvasOf(N, N), g = c.getContext('2d', { willReadFrequently: true });
+      g.save();
+      if (snap.style.shape !== 'none') { shapePath(g, 0, 0, N, snap.style.shape); g.clip(); }
+      paintContent(g, N, snap, false, 1, null);
+      g.restore();
+      var d = g.getImageData(0, 0, N, N).data, far = 0;
+      for (var y = 0; y < N; y++) {
+        for (var x = 0; x < N; x++) {
+          if (d[(y * N + x) * 4 + 3] <= 16) continue;
+          // the far corner of the pixel
+          var dx = Math.max(Math.abs(x - N / 2), Math.abs(x + 1 - N / 2)), dy = Math.max(Math.abs(y - N / 2), Math.abs(y + 1 - N / 2));
+          var r = dx * dx + dy * dy;
+          if (r > far) far = r;
+        }
+      }
+      c.width = 0;
+      reachCache = { key: key, value: Math.sqrt(far) / N };
+    }
+    return reachCache.value > 0.4 ? 0.4 / reachCache.value : 1;
+  }
+
+  // ---------- Previews ----------
+  var previews = [
+    { el: $('#fav-p-tab-light'), variant: 'icon' },
+    { el: $('#fav-p-tab-dark'), variant: 'dark' },
+    { el: $('#fav-p-tab-safari'), variant: 'icon' },
+    { el: $('#fav-p-serp'), variant: 'icon' },
+    { el: $('#fav-p-ios'), variant: 'touch' },
+    { el: $('#fav-p-android'), variant: 'mask' }
+  ];
+  var drawQueued = false;
+  function scheduleDraw() {
+    if (drawQueued) return;
+    drawQueued = true;
+    later(function () { drawQueued = false; drawAll(); });
+  }
+  function dpr() { return clamp(window.devicePixelRatio || 1, 1, 3); }
+  function sizeCanvas(cv, css) {
+    var px = Math.round(css * dpr());
+    if (cv.width !== px) { cv.width = px; cv.height = px; }
+    cv.style.width = css + 'px';
+    cv.style.height = css + 'px';
+    return px;
+  }
+  function drawAll() {
+    var snap = snapshot(), dark = snap.style.dark && hasSvg(snap);
+    var box = stage.parentNode.getBoundingClientRect(), css = Math.max(64, Math.round(box.width || 256));
+    var px = Math.round(css * dpr());
+    if (stage.width !== px) { stage.width = px; stage.height = px; }
+    renderIcon(stage, px, snap, 'icon');
+    previews.forEach(function (p) {
+      var n = sizeCanvas(p.el, +p.el.getAttribute('data-css'));
+      renderIcon(p.el, n, snap, p.variant === 'dark' && !dark ? 'icon' : p.variant);
+    });
+    renderIcon($('#fav-p-16'), 16, snap, 'icon');
+    setText(darkCaption, dark ? 'Browser tab, dark. Left: Chrome and Firefox use the dark style. Right: Safari 26 keeps the light one.' : 'Browser tab, dark. Turn on the dark style to give dark tabs their own colours.');
+  }
+
+  // ---------- icon.svg ----------
+  function hasSvg(snap) { return !!snap.content && !(snap.content.kind === 'picture' && snap.content.img.kind === 'raster'); }
+  function svgShape(shape, cls, fill, extra) {
+    var r = RADIUS.get(shape), attrs = (cls ? ' class="' + cls + '"' : '') + ' style="fill:' + fill + '"' + (extra || '');
+    if (r === 0.5) return '<circle cx="50" cy="50" r="50"' + attrs + '/>';
+    return '<rect width="100" height="100"' + (r > 0 ? ' rx="' + r2(r * 100) + '"' : '') + attrs + '/>';
+  }
+  // The vector picture placed in the icon's 0..100 box: nested <svg> with the original's own viewBox.
+  function svgPictureInner(snap) {
+    var img = snap.content.img, doc = new DOMParser().parseFromString(img.svg.text, 'image/svg+xml'), el = doc.documentElement;
+    var x, y, w, h;
+    if (snap.fit === 'crop') {
+      var sq = cropSquare(img, snap.zoom, snap.cx, snap.cy), k = 100 / sq.side;
+      x = -sq.x * k; y = -sq.y * k; w = img.w * k; h = img.h * k;
+    } else {
+      var kk = 100 * snap.size / Math.max(img.w, img.h);
+      w = img.w * kk; h = img.h * kk; x = (100 - w) / 2; y = (100 - h) / 2;
+    }
+    // Scripts never run in a favicon and linked files never load: they are left out, so icon.svg is safe to
+    // open on its own too. So is HTML the browser could not draw.
+    Array.prototype.slice.call(el.getElementsByTagName('script')).forEach(function (n) { n.parentNode.removeChild(n); });
+    if (img.omitted) Array.prototype.slice.call(el.getElementsByTagName('foreignObject')).forEach(function (n) { n.parentNode.removeChild(n); });
+    [el].concat(Array.prototype.slice.call(el.getElementsByTagName('*'))).forEach(function (n) {
+      Array.prototype.slice.call(n.attributes).forEach(function (a) {
+        if (/^on/i.test(a.localName) || (a.localName === 'href' && !/^\s*(#|data:)/i.test(a.value))) n.removeAttributeNode(a);
+      });
+    });
+    if (!el.getAttribute('viewBox')) el.setAttribute('viewBox', '0 0 ' + r2(img.svg.vw) + ' ' + r2(img.svg.vh));
+    var style = el.getAttribute('style');
+    if (style) {
+      style = style.split(';').filter(function (d) { return !/^\s*(width|height|x|y)\s*:/i.test(d); }).join(';');
+      if (/\S/.test(style)) el.setAttribute('style', style); else el.removeAttribute('style');
+    }
+    el.setAttribute('x', r2(x));
+    el.setAttribute('y', r2(y));
+    el.setAttribute('width', r2(w));
+    el.setAttribute('height', r2(h));
+    return new XMLSerializer().serializeToString(el);
+  }
+  // icon.svg for the current icon, or null for a bitmap picture. device: it relies on the viewer's fonts.
+  function iconSvg(snap) {
+    if (!hasSvg(snap)) return null;
+    var s = snap.style, c = snap.content, none = s.shape === 'none', dark = s.dark;
+    var isText = c.kind === 'path' || c.kind === 'text';
+    var css = [];
+    if (dark && !none) css.push('.fav-bg{fill:' + s.darkBg + '!important}');
+    if (dark && isText) css.push('.fav-ink{fill:' + snap.darkInk + '!important}');
+    var out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'];
+    if (css.length) out.push('<style>@media (prefers-color-scheme:dark){' + css.join('') + '}</style>');
+    if (!none) {
+      out.push('<defs><clipPath id="fav-clip">' + svgShape(s.shape, '', '#000') + '</clipPath></defs>');
+      out.push(svgShape(s.shape, 'fav-bg', s.bg));
+      out.push('<g clip-path="url(#fav-clip)">');
+    }
+    if (c.kind === 'path') {
+      var p = placement(100, c, snap.size);
+      out.push('<path class="fav-ink" style="fill:' + snap.ink + '" d="' + pathData(c.cmds, p.k, p.ox, p.oy) + '"/>');
+    } else if (c.kind === 'text' || c.kind === 'emoji') {
+      var q = placement(100, c, snap.size);
+      out.push('<text x="' + r2(q.ox) + '" y="' + r2(q.oy) + '" font-size="' + r2(MEASURE * q.k) + '" font-family="' + xml(c.family.replace(/"/g, "'")) + '"' +
+        (c.kind === 'text' ? ' font-weight="700" class="fav-ink" style="fill:' + snap.ink + '"' : '') + '>' + xml(c.text) + '</text>');
+    } else {
+      out.push(svgPictureInner(snap));
+    }
+    if (!none) out.push('</g>');
+    out.push('</svg>');
+    return { text: out.join('\n') + '\n', device: c.kind === 'text' || c.kind === 'emoji' };
+  }
+
+  // ---------- Files ----------
+  function toPng(cv) {
+    return new Promise(function (resolve, reject) {
+      cv.toBlob(function (b) { if (b && b.size) resolve(b); else reject(friendly('This browser could not make a PNG.')); }, 'image/png');
+    });
+  }
+  // The content layer of a vector picture, rendered from the SVG at exactly the size needed.
+  async function vectorLayer(snap, T) {
+    var c = snap.content;
+    if (!c || c.kind !== 'picture' || c.img.kind !== 'svg') return null;
+    var inner = svgPictureInner(snap);
+    var text = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' + inner + '</svg>';
+    return TTImage.svg.render(text, Math.max(1, Math.round(T)), Math.max(1, Math.round(T)));
+  }
+  async function pngOf(snap, S, variant) {
+    var f = variant === 'mask' ? maskScale(snap) : 1, cv = canvasOf(S, S);
+    var layer = await vectorLayer(snap, S * f);
+    renderIcon(cv, S, snap, variant, layer);
+    if (layer) layer.width = 0;
+    var b = await toPng(cv);
+    cv.width = 0;
+    return b;
+  }
+  // favicon.ico: one PNG per size, as Windows Vista and every current browser read them.
+  async function icoOf(pngs) {
+    var datas = await Promise.all(pngs.map(function (p) { return p.blob.arrayBuffer(); }));
+    var head = new Uint8Array(6 + 16 * pngs.length), dv = new DataView(head.buffer), off = head.length;
+    dv.setUint16(2, 1, true);
+    dv.setUint16(4, pngs.length, true);
+    pngs.forEach(function (p, i) {
+      var o = 6 + 16 * i;
+      head[o] = head[o + 1] = p.size >= 256 ? 0 : p.size;
+      dv.setUint16(o + 4, 1, true);
+      dv.setUint16(o + 6, 32, true);
+      dv.setUint32(o + 8, datas[i].byteLength, true);
+      dv.setUint32(o + 12, off, true);
+      off += datas[i].byteLength;
+    });
+    return new Blob([head].concat(datas), { type: 'image/x-icon' });
+  }
+  function manifestOf(snap, site) {
+    var s = snap.style, colour = s.shape === 'none' ? s.fill : s.bg;
+    return JSON.stringify({
+      name: site.name,
+      short_name: site.short || site.name,
+      icons: [
+        { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+        { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+      ],
+      theme_color: colour,
+      background_color: colour,
+      display: 'standalone',
+      start_url: './'
+    }, null, 2) + '\n';
+  }
+  function snippetOf(svg, base) {
+    var b = xml(base);
+    return [
+      '<link rel="icon" href="' + b + 'favicon.ico" sizes="32x32">',
+      svg ? '<link rel="icon" href="' + b + 'icon.svg" type="image/svg+xml">' : null,
+      '<link rel="icon" href="' + b + 'favicon-96x96.png" type="image/png" sizes="96x96">',
+      '<link rel="apple-touch-icon" href="' + b + 'apple-touch-icon.png">',
+      '<link rel="manifest" href="' + b + 'site.webmanifest">'
+    ].filter(Boolean).join('\n');
+  }
+  var built = null, building = null;
+  async function buildPackage(snap) {
+    var site = Object.assign({}, st.site), svg = iconSvg(snap), files = [];
+    var small = [];
+    for (var i = 0; i < 3; i++) { var n = [16, 32, 48][i]; small.push({ size: n, blob: await pngOf(snap, n, 'icon') }); }
+    files.push({ name: 'favicon.ico', blob: await icoOf(small) });
+    if (svg) files.push({ name: 'icon.svg', blob: new Blob([svg.text], { type: 'image/svg+xml' }) });
+    files.push({ name: 'favicon-96x96.png', blob: await pngOf(snap, 96, 'icon') });
+    files.push({ name: 'apple-touch-icon.png', blob: await pngOf(snap, 180, 'touch') });
+    files.push({ name: 'icon-192.png', blob: await pngOf(snap, 192, 'icon') });
+    files.push({ name: 'icon-512.png', blob: await pngOf(snap, 512, 'icon') });
+    files.push({ name: 'icon-maskable-512.png', blob: await pngOf(snap, 512, 'mask') });
+    files.push({ name: 'site.webmanifest', blob: new Blob([manifestOf(snap, site)], { type: 'application/manifest+json' }) });
+    var snippet = snippetOf(!!svg, site.base);
+    return { version: snap.version, files: files, snippet: snippet, svg: svg };
+  }
+  // The files for the icon as it is now. A change while they are being made starts them again, so what
+  // is saved is never an older icon.
+  async function currentPackage() {
+    for (;;) {
+      await settled();
+      if (built && built.version === version) return built;
+      var v = version;
+      if (!building || building.version !== v) {
+        var job = { version: v };
+        job.promise = buildPackage(snapshot());
+        building = job;
+      }
+      var b = building, pkg;
+      try { pkg = await b.promise; } finally { if (building === b) building = null; }
+      if (pkg.version === version && !pendingContent) { built = pkg; showSizes(pkg); return pkg; }
+    }
+  }
+  // The size of each file once it is made for the icon as it is now; blank while it is being made.
+  function showSizes(pkg) {
+    var sizes = new Map(pkg ? pkg.files.map(function (f) { return [f.name, f.blob.size]; }) : []);
+    $$('.fav-file').forEach(function (li) {
+      var n = li.getAttribute('data-file'), s = sizes.get(n);
+      setText($('.fav-size', li), s ? sizeText(s) : '');
+    });
+  }
+  var buildSoon = TT.debounce(function () {
+    if (blocker()) return;
+    currentPackage().catch(function () { /* shown when a download is asked for */ });
+  }, 350);
+
+  // What stops the files from being made, and the field to fix: null when nothing does.
+  function blocker() {
+    if (st.opening) return { msg: 'Wait until the image has opened.', field: null };
+    if (st.source === 'text' && st.text.error) return { msg: 'Correct the letters first.', field: textIn };
+    if (st.source === 'emoji' && st.emoji.error) return { msg: 'Correct the emoji first.', field: emojiIn };
+    if (st.source === 'image' && !st.image) return { msg: 'Choose an image first.', field: fileIn };
+    if (!content) return { msg: contentError || 'There is nothing to draw yet.', field: null };
+    if (st.site.nameError) return { msg: 'Correct the site name first.', field: nameIn };
+    if (st.site.shortError) return { msg: 'Correct the short name first.', field: shortIn };
+    if (st.site.baseError) return { msg: 'Correct the folder first.', field: baseIn };
+    return null;
+  }
+  // The HTML depends only on the folder and on whether there is an icon.svg, which a bitmap picture does not get.
+  function willHaveSvg() { return st.source !== 'image' || (!!st.image && st.image.kind === 'svg'); }
+  function snippetBlocker() {
+    if (st.site.baseError) return { msg: 'Correct the folder first.', field: baseIn };
+    if (st.source === 'image' && st.opening) return { msg: 'Wait until the image has opened.', field: null };
+    if (st.source === 'image' && !st.image) return { msg: 'Choose an image first: the HTML depends on whether it is an SVG.', field: fileIn };
+    return null;
+  }
+  var busy = new Set();
+  async function save(which, e) {
+    if (e && e.detail > 1) return;          // the second click of a double click
+    if (busy.has(which)) return;
+    busy.add(which);
+    try {
+      await settled();
+      var stop = blocker();
+      if (stop) {
+        setText(dlErr, stop.msg);
+        if (stop.field) stop.field.focus();
+        return;
+      }
+      setText(dlErr, '');
+      var pkg = await currentPackage();
+      if (which === 'zip') {
+        var list = pkg.files.map(function (f) { return { name: f.name, data: f.blob }; });
+        list.push({ name: 'favicon-snippet.html', data: '<!-- Paste these lines into the <head> of every page. -->\n' + pkg.snippet + '\n' });
+        var zip = await TTZip.create(list);
+        TT.download('favicons.zip', zip);
+        setText(statusEl, 'Saved favicons.zip (' + sizeText(zip.size) + '): ' + list.length + ' files.');
+      } else {
+        var f = pkg.files.filter(function (x) { return x.name === which; })[0];
+        if (!f) { setText(dlErr, 'icon.svg is made only from text, an emoji or an SVG picture.'); return; }
+        TT.download(f.name, f.blob);
+        setText(statusEl, 'Saved ' + f.name + ' (' + sizeText(f.blob.size) + ').');
+      }
+    } catch (err) {
+      setText(dlErr, err && err.friendly ? err.message : 'The files could not be made: ' + (err && err.message ? err.message : 'unknown error') + '.');
+    } finally {
+      busy.delete(which);
+    }
+  }
+
+  // ---------- Reading the controls ----------
+  function readStyle() {
+    var s = st.style[st.source];
+    s.shape = RADIUS.has(shapeSel.value) ? shapeSel.value : 'rounded';
+    s.bg = colour(bgIn, s.bg);
+    s.fill = colour(fillIn, s.fill);
+    s.dark = darkBox.checked;
+    s.darkInk = colour(darkInkIn, s.darkInk);
+    s.darkBg = colour(darkBgIn, s.darkBg);
+  }
+  function writeStyle() {
+    var s = st.style[st.source];
+    shapeSel.value = s.shape;
+    bgIn.value = s.bg;
+    fillIn.value = s.fill;
+    darkBox.checked = s.dark;
+    darkInkIn.value = s.darkInk;
+    darkBgIn.value = s.darkBg;
+  }
+  function readText() {
+    var raw = textIn.value, t = st.text;
+    t.error = '';
+    if (raw.length > 40) { t.value = ''; t.error = 'Use 1 to 3 characters.'; return; }
+    var v = raw.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, function (ch) { return ch === '‍' ? ch : ''; }).replace(/\s+/g, ' ').trim();
+    var n = graphemes(v).length;
+    if (!n) t.error = 'Type 1 to 3 letters, digits or other characters.';
+    else if (n > 3) t.error = 'Use at most 3 characters; this has ' + n + '.';
+    t.value = t.error ? '' : v;
+  }
+  function readEmoji() {
+    var raw = emojiIn.value, e = st.emoji;
+    e.error = '';
+    e.value = '';
+    if (raw.length > 40) { e.error = 'Enter one emoji.'; return; }
+    var v = raw.replace(/\s+/g, ''), gs = graphemes(v);
+    if (!gs.length) { e.error = 'Pick or paste an emoji.'; return; }
+    if (gs.length > 1) {
+      e.error = gs.every(function (g) { return emojiForm(g); }) ? 'Enter one emoji; this has ' + gs.length + '.' : 'Enter one emoji. For letters, choose Text above.';
+      return;
+    }
+    var form = emojiForm(gs[0]);
+    if (!form) { e.error = 'That is not an emoji. For letters, choose Text above.'; return; }
+    e.value = form;
+  }
+  function readSite() {
+    var name = nameIn.value.length > 400 ? null : nameIn.value.replace(/\s+/g, ' ').trim();
+    var short = shortIn.value.length > 400 ? null : shortIn.value.replace(/\s+/g, ' ').trim();
+    var nErr = name === null || Array.from(name).length > 100 ? 'Keep the site name to 100 characters or fewer.' : !name ? 'Enter the site’s name: the manifest needs one.' : '';
+    var sErr = short === null || Array.from(short).length > 100 ? 'Keep the short name to 100 characters or fewer.' : '';
+    st.site.nameError = nErr;
+    st.site.shortError = sErr;
+    st.site.name = nErr ? '' : name;
+    st.site.short = sErr ? '' : short;
+    showError(nameErr, nameIn, nErr);
+    showError(shortErr, shortIn, sErr);
+    var raw = baseIn.value, err = '', base = '/';
+    if (raw.length > 300) err = 'Use a folder path under 300 characters, such as /blog/.';
+    else {
+      var v = raw.trim();
+      if (/[\s"'<>`\\]/.test(v)) err = 'A folder path cannot contain spaces, quotes, angle brackets or backslashes.';
+      else if (/^[a-z][a-z0-9+.-]*:/i.test(v) && !/^https?:\/\//i.test(v)) err = 'Use a path such as /blog/, or an address that starts with https://.';
+      else {
+        try {
+          var u = /^https?:\/\//i.test(v) ? new URL(v) : new URL(v.replace(/^\/*/, '/'), 'https://example.invalid');
+          if (u.search || u.hash) err = 'Leave out ? and # parts: enter the folder only.';
+          else base = (/^https?:\/\//i.test(v) ? u.origin : '') + u.pathname.replace(/\/*$/, '/');
+        } catch (x) { err = 'Use a path such as /blog/, or an address that starts with https://.'; }
+      }
+    }
+    st.site.baseError = err;
+    st.site.base = err ? st.site.base : base;
+    showError(baseErr, baseIn, err);
+  }
+  function readSource() {
+    var r = srcRadios.filter(function (x) { return x.checked; })[0];
+    st.source = r && panels[r.value] ? r.value : 'text';
+  }
+  function readImageControls() {
+    var r = fitRadios.filter(function (x) { return x.checked; })[0];
+    st.fit = r && r.value === 'crop' ? 'crop' : 'pad';
+    st.imgSize = clamp(+imgSize.value || 100, 30, 100) / 100;
+    st.zoom = clamp(+zoomIn.value || 100, 100, 400) / 100;
+  }
+  function readAll() {
+    readSource();
+    readStyle();
+    st.text.font = FONT_BY_ID.has(fontSel.value) ? fontSel.value : 'inter';
+    st.text.ink = colour(inkIn, st.text.ink);
+    st.text.size = clamp(+textSize.value || 60, 30, 100) / 100;
+    st.emoji.size = clamp(+emojiSize.value || 84, 30, 100) / 100;
+    readText();
+    readEmoji();
+    readImageControls();
+    readSite();
+  }
+
+  // ---------- Showing the state ----------
+  function syncUi() {
+    var src = st.source, s = st.style[src];
+    Object.keys(panels).forEach(function (k) { panels[k].hidden = k !== src; });
+    setText(textSizeOut, Math.round(st.text.size * 100) + '%');
+    setText(emojiSizeOut, Math.round(st.emoji.size * 100) + '%');
+    setText(imgSizeOut, Math.round(st.imgSize * 100) + '%');
+    setText(zoomOut, Math.round(st.zoom * 100) + '%');
+    [[textSize, st.text.size], [emojiSize, st.emoji.size], [imgSize, st.imgSize], [zoomIn, st.zoom]].forEach(function (p) {
+      var t = Math.round(p[1] * 100) + '%';
+      if (p[0].getAttribute('aria-valuetext') !== t) p[0].setAttribute('aria-valuetext', t);
+    });
+    cancelRow.hidden = !st.opening;
+    showError(textErr, textIn, st.text.error);
+    showError(emojiErr, emojiIn, st.emoji.error);
+    $$('input', emojiBox).forEach(function (r) { r.checked = r.value === st.emoji.value; });
+    var none = s.shape === 'none';
+    bgIn.disabled = none;
+    fillRow.hidden = !none;
+    var raster = src === 'image' && st.image && st.image.kind === 'raster';
+    darkBox.disabled = !!raster;
+    darkRow.hidden = !s.dark || !!raster;
+    darkInkField.hidden = src !== 'text';
+    darkBgField.hidden = none;
+    setText(darkHint, raster ? 'icon.svg, the only file with a dark style, is made from text, an emoji or an SVG picture, not from a bitmap.' :
+      s.dark && none && src !== 'text' ? 'Without a background there is nothing to change in dark mode: choose a shape first.' :
+      'Browsers in dark mode use these colours from icon.svg; the PNG and ICO files keep the light ones.');
+    var crop = src === 'image' && st.fit === 'crop';
+    imgSizeField.hidden = crop;
+    zoomField.hidden = !crop;
+    cropBar.hidden = !(crop && st.image);
+    var interactive = crop && !!st.image;
+    stage.classList.toggle('is-crop', interactive);
+    if (interactive) {
+      stage.setAttribute('tabindex', '0');
+      stage.setAttribute('role', 'application');
+      stage.setAttribute('aria-roledescription', 'crop area');
+    } else {
+      stage.removeAttribute('tabindex');
+      stage.setAttribute('role', 'img');
+      stage.removeAttribute('aria-roledescription');
+    }
+    setText(stageHelp, interactive ? 'Drag the picture, or use the arrow keys on it (Shift: larger steps), to choose what stays; + and − zoom.' : 'Your icon. The checks show transparent areas.');
+    var empty = content ? '' : src === 'image' ? (st.image ? '' : st.opening ? 'Opening…' : 'Choose an image') :
+      st[src].error ? (src === 'text' ? 'Correct the letters' : 'Correct the emoji') : contentError;
+    stageEmpty.hidden = !empty;
+    setText(stageEmpty, empty);
+    stage.setAttribute('aria-label', describe());
+    var svgLine = $('.fav-svg-line'), svgRow = $('.fav-file[data-file="icon.svg"]');
+    var noSvg = src === 'image' && st.image && st.image.kind === 'raster';
+    svgRow.classList.toggle('is-off', !!noSvg);
+    $('button', svgRow).hidden = !!noSvg;
+    setText(svgLine, noSvg ? 'Not made from a bitmap picture: an SVG would only wrap its pixels. Use letters, an emoji or an SVG logo for one.' :
+      'Sharp at any size in Chrome, Edge, Firefox and Safari 26, and the only file that can switch to a dark style.');
+    var name = st.site.name || 'My site', short = st.site.short || name;
+    $$('.fav-site-name').forEach(function (n) { setText(n, name); });
+    $$('.fav-short-name').forEach(function (n) { setText(n, short); });
+    var snap = snapshot();
+    setText(snippetEl, st.site.baseError ? 'The HTML appears here once the folder above is corrected.' : snippetOf(willHaveSvg(), st.site.base));
+    if (copyErr.textContent && !snippetBlocker()) setText(copyErr, '');
+    if (dlErr.textContent && !blocker()) setText(dlErr, '');
+    announce();
+    updateNotes(snap);
+  }
+  // The live summary is written once typing stops, so a screen reader reads the icon once, not every letter.
+  var announce = TT.debounce(function () { setText(summaryEl, describe()); }, 700);
+  function describe() {
+    var c = content;
+    if (!c) return 'No icon yet.';
+    if (c.kind === 'path' || c.kind === 'text') return 'Icon from the letters “' + c.text + '”' + (c.kind === 'path' ? ' in ' + FONT_BY_ID.get(c.fontId).name : ' in your device’s font') + '.';
+    if (c.kind === 'emoji') return 'Icon from the emoji ' + c.text + '.';
+    return 'Icon from ' + c.img.name + ', ' + (st.fit === 'crop' ? 'filling the square' : 'fitted inside the square') + '.';
+  }
+  // Which large files enlarge a bitmap picture: fewer of its pixels go across the icon than the file has.
+  function softNote() {
+    var img = st.image;
+    if (st.source !== 'image' || !img || img.kind !== 'raster') return '';
+    var across = st.fit === 'crop' ? Math.min(img.w, img.h) / st.zoom : Math.max(img.w, img.h) / st.imgSize;
+    var big = [16, 32, 48, 96, 180, 192, 512].filter(function (n) { return n > across + 0.5; });
+    if (!big.length) return '';
+    return (big[0] === 512 ? 'The 512 px icons are' : 'The icons of ' + big[0] + ' px and larger are') +
+      ' enlarged from fewer pixels of the picture, so they may look soft. A larger picture or an SVG gives sharper icons.';
+  }
+  function updateNotes(snap) {
+    if (st.source === 'image') setText(fileNote, st.image ? st.image.notes.concat(softNote()).filter(Boolean).join(' ') : '');
+    if (st.source === 'text') {
+      var notes = [];
+      if (fontInfo) notes.push(fontInfo);
+      var s = snap.style;
+      if (content && !s.dark) {
+        if (s.shape === 'none') {
+          if (contrast(st.text.ink, '#ffffff') < 1.6) notes.push('Without a background, letters this light are hard to see in light browser tabs.');
+          else if (contrast(st.text.ink, '#35363a') < 1.6) notes.push('Without a background, letters this dark are hard to see in dark browser tabs: add a background or a dark style.');
+          if (contrast(st.text.ink, s.fill) < 1.6) notes.push('The letters barely show on the phone icon fill colour.');
+        } else if (contrast(st.text.ink, s.bg) < 1.6) notes.push('The letters and the background are close in brightness, so the letters barely show.');
+      }
+      setText(fontNote, notes.join(' '));
+    }
+  }
+
+  // ---------- Making the content for the current source ----------
+  // The content is remade after every change; fonts load on the way. Saving waits for the latest remake,
+  // so a file is never made from the content before the change.
+  var contentRun = 0, pendingContent = null;
+  function refreshContent() {
+    var p = makeContent().catch(function () { /* the icon stays as it was */ });
+    pendingContent = p;
+    p.then(function () { if (pendingContent === p) pendingContent = null; });
+    return p;
+  }
+  async function settled() { while (pendingContent) await pendingContent; }
+  async function makeContent() {
+    var run = ++contentRun, src = st.source;
+    var next = null, err = '';
+    if (src === 'text') {
+      var t = st.text;
+      if (!t.error) {
+        var f = FONT_BY_ID.get(t.font), font = null, failed = false;
+        fontInfo = '';
+        try { font = await loadFont(t.font); } catch (e) { failed = true; }
+        if (run !== contentRun) return;
+        var chars = graphemes(t.value).join('');
+        var missing = font ? Array.from(new Set(Array.from(chars).filter(function (ch) {
+          return /\S/.test(ch) && !/[‍︀-️]/.test(ch) && !(font.charToGlyphIndex(ch) > 0);
+        }))) : [];
+        if (font && !missing.length) next = outlineContent(font, t.value, t.font);
+        if (!next) {
+          next = measuredContent('text', t.value, '700', DEVICE_FAMILY.get(f.generic));
+          if (failed) fontInfo = 'The ' + f.name + ' font could not be loaded, so your device’s ' + f.generic + ' font is used. Check your connection, then choose the font again.';
+          else if (missing.length) {
+            var q = missing.slice(0, 3).map(function (ch) { return '“' + ch + '”'; });
+            fontInfo = f.name + ' has no ' + (q.length > 1 ? q.slice(0, -1).join(', ') + ' or ' + q[q.length - 1] : q[0]) + ', so your device’s ' + f.generic +
+              ' font draws these letters. icon.svg then depends on each visitor’s own fonts and can look different on other devices; the PNG and ICO files keep what you see.';
+          }
+          if (!next) err = 'Your device could not draw these characters.';
+        }
+      }
+    } else if (src === 'emoji') {
+      if (!st.emoji.error) {
+        next = measuredContent('emoji', st.emoji.value, '400', EMOJI_FAMILY);
+        if (!next) err = 'Your device drew nothing for this emoji. Try another one.';
+        else setText(emojiNote, next.colour ? 'Your device’s emoji font draws the emoji. icon.svg keeps it as text, so other devices show their own version of it, while the PNG and ICO files copy the artwork you see here.' :
+          'Your device drew this emoji without colour, probably because it has no colour emoji font. Other devices show their own version in icon.svg; the PNG and ICO files copy what you see here.');
+      }
+    } else if (st.image) {
+      next = { kind: 'picture', key: 'picture|' + st.image.id, img: st.image };
+    }
+    if (run !== contentRun) return;
+    content = next;
+    contentError = err;
+    changed();
+  }
+  // Something that changes the icon or the files happened.
+  function changed() {
+    version++;
+    showSizes(null);
+    syncUi();
+    scheduleDraw();
+    buildSoon();
+  }
+  function onInput() {
+    readAll();
+    showSizes(null);
+    refreshContent();
+  }
+
+  // ---------- Opening a picture ----------
+  var imageSeq = 0;
+  function freeImage(img) {
+    if (!img) return;
+    img.mip.forEach(function (c) { c.width = 0; });
+  }
+  // Fully transparent edges are cut off, so a logo with wide empty margins is centred and sized by what shows.
+  function trimmed(c) {
+    var w = c.width, h = c.height, g = c.getContext('2d', { willReadFrequently: true }), d = g.getImageData(0, 0, w, h).data;
+    var x1 = w, y1 = h, x2 = -1, y2 = -1;
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        if (!d[(y * w + x) * 4 + 3]) continue;
+        if (x < x1) x1 = x;
+        if (x > x2) x2 = x;
+        if (y < y1) y1 = y;
+        if (y > y2) y2 = y;
+      }
+    }
+    if (x2 < 0) return null;
+    if (x1 === 0 && y1 === 0 && x2 === w - 1 && y2 === h - 1) return c;
+    var t = canvasOf(x2 - x1 + 1, y2 - y1 + 1);
+    t.getContext('2d').drawImage(c, x1, y1, t.width, t.height, 0, 0, t.width, t.height);
+    return t;
+  }
+  async function loadPicture(file) {
+    var name = String(file.name || 'pasted image');
+    var fmt = await TTImage.sniff(file), notes = [];
+    if (fmt === 'svg') {
+      var text = await TTImage.svg.text(file), info = TTImage.svg.info(text);
+      if (info.error) throw friendly(name + ' could not be read: ' + info.error);
+      var vw = info.viewBox ? info.viewBox[2] : info.width, vh = info.viewBox ? info.viewBox[3] : info.height;
+      var w = info.width, h = info.height;
+      if (!(w > 0 && h > 0)) throw friendly(name + ' has no size that can be drawn.');
+      var k = workScale(w, h, Infinity);
+      var view = await TTImage.svg.render(info.text, Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+      if (info.scripts) notes.push('Its scripts are left out: they never run in a favicon.');
+      if (info.external) notes.push('Files it links to are left out, as browsers do in an icon.');
+      if (view.dataset.omitted) notes.push('Its HTML content (foreignObject) cannot be drawn here and is left out.');
+      if (text.length > 51200) notes.push('This SVG is ' + sizeText(text.length) + ': icon.svg will be about as large, and browsers download it for every new visitor. A simpler SVG loads faster.');
+      // The vector picture is measured in its own px (info.width x height); the working copy is k times that.
+      return { kind: 'svg', name: name, w: w, h: h, mip: buildMip(view), svg: { text: info.text, vw: vw, vh: vh }, k: k, notes: notes, omitted: !!view.dataset.omitted };
+    }
+    var res = await TTImage.decode(file, { canvas: false });
+    try {
+      var W = res.width, H = res.height, s = workScale(W, H, 1);
+      var cw = Math.max(1, Math.round(W * s)), ch = Math.max(1, Math.round(H * s));
+      var bm = await createImageBitmap(await TTImage.encode(res, 'png', { width: cw, height: ch }));
+      var c = canvasOf(cw, ch);
+      c.getContext('2d').drawImage(bm, 0, 0);
+      if (bm.close) bm.close();
+      var label = (TTImage.formats[res.format] || { label: 'image' }).label;
+      if (res.animated) notes.push('This ' + label + ' is animated: its first frame is used.');
+      if (res.images > 1) notes.push('This file holds ' + res.images + ' pictures; the first one is used.');
+      if (res.warnings.indexOf('truncated') >= 0) notes.push('The file seems to be cut off, so part of the picture may be blank.');
+      if (res.warnings.indexOf('damaged') >= 0) notes.push('The file seems to be damaged, so part of the picture may be blank.');
+      if (res.colorProfile === 'converted') notes.push('Its colours were converted to sRGB, the colour space of icons.');
+      if (res.orientation > 1) notes.push('The photo’s rotation tag was applied, so it is upright.');
+      if (s < 1) notes.push('This picture is ' + fmtN(W) + ' × ' + fmtN(H) + ' px; a copy of ' + fmtN(cw) + ' × ' + fmtN(ch) + ' px is used, which keeps memory use low.');
+      var t = res.hasAlpha ? trimmed(c) : c;
+      if (!t) throw friendly(name + ' is fully transparent: there is nothing to make an icon from.');
+      if (t !== c) { notes.push('Its transparent edges were trimmed, so the visible part is centred.'); c.width = 0; }
+      return { kind: 'raster', name: name, w: t.width, h: t.height, mip: buildMip(t), notes: notes, label: label, ow: W, oh: H };
+    } finally {
+      TTImage.release(res);
+    }
+  }
+  function readableError(e, name) {
+    if (e && e.friendly && e.code) return name + ': ' + e.message;
+    if (e && e.friendly) return e.message;
+    return name + ' could not be opened as an image.';
+  }
+  // Waits for a job, giving up after ms spent with the page in view: a background tab may be slowed down.
+  function watchdog(job, ms, late) {
+    return new Promise(function (resolve, reject) {
+      var left = ms, last = Date.now(), timer = setInterval(function () {
+        var now = Date.now();
+        if (!document.hidden) left -= now - last;
+        last = now;
+        if (left <= 0) { clearInterval(timer); reject(late()); }
+      }, 500);
+      job.then(function (v) { clearInterval(timer); resolve(v); }, function (e) { clearInterval(timer); reject(e); });
+    });
+  }
+  var openingName = '';
+  async function openFile(file) {
+    if (!file) return;
+    var run = ++imageSeq, name = String(file.name || 'pasted image');
+    selectSource('image');
+    st.opening = run;
+    openingName = name;
+    showError(fileErr, fileIn, '');
+    setText(statusEl, 'Opening ' + name + '…');
+    syncUi();
+    var img = null, err = null, job = loadPicture(file);
+    try {
+      img = await watchdog(job, 60000, function () {
+        job.then(freeImage, function () { /* already reported */ });
+        return friendly(name + ' took too long to open and was given up. It may be damaged, or too large for this device.');
+      });
+    } catch (e) { err = e; }
+    if (run !== imageSeq) { freeImage(img); return; }     // another file was chosen, or Cancel was pressed
+    st.opening = 0;
+    if (err) {
+      showError(fileErr, fileIn, readableError(err, name));
+      setText(statusEl, '');
+      syncUi();
+      scheduleDraw();
+      return;
+    }
+    img.id = run;
+    var old = st.image;
+    st.image = img;
+    freeImage(old);
+    st.cx = 0.5; st.cy = 0.5;
+    setText(dropTitle, name);
+    setText(dropHint, (img.kind === 'svg' ? 'SVG, ' + fmtN(Math.round(img.w)) + ' × ' + fmtN(Math.round(img.h)) : img.label + ', ' + fmtN(img.ow) + ' × ' + fmtN(img.oh) + ' px') + '. Choose or drop another image to replace it.');
+    setText(statusEl, 'Opened ' + name + '.');
+    refreshContent();
+  }
+  cancelBtn.addEventListener('click', function () {
+    if (!st.opening) return;
+    imageSeq++;
+    st.opening = 0;
+    setText(statusEl, 'Stopped opening ' + openingName + '.');
+    syncUi();
+    scheduleDraw();
+    fileIn.focus();
+  });
+  function selectSource(src) {
+    if (st.source === src) return;
+    srcRadios.forEach(function (r) { r.checked = r.value === src; });
+    st.source = src;
+    writeStyle();
+    readAll();
+    refreshContent();
+  }
+
+  // ---------- Crop: drag, pinch, keys ----------
+  var pointers = new Map(), drag = null;
+  function stageScale() {
+    var img = st.image, r = stage.getBoundingClientRect();
+    return r.width ? cropSquare(img, st.zoom, st.cx, st.cy).side / r.width : 1;   // working px per CSS px
+  }
+  function moveBy(dxCss, dyCss) {
+    var img = st.image;
+    if (!img) return;
+    var k = stageScale(), sq = cropSquare(img, st.zoom, st.cx, st.cy);
+    // The picture follows the pointer, so the square moves the other way; the centre is kept inside.
+    var nx = clamp(sq.x - dxCss * k, 0, img.w - sq.side), ny = clamp(sq.y - dyCss * k, 0, img.h - sq.side);
+    st.cx = (nx + sq.side / 2) / img.w;
+    st.cy = (ny + sq.side / 2) / img.h;
+    changed();
+  }
+  function setZoom(z) {
+    var img = st.image;
+    z = clamp(Math.round(z * 20) / 20, 1, 4);
+    if (z === st.zoom) return;
+    zoomIn.value = String(Math.round(z * 100));
+    var sq = cropSquare(img, st.zoom, st.cx, st.cy), mid = [(sq.x + sq.side / 2) / img.w, (sq.y + sq.side / 2) / img.h];
+    st.zoom = z;
+    st.cx = mid[0]; st.cy = mid[1];
+    changed();
+  }
+  function cropActive() { return st.source === 'image' && st.fit === 'crop' && !!st.image; }
+  stage.addEventListener('pointerdown', function (e) {
+    if (!cropActive() || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { stage.setPointerCapture(e.pointerId); } catch (x) { /* already gone */ }
+    stage.classList.add('is-dragging');
+    drag = pointers.size === 2 ? { pinch: pinchDistance(), zoom: st.zoom } : { pinch: 0 };
+    e.preventDefault();
+  });
+  function pinchDistance() {
+    var p = Array.from(pointers.values());
+    return p.length < 2 ? 0 : Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+  }
+  stage.addEventListener('pointermove', function (e) {
+    var prev = pointers.get(e.pointerId);
+    if (!prev || !cropActive()) return;
+    var now = { x: e.clientX, y: e.clientY };
+    pointers.set(e.pointerId, now);
+    if (pointers.size >= 2) {
+      var d = pinchDistance();
+      if (drag && drag.pinch > 0 && d > 0) setZoom(drag.zoom * d / drag.pinch);
+      return;
+    }
+    moveBy((now.x - prev.x), (now.y - prev.y));
+  });
+  function endPointer(e) {
+    pointers.delete(e.pointerId);
+    if (!pointers.size) { drag = null; stage.classList.remove('is-dragging'); }
+    else if (pointers.size === 1) drag = { pinch: 0 };
+  }
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (t) { stage.addEventListener(t, endPointer); });
+  stage.addEventListener('keydown', function (e) {
+    if (!cropActive()) return;
+    var step = e.shiftKey ? 20 : 2, box = stage.getBoundingClientRect().width || 256;
+    var moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (moves[e.key] && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      moveBy(moves[e.key][0] * box / 256, moves[e.key][1] * box / 256);
+    } else if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom(st.zoom + 0.25); }
+    else if (e.key === '-' || e.key === '−' || e.key === '_') { e.preventDefault(); setZoom(st.zoom - 0.25); }
+  });
+  centreBtn.addEventListener('click', function () {
+    if (!st.image) return;
+    st.cx = 0.5; st.cy = 0.5;
+    changed();
+  });
+
+  // ---------- Events ----------
+  srcRadios.forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (!r.checked) return;
+      st.source = r.value;
+      writeStyle();
+      onInput();
+    });
+  });
+  [textIn, emojiIn].forEach(function (inp) { inp.addEventListener('input', onInput); });
+  [fontSel, inkIn, textSize, emojiSize, imgSize, shapeSel, bgIn, fillIn, darkBox, darkInkIn, darkBgIn].forEach(function (inp) {
+    inp.addEventListener('input', onInput);
+    inp.addEventListener('change', onInput);
+  });
+  fitRadios.forEach(function (r) { r.addEventListener('change', onInput); });
+  zoomIn.addEventListener('input', function () {
+    if (!st.image) { onInput(); return; }
+    setZoom(clamp(+zoomIn.value || 100, 100, 400) / 100);
+  });
+  [nameIn, shortIn, baseIn].forEach(function (inp) {
+    inp.addEventListener('input', function () { readSite(); changed(); });
+  });
+  baseIn.addEventListener('change', function () { if (!st.site.baseError && baseIn.value !== st.site.base) { baseIn.value = st.site.base; } });
+  EMOJIS.forEach(function (em, i) {
+    var label = document.createElement('label'), input = document.createElement('input'), span = document.createElement('span');
+    input.type = 'radio';
+    input.name = 'fav-emoji-pick';
+    input.value = em;
+    input.checked = i === 0;
+    span.textContent = em;
+    label.appendChild(input);
+    label.appendChild(span);
+    emojiBox.appendChild(label);
+    input.addEventListener('change', function () {
+      if (!input.checked) return;
+      emojiIn.value = em;
+      onInput();
+    });
+  });
+  $$('.fav-file button').forEach(function (b) {
+    b.addEventListener('click', function (e) { save(b.parentNode.getAttribute('data-file'), e); });
+  });
+  zipBtn.addEventListener('click', function (e) { save('zip', e); });
+  copyBtn.addEventListener('click', function () {
+    var stop = snippetBlocker();
+    if (stop) {
+      setText(copyErr, stop.msg);
+      if (stop.field) stop.field.focus();
+      return;
+    }
+    setText(copyErr, '');
+    TT.copy(snippetOf(willHaveSvg(), st.site.base), copyBtn);
+  });
+
+  fileIn.accept = TTImage.accept;
+  fileIn.addEventListener('change', function () {
+    var f = fileIn.files && fileIn.files[0];
+    fileIn.value = '';
+    openFile(f);
+  });
+  ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('is-over'); }); });
+  ['dragleave', 'dragend'].forEach(function (t) { drop.addEventListener(t, function () { drop.classList.remove('is-over'); }); });
+  drop.addEventListener('drop', function (e) {
+    e.preventDefault();
+    drop.classList.remove('is-over');
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) openFile(f);
+  });
+  // A picture dropped anywhere else on the page opens too, instead of the browser leaving the page for it.
+  document.addEventListener('dragover', function (e) {
+    if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) e.preventDefault();
+  });
+  document.addEventListener('drop', function (e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (e.defaultPrevented || !f) return;
+    e.preventDefault();
+    openFile(f);
+  });
+  document.addEventListener('paste', function (e) {
+    var cd = e.clipboardData, files = cd ? Array.prototype.filter.call(cd.files || [], function (f) { return /^image\//.test(f.type); }) : [];
+    if (!files.length) return;
+    // Text copied from a word processor can carry a picture of itself too: in a text field, the text wins.
+    var t = e.target;
+    if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && t.type === 'text')) && Array.prototype.indexOf.call(cd.types || [], 'text/plain') >= 0) return;
+    e.preventDefault();
+    openFile(files[0]);
+  });
+
+  window.addEventListener('resize', TT.debounce(scheduleDraw, 100));
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)');
+    if (mq.addEventListener) mq.addEventListener('change', scheduleDraw);
+  }
+  // A Back or Forward visit can bring back the fields after this script ran: read them again.
+  window.addEventListener('pageshow', function () { onInput(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) scheduleDraw(); });
+
+  readAll();
+  if (st.source !== 'text') writeStyle();
+  refreshContent();
+})();
+{% endraw %}
+</script>

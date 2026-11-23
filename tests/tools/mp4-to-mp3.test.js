@@ -180,7 +180,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
       const mode = (h >>> 6) & 3, pad = (h >>> 9) & 1;
       const len = Math.floor((ver === 3 ? 144000 : 72000) * kbps / sr) + pad;
       const side = ver === 3 ? (mode === 3 ? 17 : 32) : (mode === 3 ? 9 : 17);
-      frames.push({ ver, layer, kbps, sr, mode, tag: buf.toString('latin1', off + 4 + side, off + 8 + side) });
+      frames.push({ ver, layer, kbps, sr, mode, tag: buf.toString('latin1', off + 4 + side, off + 8 + side), pos: off, len });
       off += len;
     }
     // ID3v1.1: text fields padded with zeros, then a zero, the track and the genre.
@@ -191,8 +191,31 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     }
     return { id3, tags, enc, frames, v1, rest: buf.length - off, tail: buf.toString('latin1', off, off + 3) };
   }
+  // CRC-16/ARC (polynomial 0x8005, reflected, from 0), which LAME tags use.
+  const crcArc = (b, from = 0, to = b.length) => {
+    let c = 0;
+    for (let i = from; i < to; i++) { c ^= b[i]; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xa001 : c >>> 1; }
+    return c;
+  };
+  // The Info or Xing frame at the start of an MP3 (after its ID3v2 tag) and its LAME tag.
+  function lameTag(buf) {
+    const p = buf.toString('latin1', 0, 3) === 'ID3' ? 10 + synch(buf.subarray(6, 10)) : 0;
+    const ver = (buf[p + 1] >>> 3) & 3, mode = buf[p + 3] >>> 6, o = p + 4 + (ver === 3 ? (mode === 3 ? 17 : 32) : (mode === 3 ? 9 : 17));
+    const tag = buf.toString('latin1', o, o + 4);
+    if (tag !== 'Info' && tag !== 'Xing') return { tag: null };
+    const flags = buf.readUInt32BE(o + 4), r = { tag, frames: null, bytes: null, toc: null, pos: p };
+    let q = o + 8;
+    if (flags & 1) { r.frames = buf.readUInt32BE(q); q += 4; }
+    if (flags & 2) { r.bytes = buf.readUInt32BE(q); q += 4; }
+    if (flags & 4) { r.toc = [...buf.subarray(q, q + 100)]; q += 100; }
+    if (flags & 8) q += 4;
+    const v = buf.readUIntBE(q + 21, 3);
+    Object.assign(r, { encoder: buf.toString('latin1', q, q + 9), delay: v >>> 12, padding: v & 4095, musicLength: buf.readUInt32BE(q + 28),
+      musicCrc: buf.readUInt16BE(q + 32), crcOk: crcArc(buf, p, q + 34) === buf.readUInt16BE(q + 34) });
+    return r;
+  }
   // MPEG-1 above 32 kHz, MPEG-2 from 16 to 24 kHz, MPEG-2.5 below.
-  function checkMp3(buf, { kbps, sr, mono, seconds }, what) {
+  function checkMp3(buf, { kbps, sr, mono, seconds, samples }, what) {
     const m = parseMp3(buf);
     const ver = sr >= 32000 ? 3 : sr >= 16000 ? 2 : 0, name = { 3: 'MPEG-1', 2: 'MPEG-2', 0: 'MPEG-2.5' }[ver];
     assert.equal(m.id3, 3, `${what}: ID3v2.3 tag`);
@@ -210,13 +233,29 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     const audioFrames = m.frames.length - 1;
     const need = Math.ceil(seconds * sr / (ver === 3 ? 1152 : 576));
     assert.ok(audioFrames >= need && audioFrames <= need + 3, `${what}: ${audioFrames} audio frames for ${seconds} s (at least ${need})`);
+    // What a gapless decoder (ffmpeg, Chromium, Apple's, foobar2000) needs:
+    // the Info frame, at the stream's own bitrate, counts the frames after
+    // it, and its LAME tag gives LAME's delay and the padding after the last
+    // sample, under valid CRCs.
+    const lt = lameTag(buf), spf = ver === 3 ? 1152 : 576, last = m.frames[m.frames.length - 1];
+    assert.equal(lt.tag, 'Info', `${what}: an Info frame (constant bitrate)`);
+    assert.equal(m.frames[0].kbps, kbps, `${what}: the Info frame is at the stream's ${kbps} kbps`);
+    assert.equal(lt.frames, audioFrames, `${what}: the Info frame counts the ${audioFrames} frames after it`);
+    assert.equal(lt.bytes, last.pos + last.len - m.frames[0].pos, `${what}: the Info frame's byte count`);
+    assert.equal(lt.toc.length, 100, `${what}: a table of contents`);
+    assert.ok(lt.crcOk, `${what}: the LAME tag's CRC`);
+    assert.equal(lt.musicCrc, crcArc(buf, m.frames[1].pos, last.pos + last.len), `${what}: the LAME tag's CRC of the music`);
+    assert.deepEqual([lt.encoder, lt.delay], ['LAME3.100', 576], `${what}: LAME's encoder delay`);
+    m.exact = audioFrames * spf - lt.delay - lt.padding;
+    assert.ok(lt.padding >= 529 && m.exact > 0, `${what}: a padding of ${lt.padding} samples leaves the decoder's 529 to decode`);
+    if (samples !== undefined) assert.equal(m.exact, samples, `${what}: the LAME tag makes it exactly ${samples} samples long, not ${m.exact}`);
     return m;
   }
   // Decodes a file with the page's browser and measures windows [from, to] in seconds.
   const analyse = (bytes, sr, wins, p = page) => p.evaluate(async ([b64, sr, wins]) => {
     const u8 = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const ab = await new OfflineAudioContext(1, 1, sr).decodeAudioData(u8.buffer);
-    const out = { dur: ab.duration, ch: ab.numberOfChannels, win: [] };
+    const out = { dur: ab.duration, len: ab.length, ch: ab.numberOfChannels, win: [] };
     for (const [a, b] of wins) {
       const i0 = Math.round(a * sr), i1 = Math.min(ab.length, Math.round(b * sr)), rms = [], freq = [];
       for (let c = 0; c < ab.numberOfChannels; c++) {
@@ -462,10 +501,22 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     m4aTags['\u00a9cmt'], m4aTags['\u00a9lyr']], [T.title, T.artist, T.album_artist, T.album, T.composer, '2019', 'Jazz', T.comment, T.lyrics], 'the M4A\'s iTunes tags');
   assert.deepEqual([m4aTags.trkn.readUInt16BE(2), m4aTags.trkn.readUInt16BE(4), m4aTags.disk.readUInt16BE(2), m4aTags.disk.readUInt16BE(4)], [3, 12, 1, 2], 'track 3/12, disc 1/2');
   assert.equal(sha(m4aTags.covr), exp['tags.m4a'].jpeg_sha256, 'the M4A\'s cover');
-  const wavTags = parseWav(Buffer.from((await engine('tags.m4a', { format: 'wav' })).out, 'base64')).id3;
-  assert.deepEqual([wavTags.TIT2, wavTags.TPE2, wavTags.TCOM, wavTags.TDRC, wavTags.TRCK, wavTags.TPOS, wavTags.USLT.text],
+  // The WAV's tags: an ID3v2.3 chunk, as in the MP3, and RIFF INFO in UTF-8.
+  const tagWavBytes = Buffer.from((await engine('tags.m4a', { format: 'wav' })).out, 'base64'), tagWav = parseWav(tagWavBytes), wavTags = tagWav.id3;
+  assert.deepEqual([wavTags.TIT2, wavTags.TPE2, wavTags.TCOM, wavTags.TYER, wavTags.TRCK, wavTags.TPOS, wavTags.USLT.text],
     [T.title, T.album_artist, T.composer, '2019', '3/12', '1/2', T.lyrics], 'the WAV\'s ID3 chunk');
   assert.equal(sha(apicImage(wavTags.APIC)), exp['tags.m4a'].jpeg_sha256, 'the WAV\'s cover');
+  // Read back by the engine, from its INFO and ID3 chunks, the WAV gives every tag again.
+  const wavBack = await page.evaluate(async ([data]) => {
+    const m = await TTAudio.open(new File([Uint8Array.from(atob(data), ch => ch.charCodeAt(0))], 'tags.wav'));
+    const hex = async d => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', d)), x => x.toString(16).padStart(2, '0')).join('');
+    const images = [];
+    for (const im of m.tags.images) images.push({ mimeType: im.mimeType, kind: im.kind, sha: await hex(im.data) });
+    TTAudio.close(m);
+    return Object.assign({}, m.tags, { images });
+  }, [tagWavBytes.toString('base64')]);
+  assert.deepEqual(wavBack, Object.assign({}, TAGS, { images: [{ mimeType: 'image/jpeg', kind: 'coverFront', sha: exp['tags.m4a'].jpeg_sha256 }] }),
+    'the WAV read back: every tag and the cover');
 
   // ---------- Incomplete and empty files say so ----------
   // cut-short.mp4 is clip.mp4 cut off after 50,000 bytes: its index still lists
@@ -651,7 +702,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Download clip.mp3', 'focus moves to the download');
   let mp3 = await download(() => page.keyboard.press('Enter'));
   assert.equal(mp3.name, 'clip.mp3');
-  m = checkMp3(mp3.bytes, { kbps: 128, sr: 48000, mono: false, seconds: 1 }, 'clip.mp3');
+  m = checkMp3(mp3.bytes, { kbps: 128, sr: 48000, mono: false, seconds: 1, samples: 48000 }, 'clip.mp3');
   assert.equal(m.tags.TIT2, title);
   assert.equal(m.tags.TPE1, 'Ärtist');
   assert.equal(m.tags.TALB, 'Albüm');
@@ -666,6 +717,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   // Decoded: 1 s of the 660 Hz part, halved, with 0.25 s fades at both ends.
   let a = await analyse(mp3.bytes, 48000, [[0.35, 0.65], [0, 0.05], [0.1, 0.15], [0.95, 1.0]]);
   near(a.dur, 1, 0.06, 'clip.mp3 length');
+  assert.equal(a.len, 48000, 'decoded, the cut is exactly 1 s long at 48 kHz');
   assert.equal(a.ch, 2);
   near(a.win[0].freq[0], 660, 3, 'clip.mp3 tone (the 2-4 s part)');
   near(a.win[0].rms[0], 0.5 / Math.SQRT2 * 0.5, 0.012, 'left RMS at 50% volume');
@@ -784,8 +836,8 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const clipWav = await download(() => row('clip.mp4').locator('.m2m-dl').click());
   w = parseWav(clipWav.bytes);
   assert.deepEqual([w.channels, w.sr, w.data.length], [2, 48000, 96000], 'clip.wav: exactly 1 s of stereo at 48 kHz');
-  assert.equal(w.info.INAM, undefined, 'RIFF INFO cannot hold this title');
-  assert.equal(w.id3.TIT2, title, 'so the title is in an ID3 chunk of the WAV');
+  assert.equal(w.info.INAM, title, 'RIFF INFO holds the title in UTF-8');
+  assert.equal(w.id3.TIT2, title, 'and so does the WAV\'s ID3 chunk');
   // The ZIP holds both files, byte for byte.
   const zip = await download(() => page.click('#m2m-zip'));
   assert.equal(zip.name, 'converted-audio.zip');
@@ -847,7 +899,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const res = {};
   for (const n of ['voice.webm', 'phone.mov', 'two-langs.mkv']) res[n] = (await download(() => row(n).locator('.m2m-dl').click())).bytes;
   checkMp3(res['voice.webm'], { kbps: 96, sr: 48000, mono: true, seconds: 2.99 }, 'voice.mp3');
-  checkMp3(res['phone.mov'], { kbps: 96, sr: 44100, mono: true, seconds: 2 }, 'phone.mp3');
+  checkMp3(res['phone.mov'], { kbps: 96, sr: 44100, mono: true, seconds: 2, samples: 88200 }, 'phone.mp3');
+  assert.equal((await analyse(res['phone.mov'], 44100, [])).len, 88200, 'phone.mp3 decodes to exactly the 2 s of the MOV');
+  dump('phone.mp3', res['phone.mov']);
+  dump('voice.mp3', res['voice.webm']);
   checkMp3(res['two-langs.mkv'], { kbps: 96, sr: 48000, mono: true, seconds: 1.99 }, 'two-langs.mp3');
   near((await analyse(res['voice.webm'], 48000, [[0.5, 2.5]])).win[0].freq[0], 300, 2, 'voice.webm tone');
   near((await analyse(res['phone.mov'], 44100, [[0.5, 1.5]])).win[0].freq[0], 523.25, 2, 'phone.mov tone');
@@ -1174,9 +1229,11 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await text('#m2m-estimate'), 'Estimated size: about 20 KB as low-rate.mp3. Its sound is at 22.05 kHz, where MP3 goes up to 160 kbps, so it is saved at 160 kbps.');
   await convert();
   let low = (await download(() => row('low-rate.wav').locator('.m2m-dl').click())).bytes;
-  checkMp3(low, { kbps: 160, sr: 22050, mono: true, seconds: 1 }, 'low-rate.mp3');
+  checkMp3(low, { kbps: 160, sr: 22050, mono: true, seconds: 1, samples: 22050 }, 'low-rate.mp3');
   dump('low-rate.mp3', low);
-  near((await analyse(low, 22050, [[0.2, 0.8]])).win[0].freq[0], 440, 2, 'low-rate.mp3 tone');
+  a = await analyse(low, 22050, [[0.2, 0.8]]);
+  near(a.win[0].freq[0], 440, 2, 'low-rate.mp3 tone');
+  assert.equal(a.len, 22050, 'low-rate.mp3 decodes to exactly its 22,050 samples');
   await page.click('[aria-label="Remove low-rate.wav"]');
   // A phone recording at 8 kHz with the Speech button (96 kbps mono): 8 kHz at 64 kbps.
   await dropWav('speech 8k.wav', 8000, 2, ['0.4 * Math.sin(2 * Math.PI * 300 * t)']);
@@ -1185,10 +1242,11 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await text('#m2m-estimate'), 'Estimated size: about 16 KB as speech 8k.mp3. Its sound is at 8 kHz, where MP3 goes up to 64 kbps, so it is saved at 64 kbps.');
   await convert();
   low = (await download(() => row('speech 8k.wav').locator('.m2m-dl').click())).bytes;
-  checkMp3(low, { kbps: 64, sr: 8000, mono: true, seconds: 2 }, 'speech 8k.mp3');
+  checkMp3(low, { kbps: 64, sr: 8000, mono: true, seconds: 2, samples: 16000 }, 'speech 8k.mp3');
   dump('speech8k.mp3', low);
   a = await analyse(low, 8000, [[0.5, 1.5]]);
   near(a.dur, 2, 0.1, 'speech 8k.mp3 length');
+  assert.equal(a.len, 16000, 'speech 8k.mp3 decodes to exactly 2 s');
   near(a.win[0].freq[0], 300, 2, 'speech 8k.mp3 tone');
   await page.click('[aria-label="Remove speech 8k.wav"]');
   // 16 kHz at 96 kbps fits MPEG-2 as it is.
@@ -1197,12 +1255,519 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await text('#m2m-estimate'), 'Estimated size: about 12 KB as w16k.mp3.');
   await convert();
   low = (await download(() => row('w16k.wav').locator('.m2m-dl').click())).bytes;
-  checkMp3(low, { kbps: 96, sr: 16000, mono: true, seconds: 1 }, 'w16k.mp3');
+  checkMp3(low, { kbps: 96, sr: 16000, mono: true, seconds: 1, samples: 16000 }, 'w16k.mp3');
   dump('w16k.mp3', low);
-  near((await analyse(low, 16000, [[0.2, 0.8]])).win[0].freq[0], 1000, 3, 'w16k.mp3 tone');
+  a = await analyse(low, 16000, [[0.2, 0.8]]);
+  near(a.win[0].freq[0], 1000, 3, 'w16k.mp3 tone');
+  assert.equal(a.len, 16000, 'w16k.mp3 decodes to exactly 1 s');
   await page.click('[aria-label="Remove w16k.wav"]');
   await page.selectOption('#m2m-bitrate', '192');
   await page.selectOption('#m2m-channels', 'keep');
+
+  // ---------- MP3 frames: the engine's parser against ffprobe, mutagen and this test's own ----------
+  const mp3Engine = name => page.evaluate(async ([data]) => {
+    const u8 = Uint8Array.from(atob(data), ch => ch.charCodeAt(0));
+    try {
+      const fr = TTAudio.mp3Frames(u8), i = fr.info;
+      return { count: fr.count, version: fr.version, sampleRate: fr.sampleRate, spf: fr.spf, channels: fr.channels, cbr: fr.cbr, crc: fr.crc,
+        junk: fr.junk, start: fr.start, end: fr.end, tags: fr.tags.map(t => [t.kind, t.start, t.end]), samples: TTAudio.mp3Samples(fr),
+        pos: Array.from(fr.pos), size: Array.from(fr.size), mdb: Array.from(fr.mdb),
+        info: i && { tag: i.tag, frames: i.frames, bytes: i.bytes, toc: i.toc && Array.from(i.toc), delay: i.delay, padding: i.padding, lame: i.lame, crcOk: i.crcOk } };
+    } catch (e) { return { code: e.code, error: e.message }; }
+  }, [b64(name)]);
+  // main_data_begin of the frame at p: 9 bits after the header (and its CRC) in MPEG-1, 8 in MPEG-2 and 2.5.
+  const mdbAt = (buf, p) => { const q = p + 4 + ((buf[p + 1] & 1) ? 0 : 2); return ((buf[p + 1] >>> 3) & 3) === 3 ? (buf[q] << 1) | (buf[q + 1] >>> 7) : buf[q]; };
+  for (const [name, more] of [['lame-cbr.mp3', { cbr: true, samples: 132300 }], ['lame-vbr.mp3', { cbr: false, samples: 132300 }],
+    ['mpeg2.mp3', { cbr: true, samples: 66150 }]]) {
+    const e = exp[name], fr = await mp3Engine(name), buf = fs.readFileSync(F(name)), own = parseMp3(buf);
+    assert.equal(fr.count, e.packets, `${name}: the audio frames ffprobe counts`);
+    assert.deepEqual(fr.info, { tag: e.xing.info ? 'Info' : 'Xing', frames: e.xing.frames, bytes: e.xing.bytes, toc: e.xing.toc, delay: e.xing.delay,
+      padding: e.xing.padding, lame: true, crcOk: name !== 'mpeg2.mp3' }, `${name}: its Info or Xing header and LAME tag, as mutagen reads them`);
+    assert.equal(fr.samples, more.samples, `${name}: ${more.samples} samples encoded`);
+    assert.equal(fr.samples, e.xing.frames * fr.spf - e.xing.delay - e.xing.padding);
+    assert.equal(fr.cbr, more.cbr);
+    assert.deepEqual([fr.sampleRate, fr.channels], [e.sample_rate, e.channels]);
+    assert.deepEqual(fr.pos, own.frames.slice(1).map(f => f.pos), `${name}: every frame where this test finds it`);
+    assert.deepEqual(fr.size, own.frames.slice(1).map(f => f.len));
+    assert.deepEqual(fr.mdb, fr.pos.map(p => mdbAt(buf, p)), `${name}: main_data_begin of every frame`);
+  }
+  // mpeg2.mp3's tag CRC is ffmpeg's: it covers 190 bytes whatever the frame holds, so it fails LAME's own check.
+  let fr = await mp3Engine('lame-cbr.mp3');
+  assert.deepEqual(fr.tags, [['id3v2', 0, exp['lame-cbr.mp3'].first_frame], ['id3v1', exp['lame-cbr.mp3'].size - 128, exp['lame-cbr.mp3'].size]], 'the tags around the frames');
+  assert.ok(fr.mdb.some(x => x > 0), 'the bit reservoir is used');
+  fr = await mp3Engine('no-tag.mp3');
+  assert.deepEqual([fr.count, fr.info, fr.samples], [exp['no-tag.mp3'].packets, null, -1], 'no-tag.mp3: frames, no header, no sample count');
+  fr = await mp3Engine('crc.mp3');
+  assert.deepEqual([fr.count, fr.crc, fr.junk], [exp['crc.mp3'].packets, true, 0], 'crc.mp3: every frame, each with a CRC');
+  assert.ok(fr.mdb.every(x => x === 0), 'crc.mp3: main_data_begin read after the CRC');
+  fr = await mp3Engine('junk.mp3');
+  const junkSize = exp['junk.mp3'].size;
+  assert.deepEqual([fr.count, fr.junk], [exp['junk.mp3'].frames, 700 + 333], 'junk.mp3: every frame, past 700 bytes of junk and 333 more between frames');
+  assert.deepEqual(fr.tags.map(t => t[0]).sort(), ['ape', 'id3v1', 'id3v2'], 'junk.mp3: ID3v2, APEv2 and ID3v1 tags');
+  assert.deepEqual(fr.tags.find(t => t[0] === 'ape').slice(1), [fr.end, junkSize - 128], 'the APE tag runs from the last frame to the ID3v1 tag');
+  fr = await mp3Engine('vbri.mp3');
+  const vb = exp['vbri.mp3'].vbri;
+  assert.deepEqual([fr.info.tag, fr.info.frames, fr.info.bytes, fr.info.toc], ['VBRI', vb.frames, vb.bytes, vb.toc], 'the VBRI header, as mutagen reads it');
+  assert.equal(fr.count, exp['vbri.mp3'].packets);
+  assert.equal((await mp3Engine('free.mp3')).code, 'FREE_FORMAT', 'free format is refused');
+  // The Info frame writer, read back by this test.
+  const written = await page.evaluate(() => {
+    const out = [];
+    const toc = new Uint8Array(100).map((_, i) => 2 * i);
+    for (const o of [{ id: 3, sampleRateIndex: 0, mode: 1, kbps: 128, vbr: false, frames: 1000, bytes: 417000, delay: 576, padding: 1234, musicCrc: 0x1234, toc },
+      { id: 3, sampleRateIndex: 1, mode: 3, kbps: null, vbr: true, frames: 50, bytes: 12345, delay: 2000, padding: 600, toc },
+      { id: 0, sampleRateIndex: 2, mode: 3, kbps: 8, vbr: false, frames: 7, bytes: 504, delay: 576, padding: 900, toc }]) {
+      out.push(Array.from(TTAudio.mp3InfoFrame(o)));
+    }
+    return out;
+  });
+  let lt = lameTag(Buffer.from(written[0]));
+  assert.deepEqual([written[0].length, written[0][2] >> 4, lt.tag, lt.frames, lt.bytes, lt.delay, lt.padding, lt.musicCrc, lt.crcOk, lt.toc.length],
+    [417, 9, 'Info', 1000, 417417, 576, 1234, 0x1234, true, 100], 'an Info frame at 128 kbps, its table of contents, LAME tag and CRC');
+  lt = lameTag(Buffer.from(written[1]));
+  assert.deepEqual([lt.tag, lt.frames, lt.bytes - written[1].length, lt.delay, lt.padding, lt.crcOk, lt.toc[50]], ['Xing', 50, 12345, 2000, 600, true, 100], 'a Xing frame with its table of contents');
+  lt = lameTag(Buffer.from(written[2]));
+  assert.deepEqual([written[2].length, lt.tag, lt.toc, lt.crcOk], [72, 'Info', null, true], 'at 8 kbps an Info frame keeps the stream\'s bitrate without a table of contents');
+
+  // ---------- MP3 to WAV: exactly the samples that were encoded ----------
+  // A LAME tag gives the encoder's delay and the padding after the last
+  // sample; mediabunny drops the delay but not the padding. Without a tag
+  // (no-tag.mp3, VBRI) everything decoded is kept, LAME's 1,105-sample lead-in too.
+  const mp3Files = ['lame-cbr.mp3', 'lame-vbr.mp3', 'mpeg2.mp3', 'no-tag.mp3', 'vbri.mp3', 'crc.mp3', 'junk.mp3', 'free.mp3'];
+  await page.setInputFiles('#m2m-file', mp3Files.map(F));
+  await waitRead();
+  for (const [name, info] of [['lame-cbr.mp3', '0:03.000 · MP3 · 44.1 kHz · stereo'], ['lame-vbr.mp3', '0:03.000 · MP3 · 44.1 kHz · stereo'],
+    ['mpeg2.mp3', '0:03.000 · MP3 · 22.05 kHz · mono'], ['no-tag.mp3', '0:03.030 · MP3 · 44.1 kHz · stereo'], ['vbri.mp3', '0:03.030 · MP3 · 44.1 kHz · stereo'],
+    ['crc.mp3', '0:01.045 · MP3 · 44.1 kHz · stereo'], ['junk.mp3', '0:01.045 · MP3 · 44.1 kHz · stereo']]) {
+    c = await card(name);
+    assert.ok(c.info.startsWith(info + ' · '), `${name}: ${c.info}`);
+    assert.equal(c.msg, '', `${name}: no message`);
+  }
+  c = await card('free.mp3');
+  assert.equal(c.msg, 'This MP3 is in free format (its frames state no bitrate), which browsers cannot decode.');
+  await page.check('#m2m-f-wav');
+  await convert();
+  // The chirp the MP3s were made of, and where the decoded sound lines up with it.
+  const chirpL = i => 0.5 * Math.sin(2 * Math.PI * (200 * i / 44100 + 300 * (i / 44100) ** 2));
+  const lagOf = (data, step, from, len, range) => {
+    let best = 0, bestDot = -Infinity;
+    for (let lag = -range; lag <= range; lag++) {
+      let d = 0;
+      for (let i = from; i < from + len; i++) d += data[(i + lag) * step] * chirpL(i);
+      if (d > bestDot) { bestDot = d; best = lag; }
+    }
+    return best;
+  };
+  const wavs = {};
+  for (const [name, frames, lag] of [['lame-cbr.mp3', 132300, 0], ['lame-vbr.mp3', 132300, null], ['mpeg2.mp3', 66150, null], ['no-tag.mp3', 133632, 1105],
+    ['vbri.mp3', 133632, null], ['crc.mp3', 46080, null], ['junk.mp3', 46080, null]]) {
+    w = wavs[name] = parseWav((await download(() => row(name).locator('.m2m-dl').click())).bytes);
+    assert.equal(w.data.length / w.channels, frames, `${name} as WAV: ${frames} samples`);
+    if (lag !== null) assert.equal(lagOf(w.data, w.channels, 20000, 20000, 1200), lag, `${name} as WAV lines up with the chirp ${lag ? lag + ' samples late' : 'to the sample'}`);
+  }
+  assert.equal(wavs['lame-cbr.mp3'].info.INAM, 'Cut test', 'the ID3 title goes into the WAV');
+  await page.click('#m2m-clear');
+
+  // ---------- An exact MP3 cut from the engine's frame primitives (as /mp3-cutter/ makes it) ----------
+  // TTAudio.mp3Cut copies whole frames, from the one that holds `start` to
+  // the one that holds `end`, with the frames before it that the decoder
+  // needs (mp3LeadIn: the frames it must decode in full, one in MPEG-1 and
+  // two in MPEG-2, and those that hold the start of their main data, the
+  // bit reservoir) or, where those are more than the LAME tag's
+  // 4,095-sample delay can skip (low bitrates), a frame of silence that
+  // holds the reservoir's bytes (mp3Donor), under a new LAME tag whose
+  // delay and padding pin playback to the samples asked for. Decoded, the
+  // cut must equal the decoded whole file from `start` to `end`, sample for
+  // sample. A start of -1 asks for 30,000 samples from 600 samples into the
+  // first frame after the 20th whose lead-in the delay cannot skip.
+  const exactCut = (name, start, end) => page.evaluate(async ([data, start, end]) => {
+    const bytes = Uint8Array.from(atob(data), ch => ch.charCodeAt(0)), A = TTAudio, fr = A.mp3Frames(bytes), spf = fr.spf, D = A.MP3_DECODER_DELAY;
+    const skip = fr.info && fr.info.lame ? fr.info.delay + D : 0;
+    if (start < 0) {
+      let k = 20;
+      while (k < fr.count && A.mp3LeadIn(fr, k) * spf + 600 - D <= 4095) k++;
+      start = k * spf + 600 - skip; end = start + 30000;
+    }
+    const P = start + skip, F = Math.floor(P / spf), copyDelay = A.mp3LeadIn(fr, F) * spf + P % spf - D;
+    const c = A.mp3Cut(bytes, fr, start, end);
+    const parts = [...fr.tags.filter(t => t.kind === 'id3v2').map(t => bytes.subarray(t.start, t.end)), c.bytes,
+      ...fr.tags.filter(t => t.kind === 'id3v1').map(t => bytes.subarray(t.start, t.end))];
+    const cut = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    parts.reduce((q, p) => { cut.set(p, q); return q + p.length; }, 0);
+    // After the Info frame and the frames of silence come the file's own frames, byte for byte.
+    const cf = A.mp3Frames(c.bytes), first = F - (c.lead - c.donors), same = (a, b) => a.length === b.length && a.every((x, j) => x === b[j]);
+    let own = cf.count === c.frames;
+    for (let i = c.donors; i < cf.count; i++) {
+      const k = first + i - c.donors;
+      own = own && same(bytes.subarray(fr.pos[k], fr.pos[k] + fr.size[k]), c.bytes.subarray(cf.pos[i], cf.pos[i] + cf.size[i]));
+    }
+    // The frames of silence: side information of zeros but main_data_begin,
+    // and main data that ends with the bytes of the reservoir frame `first` reads.
+    const over = 4 + (fr.crc ? 2 : 0) + fr.side, res = [];
+    for (let k = 0; k < first; k++) res.push(...bytes.subarray(fr.pos[k] + over, fr.pos[k] + fr.size[k]));
+    const want = fr.mdb[first] ? res.slice(res.length - fr.mdb[first]) : [], held = [];
+    let sideZero = true;
+    for (let i = 0; i < c.donors; i++) {
+      const p = cf.pos[i], s = c.bytes.subarray(p + 4, p + 4 + fr.side);
+      sideZero = sideZero && (c.bytes[p + 1] & 1) === 1 && (s[1] & (fr.id === 3 ? 0x7F : 0xFF)) === 0 && s.subarray(2).every(x => x === 0);
+      held.push(...c.bytes.subarray(p + 4 + fr.side, p + cf.size[i]));
+    }
+    const reservoir = !want.length || same(want, held.slice(held.length - want.length));
+    const dec = async u8 => {
+      const ab = await new OfflineAudioContext(fr.channels, 1, fr.sampleRate).decodeAudioData(u8.slice().buffer);
+      return Array.from({ length: ab.numberOfChannels }, (_, i) => ab.getChannelData(i));
+    };
+    const whole = await dec(bytes), got = await dec(cut);
+    let diff = 0;
+    for (let ch = 0; ch < got.length; ch++) for (let i = 0; i < got[ch].length; i++) diff = Math.max(diff, Math.abs(got[ch][i] - whole[ch][start + i]));
+    let s = '';
+    for (let i = 0; i < cut.length; i += 0x8000) s += String.fromCharCode.apply(null, cut.subarray(i, i + 0x8000));
+    const leads = Array.from({ length: fr.count }, (_, k) => A.mp3LeadIn(fr, k));
+    return { start, end, len: got[0].length, diff, lead: c.lead, donors: c.donors, delay: c.delay, padding: c.padding, count: c.frames,
+      copyDelay, own, sideZero, reservoir, granules: fr.granules, minLead: Math.min(...leads.slice(2)), cut: btoa(s) };
+  }, [b64(name), start, end]);
+  for (const [name, start, end, check] of [['lame-cbr.mp3', 30000, 100000], ['lame-cbr.mp3', 44100, 88200], ['lame-cbr.mp3', 131000, 132300],
+    ['lame-vbr.mp3', 30000, 100000], ['lame-vbr.mp3', 44100, 88200], ['lame-vbr.mp3', 131000, 132300],
+    ['mpeg2.mp3', 20000, 40000, r => {
+      assert.equal(r.granules, 1, 'MPEG-2: one granule a frame');
+      assert.ok(r.minLead >= 2, `MPEG-2: the two frames before a frame are decoded in full (lead-in ${r.minLead})`);
+    }],
+    ['lame-32k.mp3', -1, 0, r => {
+      assert.ok(r.copyDelay > 4095, `32 kbps: copied lead-in frames would need a delay of ${r.copyDelay} samples`);
+      assert.deepEqual([r.donors, r.lead], [1, 2], 'so a frame of silence holds the reservoir, before the frame decoded in full');
+      assert.ok(r.reservoir && r.sideZero, 'the frame of silence: side information of zeros, the reservoir\'s bytes at its end');
+    }],
+    ['no-tag.mp3', 0, 30000, r => assert.deepEqual([r.donors, r.lead, r.delay], [1, 1, 1152 - 529], 'no LAME tag: a frame of silence first, so that the decoder\'s own 529 samples can be skipped')]]) {
+    const r = await exactCut(name, start, end), cutBytes = Buffer.from(r.cut, 'base64'), lt2 = lameTag(cutBytes), what = `${name} ${r.start}-${r.end}`;
+    dump(`${name.replace('.mp3', '')}-cut-${r.start}-${r.end}.mp3`, cutBytes);
+    assert.equal(r.len, r.end - r.start, `${what}: decoded, exactly ${r.end - r.start} samples`);
+    assert.equal(r.diff, 0, `${what}: the same samples as the whole file decoded`);
+    assert.ok(r.own, `${what}: the file's own frames, byte for byte`);
+    assert.ok(r.delay >= 0 && r.delay <= 4095 && r.padding >= 529 && r.padding <= 4095, `${what}: a delay of ${r.delay} and a padding of ${r.padding} fit the LAME tag`);
+    if (/lame-(cbr|vbr)/.test(name)) assert.ok(r.lead >= 2 && r.lead <= 3, `${what}: ${r.lead} lead-in frames`);
+    const rates = new Set(parseMp3(cutBytes).frames.slice(1).map(f => f.kbps));
+    assert.deepEqual([lt2.tag, lt2.frames, lt2.delay, lt2.padding, lt2.crcOk], [rates.size > 1 ? 'Xing' : 'Info', r.count, r.delay, r.padding, true],
+      `${what}: its LAME tag (Info only at a constant bitrate)`);
+    assert.equal(lt2.toc && lt2.toc.length, 100, `${what}: a table of contents`);
+    assert.equal(lt2.encoder.slice(0, 4), 'LAME', `${what}: the tag signed LAME, which every reader of it knows`);
+    if (name !== 'mpeg2.mp3' && name !== 'no-tag.mp3') assert.equal(parseMp3(cutBytes).tags.TIT2, 'Cut test', 'the ID3 tag is kept');
+    if (check) check(r);
+  }
+
+  // ---------- WAV files: every format browsers read, three they cannot, and MP3 inside ----------
+  const wavFiles = ['pcm8.wav', 'pcm24.wav', 'pcm32.wav', 'float32.wav', 'float64.wav', 'ulaw.wav', 'alaw.wav', 'rf64.wav', 'ima-adpcm.wav', 'ms-adpcm.wav', 'gsm.wav', 'mp3-in.wav'];
+  await page.setInputFiles('#m2m-file', wavFiles.map(F));
+  await waitRead();
+  for (const [name, codec] of [['ima-adpcm.wav', 'IMA ADPCM'], ['ms-adpcm.wav', 'Microsoft ADPCM'], ['gsm.wav', 'GSM 6.10']]) {
+    assert.equal((await card(name)).msg, `This WAV file holds ${codec} sound, which this page cannot decode. An audio editor can save it again as ordinary (PCM) WAV, which this page reads.`);
+  }
+  for (const [name, codec] of [['pcm8.wav', 'PCM'], ['pcm24.wav', 'PCM'], ['pcm32.wav', 'PCM'], ['float32.wav', 'PCM'], ['float64.wav', 'PCM'],
+    ['ulaw.wav', 'µ-law · 16 kHz · mono · 128 kbps'], ['alaw.wav', 'A-law · 16 kHz · mono · 128 kbps'], ['rf64.wav', 'PCM']]) {
+    assert.equal((await card(name)).info, `0:00.250 · ${codec}${codec.length > 6 ? '' : ' · 16 kHz · mono'}`, name);
+  }
+  assert.ok((await card('mp3-in.wav')).info.startsWith('0:00.324 · MP3 · 16 kHz · mono'), 'MP3 sound in a WAV is read as MP3: all nine frames');
+  await convert();
+  // Each as 16-bit WAV: the tone ffmpeg wrote (0.5 sin 440 Hz), to within what each format holds.
+  const tone440 = i => 0.5 * Math.sin(2 * Math.PI * 440 * i / 16000) * 32768;
+  for (const [name, tol] of [['pcm8.wav', 129], ['pcm24.wav', 1], ['pcm32.wav', 1], ['float32.wav', 1], ['float64.wav', 1], ['ulaw.wav', 520], ['alaw.wav', 520], ['rf64.wav', 1]]) {
+    w = parseWav((await download(() => row(name).locator('.m2m-dl').click())).bytes);
+    assert.equal(w.data.length, 4000, `${name}: 4,000 samples`);
+    let worst = 0;
+    for (let i = 0; i < w.data.length; i++) worst = Math.max(worst, Math.abs(w.data[i] - tone440(i)));
+    assert.ok(worst <= tol, `${name}: within ${tol} of the tone, largest difference ${worst.toFixed(1)}`);
+  }
+  // MP3 in a WAV: its frames can be saved as an .mp3 as they are, and its INFO tags are read.
+  const inWav = await page.evaluate(async ([data]) => {
+    const m = await TTAudio.open(new File([Uint8Array.from(atob(data), ch => ch.charCodeAt(0))], 'mp3-in.wav'));
+    const b = new Uint8Array(await TTAudio.wavMp3(m, null).arrayBuffer()), r = { mp3: m.wav.mp3, codec: m.tracks[0].codec, title: m.tags.title, artist: m.tags.artist, len: b.length };
+    r.head = Array.from(b.subarray(0, 4));
+    let x = 0; for (let i = 0; i < b.length; i++) x = (x * 31 + b[i]) >>> 0; r.hash = x;
+    TTAudio.close(m);
+    return r;
+  }, [b64('mp3-in.wav')]);
+  const inWavBytes = fs.readFileSync(F('mp3-in.wav')), dataAt = inWavBytes.indexOf('data', 12, 'latin1') + 8, mp3Data = inWavBytes.subarray(dataAt, dataAt + inWavBytes.readUInt32LE(dataAt - 4));
+  let hash = 0;
+  for (const v of mp3Data) hash = (hash * 31 + v) >>> 0;
+  assert.deepEqual(inWav, { mp3: true, codec: 'mp3', title: 'MP3 inside', artist: 'Wave Artist', len: mp3Data.length, head: [...mp3Data.subarray(0, 4)], hash },
+    'the frames of MP3-in-WAV, byte for byte, and its tags');
+  await page.click('#m2m-clear');
+
+  // ---------- WAV headers whose sizes are wrong are read to the end of the sound ----------
+  // A header that states 2 s of 3 (as an editor that wrote too small a size),
+  // sizes of 0 (a recorder that never finished its file) or 0xFFFFFFFF, each
+  // with or without a LIST chunk after the sound; and one whose size is right,
+  // with a LIST chunk after it, which must not be read as sound.
+  const brokenWav = (name, riff, data, title) => page.evaluate(async ([name, riff, data, title]) => {
+    const sr = 8000, n = 3 * sr, pcm = new Int16Array(n);
+    for (let i = 0; i < n; i++) pcm[i] = Math.round(16000 * Math.sin(2 * Math.PI * (i < 2 * sr ? 440 : 1000) * i / sr));
+    const h = new DataView(new ArrayBuffer(44)), w = (o, s) => { for (let i = 0; i < 4; i++) h.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); h.setUint32(4, riff, true); w(8, 'WAVE'); w(12, 'fmt '); h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+    h.setUint32(24, sr, true); h.setUint32(28, 2 * sr, true); h.setUint16(32, 2, true); h.setUint16(34, 16, true); w(36, 'data'); h.setUint32(40, data, true);
+    const parts = [h.buffer, pcm];
+    if (title) {
+      const t = new TextEncoder().encode(title + '\0'), len = t.length + (t.length & 1), b = new Uint8Array(20 + len), v = new DataView(b.buffer);
+      b.set([76, 73, 83, 84]); v.setUint32(4, 12 + len, true); b.set([73, 78, 70, 79, 73, 78, 65, 77], 8); v.setUint32(16, t.length, true); b.set(t, 20);
+      parts.push(b);
+    }
+    const file = new File(parts, name, { type: 'audio/wav' }), dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById('m2m-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    const wl = await TTAudio.wavParse(file);
+    return { repaired: wl.repaired, sound: wl.dataEnd - wl.dataStart, tail: wl.tail };
+  }, [name, riff, data, title || '']);
+  const listLen = t => 20 + t.length + 1 + ((t.length + 1) & 1);
+  for (const [name, riff, data, title, why] of [['short.wav', 36 + 32000, 32000, '', 'short'], ['zero.wav', 0, 0, '', 'zero'], ['ffff.wav', 0xFFFFFFFF, 0xFFFFFFFF, '', 'unknown'],
+    ['short-list.wav', 36 + 32000, 32000, 'Short tag', 'short'], ['zero-list.wav', 0, 0, 'Zero tag', 'zero'],
+    ['right-list.wav', 36 + 48000 + listLen('Right tag'), 48000, 'Right tag', '']]) {
+    assert.deepEqual(await brokenWav(name, riff, data, title), { repaired: why, sound: 48000, tail: 44 + 48000 },
+      `${name}: wavParse finds the 3 s of sound, and the header ${why ? 'wrong (' + why + ')' : 'right'}`);
+    await page.waitForFunction(n => [...document.querySelectorAll('.m2m-file-name')].some(e => e.textContent === n), name);
+    await waitRead();
+    c = await card(name);
+    assert.equal(c.info, '0:03.000 · PCM · 8 kHz · mono', `${name}: all 3 s are read`);
+  }
+  await row('zero-list.wav').locator('.m2m-edit').click();
+  assert.equal(await page.inputValue('#m2m-title'), 'Zero tag', 'the LIST chunk after the sound is read as tags');
+  await row('right-list.wav').locator('.m2m-edit').click();
+  assert.equal(await page.inputValue('#m2m-title'), 'Right tag');
+  await convert();
+  for (const name of ['short.wav', 'zero.wav', 'ffff.wav', 'short-list.wav', 'zero-list.wav', 'right-list.wav']) {
+    w = parseWav((await download(() => row(name).locator('.m2m-dl').click())).bytes);
+    assert.equal(w.data.length, 24000, `${name} as WAV: 3 s, none of the LIST chunk read as sound`);
+    let worst = 0;
+    for (let i = 0; i < 24000; i++) worst = Math.max(worst, Math.abs(w.data[i] - Math.round(16000 * Math.sin(2 * Math.PI * (i < 16000 ? 440 : 1000) * i / 8000))));
+    assert.equal(worst, 0, `${name}: the samples as they are`);
+  }
+  assert.deepEqual(await page.evaluate(async () => {
+    const out = [];
+    for (const e of document.querySelectorAll('.m2m-file-name')) out.push(e.textContent);
+    return out;
+  }), ['short.wav', 'zero.wav', 'ffff.wav', 'short-list.wav', 'zero-list.wav', 'right-list.wav']);
+  await page.click('#m2m-clear');
+  // A 4.5 GB recording whose sizes wrapped round past 4 GB (as written without
+  // RF64), built of repeated parts so that it takes no memory: it is read to
+  // its end, where the last 3 s hold the tones.
+  const cdpW = await page.context().newCDPSession(page);
+  await cdpW.send('Performance.enable');
+  const threadW = async () => (await cdpW.send('Performance.getMetrics')).metrics.find(x => x.name === 'ThreadTime').value * 1000;
+  const cpuW = await threadW();
+  const huge = await page.evaluate(async () => {
+    const sr = 8000, n = 3 * sr, pcm = new Int16Array(n);
+    for (let i = 0; i < n; i++) pcm[i] = Math.round(16000 * Math.sin(2 * Math.PI * (i < 2 * sr ? 440 : 1000) * i / sr));
+    const mb = new Blob([new Uint8Array(1 << 20)]), parts = [], count = 4291;
+    for (let i = 0; i < count; i++) parts.push(mb);
+    const data = count * (1 << 20) + 2 * n, h = new DataView(new ArrayBuffer(44)), w = (o, s) => { for (let i = 0; i < 4; i++) h.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); h.setUint32(4, (36 + data) % 4294967296, true); w(8, 'WAVE'); w(12, 'fmt '); h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+    h.setUint32(24, sr, true); h.setUint32(28, 2 * sr, true); h.setUint16(32, 2, true); h.setUint16(34, 16, true); w(36, 'data'); h.setUint32(40, data % 4294967296, true);
+    const file = new File([h.buffer, ...parts, pcm], 'huge.wav');
+    const m = await TTAudio.open(file), t = m.tracks[0], src = await TTAudio.decodeSource(m, 0);
+    let zc = 0, prev = 0, got = 0;
+    for await (const s of new TTAudio.MB.AudioSampleSink(src.track).samples(t.end - 1, t.end)) {
+      const a = new Float32Array(s.numberOfFrames);
+      s.copyTo(a, { planeIndex: 0, format: 'f32-planar' });
+      a.forEach((v, i) => {
+        if (s.timestamp + i / sr < t.end - 0.9) return;
+        if (prev < 0 && v >= 0) zc++;
+        prev = v; got++;
+      });
+      s.close();
+    }
+    const r = { size: file.size, durMs: t.durMs, repaired: m.wav.repaired, declared: m.wav.declared, hz: zc / (got / sr) };
+    TTAudio.close(m);
+    return r;
+  });
+  const spentW = (await threadW()) - cpuW;
+  assert.ok(huge.size > 4.49e9 && huge.declared < 4.3e9, `a ${huge.size}-byte file whose header states ${huge.declared} bytes of sound`);
+  assert.deepEqual([huge.durMs, huge.repaired], [Math.round((huge.size - 44) / 16), 'short'], 'read to the end of the file');
+  near(huge.hz, 1000, 20, 'the last second holds the 1 kHz tone');
+  assert.ok(spentW < 3000, `opening it took ${Math.round(spentW)} ms of main-thread time`);
+
+  // ---------- WAV out: 24-bit, float, µ-law and A-law, RF64, and the tags ----------
+  // chirp.wav (16-bit) written in each format: the same samples, in that
+  // format's terms. G.711 is encoded here as the ITU reference code does it.
+  const g711 = (x, ulaw) => {
+    const seg = (v, ends) => { let i = 0; while (i < 8 && v > ends[i]) i++; return i; };
+    if (ulaw) {
+      let mask = 0xff, v = x >> 2;
+      if (v < 0) { v = -v; mask = 0x7f; }
+      v = Math.min(v, 8159) + 33;
+      const s = seg(v, [0x3f, 0x7f, 0xff, 0x1ff, 0x3ff, 0x7ff, 0xfff, 0x1fff]);
+      return (s >= 8 ? 0x7f : (s << 4) | ((v >> (s + 1)) & 15)) ^ mask;
+    }
+    let mask = 0xd5, v = x >> 3;
+    if (v < 0) { mask = 0x55; v = -v - 1; }
+    const s = seg(v, [0x1f, 0x3f, 0x7f, 0xff, 0x1ff, 0x3ff, 0x7ff, 0xfff]);
+    return (s >= 8 ? 0x7f : (s << 4) | ((s < 2 ? v >> 1 : v >> s) & 15)) ^ mask;
+  };
+  const riffChunks = buf => {
+    const out = {};
+    let q = 12;
+    if (buf.toString('latin1', 0, 4) === 'RF64') out.ds64 = { riff: Number(buf.readBigUInt64LE(20)), data: Number(buf.readBigUInt64LE(28)), frames: Number(buf.readBigUInt64LE(36)) };
+    while (q + 8 <= buf.length) {
+      const id = buf.toString('latin1', q, q + 4), n = buf.readUInt32LE(q + 4);
+      if (id !== 'ds64') out[id] = buf.subarray(q + 8, q + 8 + (n === 0xffffffff ? out.ds64.data : n));
+      q += 8 + (n === 0xffffffff ? out.ds64.data : n) + (n & 1);
+    }
+    return out;
+  };
+  const chirpData = chirpSrc.subarray(exp['chirp.wav'].data_offset);
+  for (const [sf, tag, bits] of [['s24', 1, 24], ['f32', 3, 32], ['ulaw', 7, 8], ['alaw', 6, 8]]) {
+    const out = Buffer.from((await engine('chirp.wav', { format: 'wav', sampleFormat: sf, tags: null })).out, 'base64'), ck = riffChunks(out);
+    assert.deepEqual([out.toString('latin1', 0, 4), ck['fmt '].readUInt16LE(0), ck['fmt '].readUInt16LE(14), ck['fmt '].readUInt32LE(4)], ['RIFF', tag, bits, 44100], `${sf}: the format`);
+    assert.equal(out.readUInt32LE(4), out.length - 8, `${sf}: the RIFF size`);
+    if (tag !== 1) assert.equal(ck.fact.readUInt32LE(0), 44100, `${sf}: a fact chunk with the number of samples`);
+    const d = ck.data, n = chirpData.length / 2;
+    let bad = 0;
+    for (let i = 0; i < n; i++) {
+      const x = chirpData.readInt16LE(2 * i);
+      const got = sf === 's24' ? d.readIntLE(3 * i, 3) : sf === 'f32' ? d.readFloatLE(4 * i) : d[i];
+      const want = sf === 's24' ? x * 256 : sf === 'f32' ? x / 32768 : g711(x, sf === 'ulaw');
+      if (got !== want) bad++;
+    }
+    assert.equal(bad, 0, `${sf}: every sample of chirp.wav, exactly`);
+  }
+  // Float keeps sound over full scale (chirp.wav at a volume of 2 peaks at
+  // 1.2) where 16-bit clips it.
+  const loud = riffChunks(Buffer.from((await engine('chirp.wav', { format: 'wav', sampleFormat: 'f32', volume: 2, tags: null })).out, 'base64')).data;
+  let over = 0, badLoud = 0;
+  for (let i = 0; i < chirpData.length / 2; i++) {
+    const v = loud.readFloatLE(4 * i);
+    if (Math.abs(v) > 1) over++;
+    if (v !== chirpData.readInt16LE(2 * i) / 32768 * 2) badLoud++;
+  }
+  assert.ok(over > 1000 && badLoud === 0, `f32 at a volume of 2: ${over} samples over full scale, ${badLoud} not exactly twice the original`);
+  // RF64 when asked (as past 4 GB), read back by the engine.
+  const rf = Buffer.from((await engine('chirp.wav', { format: 'wav', rf64: true, tags: null })).out, 'base64'), rfc = riffChunks(rf);
+  assert.deepEqual([rf.toString('latin1', 0, 4), rf.readUInt32LE(4), rfc.ds64, rfc.data.length], ['RF64', 0xffffffff, { riff: rf.length - 8, data: 176400, frames: 44100 }, 176400], 'RF64 with its ds64 chunk');
+  assert.ok(rfc.data.equals(chirpData), 'the RF64 file holds the samples');
+  const rfBack = await page.evaluate(async ([data]) => {
+    const m = await TTAudio.open(new File([Uint8Array.from(atob(data), ch => ch.charCodeAt(0))], 'back.wav'));
+    const r = { rf64: m.wav.rf64, repaired: m.wav.repaired, durMs: m.tracks[0].durMs, codec: m.tracks[0].codec };
+    TTAudio.close(m);
+    return r;
+  }, [rf.toString('base64')]);
+  assert.deepEqual(rfBack, { rf64: true, repaired: '', durMs: 1000, codec: 'pcm-s16' });
+  const bigHead = Buffer.from(await page.evaluate(() => Array.from(TTAudio.wavHeader({ tag: 1, channels: 2, sampleRate: 48000, bits: 24, frames: 1e9, data: 6e9, info: null, after: 0 }))));
+  assert.deepEqual([bigHead.toString('latin1', 0, 4), bigHead.toString('latin1', 12, 16), Number(bigHead.readBigUInt64LE(20)), Number(bigHead.readBigUInt64LE(28)),
+    Number(bigHead.readBigUInt64LE(36)), bigHead.toString('latin1', bigHead.length - 8, bigHead.length - 4), bigHead.readUInt32LE(bigHead.length - 4)],
+  ['RF64', 'ds64', 6e9 + bigHead.length - 8, 6e9, 1e9, 'data', 0xffffffff], 'past 4 GB the header is RF64');
+  // Every tag in the WAV: RIFF INFO in UTF-8 before the sound, ID3v2.3 after it.
+  assert.deepEqual([tagWav.info.INAM, tagWav.info.IART, tagWav.info.IPRD, tagWav.info.IMUS, tagWav.info.IGNR, tagWav.info.ICRD, tagWav.info.ITRK, tagWav.info.ICMT],
+    [T.title, T.artist, T.album, T.composer, 'Jazz', '2019', '3', T.comment], 'the WAV\'s RIFF INFO tags, in UTF-8');
+  const tagRaw = Buffer.from((await engine('tags.m4a', { format: 'wav' })).out, 'base64');
+  assert.ok(tagRaw.indexOf('LIST') < tagRaw.indexOf('data') && tagRaw.indexOf('id3 ') > tagRaw.indexOf('data'), 'INFO before the sound, ID3 after it');
+  assert.equal(parseMp3(Buffer.from(riffChunks(tagRaw)['id3 '])).id3, 3, 'the ID3 chunk is ID3v2.3');
+
+  // ---------- Resampling: a windowed-sinc filter, not mediabunny's linear one ----------
+  // Levels are measured here with a Kaiser-windowed FFT (beta 20: leakage
+  // under -150 dB), in dB of full scale.
+  const fftDb = (x, sr) => {
+    let n = 1;
+    while (n * 2 <= x.length) n *= 2;
+    const i0 = v => { let s = 1, t = 1; for (let k = 1; k < 200; k++) { t *= (v / 2 / k) ** 2; s += t; if (t < 1e-16 * s) break; } return s; };
+    const re = new Float64Array(n), im = new Float64Array(n), off = (x.length - n) >> 1;
+    let wsum = 0;
+    for (let i = 0; i < n; i++) { const r = 2 * i / (n - 1) - 1, wv = i0(20 * Math.sqrt(1 - r * r)) / i0(20); re[i] = x[off + i] * wv; wsum += wv; }
+    for (let i = 1, j = 0; i < n; i++) { let b = n >> 1; for (; j & b; b >>= 1) j ^= b; j ^= b; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; } }
+    for (let len = 2; len <= n; len <<= 1) {
+      const a = -2 * Math.PI / len;
+      for (let i = 0; i < n; i += len) for (let k = 0; k < len / 2; k++) {
+        const c = Math.cos(a * k), s = Math.sin(a * k), p = i + k, q = p + len / 2;
+        const tr = re[q] * c - im[q] * s, ti = re[q] * s + im[q] * c;
+        re[q] = re[p] - tr; im[q] = im[p] - ti; re[p] += tr; im[p] += ti;
+      }
+    }
+    const db = new Float64Array(n / 2);
+    for (let k = 0; k < n / 2; k++) db[k] = 20 * Math.log10(Math.hypot(re[k], im[k]) / (wsum / 2) + 1e-30);
+    return { db, hz: sr / n };
+  };
+  // The level of a tone at exactly f, from a windowed DFT at f (no scalloping).
+  const toneDb = (x, sr, f) => {
+    const n = Math.floor(x.length * 0.8), off = (x.length - n) >> 1, i0 = v => { let s = 1, t = 1; for (let k = 1; k < 200; k++) { t *= (v / 2 / k) ** 2; s += t; if (t < 1e-16 * s) break; } return s; };
+    let re = 0, im = 0, ws = 0;
+    for (let i = 0; i < n; i++) {
+      const r = 2 * i / (n - 1) - 1, wv = i0(20 * Math.sqrt(1 - r * r)) / i0(20), ph = 2 * Math.PI * f * (off + i) / sr;
+      re += x[off + i] * wv * Math.cos(ph); im -= x[off + i] * wv * Math.sin(ph); ws += wv;
+    }
+    return 20 * Math.log10(Math.hypot(re, im) / (ws / 2));
+  };
+  const peakNear = (sp, f, w = 40) => { let m = -Infinity; for (let k = Math.round((f - w) / sp.hz); k <= Math.round((f + w) / sp.hz); k++) m = Math.max(m, sp.db[k]); return m; };
+  const worstBut = (sp, fs, from = 20, w = 60) => {
+    let m = -Infinity, at = 0;
+    for (let k = Math.round(from / sp.hz); k < sp.db.length; k++) if (fs.every(f => Math.abs(k * sp.hz - f) > w) && sp.db[k] > m) { m = sp.db[k]; at = k * sp.hz; }
+    return [m, at];
+  };
+  // Tones at inRate, resampled in blocks of odd sizes; also resampled at once, which must give the same samples.
+  const resampled = (inRate, outRate, tones, seconds) => page.evaluate(([inRate, outRate, tones, seconds]) => {
+    const n = Math.round(inRate * seconds), x = new Float32Array(n);
+    for (let i = 0; i < n; i++) for (const [f, a] of tones) x[i] += a * Math.sin(2 * Math.PI * f * i / inRate);
+    const r = TTAudio.resampler(inRate, outRate, 1), parts = [];
+    for (let i = 0, b = 997; i < n; i += b, b = 997 + (i % 3001)) parts.push(r.process([x.subarray(i, Math.min(n, i + b))], Math.min(b, n - i))[0]);
+    parts.push(r.flush()[0]);
+    const y = new Float32Array(parts.reduce((a, p) => a + p.length, 0));
+    parts.reduce((o, p) => { y.set(p, o); return o + p.length; }, 0);
+    const once = TTAudio.resample([x], inRate, outRate)[0];
+    const same = once.length === y.length && once.every((v, i) => v === y[i]);
+    return { y: Array.from(y), same, want: Math.round(n * outRate / inRate) };
+  }, [inRate, outRate, tones, seconds]);
+  // A full-scale tone above the new Nyquist frequency folds back at least 90
+  // dB down; going up, the image of a tone just under the old one is as low.
+  for (const [inRate, outRate, f] of [[96000, 48000, 30000], [96000, 48000, 24500], [96000, 44100, 23000], [48000, 44100, 22500], [88200, 44100, 30000],
+    [192000, 48000, 60000], [44100, 48000, 21000], [22050, 8000, 4500]]) {
+    const r = await resampled(inRate, outRate, [[f, 1]], 1);
+    assert.equal(r.y.length, r.want, `${inRate} to ${outRate} Hz: round(n × out ÷ in) samples`);
+    assert.ok(r.same, `${inRate} to ${outRate} Hz: a block at a time gives the same samples as all at once`);
+    const [worst, at] = worstBut(fftDb(r.y, outRate), f < outRate / 2 ? [f] : []);
+    assert.ok(worst < -90, `${inRate} to ${outRate} Hz: a full-scale ${f} Hz tone leaves ${worst.toFixed(1)} dBFS at ${Math.round(at)} Hz`);
+  }
+  // The passband is flat to 20 kHz at 44.1 and 48 kHz.
+  for (const [inRate, outRate] of [[48000, 44100], [96000, 48000], [44100, 48000], [96000, 44100], [32000, 48000]]) {
+    const freqs = [1000, 5000, 10000, 15000, 18000, 19000, 20000].filter(f => f < Math.min(inRate, outRate) * 0.4536);
+    for (const f of freqs) {
+      const r = await resampled(inRate, outRate, [[f, 0.5]], 0.5);
+      const lvl = toneDb(r.y, outRate, f) - 20 * Math.log10(0.5);
+      assert.ok(Math.abs(lvl) < 0.1, `${inRate} to ${outRate} Hz: ${f} Hz comes out at ${lvl.toFixed(4)} dB`);
+    }
+  }
+  // Exact lengths for odd counts and ratios, an odd ratio of 11025:11014 among them.
+  const lengths = await page.evaluate(() => [[44056, 44100, 9999], [8000, 48000, 12345], [44100, 16000, 54321], [22050, 44100, 1], [48000, 44100, 7]].map(([a, b, n]) => {
+    const x = new Float32Array(n).fill(0.25), y = TTAudio.resample([x], a, b)[0];
+    return [y.length, Math.round(n * b / a), Math.abs(y[Math.floor(y.length / 2)] - 0.25) < 1e-3 || n < 100];
+  }));
+  for (const [got, want, dc] of lengths) assert.ok(got === want && dc, `resampled length ${got}, expected ${want}; a constant stays constant`);
+  // Fast enough: 10 minutes of 96 kHz stereo to 48 kHz.
+  const cpuR = await threadW();
+  const outR = await page.evaluate(() => {
+    const blk = 4096, pl = [new Float32Array(blk), new Float32Array(blk)];
+    for (let i = 0; i < blk; i++) { pl[0][i] = Math.sin(i * 0.05); pl[1][i] = Math.sin(i * 0.031); }
+    const r = TTAudio.resampler(96000, 48000, 2), n = 96000 * 600;
+    let out = 0;
+    for (let i = 0; i < n; i += blk) out += r.process(pl, Math.min(blk, n - i))[0].length;
+    return out + r.flush()[0].length;
+  });
+  const spentR = (await threadW()) - cpuR;
+  assert.equal(outR, 48000 * 600);
+  assert.ok(spentR < 10000, `10 minutes of 96 kHz stereo resampled to 48 kHz in ${Math.round(spentR)} ms of CPU`);
+  // Through the page: a 96 kHz WAV becomes a 48 kHz MP3, without the
+  // 18 kHz alias of its 30 kHz tone that linear interpolation leaves.
+  await dropWav('hi-res.wav', 96000, 1, ['0.5 * Math.sin(2 * Math.PI * 1000 * t) + 0.45 * Math.sin(2 * Math.PI * 30000 * t)']);
+  await waitRead();
+  assert.equal((await card('hi-res.wav')).info, '0:01.000 · PCM · 96 kHz · mono');
+  await page.check('#m2m-f-mp3');
+  await page.selectOption('#m2m-bitrate', '320');
+  await convert();
+  const hiRes = (await download(() => row('hi-res.wav').locator('.m2m-dl').click())).bytes;
+  checkMp3(hiRes, { kbps: 320, sr: 48000, mono: true, seconds: 1, samples: 48000 }, 'hi-res.mp3');
+  dump('hi-res.mp3', hiRes);
+  const hiDec = await page.evaluate(async b64 => {
+    const u8 = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    return Array.from((await new OfflineAudioContext(1, 1, 48000).decodeAudioData(u8.buffer)).getChannelData(0));
+  }, hiRes.toString('base64'));
+  const hiSp = fftDb(hiDec, 48000);
+  near(toneDb(hiDec, 48000, 1000), -6.02, 0.2, 'the 1 kHz tone of hi-res.mp3');
+  assert.ok(peakNear(hiSp, 18000, 200) < -80, `no 18 kHz alias of the 30 kHz tone: ${peakNear(hiSp, 18000, 200).toFixed(1)} dBFS`);
+  await page.click('[aria-label="Remove hi-res.wav"]');
+  await page.selectOption('#m2m-bitrate', '192');
 
   // ---------- Fields the browser restores on Back are read again ----------
   await page.evaluate(() => { document.getElementById('m2m-f-mp3').checked = true; document.getElementById('m2m-bitrate').value = '320'; window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
@@ -1213,7 +1778,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await waitRead();
   assert.equal((await card('sample.wav')).info, '0:08.000 · PCM · 44.1 kHz · stereo');
   await convert();
-  checkMp3((await download(() => row('sample.wav').locator('.m2m-dl').click())).bytes, { kbps: 320, sr: 44100, mono: false, seconds: 8 }, 'sample.mp3');
+  const sampleMp3 = (await download(() => row('sample.wav').locator('.m2m-dl').click())).bytes;
+  checkMp3(sampleMp3, { kbps: 320, sr: 44100, mono: false, seconds: 8, samples: 352800 }, 'sample.mp3');
+  assert.equal((await analyse(sampleMp3, 44100, [])).len, 352800, 'sample.mp3 decodes to exactly 8 s');
+  dump('sample.mp3', sampleMp3);
 
   const browser = page.context().browser();
   const problems = [];
@@ -1305,6 +1873,17 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   near(a.win[0].freq[0], 880, 3, 'the 4-6 s tone without AudioDecoder');
   near(a.win[0].rms[0], 0.5 / Math.SQRT2, 0.02, 'level without AudioDecoder');
   assert.equal((await card('long-claim.m4a', op)).msg, 'This browser has to decode the whole sound track at once, which works up to 60 minutes on this device. Choose Original audio, or use a current version of Chrome, Edge, Firefox (on a computer) or Safari (26 or later).');
+  // An MP3 decoded whole by decodeAudioData is exactly as long as what was encoded, too.
+  await op.click('#m2m-clear');
+  await op.setInputFiles('#m2m-file', [F('lame-cbr.mp3'), F('mpeg2.mp3')]);
+  await waitRead(op);
+  await op.check('#m2m-f-wav');
+  await op.click('#m2m-convert');
+  await waitIdle(op);
+  for (const [name, frames] of [['lame-cbr.mp3', 132300], ['mpeg2.mp3', 66150]]) {
+    const ww = parseWav((await download(() => row(name, op).locator('.m2m-dl').click(), op)).bytes);
+    assert.equal(ww.data.length / ww.channels, frames, `${name} decoded whole: ${frames} samples`);
+  }
   await old.close();
 
   // ---------- A phone in a decimal-comma locale: touch drag, tap to convert ----------
@@ -1340,7 +1919,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await pp.tap('#m2m-convert');
   await waitIdle(pp);
   const phoneMp3 = await download(() => row('sample.wav', pp).locator('.m2m-dl').tap(), pp);
-  checkMp3(phoneMp3.bytes, { kbps: 192, sr: 44100, mono: false, seconds: 2.5 }, 'sample.mp3 on a phone');
+  checkMp3(phoneMp3.bytes, { kbps: 192, sr: 44100, mono: false, seconds: 2.5, samples: 110250 }, 'sample.mp3 on a phone');
   // A finger that scrolls the page across the waveform moves no handle; a tap
   // moves the nearer one, and a sideways drag on the waveform moves it along.
   const handlesNow = () => pp.evaluate(() => ['m2m-h-start', 'm2m-h-end'].map(id => document.getElementById(id).getAttribute('aria-valuenow')));

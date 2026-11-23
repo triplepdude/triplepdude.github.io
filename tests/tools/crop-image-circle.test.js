@@ -589,4 +589,32 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }
+
+  // ---------- Safari: its canvas cannot write WebP, so libwebp (TTImage's { wasm: true }) does ----------
+  await page.addInitScript(() => {
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
+    if (typeof OffscreenCanvas === 'function') {
+      const c2b = OffscreenCanvas.prototype.convertToBlob;
+      OffscreenCanvas.prototype.convertToBlob = function (o) { return c2b.call(this, o && o.type === 'image/webp' ? Object.assign({}, o, { type: 'image/png' }) : o); };
+    }
+  });
+  await open();
+  assert.deepEqual(await page.evaluate(async () => [await TTImage.canEncode('webp'), await TTImage.canEncode('webp', { wasm: true })]), [false, true]);
+  await page.setInputFiles('#circ-file', path.join(fixtures, 'stripes.png'));
+  await page.waitForFunction(() => /stripes\.png/.test(document.querySelector('#circ-drop-title').textContent));
+  assert.deepEqual(await page.$eval('#circ-format option[value="webp"]', o => [o.disabled, o.textContent]), [false, 'WebP (smaller)']);
+  await page.selectOption('#circ-size', '256');
+  await page.selectOption('#circ-format', 'webp');
+  [dlw] = await Promise.all([page.waitForEvent('download'), page.click('#circ-download')]);
+  assert.equal(dlw.suggestedFilename(), 'stripes-circle-256.webp');
+  buf = fs.readFileSync(await dlw.path());
+  const chunks = [];
+  for (let o = 12; o + 8 <= buf.length; o += 8 + buf.readUInt32LE(o + 4) + (buf.readUInt32LE(o + 4) & 1)) chunks.push(buf.toString('latin1', o, o + 4).trim());
+  // libwebp's file: no sRGB profile chunk, which Chrome's canvas always adds.
+  assert.deepEqual(chunks, ['VP8X', 'ALPH', 'VP8'], 'a lossy WebP with exact alpha, made without the canvas');
+  dec = await decodeB(buf);
+  assert.equal(dec.w, 256);
+  assert.equal(dec.corner[3], 0, 'WebP corner transparent');
+  assert.ok(near(dec.centre, GREEN, 12), `WebP centre ${dec.centre}`);
 };
