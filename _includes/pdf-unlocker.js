@@ -1,9 +1,8 @@
 {%- comment -%}
   pdfUnlocker(PDFLib): the PDF standard security handler (ISO 32000-1 7.6.3, ISO 32000-2 7.6.4)
-  for pdf-lib, shared by Split PDF, Merge PDF, Unlock PDF, Compress PDF, Rotate PDF and PDF to
-  Text; PDF to PNG, PDF to JPG and Image to Text use only its pdfjsPasswords. It reads RC4 (40 to
-  128-bit), AES-128 and AES-256 files (R2 to R6) with the open (user) or the permissions (owner)
-  password, decrypts them in memory, and encrypts objects again with the file key.
+  for pdf-lib, shared by Split PDF, Merge PDF and Unlock PDF. It reads RC4 (40 to 128-bit),
+  AES-128 and AES-256 files (R2 to R6) with the open (user) or the permissions (owner) password,
+  decrypts them in memory, and encrypts objects again with the file key.
 
   A page includes it in its script, where the function is to be defined, with an include tag
   for pdf-unlocker.js at the start of a line of its own. The tag must sit outside the page's
@@ -12,18 +11,12 @@
   a newline, so the built page reads as if the function were written there. It uses nothing
   from outside itself, so pdfUnlocker.toString() puts it into a worker.
 
-  pdfUnlocker(PDFLib) -> { open, inspect, isOwner, unlock, encrypt, encryptObject, pdfjsPasswords, md5, rc4 }
+  pdfUnlocker(PDFLib) -> { open, inspect, unlock, encrypt, encryptObject, pdfjsPasswords, md5, rc4 }
     PDFLib is the pdf-lib 1.17.1 module (self.PDFLib after importScripts in a worker). The first
     parse patches PDFLib.PDFParser and PDFLib.PDFObjectStreamParser once, so that object streams
-    are decrypted as they are read; other parsing is unaffected. open, inspect, isOwner and unlock
-    parse one file at a time: wait for one call to finish before starting the next.
-    pdfUnlocker(null) is enough for pdfjsPasswords, md5 and rc4, which need no pdf-lib.
-
-  options, the last argument of open, inspect, isOwner and unlock, may be left out:
-    objectsPerTick  how many objects pdf-lib reads before it lets other work run: 400 when left
-                    out, for a page's own thread. Each pause is a setTimeout, at least 4 ms once
-                    timers nest, so 71,000 objects wait 0.7 s at 400 (and 2.8 s at the 100 of
-                    PDFDocument.load). In a worker, where nothing else waits, pass Infinity.
+    are decrypted as they are read; other parsing is unaffected. open, inspect and unlock parse
+    one file at a time: wait for one call to finish before starting the next. pdfUnlocker(null)
+    is enough for pdfjsPasswords, md5 and rc4, which need no pdf-lib.
 
   Passwords. For R2 to R4 a password is tried in PDFDocEncoding, then UTF-8, then Windows-1252,
   then as the low byte of each character (as qpdf does); for R5 and R6 in UTF-8 after NFKC
@@ -45,18 +38,16 @@
     'DAMAGED'      inspect: the trailer names no catalogue.
   Anything pdf-lib throws for a file it cannot parse passes through, without a .code.
 
-  open(bytes, password, options) -> Promise of { doc, encrypted, security }
+  open(bytes, password) -> Promise of { doc, encrypted, security }
     bytes is a Uint8Array of the whole file; password a string ('' or undefined for none). For
     Split PDF, Merge PDF, and pages that change or rewrite a file.
-    doc        a PDFDocument. A file that is not encrypted is read as PDFDocument.load reads it
-               (updateMetadata false), and only once when its bytes never name /Encrypt, as
-               nearly all such files: that read also finds that it is not encrypted. An
-               encrypted one is decrypted in memory, with the same rules as unlock: every
-               string and stream, but not a signature's /Contents, a stream with its own
-               /Crypt filter, nor the catalogue's /Metadata when /EncryptMetadata is false.
-               doc.context.trailerInfo.Encrypt is cleared; the encryption dictionary stays in
-               the context, unused, at security.ref (delete it before saving a whole new
-               file), and trailerInfo.ID is kept.
+    doc        a PDFDocument. A file that is not encrypted is read with PDFDocument.load
+               (updateMetadata false). An encrypted one is decrypted in memory, with the same
+               rules as unlock: every string and stream, but not a signature's /Contents, a
+               stream with its own /Crypt filter, nor the catalogue's /Metadata when
+               /EncryptMetadata is false. doc.context.trailerInfo.Encrypt is cleared; the
+               encryption dictionary stays in the context, unused, at security.ref (delete it
+               before saving a whole new file), and trailerInfo.ID is kept.
     encrypted  true when the file has an encryption dictionary.
     security   null when it has none, otherwise:
       access     'owner' when the password given, or a blank one, is the permissions (owner)
@@ -81,7 +72,7 @@
       metadataRef  the catalogue's /Metadata (a PDFRef), or null.
     Throws 'PASSWORD' or 'UNSUPPORTED' ('certificate', 'drm' or 'revision').
 
-  inspect(bytes, options) -> Promise of what protects a file, without its password:
+  inspect(bytes) -> Promise of what protects a file, without its password:
     { encrypted: false, signed } or
     { encrypted: true, V, R, P, cipher, restrictions, emptyOwner, emptyUser, signed }
     restrictions lists what is forbidden: 'printing' or 'high-quality printing', 'changes',
@@ -89,13 +80,7 @@
     emptyUser: a blank permissions, or open, password works. signed: the file holds a signature.
     Throws 'DAMAGED' or 'UNSUPPORTED' (any reason).
 
-  isOwner(bytes, password, options) -> Promise of true when the password given, or a blank one,
-    is the permissions (owner) password of an encrypted file: what open(bytes, password) gives as
-    security.access 'owner', without decrypting the file. It reads the file as inspect does,
-    without the objects inside object streams. false for a file that is not encrypted.
-    Throws 'UNSUPPORTED' ('certificate', 'drm' or 'revision').
-
-  unlock(bytes, password, ownerOnly, options) -> Promise of a copy without the password (Unlock PDF).
+  unlock(bytes, password, ownerOnly) -> Promise of a copy without the password (Unlock PDF).
     Tries the password as the permissions password, then a blank one, then (unless ownerOnly)
     the password as the open password, then a blank one.
     { access: 'none' }  the file is not encrypted; no copy is made.
@@ -537,31 +522,12 @@
         };
       };
     }
-    // state null reads the file as PDFDocument.load does; speed is the objects read between pauses.
-    async function parse(bytes, state, speed) {
+    async function parse(bytes, state) {
       patch();
       hookState = state;
       try {
-        return await PDFLib.PDFParser.forBytesWithOptions(bytes, speed, false, false).parseDocument();
+        return await PDFLib.PDFParser.forBytesWithOptions(bytes, 400, false, false).parseDocument();
       } finally { hookState = null; }
-    }
-    function speedOf(options) {
-      var n = options && options.objectsPerTick;
-      return typeof n === 'number' && n >= 1 ? n : 400;
-    }
-    // True when the bytes hold the name /word as a whole token. The trailer, or the dictionary of a
-    // cross-reference stream, names /Encrypt in the clear: neither is ever compressed. A name spelt
-    // with # escapes (/Encr#79pt) is missed here, which costs only time: readEncrypt still finds it.
-    function namesWord(b, word) {
-      var n = word.length;
-      next: for (var p = b.indexOf(0x2F); p >= 0; p = b.indexOf(0x2F, p + 1)) {
-        for (var i = 0; i < n; i++) if (b[p + 1 + i] !== word.charCodeAt(i)) continue next;
-        var c = b[p + 1 + n];
-        // The name ends at white-space, a delimiter or the end of the file.
-        if (c === undefined || c <= 0x20 || c === 0x28 || c === 0x29 || c === 0x3C || c === 0x3E || c === 0x5B || c === 0x5D ||
-          c === 0x7B || c === 0x7D || c === 0x2F || c === 0x25) return true;
-      }
-      return false;
     }
 
     function objectKey(e, key, ref, aes) {
@@ -658,8 +624,8 @@
     }
 
     // What protects a file, without its password. Throws .code 'UNSUPPORTED' or 'DAMAGED'.
-    async function inspect(bytes, options) {
-      var probe = await parse(bytes, { mode: 'skip' }, speedOf(options));
+    async function inspect(bytes) {
+      var probe = await parse(bytes, { mode: 'skip' });
       // No catalogue in the trailer (or cross-reference stream): not a readable PDF.
       if (!probe.trailerInfo.Root) throw fail('DAMAGED');
       var e = readEncrypt(probe);
@@ -678,37 +644,17 @@
       };
     }
 
-    // Whether the password given, or a blank one, is the permissions password, without decrypting.
-    async function isOwner(bytes, password, options) {
-      var probe = await parse(bytes, { mode: 'skip' }, speedOf(options));
-      var e = readEncrypt(probe, true);
-      probe = null;
-      if (!e) return false;
-      if (await ownerKey(e, password || '')) return true;
-      return !!password && !!(await ownerKey(e, ''));
-    }
-
     // Opens the file with the password for reading and changing it in pdf-lib.
     // Returns { doc, encrypted, security }; throws .code 'PASSWORD' or 'UNSUPPORTED'.
-    async function open(bytes, password, options) {
-      var speed = speedOf(options), plain = null, probe;
-      // A file whose bytes never name /Encrypt is read once, as PDFDocument.load reads it, and that
-      // read is the document (unless its trailer spells the name with # escapes: it is then read
-      // again below, to decrypt it). Any other file is first read without its object streams.
-      if (!namesWord(bytes, 'Encrypt')) probe = plain = await parse(bytes, null, speed);
-      else probe = await parse(bytes, { mode: 'skip' }, speed);
+    async function open(bytes, password) {
+      var probe = await parse(bytes, { mode: 'skip' });
       var e = readEncrypt(probe, true);
+      if (!e) return { doc: await PDFLib.PDFDocument.load(bytes, { updateMetadata: false }), encrypted: false, security: null };
       probe = null;
-      if (!e) {
-        if (!plain) plain = await parse(bytes, null, speed);
-        // As PDFDocument.load(bytes, { updateMetadata: false }) makes it.
-        return { doc: new PDFLib.PDFDocument(plain, false, false), encrypted: false, security: null };
-      }
-      plain = null;
       var found = await findKey(e, password || '', false);
       if (!found.key && !e.attachmentsOnly) throw fail('PASSWORD');
       var state = { mode: 'decrypt', e: e, key: found.key, inner: new Set() };
-      var context = await parse(bytes, state, speed);
+      var context = await parse(bytes, state);
       var metaRef = catalogMetadataRef(context);
       await decryptObjects(context, e, found.key, state.inner, metaRef);
       var security = {
@@ -723,15 +669,15 @@
 
     // Opens the file with the password: the permissions password first, then a blank one, then
     // the open password (typed or blank), unless ownerOnly. Returns { access: 'owner' | 'user' | null, ... }.
-    async function unlock(bytes, password, ownerOnly, options) {
-      var speed = speedOf(options), probe = await parse(bytes, { mode: 'skip' }, speed);
+    async function unlock(bytes, password, ownerOnly) {
+      var probe = await parse(bytes, { mode: 'skip' });
       var e = readEncrypt(probe);
       if (!e) return { access: 'none' };
       probe = null;
       var found = await findKey(e, password, ownerOnly), key = found.key, access = found.access;
       if (!key) return { access: null };
       var state = { mode: 'decrypt', e: e, key: key, inner: new Set() };
-      var context = await parse(bytes, state, speed);
+      var context = await parse(bytes, state);
       var encRef = context.trailerInfo.Encrypt, metaRef = catalogMetadataRef(context);
       await decryptObjects(context, e, key, state.inner, metaRef);
       // The old dictionary would otherwise be written out as an orphan, and its /O and /U let
@@ -845,5 +791,5 @@
       }
     }
 
-    return { open: open, inspect: inspect, isOwner: isOwner, unlock: unlock, encrypt: encrypt, encryptObject: encryptObject, pdfjsPasswords: pdfjsPasswords, md5: md5, rc4: rc4 };
+    return { open: open, inspect: inspect, unlock: unlock, encrypt: encrypt, encryptObject: encryptObject, pdfjsPasswords: pdfjsPasswords, md5: md5, rc4: rc4 };
   }{% endraw %}

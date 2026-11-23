@@ -92,10 +92,6 @@ function checkR6(buf, origOwner) {
   return { V: e.V, R: e.R, P: e.P, userOk, permsP: perms.readInt32LE(0), permsTag: perms.toString('latin1', 8, 12), origOwnerWorks, fileKey, text: e.text };
 }
 
-// Added to pdf-lib as a test page loads it: each time pdf-lib reads a file, it logs how many objects
-// it reads between pauses: "pdf-lib parse: 400".
-const PARSE_SPY = '\n;(function () { var P = self.PDFLib.PDFParser, f = P.forBytesWithOptions; P.forBytesWithOptions = function (b, n) { console.log("pdf-lib parse: " + n); return f.apply(this, arguments); }; })();\n';
-
 module.exports = async ({ page, open, assert, fixtures, url }) => {
   const fx = n => path.join(fixtures, n);
   const exp = JSON.parse(fs.readFileSync(fx('expected.json'), 'utf8'));
@@ -501,53 +497,4 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(dlPhone.suggestedFilename(), longName + '-unlocked.pdf');
   assert.deepEqual(errors, []);
   await phone.close();
-
-  // ---- Clear while the worker starts, then a file again: it is still checked ----
-  // pdf-lib's first download is held back until the list has been cleared. The worker waiting for it
-  // is stopped, and its start must fail with it: the check of the cleared file waited for that start
-  // for ever before, and the next file's check, queued behind it, too.
-  const fresh = await page.context().browser().newContext({ acceptDownloads: true });
-  const p3 = await fresh.newPage();
-  const p3errors = [], parses = [];
-  p3.on('pageerror', e => p3errors.push(e.message));
-  p3.on('console', m => {
-    if (m.text().startsWith('pdf-lib parse: ')) parses.push(m.text().slice(15));
-    else if (m.type() === 'error') p3errors.push(m.text());
-  });
-  let writerAsks = 0, letGo = null;
-  const held = new Promise(resolve => { letGo = resolve; });
-  await p3.route('**/assets/vendor/pdf-lib/pdf-lib.min.js', async route => {
-    const first = writerAsks++ === 0;
-    const r = await route.fetch(), body = (await r.text()) + PARSE_SPY;
-    if (first) await held;
-    // The worker that asked first is gone by then.
-    await route.fulfill({ response: r, body }).catch(() => {});
-  });
-  await p3.goto(url);
-  await p3.setInputFiles('#ul-file', fx('plain.pdf'));
-  for (let i = 0; i < 250 && !writerAsks; i++) await p3.waitForTimeout(20);
-  assert.equal(writerAsks, 1, 'the worker asks for pdf-lib');
-  assert.equal(await p3.textContent('.ul-state'), 'Checking…');
-  await p3.click('#ul-clear');
-  await p3.setInputFiles('#ul-file', [fx('plain.pdf'), fx('r6-restricted.pdf')]);
-  const checked = await p3.waitForFunction(() => document.querySelectorAll('.ul-file').length === 2 &&
-    ![...document.querySelectorAll('.ul-state')].some(e => e.textContent === 'Checking…'), null, { timeout: 20000 }).then(() => true, () => false);
-  letGo();
-  assert.ok(checked, 'the files added after Clear are checked');
-  assert.deepEqual(await p3.$$eval('.ul-state', l => l.map(e => e.textContent)), [
-    'Not protected: no password and no restrictions, so there is nothing to remove.',
-    'Opens without a password. To remove the restrictions, type its permissions password.']);
-
-  // ---- pdf-lib reads without pausing: it runs in a worker ----
-  // Each check reads a file once; removing the restrictions reads it once to find its key, then
-  // once more to decrypt it. Every read used to pause after 400 objects, at least 4 ms each time.
-  await p3.fill('#ul-pw', 'owner pass');
-  await p3.press('#ul-pw', 'Enter');
-  await p3.waitForFunction(() => document.querySelector('#ul-progress').hidden && !document.querySelector('#ul-clear').disabled &&
-    !document.querySelectorAll('.ul-file button')[1].hidden, null, { timeout: 60000 });
-  assert.equal((await p3.$$eval('.ul-state', l => l.map(e => e.textContent)))[1], 'Unlocked: restrictions removed.');
-  for (let i = 0; i < 100 && parses.length < 4; i++) await p3.waitForTimeout(20);
-  assert.deepEqual(parses, ['Infinity', 'Infinity', 'Infinity', 'Infinity'], 'two checks, then the two reads of the unlocking');
-  assert.deepEqual(p3errors, []);
-  await fresh.close();
 };

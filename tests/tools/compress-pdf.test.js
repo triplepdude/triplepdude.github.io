@@ -115,10 +115,6 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   }
 };
 
-// Added to pdf-lib as a test page loads it: each time pdf-lib reads a file, it logs how many objects
-// it reads between pauses: "pdf-lib parse: 400".
-const PARSE_SPY = '\n;(function () { var P = self.PDFLib.PDFParser, f = P.forBytesWithOptions; P.forBytesWithOptions = function (b, n) { console.log("pdf-lib parse: " + n); return f.apply(this, arguments); }; })();\n';
-
 async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
   const browser = page.context().browser();
 
@@ -904,53 +900,6 @@ async function run({ page, open, assert, fixtures, base, url, fx, exp, tmp }) {
     assert.equal(await dp.getAttribute('#cp-ppi', 'aria-invalid'), ok ? null : 'true', `de-DE: "${v}"`);
   }
   await de.close();
-
-  // ---------- A new tab whose first request for PDF.js fails, as a dropped connection leaves it ----------
-  // PDF.js checks each copy and draws the preview. A copy made while it could not load is offered
-  // unchecked. The browser keeps a module that failed to load as failed for the page, so the next
-  // use, the preview, must ask for it under another address.
-  {
-    const fresh = await page.context().browser().newContext({ acceptDownloads: true });
-    const p3 = await fresh.newPage();
-    const p3errors = [], parses = [];
-    p3.on('pageerror', e => p3errors.push(e.message));
-    p3.on('console', m => {
-      if (m.text().startsWith('pdf-lib parse: ')) parses.push(m.text().slice(15));
-      else if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) p3errors.push(m.text());
-    });
-    let readerAsks = 0;
-    await p3.route(/\/pdfjs\/pdf\.min\.js(\?.*)?$/, route => (readerAsks++ ? route.fallback() : route.abort('connectionreset')));
-    await p3.route('**/assets/vendor/pdf-lib/pdf-lib.min.js', async route => {
-      const r = await route.fetch();
-      await route.fulfill({ response: r, body: (await r.text()) + PARSE_SPY });
-    });
-    await p3.goto(url);
-    await p3.setInputFiles('#cp-file', fx('photo.pdf'));
-    await idle(p3);
-    assert.equal(readerAsks, 1, 'PDF.js was asked for, to check the copy');
-    assert.equal((await rowOf('photo.pdf', p3)).dl, true, 'a copy PDF.js could not check is offered');
-    await pvButton('photo.pdf', p3).click();
-    await p3.waitForFunction(() => !document.getElementById('cp-preview').hidden && document.getElementById('cp-wait').hidden);
-    assert.equal(await p3.textContent('#cp-pv-info'), 'Page 1 of 1, compressed, at actual size (100%). Switch between Compressed and Original to compare.',
-      'PDF.js loads on the next try, for the preview');
-    assert.equal(readerAsks, 2);
-
-    // ---------- pdf-lib reads a file once, and without pausing: it runs in a worker ----------
-    // An encrypted file was read three times: by this page to see that it is encrypted, then twice by
-    // the shared unlocker, 400 objects at a time. It is now read once to find its key, then once more
-    // to decrypt it, and a file that is not encrypted once.
-    const parsed = async n => {
-      for (let i = 0; i < 100 && parses.length < n; i++) await p3.waitForTimeout(20);
-      return parses.splice(0);
-    };
-    assert.deepEqual(await parsed(1), ['Infinity'], 'photo.pdf is read once');
-    await p3.setInputFiles('#cp-file', fx('enc-restricted.pdf'));
-    await idle(p3);
-    assert.equal((await rowOf('enc-restricted.pdf', p3)).dl, true, 'enc-restricted.pdf is compressed');
-    assert.deepEqual(await parsed(2), ['Infinity', 'Infinity'], 'an encrypted file is read twice, without pausing');
-    assert.deepEqual(p3errors, []);
-    await fresh.close();
-  }
 
   // ---------- Leave the main page with a result on screen ----------
   await clear();

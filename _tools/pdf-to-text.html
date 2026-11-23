@@ -246,9 +246,8 @@ faq:
 
   // The standard security handler shared by the PDF tools (_includes/pdf-unlocker.js): its
   // pdfjsPasswords for passwords with characters outside ASCII, and, in a worker with pdf-lib,
-  // the check of a permissions password. Then the PDF.js loader they share.
+  // the check of a permissions password.
 {% include pdf-unlocker.js %}
-{% include pdfjs-loader.js %}
   {% raw %}
   // ---------- The text of a page: lines, paragraphs and layout ----------
   // PDF.js gives a page's text as pieces in the order the PDF draws them, which is the reading
@@ -811,17 +810,21 @@ faq:
   let focusAfterStop = false;
 
   // ---------- PDF.js, loaded on first use ----------
-  // The browser remembers a module that failed to load, so the loader shared by the PDF tools
-  // (pdfjsLoader, from _includes/pdfjs-loader.js) asks for it anew under another address.
-  let pdfjs = null, pdfWorker = null;
-  const importPdfjs = pdfjsLoader(PDFJS_URL, PDFJS_WORKER, lib => {
-    pdfjs = lib;
-    pdfWorker = new lib.PDFWorker({ verbosity: 0 });
-  });
+  let pdfjs = null, pdfjsP = null, pdfWorker = null, pdfjsTries = 0;
   function loadPdfjs() {
-    return importPdfjs().catch(() => {
-      throw friendly('The PDF reader could not be loaded. Check your connection and try again.');
-    });
+    if (!pdfjsP) {
+      // The browser remembers a module that failed to load, so a second try asks for it anew.
+      pdfjsP = import(pdfjsTries++ ? PDFJS_URL + '?try=' + pdfjsTries : PDFJS_URL).then(lib => {
+        lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+        pdfjs = lib;
+        pdfWorker = new lib.PDFWorker({ verbosity: 0 });
+        return lib;
+      }, () => {
+        pdfjsP = null;
+        throw friendly('The PDF reader could not be loaded. Check your connection and try again.');
+      });
+    }
+    return pdfjsP;
   }
   // A page that stops answering (a damaged file can keep PDF.js's worker busy for ever) is ended
   // by ending the worker; the next file gets a new one.
@@ -887,12 +890,12 @@ faq:
       }
       try {
         const bytes = new Uint8Array(await msg.file.arrayBuffer());
-        // pdf-lib reads the file without pausing, and only to check the password: nothing is decrypted.
-        const FAST = { objectsPerTick: Infinity };
         let owner = false;
-        const info = await unlocker.inspect(bytes, FAST);
+        const info = await unlocker.inspect(bytes);
         if (info.encrypted && info.emptyOwner) owner = true;
-        else if (info.encrypted && msg.password) owner = await unlocker.isOwner(bytes, msg.password, FAST);
+        else if (info.encrypted && msg.password) {
+          try { owner = (await unlocker.open(bytes, msg.password)).security.access === 'owner'; } catch (e) { if (e.code !== 'PASSWORD') throw e; }
+        }
         scope.postMessage({ type: 'done', id: msg.id, owner, blank: !!info.emptyOwner });
       } catch (err) { scope.postMessage({ type: 'error', id: msg.id, code: err && err.code || 'READ' }); }
     };

@@ -552,18 +552,19 @@ faq:
   }
 
   // ---------- pdf.js: reading and thumbnails, loaded on first use ----------
-  // The loader shared by the PDF tools (_includes/pdfjs-loader.js) asks for the module under another
-  // address after a failed try, which the browser would otherwise refuse again until a reload.
-{% endraw %}{% include pdfjs-loader.js %}{% raw %}
-  var pdfjs = null, pdfjsWorker = null;
-  var importPdfjs = pdfjsLoader(PDFJS_URL, PDFJS_WORKER, function (lib) {
-    pdfjs = lib;
-    pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
-  });
+  var pdfjs = null, pdfjsWorker = null, pdfjsLoading = null;
   function loadPdfjs() {
-    return importPdfjs().catch(function () {
+    if (pdfjsLoading) return pdfjsLoading;
+    pdfjsLoading = import(PDFJS_URL).then(function (lib) {
+      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      pdfjs = lib;
+      pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
+      return lib;
+    }, function () {
+      pdfjsLoading = null;
       throw friendly('The PDF reader could not load. Check your connection and try again.');
     });
+    return pdfjsLoading;
   }
   function openPdf(d, password) {
     return loadPdfjs().then(function (lib) {
@@ -818,7 +819,7 @@ faq:
           var src;
           try { src = new Uint8Array(await msg.file.arrayBuffer()); } catch (readErr) { scope.postMessage({ type: 'error', id: id, code: 'GONE' }); return; }
           var opened;
-          try { opened = await unlocker.open(src, msg.password || '', { objectsPerTick: Infinity }); } catch (openErr) {
+          try { opened = await unlocker.open(src, msg.password || ''); } catch (openErr) {
             scope.postMessage({ type: 'error', id: id, code: openErr && openErr.code || 'READ', message: String(openErr && openErr.message || openErr) });
             return;
           }

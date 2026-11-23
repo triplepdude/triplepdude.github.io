@@ -8,10 +8,6 @@ const path = require('path');
 // pypdf make of the same files ("others"), for the cases where the page does something they do
 // not (letter spacing, ligatures, hyphens, columns run on). The 1,000-page and 100 MB files are
 // written here, by a small PDF writer.
-// Added to pdf-lib as a test page loads it: each time pdf-lib reads a file, it logs how many objects
-// it reads between pauses: "pdf-lib parse: 400".
-const PARSE_SPY = '\n;(function () { var P = self.PDFLib.PDFParser, f = P.forBytesWithOptions; P.forBytesWithOptions = function (b, n) { console.log("pdf-lib parse: " + n); return f.apply(this, arguments); }; })();\n';
-
 module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const expected = JSON.parse(fs.readFileSync(path.join(fixtures, 'expected.json'), 'utf8'));
   const others = expected.others;
@@ -678,45 +674,6 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.ok(s.text.startsWith('The Ouse river survey') && s.text.includes('3. Measurements by site') && !s.text.includes('2. Results'), 'pages 1 and 3');
   await de.close();
   fs.rmSync(tmp, { recursive: true, force: true });
-
-  // ---- The permissions password is checked without decrypting the file ----
-  // Each check reads the file once, for what protects it, and, for a password typed, once more
-  // for its key (isOwner). It used to open the file with that password, which reads it twice more
-  // and decrypts every object, 400 objects at a time, with a pause of at least 4 ms after each 400.
-  {
-    const fresh = await page.context().browser().newContext();
-    const p5 = await fresh.newPage();
-    const p5errors = [], parses = [];
-    p5.on('pageerror', e => p5errors.push(e.message));
-    p5.on('console', m => {
-      if (m.text().startsWith('pdf-lib parse: ')) parses.push(m.text().slice(15));
-      else if (m.type() === 'error') p5errors.push(m.text());
-    });
-    await p5.route('**/assets/vendor/pdf-lib/pdf-lib.min.js', async route => {
-      const r = await route.fetch();
-      await route.fulfill({ response: r, body: (await r.text()) + PARSE_SPY });
-    });
-    const parsed = async n => {
-      for (let i = 0; i < 100 && parses.length < n; i++) await p5.waitForTimeout(20);
-      return parses.splice(0);
-    };
-    await p5.goto(url);
-    s = await load('nocopy.pdf', p5);
-    assert.match(s.lock, /^The author of nocopy\.pdf does not allow copying its text\./);
-    assert.deepEqual(await parsed(1), ['Infinity'], 'the check without a password reads the file once');
-    await p5.fill('#p2t-owner', expected.locked.password);
-    await p5.press('#p2t-owner', 'Enter');
-    await p5.waitForFunction(() => document.querySelector('#p2t-owner-error').textContent !== '');
-    assert.equal(await p5.textContent('#p2t-owner-error'), 'That is not the permissions password of this file. Check it and try again.');
-    assert.deepEqual(await parsed(2), ['Infinity', 'Infinity'], 'a wrong password: two reads, nothing decrypted');
-    await p5.fill('#p2t-owner', expected.locked.permissions);
-    await p5.press('#p2t-owner', 'Enter');
-    await settled(p5);
-    assert.equal((await state(p5)).text, expected.locked.text);
-    assert.deepEqual(await parsed(2), ['Infinity', 'Infinity'], 'the permissions password: two reads, nothing decrypted');
-    assert.deepEqual(p5errors, []);
-    await fresh.close();
-  }
 
   // ---- The main flow from the keyboard: Choose a PDF file opens the file chooser ----
   await open();

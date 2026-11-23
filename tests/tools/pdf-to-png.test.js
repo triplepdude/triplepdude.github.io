@@ -1022,29 +1022,4 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(errors, []);
   await cdp.detach();
   await phone.close();
-
-  // ---- A new tab whose first request for the PDF reader fails, as a dropped connection leaves it ----
-  // The browser keeps a module that failed to load as failed for the page, so asking for the same
-  // address again cannot work: the next try must ask for it under another one.
-  {
-    const fresh = await page.context().browser().newContext({ acceptDownloads: true });
-    const p3 = await fresh.newPage();
-    const p3errors = [];
-    p3.on('pageerror', e => p3errors.push(e.message));
-    p3.on('console', m => { if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) p3errors.push(m.text()); });
-    let readerAsks = 0;
-    await p3.route(/\/pdfjs\/pdf\.min\.js(\?.*)?$/, route => (readerAsks++ ? route.fallback() : route.abort('connectionreset')));
-    await p3.goto(url);
-    await p3.setInputFiles('#p2p-file', fx('pages.pdf'));
-    await p3.waitForFunction(() => document.getElementById('p2p-error').textContent);
-    assert.equal(await p3.textContent('#p2p-error'), 'The PDF reader could not load. Check your connection and try again.');
-    assert.equal(await p3.textContent('#p2p-status'), '');
-    await p3.setInputFiles('#p2p-file', fx('pages.pdf'));
-    await p3.waitForFunction(() => /^pages\.pdf is open/.test(document.getElementById('p2p-status').textContent) || document.getElementById('p2p-error').textContent);
-    assert.equal(await p3.textContent('#p2p-error'), '', 'the reader loads on the next try');
-    assert.equal(await p3.textContent('#p2p-status'), 'pages.pdf is open: 4 pages.');
-    assert.equal(readerAsks, 2);
-    assert.deepEqual(p3errors, []);
-    await fresh.close();
-  }
 };

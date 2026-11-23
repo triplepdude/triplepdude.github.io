@@ -4,7 +4,6 @@
   thumbnails as they scroll into view, keeps the page choice (a list such as 1-3, 5, clicks, a drag,
   touch and hold), draws pages on a canvas at a DPI (at a lower one when the browser cannot hold that
   many pixels), runs the conversion with progress and Cancel, and saves one image or a ZIP file.
-  PDF.js is imported with _includes/pdfjs-loader.js, which tries again after a failed download.
 
   A page puts it in a script after zip.js and png-kit.js, and starts it once:
 
@@ -56,9 +55,6 @@ window.TTPdfPages = (function () {
   // The standard security handler shared by the PDF tools, for its pdfjsPasswords (see docPasswords).
 {% include pdf-unlocker.js %}
 {%- endif %}
-  // The PDF.js loader shared by the PDF tools: after a failed try it asks for the module under
-  // another address, which the browser would otherwise refuse again until the page is reloaded.
-{% include pdfjs-loader.js %}
   {% raw %}
   return function (cfg) {
   var P = cfg.p;
@@ -258,16 +254,20 @@ window.TTPdfPages = (function () {
     return { w: w, h: h, dpi: used };
   }
 
-  // ---------- pdf.js, loaded on first use (pdfjsLoader, from _includes/pdfjs-loader.js) ----------
-  var pdfjs = null, pdfjsWorker = null;
-  var importPdfjs = pdfjsLoader(PDFJS_URL, PDFJS_WORKER, function (lib) {
-    pdfjs = lib;
-    pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
-  });
+  // ---------- pdf.js, loaded on first use ----------
+  var pdfjs = null, pdfjsWorker = null, pdfjsLoading = null;
   function loadPdfjs() {
-    return importPdfjs().catch(function () {
+    if (pdfjsLoading) return pdfjsLoading;
+    pdfjsLoading = import(PDFJS_URL).then(function (lib) {
+      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      pdfjs = lib;
+      pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
+      return lib;
+    }, function () {
+      pdfjsLoading = null;
       throw friendly('The PDF reader could not load. Check your connection and try again.');
     });
+    return pdfjsLoading;
   }
   function openPdf(d, password) {
     return loadPdfjs().then(function (lib) {
@@ -528,8 +528,7 @@ window.TTPdfPages = (function () {
     c.cb.setAttribute('aria-label', 'Page ' + (i + 1));
     c.cb.dataset.i = i;
     c.dl.dataset.i = i;
-    // The first page is the tab stop until another is used; roveTo takes it from there.
-    if (cfg.keys) { c.cb.tabIndex = i === 0 ? 0 : -1; if (i === 0) rove = 0; }
+    if (cfg.keys) c.cb.tabIndex = i === 0 ? 0 : -1;
     cards[i] = c;
     if (observer) observer.observe(li); else queueThumb(c, i);
     return li;
