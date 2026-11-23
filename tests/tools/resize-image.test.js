@@ -749,7 +749,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(prose, /Pad with white, black, transparency or any colour; the image colour picker gives the HEX code of one in the photo\./);
   assert.match(prose, /Phone photos are turned upright from their EXIF orientation tag; Flip Image turns or mirrors pictures any other way, also in a batch\./);
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/image-color-picker/', '/compress-image/', '/flip-image/', '/crop-image/']);
+  assert.deepEqual(links, ['/image-color-picker/', '/compress-image/', '/flip-image/', '/favicon-generator/', '/crop-image/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }

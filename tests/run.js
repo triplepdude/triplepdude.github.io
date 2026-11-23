@@ -680,6 +680,29 @@ async function siteChecks(browser, base, problems) {
     if (type === 4 || type === 6 || png.includes('tRNS')) problems.push('/assets/apple-touch-icon.png has transparency, which iOS paints black');
     if (png.length >= 20 * 1024) problems.push(`/assets/apple-touch-icon.png is ${png.length} bytes (keep it under 20 KB)`);
   }
+  // The favicons: every head names /favicon.ico (sizes="32x32", so Chrome keeps
+  // the SVG), the SVG, and a 96 px PNG for Google Search, which takes no SVG.
+  // The ICO holds 16, 32 and 48 px images (its directory: a 6-byte header, then
+  // 16 bytes per image, whose first two bytes are the width and height).
+  for (const p of ['/', '/case-converter/']) {
+    await page.goto(base + p, { waitUntil: 'load' });
+    const links = await page.$$eval('link[rel="icon"]', ls => ls.map(l => [l.getAttribute('href'), l.getAttribute('sizes'), l.getAttribute('type')].join(' ')));
+    const want = ['/favicon.ico 32x32 ', '/assets/favicon.svg  image/svg+xml', '/assets/favicon-96x96.png 96x96 image/png'];
+    if (links.join('|') !== want.join('|')) problems.push(`${p}: icon links are [${links.join(', ')}], expected [${want.join(', ')}]`);
+  }
+  const ico = await page.request.get(base + '/favicon.ico');
+  const icoBody = ico.status() === 200 ? await ico.body() : Buffer.alloc(0);
+  if (icoBody.length < 6 || icoBody.readUInt16LE(0) !== 0 || icoBody.readUInt16LE(2) !== 1) {
+    problems.push(`/favicon.ico is not served as an icon (status ${ico.status()})`);
+  } else {
+    const sizes = [];
+    for (let i = 0; i < icoBody.readUInt16LE(4) && 6 + 16 * i + 16 <= icoBody.length; i++) sizes.push(icoBody[6 + 16 * i] || 256);
+    if (sizes.sort((a, b) => a - b).join() !== '16,32,48') problems.push(`/favicon.ico holds ${sizes.join(', ')} px images, expected 16, 32 and 48`);
+  }
+  const fav = await page.request.get(base + '/assets/favicon-96x96.png');
+  const favPng = fav.status() === 200 ? await fav.body() : Buffer.alloc(0);
+  if (favPng.length < 26 || favPng.toString('latin1', 0, 8) !== '\x89PNG\r\n\x1a\n') problems.push(`/assets/favicon-96x96.png is not served as a PNG (status ${fav.status()})`);
+  else if (favPng.readUInt32BE(16) !== 96 || favPng.readUInt32BE(20) !== 96) problems.push(`/assets/favicon-96x96.png is ${favPng.readUInt32BE(16)}x${favPng.readUInt32BE(20)}, expected 96x96`);
 
   // Smooth scrolling is animation, so it is only for visitors who have not
   // asked their system to reduce motion (WCAG 2.3.3).
