@@ -44,8 +44,8 @@ howto: |
   The tool reads which way the text runs on each page and marks the pages
   where it runs sideways or upside down, such as a landscape table on a
   portrait page. **Turn them upright** turns all of those pages so their
-  text reads normally. Scanned pages have no text to read, so check those by
-  eye.
+  text reads normally. A scan without a text layer (one whose text you cannot
+  select) has no text to read, so check those pages by eye.
 
   ## What the saved file keeps
 
@@ -154,6 +154,8 @@ faq:
 .rot-more { margin: 0 0 16px; }
 @media (pointer: coarse) {
   .rot-tb { min-height: 44px; }
+  /* Wide enough for three 44 px buttons side by side. */
+  .rot-pages { grid-template-columns: repeat(auto-fill, minmax(154px, 1fr)); }
 }
 @media (max-width: 640px) {
   .rot-row > .label { flex-basis: 100%; }
@@ -161,6 +163,11 @@ faq:
 @media (max-width: 420px) {
   .rot-pages { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .rot-bar { padding: 10px; }
+}
+/* Below about 390 px three buttons side by side would be under 44 px wide: 180° goes on a row of its own. */
+@media (max-width: 389px) {
+  .rot-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rot-tb[data-q="2"] { grid-column: 1 / -1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .rot-drop, .rot-thumb img { transition: none; }
@@ -544,11 +551,29 @@ faq:
         var opened = await unlocker.open(b, password || '');
         return { x: x, doc: opened.doc, security: opened.security };
       }
+      // The signature dictionaries, each found by its /ByteRange: signed when one is a person's or an
+      // organisation's signature; rights when one is Adobe's usage rights (Reader extensions, whose
+      // reference has /TransformMethod /UR3, or /UR before PDF 1.6), which sign the file only to turn
+      // on features of Adobe Reader, as on many tax forms.
+      function signatures(b) {
+        var out = { signed: false, rights: false }, text = new TextDecoder('latin1');
+        for (var p = b.indexOf(47); p >= 0; p = b.indexOf(47, p + 1)) {
+          if (!word(b, p, '/ByteRange')) continue;
+          // The object around it, from its "obj" to its "endobj".
+          var s = p, e = p, lo = Math.max(0, p - 65536), hi = Math.min(b.length, p + 65536);
+          while (s > lo && !(word(b, s, 'obj') && !word(b, s - 3, 'end'))) s--;
+          while (e < hi && !word(b, e, 'endobj')) e++;
+          if (/\/TransformMethod\s*\/UR3?(?![^\s\/<>\[\]()%{}])/.test(text.decode(b.subarray(s, e)))) out.rights = true;
+          else out.signed = true;
+          p = e;
+        }
+        return out;
+      }
       // A signature dictionary is never inside an object stream, since its /ByteRange gives places in
       // the file, so its keywords can be looked for in the bytes as they are.
       async function inspect(b, password) {
-        var x = readXref(b);
-        var out = { intact: x.ok, kind: x.ok ? x.last.kind : '', signed: has(b, '/ByteRange'), certified: has(b, '/DocMDP'), encrypted: false, allowed: true };
+        var x = readXref(b), sig = signatures(b);
+        var out = { intact: x.ok, kind: x.ok ? x.last.kind : '', signed: sig.signed, rights: sig.rights, certified: has(b, '/DocMDP'), encrypted: false, allowed: true };
         if (!x.ok || x.last.dict.get(N('Encrypt')) !== undefined) {
           var r = await load(b, password);
           if (r.security) {
@@ -704,7 +729,8 @@ faq:
 
   // One request at a time: the unlocker patches pdf-lib's parser while it reads a file. A worker
   // stopped while it starts (Cancel) fails its start too, or every later request would wait for it.
-  var worker = null, workerReady = null, startFail = null, reqId = 0, waiting = {}, queue = Promise.resolve();
+  // running: the save that the request in progress belongs to (null for a check of a file).
+  var worker = null, workerReady = null, startFail = null, reqId = 0, waiting = {}, queue = Promise.resolve(), running = null;
   function getWorker() {
     if (workerReady) return workerReady;
     workerReady = new Promise(function (resolve, reject) {
@@ -736,8 +762,12 @@ faq:
     if (worker) { try { worker.terminate(); } catch (err) { /* already gone */ } }
     worker = null;
   }
-  function ask(msg) {
+  // job: the save a request belongs to. A request of a cancelled save that is still waiting never
+  // runs; a check of a file is not part of a save, so Cancel lets it finish.
+  function ask(msg, job) {
     var p = queue.then(function () {
+      if (job && job.cancelled) throw { code: 'CANCEL' };
+      running = job || null;
       return getWorker().then(function (w) {
         return new Promise(function (resolve, reject) {
           var id = ++reqId;
@@ -747,7 +777,7 @@ faq:
         });
       });
     });
-    queue = p.catch(function () { /* the next request still runs */ });
+    queue = p.then(null, function () { /* the next request still runs */ }).then(function () { running = null; });
     return p;
   }
 
@@ -827,7 +857,6 @@ faq:
     buildSection(f);
     root.classList.remove('is-empty');
     work.hidden = false;
-    say('Opening ' + f.name + '…');
     openFile(f, '');
     return f;
   }
@@ -847,8 +876,11 @@ faq:
   }
   function openFile(f, password) {
     f.state = f.state === 'password' ? 'password' : 'opening';
+    // A file is announced once, when it is open (or needs its password, or fails); its section shows
+    // "Opening…" meanwhile.
     return openPdf(f, password).then(function (pdf) {
-      if (f.gone) { pdf.loadingTask.destroy(); return; }
+      // Gone, or already shown by an earlier attempt: this copy is not needed.
+      if (f.gone || f.state === 'open') { pdf.loadingTask.destroy(); return; }
       if (!(pdf.numPages >= 1)) { pdf.loadingTask.destroy(); failFile(f, f.name + ' has no pages. ' + REPAIR); return; }
       if (totalPages() + pdf.numPages > MAX_PAGES) {
         pdf.loadingTask.destroy();
@@ -903,7 +935,7 @@ faq:
       '<div class="rot-unlock" hidden><p class="rot-unlock-why"></p><div class="field"><label for="rot-pw-' + f.id + '"></label>' +
       '<div class="rot-pw-row"><input type="password" id="rot-pw-' + f.id + '" maxlength="' + MAX_PW + '" autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="go" aria-describedby="rot-pw-' + f.id + '-error">' +
       '<button class="btn" type="button" data-unlock="' + f.id + '">Open</button></div></div>' +
-      '<p class="msg error" id="rot-pw-' + f.id + '-error"></p></div>' +
+      '<p class="msg error" id="rot-pw-' + f.id + '-error" aria-live="polite"></p></div>' +
       '<ol class="rot-pages" hidden></ol>';
     $('.rot-fname', sec).textContent = f.name;
     var rm = $('[data-remove]', sec);
@@ -944,8 +976,9 @@ faq:
     if (!pw) { showPwError(f, 'Type the password first.'); f.pwIn.focus(); return; }
     showPwError(f, '');
     if (f.pwMode === 'open') {
-      say('Opening ' + f.name + '…');
-      openFile(f, pw);
+      // One attempt at a time: a double click or a second Enter would show the pages twice.
+      f.checking = true;
+      openFile(f, pw).finally(function () { f.checking = false; });
       return;
     }
     f.checking = true;
@@ -1003,6 +1036,8 @@ faq:
     }
     if (i.certified) out.push(['warn', 'Certified by its author: a certified PDF allows no page changes, so rotating any page breaks its certification. Keep the original if you need it.']);
     else if (i.signed) out.push(['warn', 'Digitally signed. The signed version stays inside the file, so the signature still checks out for that version, but PDF readers will show that pages were changed after signing.']);
+    // Adobe's usage rights are a signature too, but nobody signed the document with them.
+    if (i.rights) out.push(['', 'Reader-extended: an Adobe usage-rights signature, not a person’s, turns on extended features in Adobe Acrobat Reader. Rotating pages ends them, and Acrobat Reader then says the document has changed since it was created.']);
     if (!i.intact) out.push(['', 'Its index of objects is damaged, so the rotated copy is written out in full, which also repairs it' + (i.signed ? ', and its signature will no longer validate' : '') + '.']);
     return out;
   }
@@ -1266,8 +1301,11 @@ faq:
   }
 
   // ---------- turning pages, with undo ----------
+  // What a save writes: the turns of each open file that has any. A file added (or removed) without
+  // turns leaves earlier copies as they are.
   function stateKey() {
-    return openFiles().map(function (f) { return f.id + ':' + f.pages.map(function (p) { return p.q; }).join(''); }).join('|');
+    return openFiles().filter(function (f) { return f.pages.some(function (p) { return p.q; }); })
+      .map(function (f) { return f.id + ':' + f.pages.map(function (p) { return p.q; }).join(''); }).join('|');
   }
   function snapshot() {
     return { kind: 'turns', files: openFiles().map(function (f) { return { f: f, q: Uint8Array.from(f.pages, function (p) { return p.q; }) }; }) };
@@ -1304,22 +1342,32 @@ faq:
     turn(list, q);
   }
   function turnAll(q) { turn(flat(), q, 'All ' + plural(flat().length, 'page', 'pages')); }
+  // A button that its own action hides or turns off would leave keyboard focus on the page itself,
+  // so focus moves on to the first of `to` that can take it.
+  function keepFocus(from, to) {
+    if (!(from.disabled || from.closest('[hidden]'))) return;
+    for (var i = 0; i < to.length; i++) if (to[i] && !to[i].disabled && !to[i].closest('[hidden]')) { to[i].focus(); return; }
+  }
+  // The page of the first file that is its list's tab stop.
+  function currentCheck() { var f = openFiles()[0]; return f && f.pages[f.cur] ? f.pages[f.cur].cb : null; }
   function upright() {
     if (busy) return;
-    var list = [];
+    var had = document.activeElement === uprightBtn, list = [];
     openFiles().forEach(function (f) { f.pages.forEach(function (p, i) { if (flagOf(p)) list.push({ f: f, i: i }); }); });
     if (!list.length) return;
     remember(snapshot());
     list.forEach(function (t) { var p = t.f.pages[t.i]; p.q = (((p.theta - p.rot0) / 90) % 4 + 4) % 4; });
     refresh();
+    if (had) keepFocus(uprightBtn, [goBtn]);
     say('Turned ' + plural(list.length, 'page', 'pages') + ' so their text is upright.', true);
   }
   function undo() {
     if (busy || !history.length) return;
-    var e = history.pop();
+    var e = history.pop(), had = document.activeElement === undoBtn;
     if (e.kind === 'turns') {
       e.files.forEach(function (s) { if (s.f.state === 'open' && !s.f.gone) s.f.pages.forEach(function (p, i) { p.q = s.q[i]; }); });
       refresh();
+      if (had) keepFocus(undoBtn, [resetBtn, currentCheck(), goBtn]);
       say('Undone.', true);
       return;
     }
@@ -1333,15 +1381,18 @@ faq:
       if (it.f.stopped) { it.f.stopped = false; it.f.infoDone = readInfo(it.f); }
     });
     refresh();
+    if (had) keepFocus(undoBtn, [resetBtn, currentCheck(), goBtn]);
     say(e.items.length === 1 ? e.items[0].f.name + ' is back.' : plural(e.items.length, 'file is', 'files are') + ' back.', true);
   }
   function reset() {
     if (busy) return;
     var any = openFiles().some(function (f) { return f.pages.some(function (p) { return p.q; }); });
     if (!any) return;
+    var had = document.activeElement === resetBtn;
     remember(snapshot());
     openFiles().forEach(function (f) { f.pages.forEach(function (p) { p.q = 0; }); });
     refresh();
+    if (had) keepFocus(resetBtn, [undoBtn, goBtn]);
     say('Every page is back as it was saved. Undo brings your turns back.', true);
   }
   function dropFile(f) {
@@ -1409,7 +1460,9 @@ faq:
     s.from = posOf(s.start.f, s.start.i);
     s.value = !s.start.f.pages[s.start.i].sel;
     s.last = -1;
-    root.classList.add('is-sweeping');
+    // The sweep's cursor changes the style of every page, which takes a moment in a long file: a
+    // mouse gets it once the drag reaches another page, so a plain click stays quick.
+    if (s.touch) root.classList.add('is-sweeping');
     applySweep(s.start);
     if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScroll);
   }
@@ -1418,6 +1471,7 @@ faq:
     if (!s || !t) return;
     var k = s.all.findIndex(function (x) { return x.f === t.f && x.i === t.i; });
     if (k < 0 || k === s.last) return;
+    if (s.last >= 0) root.classList.add('is-sweeping');
     s.last = k;
     var lo = Math.min(s.from, k), hi = Math.max(s.from, k);
     s.all.forEach(function (x, j) { setSel(x, j >= lo && j <= hi ? s.value : s.base[j]); });
@@ -1591,7 +1645,7 @@ faq:
     outList.hidden = stale;
     $('#rot-zip-row').hidden = stale || !results.zip;
     var n = results.outputs.length;
-    $('#rot-results-note').textContent = stale ? 'You have turned pages since these were saved. Press Save again for files that match.' :
+    $('#rot-results-note').textContent = stale ? 'These copies no longer match the pages above. Press Save again for copies that match.' :
       results.zip ? plural(n, 'PDF', 'PDFs') + ', saved together as ' + results.zipName + '.' : n ? 'Saved as ' + results.outputs[0].name + '.' : '';
   }
   function setBusy(on) {
@@ -1652,7 +1706,7 @@ faq:
         pct.textContent = plan.ready.length > 1 ? 'Saving ' + f.name + ' (' + (done + 1) + ' of ' + plan.ready.length + ')…' : 'Saving ' + f.name + '…';
         return f.infoDone.then(function () {
           var turns = turnsOf(f);
-          return ask({ type: 'save', file: f.file, password: f.owner || f.password, turns: turns, pages: f.n });
+          return ask({ type: 'save', file: f.file, password: f.owner || f.password, turns: turns, pages: f.n }, job);
         }).then(function (m) {
           outputs.push({ f: f, name: window.TTZip.uniqueName(baseName(f.name) + '-rotated.pdf', used), blob: m.blob, mode: m.mode, pages: r.n });
         }, function (err) {
@@ -1693,12 +1747,15 @@ faq:
       setError(err && err.message ? err.message : 'The rotated PDFs could not be saved. The device may have run out of memory; try fewer files at a time.');
     });
   }
-  // Stopping the worker is the only way to stop pdf-lib mid-file; a new one starts when needed.
+  // Stopping the worker is the only way to stop pdf-lib mid-file; a new one starts when needed. It is
+  // stopped only while it works for this save: a check of a file that is running goes on, and the
+  // save's requests still waiting never start.
   function cancel() {
     if (!busy || !current) return;
-    current.cancelled = true;
+    var job = current;
+    job.cancelled = true;
     current = null;
-    stopWorker({ code: 'CANCEL' });
+    if (running === job) stopWorker({ code: 'CANCEL' });
     setBusy(false);
     setError('');
     say('Cancelled. Nothing was saved.', true);
@@ -1752,7 +1809,13 @@ faq:
   $('#rot-choose').addEventListener('click', function () { fileInput.click(); });
   $('#rot-add').addEventListener('click', function () { fileInput.click(); });
   fileInput.addEventListener('change', function () { var l = fileInput.files; chooseFiles(l).then(function () { fileInput.value = ''; }); });
-  $('#rot-sample').addEventListener('click', function () { chooseFiles([samplePdf()]); });
+  // A double click adds the sample once.
+  var sampleBusy = false;
+  $('#rot-sample').addEventListener('click', function () {
+    if (sampleBusy) return;
+    sampleBusy = true;
+    chooseFiles([samplePdf()]).finally(function () { sampleBusy = false; });
+  });
   $('#rot-clear').addEventListener('click', function () { removeFiles(files.slice()); });
   $$('[data-pick]').forEach(function (b) { b.addEventListener('click', function () { pick(b.dataset.pick); }); });
   $$('[data-sel]').forEach(function (b) { b.addEventListener('click', function () { turnSelected(Number(b.dataset.sel)); }); });

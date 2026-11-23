@@ -60,6 +60,65 @@ function bigPdf(size) {
   return rawPdf(objs, ' /Info 8 0 R');
 }
 
+// A PDF from objects [{ n, g, body }] with a classic table; eol false ends it at %%EOF with no end of
+// line, as some writers do.
+function pdfFrom(list, trailer = '', eol = true) {
+  const parts = [Buffer.from('%PDF-1.7\n%\xe2\xe3\xcf\xd3\n', 'latin1')], at = {};
+  let len = parts[0].length;
+  for (const o of list) {
+    const b = Buffer.concat([Buffer.from(`${o.n} ${o.g || 0} obj\n`), Buffer.from(o.body, 'latin1'), Buffer.from('\nendobj\n')]);
+    at[o.n] = String(len).padStart(10, '0') + ' ' + String(o.g || 0).padStart(5, '0') + ' n \n';
+    parts.push(b);
+    len += b.length;
+  }
+  const size = Math.max(...list.map(o => o.n)) + 1;
+  let x = 'xref\n0 ' + size + '\n0000000000 65535 f \n';
+  for (let n = 1; n < size; n++) x += at[n] || '0000000000 00001 f \n';
+  x += `trailer\n<< /Size ${size} /Root 1 0 R${trailer} >>\nstartxref\n${len}\n%%EOF` + (eol ? '\n' : '');
+  parts.push(Buffer.from(x, 'latin1'));
+  return Buffer.concat(parts);
+}
+// A page (object n) with the marker text and its content stream (object n + 1).
+const markPage = (n, text) => {
+  const c = `BT /F1 30 Tf 30 300 Td (${text}) Tj ET`;
+  return [{ n, body: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 3 0 R >> >> /Contents ${n + 1} 0 R >>` },
+    { n: n + 1, body: `<< /Length ${c.length} >>\nstream\n${c}\nendstream` }];
+};
+const HEAD = [{ n: 1, body: '<< /Type /Catalog /Pages 2 0 R >>' }, { n: 2, body: '<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>' },
+  { n: 3, body: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>' }];
+// Page 1 is object 4 of generation 1 (a number used again, as some editors leave it), and the file
+// ends at %%EOF with no end of line.
+function genPdf() {
+  const [p1, c1] = markPage(4, 'GEN-MARK-1');
+  p1.g = 1;
+  return pdfFrom([HEAD[0], { n: 2, body: '<< /Type /Pages /Kids [4 1 R 6 0 R] /Count 2 >>' }, HEAD[2], p1, c1, ...markPage(6, 'GEN-MARK-2')], '', false);
+}
+// Two pages in a file that ends with a cross-reference stream (W [1 4 2], not compressed), padded
+// past 64 KB, so that the offsets in an update take three bytes.
+function xrefStreamPdf(pad) {
+  const objs = [...HEAD, ...markPage(4, 'XSTM-MARK-1'), ...markPage(6, 'XSTM-MARK-2'), { n: 8, body: `<< /Length ${pad} >>\nstream\n${'%'.repeat(pad)}\nendstream` }];
+  let s = '%PDF-1.7\n%\xe2\xe3\xcf\xd3\n';
+  const rows = [], row = (t, a, b) => { const r = Buffer.alloc(7); r[0] = t; r.writeUInt32BE(a, 1); r.writeUInt16BE(b, 5); return r; };
+  rows.push(row(0, 0, 65535));
+  for (const o of objs) { rows.push(row(1, s.length, 0)); s += `${o.n} 0 obj\n${o.body}\nendobj\n`; }
+  rows.push(row(1, s.length, 0));
+  const xoff = s.length, data = Buffer.concat(rows), id = '<00112233445566778899AABBCCDDEEFF>';
+  s += `9 0 obj\n<< /Type /XRef /Size 10 /W [1 4 2] /Root 1 0 R /ID [${id} ${id}] /Length ${data.length} >>\nstream\n`;
+  return Buffer.concat([Buffer.from(s, 'latin1'), data, Buffer.from(`\nendstream\nendobj\nstartxref\n${xoff}\n%%EOF\n`, 'latin1')]);
+}
+// Two pages with Adobe usage rights (Reader extensions, as on many tax forms): a signature
+// dictionary whose reference has /TransformMethod /UR3, kept in the catalogue's /Perms. With
+// approval, also a signature field signed by a person. Neither signature is a real one: the page
+// only tells which kind each is.
+function rightsPdf(approval) {
+  const sig = more => `<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 10 20 10] /Contents <${'00'.repeat(32)}>${more} >>`;
+  const list = [{ n: 1, body: `<< /Type /Catalog /Pages 2 0 R /Perms << /UR3 8 0 R >>${approval ? ' /AcroForm << /Fields [9 0 R] /SigFlags 3 >>' : ''} >>` }, HEAD[1], HEAD[2],
+    ...markPage(4, 'RIGHTS-MARK-1'), ...markPage(6, 'RIGHTS-MARK-2'),
+    { n: 8, body: sig(' /Reference [<< /Type /SigRef /TransformMethod /UR3 /TransformParams << /Type /TransformParams /V /2.2 /Document [/FullSave] /Form [/FillIn] >> >>]') }];
+  if (approval) list.push({ n: 9, body: '<< /FT /Sig /T (Approval) /V 10 0 R /Type /Annot /Subtype /Widget /Rect [0 0 0 0] /P 4 0 R /F 132 >>' }, { n: 10, body: sig('') });
+  return pdfFrom(list);
+}
+
 function unzip(buf) {
   let eocd = buf.length - 22;
   while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
@@ -91,6 +150,42 @@ const entry = (dict, key) => {
   return m ? m[1].replace(/\s+/g, ' ').replace(/\[\s*/g, '[').replace(/\s*\]/g, ']').replace(/>\s*</g, '> <') : null;
 };
 
+// The objects in use that the last cross-reference section of buf lists: [number, generation, offset].
+// A table entry must be exactly 20 bytes long (ISO 32000-1 7.5.4).
+function sectionEntries(buf, sec, assert, label) {
+  const s = buf.toString('latin1'), out = [];
+  if (sec.kind === 'table') {
+    let p = sec.off + 4;
+    while (/\s/.test(s[p])) p++;
+    for (let h; (h = /^(\d+) (\d+)[ \t]*(?:\r\n|\n|\r)/.exec(s.slice(p, p + 40)));) {
+      p += h[0].length;
+      for (let i = 0; i < Number(h[2]); i++, p += 20) {
+        const e = s.slice(p, p + 20);
+        assert.match(e, /^\d{10} \d{5} [nf](?: \r| \n|\r\n)$/, `${label}: a table entry is exactly 20 bytes (${JSON.stringify(e)})`);
+        if (e[17] === 'n') out.push([Number(h[1]) + i, Number(e.slice(11, 16)), Number(e.slice(0, 10))]);
+      }
+    }
+    return out;
+  }
+  const d = sec.dict, W = /\/W\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s*\]/.exec(d).slice(1).map(Number);
+  const index = /\/Index\s*\[([^\]]*)\]/.exec(d), runs = index ? index[1].trim().split(/\s+/).map(Number) : [0, Number(entry(d, 'Size'))];
+  assert.ok(!/\/DecodeParms/.test(d), `${label}: the new cross-reference stream has no predictor (not read here)`);
+  let at = s.indexOf('stream', sec.off + d.length) + 6;
+  if (s[at] === '\r') at++;
+  if (s[at] === '\n') at++;
+  let data = buf.subarray(at, at + Number(entry(d, 'Length')));
+  if (/\/Filter/.test(d)) data = zlib.inflateSync(data);
+  let pos = 0;
+  const field = (w, dflt) => { if (!w) return dflt; let v = 0; for (let j = 0; j < w; j++) v = v * 256 + data[pos++]; return v; };
+  for (let r = 0; r < runs.length; r += 2) {
+    for (let i = 0; i < runs[r + 1]; i++) {
+      const t = field(W[0], 1), f2 = field(W[1], 0), f3 = field(W[2], 0);
+      if (t === 1) out.push([runs[r] + i, f3, f2]);
+    }
+  }
+  return out;
+}
+
 module.exports = async ({ page, open, assert, fixtures, base }) => {
   const fx = n => path.join(fixtures, n);
   const expected = JSON.parse(fs.readFileSync(fx('expected.json'), 'utf8'));
@@ -106,6 +201,14 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await open();
     const text = sel => page.textContent(sel);
     const status = () => text('#rot-status');
+    // What the status line says, in order, recorded from when listen() runs; said() empties the record.
+    const listen = () => page.evaluate(() => {
+      window.__said = [];
+      const s = document.getElementById('rot-status');
+      new MutationObserver(() => { if (s.textContent) window.__said.push(s.textContent); }).observe(s, { childList: true, characterData: true, subtree: true });
+    });
+    const said = () => page.evaluate(() => window.__said.splice(0));
+    await listen();
     const states = () => page.$$eval('.rot-state', l => l.map(e => e.textContent));
     const checked = () => page.$$eval('.rot-check', l => l.map(e => e.checked));
     const turns = () => page.$$eval('.rot-thumb img', l => l.map(e => e.style.transform));
@@ -165,6 +268,13 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
       assert.equal(Number(entry(b.dict, 'Prev')), a.off, label + ': /Prev points at the original last section');
       assert.ok(Number(entry(b.dict, 'Size')) >= Number(entry(a.dict, 'Size')), label + ': /Size is not smaller than the original');
       for (const k of ['Root', 'Info', 'ID', 'Encrypt']) assert.equal(entry(b.dict, k), entry(a.dict, k), label + ': /' + k + ' is repeated');
+      // Byte by byte: each entry of the new section points exactly at "n g obj" of its own generation
+      // in the update, /Size covers every number, and each /Rotate written is 0, 90, 180 or 270.
+      const news = sectionEntries(out, b, assert, label), s = out.toString('latin1');
+      assert.ok(news.length > 0, label + ': the update lists its objects');
+      for (const [n, g, off] of news) assert.ok(off >= orig.length && s.startsWith(`${n} ${g} obj`, off), `${label}: "${n} ${g} obj" is at ${off}`);
+      assert.ok(news.every(e => e[0] < Number(entry(b.dict, 'Size'))), label + ': /Size covers the new objects');
+      for (const m of s.slice(orig.length).matchAll(/\/Rotate\s+([-+]?[\d.]+)/g)) assert.ok(['0', '90', '180', '270'].includes(m[1]), `${label}: /Rotate ${m[1]} is written as 0, 90, 180 or 270`);
     };
     // libqpdf, pikepdf and poppler (when installed): no problem, the rotations expected, and what the
     // original holds kept.
@@ -232,6 +342,7 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     assert.equal(await page.isVisible('#rot-work'), false);
 
     // ---------- mixed.pdf: what the page reads ----------
+    await said();
     await addFiles(fx('mixed.pdf'), 6);
     assert.equal(await text('#rot-error'), '');
     assert.equal(await text(`${sec(1)} .rot-fmeta`), '6 pages · ' + (fs.statSync(fx('mixed.pdf')).size / 1024).toFixed(1) + '\u00a0KB');
@@ -240,6 +351,8 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     assert.equal(await text('#rot-flags-text'), 'Text runs sideways or upside down on 5 pages: pages 2–6.');
     assert.deepEqual(await states(), ['', 'Upside-down text', 'Sideways text', 'Sideways text', 'Sideways text', 'Sideways text']);
     assert.equal(await status(), 'Text runs sideways or upside down on 5 pages of mixed.pdf.');
+    // The file is announced once, when it is open (no "Opening…" just before), then what the text check found.
+    assert.deepEqual(await said(), ['mixed.pdf is open: 6 pages.', 'Text runs sideways or upside down on 5 pages of mixed.pdf.']);
     assert.equal(await text('#rot-plan'), 'No pages turned yet. Use the buttons under a page, or select pages and use Rotate selected.');
     assert.equal(await page.getAttribute('#rot-plan', 'aria-live'), null, 'the plan is redrawn on every change, so it is not a live region');
     assert.equal(await page.getAttribute('#rot-status', 'role'), 'status');
@@ -350,6 +463,11 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     if (v1) assert.deepEqual(v1.own, [false, true, true, true, true, true]);
     assert.match(await text('#rot-results'), /Saved as mixed-rotated\.pdf\./);
     assert.match(await text('#rot-out'), /5 pages turned · [\d.]+\u00a0KB · [\d.]+\u00a0KB added to the original/);
+    // A file added with nothing turned leaves the copy offered: it still matches the pages.
+    await addFiles(fx('hybrid.pdf'), 8);
+    assert.equal(await text('#rot-results-note'), 'Saved as mixed-rotated.pdf.');
+    assert.equal(await page.isVisible('#rot-out button'), true);
+    await page.click(`${sec(2)} [data-remove]`);
     // A double click on Save saves once, and one on Download downloads once. Downloads arrive in order,
     // so after a later, single download any second one would have been counted.
     let before = downloads;
@@ -367,7 +485,7 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     assert.equal(downloads - before, 3, 'a double click on Save or Download saves once');
     // After another change the old copy is no longer offered.
     await page.click(btn(1, 1));
-    assert.match(await text('#rot-results-note'), /You have turned pages since these were saved/);
+    assert.match(await text('#rot-results-note'), /^These copies no longer match the pages above\./);
     assert.equal(await page.isVisible('#rot-out button'), false);
 
     // ---------- the keyboard ----------
@@ -459,6 +577,24 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     assert.deepEqual((await readBack((() => { const f = path.join(tmp, 'twice.pdf'); fs.writeFileSync(f, twice[1].data); return f; })())).pages.map(p => p.rotate), [0, 270]);
     await clearAll();
 
+    // A page object of generation 1 in a file that ends with no end of line, and a file over 64 KB
+    // that ends with a cross-reference stream, so that the update's offsets take three bytes.
+    const genFile = path.join(tmp, 'gen.pdf'), xstmFile = path.join(tmp, 'xstm.pdf');
+    fs.writeFileSync(genFile, genPdf());
+    fs.writeFileSync(xstmFile, xrefStreamPdf(80000));
+    await addFiles([genFile, xstmFile], 4);
+    await page.click('[data-all="1"]');
+    const gx = unzip((await save()).buf);
+    for (const [k, src, mark] of [[0, genFile, 'GEN'], [1, xstmFile, 'XSTM']]) {
+      const out = path.join(tmp, 'gx-' + gx[k].name);
+      fs.writeFileSync(out, gx[k].data);
+      checkUpdate(fs.readFileSync(src), gx[k].data, gx[k].name);
+      assert.deepEqual((await readBack(out)).pages.map(p => [p.rotate, p.mark]), [[90, mark + '-MARK-1'], [90, mark + '-MARK-2']], gx[k].name + ': PDF.js');
+      checkCopy(src, out, '', [90, 90], gx[k].name);
+    }
+    assert.equal(lastSection(gx[1].data).kind, 'stream');
+    await clearAll();
+
     // ---------- passwords ----------
     await page.setInputFiles('#rot-file', fx('enc-aes-256.pdf'));
     await page.waitForSelector('#rot-pw-1, .rot-unlock:not([hidden]) input');
@@ -468,6 +604,7 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
       return { text: box.textContent, invalid: f.getAttribute('aria-invalid'), linked: (f.getAttribute('aria-describedby') || '').split(/\s+/).includes(id + '-error'), cls: box.className, focused: document.activeElement === f };
     }, pwId);
     assert.equal(await text(`label[for="${pwId}"]`), 'Password for enc-aes-256.pdf');
+    assert.equal(await page.getAttribute('#' + pwId + '-error', 'aria-live'), 'polite', 'a wrong password is announced');
     assert.equal(await page.evaluate(() => document.activeElement.type), 'password');
     await page.click('[data-unlock]');
     assert.deepEqual(await pwField(), { text: 'Type the password first.', invalid: 'true', linked: true, cls: 'msg error', focused: true });
@@ -480,9 +617,11 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await page.$eval('#' + pwId, el => { el.value = 'x'.repeat(1 << 20); el.dispatchEvent(new Event('input', { bubbles: true })); });
     assert.equal(await page.$eval('#' + pwId, el => el.value.length), 1024);
     await page.fill('#' + pwId, 'open sesame');
-    await page.click('[data-unlock]');
+    // A double click on Open opens the file once.
+    await page.dblclick('[data-unlock]');
     await page.waitForFunction(() => document.querySelectorAll('.rot-page').length === 6, null, { timeout: 30000 });
     await ready();
+    assert.equal(await page.$$eval('.rot-num', l => l.map(e => e.textContent).join()), '1,2,3,4,5,6', 'each page is shown once');
     await page.waitForFunction(() => /Encrypted/.test(document.querySelector('.rot-notes').textContent));
     assert.equal(await text('.rot-notes'), 'Encrypted (AES 256-bit). The rotated copy keeps the same encryption and passwords.');
     await page.click(btn(3, 3));
@@ -586,6 +725,19 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
       if (v) assert.deepEqual(v.sig, [true], n + ': the signed bytes are unchanged');
     }
     await clearAll();
+    // Adobe's usage rights (Reader extensions, as on many tax forms) are a signature of Adobe's, not
+    // of a person: named as such, and a person's signature next to them is still named.
+    const rightsFile = path.join(tmp, 'rights.pdf'), bothFile = path.join(tmp, 'rights-signed.pdf');
+    fs.writeFileSync(rightsFile, rightsPdf(false));
+    fs.writeFileSync(bothFile, rightsPdf(true));
+    await addFiles([rightsFile, bothFile], 4);
+    await page.waitForFunction(() => document.querySelectorAll('.rot-notes li').length === 3);
+    const RIGHTS = 'Reader-extended: an Adobe usage-rights signature, not a person’s, turns on extended features in Adobe Acrobat Reader. Rotating pages ends them, and Acrobat Reader then says the document has changed since it was created.';
+    assert.deepEqual(await page.$$eval(`${sec(1)} .rot-notes li`, l => l.map(e => e.textContent)), [RIGHTS]);
+    assert.deepEqual(await page.$$eval(`${sec(2)} .rot-notes li`, l => l.map(e => e.textContent.split('.')[0])), ['Digitally signed', 'Reader-extended: an Adobe usage-rights signature, not a person’s, turns on extended features in Adobe Acrobat Reader']);
+    await page.click(btn(1, 1, 1));
+    checkUpdate(fs.readFileSync(rightsFile), (await save()).buf, 'rights.pdf');
+    await clearAll();
 
     // ---------- damaged files are written out in full, which repairs them ----------
     await addFiles(['cut.pdf', 'garbage.pdf', 'badxref.pdf'].map(fx), 18);
@@ -624,6 +776,12 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await cdp.send('Performance.enable');
     const threadMs = async () => (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'ThreadTime').value * 1000;
     const cpuMs = async action => { const t0 = await threadMs(); await action(); return (await threadMs()) - t0; };
+    const styleMs = async action => {
+      const ms = async () => (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'RecalcStyleDuration').value * 1000;
+      const t0 = await ms();
+      await action();
+      return (await ms()) - t0;
+    };
     const many = path.join(tmp, 'thousand.pdf');
     fs.writeFileSync(many, manyPages(1000));
     await page.setInputFiles('#rot-file', many);
@@ -635,6 +793,10 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await page.click(`${sec(1)} [data-remove]`);
     await page.click('#rot-undo-gone');
     await ready();
+    // A click on a page selects it without restyling the whole list (the drag cursor waits for a drag).
+    const clickStyle = await styleMs(() => page.click('.rot-page:nth-child(2) .rot-thumb'));
+    assert.ok(clickStyle < 40, `selecting one page of 1,000 took ${clickStyle.toFixed(0)} ms of style work`);
+    assert.equal(await page.$eval('.rot-page:nth-child(2) .rot-check', e => e.checked), true);
     const allCpu = await cpuMs(async () => {
       await page.click('[data-all="1"]');
       await page.waitForFunction(() => document.getElementById('rot-status').textContent === 'All 1,000 pages turned right.');
@@ -677,9 +839,11 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     fs.rmSync(huge);
 
     // ---------- the sample, and a file named like an object's own keys ----------
-    await page.click('#rot-sample');
+    // A double click adds it once.
+    await page.dblclick('#rot-sample');
     await page.waitForFunction(() => document.querySelectorAll('.rot-page').length === 4);
     await ready();
+    assert.equal(await page.$$eval('.rot-file', l => l.length), 1);
     assert.equal(await text('#rot-flags-text'), 'Text runs sideways or upside down on 2 pages: pages 2–3.');
     await page.click('#rot-upright');
     const sample = await save();
@@ -695,6 +859,73 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     assert.ok((await checked()).every(c => !c), 'pageshow draws the selection from the page\'s state');
     await clearAll();
+
+    // ---------- a check of a file that is still running when Save is pressed ----------
+    // The writer is held back until released, so the check of a newly added file waits for the worker.
+    // Each part opens the page again, for a worker that has not started yet.
+    let gate = null, release = null;
+    const hold = async route => { await gate; try { await route.continue(); } catch (e) { /* the worker was stopped meanwhile */ } };
+    await page.addInitScript(() => {
+      window.__posted = [];
+      const post = Worker.prototype.postMessage;
+      Worker.prototype.postMessage = function (m) { if (m && /^(init|inspect|save)$/.test(m.type)) window.__posted.push(m.type); return post.apply(this, arguments); };
+    });
+    await page.route(WRITER, hold);
+    // Cancel stops only the save: the check goes on and asks for the permissions password, and the save
+    // that was waiting for it is never sent to the writer.
+    gate = new Promise(r => { release = r; });
+    await open();
+    await page.setInputFiles('#rot-file', fx('no-assembly.pdf'));
+    await page.waitForFunction(() => document.querySelectorAll('.rot-page').length === 3);
+    await page.click(btn(1, 1));
+    await page.click('#rot-go');
+    await page.click('#rot-cancel');
+    assert.equal(await status(), 'Cancelled. Nothing was saved.');
+    release();
+    await page.waitForSelector('.rot-unlock:not([hidden])', { timeout: 20000 });
+    assert.match(await text('.rot-notes'), /^Encrypted \(AES 256-bit\)\./);
+    const ownerIn = await page.$eval('.rot-unlock input', e => e.id);
+    await page.fill('#' + ownerIn, 'not it');
+    await page.press('#' + ownerIn, 'Enter');
+    await page.waitForFunction(id => document.getElementById(id + '-error').textContent, ownerIn);
+    assert.deepEqual(await page.evaluate(() => window.__posted), ['init', 'inspect', 'inspect'], 'the cancelled save never reached the writer');
+    // Saved before its check has ended, a file whose permissions forbid assembling is refused by the
+    // writer itself: nothing is saved, and the permissions password is asked for.
+    gate = new Promise(r => { release = r; });
+    await open();
+    await page.setInputFiles('#rot-file', fx('no-assembly.pdf'));
+    await page.waitForFunction(() => document.querySelectorAll('.rot-page').length === 3);
+    await page.click(btn(1, 1));
+    const held = downloads;
+    await page.click('#rot-go');
+    release();
+    await page.waitForFunction(() => document.getElementById('rot-cancel').hidden && document.getElementById('rot-error').textContent, null, { timeout: 30000 });
+    assert.equal(await text('#rot-error'), 'no-assembly.pdf: its permissions do not allow its pages to be rotated; type its permissions password above its pages.');
+    assert.equal(await status(), 'Nothing was saved.');
+    assert.equal(downloads, held);
+    assert.equal(await page.isVisible('.rot-unlock'), true);
+    await page.unroute(WRITER, hold);
+
+    // ---------- keyboard focus stays on the tool ----------
+    // A button that its own action hides or turns off hands focus on: Turn them upright to Save,
+    // Reset to Undo, and the last Undo to the page that is the list's tab stop.
+    await open();
+    await page.click('#rot-sample');
+    await page.waitForFunction(() => document.querySelectorAll('.rot-page').length === 4);
+    await ready();
+    const focused = () => page.evaluate(() => document.activeElement.id || document.activeElement.getAttribute('aria-label'));
+    await page.focus('#rot-upright');
+    await page.keyboard.press('Enter');
+    assert.equal(await focused(), 'rot-go');
+    await page.focus('#rot-reset');
+    await page.keyboard.press('Enter');
+    assert.equal(await focused(), 'rot-undo');
+    await page.keyboard.press('Enter');
+    assert.equal(await focused(), 'rot-undo');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.isDisabled('#rot-undo'), true);
+    assert.equal(await focused(), 'Page 1');
+    await page.evaluate(() => { const i = document.createElement('input'); i.type = 'file'; i.id = 't-read'; i.hidden = true; document.body.appendChild(i); });
 
     // ---------- a phone with a touch screen ----------
     const { devices } = require('playwright');
@@ -729,6 +960,13 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await tcdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await phone.waitForFunction(y => scrollY !== y, y0);
     assert.deepEqual(await phone.$$eval('.rot-check', l => l.map(e => e.checked)), [false, true, true, true, false, false], 'a swipe selects nothing');
+    // A tap while the page still glides after the swipe only stops it, as on a real phone: the next
+    // tap waits until the page has been still for ten frames.
+    await phone.evaluate(() => new Promise(done => {
+      let y = scrollY, still = 0;
+      const frame = () => { if (scrollY === y) still++; else { still = 0; y = scrollY; } if (still >= 10) done(); else requestAnimationFrame(frame); };
+      requestAnimationFrame(frame);
+    }));
     await phone.tap('.rot-page:nth-child(6) .rot-tb[data-q="1"]');
     await phone.tap('[data-sel="2"]');
     const [pdl] = await Promise.all([phone.waitForEvent('download'), phone.tap('#rot-go')]);
@@ -741,6 +979,12 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     await phone.setInputFiles('#rot-file', fx('enc-aes-128.pdf'));
     await phone.waitForSelector('.rot-unlock:not([hidden]) input');
     assert.ok(await phone.$eval('.rot-unlock:not([hidden]) input', e => parseFloat(getComputedStyle(e).fontSize) >= 16));
+    // On a touch screen no page button is under 44 by 44 px: from 389 px down 180° takes a row of its
+    // own, and on wider screens, a tablet or a phone on its side, the pages are laid out wide enough.
+    for (const width of [320, 640, 800, 960]) {
+      await phone.setViewportSize({ width, height: 640 });
+      assert.deepEqual(await phone.$$eval('.rot-tb', l => l.filter(b => b.offsetParent).map(b => b.getBoundingClientRect()).filter(r => r.width < 44 || r.height < 44).map(r => Math.round(r.width) + 'x' + Math.round(r.height))), [], `every page button is at least 44 by 44 px at ${width} px`);
+    }
     assert.deepEqual(outside, [], 'no request to another host on the phone');
     assert.deepEqual(phoneErrors, []);
     await phoneCtx.close();
