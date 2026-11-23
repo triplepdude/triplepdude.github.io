@@ -376,22 +376,41 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // ---------- Lines too thin for flat pixels, and a small logo on white ----------
   const near3 = (fill, rgb, tol) => near(rgbOf(fill), rgb, tol);
+  // Pixels of one colour (to within 3 a channel) outside a box (x0, y0, x1, y1 in the picture's
+  // pixels), with the SVG drawn k times the picture's size without smoothing: only its own colours show.
+  const stray = (text, w, h, k, rgb, box) => page.evaluate(async ([text, w, h, k, rgb, box]) => {
+    const img = new Image();
+    img.src = URL.createObjectURL(new Blob([text.replace('<svg ', '<svg shape-rendering="crispEdges" ')], { type: 'image/svg+xml' }));
+    await img.decode();
+    const c = Object.assign(document.createElement('canvas'), { width: w * k, height: h * k }), g = c.getContext('2d');
+    g.drawImage(img, 0, 0, w * k, h * k);
+    const d = g.getImageData(0, 0, w * k, h * k).data;
+    let n = 0;
+    for (let y = 0; y < h * k; y++) for (let x = 0; x < w * k; x++) {
+      if (x >= k * box[0] && x < k * box[2] && y >= k * box[1] && y < k * box[3]) continue;
+      const o = 4 * (y * w * k + x);
+      if (Math.abs(d[o] - rgb[0]) <= 3 && Math.abs(d[o + 1] - rgb[1]) <= 3 && Math.abs(d[o + 2] - rgb[2]) <= 3) n++;
+    }
+    return n;
+  }, [text, w, h, k, rgb, box]);
   // A signature traced at its own size (dropped on the drop area): no pixel of its lines is flat, yet
-  // they are drawn, each in its own colour.
+  // they are drawn, each in its own colour, and their soft edges do not take the colour of the pale
+  // blue block, though it is nearer to them than navy is.
   await handOver('drop', 'signature.png');
   await page.waitForFunction(() => document.querySelector('#p2s-drop-title').textContent === 'signature.png');
   svg = await downloadSvg();
   assert.equal(await page.textContent('#p2s-note'), '', 'traced at its own size');
-  assert.match(await info(), /^3 colours, \d shapes, /, 'white, the navy scribble and the red line');
+  assert.match(await info(), /^4 colours, \d+ shapes, /, 'white, the pale blue block, the navy scribble and the red line');
   let fl = (await structure(svg.text)).groups.map(g => g.fill);
-  assert.ok(fl.includes('#ffffff') && fl.some(f => near3(f, [20, 30, 90], 10)) && fl.some(f => near3(f, [200, 30, 40], 4)), `the lines' own colours: ${fl}`);
+  const pale = fl.find(f => near3(f, [110, 140, 215], 3));
+  assert.ok(fl.includes('#ffffff') && pale && fl.some(f => near3(f, [20, 30, 90], 10)) && fl.some(f => near3(f, [200, 30, 40], 4)), `the lines' own colours: ${fl}`);
   const inkMatch = await page.evaluate(async ([text, data]) => {
     async function ink(src) {
       const img = new Image(); img.src = src; await img.decode();
       const c = Object.assign(document.createElement('canvas'), { width: 1200, height: 450 }), g = c.getContext('2d');
       g.drawImage(img, 0, 0, 1200, 450);
       const d = g.getImageData(0, 0, 1200, 450).data, m = new Uint8Array(540000);
-      for (let i = 0; i < 540000; i++) m[i] = 765 - d[4 * i] - d[4 * i + 1] - d[4 * i + 2] > 192 ? 1 : 0;
+      for (let i = 0; i < 540000; i++) m[i] = (i % 1200 < 1090 || i >= 90 * 1200) && 765 - d[4 * i] - d[4 * i + 1] - d[4 * i + 2] > 192 ? 1 : 0;
       return m;
     }
     const a = await ink(URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }))), b = await ink('data:image/png;base64,' + data);
@@ -400,6 +419,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     return { both, svgOnly, srcOnly };
   }, [svg.text, b64('signature.png')]);
   assert.ok(inkMatch.both > 0.65 * expected.signature_ink && inkMatch.svgOnly < 0.15 * expected.signature_ink, `the lines are where the picture has them: ${JSON.stringify(inkMatch)}`);
+  assert.equal(await stray(svg.text, 1200, 450, 1, rgbOf(pale), [1098, 18, 1182, 82]), 0, 'no pale blue along the lines');
   // A small logo on white, enlarged 4 times to be traced (pasted): its soft edges add no in-between
   // shades as colours, and leave no slivers of grey around the black shapes.
   await handOver('paste', 'badge.png');
@@ -413,23 +433,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   px = await pixels(svg.text, 240, 120, [[19, 60], [60, 60], [145, 57], [200, 40], [200, 83], [235, 110]]);
   assert.deepEqual(px.px.map(p => fl.findIndex(f => near(rgbOf(f), p.slice(0, 3), 3))), [[20, 20, 20], [255, 255, 255], [20, 20, 20], [128, 128, 128], [210, 40, 50], [255, 255, 255]].map(c => fl.findIndex(f => near3(f, c, 3))),
     'ring, hole, bar, grey block, red disc, ground');
-  // Drawn at 4 times the size without smoothing, so that only the SVG's own colours show.
-  const slivers = await page.evaluate(async text => {
-    const img = new Image();
-    img.src = URL.createObjectURL(new Blob([text.replace('<svg ', '<svg shape-rendering="crispEdges" ')], { type: 'image/svg+xml' }));
-    await img.decode();
-    const c = Object.assign(document.createElement('canvas'), { width: 960, height: 480 }), g = c.getContext('2d');
-    g.drawImage(img, 0, 0, 960, 480);
-    const d = g.getImageData(0, 0, 960, 480).data;
-    let n = 0;
-    for (let y = 0; y < 480; y++) for (let x = 0; x < 960; x++) {
-      const o = 4 * (y * 960 + x);
-      if (x >= 4 * 173 && x < 4 * 232 && y >= 4 * 18 && y < 4 * 62) continue;
-      if (Math.abs(d[o] - 128) + Math.abs(d[o + 1] - 128) + Math.abs(d[o + 2] - 128) <= 9) n++;
-    }
-    return n;
-  }, svg.text);
-  assert.equal(slivers, 0, 'no grey outside the grey block (drawn at 4 times the size)');
+  assert.equal(await stray(svg.text, 240, 120, 4, rgbOf(fl.find(f => near3(f, [128, 128, 128], 3))), [173, 18, 232, 62]), 0, 'no grey outside the grey block (drawn at 4 times the size)');
 
   // ---------- Thousands of shapes: a warning ----------
   await page.check('input[name="p2s-mode"][value="logo"]');

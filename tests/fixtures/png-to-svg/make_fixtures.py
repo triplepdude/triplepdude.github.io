@@ -16,14 +16,16 @@ photo.jpg     640 x 480 synthetic photo (sky gradient, hills, sun, noise).
 dots.png      400 x 400 white with 6,400 black 3 x 3 squares, 5 px apart.
 signature.png 1200 x 450 white (traced at its own size) with a 2 px navy scribble
               (20, 30, 90) and a 1.5 px red line (200, 30, 40) at y = 400, drawn at
-              4x and box-filtered: no pixel of either line is flat.
+              4x and box-filtered: no pixel of either line is flat. A pale blue block
+              (110, 140, 215; 1100..1179, 20..79) is nearer than navy to the
+              scribble's soft edges, which must not take its colour.
 badge.png     240 x 120 white (traced enlarged 4 times) with soft edges: a black ring
               (20, 20, 20; centre 60,60, radii 50 and 32), a black slanted bar, a grey
               rounded block (128; 175..230, 20..60) and a red disc (210, 40, 50;
               centre 200,83, radius 15).
 expected.json the Otsu threshold of lettering.png, its ink pixels at that threshold
               and at 60, the pixels of logo.png at least half opaque, and the pixels
-              of signature.png further than 64 a channel from white on average.
+              of signature.png's lines further than 64 a channel from white on average.
 """
 import json, os, random
 import numpy as np
@@ -115,8 +117,9 @@ for k in range(1201):
 d.line(pts, fill=(20, 30, 90), width=2 * S, joint='curve')
 d.line([(150 * S, 400 * S), (1050 * S, 400 * S)], fill=(200, 30, 40), width=6)
 sig = big.resize((1200, 450), Image.BOX)
-sig.save(out('signature.png'))
 sig_ink = int((np.abs(np.asarray(sig).astype(np.int64) - 255).sum(axis=2) > 3 * 64).sum())
+ImageDraw.Draw(sig).rectangle([1100, 20, 1179, 79], fill=(110, 140, 215))
+sig.save(out('signature.png'))
 
 # badge.png
 big = Image.new('RGB', (240 * S, 120 * S), (255, 255, 255))
