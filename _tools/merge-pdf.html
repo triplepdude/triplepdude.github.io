@@ -255,19 +255,18 @@ faq:
   }
 
   // ---------- pdf.js (thumbnails), loaded on first use ----------
-  var pdfjs = null, pdfjsWorker = null, pdfjsLoading = null;
+  // The loader shared by the PDF tools (_includes/pdfjs-loader.js) asks for the module under another
+  // address after a failed try, which the browser would otherwise refuse again until a reload.
+{% endraw %}{% include pdfjs-loader.js %}{% raw %}
+  var pdfjs = null, pdfjsWorker = null;
+  var importPdfjs = pdfjsLoader(PDFJS_URL, PDFJS_WORKER, function (lib) {
+    pdfjs = lib;
+    pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
+  });
   function loadPdfjs() {
-    if (pdfjsLoading) return pdfjsLoading;
-    pdfjsLoading = import(PDFJS_URL).then(function (lib) {
-      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
-      pdfjs = lib;
-      pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
-      return lib;
-    }, function (e) {
-      pdfjsLoading = null;
+    return importPdfjs().catch(function () {
       throw new Error('The PDF reader could not load. Check your connection and try again.');
     });
-    return pdfjsLoading;
   }
   function openPdf(f, password) {
     return loadPdfjs().then(function (lib) {
@@ -536,7 +535,7 @@ faq:
           try {
             var raw;
             try { raw = new Uint8Array(await f.file.arrayBuffer()); } catch (readErr) { var re = new Error('READ'); re.code = 'GONE'; throw re; }
-            var doc = (await unlocker.open(raw, f.password || '')).doc, pages = doc.getPages();
+            var doc = (await unlocker.open(raw, f.password || '', { objectsPerTick: Infinity })).doc, pages = doc.getPages();
             raw = null;
             try { resolveNamed(L, doc, pages); } catch (nameErr) { /* a damaged name table: links by name are left out */ }
             src[f.id] = { doc: doc, pages: pages, prepared: [] };

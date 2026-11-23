@@ -194,6 +194,16 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   let img = await look(out.buf, 'image/jpeg', [{ x: 0.05, y: 0.05 }]);
   near(img.samples[0], [255, 255, 255], 3, 'the corner of the locked page is white');
   assert.ok(img.grid.flat().some(c => c[0] < 200), 'the text of the locked page is drawn');
+  // Split PDF's pdfdoc-password.pdf (AES-128) keeps its open password "café€" in PDFDocEncoding, where
+  // € is 0xA0. PDF.js takes the low byte of each character (0xAC for €), so the page asks it again
+  // with the other bytes the shared unlocker tries; before, that password was "not right".
+  await page.setInputFiles('#p2j-file', path.join(fixtures, '..', 'split-pdf', 'pdfdoc-password.pdf'));
+  await page.waitForSelector('#p2j-unlock:not([hidden])');
+  await page.fill('#p2j-pw', 'café€');
+  await page.press('#p2j-pw', 'Enter');
+  await page.waitForFunction(() => / is open: /.test(document.getElementById('p2j-status').textContent) || /not right/.test(document.getElementById('p2j-pw-error').textContent));
+  assert.equal(await text('#p2j-pw-error'), '', 'café€ opens pdfdoc-password.pdf');
+  assert.equal(await text('#p2j-status'), 'pdfdoc-password.pdf is open: 2 pages, unlocked.');
   // An owner password only, forbidding printing and copying: opened and converted without asking.
   await page.setInputFiles('#p2j-file', fx('restricted.pdf'));
   await page.waitForFunction(() => /restricted\.pdf is open: 1 page, unlocked\./.test(document.getElementById('p2j-status').textContent));
@@ -385,6 +395,21 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.press('Space');
   assert.equal(await page.inputValue('#p2j-pages'), '2');
   assert.deepEqual(await page.$$eval('.p2j-page', l => l.map(e => e.classList.contains('is-selected'))), [false, true, false]);
+  // The pages are one tab stop, the page last used, and the arrow keys, Home and End move between them.
+  assert.deepEqual(await page.$$eval('.p2j-check', l => l.map(c => c.tabIndex)), [-1, 0, -1]);
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Page 3');
+  assert.deepEqual(await page.$$eval('.p2j-check', l => l.map(c => c.tabIndex)), [-1, -1, 0]);
+  await page.keyboard.press('Space');
+  assert.equal(await page.inputValue('#p2j-pages'), '2-3');
+  await page.keyboard.press('Space');
+  await page.keyboard.press('Home');
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Page 1');
+  await page.keyboard.press('End');
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Page 3');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Page 2');
+  assert.equal(await page.inputValue('#p2j-pages'), '2');
   // Convert from the keyboard, then download that page with its own button.
   await page.focus('#p2j-pages');
   const [dlKey] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
@@ -395,6 +420,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.ok(fs.readFileSync(await dlBtn.path()).equals(fs.readFileSync(await dlKey.path())));
   await page.click('[data-pick="all"]');
   assert.equal(await page.inputValue('#p2j-pages'), '1-3');
+  // The images of one conversion are kept in memory: past 1.5 GB on a computer (simulated by their
+  // reported size) the rest are left, with a message, and what was made is saved.
+  await page.evaluate(() => {
+    const d = Object.getOwnPropertyDescriptor(Blob.prototype, 'size');
+    Object.defineProperty(Blob.prototype, 'size', { configurable: true, get() { return this.type === 'image/jpeg' ? 1000 * 1048576 : d.get.call(this); } });
+    window.__restoreSize = () => Object.defineProperty(Blob.prototype, 'size', d);
+  });
+  await page.selectOption('#p2j-dpi', '96');
+  out = await save();
+  await page.evaluate(() => window.__restoreSize());
+  assert.equal(out.name, 'pages-jpg.zip');
+  assert.deepEqual(unzip(out.buf).map(e => e.name), ['pages-page-1.jpg', 'pages-page-2.jpg']);
+  assert.equal(await text('#p2j-error'), 'Page 3 was not converted: the images already made take 2000.0\u00a0MB, as much as this device can safely hold at once. Convert it separately.');
+  await page.selectOption('#p2j-dpi', '150');
 
   // ---- Cancel; then a page too large for the DPI ----
   // While converting, every control that changes the images is disabled. A Cancel pressed before the
@@ -741,6 +780,19 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await p2.waitForFunction(() => /^Saved/.test(document.getElementById('p2j-status').textContent));
   assert.equal(await lines(), 2, 'the message that ends the conversion takes two lines here');
   assert.deepEqual(await spots(), rest, 'nothing moves when the conversion ends');
+  // A touch screen device holds at most 300 MB of images from one conversion (sizes simulated).
+  await p2.evaluate(() => {
+    const d = Object.getOwnPropertyDescriptor(Blob.prototype, 'size');
+    Object.defineProperty(Blob.prototype, 'size', { configurable: true, get() { return this.type === 'image/jpeg' ? 200 * 1048576 : d.get.call(this); } });
+    window.__restoreSize = () => Object.defineProperty(Blob.prototype, 'size', d);
+  });
+  await p2.fill('#p2j-pages', '1-3');
+  await p2.selectOption('#p2j-dpi', '72');
+  const [dlCapped] = await Promise.all([p2.waitForEvent('download'), p2.tap('#p2j-go')]);
+  await p2.evaluate(() => window.__restoreSize());
+  assert.equal(dlCapped.suggestedFilename(), 'pages-jpg.zip');
+  assert.deepEqual(unzip(fs.readFileSync(await dlCapped.path())).map(e => e.name), ['pages-page-1.jpg', 'pages-page-2.jpg']);
+  assert.equal(await p2.textContent('#p2j-error'), 'Page 3 was not converted: the images already made take 400.0\u00a0MB, as much as this device can safely hold at once. Convert it separately.');
   // A touch screen device gets at most 36 million pixels a page: 6,000 a side, 30 DPI for the poster.
   await p2.setInputFiles('#p2j-file', fx('huge.pdf'));
   await p2.waitForFunction(() => document.querySelectorAll('.p2j-page').length === 1 && document.querySelector('.p2j-info').textContent);
@@ -773,4 +825,29 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const tile = await home.$eval('li[data-search^="pdf to jpg converter"]', li => li.dataset.search);
   assert.ok(!tile.includes('pdf to png'), tile);
   await home.close();
+
+  // ---- A new tab whose first request for the PDF reader fails, as a dropped connection leaves it ----
+  // The browser keeps a module that failed to load as failed for the page, so asking for the same
+  // address again cannot work: the next try must ask for it under another one.
+  {
+    const fresh = await page.context().browser().newContext({ acceptDownloads: true });
+    const p3 = await fresh.newPage();
+    const p3errors = [];
+    p3.on('pageerror', e => p3errors.push(e.message));
+    p3.on('console', m => { if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) p3errors.push(m.text()); });
+    let readerAsks = 0;
+    await p3.route(/\/pdfjs\/pdf\.min\.js(\?.*)?$/, route => (readerAsks++ ? route.fallback() : route.abort('connectionreset')));
+    await p3.goto(url);
+    await p3.setInputFiles('#p2j-file', fx('pages.pdf'));
+    await p3.waitForFunction(() => document.getElementById('p2j-error').textContent);
+    assert.equal(await p3.textContent('#p2j-error'), 'The PDF reader could not load. Check your connection and try again.');
+    assert.equal(await p3.textContent('#p2j-status'), '');
+    await p3.setInputFiles('#p2j-file', fx('pages.pdf'));
+    await p3.waitForFunction(() => /^pages\.pdf is open/.test(document.getElementById('p2j-status').textContent) || document.getElementById('p2j-error').textContent);
+    assert.equal(await p3.textContent('#p2j-error'), '', 'the reader loads on the next try');
+    assert.equal(await p3.textContent('#p2j-status'), 'pages.pdf is open: 3 pages.');
+    assert.equal(readerAsks, 2);
+    assert.deepEqual(p3errors, []);
+    await fresh.close();
+  }
 };

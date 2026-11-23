@@ -165,7 +165,8 @@ faq:
 {% endraw %}{% include pdf-unlocker.js %}{% raw %}
 
   function workerMain(scope) {
-    var unlocker = null;
+    // pdf-lib reads the whole file without pausing: nothing else runs in this worker.
+    var unlocker = null, FAST = { objectsPerTick: Infinity };
     scope.onmessage = async function (ev) {
       var msg = ev.data;
       if (msg.type === 'init') {
@@ -180,9 +181,9 @@ faq:
       try { bytes = new Uint8Array(await msg.file.arrayBuffer()); } catch (readErr) { scope.postMessage({ type: 'error', id: id, code: 'GONE' }); return; }
       try {
         if (msg.type === 'inspect') {
-          scope.postMessage({ type: 'done', id: id, info: await unlocker.inspect(bytes) });
+          scope.postMessage({ type: 'done', id: id, info: await unlocker.inspect(bytes, FAST) });
         } else {
-          var r = await unlocker.unlock(bytes, msg.password || '', !!msg.ownerOnly);
+          var r = await unlocker.unlock(bytes, msg.password || '', !!msg.ownerOnly, FAST);
           bytes = null;
           var blob = r.bytes ? new Blob([r.bytes], { type: 'application/pdf' }) : null;
           scope.postMessage({ type: 'done', id: id, result: { access: r.access, kept: r.kept || [], signed: !!r.signed, blob: blob } });
@@ -194,7 +195,10 @@ faq:
   }
 
   // ---------- the worker ----------
-  var worker = null, workerReady = null, reqId = 0, waiting = {};
+  // A worker stopped while it starts (Clear while pdf-lib downloads) fails its start too, through
+  // startFail; otherwise the request waiting for it, and every request queued behind that one,
+  // would wait for ever.
+  var worker = null, workerReady = null, startFail = null, reqId = 0, waiting = {};
   function getWorker() {
     if (workerReady) return workerReady;
     workerReady = new Promise(function (resolve, reject) {
@@ -202,9 +206,10 @@ faq:
       var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
       // Rejections carry a code like the worker's own errors, so a row can say what went wrong.
       try { worker = new Worker(url); } catch (e) { workerReady = null; reject({ code: 'START' }); return; }
+      startFail = reject;
       worker.onmessage = function (e) {
         var m = e.data;
-        if (m.type === 'ready') { URL.revokeObjectURL(url); resolve(worker); return; }
+        if (m.type === 'ready') { URL.revokeObjectURL(url); startFail = null; resolve(worker); return; }
         if (m.type === 'fatal') { stopWorker({ code: 'LOAD' }); reject({ code: 'LOAD' }); return; }
         var w = waiting[m.id];
         if (!w) return;
@@ -222,6 +227,7 @@ faq:
   }
   function stopWorker(reason) {
     Object.keys(waiting).forEach(function (k) { waiting[k].reject(reason); delete waiting[k]; });
+    if (startFail) { var fail = startFail; startFail = null; fail(reason); }
     workerReady = null;
     if (worker) { try { worker.terminate(); } catch (err) { /* already gone */ } }
     worker = null;

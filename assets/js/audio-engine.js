@@ -62,7 +62,7 @@
  *                and it is longer than limits.whole seconds (.limit).
  *   NOT_AAC      convert() with format 'copy': only AAC is copied to .m4a.
  *   TOO_BIG      convert(): the WAV would be over limits.wav bytes, or the
- *                MP3 over limits.mp3 (one not written into o.writable)
+ *                MP3 over limits.mp3 (either not written into o.writable)
  *                (.bytes, .limit, .format 'wav' or 'mp3').
  *   NO_ENCODER   convert(): the browser cannot write the format (MP3
  *                without WebAssembly SIMD, or the encoder did not load).
@@ -77,8 +77,9 @@
  *   TTAudio.simd      true when WebAssembly SIMD exists (the MP3 encoder needs it).
  *   TTAudio.canWriteMp3() -> true once the MP3 encoder is registered.
  *   TTAudio.PHONE     true on phones and tablets (smaller memory limits).
- *   TTAudio.limits    { wav: bytes of WAV built in memory (2 GB, 300 MB on a
- *     phone), mp3: bytes of MP3 built in memory when no o.writable takes it
+ *   TTAudio.limits    { wav: bytes of WAV built in memory when no o.writable
+ *     takes it (2 GB, 300 MB on a phone), mp3: bytes of MP3 built in memory
+ *     when no o.writable takes it
  *     (as wav), zip: bytes put in one ZIP (as wav), whole: seconds decoded
  *     at once without a streaming decoder (3600, 1200 on a phone), alac:
  *     bytes of Apple Lossless files the decoder holds at once, and so the
@@ -201,7 +202,9 @@
  *     kHz) is kept and the bitrate lowered to what MPEG-2 (16 to 24 kHz: 160
  *     kbps) or MPEG-2.5 (8 to 12 kHz: 64 kbps) holds; other rates go to the
  *     nearest MP3 rate above them (44.1 or 48 kHz above 48 kHz).
- *   TTAudio.outChannels(track, mono) -> 1 or 2: channels of the result.
+ *   TTAudio.outChannels(track, mono, stereo) -> 1 or 2: channels of the
+ *     result (mono: 1; stereo: 2, also for a mono track; else the track's,
+ *     at most 2).
  *   TTAudio.estimate(media, ti, options) -> bytes the result will take about
  *     (0 when it cannot be told: a copy of a track whose bitrate is unknown).
  *   TTAudio.convert(media, ti, options) -> job { promise, cancel() }.
@@ -212,6 +215,9 @@
  *       kbps      MP3 bitrate, 64 to 320 (default 192; see mp3Plan)
  *       mono      true for one channel: the average of left and right, quad
  *                 and 5.1 mixed as in scan(), the first channel of others
+ *       stereo    true for two channels also from a mono track (the same
+ *                 sound in both, as CD audio is always stereo); a track of
+ *                 more channels is mixed or cut to two as without it
  *       sel       { start, end } in ms from t0 (default the whole track)
  *       volume    gain factor (default 1); fadeIn, fadeOut: seconds
  *       tags      a tag model (see TAGS) to write, or null to write no tags
@@ -220,17 +226,23 @@
  *                 'ulaw' or 'alaw' (G.711, 8 bits), as wavWriter() writes
  *       sampleRate  WAV: the rate to write (default the sound's own)
  *       rf64      WAV: RF64 even under 4 GB (past 4 GB it is RF64 anyway)
- *       writable  MP3: a WritableStream that takes { type: 'write',
+ *       writable  MP3 and WAV: a WritableStream that takes { type: 'write',
  *                 position, data } chunks, such as the
  *                 FileSystemWritableFileStream of a handle from
- *                 showSaveFilePicker(). The MP3 is written into it as it is
- *                 encoded, so it is never held in memory, and the stream is
- *                 closed at the end (aborted on an error or a cancel). The
- *                 file is the same, byte for byte, as the Blob convert()
- *                 gives without it: the ID3v2.3 tag, room for the Info
- *                 frame, the frames as the encoder makes them (their count,
- *                 positions and CRC taken as they pass), the ID3v1 tag, and
- *                 the Info frame put in its room once the length is known.
+ *                 showSaveFilePicker(). The file is written into it as it is
+ *                 made, so it is never held in memory (limits.mp3 and
+ *                 limits.wav do not apply), and the stream is closed at the
+ *                 end (aborted on an error or a cancel). The file is the
+ *                 same, byte for byte, as the Blob convert() gives without
+ *                 it. An MP3: the ID3v2.3 tag, room for the Info frame, the
+ *                 frames as the encoder makes them (their count, positions
+ *                 and CRC taken as they pass), the ID3v1 tag, and the Info
+ *                 frame put in its room once the length is known. A WAV
+ *                 (wavWriter with o.writable): room for the header, the
+ *                 sound a megabyte at a time, then the header and the tags;
+ *                 a WAV estimated at 2 GB or more keeps the 36 bytes RF64
+ *                 needs, so it is written as RF64 past 4 GB and with a 'JUNK'
+ *                 chunk in their place below that.
  *       onProgress(fraction)
  *     promise resolves { blob, ext ('mp3' | 'wav' | 'm4a'), mime, sampleRate,
  *     channels, samples (MP3, WAV: per channel, as written), kbps (MP3),
@@ -383,15 +395,23 @@
  *     Blob, byte for byte, with tags as ID3v2.3 and ID3v1 (null for any
  *     other file): MP3 in a WAV saved as the MP3 it is.
  *   TTAudio.wavWriter(o) -> a WAV built a block at a time: o = { sampleRate,
- *     channels, sampleFormat ('s16', 's24', 'f32', 'ulaw', 'alaw'), rf64 }.
- *     .add(planes, n) takes n samples of each channel (Float32Arrays, full
- *     scale 1; integer formats are rounded and clipped, float kept as it
- *     is), .finish(tags) -> the Blob (RF64 with a ds64 chunk past 4 GB; tags
- *     as LIST INFO and id3 chunks, none for null), .frames() -> samples a
- *     channel so far. convert() writes every WAV with it.
+ *     channels, sampleFormat ('s16', 's24', 'f32', 'ulaw', 'alaw'), rf64,
+ *     writable, tags, room }. .add(planes, n) takes n samples of each
+ *     channel (Float32Arrays, full scale 1; integer formats are rounded and
+ *     clipped, float kept as it is), .finish(tags) -> the Blob (RF64 with a
+ *     ds64 chunk past 4 GB; tags as LIST INFO and id3 chunks, none for
+ *     null), .frames() -> samples a channel so far. With o.writable (see
+ *     convert) nothing is kept: each megabyte is written as it fills, after
+ *     room for the header; .wait() -> a promise while a megabyte is still
+ *     being written (else null), .finish() -> a promise of the bytes written
+ *     (the header and o.tags, which the header's length depends on, are
+ *     written last, then the stream is closed), .abort() discards it; with
+ *     o.room the header keeps room for RF64's ds64 chunk, as a 'JUNK' chunk
+ *     when the file stays under 4 GB. convert() writes every WAV with it.
  *   TTAudio.wavHeader(f) -> the bytes of a WAV header up to the data chunk's:
  *     f = { tag, channels, sampleRate, bits, frames, data (bytes of sound),
- *     info (a LIST chunk or null), after (bytes after the sound), rf64 }.
+ *     info (a LIST chunk or null), after (bytes after the sound), rf64,
+ *     junk (36 bytes of 'JUNK' chunk where RF64's ds64 would go) }.
  *
  * RESAMPLING
  *   TTAudio.resampler(inRate, outRate, channels) -> { process(planes, n) ->
@@ -1654,13 +1674,16 @@
   }
   // The header of a WAV: f = { tag, channels, sampleRate, bits, frames,
   // data (bytes of sound), info (a LIST chunk or null), after (bytes after
-  // the sound), rf64 (true to write RF64 even under 4 GB) }.
+  // the sound), rf64 (true to write RF64 even under 4 GB), junk (true to
+  // keep the 36 bytes a ds64 chunk takes in a RIFF file too, as a 'JUNK'
+  // chunk, so that the header is as long whichever it turns out to be) }.
   function wavHeader(f) {
     var pcm = f.tag === 1, fmtLen = pcm ? 16 : 18, fact = pcm ? 0 : 12, info = f.info ? f.info.length : 0, block = f.channels * f.bits / 8;
-    var body = 4 + 8 + fmtLen + fact + info + 8 + f.data + (f.after || 0), big = !!f.rf64 || body > 0xFFFFFFFF, ds = big ? 36 : 0;
+    var body = 4 + 8 + fmtLen + fact + info + 8 + f.data + (f.after || 0), big = !!f.rf64 || body + (f.junk ? 36 : 0) > 0xFFFFFFFF, ds = big || f.junk ? 36 : 0;
     var h = new Uint8Array(12 + ds + 8 + fmtLen + fact + info + 8), p = 12;
-    putAscii(h, 0, big ? 'RF64' : 'RIFF'); set32le(h, 4, big ? 0xFFFFFFFF : body); putAscii(h, 8, 'WAVE');
+    putAscii(h, 0, big ? 'RF64' : 'RIFF'); set32le(h, 4, big ? 0xFFFFFFFF : body + ds); putAscii(h, 8, 'WAVE');
     if (big) { putAscii(h, 12, 'ds64'); set32le(h, 16, 28); set64le(h, 20, body + ds); set64le(h, 28, f.data); set64le(h, 36, f.frames); p = 48; }
+    else if (ds) { putAscii(h, 12, 'JUNK'); set32le(h, 16, 28); p = 48; }
     putAscii(h, p, 'fmt '); set32le(h, p + 4, fmtLen);
     h[p + 8] = f.tag; h[p + 10] = f.channels; set32le(h, p + 12, f.sampleRate); set32le(h, p + 16, f.sampleRate * block);
     h[p + 20] = block & 255; h[p + 21] = block >> 8; h[p + 22] = f.bits;
@@ -1671,15 +1694,43 @@
     return h;
   }
   // A WAV built a block at a time: o = { sampleRate, channels, sampleFormat
-  // ('s16' (default), 's24', 'f32', 'ulaw', 'alaw'), rf64 }. add(planes, n)
-  // takes n samples of each channel (Float32Arrays, full scale ±1; integer
-  // formats are rounded and clipped there, float is kept as it is);
-  // finish(tags) gives the Blob, with the tags (or none for null).
+  // ('s16' (default), 's24', 'f32', 'ulaw', 'alaw'), rf64, writable, tags,
+  // room }. add(planes, n) takes n samples of each channel (Float32Arrays,
+  // full scale ±1; integer formats are rounded and clipped there, float is
+  // kept as it is); finish(tags) gives the Blob, with the tags (or none for
+  // null). With o.writable (a WritableStream that takes { type: 'write',
+  // position, data }, as a FileSystemWritableFileStream does) nothing is
+  // kept: each megabyte of sound is written as it fills, after room for the
+  // header, and finish() writes the header and the tags (o.tags, known from
+  // the start, as the header's length depends on them), closes the stream
+  // and resolves the bytes written. wait() is then a promise while the
+  // stream has a megabyte to write already (else null), and abort()
+  // discards the file. The file is the Blob that finish() gives without
+  // o.writable, byte for byte, unless o.room asks for the room RF64 needs
+  // past 4 GB: a file that stays under 4 GB then keeps it as a 'JUNK'
+  // chunk (wavHeader's junk), as EBU Tech 3306 recommends.
   function wavWriter(o) {
     var spec = WAV_OUT[o.sampleFormat] || WAV_OUT.s16, ch = Math.max(1, o.channels | 0), bytes = spec.bits / 8, block = ch * bytes;
     var size = Math.floor((1 << 20) / block) * block, parts = [], buf, u8, i16, f32, at = 0, frames = 0, law = bytes === 1 ? g711Table(spec.tag) : null;
+    var fw = o.writable ? o.writable.getWriter() : null, info = fw && o.tags ? wavInfoChunk(o.tags) : null, head = 0, written = 0, failed = null, closed = false;
+    function layout(data, after) {
+      return wavHeader({ tag: spec.tag, channels: ch, sampleRate: o.sampleRate, bits: spec.bits, frames: frames, data: data, info: info, after: after, rf64: o.rf64, junk: !!o.room });
+    }
+    if (fw) head = layout(0, 0).length;
     function fresh() { buf = new ArrayBuffer(size); u8 = new Uint8Array(buf); i16 = bytes === 2 ? new Int16Array(buf) : null; f32 = bytes === 4 ? new Float32Array(buf) : null; at = 0; }
     fresh();
+    // A full megabyte (or the last part): kept, or written behind the header.
+    function put(chunk) {
+      if (!fw) { parts.push(chunk); return; }
+      var p = head + written;
+      written += chunk.length;
+      fw.write({ type: 'write', position: p, data: chunk }).catch(function (e) { if (!failed) failed = e; });
+    }
+    function wait() {
+      if (!fw) return null;
+      if (failed) return Promise.reject(failed);
+      return fw.desiredSize > 0 ? null : fw.ready.then(function () { if (failed) throw failed; });
+    }
     function add(planes, n) {
       for (var i = 0; i < n;) {
         var m = Math.min(n - i, (size - at) / block), c, j, k, x, pl;
@@ -1699,7 +1750,7 @@
           }
         }
         at += m * block; i += m; frames += m;
-        if (at === size) { parts.push(u8); fresh(); }
+        if (at === size) { put(u8); fresh(); }
       }
     }
     // Frames sf to sf + n of an AudioSample as they are, when its channels
@@ -1710,12 +1761,14 @@
         var m = Math.min(n - i, (size - at) / block);
         s.copyTo(new Int16Array(buf, at, m * ch), { planeIndex: 0, format: 's16', frameOffset: sf + i, frameCount: m });
         at += m * block; i += m; frames += m;
-        if (at === size) { parts.push(u8); fresh(); }
+        if (at === size) { put(u8); fresh(); }
       }
     }
     function finish(tags) {
-      if (at) parts.push(u8.subarray(0, at));
-      var data = frames * block, info = tags ? wavInfoChunk(tags) : null, id3 = tags ? id3v23(tags) : new Uint8Array(0), tail = [], after = 0;
+      if (at) put(u8.subarray(0, at));
+      if (fw) tags = o.tags || null;
+      else info = tags ? wavInfoChunk(tags) : null;
+      var data = frames * block, id3 = tags ? id3v23(tags) : new Uint8Array(0), tail = [], after = 0;
       if (data & 1) { tail.push(new Uint8Array(1)); after++; }
       if (id3.length) {
         var hd = new Uint8Array(8);
@@ -1723,10 +1776,20 @@
         tail.push(hd, id3); after += 8 + id3.length;
         if (id3.length & 1) { tail.push(new Uint8Array(1)); after++; }
       }
-      var head = wavHeader({ tag: spec.tag, channels: ch, sampleRate: o.sampleRate, bits: spec.bits, frames: frames, data: data, info: info, after: after, rf64: o.rf64 });
-      return new Blob([head].concat(parts, tail), { type: 'audio/wav' });
+      var top = layout(data, after);
+      if (!fw) return new Blob([top].concat(parts, tail), { type: 'audio/wav' });
+      return (async function () {
+        if (failed) throw failed;
+        if (top.length !== head) throw new Error('The WAV passed 4 GB, and its header has no room for the RF64 sizes it then needs.');
+        await fw.write({ type: 'write', position: 0, data: top });
+        if (after) await fw.write({ type: 'write', position: head + data, data: concatBytes(tail) });
+        closed = true;
+        await fw.close();
+        return head + data + after;
+      })();
     }
-    return { add: add, addSample: bytes === 2 ? addSample : null, finish: finish, frames: function () { return frames; }, bytesPerFrame: block };
+    function abort() { if (fw && !closed) { closed = true; return fw.abort().catch(function () {}); } }
+    return { add: add, addSample: bytes === 2 ? addSample : null, finish: finish, wait: wait, abort: abort, frames: function () { return frames; }, bytesPerFrame: block };
   }
 
   // ---------- Resampling ----------
@@ -2225,7 +2288,7 @@
     }
     return { sampleRate: rate, kbps: Math.max(rate >= 32000 ? 32 : 8, Math.min(kbps, mp3MaxKbps(rate))) };
   }
-  function outChannels(t, mono) { return mono ? 1 : Math.min(2, t.ch || 2); }
+  function outChannels(t, mono, stereo) { return mono ? 1 : stereo ? 2 : Math.min(2, t.ch || 2); }
   // The WAV sample format when none is asked for: 24-bit Apple Lossless
   // keeps its 24 bits, everything else is written as 16-bit.
   function wavDefault(t) { return t.alac && t.alac.bits === 24 ? 's24' : 's16'; }
@@ -2239,7 +2302,7 @@
     if (o.format === 'mp3') return Math.round(mp3Plan(t.sr, o.kbps).kbps * 125 * sec) + 300;
     if (o.format === 'wav') {
       var rate = o.sampleRate > 0 ? Math.round(o.sampleRate) : t.sr, spec = WAV_OUT[o.sampleFormat] || WAV_OUT[wavDefault(t)];
-      return Math.round(sec * rate) * outChannels(t, o.mono) * spec.bits / 8 + 44;
+      return Math.round(sec * rate) * outChannels(t, o.mono, o.stereo) * spec.bits / 8 + 44;
     }
     return t.bitrate > 0 && t.codec === 'aac' ? Math.round(t.bitrate / 8 * sec) + 2000 : 0;
   }
@@ -2247,7 +2310,7 @@
   // Frames sf to sf + n of an AudioSample, as the result's ch channels
   // (Float32Arrays): mixed as mediabunny mixes channels (in 32-bit floats),
   // quad and 5.1 down to stereo or mono, stereo to mono as the average; of
-  // other layouts the first channels.
+  // other layouts the first channels; mono as two equal channels for stereo.
   function mixDown(s, sf, n, inCh, ch) {
     var need = inCh === 4 || inCh === 6 ? inCh : inCh === 2 ? 2 : Math.min(inCh, ch), P = [], out = [], c, i;
     for (c = 0; c < need; c++) {
@@ -2255,6 +2318,7 @@
       s.copyTo(x, { planeIndex: c, format: 'f32-planar', frameOffset: sf, frameCount: n });
       P.push(x);
     }
+    if (inCh === 1 && ch === 2) return [P[0], P[0].slice()];
     if (inCh === ch || (inCh !== 2 && inCh !== 4 && inCh !== 6)) return P.slice(0, ch);
     for (c = 0; c < ch; c++) out.push(new Float32Array(n));
     var L = out[0], R = out[1], a = Math.SQRT1_2;
@@ -2335,7 +2399,7 @@
   // does. Every MP3 goes through finishMp3() with the number of samples
   // encoded, and every WAV through wavWriter().
   async function transcode(m, ti, o, job, fmt, sel, len, tags) {
-    var t = m.tracks[ti], ch = outChannels(t, !!o.mono), plan = null, outRate, spec = null;
+    var t = m.tracks[ti], ch = outChannels(t, !!o.mono, !!o.stereo), plan = null, outRate, spec = null;
     var fx = { vol: o.volume == null ? 1 : Math.max(0, +o.volume || 0), fadeIn: Math.max(0, +o.fadeIn || 0), fadeOut: Math.max(0, +o.fadeOut || 0) };
     if (!t.decodable && !t.whole) throw noDecode(t);
     if (fmt === 'mp3') {
@@ -2352,8 +2416,9 @@
     } else {
       spec = WAV_OUT[o.sampleFormat] ? o.sampleFormat : wavDefault(t);
       outRate = o.sampleRate > 0 ? Math.round(o.sampleRate) : t.sr;
-      var bytes = estimate(m, ti, { format: 'wav', sel: sel, mono: o.mono, sampleRate: outRate, sampleFormat: spec });
-      if (bytes > LIMITS.wav) throw coded('TOO_BIG', fill(TEXT.tooBig, { size: fmtBytes(bytes), limit: fmtBytes(LIMITS.wav) }), { bytes: bytes, limit: LIMITS.wav, format: 'wav' });
+      var bytes = estimate(m, ti, { format: 'wav', sel: sel, mono: o.mono, stereo: o.stereo, sampleRate: outRate, sampleFormat: spec });
+      // A WAV not written into o.writable is built in memory.
+      if (!o.writable && bytes > LIMITS.wav) throw coded('TOO_BIG', fill(TEXT.tooBig, { size: fmtBytes(bytes), limit: fmtBytes(LIMITS.wav) }), { bytes: bytes, limit: LIMITS.wav, format: 'wav' });
     }
     var src = await decodeSource(m, ti);
     if (job.cancelled) throw coded('CANCELLED', 'Conversion cancelled.');
@@ -2369,7 +2434,12 @@
       out.addAudioTrack(enc);
       await out.start();
       job.onCancel = function () { return out.cancel(); };
-    } else wav = wavWriter({ sampleRate: outRate, channels: ch, sampleFormat: spec, rf64: o.rf64 });
+    } else {
+      // Into o.writable as it is made, with room for RF64 sizes when it may
+      // pass 4 GB, else into memory.
+      wav = wavWriter({ sampleRate: outRate, channels: ch, sampleFormat: spec, rf64: o.rf64, writable: o.writable || null, tags: tags, room: !!o.writable && bytes >= 2e9 });
+      if (o.writable) job.stream = wav;
+    }
     // The encoder gets about a second at a time: each block is a round trip
     // to its worker, and small ones would leave it waiting.
     var block = fmt === 'mp3' ? outRate : 0, pend = null, pendN = 0, sent = 0;
@@ -2385,7 +2455,12 @@
       var n = sample ? planes : planes.length ? planes[0].length : 0;
       if (!n) return;
       outN += n;
-      if (wav) { if (sample) wav.addSample(sample, sf, n); else wav.add(planes, n); return; }
+      if (wav) {
+        if (sample) wav.addSample(sample, sf, n); else wav.add(planes, n);
+        var busy = wav.wait();
+        if (busy) await busy;
+        return;
+      }
       for (var i = 0; i < n;) {
         if (!pend) pend = new Float32Array(block * ch);
         var m = Math.min(n - i, block - pendN);
@@ -2445,7 +2520,11 @@
       var result = { ext: fmt, mime: fmt === 'mp3' ? 'audio/mpeg' : 'audio/wav', channels: ch, sampleRate: outRate, samples: outN };
       if (wav) {
         result.sampleFormat = spec;
-        result.blob = wav.finish(tags);
+        if (o.writable) {
+          result.size = await wav.finish(tags);
+          result.blob = null;
+          result.streamed = true;
+        } else result.blob = wav.finish(tags);
       } else {
         enc.close();
         await out.finalize();

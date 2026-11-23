@@ -1408,6 +1408,80 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual(streamedMp3.slice(4), [{ name: 'cancelled', code: 'CANCELLED', closed: false, aborted: true },
     { name: 'no such track', code: 'TypeError', closed: false, aborted: true, written: 0 }], 'a cancel or an error aborts the stream, never closes it');
 
+  // ---------- WAV written as it is made too (convert's o.writable), and stereo from mono ----------
+  // Every sample format gives the same bytes as the WAV built in memory; with
+  // stereo a mono file gets two equal channels; a cancel aborts the file; and
+  // a header that keeps room for RF64 holds it as a JUNK chunk under 4 GB.
+  const streamedWav = await page.evaluate(async ([chirp, low]) => {
+    const fileOf = (b64, name) => new File([Uint8Array.from(atob(b64), ch => ch.charCodeAt(0))], name);
+    const sink = slow => {
+      const s = { bytes: new Uint8Array(0), closed: false, aborted: false };
+      s.ws = new WritableStream({
+        async write(c) {
+          if (slow) await new Promise(r => setTimeout(r, slow));
+          const end = c.position + c.data.byteLength;
+          if (end > s.bytes.length) { const b = new Uint8Array(end); b.set(s.bytes); s.bytes = b; }
+          s.bytes.set(new Uint8Array(c.data.buffer, c.data.byteOffset, c.data.byteLength), c.position);
+        },
+        close() { s.closed = true; }, abort() { s.aborted = true; }
+      });
+      return s;
+    };
+    const tags = TTAudio.emptyTags();
+    tags.title = 'Streamed ☕'; tags.date = '2019'; tags.track = 2;
+    const out = [];
+    for (const [b64, name, o] of [[chirp, 'chirp.wav', { tags }], [chirp, 'chirp.wav', { sampleFormat: 's24', tags: null, sel: { start: 100, end: 900 } }],
+      [low, 'info-utf8.wav', { sampleFormat: 'f32', stereo: true, tags }], [low, 'info-utf8.wav', { sampleFormat: 'ulaw', stereo: true, mono: true, tags }]]) {
+      const m = await TTAudio.open(fileOf(b64, name));
+      const mem = new Uint8Array(await (await TTAudio.convert(m, 0, Object.assign({ format: 'wav' }, o)).promise).blob.arrayBuffer());
+      const s = sink(), r = await TTAudio.convert(m, 0, Object.assign({ format: 'wav', writable: s.ws }, o)).promise;
+      const dv = new DataView(mem.buffer), ch = dv.getUint16(22, true), bits = dv.getUint16(34, true);
+      let same2 = null;
+      if (ch === 2 && name === 'info-utf8.wav') {
+        let q = 12, off = -1, n = 0;
+        while (q + 8 <= mem.length) {
+          const id = String.fromCharCode(...mem.subarray(q, q + 4)), len = dv.getUint32(q + 4, true);
+          if (id === 'data') { off = q + 8; n = len; break; }
+          q += 8 + len + (len & 1);
+        }
+        const f = new Float32Array(mem.buffer.slice(off, off + n));
+        same2 = f.length === 1600 && f.some(v => v !== 0) && f.every((v, i) => i % 2 || v === f[i + 1]);
+      }
+      out.push({ name, same: mem.length === s.bytes.length && mem.every((v, i) => v === s.bytes[i]), size: r.size === mem.length, blob: r.blob,
+        streamed: r.streamed, closed: s.closed, aborted: s.aborted, ch, bits, channels: r.channels, same2 });
+      TTAudio.close(m);
+    }
+    // A minute of a tone (10.6 MB as float), cancelled once writing has
+    // started: the writer waits for each megabyte, so it is still writing.
+    const sr = 44100, pcm = new Int16Array(60 * sr), h = new DataView(new ArrayBuffer(44)), w = (q, t) => { for (let i = 0; i < 4; i++) h.setUint8(q + i, t.charCodeAt(i)); };
+    for (let i = 0; i < pcm.length; i++) pcm[i] = Math.round(9000 * Math.sin(2 * Math.PI * 440 * i / sr));
+    w(0, 'RIFF'); h.setUint32(4, 36 + 2 * pcm.length, true); w(8, 'WAVE'); w(12, 'fmt '); h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+    h.setUint32(24, sr, true); h.setUint32(28, 2 * sr, true); h.setUint16(32, 2, true); h.setUint16(34, 16, true); w(36, 'data'); h.setUint32(40, 2 * pcm.length, true);
+    const m = await TTAudio.open(new File([h.buffer, pcm], 'minute.wav')), s = sink(200), job = TTAudio.convert(m, 0, { format: 'wav', sampleFormat: 'f32', writable: s.ws });
+    while (!s.bytes.length) await new Promise(r => setTimeout(r, 20));
+    job.cancel();
+    let code = '';
+    try { await job.promise; } catch (e) { code = e.code; }
+    out.push({ name: 'cancelled', code, closed: s.closed, aborted: s.aborted, partial: s.bytes.length < 60 * sr * 4 });
+    TTAudio.close(m);
+    // Room for RF64's ds64 chunk, kept as JUNK in a file under 4 GB.
+    const j = sink(), wr = TTAudio.wavWriter({ sampleRate: 8000, channels: 1, sampleFormat: 's16', writable: j.ws, tags: null, room: true });
+    wr.add([new Float32Array(10).fill(0.5)], 10);
+    const size = await wr.finish(null), jv = new DataView(j.bytes.buffer);
+    out.push({ name: 'room', size, ids: [0, 12, 48, 72].map(q => String.fromCharCode(...j.bytes.subarray(q, q + 4))), riff: jv.getUint32(4, true), junk: jv.getUint32(16, true),
+      header: TTAudio.wavHeader({ tag: 1, channels: 1, sampleRate: 8000, bits: 16, frames: 10, data: 20, info: null, after: 0, junk: true }).length,
+      outCh: [TTAudio.outChannels({ ch: 1 }, false, true), TTAudio.outChannels({ ch: 6 }, false, true), TTAudio.outChannels({ ch: 1 }, true, true), TTAudio.outChannels({ ch: 1 }, false)] });
+    return out;
+  }, [b64('chirp.wav'), b64('info-utf8.wav')]);
+  assert.deepEqual(streamedWav.slice(0, 4).map(r => [r.name, r.same, r.size, r.blob, r.streamed, r.closed, r.aborted, r.ch, r.bits, r.channels]), [
+    ['chirp.wav', true, true, null, true, true, false, 2, 16, 2], ['chirp.wav', true, true, null, true, true, false, 2, 24, 2],
+    ['info-utf8.wav', true, true, null, true, true, false, 2, 32, 2], ['info-utf8.wav', true, true, null, true, true, false, 1, 8, 1]],
+  'WAV written as it is made: the same bytes as in memory, then closed; stereo from mono, unless Mono is asked for');
+  assert.equal(streamedWav[2].same2, true, 'a mono file written as stereo has the same sound in both channels');
+  assert.deepEqual(streamedWav[4], { name: 'cancelled', code: 'CANCELLED', closed: false, aborted: true, partial: true }, 'a cancelled WAV is aborted, never closed');
+  assert.deepEqual(streamedWav[5], { name: 'room', size: 12 + 36 + 24 + 8 + 20, ids: ['RIFF', 'JUNK', 'fmt ', 'data'], riff: 12 + 36 + 24 + 8 + 20 - 8, junk: 28, header: 80, outCh: [2, 2, 1, 1] },
+    'room for RF64 kept as a 28-byte JUNK chunk; outChannels with stereo');
+
   // ---------- MP3 to WAV: exactly the samples that were encoded ----------
   // A LAME tag gives the encoder's delay and the padding after the last
   // sample; mediabunny drops the delay but not the padding. Without a tag

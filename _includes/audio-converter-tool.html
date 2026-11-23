@@ -60,12 +60,18 @@
                and 24-bit mono or stereo, a 24-bit file written as 24-bit
                WAV, and the bit depth shown on its line. Default: an ALAC
                file is refused as an unknown codec, as before.
-  presets      MP3 preset buttons, separated by spaces, shown in their own
-               "Presets" row above the bitrate: music ("Music: 192 kbps",
-               channels as in the file), speech96 ("Speech: 96 kbps mono")
-               and speech64 ("Speech: 64 kbps mono"). Each sets the bitrate
-               and channel fields. Default: no row, and the hub's one button
-               "Speech: 96 kbps mono" beside the channels.
+  presets      Preset buttons, separated by spaces, shown in their own
+               "Presets" row above the options. For MP3: music ("Music: 192
+               kbps", channels as in the file), speech96 ("Speech: 96 kbps
+               mono") and speech64 ("Speech: 64 kbps mono"), which set the
+               bitrate and channel fields. For WAV, with wav_out="options"
+               only: cd ("CD: 44.1 kHz 16-bit stereo"), video ("Video: 48 kHz
+               24-bit", channels as in the file), phone16 ("Phone: 8 kHz
+               16-bit mono") and phone-ulaw ("Phone: 8 kHz µ-law mono"),
+               which set the bit depth, sample rate and channel fields. A
+               button shows while its format is chosen, and the row while
+               any of its buttons does. Default: no row, and the hub's one
+               button "Speech: 96 kbps mono" beside the channels.
   tags         basic, all or edit. basic (the default) writes the title,
                artist and album of the Tags fields and the cover. all also
                keeps the file's other tags (album artist, composer, date,
@@ -87,15 +93,17 @@
                size estimate says how much smaller the result will be, and
                the MP3 hint compares a minute with 16-bit WAV at 44.1 kHz.
                Default: sizes only.
-  stream       big: an MP3 estimated at 200 MB or more is written straight
-               to a file the visitor chooses, as it converts, where the
-               browser has showSaveFilePicker (Chrome and Edge 86 on a
+  stream       big: an MP3 or WAV estimated at 200 MB or more is written
+               straight to a file the visitor chooses, as it converts, where
+               the browser has showSaveFilePicker (Chrome and Edge 86 on a
                computer, Chrome 132 on Android): Convert asks where to save
                the first such file, one a press, and converts it with the
-               files that need no asking. Where it has not, an MP3 is built
-               in memory up to TTAudio.limits.wav (2 GB, 300 MB on a phone),
-               and a bigger one is not converted: its file says why. Default:
-               every MP3 is built in memory, with no limit.
+               files that need no asking. A WAV written so has no size limit
+               and becomes RF64 past 4 GB. Where the browser has no
+               showSaveFilePicker, a file is built in memory up to
+               TTAudio.limits.wav (2 GB, 300 MB on a phone), and a bigger one
+               is not converted: its file says why. Default: every file is
+               built in memory, up to the engine's limits.
   wav          details: for WAV files the line under the name gives the bit
                depth ("PCM 24-bit", "32-bit float"), RF64 and BWF (a bext
                chunk); a note says when the header stated the wrong length
@@ -108,19 +116,45 @@
                says when the rate changes; the MP3 hint says MP3 has no bit
                depth; the file picker also offers .bwf and .rf64 files.
                Default: WAV files are shown and converted like any other.
+  wav_out      options: WAV gets a "Bit depth" choice (16-bit, the default;
+               24-bit; 32-bit float; 8-bit µ-law and 8-bit A-law, the G.711
+               of phone systems) and a "Sample rate" choice (as in the file,
+               the default; 44.1, 48, 22.05, 16 or 8 kHz, resampled by the
+               engine's filter), both shown while WAV is chosen; Channels
+               gains "Stereo" (a mono file in both channels, as CD audio
+               always is); the WAV hint describes the bit depth and the size
+               of a minute; the size estimate says when the rate changes,
+               and when this browser decodes the track whole, at 16 bits, so
+               that 24-bit or float holds no more than 16-bit would.
+               Default: a WAV is 16-bit, at the file's own rate.
+  notags       switch: a "Save without tags" checkbox under the output
+               options, off at first. Ticked, no tags are written (no LIST
+               INFO or id3 chunk in a WAV, no ID3 tags in an MP3), for
+               samplers and devices that refuse anything but the sound, and
+               the Tags fields are disabled, with a note that says why.
+               Default: no checkbox, and the tags are written.
+  mp3          details: for MP3 files the line under the name says whether
+               the result will be exactly as long as what was encoded (a
+               LAME tag gives the encoder's delay and padding, which are
+               left out) or keeps the encoder's lead-in, about 25 ms at 44.1
+               kHz (track.mp3.leadIn), for want of one; and the file's
+               message says when an MP3 is cut off: its LAME or VBR header
+               promises more sound than its frames hold. A file this browser
+               can only decode whole (no WebCodecs) and that is longer than
+               TTAudio.limits.whole is refused as soon as it is added, not
+               when it is converted. Default: none of this.
+  sample       mp3: "Try a sample sound" adds the sample as an MP3 (192
+               kbps, made by the MP3 encoder; a WAV where the browser has
+               none). Default: the sample is a WAV.
 
   Adding parameters (pair pages). Follow the pattern above: read the value
   into an acv_ variable below (strip, downcase, a default for unknown
   values), render the starting state into the HTML so nothing moves when the
-  script runs, put it into CONF in the script, and document it here. The
-  places are marked "Pair-page options": WAV bit depth and sample rate (add
-  sampleFormat and sampleRate to convertOptions(), which the size estimate
-  and TTAudio.convert both read; the engine writes 16 and 24-bit, float,
-  µ-law and A-law and resamples), presets (the presets parameter, or beside
-  the Speech button, which is the hub's one preset), and a switch that
-  writes no tags (pass tags: null to TTAudio.convert in convertOne()). The
-  script of presets, tags, saving, stream and wav is in its section "WAV to
-  MP3 options".
+  script runs, put it into CONF in the script, and document it here. Options
+  that change the result go into convertOptions(), which the size estimate
+  and TTAudio.convert both read. The script of presets, tags, saving, stream
+  and wav is in its section "WAV to MP3 options", that of wav_out, notags,
+  mp3 and sample in "MP3 to WAV options".
 
   The element ids (m2m-...) are fixed, so a page holds one converter.
   Liquid runs over this file: the script must not contain a double opening
@@ -154,7 +188,20 @@
 {%- assign acv_hint = include.hint | default: 'MP4, MOV, WebM, MKV, M4A, MP3, WAV, OGG or FLAC. Only the audio is read, so long phone videos of several GB work. Links and protected (DRM) files cannot be converted.' -%}
 {%- assign acv_title = include.drop_title | default: 'Drop videos or audio files here' -%}
 {%- comment -%} WAV to MP3 options: presets, tags, saving, stream, wav. {%- endcomment -%}
+{%- comment -%} MP3 to WAV options: wav_out, notags, mp3, sample; the WAV presets need wav_out. {%- endcomment -%}
+{%- assign acv_wavout = include.wav_out | default: '' | strip | downcase -%}
+{%- unless acv_wavout == 'options' -%}{%- assign acv_wavout = '' -%}{%- endunless -%}
+{%- assign acv_notags = include.notags | default: '' | strip | downcase -%}
+{%- unless acv_notags == 'switch' -%}{%- assign acv_notags = '' -%}{%- endunless -%}
+{%- assign acv_mp3 = include.mp3 | default: '' | strip | downcase -%}
+{%- unless acv_mp3 == 'details' -%}{%- assign acv_mp3 = '' -%}{%- endunless -%}
+{%- assign acv_sample = include.sample | default: '' | strip | downcase -%}
+{%- unless acv_sample == 'mp3' -%}{%- assign acv_sample = '' -%}{%- endunless -%}
+{%- if acv_wavout == 'options' -%}
+{%- assign acv_pknown = 'music speech96 speech64 cd video phone16 phone-ulaw' | split: ' ' -%}
+{%- else -%}
 {%- assign acv_pknown = 'music speech96 speech64' | split: ' ' -%}
+{%- endif -%}
 {%- assign acv_praw = include.presets | default: '' | strip | downcase | split: ' ' -%}
 {%- assign acv_plist = '' -%}
 {%- for acv_p in acv_praw -%}
@@ -163,6 +210,13 @@
   {%- endif -%}
 {%- endfor -%}
 {%- assign acv_presets = acv_plist | strip | split: ' ' -%}
+{%- assign acv_prow = false -%}
+{%- for acv_p in acv_presets -%}
+  {%- case acv_p -%}
+  {%- when 'music', 'speech96', 'speech64' -%}{%- if acv_fmt == 'mp3' -%}{%- assign acv_prow = true -%}{%- endif -%}
+  {%- else -%}{%- if acv_fmt == 'wav' -%}{%- assign acv_prow = true -%}{%- endif -%}
+  {%- endcase -%}
+{%- endfor -%}
 {%- assign acv_tags = include.tags | default: 'basic' | strip | downcase -%}
 {%- unless acv_tags == 'all' or acv_tags == 'edit' -%}{%- assign acv_tags = 'basic' -%}{%- endunless -%}
 {%- assign acv_saving = include.saving | default: '' | strip | downcase -%}
@@ -234,7 +288,7 @@
 {%- if acv_saving == 'show' %}
 .m2m-total { margin: 0 0 12px; font-weight: 600; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 {%- endif %}
-{%- if acv_wav == 'details' %}
+{%- if acv_wav == 'details' or acv_mp3 == 'details' %}
 .m2m-file-note { margin: 0; overflow-wrap: anywhere; }
 {%- endif %}
 @media (pointer: coarse) {
@@ -339,6 +393,9 @@
 {%- endif %}
     <details class="m2m-tags" id="m2m-tags">
       <summary>{% if acv_tags == 'edit' %}Tags and cover art{% else %}Tags: title, artist and album{% endif %}</summary>
+{%- if acv_notags == 'switch' %}
+      <p class="hint m2m-note" id="m2m-notags-note" hidden>“Save without tags” is ticked under Output, so none of these is written.</p>
+{%- endif %}
       <div class="row">
         <div class="field"><label for="m2m-title">Title</label><input type="text" id="m2m-title" autocomplete="off" maxlength="200"></div>
         <div class="field"><label for="m2m-artist">Artist</label><input type="text" id="m2m-artist" autocomplete="off" maxlength="200"></div>
@@ -398,17 +455,25 @@
         </div>
       </fieldset>
 {%- if acv_presets.size > 0 %}
-      <div class="m2m-presets" id="m2m-presets" role="group" aria-labelledby="m2m-presets-label"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>
+      <div class="m2m-presets" id="m2m-presets" role="group" aria-labelledby="m2m-presets-label"{% unless acv_prow %} hidden{% endunless %}>
         <span class="label" id="m2m-presets-label">Presets</span>
         <div class="actions">
 {%- for acv_p in acv_presets %}
 {%- case acv_p %}
 {%- when 'music' %}
-          <button class="btn secondary" type="button" id="m2m-p-music" data-kbps="192" data-mono="0">Music: 192 kbps</button>
+          <button class="btn secondary" type="button" id="m2m-p-music" data-kbps="192" data-mono="0"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>Music: 192 kbps</button>
 {%- when 'speech96' %}
-          <button class="btn secondary" type="button" id="m2m-p-speech96" data-kbps="96" data-mono="1">Speech: 96 kbps mono</button>
+          <button class="btn secondary" type="button" id="m2m-p-speech96" data-kbps="96" data-mono="1"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>Speech: 96 kbps mono</button>
 {%- when 'speech64' %}
-          <button class="btn secondary" type="button" id="m2m-p-speech64" data-kbps="64" data-mono="1">Speech: 64 kbps mono</button>
+          <button class="btn secondary" type="button" id="m2m-p-speech64" data-kbps="64" data-mono="1"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>Speech: 64 kbps mono</button>
+{%- when 'cd' %}
+          <button class="btn secondary" type="button" id="m2m-p-cd" data-format="wav" data-bits="s16" data-rate="44100" data-ch="stereo"{% unless acv_fmt == 'wav' %} hidden{% endunless %}>CD: 44.1 kHz 16-bit stereo</button>
+{%- when 'video' %}
+          <button class="btn secondary" type="button" id="m2m-p-video" data-format="wav" data-bits="s24" data-rate="48000" data-ch="keep"{% unless acv_fmt == 'wav' %} hidden{% endunless %}>Video: 48 kHz 24-bit</button>
+{%- when 'phone16' %}
+          <button class="btn secondary" type="button" id="m2m-p-phone16" data-format="wav" data-bits="s16" data-rate="8000" data-ch="mono"{% unless acv_fmt == 'wav' %} hidden{% endunless %}>Phone: 8 kHz 16-bit mono</button>
+{%- when 'phone-ulaw' %}
+          <button class="btn secondary" type="button" id="m2m-p-phone-ulaw" data-format="wav" data-bits="ulaw" data-rate="8000" data-ch="mono"{% unless acv_fmt == 'wav' %} hidden{% endunless %}>Phone: 8 kHz µ-law mono</button>
 {%- endcase %}
 {%- endfor %}
         </div>
@@ -430,15 +495,44 @@
           <label for="m2m-channels">Channels</label>
           <select id="m2m-channels">
             <option value="keep"{% unless acv_mono %} selected{% endunless %}>As in the file</option>
+{%- if acv_wavout == 'options' %}
+            <option value="stereo">Stereo</option>
+{%- endif %}
             <option value="mono"{% if acv_mono %} selected{% endif %}>Mono</option>
           </select>
         </div>
-        {%- comment -%} Pair-page options: WAV bit depth and sample rate fields go here, shown only for WAV, and presets beside the Speech button. {%- endcomment %}
+{%- if acv_wavout == 'options' %}
+        <div class="field" id="m2m-bits-field"{% unless acv_fmt == 'wav' %} hidden{% endunless %}>
+          <label for="m2m-bits">Bit depth</label>
+          <select id="m2m-bits">
+            <option value="s16" selected>16-bit</option>
+            <option value="s24">24-bit</option>
+            <option value="f32">32-bit float</option>
+            <option value="ulaw">8-bit µ-law</option>
+            <option value="alaw">8-bit A-law</option>
+          </select>
+        </div>
+        <div class="field" id="m2m-rate-field"{% unless acv_fmt == 'wav' %} hidden{% endunless %}>
+          <label for="m2m-rate">Sample rate</label>
+          <select id="m2m-rate">
+            <option value="0" selected>As in the file</option>
+            <option value="44100">44.1 kHz</option>
+            <option value="48000">48 kHz</option>
+            <option value="22050">22.05 kHz</option>
+            <option value="16000">16 kHz</option>
+            <option value="8000">8 kHz</option>
+          </select>
+        </div>
+{%- endif %}
 {%- if acv_presets.size == 0 %}
         <button class="btn secondary" type="button" id="m2m-speech"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>Speech: 96 kbps mono</button>
 {%- endif %}
       </div>
       <p class="hint m2m-note" id="m2m-format-hint"></p>
+{%- if acv_notags == 'switch' %}
+      <label class="check"><input type="checkbox" id="m2m-notags" aria-describedby="m2m-notags-hint"> Save without tags</label>
+      <p class="hint m2m-note" id="m2m-notags-hint">For samplers and other devices that refuse files holding anything but the sound: no title, artist or cover art is written.</p>
+{%- endif %}
 {%- if acv_tags == 'edit' %}
       <label class="check"><input type="checkbox" id="m2m-shrink" aria-describedby="m2m-shrink-hint"> Shrink cover art to 600 × 600 pixels</label>
       <p class="hint m2m-note" id="m2m-shrink-hint">Covers wider or higher than 600 pixels are scaled down to fit, which can save hundreds of KB a file. Smaller covers stay as they are.</p>
@@ -485,7 +579,12 @@
     tags: {{ acv_tags | jsonify }},
     saving: {{ acv_saving | jsonify }},
     stream: {{ acv_stream | jsonify }},
-    wav: {{ acv_wav | jsonify }}
+    wav: {{ acv_wav | jsonify }},
+    // MP3 to WAV options (see the header and the section of that name).
+    wavOut: {{ acv_wavout | jsonify }},
+    notags: {{ acv_notags | jsonify }},
+    mp3: {{ acv_mp3 | jsonify }},
+    sample: {{ acv_sample | jsonify }}
   };
 
   function $(id) { return document.getElementById(id); }
@@ -519,7 +618,10 @@
     asIs: $('m2m-asis'), asIsRow: $('m2m-asis-row'), asIsNote: $('m2m-asis-note'),
     // tags="edit" only (null otherwise)
     albumArtist: $('m2m-albumartist'), composer: $('m2m-composer'), genre: $('m2m-genre'), year: $('m2m-year'), track: $('m2m-track'), disc: $('m2m-disc'),
-    numErr: $('m2m-num-error'), kept: $('m2m-kept'), coverInfo: $('m2m-cover-info'), shrink: $('m2m-shrink')
+    numErr: $('m2m-num-error'), kept: $('m2m-kept'), coverInfo: $('m2m-cover-info'), shrink: $('m2m-shrink'),
+    // wav_out="options" and notags="switch" only (null otherwise)
+    bits: $('m2m-bits'), bitsField: $('m2m-bits-field'), rate: $('m2m-rate'), rateField: $('m2m-rate-field'),
+    notags: $('m2m-notags'), notagsNote: $('m2m-notags-note')
   };
 
   var entries = [];
@@ -529,7 +631,7 @@
   var cancelRequested = false;
   var activeJob = null;
   var resultSeq = 0;
-  var settings = { format: CONF.formats[0], kbps: 192, mono: false, shrink: false };
+  var settings = { format: CONF.formats[0], kbps: 192, mono: false, shrink: false, bits: 's16', rate: 0, stereo: false, notags: false };
   var ALL_TAGS = CONF.tags === 'edit';   // every tag as a field of its own
   var RATES = [64, 96, 128, 160, 192, 224, 256, 320];
   var COVER_MAX = 600;                        // pixels a side of a shrunk cover
@@ -837,7 +939,7 @@
       var li = e.li = el('li', 'm2m-file');
       li.appendChild(e.nameEl = el('p', 'm2m-file-name'));
       li.appendChild(e.infoEl = el('p', 'm2m-file-info'));
-      if (CONF.wav === 'details') li.appendChild(e.noteEl = el('p', 'hint m2m-file-note'));
+      if (CONF.wav === 'details' || CONF.mp3 === 'details') li.appendChild(e.noteEl = el('p', 'hint m2m-file-note'));
       li.appendChild(e.stateEl = el('p', 'm2m-file-state'));
       // Not a live region: a summary that names the files goes to the status line.
       e.msgEl = el('p', 'msg error m2m-file-msg');
@@ -856,7 +958,7 @@
     setMsg(e.nameEl, e.name);
     setMsg(e.infoEl, fileInfo(e));
     e.infoEl.hidden = !e.t;
-    if (e.noteEl) { setMsg(e.noteEl, wavNote(e)); e.noteEl.hidden = !e.noteEl.textContent; }
+    if (e.noteEl) { setMsg(e.noteEl, (CONF.wav === 'details' && wavNote(e)) || (CONF.mp3 === 'details' && mp3Note(e)) || ''); e.noteEl.hidden = !e.noteEl.textContent; }
     setMsg(e.stateEl, stateText(e));
     e.stateEl.hidden = !stateText(e);
     e.stateEl.classList.toggle('is-done', !!e.result);
@@ -877,10 +979,12 @@
     if (e.t.drm) return A.describe(null, e.t.drm);
     var copy = settings.format === 'copy';
     if (!copy && !canDecode(e)) return noDecodeText(e);
+    if (!copy && tooLongWhole(e)) return messageFor({ code: 'TOO_LONG', limit: A.limits.whole }, e);
     if (copy && e.t.codec !== 'aac') return copyText(e);
     if (tooBig(e)) return tooBigText(e);
     var notes = [];
     if (e.t.listed > e.t.end) notes.push(shortText(e));
+    else if (CONF.mp3 === 'details' && mp3Promised(e) > e.durMs + 30) notes.push(mp3ShortText(e));
     if (!copy && e.t.ch > 2 && e.t.ch !== 4 && e.t.ch !== 6) notes.push(layoutText(e));
     return notes.join(' ');
   }
@@ -1273,7 +1377,13 @@
 
   function convertOptions(e) {
     var fx = effects(e);
-    return { format: settings.format, kbps: kbpsFor(e), mono: fx.mono, sel: e.sel, volume: fx.vol, fadeIn: fx.fadeIn, fadeOut: fx.fadeOut };
+    var o = { format: settings.format, kbps: kbpsFor(e), mono: fx.mono, sel: e.sel, volume: fx.vol, fadeIn: fx.fadeIn, fadeOut: fx.fadeOut };
+    // wav_out="options": the WAV's bit depth and rate, and mono files as stereo.
+    if (CONF.wavOut) {
+      if (settings.format === 'wav') { o.sampleFormat = settings.bits; if (settings.rate) o.sampleRate = settings.rate; }
+      if (settings.stereo && !fx.mono && settings.format !== 'copy') o.stereo = true;
+    }
+    return o;
   }
   // "Automatic" (kbps="auto"): the MP3 bitrate that suits a file's source,
   // in steps: lossless sound 320 kbps, the most MP3 holds; lossy stereo
@@ -1309,6 +1419,7 @@
     if (!editorOn()) return;
     var bytes = estimateBytes(e);
     if (ALL_TAGS && bytes > 0) bytes += coverBytes(e);
+    else if (CONF.wavOut && bytes > 0) bytes += tagBytes(e);
     var ext = settings.format === 'mp3' ? 'mp3' : settings.format === 'wav' ? 'wav' : 'm4a';
     var text = bytes > 0 ? 'Estimated size: about ' + fmtBytes(bytes) + ' as ' + e.base + '.' + ext + (CONF.saving === 'show' ? savingVs(e, bytes) : '') + '.' : '';
     // MP3 at 8 to 24 kHz holds less than the bitrate asked for.
@@ -1678,20 +1789,26 @@
       format: f ? f.value : CONF.formats[0],
       kbps: dom.bitrate.value === 'auto' ? 'auto' : Math.max(64, Math.min(320, +dom.bitrate.value || 192)),
       mono: dom.channels.value === 'mono',
-      shrink: !!(dom.shrink && dom.shrink.checked)
+      shrink: !!(dom.shrink && dom.shrink.checked),
+      bits: dom.bits && Object.prototype.hasOwnProperty.call(WAV_BYTES, dom.bits.value) ? dom.bits.value : 's16',
+      rate: dom.rate ? Math.max(0, Math.round(+dom.rate.value) || 0) : 0,
+      stereo: dom.channels.value === 'stereo',
+      notags: !!(dom.notags && dom.notags.checked)
     };
     if (next.format === 'mp3' && !SIMD) {
       // No MP3 encoder here: the next format on offer instead.
       var alt = CONF.formats.filter(function (x) { return x !== 'mp3'; })[0];
       if (alt) { next.format = alt; $('m2m-f-' + alt).checked = true; }
     }
-    var changed = next.format !== settings.format || next.kbps !== settings.kbps || next.mono !== settings.mono;
+    var changed = next.format !== settings.format || next.kbps !== settings.kbps || next.mono !== settings.mono ||
+      next.bits !== settings.bits || next.rate !== settings.rate || next.stereo !== settings.stereo || next.notags !== settings.notags;
     var newFormat = next.format !== settings.format, newMono = next.mono !== settings.mono, newShrink = next.shrink !== settings.shrink;
     settings = next;
     if (changed) entries.forEach(invalidate);
     // Only files whose cover would change.
     if (newShrink) entries.filter(function (e) { return e.keepCover && e.images.some(needsShrink); }).forEach(invalidate);
     if (newShrink) updateCoverInfo();
+    syncNoTags();
     updateAll();
     // The Mono mix has levels of its own.
     if (newMono) draw();
@@ -1710,6 +1827,7 @@
         '. A higher bitrate cannot add detail that the source does not have.' +
         (CONF.wav === 'details' ? ' MP3 has no bit depth: a 24-bit or 32-bit float WAV gives an MP3 of the same size as a 16-bit one.' : '');
     }
+    if (s.format === 'wav' && CONF.wavOut) return wavHint(s);
     if (s.format === 'wav') {
       return '16-bit WAV stores the decoded sound without compressing it again, but takes about ' + (s.mono ? '5.3' : '10.6') +
         ' MB a minute (' + (s.mono ? 'mono' : 'stereo') + ', 44.1 kHz). Limit on this device: ' + fmtBytes(WAV_LIMIT) + ' per file.' +
@@ -1721,7 +1839,16 @@
     var copy = settings.format === 'copy';
     dom.bitrateField.hidden = settings.format !== 'mp3';
     if (dom.speech) dom.speech.hidden = settings.format !== 'mp3';
-    if (dom.presets) dom.presets.hidden = settings.format !== 'mp3';
+    if (dom.presets) {
+      // Each preset shows while its format is chosen, the row while one does.
+      var anyPreset = false;
+      dom.presets.querySelectorAll('button').forEach(function (b) {
+        b.hidden = (b.getAttribute('data-format') || 'mp3') !== settings.format;
+        if (!b.hidden) anyPreset = true;
+      });
+      dom.presets.hidden = !anyPreset;
+    }
+    if (dom.bitsField) dom.bitsField.hidden = dom.rateField.hidden = settings.format !== 'wav';
     dom.channelsField.hidden = copy;
     var rest = others('mp3', 'and');
     setMsg(dom.formatHint, formatHint() + (SIMD || !offered('mp3') ? '' : ' MP3 needs a newer browser (with WebAssembly SIMD, such as Safari 16.4 or later)' +
@@ -1742,6 +1869,7 @@
   function convertible(e) {
     if (!e.t || e.t.drm || (e.status !== 'ready' && e.status !== 'failed')) return false;
     if ((settings.format === 'mp3' && !SIMD && !asIs(e)) || tooBig(e)) return false;
+    if (settings.format !== 'copy' && tooLongWhole(e)) return false;
     return settings.format === 'copy' ? e.t.codec === 'aac' : canDecode(e);
   }
   function pendingEntries() {
@@ -1765,9 +1893,10 @@
   });
 
   // ---------- WAV to MP3 options (presets, tags, saving, stream, wav) ----------
-  // Presets set the bitrate and channel fields.
+  // Presets set the bitrate and channel fields (a WAV preset its own fields).
   if (dom.presets) dom.presets.querySelectorAll('button').forEach(function (b) {
     b.addEventListener('click', function () {
+      if (b.getAttribute('data-format') === 'wav') { wavPreset(b); return; }
       var mono = b.getAttribute('data-mono') === '1';
       dom.bitrate.value = b.getAttribute('data-kbps');
       dom.channels.value = mono ? 'mono' : 'keep';
@@ -1809,14 +1938,14 @@
   }
   function userError(text) { var x = new Error(text); x.userText = text; return x; }
   async function saveMp3Inside(e) {
-    var tags = tagsFor(e), w = e.media.wav, blob;
+    var tags = tagsFor(e), w = e.media.wav, blob;   // tags are null with "Save without tags"
     if (e.sel.start <= 0 && e.sel.end >= e.durMs) blob = A.wavMp3(e.media, tags);
     else {
       var r = await A.readMp3(e.media.file.slice(w.dataStart, w.dataEnd)), sr = e.t.sr;
       var c = r.frames && A.mp3Cut(r.bytes, r.frames, Math.round(e.sel.start * sr / 1000), Math.round(e.sel.end * sr / 1000));
       if (!c) throw userError('This part of the MP3 inside could not be cut without re-encoding. Untick “Save the MP3 inside as it is” to re-encode it.');
-      var v1 = A.id3v1(tags);
-      blob = new Blob([A.id3v23(tags), c.bytes].concat(v1 ? [v1] : []), { type: 'audio/mpeg' });
+      var v1 = tags ? A.id3v1(tags) : null;
+      blob = new Blob([tags ? A.id3v23(tags) : new Uint8Array(0), c.bytes].concat(v1 ? [v1] : []), { type: 'audio/mpeg' });
     }
     var used = new Set();
     entries.forEach(function (x) { if (x.result) used.add(x.result.name.toLowerCase()); });
@@ -1963,36 +2092,41 @@
   }
 
   // stream=big: an MP3 too big to build in memory is written to a file.
-  var STREAM_FROM = 200e6;
+  var STREAM_FROM = 200e6;   // bytes of MP3 or WAV from which a file is written as it converts
   var CAN_STREAM = CONF.stream === 'big' && typeof window.showSaveFilePicker === 'function';
   var picking = false;
-  function bigMp3(e) { return CONF.stream === 'big' && settings.format === 'mp3' && !asIs(e) && !!e.media && estimateBytes(e) >= STREAM_FROM; }
-  function tooBig(e) { return !CAN_STREAM && bigMp3(e) && estimateBytes(e) > WAV_LIMIT; }
+  function bigOut(e) {
+    return CONF.stream === 'big' && (settings.format === 'wav' || (settings.format === 'mp3' && !asIs(e))) && !!e.media && estimateBytes(e) >= STREAM_FROM;
+  }
+  function tooBig(e) { return !CAN_STREAM && bigOut(e) && estimateBytes(e) > WAV_LIMIT; }
   function tooBigText(e) {
-    var limit = WAV_LIMIT >= 1e9 ? WAV_LIMIT / 1e9 + ' GB' : WAV_LIMIT / 1e6 + ' MB';
-    return 'As MP3 this would be about ' + fmtBytes(estimateBytes(e)) + ', more than the ' + limit + (A.PHONE ? ' a phone' : ' this browser') +
-      ' can build in memory. Choose a lower bitrate, Mono or a shorter part' + (dom.trim ? ' (under Trim, fades and volume)' : '') + ', or use Chrome' +
-      (A.PHONE ? ' on Android, or Chrome or Edge on a computer' : ' or Edge') + ', which can write a big MP3 straight to a file as it converts.';
+    var limit = WAV_LIMIT >= 1e9 ? WAV_LIMIT / 1e9 + ' GB' : WAV_LIMIT / 1e6 + ' MB', wav = settings.format === 'wav', what = wav ? 'WAV' : 'MP3';
+    return 'As ' + what + ' this would be about ' + fmtBytes(estimateBytes(e)) + ', more than the ' + limit + (A.PHONE ? ' a phone' : ' this browser') +
+      ' can build in memory. Choose ' + (wav ? (CONF.wavOut ? 'a lower sample rate or bit depth, ' : '') + 'Mono' : 'a lower bitrate, Mono') + ' or a shorter part' +
+      (dom.trim ? ' (under Trim, fades and volume)' : '') + ', or use Chrome' +
+      (A.PHONE ? ' on Android, or Chrome or Edge on a computer' : ' or Edge') + ', which can write a big ' + what + ' straight to a file as it converts.';
   }
   function estimateNotes(e, plan) {
     var text = '';
     if (CONF.wav === 'details' && settings.format === 'mp3' && !asIs(e) && plan.sampleRate !== e.t.sr) {
       text += ' MP3 has no ' + fmtKhz(e.t.sr) + ', so its sound is resampled to ' + fmtKhz(plan.sampleRate) + '.';
     }
-    if (CAN_STREAM && bigMp3(e)) text += ' An MP3 this big is written straight to a file as it converts: Convert asks where to save it.';
+    if (CONF.wavOut && settings.format === 'wav') text += wavNotes(e);
+    if (CAN_STREAM && bigOut(e)) text += ' ' + (settings.format === 'wav' ? 'A WAV' : 'An MP3') + ' this big is written straight to a file as it converts: Convert asks where to save it.';
     return text;
   }
   function moreToSave() {
-    var n = CAN_STREAM ? pendingEntries().filter(bigMp3).length : 0;
+    var n = CAN_STREAM ? pendingEntries().filter(bigOut).length : 0;
     return n ? ' ' + (n === 1 ? 'One more file is' : n + ' more files are') + ' written straight to a file: press Convert to choose where.' : '';
   }
   // Asks where to save the first big MP3 (a save dialog needs a press of its
   // own); returns the files to convert now, or null when none was chosen.
   async function chooseSaveFile(list) {
-    var pick = list.filter(bigMp3)[0];
+    var pick = list.filter(bigOut)[0], wav = settings.format === 'wav';
     picking = true;
     try {
-      pick.saveTo = await window.showSaveFilePicker({ suggestedName: pick.base + '.mp3', types: [{ description: 'MP3 audio', accept: { 'audio/mpeg': ['.mp3'] } }] });
+      pick.saveTo = await window.showSaveFilePicker(wav ? { suggestedName: pick.base + '.wav', types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] }
+        : { suggestedName: pick.base + '.mp3', types: [{ description: 'MP3 audio', accept: { 'audio/mpeg': ['.mp3'] } }] });
     } catch (err) {
       if (err && err.name === 'AbortError') say('Nothing was converted: no file was chosen to save ' + pick.name + ' in.');
       else setMsg(dom.error, 'No file could be opened to save ' + pick.name + ' in (' + cut(String(err && err.message || err), 120) + ').');
@@ -2000,13 +2134,113 @@
     } finally {
       picking = false;
     }
-    return list.filter(function (e) { return e === pick || !bigMp3(e); });
+    return list.filter(function (e) { return e === pick || !bigOut(e); });
   }
   // A failure to write the file chosen, said as such; the engine's own errors as they are.
   function saveError(save, err) {
     if (err && err.userText) return err;
     if (err && err.name && !/^(NotAllowed|QuotaExceeded|NoModificationAllowed|InvalidState|NotFound|NotReadable|Security|Abort)Error$/.test(err.name)) return err;
-    return userError('The MP3 could not be written to ' + save.name + ' (' + cut(String(err && err.message || err), 120) + '). Check the space left on the device, then convert it again.');
+    return userError('The ' + (settings.format === 'wav' ? 'WAV' : 'MP3') + ' could not be written to ' + save.name + ' (' + cut(String(err && err.message || err), 120) + '). Check the space left on the device, then convert it again.');
+  }
+
+  // ---------- MP3 to WAV options (wav_out, notags, mp3, sample) ----------
+  // wav_out="options": bytes a sample of each bit depth takes, and what each is for.
+  var WAV_BYTES = { s16: 2, s24: 3, f32: 4, ulaw: 1, alaw: 1 };
+  var WAV_WHAT = {
+    s16: '16-bit PCM, as on a CD, which every player, editor and burning program reads',
+    s24: '24-bit PCM, which video editors and recording programs work in',
+    f32: '32-bit float, which audio editors work in',
+    ulaw: '8-bit µ-law, the G.711 of phone systems in North America and Japan, at telephone quality',
+    alaw: '8-bit A-law, the G.711 of phone systems in Europe and most other countries, at telephone quality'
+  };
+  var BITS_TEXT = { s16: '16-bit', s24: '24-bit', f32: '32-bit float', ulaw: '8-bit µ-law', alaw: '8-bit A-law' };
+  function wavHint(s) {
+    var rate = s.rate || 44100, ch = s.mono ? 1 : 2, mb = WAV_BYTES[s.bits] * rate * ch * 60 / 1e6;
+    var limit = WAV_LIMIT >= 1e9 ? WAV_LIMIT / 1e9 + ' GB' : WAV_LIMIT / 1e6 + ' MB';
+    return 'WAV, ' + WAV_WHAT[s.bits] + '. A minute of ' + (ch === 1 ? 'mono' : 'stereo') + ' at ' + fmtKhz(rate) + ' takes ' +
+      mb.toLocaleString('en-GB', { maximumFractionDigits: mb < 10 ? 2 : 1 }) + ' MB. A higher bit depth or rate makes a bigger file but cannot add detail that the original does not have. ' +
+      'Each WAV is built in memory, up to ' + limit + ' on this device' + (CAN_STREAM ? ', and one of 200 MB or more is written straight to a file you choose.' : '.');
+  }
+  // What the size estimate adds for a WAV: a new rate, and 16 bits from a whole decode.
+  function wavNotes(e) {
+    var t = e.t, text = '';
+    if (settings.rate && t.sr && settings.rate !== t.sr) text += ' Its sound is resampled from ' + fmtKhz(t.sr) + ' to ' + fmtKhz(settings.rate) + '.';
+    if (t.whole && !t.decodable && (settings.bits === 's24' || settings.bits === 'f32')) {
+      text += ' This browser decodes ' + A.codecName(t) + ' whole, at 16 bits, so this ' + BITS_TEXT[settings.bits] + ' WAV holds no more than a 16-bit one.';
+    }
+    return text;
+  }
+  // Bytes the tags add: an ID3 tag (with the cover) and, in a WAV, RIFF INFO.
+  var utf8 = new TextEncoder();
+  function tagBytes(e) {
+    var t = tagsFor(e);
+    if (!t) return 0;
+    var n = A.id3v23(t).length + (settings.format === 'wav' ? 8 : 128);
+    if (settings.format === 'wav') ['title', 'artist', 'album', 'composer', 'genre', 'date', 'comment'].forEach(function (k) { if (t[k]) n += utf8.encode(t[k]).length + 10; });
+    return n;
+  }
+  // A WAV preset sets the bit depth, rate and channel fields.
+  function wavPreset(b) {
+    var ch = b.getAttribute('data-ch'), rate = +b.getAttribute('data-rate');
+    dom.bits.value = b.getAttribute('data-bits');
+    dom.rate.value = String(rate);
+    dom.channels.value = ch;
+    stopPlay();
+    readSettings();
+    say(b.textContent.replace(/:.*$/, '') + ' settings: WAV at ' + fmtKhz(rate) + ', ' + BITS_TEXT[settings.bits] + ', ' +
+      (ch === 'mono' ? 'mono.' : ch === 'stereo' ? 'stereo.' : 'channels as in the file.'));
+  }
+  if (dom.bits) dom.bits.addEventListener('change', readSettings);
+  if (dom.rate) dom.rate.addEventListener('change', readSettings);
+  // notags="switch": no tags at all, and the Tags fields say so.
+  function syncNoTags() {
+    if (!dom.notags) return;
+    var off = settings.notags;
+    [dom.title, dom.artist, dom.album, dom.cover, dom.more, dom.albumArtist, dom.composer, dom.genre, dom.year, dom.track, dom.disc].forEach(function (f) {
+      if (f) f.disabled = off;
+    });
+    dom.notagsNote.hidden = !off;
+  }
+  if (dom.notags) dom.notags.addEventListener('change', readSettings);
+  // mp3="details": a file this browser can only decode whole (no WebCodecs)
+  // and that is longer than the engine decodes at once is refused at once.
+  function tooLongWhole(e) {
+    return CONF.mp3 === 'details' && !!e.t && e.t.whole && !e.t.decodable && e.durMs / 1000 > A.limits.whole;
+  }
+  // mp3="details": how long the result is, against what the MP3 says it holds.
+  function mp3Promised(e) {
+    var t = e.t, x = t && t.mp3;
+    if (!x || !(t.sr > 0)) return 0;
+    if (x.gapless) return x.samples / t.sr * 1000;
+    return x.frames > 0 ? x.frames * (t.sr >= 32000 ? 1152 : 576) / t.sr * 1000 : 0;
+  }
+  function mp3ShortText(e) {
+    return 'This MP3 is incomplete, perhaps a download that did not finish: its header says it holds ' + fmtTime(mp3Promised(e)) +
+      ' of sound, but its frames stop at ' + fmtTime(e.durMs) + '. That part can still be converted.';
+  }
+  function mp3Note(e) {
+    var t = e.t, x = t && t.mp3;
+    if (!x || e.status === 'error' || !(t.sr > 0)) return '';
+    if (x.gapless) return 'Gapless: the encoder’s delay and padding, which its LAME tag gives, are left out, so nothing is added before or after the sound.';
+    return 'No LAME tag gives the encoder’s delay, so about ' + Math.round(x.leadIn / t.sr * 1000) + ' ms of silence (' + x.leadIn.toLocaleString('en-GB') +
+      ' samples) stays at the start.';
+  }
+  // sample="mp3": the sample sound as an MP3 (the WAV where no MP3 encoder works).
+  async function sampleMp3() {
+    var wav = sampleFile(), m = null;
+    try {
+      await A.load();
+      if (!A.canWriteMp3()) return wav;
+      m = await A.open(wav);
+      var tags = A.emptyTags();
+      tags.title = 'Sample sound';
+      var r = await A.convert(m, m.primary, { format: 'mp3', kbps: 192, tags: tags }).promise;
+      return new File([r.blob], 'sample.mp3', { type: 'audio/mpeg' });
+    } catch (err) {
+      return wav;
+    } finally {
+      A.close(m);
+    }
   }
 
   // ---------- Converting ----------
@@ -2019,9 +2253,10 @@
       if (!used.has(n.toLowerCase())) { used.add(n.toLowerCase()); return n; }
     }
   }
-  // The tags written: what the Tags fields show, and the cover when kept.
-  // (Pair-page options: a switch that writes no tags returns null here.)
+  // The tags written: what the Tags fields show, and the cover when kept;
+  // none with "Save without tags" (notags="switch").
   function tagsFor(e) {
+    if (settings.notags) return null;
     var t = A.emptyTags();
     t.title = e.tags.title;
     t.artist = e.tags.artist;
@@ -2039,7 +2274,7 @@
     if (asIs(e)) return saveMp3Inside(e);
     var o = convertOptions(e);
     o.tags = tagsFor(e);
-    if (ALL_TAGS && settings.shrink && o.tags.images.length) o.tags.images = await Promise.all(o.tags.images.map(shrinkImage));
+    if (ALL_TAGS && settings.shrink && o.tags && o.tags.images.length) o.tags.images = await Promise.all(o.tags.images.map(shrinkImage));
     o.onProgress = onProgress;
     var save = e.saveTo || null;
     e.saveTo = null;
@@ -2083,7 +2318,7 @@
     var list = pendingEntries();
     if (!list.length) return;
     // stream=big: where to write the first MP3 too big to build in memory.
-    if (CAN_STREAM && list.some(bigMp3)) {
+    if (CAN_STREAM && list.some(bigOut)) {
       list = await chooseSaveFile(list);
       if (!list) return;
     }
@@ -2271,7 +2506,8 @@
   }
   dom.sample.addEventListener('click', function () {
     if (tooSoon(dom.sample, 'sample')) return;
-    addFiles([sampleFile()]);
+    if (CONF.sample === 'mp3') sampleMp3().then(function (f) { addFiles([f]); });
+    else addFiles([sampleFile()]);
   });
 
   // ---------- Page events ----------
