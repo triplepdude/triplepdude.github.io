@@ -35,7 +35,8 @@ howto: |
   Then pick how to size the output: a scale factor (2× suits high-density
   screens), an exact width or height with the other side in proportion, both
   width and height (the drawing is centred and keeps its proportions), or a
-  print resolution in DPI.
+  print resolution in DPI. For favicons and app icons, the
+  [Favicon Generator](/favicon-generator/) makes every size from one SVG.
 
   | DPI | Scale | A 2 in (192 px) wide SVG becomes |
   |---|---|---|
@@ -352,7 +353,7 @@ faq:
     it.omitted = canvas.dataset.omitted || null;
     try {
       if (it.token !== t) return;
-      blob = await TTImage.encode(canvas, s.fmt, { quality: s.quality, background: s.transparent ? null : s.bg, dpi: s.mode === 'dpi' ? s.dpi : 0 });
+      blob = await TTImage.encode(canvas, s.fmt, { quality: s.quality, background: s.transparent ? null : s.bg, dpi: s.mode === 'dpi' ? s.dpi : 0, wasm: true });
       var k = Math.min(1, 112 / Math.max(size.w, size.h));
       thumb = await TTImage.encode(canvas, 'png', { width: size.w * k, height: size.h * k, background: s.transparent ? null : s.bg });
     } finally {
@@ -633,8 +634,9 @@ faq:
     addFiles(e.dataTransfer.files);
   });
 
-  // Safari and older browsers cannot save WebP from a web page.
-  TTImage.canEncode('webp').then(function (ok) {
+  // WebP is encoded by libwebp (TTImage's { wasm: true }), also in Safari; only
+  // browsers without WebAssembly in module workers cannot save it.
+  TTImage.canEncode('webp', { wasm: true }).then(function (ok) {
     if (ok) return;
     var o = fmtSel.querySelector('option[value="webp"]');
     o.disabled = true;

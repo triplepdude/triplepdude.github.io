@@ -721,7 +721,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(guide, /For photos, JPG or WebP keeps far more detail at the same size\. To convert PNG photos to JPG with no target size, use the PNG to JPG converter, which shows how much smaller each file gets\./);
   assert.match(guide, /Rotation: the turn a phone recorded is applied to the pixels, so the photo stays upright\. To turn or mirror a picture yourself, use Flip Image\./);
   const links = await page.$$eval('.prose a[href^="/"], .faq a[href^="/"]', as => as.map(a => a.getAttribute('href')));
-  assert.deepEqual(links, ['/resize-image/', '/png-to-jpg/', '/remove-exif-data/', '/flip-image/', '/compress-pdf/']);
+  assert.deepEqual(links, ['/resize-image/', '/png-to-jpg/', '/remove-exif-data/', '/flip-image/', '/compress-pdf/', '/jpg-to-webp/', '/gif-to-mp4/']);
   for (const href of links) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', href.replace(/\//g, '') + '.html')), `${href} is linked from the guide but is not a tool page`);
   }
@@ -743,4 +743,30 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await noKit.$$eval('li[data-id]', l => l.length), 0);
   assert.deepEqual(scriptErrors, []);
   await unkit.close();
+
+  // ---------- Safari: its canvas cannot write WebP, so libwebp (TTImage's { wasm: true }) does ----------
+  await page.addInitScript(() => {
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
+    if (typeof OffscreenCanvas === 'function') {
+      const c2b = OffscreenCanvas.prototype.convertToBlob;
+      OffscreenCanvas.prototype.convertToBlob = function (o) { return c2b.call(this, o && o.type === 'image/webp' ? Object.assign({}, o, { type: 'image/png' }) : o); };
+    }
+  });
+  await open();
+  assert.deepEqual(await page.evaluate(async () => [await TTImage.canEncode('webp'), await TTImage.canEncode('webp', { wasm: true })]), [false, true]);
+  assert.deepEqual(await page.$eval('#cmpi-format option[value="webp"]', o => [o.disabled, o.textContent]), [false, 'WebP (smaller, keeps transparency)']);
+  await page.setInputFiles('#cmpi-file', F('logo.png'));
+  await page.selectOption('#cmpi-format', 'webp');
+  assert.equal(await settle(), 'done');
+  const sw = await download();
+  assert.equal(sw.name, 'logo-compressed.webp');
+  const swChunks = [];
+  for (let o = 12; o + 8 <= sw.buf.length; o += 8 + sw.buf.readUInt32LE(o + 4) + (sw.buf.readUInt32LE(o + 4) & 1)) swChunks.push(sw.buf.toString('latin1', o, o + 4).trim());
+  assert.ok(swChunks.includes('VP8') || swChunks.includes('VP8L'), 'a WebP bitstream: ' + swChunks);
+  assert.ok(!swChunks.includes('ICCP'), 'made by libwebp, not a canvas (which adds an sRGB profile): ' + swChunks);
+  const swImg = await decode(sw.buf, [[2, 2], [150, 100]]);
+  assert.deepEqual([swImg.w, swImg.h], [300, 200]);
+  assert.equal(swImg.px[0][3], 0, 'the WebP keeps the transparent corner');
+  assert.ok(near(swImg.px[1], [20, 60, 200, 255], 20), `centre stays blue: ${swImg.px[1]}`);
 };

@@ -181,6 +181,14 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await text('#tt-time'), '1:00');
   assert.equal(await active(), 'tt-input');
 
+  // Speed budgets are in main-thread CPU time (Chrome's ThreadTime metric), not wall time: on a busy
+  // machine the page waits for a CPU, which once stretched typing 20,000 characters to 9.8 s.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Performance.enable');
+  const threadMs = async () => (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'ThreadTime').value * 1000;
+  const cpuMs = async action => { const t0 = await threadMs(); const result = await action(); return { ms: (await threadMs()) - t0, result }; };
+  const nextFrame = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+
   // ---- Paste is refused, even a megabyte of it ----
   // beforeinput cancels it. The paste event itself is not cancelled: that
   // would mark the field as one that blocks pasting (Lighthouse Best Practices).
@@ -190,9 +198,8 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   });
   await page.evaluate(() => navigator.clipboard.writeText('paste '.repeat(175000)));
   await page.focus('#tt-input');
-  const tp = Date.now();
-  await page.keyboard.press('Control+V');
-  assert.ok(Date.now() - tp < 3000, 'a megabyte paste is refused at once');
+  const paste = await cpuMs(() => page.keyboard.press('Control+V'));
+  assert.ok(paste.ms < 3000, `refusing a megabyte paste took ${Math.round(paste.ms)} ms of CPU time`);
   assert.equal(await value(), '');
   assert.equal(await text('#tt-note'), 'Pasting is turned off in the typing test: type the text yourself.');
   assert.equal(await page.evaluate(() => window.__paste === null ? 'no paste event' : window.__paste.defaultPrevented), false, 'the paste event is not cancelled');
@@ -200,31 +207,29 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.evaluate(() => document.querySelector('#tt-box').classList.contains('is-ready')), true);
 
   // ---- A megabyte added in one go some other way is refused at once ----
-  const flood = await page.evaluate(() => {
+  const flood = await cpuMs(() => page.evaluate(() => {
     const i = document.getElementById('tt-input');
-    const t0 = performance.now();
     i.value = 'flood word '.repeat(100000);
     i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-    return { ms: performance.now() - t0, len: i.value.length };
-  });
-  assert.ok(flood.ms < 3000, `refusing a megabyte took ${Math.round(flood.ms)} ms`);
-  assert.equal(flood.len, 0);
+    return i.value.length;
+  }));
+  assert.ok(flood.ms < 3000, `refusing a megabyte took ${Math.round(flood.ms)} ms of CPU time`);
+  assert.equal(flood.result, 0);
   assert.equal(await text('#tt-note'), BULK_NOTE);
   assert.equal(await text('#tt-time'), '1:00');
   assert.equal(await text('#tt-error'), '');
 
   // ---- Past 20,000 characters (only a script gets there) the rest is cut, and the box says why ----
-  const grow = await page.evaluate(() => {
+  const grow = await cpuMs(() => page.evaluate(() => {
     const i = document.getElementById('tt-input');
-    const t0 = performance.now();
     for (let k = 0; k < 220; k++) {
       i.value += 'flood word '.repeat(9);
       i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     }
-    return { ms: performance.now() - t0, len: i.value.length };
-  });
-  assert.ok(grow.ms < 8000, `typing 20,000 characters took ${Math.round(grow.ms)} ms`);
-  assert.equal(grow.len, 20000);
+    return i.value.length;
+  }));
+  assert.ok(grow.ms < 8000, `typing 20,000 characters took ${Math.round(grow.ms)} ms of CPU time`);
+  assert.equal(grow.result, 20000);
   assert.equal(await text('#tt-error'), 'Only the first 20,000 characters can be typed in one test; the rest was cut off.');
   assert.equal(await page.getAttribute('#tt-input', 'aria-invalid'), 'true');
   assert.deepEqual((await page.getAttribute('#tt-input', 'aria-describedby')).split(' ').sort(), ['tt-error', 'tt-hint']);
@@ -234,31 +239,36 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // stays quick because only 20 extra letters are drawn, and an emoji at the
   // limit is not cut in half.
   await page.click('#tt-restart');
-  const held = await page.evaluate(() => {
+  await page.evaluate(() => {
     const i = document.getElementById('tt-input');
     for (let k = 0; k < 202; k++) {
       i.value += 'a'.repeat(99);
       i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     }
-    const t0 = performance.now();
+  });
+  await nextFrame(); // the long word is drawn before the 60 keys are timed
+  const keys = await cpuMs(() => page.evaluate(() => {
+    const i = document.getElementById('tt-input');
     for (let k = 0; k < 30; k++) {
       i.value = i.value.slice(0, -1);
       i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
       i.value += 'a';
       i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     }
-    const ms = (performance.now() - t0) / 60;
+  }));
+  const held = await page.evaluate(() => {
+    const i = document.getElementById('tt-input');
     i.value += 'a';
     i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     i.value += '\u{1F600}tail';
     i.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     const word = document.querySelector('#tt-text .tt-w');
     return {
-      ms, spans: word.querySelectorAll('.tt-l').length, text: word.textContent,
+      spans: word.querySelectorAll('.tt-l').length, text: word.textContent,
       last: word.lastElementChild.className, before: word.lastElementChild.previousElementSibling.textContent
     };
   });
-  assert.ok(held.ms < 25, `a key in a 20,000-letter word took ${held.ms.toFixed(1)} ms`);
+  assert.ok(keys.ms / 60 < 25, `a key in a 20,000-letter word took ${(keys.ms / 60).toFixed(1)} ms of CPU time`);
   // The word's own letters, 20 extra ones, an ellipsis and the caret.
   assert.ok(held.text.endsWith('a'.repeat(20) + '…'), held.text);
   assert.equal(held.spans, held.text.length + 1);
