@@ -513,8 +513,11 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.getAttribute('#p2s-file', 'aria-invalid'), null);
   // A file the decoder warns about is traced with a note: a PNG damaged half way
   // and one cut off (from the image converter's fixtures).
-  for (const [n, re] of [['damaged.png', /seems to be damaged/], ['cut-big.png', /seems to be cut off/]]) {
-    await page.setInputFiles('#p2s-file', { name: n, mimeType: 'image/png', buffer: fs.readFileSync(path.join(fixtures, '..', 'image-converter', n)) });
+  // So is a wide-gamut picture (its colours become sRGB, as SVG colours are) and an HDR one.
+  for (const [dir, n, re] of [['image-converter', 'damaged.png', /seems to be damaged/], ['image-converter', 'cut-big.png', /seems to be cut off/],
+    ['image-converter', 'p3.png', /^Colours were converted to sRGB from the wide-gamut profile of the picture, as SVG colours are sRGB\./],
+    ['compress-image', 'hdr-pq.heic', /This is an HDR picture\. It is traced in standard range/]]) {
+    await page.setInputFiles('#p2s-file', { name: n, mimeType: n.endsWith('.heic') ? 'image/heic' : 'image/png', buffer: fs.readFileSync(path.join(fixtures, '..', dir, n)) });
     await page.waitForFunction(name => document.querySelector('#p2s-drop-title').textContent === name, n);
     await page.waitForFunction(r => new RegExp(r).test(document.querySelector('#p2s-note').textContent), re.source);
   }
