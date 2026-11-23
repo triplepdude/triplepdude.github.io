@@ -441,6 +441,27 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.check('#m2m-f-mp3');
   await page.click('#m2m-clear');
 
+  // ---------- Apple Lossless: refused here as before; the engine decodes it for a page that asks ----------
+  // /m4a-to-mp3/ asks (alac="decode"); this page keeps an ALAC track as
+  // mediabunny lists it, with no codec. The samples are /m4a-to-mp3/'s.
+  const LOSSLESS = name => path.join(fixtures, '..', 'm4a-to-mp3', name);
+  await page.setInputFiles('#m2m-file', [LOSSLESS('alac16.m4a')]);
+  await waitRead();
+  assert.equal((await card('alac16.m4a')).msg, 'Its audio uses an unknown codec (alac), which this page cannot read.');
+  assert.deepEqual(await page.evaluate(() => [TTAudio.limits.mp3, TTAudio.limits.alac]), [2e9, 2e9], 'limits on a computer');
+  const viaEngine = await page.evaluate(async b64 => {
+    const u8 = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const m = await TTAudio.open(new File([u8], 'alac16.m4a'), { alac: true });
+    const t = m.tracks[m.primary];
+    const r = await TTAudio.convert(m, m.primary, { format: 'wav' }).promise;
+    const head = new Uint8Array(await r.blob.slice(0, 64).arrayBuffer());
+    TTAudio.close(m);
+    return { codec: t.codec, bits: t.alac.bits, decodable: t.decodable, size: r.blob.size, rate: r.sampleRate, samples: r.samples, sampleFormat: r.sampleFormat, wavBits: head[34] };
+  }, fs.readFileSync(LOSSLESS('alac16.m4a')).toString('base64'));
+  assert.deepEqual(viaEngine, { codec: 'alac', bits: 16, decodable: true, size: 44 + 66150 * 4, rate: 44100, samples: 66150, sampleFormat: 's16', wavBits: 16 },
+    'TTAudio.open(file, { alac: true }) decodes Apple Lossless');
+  await row('alac16.m4a').locator('.m2m-remove').click();
+
   // ---------- RIFF INFO text in UTF-8 or in Windows-1252 ----------
   for (const [name, title, artist] of [['info-utf8.wav', exp['info-utf8.wav'].info.title, exp['info-utf8.wav'].info.artist],
     ['info-1252.wav', exp['info-1252.wav'].info.INAM, exp['info-1252.wav'].info.IART]]) {
@@ -1949,6 +1970,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const pp = await phone.newPage();
   watch(pp);
   await pp.goto(page.url());
+  assert.deepEqual(await pp.evaluate(() => [TTAudio.limits.mp3, TTAudio.limits.alac]), [300e6, 300e6], 'smaller limits on a phone');
   await pp.tap('#m2m-sample');
   await waitRead(pp);
   await waitWave(pp);

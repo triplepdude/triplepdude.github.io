@@ -8,8 +8,10 @@
  * writes MP3, WAV or M4A with tags. Its own parts: an MP3 frame reader and
  * writer (gapless MP3s, exact cuts without re-encoding), a WAV reader that
  * mends wrong header sizes, a WAV writer (16 and 24-bit, float, µ-law,
- * A-law, RF64) and a windowed-sinc resampler. It has no page UI and stores
- * nothing.
+ * A-law, RF64), a windowed-sinc resampler and an Apple Lossless (ALAC)
+ * decoder (@mgz-dev/alac in assets/vendor/alac/, run in the module worker
+ * assets/js/alac-worker.js, both loaded only for an ALAC file). It has no
+ * page UI and stores nothing.
  *
  * Load it where it is needed; it loads nothing more until load() is called:
  *   <script src="{{ '/assets/js/audio-engine.js' | relative_url }}"></script>
@@ -17,7 +19,7 @@
  *
  * ORDER OF CALLS
  *   1. await TTAudio.load()                    before anything that reads a file
- *   2. var m = await TTAudio.open(file)        per file: m.tracks, m.primary, m.tags
+ *   2. var m = await TTAudio.open(file[, { alac: true }])  per file: m.tracks, m.primary, m.tags
  *   3. var src = await TTAudio.decodeSource(m, ti)   sound of track ti, then
  *        TTAudio.scan(src, levels, options)    waveform levels and the peak, and/or
  *        TTAudio.buffers(src, from, to)        AudioBuffers to play
@@ -47,12 +49,21 @@
  *                .aax files that cannot be read at all).
  *   EMPTY_TRACK  open(): the default sound track holds no sound.
  *   NO_DECODE    decodeSource(), convert(): this browser has no decoder for
- *                the codec (.track is the track info).
+ *                the codec (.track is the track info), or the track is one
+ *                the engine cannot decode (track.unsupported says why).
+ *   ALAC_FAILED  decodeSource(), convert(), and reads of its sound: the
+ *                Apple Lossless decoder could not open or decode the file
+ *                (damaged, or too big for the memory of the device).
+ *   ALAC_CLOSED  the same: the file's Apple Lossless decoder was closed to
+ *                keep within limits.alac while another file was opened (a
+ *                decoder that is answering reads is never closed); trying
+ *                again opens it again.
  *   TOO_LONG     decodeSource(), convert(): the track must be decoded whole,
  *                and it is longer than limits.whole seconds (.limit).
  *   NOT_AAC      convert() with format 'copy': only AAC is copied to .m4a.
- *   TOO_BIG      convert() with format 'wav': the WAV would be over
- *                limits.wav bytes (.bytes, .limit).
+ *   TOO_BIG      convert(): the WAV would be over limits.wav bytes, or the
+ *                MP3 over limits.mp3 (one not written into o.writable)
+ *                (.bytes, .limit, .format 'wav' or 'mp3').
  *   NO_ENCODER   convert(): the browser cannot write the format (MP3
  *                without WebAssembly SIMD, or the encoder did not load).
  *   CANNOT_COPY  convert() with format 'copy': the packets cannot be copied.
@@ -67,12 +78,19 @@
  *   TTAudio.canWriteMp3() -> true once the MP3 encoder is registered.
  *   TTAudio.PHONE     true on phones and tablets (smaller memory limits).
  *   TTAudio.limits    { wav: bytes of WAV built in memory (2 GB, 300 MB on a
- *     phone), zip: bytes put in one ZIP (the same), whole: seconds decoded at
- *     once without a streaming decoder (3600, 1200 on a phone) }.
+ *     phone), mp3: bytes of MP3 built in memory when no o.writable takes it
+ *     (as wav), zip: bytes put in one ZIP (as wav), whole: seconds decoded
+ *     at once without a streaming decoder (3600, 1200 on a phone), alac:
+ *     bytes of Apple Lossless files the decoder holds at once, and so the
+ *     largest it decodes (2 GB, 300 MB on a phone) }.
  *   TTAudio.loadScript(url) -> Promise: a classic script, loaded once.
  *
  * OPENING A FILE
- *   TTAudio.open(file) -> Promise of a media object:
+ *   TTAudio.open(file, options) -> Promise of a media object. options: {
+ *     alac: true to decode Apple Lossless with the engine's own decoder (see
+ *     decodeSource); without it an ALAC track keeps the null codec that
+ *     mediabunny gives it and cannot be decoded, as before the decoder came }.
+ *     The media object:
  *     { file, input (mediabunny Input),
  *       container: 'mp4' | 'mov' | 'mkv' | 'webm' | 'mp3' | 'wav' | 'ogg' |
  *                  'flac' | 'adts' | 'mpegts',
@@ -82,9 +100,13 @@
  *     Track info:
  *     { track     the mediabunny InputAudioTrack
  *       codec     mediabunny's codec name ('aac', 'mp3', 'opus', 'vorbis',
- *                 'flac', 'ac3', 'pcm-s16', 'ulaw' ...), null when unknown
+ *                 'flac', 'ac3', 'pcm-s16', 'ulaw' ...), or 'alac' for
+ *                 Apple Lossless when open() was asked to decode it
+ *                 (mediabunny lists it without a codec); null when unknown
  *       internal  the container's codec id ('mp4a', 'alac', 'drms' ...), ''
  *       sr, ch    sample rate (Hz) and channels as the file states them
+ *                 (for ALAC as its own settings state them: an MP4 sample
+ *                 entry cannot hold rates above 65,535 Hz)
  *       lang, name  language code ('und' when none) and the track's title
  *       first     timestamp (s) of the first packet; may be negative
  *       t0        max(0, first): where the sound that is heard starts
@@ -94,12 +116,21 @@
  *       bitrate   bits per second; from the file's metadata, else measured
  *                 from the packets of the first 10 s (never a whole-file
  *                 scan); 0 for PCM and when unknown
- *       decodable this browser decodes it a piece at a time (WebCodecs, or
- *                 mediabunny's own PCM decoders)
+ *       decodable this browser decodes it a piece at a time (WebCodecs,
+ *                 mediabunny's own PCM decoders, or for ALAC the engine's
+ *                 decoder: WebAssembly SIMD, reference types and module
+ *                 workers, so Chrome 96, Firefox 114, Safari 16.4)
  *       whole     it is not decodable, but decodeAudioData may read it: the
  *                 whole track is decoded at once (see decodeSource)
  *       drm       '' or 'cenc' | 'fairplay' | 'audible' for an encrypted
  *                 track ('enca', 'drms' or 'aavd'), which is never decoded
+ *       alac      for Apple Lossless { bits (16, 24 ... per sample, 0 when
+ *                 the settings could not be read), frameLength }, else null
+ *       unsupported  '' or a sentence saying why the engine cannot decode
+ *                 this track although it knows the codec: ALAC of 20 or 32
+ *                 bits, of more than 2 channels, a file over limits.alac,
+ *                 sound over 4 GB, a second ALAC track (decodable is then
+ *                 false; NO_DECODE carries the sentence)
  *       mp3       for MP3 sound (an MP3 file, or MP3 in a WAV) { gapless:
  *                 true when a LAME tag gives the encoder delay and padding,
  *                 so that t0..end is exactly the sound encoded, as gapless
@@ -129,8 +160,15 @@
  *     decoded with decodeAudioData at its own rate and kept as 16-bit PCM in
  *     a WAV held in memory (base = 0), so 24-bit and float WAVs made from it
  *     carry 16 bits; one such decode is kept at a time, for the last media
- *     and track asked for. Rejects with NO_DECODE or TOO_LONG.
- *   TTAudio.release(media)  drops the whole decode of media, if it holds one.
+ *     and track asked for. An ALAC track is read through a WAV of 16 or
+ *     24-bit PCM that its decoder fills as mediabunny reads it (base = 0):
+ *     the decoder (a worker holding the whole file) is kept per media until
+ *     release() or close(), or until the files held would pass limits.alac,
+ *     when the one used least recently is closed unless it is answering
+ *     reads. Rejects with NO_DECODE, TOO_LONG or ALAC_FAILED; reads of an
+ *     ALAC track's sound can fail with ALAC_FAILED or ALAC_CLOSED.
+ *   TTAudio.release(media)  drops the whole decode of media, if it holds one,
+ *     and its ALAC decoder (a later decodeSource() starts a new one).
  *   TTAudio.buffers(src, from, to) -> async iterable of mediabunny's
  *     { buffer (AudioBuffer), timestamp, duration } from `from` to `to` (s, in
  *     src's own times: base + ms / 1000), for playing with Web Audio.
@@ -177,7 +215,8 @@
  *       sel       { start, end } in ms from t0 (default the whole track)
  *       volume    gain factor (default 1); fadeIn, fadeOut: seconds
  *       tags      a tag model (see TAGS) to write, or null to write no tags
- *       sampleFormat  WAV: 's16' (default), 's24', 'f32' (32-bit float),
+ *       sampleFormat  WAV: 's16' (the default, but 's24' for 24-bit ALAC,
+ *                 which then keeps every bit), 's24', 'f32' (32-bit float),
  *                 'ulaw' or 'alaw' (G.711, 8 bits), as wavWriter() writes
  *       sampleRate  WAV: the rate to write (default the sound's own)
  *       rf64      WAV: RF64 even under 4 GB (past 4 GB it is RF64 anyway)
@@ -196,8 +235,9 @@
  *     promise resolves { blob, ext ('mp3' | 'wav' | 'm4a'), mime, sampleRate,
  *     channels, samples (MP3, WAV: per channel, as written), kbps (MP3),
  *     sampleFormat (WAV) }; with writable, blob is null, streamed is true
- *     and size is the bytes written. Rejects with CANCELLED, NO_DECODE, TOO_LONG,
- *     NOT_AAC, TOO_BIG, NO_ENCODER or CANNOT_COPY, or another error.
+ *     and size is the bytes written. Rejects with CANCELLED, NO_DECODE,
+ *     TOO_LONG, NOT_AAC, TOO_BIG, NO_ENCODER, CANNOT_COPY, ALAC_FAILED or
+ *     ALAC_CLOSED, or another error.
  *     MP3 and WAV are made by the engine's own pipeline: the sound decoded a
  *     piece at a time from the start of the selection, cut to the sample,
  *     mixed, shaped, resampled where the rate changes (the windowed-sinc
@@ -377,18 +417,27 @@
   var VENDOR = new URL('../vendor/mediabunny/', SCRIPT || new URL('/assets/js/audio-engine.js', location.href).href).href;
   var LIB_URL = VENDOR + 'mediabunny.min.js';
   var MP3_URL = VENDOR + 'mediabunny-mp3-encoder.min.js';
+  var ALAC_WORKER_URL = new URL('alac-worker.js', SCRIPT || new URL('/assets/js/audio-engine.js', location.href).href).href;
 
   var UA = navigator.userAgent;
   var PHONE = /Android|iPhone|iPad|iPod|Mobile/i.test(UA) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(UA));
   var LIMITS = {
     wav: PHONE ? 300e6 : 2e9,       // bytes of WAV built in memory
+    mp3: PHONE ? 300e6 : 2e9,       // bytes of MP3 built in memory (not written into o.writable)
     zip: PHONE ? 300e6 : 2e9,       // bytes put in one ZIP
-    whole: PHONE ? 1200 : 3600      // seconds decoded at once without a streaming decoder
+    whole: PHONE ? 1200 : 3600,     // seconds decoded at once without a streaming decoder
+    alac: PHONE ? 300e6 : 2e9       // bytes of Apple Lossless files held by the decoder at once
   };
   // A module with one WebAssembly SIMD instruction: the MP3 encoder needs SIMD.
   var SIMD = (function () {
     try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; }
   })();
+  // A module with one reference-types instruction: the ALAC decoder needs
+  // reference types as well as SIMD (Chrome 96, Firefox 89, Safari 16.4).
+  var REFTYPES = (function () {
+    try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 111, 3, 2, 1, 0, 10, 6, 1, 4, 0, 208, 111, 11])); } catch (e) { return false; }
+  })();
+  var ALAC_OK = SIMD && REFTYPES && typeof Worker !== 'undefined';
   var STATS_SECONDS = 10;           // packets measured for a bitrate the file does not state
   var PROTECTED_MARK = 'tt-audio-protected';
   // Encrypted sample entries: CENC (films, streaming), Apple FairPlay, Audible.
@@ -405,7 +454,7 @@
   var K51_MONO = 1 - Math.SQRT1_2;
   var CODECS = new Map([['aac', 'AAC'], ['mp3', 'MP3'], ['opus', 'Opus'], ['vorbis', 'Vorbis'], ['flac', 'FLAC'],
     ['ac3', 'AC-3 (Dolby Digital)'], ['eac3', 'E-AC-3 (Dolby Digital Plus)'], ['dts', 'DTS'], ['truehd', 'Dolby TrueHD'],
-    ['ulaw', 'µ-law'], ['alaw', 'A-law']]);
+    ['ulaw', 'µ-law'], ['alaw', 'A-law'], ['alac', 'Apple Lossless (ALAC)']]);
 
   var TEXT = {
     load: 'The converter could not be loaded. Check the connection and reload the page.',
@@ -427,7 +476,17 @@
     decode: 'The sound could not be decoded. The file may be damaged, or this browser may not support its codec.',
     other: 'Something went wrong while reading this file ({message}).',
     mp3Free: 'This MP3 is in free format (its frames state no bitrate), which browsers cannot decode.',
-    wavCodec: 'This WAV file holds {codec} sound, which this page cannot decode. An audio editor can save it again as ordinary (PCM) WAV, which this page reads.'
+    wavCodec: 'This WAV file holds {codec} sound, which this page cannot decode. An audio editor can save it again as ordinary (PCM) WAV, which this page reads.',
+    tooBigMp3: 'As MP3 this would be about {size}, more than the {limit} this device can build in memory.',
+    alacBits: 'This Apple Lossless file holds {bits}-bit sound, which this page cannot decode: it decodes 16 and 24-bit Apple Lossless.',
+    alacChannels: 'This Apple Lossless file has {channels} channels, which this page cannot decode: it decodes Apple Lossless in mono or stereo.',
+    alacBig: 'This Apple Lossless file is {size}. This page decodes Apple Lossless files of up to {limit} on this device, as the whole file is held in memory while it is decoded.',
+    alacLong: 'This Apple Lossless file is too long to decode here: its sound would take more than 4 GB.',
+    alacHeader: 'The Apple Lossless settings of this file could not be read, so it cannot be decoded.',
+    alacSecond: 'This page decodes only the first Apple Lossless track of a file.',
+    alacDamaged: 'The Apple Lossless sound could not be decoded. The file may be damaged.',
+    alacClosed: 'This Apple Lossless file was closed to free memory for another one. Try again.',
+    alacOpen: 'The Apple Lossless sound could not be decoded. The file may be damaged, or too big for the memory of this device.'
   };
 
   var MB = null;
@@ -550,11 +609,11 @@
     return out;
   }
 
-  async function open(file) {
+  async function open(file, opts) {
     await load();
     var name = String(file && file.name || '');
     var nameDrm = /\.m4p$/i.test(name) ? 'fairplay' : /\.aax?$/i.test(name) ? 'audible' : '';
-    var m = { file: file, input: null, audio: file, container: 'other', tracks: [], primary: 0, tags: emptyTags(), drm: '', wav: null };
+    var m = { file: file, input: null, audio: file, container: 'other', tracks: [], primary: 0, tags: emptyTags(), drm: '', wav: null, alacOn: !!(opts && opts.alac) };
     try {
       if (!file || !(file.size > 0)) throw coded('EMPTY', TEXT.empty);
       m.input = new MB.Input({
@@ -609,8 +668,13 @@
     if (indexed && !info.drm) {
       try { info.end = await readableEnd(tr, info.first, info.end); } catch (x) { if (m.drm) throw x; }
     }
-    info.decodable = !info.drm && !!info.codec && (await tr.canDecode());
-    info.whole = !info.decodable && !info.drm && !!info.codec && typeof OfflineAudioContext !== 'undefined' &&
+    // Apple Lossless: mediabunny reads the track but has no decoder for it;
+    // the engine's own decodes it (see alacSource).
+    info.alac = null;
+    info.unsupported = '';
+    if (info.internal === 'alac' && !info.drm && m.alacOn) await alacInfo(m, info);
+    info.decodable = info.alac ? ALAC_OK && !info.unsupported : !info.drm && !!info.codec && (await tr.canDecode());
+    info.whole = !info.alac && !info.decodable && !info.drm && !!info.codec && typeof OfflineAudioContext !== 'undefined' &&
       (typeof AudioDecoder === 'undefined' || WHOLE_CODECS.test(info.codec));
     info.t0 = Math.max(0, info.first || 0);
     info.mp3 = null;
@@ -1785,11 +1849,193 @@
     return a.map(function (x, c) { var y = new Float32Array(x.length + b[c].length); y.set(x); y.set(b[c], x.length); return y; });
   }
 
+  // ---------- Apple Lossless (ALAC) ----------
+  // mediabunny 1.65.2 lists an ALAC track (internal codec 'alac') with no
+  // codec and no decoder, and only Safari decodes ALAC itself. The engine
+  // reads the file's ALAC settings (the 'alac' box in its sample entry: bit
+  // depth, channels and the true sample rate, which the sample entry's own
+  // 16-bit field cannot hold above 65,535 Hz) and decodes the sound with
+  // @mgz-dev/alac (assets/vendor/alac/) in a module worker
+  // (assets/js/alac-worker.js). The worker holds the whole file; mediabunny
+  // reads the decoded sound as the PCM of a WAV file (16 or 24-bit, as
+  // the ALAC is) through a CustomSource, which asks the worker only for
+  // the samples it reads, so a waveform, a preview and a conversion all
+  // work a piece at a time. The library decodes 16 and 24-bit sound in mono
+  // or stereo; it gives silence for other bit depths and wrong sound for
+  // more channels, so those are refused from the settings.
+  async function alacInfo(m, info) {
+    info.codec = 'alac';
+    var c = null;
+    try { c = await alacCookie(m.audio || m.file, info.track.id); } catch (e) { c = null; }
+    if (!c) { info.alac = { bits: 0, frameLength: 0 }; info.unsupported = TEXT.alacHeader; return; }
+    info.alac = { bits: c.bits, frameLength: c.frameLength };
+    if (c.sampleRate > 0) info.sr = c.sampleRate;
+    if (c.channels > 0) info.ch = c.channels;
+    var size = (m.audio || m.file).size, pcm = Math.max(0, info.end - Math.max(0, info.first || 0)) * info.sr * info.ch * c.bits / 8;
+    if (!c.first) info.unsupported = TEXT.alacSecond;
+    else if (c.bits !== 16 && c.bits !== 24) info.unsupported = fill(TEXT.alacBits, { bits: c.bits });
+    else if (c.channels !== 1 && c.channels !== 2) info.unsupported = fill(TEXT.alacChannels, { channels: c.channels });
+    else if (size > LIMITS.alac) info.unsupported = fill(TEXT.alacBig, { size: fmtBytes(size), limit: fmtBytes(LIMITS.alac) });
+    else if (pcm > 0xFFFFFFFF - 1024) info.unsupported = TEXT.alacLong;
+  }
+  // Boxes of an MP4 file between from and to: [type, start, header, size],
+  // read from the file a box header at a time (up to 64 boxes on a level).
+  async function mp4Boxes(file, from, to) {
+    var out = [], p = from;
+    while (p + 8 <= to && out.length < 64) {
+      var h = await readBytes(file, p, 16), size = u32be(h, 0), head = 8;
+      if (size === 1) { size = u32be(h, 8) * 4294967296 + u32be(h, 12); head = 16; } else if (size === 0) size = to - p;
+      if (size < head || p + size > to) break;
+      out.push([ascii(h, 4, 4), p, head, size]);
+      p += size;
+    }
+    return out;
+  }
+  function boxesIn(b, from, to) {
+    var out = [], p = from;
+    while (p + 8 <= to && out.length < 4096) {
+      var size = u32be(b, p), head = 8;
+      if (size === 1 && p + 16 <= to) { size = u32be(b, p + 8) * 4294967296 + u32be(b, p + 12); head = 16; } else if (size === 0) size = to - p;
+      if (size < head || p + size > to) break;
+      out.push([ascii(b, p + 4, 4), p, head, size]);
+      p += size;
+    }
+    return out;
+  }
+  // The ALAC settings of the track with tkhd id `id`: { bits, channels,
+  // sampleRate, frameLength, first (it is the file's first ALAC track, the
+  // one the decoder opens) }, or null.
+  async function alacCookie(file, id) {
+    var top = await mp4Boxes(file, 0, file.size), moov = top.filter(function (x) { return x[0] === 'moov'; })[0];
+    if (!moov || moov[3] > 64e6) return null;
+    var b = await readBytes(file, moov[1], moov[3]), firstAlac = true;
+    var traks = boxesIn(b, moov[2], b.length).filter(function (x) { return x[0] === 'trak'; });
+    for (var i = 0; i < traks.length; i++) {
+      var tk = traks[i], kids = boxesIn(b, tk[1] + tk[2], tk[1] + tk[3]), tkhd = kids.filter(function (x) { return x[0] === 'tkhd'; })[0];
+      var tid = tkhd ? u32be(b, tkhd[1] + tkhd[2] + (b[tkhd[1] + tkhd[2]] === 1 ? 20 : 12)) : -1;
+      var box = [tk[1], tk[2], tk[3]];
+      ['mdia', 'minf', 'stbl', 'stsd'].forEach(function (name) {
+        if (!box) return;
+        var k = boxesIn(b, box[0] + box[1], box[0] + box[2]).filter(function (x) { return x[0] === name; })[0];
+        box = k ? [k[1], k[2], k[3]] : null;
+      });
+      if (!box) continue;
+      // stsd: version and flags, entry count, then the sample entries.
+      var entries = boxesIn(b, box[0] + box[1] + 8, box[0] + box[2]).filter(function (x) { return x[0] === 'alac'; });
+      if (!entries.length) continue;
+      if (tid === id || id == null) {
+        // The 'alac' box (36 bytes: header, version and flags, then the 24
+        // bytes of ALACSpecificConfig) follows the AudioSampleEntry fields,
+        // also inside a QuickTime 'wave' box.
+        var e = entries[0], end = e[1] + e[3];
+        for (var p = e[1] + e[2] + 28; p + 36 <= end; p++) {
+          if (b[p + 4] !== 97 || b[p + 5] !== 108 || b[p + 6] !== 97 || b[p + 7] !== 99 || u32be(b, p) !== 36) continue;
+          var c = p + 12;
+          var r = { frameLength: u32be(b, c), bits: b[c + 5], channels: b[c + 9], sampleRate: u32be(b, c + 20), first: firstAlac };
+          return r.bits > 0 && r.channels > 0 && r.sampleRate > 0 && r.sampleRate <= 768000 && r.frameLength > 0 ? r : null;
+        }
+        return null;
+      }
+      firstAlac = false;
+    }
+    return null;
+  }
+
+  // One worker per file being decoded, kept until release() or close(), or
+  // until more files would be held than limits.alac allows (the least
+  // recently used is closed first).
+  var alacSlots = [], alacTick = 0;
+  function alacError(text, extra) { return coded('ALAC_FAILED', text, extra); }
+  function alacCall(slot, msg, transfer) {
+    if (slot.dead) return Promise.reject(slot.dead);
+    return new Promise(function (resolve, reject) {
+      msg.id = ++slot.seq;
+      slot.calls.set(msg.id, { resolve: resolve, reject: reject, open: msg.op === 'open' });
+      slot.worker.postMessage(msg, transfer || []);
+    });
+  }
+  function alacKill(slot, err) {
+    if (!slot.dead) slot.dead = err || coded('CANCELLED', 'The Apple Lossless decoder was closed.');
+    try { slot.worker.terminate(); } catch (x) { /* gone */ }
+    slot.calls.forEach(function (c) { c.reject(slot.dead); });
+    slot.calls.clear();
+  }
+  function alacClose(slot, err) {
+    var i = alacSlots.indexOf(slot);
+    if (i >= 0) alacSlots.splice(i, 1);
+    alacKill(slot, err);
+    slot.promise.then(function (src) { try { src.input.dispose(); } catch (x) { /* ignore */ } }, function () {});
+  }
+  function alacSource(m, t) {
+    var slot = alacSlots.filter(function (x) { return x.m === m && x.t === t; })[0];
+    if (slot) { slot.used = ++alacTick; return slot.promise; }
+    var size = (m.audio || m.file).size, held = 0;
+    alacSlots.forEach(function (x) { held += x.size; });
+    // A decoder that is still answering reads stays open, even past the limit.
+    alacSlots.slice().sort(function (a, b) { return a.used - b.used; }).forEach(function (x) {
+      if (held + size > LIMITS.alac && !x.calls.size) { held -= x.size; alacClose(x, coded('ALAC_CLOSED', TEXT.alacClosed)); }
+    });
+    slot = { m: m, t: t, size: size, used: ++alacTick, seq: 0, calls: new Map(), dead: null, worker: null };
+    alacSlots.push(slot);
+    slot.promise = alacOpen(slot).catch(function (err) {
+      var i = alacSlots.indexOf(slot);
+      if (i >= 0) alacSlots.splice(i, 1);
+      alacKill(slot, err);
+      throw err;
+    });
+    return slot.promise;
+  }
+  async function alacOpen(slot) {
+    var m = slot.m, t = slot.t, w;
+    try { w = slot.worker = new Worker(ALAC_WORKER_URL, { type: 'module' }); } catch (e) { throw noDecode(t); }
+    w.onmessage = function (ev) {
+      var d = ev.data || {}, c = slot.calls.get(d.id);
+      if (!c) return;
+      slot.calls.delete(d.id);
+      if (d.error != null) c.reject(alacError(d.op === 'open' || c.open ? TEXT.alacOpen : TEXT.alacDamaged, { cause: new Error(d.error) })); else c.resolve(d);
+    };
+    // The module or its WebAssembly could not start (an old browser).
+    w.onerror = function (ev) { if (ev && ev.preventDefault) ev.preventDefault(); alacKill(slot, noDecode(t)); };
+    var r = await alacCall(slot, { op: 'open', file: m.audio || m.file }), lib = r.info;
+    if (!lib || lib.bits !== t.alac.bits || lib.channels !== t.ch || lib.sampleRate !== t.sr || !(lib.samples > 0)) throw alacError(TEXT.alacDamaged);
+    var bpf = lib.bytesPerSample, sr = lib.sampleRate;
+    // The heard sound starts at t0 on the track's time line, which starts
+    // with the first sample the decoder gives (unless an edit list moves it).
+    var skip = Math.max(0, Math.round((t.t0 - (t.first || 0)) * sr));
+    var frames = Math.max(0, Math.min(lib.samples - skip, Math.round((t.end - t.t0) * sr)));
+    var head = wavHeader({ tag: 1, channels: lib.channels, sampleRate: sr, bits: lib.bits, frames: frames, data: frames * bpf, info: null, after: 0 });
+    var H = head.length, total = H + frames * bpf;
+    if (total > 0xFFFFFFFF) throw alacError(TEXT.alacLong);
+    var source = new MB.CustomSource({
+      getSize: function () { return total; },
+      read: function (start, end) {
+        var out = new Uint8Array(end - start), p = start;
+        if (p < H) { out.set(head.subarray(p, Math.min(end, H))); p = Math.min(end, H); }
+        if (p >= end) return out;
+        var d0 = p - H, d1 = end - H, f0 = Math.floor(d0 / bpf), f1 = Math.min(frames, Math.ceil(d1 / bpf));
+        slot.used = ++alacTick;
+        return alacCall(slot, { op: 'read', from: skip + f0, count: f1 - f0 }).then(function (res) {
+          // Fewer samples than asked (the file ends early) stay silent.
+          var bytes = res.bytes, from = d0 - f0 * bpf, n = Math.min(bytes.length - from, d1 - d0);
+          if (n > 0) out.set(bytes.subarray(from, from + n), p - start);
+          return out;
+        });
+      },
+      prefetchProfile: 'fileSystem',
+      handleUnhandledError: function () {}
+    });
+    var input = new MB.Input({ source: source, formats: [MB.WAVE] });
+    var track = await input.getPrimaryAudioTrack();
+    if (!track) throw alacError(TEXT.alacDamaged);
+    return { input: input, track: track, base: 0 };
+  }
+
   // ---------- The sound of a track ----------
-  function noDecode(t) { return coded('NO_DECODE', fill(TEXT.noDecode, { codec: codecName(t) }), { track: t }); }
+  function noDecode(t) { return coded('NO_DECODE', t.unsupported || fill(TEXT.noDecode, { codec: codecName(t) }), { track: t }); }
   var whole1 = null;   // the one whole-track decode kept: { m, t, promise }
   function decodeSource(m, ti) {
     var t = m.tracks[ti];
+    if (t.alac && t.decodable) return load().then(function () { return alacSource(m, t); });
     if (t.decodable) return Promise.resolve({ input: m.input, track: t.track, base: t.t0 });
     if (!t.whole) return Promise.reject(noDecode(t));
     if (whole1 && whole1.m === m && whole1.t === t) return whole1.promise;
@@ -1804,7 +2050,10 @@
     whole1 = null;
     w.promise.then(function (src) { try { src.input.dispose(); } catch (x) { /* ignore */ } }, function () {});
   }
-  function release(m) { if (whole1 && whole1.m === m) releaseWhole(); }
+  function release(m) {
+    if (whole1 && whole1.m === m) releaseWhole();
+    alacSlots.filter(function (x) { return x.m === m; }).forEach(alacClose);
+  }
   // Browsers without a streaming decoder for the codec decode the whole
   // sound track with decodeAudioData. Only the audio is copied out first.
   async function buildWhole(m, t) {
@@ -1977,6 +2226,9 @@
     return { sampleRate: rate, kbps: Math.max(rate >= 32000 ? 32 : 8, Math.min(kbps, mp3MaxKbps(rate))) };
   }
   function outChannels(t, mono) { return mono ? 1 : Math.min(2, t.ch || 2); }
+  // The WAV sample format when none is asked for: 24-bit Apple Lossless
+  // keeps its 24 bits, everything else is written as 16-bit.
+  function wavDefault(t) { return t.alac && t.alac.bits === 24 ? 's24' : 's16'; }
   function selOf(t, sel) {
     var s = sel && sel.start > 0 ? Math.min(sel.start, t.durMs) : 0;
     var e = sel && sel.end >= 0 && sel.end < t.durMs ? sel.end : t.durMs;
@@ -1986,7 +2238,7 @@
     var t = m.tracks[ti], sel = selOf(t, o.sel), sec = (sel.end - sel.start) / 1000;
     if (o.format === 'mp3') return Math.round(mp3Plan(t.sr, o.kbps).kbps * 125 * sec) + 300;
     if (o.format === 'wav') {
-      var rate = o.sampleRate > 0 ? Math.round(o.sampleRate) : t.sr, spec = WAV_OUT[o.sampleFormat] || WAV_OUT.s16;
+      var rate = o.sampleRate > 0 ? Math.round(o.sampleRate) : t.sr, spec = WAV_OUT[o.sampleFormat] || WAV_OUT[wavDefault(t)];
       return Math.round(sec * rate) * outChannels(t, o.mono) * spec.bits / 8 + 44;
     }
     return t.bitrate > 0 && t.codec === 'aac' ? Math.round(t.bitrate / 8 * sec) + 2000 : 0;
@@ -2092,11 +2344,16 @@
       if (!mp3Ok || !(await MB.canEncodeAudio('mp3', { numberOfChannels: ch, sampleRate: outRate, bitrate: plan.kbps * 1000 }))) {
         throw coded('NO_ENCODER', TEXT.noEncoder, { format: fmt });
       }
+      // An MP3 not written into o.writable is built in memory.
+      var mp3Bytes = o.writable ? 0 : estimate(m, ti, { format: 'mp3', kbps: o.kbps, sel: sel });
+      if (mp3Bytes > LIMITS.mp3) {
+        throw coded('TOO_BIG', fill(TEXT.tooBigMp3, { size: fmtBytes(mp3Bytes), limit: fmtBytes(LIMITS.mp3) }), { bytes: mp3Bytes, limit: LIMITS.mp3, format: 'mp3' });
+      }
     } else {
-      spec = WAV_OUT[o.sampleFormat] ? o.sampleFormat : 's16';
+      spec = WAV_OUT[o.sampleFormat] ? o.sampleFormat : wavDefault(t);
       outRate = o.sampleRate > 0 ? Math.round(o.sampleRate) : t.sr;
       var bytes = estimate(m, ti, { format: 'wav', sel: sel, mono: o.mono, sampleRate: outRate, sampleFormat: spec });
-      if (bytes > LIMITS.wav) throw coded('TOO_BIG', fill(TEXT.tooBig, { size: fmtBytes(bytes), limit: fmtBytes(LIMITS.wav) }), { bytes: bytes, limit: LIMITS.wav });
+      if (bytes > LIMITS.wav) throw coded('TOO_BIG', fill(TEXT.tooBig, { size: fmtBytes(bytes), limit: fmtBytes(LIMITS.wav) }), { bytes: bytes, limit: LIMITS.wav, format: 'wav' });
     }
     var src = await decodeSource(m, ti);
     if (job.cancelled) throw coded('CANCELLED', 'Conversion cancelled.');
