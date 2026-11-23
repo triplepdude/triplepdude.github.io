@@ -247,9 +247,65 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   s = await mode('lines');
   assert.equal(s.text, [...sc.ligatures, ...sc.zh_lines, ...sc.ja_lines, sc.he, sc.ar, 'Total 42 ' + sc.mixed_he].join('\n'));
   assert.ok(others['scripts.pdf'].pdftotext.includes('\ufb01') && others['scripts.pdf'].pypdf.includes('\ufb01'), 'pdftotext and pypdf keep the ligature characters');
+  s = await mode('layout');
+  assert.ok([...sc.zh_lines, ...sc.ja_lines].every(l => s.text.includes(l)), 'no spaces between Chinese or Japanese characters in Layout either');
   s = await mode('para');
   assert.ok(s.text.includes('\n\n' + sc.zh + '\n\n' + sc.ja + '\n\n'), 'Chinese and Japanese lines join without a space');
+  // The Hebrew and Arabic lines here are set flush left, one to a paragraph: not joined.
+  assert.ok(s.text.endsWith(sc.ja + '\n\n' + sc.he + '\n\n' + sc.ar + '\n\nTotal 42 ' + sc.mixed_he), s.text.slice(-120));
   assert.ok(others['scripts.pdf'].pdftotext.includes(sc.he) && others['scripts.pdf'].pypdf.includes(sc.he), 'the other programs agree on the order of the Hebrew');
+  // Right-to-left lines drawn as LibreOffice draws them: runs in reading order, each to the left
+  // of the one before (a number and a full stop are runs of their own). Two Hebrew paragraphs
+  // with no space between them, the first ending in a short line; then Arabic, and Arabic in the
+  // presentation forms Chrome writes, which come out as the letters (as NFKC gives them).
+  s = await load('rtl.pdf');
+  const rt = expected.rtl;
+  assert.equal(s.text, [...rt.he, rt.ar, rt.pf].join('\n\n'), 'right-to-left runs make one line, and lines make paragraphs');
+  assert.ok(!/[\ufb50-\ufdff\ufe70-\ufefc]/.test(s.text), 'no presentation forms');
+  s = await mode('lines');
+  assert.deepEqual(s.text.split('\n').slice(0, rt.he_lines.length), rt.he_lines);
+  // pdftotext agrees on the order of the words (it adds bidi controls), pypdf splits the runs.
+  const wordsOf = l => l.replace(/[\u202a-\u202e]/g, ' ').replace(/[.,]/g, ' ').split(/\s+/).filter(Boolean);
+  assert.deepEqual(others['rtl.pdf'].pdftotext.split('\n').slice(0, rt.he_lines.length).map(wordsOf), rt.he_lines.map(wordsOf));
+  assert.ok(others['rtl.pdf'].pypdf.includes('בשנת\n2024\n'), 'pypdf puts each run on a line of its own');
+  await mode('para');
+  // Chinese and Hebrew have no capitals to show that a column or a page continues a paragraph:
+  // a line that fills its column and ends no sentence does. A short heading at the foot of a
+  // column is not joined to the next.
+  s = await load('caseless.pdf');
+  assert.equal(s.text, expected.caseless.join('\n\n'));
+
+  // ---- A table over three pages: its rows are not running heads ----
+  // The first and last rows of each page lie where running heads are looked for, and with their
+  // numbers replaced they look alike from page to page; only the running head and the page
+  // number go.
+  s = await load('statement.pdf');
+  const stm = expected.statement;
+  const stmText = stm.pages.map(rows => [stm.head, ...rows].map(r => r.join('\t')).join('\n')).join('\n\n');
+  assert.equal(s.text, stmText, 'every row of the table is kept');
+  assert.ok(!s.text.includes('Riverside') && !s.text.includes('Page 1 of 3'));
+  await page.uncheck('#p2t-hf');
+  s = await state();
+  assert.ok(s.text.startsWith('Riverside Credit Union') && s.text.includes('\n' + stm.running[1] + '\n'), s.text.slice(0, 200));
+  await page.check('#p2t-hf');
+  // A log whose lines are single pieces of text: the first lines of each page look alike with
+  // their numbers replaced, but more than one number changes from page to page.
+  s = await load('log.pdf');
+  s = await mode('lines');
+  assert.equal(s.text, expected.log.map(p => p.join('\n')).join('\n\n'), 'every line of the log is kept; the page numbers go');
+  await mode('para');
+  // Footers that name their chapter, on the left of odd pages and the right of even ones: each
+  // form is on a sixth of the pages. They go; the heading of a table continued over pages stays
+  // where it first comes.
+  // Page 1 has a table of contents (one entry to a paragraph), and the heading of chapter 2 is
+  // drawn twice, as some programs make text bold: it is kept once, as pdftotext does (pypdf
+  // gives it twice).
+  s = await load('chapters.pdf');
+  assert.equal(s.text, expected.chapters.paragraphs.join('\n\n'));
+  assert.ok(others['chapters.pdf'].pypdf.includes('Chapter 2. LakesChapter 2. Lakes') && (others['chapters.pdf'].pdftotext.match(/Chapter 2\. Lakes/g) || []).length === 1);
+  await page.uncheck('#p2t-hf');
+  assert.ok((await state()).text.includes(expected.chapters.foot), 'the footers are there');
+  await page.check('#p2t-hf');
 
   // ---- Characters that are not letters ----
   s = await load('symbols.pdf');
@@ -260,6 +316,11 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
     'Page 2: 23 characters that its fonts do not match to letters, shown as \ufffd or as symbols. Reading the page with OCR may do better.']);
   assert.equal(s.ocr, 'Page 2 can be read with OCR, which finds the letters in the picture of a page. OCR makes mistakes: check what it reads.');
   assert.ok(await page.$eval('#p2t-flags li', li => li.classList.contains('is-warn')));
+  // A page of nothing but such characters has text, though unreadable: it is not called a scan.
+  s = await load('unreadable.pdf');
+  assert.equal(s.text, expected.unreadable, 'pdftotext gives the same characters');
+  assert.deepEqual(s.flags, ['Page 1: 8 characters that its fonts do not match to letters, shown as \ufffd or as symbols. Reading the page with OCR may do better.']);
+  assert.equal(s.ocr, 'Page 1 can be read with OCR, which finds the letters in the picture of a page. OCR makes mistakes: check what it reads.');
   await mode('para');
 
   // ---- Form fields ----
@@ -327,6 +388,21 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   for (const [name, pw] of [['unicode-aes-128.pdf', lk.unicode], ['unicode-aes-256.pdf', lk.unicode], ['latin1-rc4.pdf', lk.latin1]]) {
     s = await unlock(name, pw);
     assert.equal(s.text, lk.text, name);
+  }
+  // A double click on Open PDF, or Enter pressed twice, opens the file once and reads every page
+  // (a second opening used to close the reader of the first in mid-read: "Reading..." for a
+  // minute, then "It may be damaged").
+  for (const how of ['dblclick', 'Enter']) {
+    await clearStatus();
+    await page.setInputFiles('#p2t-file', fx('locked-pages.pdf'));
+    await page.waitForSelector('#p2t-pw-box:not([hidden])');
+    await page.fill('#p2t-pw', lk.password);
+    if (how === 'dblclick') await page.dblclick('#p2t-pw-go');
+    else await page.evaluate(() => { const pw = document.querySelector('#p2t-pw'); for (let i = 0; i < 2; i++) pw.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    await settled(page, 20000);
+    s = await state();
+    assert.equal(s.text, expected.locked_pages.join('\n\n'), how);
+    assert.equal(s.error, '', how);
   }
   await clearStatus();
   await page.setInputFiles('#p2t-file', fx('aes-256.pdf'));
@@ -448,11 +524,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // Read the other pages, from the keyboard, then stop again.
   await clearStatus();
   await page.keyboard.press('Enter');
-  await page.waitForFunction(n => {
+  // The button goes, so the focus moves to Stop (not to the start of the page), where Enter stops.
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'p2t-stop', 'the focus moves to Stop');
+  await page.waitForFunction(() => {
     const m = document.querySelector('#p2t-step').textContent.match(/^Page ([\d,]+) of/);
     return !document.querySelector('#p2t-progress').hidden && m && Number(m[1].replace(/,/g, '')) > 1;
-  }, read);
-  await page.click('#p2t-stop');
+  });
+  await page.keyboard.press('Enter');
   await settled();
   const read2 = Number(((await state()).status.match(/from ([\d,]+) pages/) || [])[1].replace(/,/g, ''));
   assert.ok(read2 > read && read2 < 1000, `${read} then ${read2} pages`);

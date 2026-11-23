@@ -22,11 +22,11 @@ howto: |
   | Lines as in the PDF | Every line as it is on the page | Addresses, poems, lists |
   | Layout | Columns and tables spaced as on the page | Tables, forms, statements |
 
-  Paragraphs joins words split by a hyphen at a line end, closes up headings
-  set with letter spacing (*F I S C A L* becomes *FISCAL*) and turns
-  ligatures such as *ﬁ* into letters. Joining hyphens also joins a compound
-  broken at its own hyphen, so *well-known* can become *wellknown*: untick
-  the option for text full of compounds. In Paragraphs and Lines the cells of
+  All three close up headings set with letter spacing (*F I S C A L* becomes
+  *FISCAL*) and turn ligatures such as *ﬁ* into letters. Paragraphs also
+  joins words split by a hyphen at a line end, which joins a compound broken
+  at its own hyphen too, so *well-known* can become *wellknown*: untick the
+  option for text full of compounds. In Paragraphs and Lines the cells of
   a table are separated by a tab, so a table pasted into a spreadsheet keeps
   its columns.
 
@@ -48,7 +48,8 @@ howto: |
   Some PDFs use fonts that do not say which letter each shape is. Their text
   comes out as symbols or as �, the replacement character, and the page says
   which pages are affected. A PDF viewer copies such text the same way,
-  because the letters are not in the file: read those pages with OCR.
+  because the letters are not in the file. OCR reads them from the picture
+  of the page, and the page offers it where much of a page is garbled.
 
   ## Scanned PDFs
 
@@ -63,9 +64,9 @@ howto: |
 
   A PDF that needs a password to open asks for it, and the password stays on
   your device. When the author of a PDF has forbidden copying its text, this
-  page extracts it only with the file's permissions password, as
-  [Unlock PDF](/unlock-pdf/) does. To count the words, paste the text into the
-  [word counter](/word-counter/).
+  page extracts it only with the file's permissions password, or when that
+  password is blank, as [Unlock PDF](/unlock-pdf/) does. To count the words,
+  paste the text into the [word counter](/word-counter/).
 faq:
   - q: Why does text copied from a PDF have a line break after every line?
     a: A PDF stores each line where it is drawn, not paragraphs, so a viewer copies a line break at the end of every line, and often a hyphen in the middle of a word. Paragraphs on this page puts the lines back together, also across columns and pages.
@@ -257,6 +258,14 @@ faq:
       m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
   }
   const RTL_CH = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/g;
+  // Some PDF writers (Chrome and Google Docs among them) map Arabic letters to their presentation
+  // forms, the shapes a letter takes at the start, middle or end of a word, which PDF.js mostly
+  // keeps: they look the same but are other characters, which searching and spell checking miss.
+  // They are put back as the letters, as NFKC does.
+  const PRESENT = /[\ufb1d-\ufb4f\ufb50-\ufdff\ufe70-\ufefc]+/g;
+  function letters(items) {
+    for (const it of items) if (typeof it.str === 'string' && it.str.search(PRESENT) >= 0) it.str = it.str.replace(PRESENT, s => s.normalize('NFKC'));
+  }
   const LTR_CH = /[A-Za-z\u00c0-\u024f\u0370-\u03ff\u0400-\u04ff]/g;
   // Chinese and Japanese are written without spaces; PDF.js puts one wherever two characters
   // stand apart, as in justified lines.
@@ -300,19 +309,39 @@ faq:
       recent.push({ s: str, rot: g.rot, u0: g.u0, v: g.v });
       if (recent.length > 24) recent.shift();
       const big = cur ? Math.max(cur.fs, g.fs) : 0;
-      const same = cur && !cur.ended && cur.rot === g.rot && Math.abs(g.v - cur.v) <= 0.5 * big && g.u0 >= cur.u1 - 0.5 * big;
-      if (!same) {
+      const along = cur && !cur.ended && cur.rot === g.rot && Math.abs(g.v - cur.v) <= 0.5 * big;
+      // Right-to-left text may be drawn as runs in reading order, each to the left of the one
+      // before (LibreOffice draws a number or a full stop inside a Hebrew line as a run of its
+      // own): such a run continues the line.
+      const back = along && g.u0 < cur.u1 - 0.5 * big && g.u1 <= cur.u0 + 0.5 * big && (cur.rtl > 0 || it.dir === 'rtl');
+      if (!(along && (back || g.u0 >= cur.u1 - 0.5 * big))) {
         cur = { rot: g.rot, v: g.v, fs: g.fs, u0: g.u0, u1: g.u1, segs: [], ended: false, space: false, rtl: 0, ltr: 0 };
         lines.push(cur);
       }
-      let seg = cur.segs.length ? cur.segs[cur.segs.length - 1] : null;
-      const gap = g.u0 - cur.u1;
-      if (!seg || gap > 1.2 * g.fs) {
-        seg = { u0: g.u0, u1: g.u1, fs: g.fs, parts: [] };
-        cur.segs.push(seg);
+      if (back) {
+        // A part's sp says whether a space stands between it and the part to its left.
+        let seg = cur.segs.reduce((a, s) => (s.u0 < a.u0 ? s : a));
+        const gap = seg.u0 - g.u1;
+        if (gap > 1.2 * g.fs) {
+          seg = { u0: g.u0, u1: g.u1, fs: g.fs, parts: [] };
+          cur.segs.push(seg);
+        } else {
+          const right = seg.parts.reduce((a, p) => (p.u0 < a.u0 ? p : a));
+          right.sp = cur.space || gap > 0.15 * g.fs;
+          seg.back = true;
+        }
+        seg.parts.push({ u0: g.u0, s: str, sp: false });
+        seg.u0 = Math.min(seg.u0, g.u0);
+      } else {
+        let seg = cur.segs.length ? cur.segs.reduce((a, s) => (s.u1 > a.u1 ? s : a)) : null;
+        const gap = g.u0 - cur.u1;
+        if (!seg || gap > 1.2 * g.fs) {
+          seg = { u0: g.u0, u1: g.u1, fs: g.fs, parts: [] };
+          cur.segs.push(seg);
+        }
+        seg.parts.push({ u0: g.u0, s: str, sp: cur.space || gap > 0.15 * g.fs });
+        seg.u1 = Math.max(seg.u1, g.u1);
       }
-      seg.parts.push({ u0: g.u0, s: str, sp: cur.space || gap > 0.15 * g.fs });
-      seg.u1 = Math.max(seg.u1, g.u1);
       cur.space = false;
       cur.u0 = Math.min(cur.u0, g.u0);
       cur.u1 = Math.max(cur.u1, g.u1);
@@ -344,6 +373,7 @@ faq:
     l.segs.forEach(s => {
       const order = s.parts.map((p, i) => i);
       if (rtl) order.sort((a, b) => s.parts[b].u0 - s.parts[a].u0);
+      else if (s.back) order.sort((a, b) => s.parts[a].u0 - s.parts[b].u0);
       let t = '';
       order.forEach((i, k) => {
         const sp = k && s.parts[rtl ? order[k - 1] : i].sp;
@@ -508,19 +538,27 @@ faq:
   const BULLET_SIGN = /^[\u2022\u25cf\u25aa\u25e6\u2023\u2043\u25a0\u25a1\u2219*]/u;
   // The end of a sentence or a heading, after which a page or column break is not joined.
   const END = /[.!?:;\u2026\u3002\uff01\uff1f"\u201d\u2019')\]]$/u;
+  // A line of a table of contents: dot leaders, then a page number.
+  const LEADER = /(?:\.\s?){4,}\s*(?:\p{N}+|[ivxlc]+)$/iu;
   function median(a) { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; }
-  function firstWordWidth(l) {
-    const s = l.segs[0], w = (l.text.match(/^\S+/) || [''])[0];
+  // The width of the first word of a line; with cjk, in Chinese and Japanese, which a line may
+  // break after any character, of its first character.
+  function firstWordWidth(l, cjk) {
+    const s = l.segs[0], c = Array.from(l.text.slice(0, 2))[0] || '', w = cjk && CJK_ONE.test(c) ? c : (l.text.match(/^\S+/) || [''])[0];
     const per = s && s.s.length ? (s.u1 - s.u0) / s.s.length : l.fs * 0.5;
     return Array.from(w).length * per;
   }
   // Continues a paragraph across a column or page break: the text before does not end a
-  // sentence, and the text after starts with a small letter.
-  function runsOn(a, b) { return !END.test(a) && (/^\p{Ll}/u.test(b) || (/[\p{L}][-\u2010\u00ad]$/u.test(a) && /^\p{L}/u.test(b))); }
+  // sentence, and the text after starts with a small letter, or, in a script without capitals
+  // (Chinese, Japanese, Korean, Hebrew, Arabic), with a letter after a line that fills its column.
+  function runsOn(a, b, full) {
+    return !END.test(a) && (/^\p{Ll}/u.test(b) || (/[\p{L}][-\u2010\u00ad]$/u.test(a) && /^\p{L}/u.test(b)) || (!!full && /^\p{Lo}/u.test(b) && /[\p{L}\p{N}\p{M}\p{Pd}\u3001\uff0c,]$/u.test(a)));
+  }
   // The lines of one page, in paragraphs: [[line, ...], ...]. A paragraph ends where the gap to
   // the next line is wider than usual, the size of the text changes, the text moves to another
   // column, a line stops short although the next word would have fitted, a bullet or a number
-  // starts the next line, or the next line is indented (a first-line indent).
+  // starts the next line, a line ends in dot leaders and a page number (a table of contents), or
+  // the next line is indented (a first-line indent).
   function paragraphs(lines) {
     const out = [];
     if (!lines.length) return out;
@@ -530,15 +568,22 @@ faq:
       if (a.rot === b.rot && Math.abs(a.fs - b.fs) < 0.1 * a.fs && dv > 0.5 * a.fs && dv < 3 * a.fs) pitches.push(dv / a.fs);
     }
     const pitch = median(pitches) || 1.2;
-    // Where each line's column ends: the furthest right of the nearby lines of its size that start
+    // Where a line starts and ends in its own direction: a right-to-left line starts at the right,
+    // and the larger the start, the further it is indented. A right-to-left line is read so only
+    // where its column is set flush right (more nearby lines share its right edge than its left).
+    const st = (x, rtl) => (rtl ? -x.u1 : x.u0), en = (x, rtl) => (rtl ? -x.u0 : x.u1);
+    const near = (i, f) => lines.slice(Math.max(0, i - 6), i + 7).filter(m => m !== lines[i] && m.rot === lines[i].rot && f(m, lines[i])).length;
+    const dir = lines.map((l, i) => l.rtl > l.ltr && near(i, (m, x) => Math.abs(m.u1 - x.u1) < 0.5 * x.fs) >= near(i, (m, x) => Math.abs(m.u0 - x.u0) < 0.5 * x.fs));
+    // Where each line's column ends: the furthest of the nearby lines of its size that start
     // where it starts (give or take an indent), so a heading across two columns does not count.
     const right = lines.map((l, i) => {
-      let r = l.u1;
+      const rtl = dir[i];
+      let r = en(l, rtl);
       for (let j = Math.max(0, i - 6); j <= Math.min(lines.length - 1, i + 6); j++) {
         const m = lines[j];
-        if (m.rot !== l.rot || Math.abs(m.fs - l.fs) > 0.15 * l.fs || Math.abs(m.u0 - l.u0) > 3 * l.fs) continue;
+        if (m.rot !== l.rot || Math.abs(m.fs - l.fs) > 0.15 * l.fs || Math.abs(st(m, rtl) - st(l, rtl)) > 3 * l.fs) continue;
         const ov = Math.min(m.u1, l.u1) - Math.max(m.u0, l.u0);
-        if (ov > 0.5 * Math.min(m.u1 - m.u0, l.u1 - l.u0)) r = Math.max(r, m.u1);
+        if (ov > 0.5 * Math.min(m.u1 - m.u0, l.u1 - l.u0)) r = Math.max(r, en(m, rtl));
       }
       return r;
     });
@@ -552,18 +597,24 @@ faq:
         continue;
       }
       const moved = dv < 0.5 * Math.min(p.fs, l.fs) || dv > (pitch + 0.45) * fs || l.u0 > p.u1 || l.u1 < p.u0;
-      if (!brk && moved) brk = !(Math.abs(p.fs - l.fs) < 0.05 * fs && runsOn(p.text, l.text));
+      if (!brk && moved) brk = !(Math.abs(p.fs - l.fs) < 0.05 * fs && runsOn(p.text, l.text, right[k - 1] - en(p, dir[k - 1]) <= firstWordWidth(l, true) + 0.6 * p.fs));
       else if (!brk) {
-        if (right[k - 1] - p.u1 > firstWordWidth(l) + 0.6 * p.fs) brk = true;
+        const rtl = dir[k - 1];
+        if (right[k - 1] - en(p, rtl) > firstWordWidth(l) + 0.6 * p.fs) brk = true;
         else if (BULLET.test(l.text) && (BULLET_SIGN.test(l.text) || END.test(p.text) || BULLET.test(p.text))) brk = true;
-        else if (l.u0 > p.u0 + 0.8 * p.fs && k + 1 < lines.length && !BULLET.test(p.text)) {
+        else if (LEADER.test(p.text.slice(-60))) brk = true;
+        else if (st(l, rtl) > st(p, rtl) + 0.8 * p.fs && k + 1 < lines.length && !BULLET.test(p.text)) {
           const n = lines[k + 1];
-          if (n.rot === l.rot && n.v > l.v && n.u0 < l.u0 - 0.8 * l.fs && Math.abs(n.u0 - p.u0) < 0.8 * p.fs) brk = true;
+          if (n.rot === l.rot && n.v > l.v && st(n, rtl) < st(l, rtl) - 0.8 * l.fs && Math.abs(st(n, rtl) - st(p, rtl)) < 0.8 * p.fs) brk = true;
         }
       }
       if (brk) { out.push(cur); cur = [l]; } else cur.push(l);
     }
     out.push(cur);
+    // Whether the last line nearly fills its column (a heading does not), for a paragraph that
+    // runs on into the next page.
+    const n = lines.length - 1, last = lines[n];
+    out.full = right[n] - en(last, dir[n]) <= 6 * last.fs;
     return out;
   }
   // The lines of a paragraph as one line. A soft hyphen at a line end is dropped. A word split by
@@ -646,28 +697,59 @@ faq:
 
   // ---------- Repeated headers and footers ----------
   // A line in the top or bottom eighth of a page whose text (with its numbers as #) and size come
-  // back on at least two pages and on 40% of the pages read: a running head, a page number. A
-  // page keeps them when they are all the text it has.
+  // back on at least two pages and on 40% of the pages read: a running head, a page number. From
+  // one of those pages to the next, mostly only one of its numbers changes, the page number: the
+  // rows of a table that runs over pages look alike too, but their dates and amounts differ, and a
+  // row next to a row of as many cells (a table) is never taken. The top or bottom line of a page
+  // that is on three or more pages, and on 40% of those from the first to the last it is on, goes
+  // too if its page number goes up with the page (a footer that names its chapter); one with no
+  // number that changes (the heading of a table continued over pages) is kept where it first
+  // comes, and one whose number changes otherwise ("Figure 3.", "Figure 4.") is no running head.
+  // A page keeps them when they are all the text it has.
+  const NUMS = /\p{N}+|\b[ivxlc]+\b/gu;
   function repeatedLines(pgs) {
-    const drop = new Set(), counts = new Map(), keys = new Map();
-    const withText = pgs.filter(p => p.lines.length && !p.ocr);
+    const drop = new Set(), groups = new Map(), keys = new Map();
+    const withText = pgs.filter(p => p.lines.length && !p.ocr).sort((a, b) => a.no - b.no);
     if (withText.length < 2) return drop;
-    withText.forEach(p => {
+    withText.forEach((p, at) => {
       const seen = new Set(), H = p.h || 792;
-      p.lines.forEach(l => {
+      let top = Infinity, foot = -Infinity;
+      p.lines.forEach(l => { if (l.rot === 0) { top = Math.min(top, l.v); foot = Math.max(foot, l.v); } });
+      p.lines.forEach((l, i) => {
         if (l.rot !== 0) return;
         const band = l.v < 0.125 * H + l.fs ? 't' : l.v > 0.875 * H ? 'b' : '';
         if (!band) return;
-        const text = l.text.toLowerCase().replace(/\p{N}+/gu, '#').replace(/\b[ivxlc]+\b/g, '#').replace(/\s+/g, ' ').trim();
-        const key = band + '|' + Math.round(l.fs) + '|' + text;
-        keys.set(l, key);
-        if (!seen.has(key)) { seen.add(key); counts.set(key, (counts.get(key) || 0) + 1); }
+        if (l.table && [p.lines[i - 1], p.lines[i + 1]].some(m => m && m.table && m.rot === 0 && m.segs.length === l.segs.length && Math.abs(m.v - l.v) < 3 * l.fs)) return;
+        const text = l.text.toLowerCase().replace(/\s+/g, ' ').trim();
+        const key = band + '|' + Math.round(l.fs) + '|' + text.replace(NUMS, '#');
+        keys.set(l, { key, at });
+        if (seen.has(key)) return;
+        seen.add(key);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({ at, no: p.no, nums: text.match(NUMS) || [], outer: band === 't' ? l.v - top < 0.5 * l.fs : foot - l.v < 0.5 * l.fs });
       });
     });
-    const need = Math.max(2, Math.ceil(0.4 * withText.length));
+    // For each running line, the page where it stays (-1: none).
+    const need = Math.max(2, Math.ceil(0.4 * withText.length)), heads = new Map();
+    groups.forEach((g, key) => {
+      const n = g.length, wide = n >= need, near = n >= 3 && n >= 0.4 * (g[n - 1].at - g[0].at + 1) && g.every(o => o.outer);
+      if (n < 2 || !(wide || near)) return;
+      let steady = 0, paged = true, changes = false;
+      for (let k = 1; k < n; k++) {
+        const a = g[k - 1].nums, b = g[k].nums, at = b.findIndex((x, j) => x !== a[j]);
+        const diff = b.filter((x, j) => x !== a[j]).length;
+        if (diff <= 1) steady++;
+        if (diff) changes = true;
+        // A page number goes up as the pages do (Figure 3 and Figure 4, two pages apart, do not).
+        if (diff !== 1 || (/^\d+$/.test(a[at]) && /^\d+$/.test(b[at]) && b[at] - a[at] !== g[k].no - g[k - 1].no)) paged = false;
+      }
+      if (steady * 2 < n - 1) return;
+      if (wide || paged) heads.set(key, -1);
+      else if (!changes) heads.set(key, g[0].at);
+    });
     // Never the whole text of a page: a page of one line repeated with its number ("Slide 3") keeps it.
     withText.forEach(p => {
-      const gone = p.lines.filter(l => keys.has(l) && counts.get(keys.get(l)) >= need);
+      const gone = p.lines.filter(l => { const k = keys.get(l); return k && heads.has(k.key) && heads.get(k.key) !== k.at; });
       if (gone.length < p.lines.length) gone.forEach(l => drop.add(l));
     });
     return drop;
@@ -951,9 +1033,11 @@ faq:
     pwIn.removeAttribute('aria-invalid');
     pwIn.value = '';
   }
+  // One try at a time: a second press while the PDF opens (a double click, Enter twice) would open
+  // it again, and the first reader would be closed while its pages are read.
   pwGo.addEventListener('click', () => {
     const d = opening;
-    if (!d || pwBox.hidden) return;
+    if (!d || pwBox.hidden || d.trying) return;
     if (!pwIn.value) {
       setText(pwErr, 'Type the password first.');
       pwIn.setAttribute('aria-invalid', 'true');
@@ -961,7 +1045,8 @@ faq:
       return;
     }
     say('Opening ' + clip(d.name, 60) + '\u2026');
-    tryOpen(d, pwIn.value).catch(() => openFailed(d));
+    d.trying = true;
+    tryOpen(d, pwIn.value).catch(() => openFailed(d)).finally(() => { d.trying = false; });
   });
   pwIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pwGo.click(); } });
   pwIn.addEventListener('input', () => { if (pwIn.getAttribute('aria-invalid') === 'true') { pwIn.removeAttribute('aria-invalid'); setText(pwErr, ''); } });
@@ -1192,6 +1277,7 @@ faq:
     const vp = page.getViewport({ scale: 1 });
     pg.h = vp.height;
     const tc = await page.getTextContent();
+    letters(tc.items);
     if (needsRespace(tc.items)) {
       try { respace(tc.items, glyphsOf(await page.getOperatorList({ annotationMode: pdfjs.AnnotationMode.DISABLE }), pdfjs.OPS, page.commonObjs)); }
       catch (e) { /* the spacing stays as PDF.js gave it */ }
@@ -1201,7 +1287,8 @@ faq:
     pg.letters = (text.match(/[\p{L}\p{N}]/gu) || []).length;
     pg.bad = (text.match(UNREADABLE) || []).length;
     pg.chars = text.replace(/\s+/g, '').length;
-    pg.noText = !pg.letters;
+    // A page of nothing but unreadable characters has text: it is flagged as unreadable, not as a scan.
+    pg.noText = !pg.letters && !pg.bad;
     // A scan with a few words stored as text (a stamped number): offered for OCR.
     const v = page.view, area = (v[2] - v[0]) * (v[3] - v[1]);
     if (pg.letters && pg.letters < area / 5184) pg.scan = await ocr.mostlyPicture(pdfjs, page, text);
@@ -1315,7 +1402,13 @@ faq:
     if (job && job.gen === gen) { job.cancel(); return; }
     if (busyNow()) stopAsked = true;
   });
-  continueBtn.addEventListener('click', () => { continueRow.hidden = true; pump(); });
+  // The button goes once pressed: the keyboard focus moves to Stop, which takes its place.
+  continueBtn.addEventListener('click', () => {
+    const focused = document.activeElement === continueBtn;
+    continueRow.hidden = true;
+    pump();
+    if (focused) (progressRow.hidden ? copyBtn : stopBtn).focus();
+  });
 
   // ---------- OCR for pages without text ----------
   const ocr = TTOcr({ status: t => { if (job && job.gen === gen) say(t); }, progress: v => { if (job && job.gen === gen) bar.value = Math.max(0, Math.min(100, Math.round(v))); }, sizes: () => updateOcrSize() });
@@ -1389,19 +1482,22 @@ faq:
   // The text of one page in the chosen form: paragraphs [{ t, table }] (one for Lines and Layout).
   // The rows of a table keep their lines, with a tab between cells.
   function pageText(pg, m, drop, dehyphen, fields) {
-    let paras;
+    let paras, full = false;
     if (pg.ocr) {
       const ps = ocrParas(pg.ocr);
       paras = m === 'para' ? ps.map(p => ({ t: joinLines(p, dehyphen) })) : [{ t: ps.map(p => p.join('\n')).join('\n') }];
     } else {
       const lines = drop.size ? pg.lines.filter(l => !drop.has(l)) : pg.lines;
       if (m === 'para') {
-        paras = paragraphs(lines).map(pl => (pl[0].table ? { t: pl.map(l => l.tab).join('\n'), table: true } : { t: joinLines(pl.map(l => l.text), dehyphen) }));
+        const ps = paragraphs(lines);
+        paras = ps.map(pl => (pl[0].table ? { t: pl.map(l => l.tab).join('\n'), table: true } : { t: joinLines(pl.map(l => l.text), dehyphen) }));
+        full = !!ps.full;
       } else if (m === 'lines') paras = [{ t: lines.map(l => l.tab).join('\n') }];
       else paras = [{ t: layoutText(lines) }];
     }
     paras = paras.filter(p => p.t);
     if (fields && pg.fields.length) paras.push({ t: pg.fields.map(f => f[0] + ': ' + f[1]).join('\n'), table: true });
+    paras.full = full;
     return paras;
   }
   function buildText() {
@@ -1413,7 +1509,7 @@ faq:
     const sep = m === 'para' ? '\n\n' : '\n';
     // Each page's text is kept apart until the end, so a long PDF is put together once.
     const parts = [];
-    let lastTable = false;
+    let lastTable = false, lastFull = false;
     pgs.forEach((pg, i) => {
       const paras = pageText(pg, m, drop, dehyphen, fields), body = paras.map(p => p.t).join(sep);
       if (breaks === 'marker') { parts.push((i ? '\n\n' : '') + '--- Page ' + pg.no + ' ---' + (body ? '\n' + body : '')); return; }
@@ -1421,12 +1517,13 @@ faq:
       if (!paras.length) return;
       const k = parts.length - 1;
       // A paragraph cut by the page break is joined again.
-      if (k >= 0 && m === 'para' && !lastTable && !paras[0].table && runsOn(parts[k].slice(-200), paras[0].t)) {
+      if (k >= 0 && m === 'para' && !lastTable && !paras[0].table && runsOn(parts[k].slice(-200), paras[0].t, lastFull)) {
         const cut = parts[k].lastIndexOf('\n\n') + 2, from = cut >= 2 ? cut : 0;
         parts[k] = parts[k].slice(0, from) + joinLines([parts[k].slice(from), paras[0].t], dehyphen);
         if (paras.length > 1) parts.push(sep + paras.slice(1).map(p => p.t).join(sep));
       } else parts.push((k >= 0 ? '\n\n' : '') + body);
       lastTable = !!paras[paras.length - 1].table;
+      lastFull = paras.full;
     });
     const out = parts.join('');
     return { text: out, pgs };

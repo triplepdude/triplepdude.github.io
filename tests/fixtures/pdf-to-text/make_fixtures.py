@@ -352,6 +352,16 @@ end'''
                            'page2': '\ue001' * 8 + '\ufffd' * 8 + '\ue001' * 7 + 'X', 'page2_bad': 23}
 
 
+# ---------- unreadable.pdf: a page of nothing but symbols ----------
+# Its text is there but unreadable: it is not a page without text (a scan).
+def make_unreadable():
+    with Pdf.open(out('symbols.pdf')) as pdf:
+        del pdf.pages[0]
+        pdf.pages[0].Contents = pdf.make_stream(b'BT /T3 12 Tf 72 720 Td (aaaabbbb) Tj ET')
+        pdf.save(out('unreadable.pdf'), deterministic_id=True)
+    expected['unreadable'] = '\ue001' * 4 + '\ufffd' * 4
+
+
 # ---------- Scans: a picture of text, with and without a stamp of real text ----------
 SCAN_LINES = ['Minutes of the parish meeting', 'held on 4 March 2026.', 'The new footpath was approved.']
 
@@ -495,6 +505,19 @@ def make_locked():
     expected['locked'] = {'text': BASE_TEXT, 'password': 'open sesame', 'permissions': 'permit', 'unicode': 'caf\u00e9\u20ac', 'latin1': 'caf\u00e9'}
 
 
+# ---------- locked-pages.pdf: three pages behind an open password ----------
+# For a double click on Open PDF: the file is opened once and every page read.
+LOCKED_PAGES = ['First locked page.', 'Second locked page.', 'Third locked page.']
+
+
+def make_locked_pages():
+    write_std([one_line_page(t) for t in LOCKED_PAGES], 'tmp-pages.pdf')
+    with Pdf.open(out('tmp-pages.pdf')) as base:
+        base.save(out('locked-pages.pdf'), encryption=pikepdf.Encryption(owner='owner pw', user='open sesame', R=6))
+    os.remove(out('tmp-pages.pdf'))
+    expected['locked_pages'] = LOCKED_PAGES
+
+
 # ---------- Damaged files and odd structures ----------
 def make_structures():
     base = write_std([one_line_page('Page one of the structure test.'), one_line_page('Page two of the structure test.')], 'tmp-struct.pdf')
@@ -606,6 +629,297 @@ def make_sample():
                           'rows': [list(r) for r in rows], 'foot': foot}
 
 
+# ---------- rtl.pdf: right-to-left text as LibreOffice and Chrome write it ----------
+# LibreOffice draws a right-to-left line as runs in reading order, each placed to the left of
+# the one before: the words, a number and a full stop are runs of their own. Two Hebrew
+# paragraphs follow each other without space between them (the first ends in a short line),
+# then an Arabic one. Chrome (and Google Docs) map Arabic glyphs to their presentation forms
+# (U+FE80 to U+FEFC), which look the same but are other characters; NFKC gives the letters.
+RTL_HE = ['שלום עולם. בשנת 2024 נערך סקר של 12 אתרים לאורך הנהר, והתוצאות פורסמו בדוח מפורט שהוגש לוועדה בסוף השנה.',
+          'פסקה שנייה מתחילה כאן ונמשכת עד 3 שורות כדי לבדוק את הסוף של הפסקה.']
+RTL_AR = 'مرحبا بالعالم. في عام 2024 أجري مسح لـ 12 موقعا على طول النهر.'
+# "مرحبا بالعالم" in presentation forms, in reading order.
+RTL_PF = '\ufee3\ufeae\ufea3\ufe92\ufe8e \ufe91\ufe8e\ufedf\ufecc\ufe8e\ufedf\ufee2'
+
+
+def make_rtl():
+    import unicodedata
+    pdfmetrics.registerFont(TTFont('DejaVu', DEJAVU))
+    assert unicodedata.normalize('NFKC', RTL_PF) == 'مرحبا بالعالم'
+    size, right, width, lead = 12, 540, 300, 16
+    sw = lambda s: stringWidth(s, 'DejaVu', size)
+
+    # The words of a paragraph in lines no wider than width (the next word did not fit).
+    def fill(text):
+        lines, cur = [], []
+        for w in text.split(' '):
+            if cur and sw(' '.join(cur + [w])) > width:
+                lines.append(cur)
+                cur = []
+            cur.append(w)
+        return lines + [cur]
+
+    # A line as LibreOffice draws it: runs of words, numbers and full stops, right to left.
+    def draw_line(c, y, words):
+        runs = []
+        for w in words:
+            body, stop = (w[:-1], '.') if w.endswith('.') and not w[:-1].isdigit() else (w, '')
+            if runs and not body.isdigit() and not runs[-1][0].isdigit() and runs[-1][0] != '.':
+                runs[-1][0] += ' ' + body
+            else:
+                runs.append([body, ' '])
+            if stop:
+                runs.append(['.', ''])
+        x = right
+        for k, (run, before) in enumerate(runs):
+            if k and before:
+                x -= sw(' ')
+            x -= sw(run)
+            # The letters of a right-to-left run are drawn left to right, so in reverse; digits not.
+            c.drawString(x, y, run if run.isdigit() else run[::-1])
+
+    lines = {'he': [fill(t) for t in RTL_HE], 'ar': fill(RTL_AR)}
+    assert all(len(p) >= 2 for p in lines['he']) and len(lines['ar']) >= 2
+    assert sw(' '.join(lines['he'][0][-1]) + ' ' + RTL_HE[1].split(' ')[0]) < width - 20, 'the next word would fit'
+
+    def draw(c):
+        c.setFont('DejaVu', size)
+        y = 720
+        for para in lines['he']:
+            for words in para:
+                draw_line(c, y, words)
+                y -= lead
+        y -= 14
+        for words in lines['ar']:
+            draw_line(c, y, words)
+            y -= lead
+        y -= 14
+        c.drawString(right - sw(RTL_PF), y, RTL_PF[::-1])
+    ttf_pdf('rtl.pdf', draw)
+    expected['rtl'] = {'he': RTL_HE, 'ar': RTL_AR, 'pf': unicodedata.normalize('NFKC', RTL_PF),
+                       'he_lines': [' '.join(w) for p in lines['he'] for w in p]}
+
+
+# ---------- caseless.pdf: Chinese and Hebrew paragraphs over column and page breaks ----------
+# Scripts without capital letters give no sign that a line continues a paragraph, but a line
+# that fills its column and does not end a sentence does. On page 1, a Chinese paragraph runs
+# from the first column into the second, and another from the second column into page 2. There,
+# a short heading at the foot of the first column is not joined to the text at the top of the
+# second, and a Hebrew paragraph runs from the right column into the left one. Page 2 ends with
+# a short heading, which is not joined to the text at the top of page 3.
+ZH_A = '本報告介紹了河流研究第一季的結果。志願者每兩週沿河岸行走一次，在約克和古爾之間的十二個固定地點測量水的深度、顏色和溫度，並將讀數與前幾個季節的記錄進行比較。'
+ZH_B = '這項工作是與當地學校和水務信託機構共同規劃的。這類研究中大家都知道的一個問題是，地點在兩次訪問之間會發生一些變化，因此每個地點都用編號的柱子標記，以便在整個季節中比較讀數。'
+ZH_HEAD = '第二部分結果'
+ZH_C = '結果表明，下游河段的水溫在夏季明顯高於上游，而水的顏色在洪水之後變化最大。'
+ZH_HEAD2 = '第三部分'
+ZH_D = '下一季我們將繼續測量，並增加對魚類和鳥類的觀察。'
+HE_A = 'הדוח השנתי של עמותת הנהר מתאר את הפעילות של המתנדבים לאורך אתרים קבועים. המדידות כללו עומק, צבע וטמפרטורה, והן הושוו לנתונים של שנים קודמות ולרשומות של רשות המים לאורך כל העונה.'
+
+
+def make_caseless():
+    pdfmetrics.registerFont(TTFont('IPAGothic', IPA))
+    pdfmetrics.registerFont(TTFont('DejaVu', DEJAVU))
+    size, lead, per, top = 12, 18, 18, 740   # 18 characters of 12 pt fill a 216 pt column
+    left, right, width = 54, 330, 216
+    chunks = lambda t: [t[i:i + per] for i in range(0, len(t), per)]
+    face = TTFont('IPAX', IPA).face
+    missing = [ch for ch in ZH_A + ZH_B + ZH_HEAD + ZH_C + ZH_HEAD2 + ZH_D if ord(ch) not in face.charToGlyph]
+    assert not missing, missing
+    a, b = chunks(ZH_A), chunks(ZH_B)
+    # Neither column nor page break falls at the end of a sentence or before punctuation.
+    assert len(a) >= 4 and len(b) >= 4 and not a[-3].endswith('。') and not b[-3].endswith('。')
+    assert a[-2][0] not in '，。、' and b[-2][0] not in '，。、'
+    he, cur = [], ''
+    for w in HE_A.split(' '):
+        if cur and stringWidth(cur + ' ' + w, 'DejaVu', 11) > width:
+            he.append(cur)
+            cur = w
+        else:
+            cur = (cur + ' ' + w).strip()
+    he.append(cur)
+    half = (len(he) + 1) // 2
+    assert half >= 2 and not he[half - 1].endswith('.')
+
+    def draw(c):
+        c.setFont('IPAGothic', size)
+        for k, line in enumerate(a[:-2]):
+            c.drawString(left, top - k * lead, line)
+        for k, line in enumerate(a[-2:] + [''] + b[:-2]):
+            if line:
+                c.drawString(right, top - k * lead, line)
+        c.showPage()
+        c.setFont('IPAGothic', size)
+        for k, line in enumerate(b[-2:] + ['', ZH_HEAD]):
+            if line:
+                c.drawString(left, top - k * lead, line)
+        for k, line in enumerate(chunks(ZH_C)):
+            c.drawString(right, top - k * lead, line)
+        c.setFont('DejaVu', 11)
+        for k, line in enumerate(he):
+            # Right to left: the right column comes first, its letters drawn in reverse.
+            x, row = (right, k) if k < half else (left, k - half)
+            c.drawString(x + width - stringWidth(line, 'DejaVu', 11), 560 - row * 16, line[::-1])
+        c.setFont('IPAGothic', size)
+        c.drawString(left, 420, ZH_HEAD2)
+        c.showPage()
+        c.setFont('IPAGothic', size)
+        for k, line in enumerate(chunks(ZH_D)):
+            c.drawString(left, top - k * lead, line)
+
+    ttf_pdf('caseless.pdf', draw)
+    expected['caseless'] = [ZH_A, ZH_B, ZH_HEAD, ZH_C, HE_A, ZH_HEAD2, ZH_D]
+
+
+# ---------- statement.pdf: a table over three pages ----------
+# A statement's first and last rows lie in the top and bottom eighths of each page, where
+# running heads are looked for, and with their numbers replaced they look alike from page to
+# page; they are not running heads. The running head and the page number are.
+STATEMENT_HEAD = ['Date', 'Description', 'Amount']
+
+
+def statement_rows(n):
+    rows = []
+    for k in range(30):
+        day = 1 + (k * 31 + n) % 28
+        rows.append(['2026-%02d-%02d' % (n, day), 'Card payment', '%d.%02d' % (10 + (k * 37 + n * 11) % 90, (k * 13) % 100)])
+    return rows
+
+
+def make_statement():
+    pages = []
+    for n in range(1, 4):
+        p = Page()
+        p.text(54, 772, 'Riverside Credit Union', 'F2', 8)
+        p.text(558 - p.width('Statement of account', 'F2', 8), 772, 'Statement of account', 'F2', 8)
+        y = 750
+        for row in [STATEMENT_HEAD] + statement_rows(n):
+            font = 'F3' if row is STATEMENT_HEAD else 'F2'
+            p.text(54, y, row[0], font, 9)
+            p.text(160, y, row[1], font, 9)
+            p.text(420 - p.width(row[2], font, 9), y, row[2], font, 9)
+            y -= 22
+        foot = 'Page %d of 3' % n
+        p.text(306 - p.width(foot, 'F2', 8) / 2, 24, foot, 'F2', 8)
+        pages.append(p)
+    write_std(pages, 'statement.pdf')
+    expected['statement'] = {'head': STATEMENT_HEAD, 'pages': [statement_rows(n) for n in range(1, 4)],
+                             'running': ['Riverside Credit Union Statement of account', 'Page 1 of 3']}
+
+
+# ---------- log.pdf: a log over three pages ----------
+# Each line of the log is one piece of text, with a page number at the foot of each page. The
+# first lines of each page lie where running heads are looked for and look alike with their
+# numbers replaced, but their times and readings change from page to page: they are kept.
+def log_lines(n):
+    return ['2026-03-%02d %02d:%02d Pump %d started at %d.%d bar' % (n, 6 + k, (n * 7 + k * 13) % 60, k % 3 + 1, 20 + (n + k) % 9, (n * k) % 10)
+            for k in range(6)]
+
+
+def make_log():
+    pages = []
+    for n in range(1, 4):
+        p = Page()
+        y = 750
+        for line in log_lines(n):
+            p.text(54, y, line, 'F2', 10)
+            y -= 14
+        p.text(306 - p.width(str(n), 'F2', 9) / 2, 30, str(n), 'F2', 9)
+        pages.append(p)
+    write_std(pages, 'log.pdf')
+    expected['log'] = [log_lines(n) for n in range(1, 4)]
+
+
+# ---------- chapters.pdf: footers that name their chapter, a table continued over pages ----------
+# Eighteen pages in three chapters. Each page ends with a footer that names its chapter and
+# gives the page number, on the left of odd pages and the right of even ones, so each form of it
+# is on a sixth of the pages, every other page. A table runs over pages 8 to 11, its heading
+# repeated at the top of the pages it continues on; pages 2, 4 and 6 have the number of a figure
+# at the top, and chapter 3 a running head. Page 1 has a table of contents, and the heading of
+# chapter 2 is drawn twice, as some programs make text bold.
+CHAPTERS = [(1, 'Rivers', range(1, 7)), (2, 'Lakes', range(7, 13)), (3, 'Coasts', range(13, 19))]
+LEVELS = [['Naburn', '2.41'], ['Selby', '3.07'], ['Goole', '5.82'], ['Hull', '6.15']]
+BODIES = ['Volunteers counted herons near the weir at dawn.', 'The bank had slipped after the February storm.',
+          'Water samples were taken from both sides of the bridge.', 'A new footpath now follows the old towing path.',
+          'Otters were seen twice, both times in the evening.', 'Litter was collected by the school on a Saturday.',
+          'The lake froze over for nine days in January.', 'Reeds have spread along the northern shore.',
+          'Anglers reported fewer perch than last year.', 'The boathouse roof was repaired in the spring.',
+          'Algae bloomed in the shallow bay during July.', 'Swans nested on the island for the first time.',
+          'The coast path was closed after a landslip.', 'Seals hauled out on the sandbank most mornings.',
+          'Storm surge reached the car park in October.', 'Rock pools were surveyed at the lowest tides.',
+          'Sea kale flowered on the shingle ridge.', 'The groynes were inspected by the council.']
+TABLE2 = 'Table 2. Water levels'
+CONTENTS = [('Rivers and their banks', 1), ('Lakes', 7), ('Coasts and estuaries', 13)]
+
+
+def toc_entry(p, title, at):
+    s = title + ' '
+    while p.width(s + '. ' + str(at)) < 250:
+        s += '. '
+    return s + str(at)
+
+
+def make_chapters():
+    pages, paras = [], []
+    for ch, name, nums in CHAPTERS:
+        for n in nums:
+            p = Page()
+            y = 700
+            if n == nums[0]:
+                p.text(54, y, 'Chapter %d. %s' % (ch, name), 'F3', 14)
+                if ch == 2:
+                    # Drawn again a little to the right, to look bolder: the text is kept once.
+                    p.text(54.4, y, 'Chapter %d. %s' % (ch, name), 'F3', 14)
+                paras.append('Chapter %d. %s' % (ch, name))
+                y -= 28
+            if n in (9, 10, 11):
+                p.text(54, 750, TABLE2 + ' (continued)', 'F3', 10)
+                if n == 9:
+                    paras.append(TABLE2 + ' (continued)')
+            if n in (2, 4, 6):
+                # A figure every other page, its number at the top: Figure 1, 2 and 3 are not page
+                # numbers, which would go up by two.
+                cap = 'Figure %d.' % (n // 2)
+                p.text(54, 750, cap, 'F3', 10)
+                paras.append(cap)
+            if ch == 3:
+                # A running head through chapter 3, kept where it first comes, and under it on
+                # every other page a line that is not the top of its page: kept on each.
+                p.text(54, 770, 'Coastal survey', 'F2', 8)
+                if n == nums[0]:
+                    paras.append('Coastal survey')
+                if n % 2 == 0:
+                    p.text(54, 750, 'Notes from the shore', 'F3', 10)
+                    paras.append('Notes from the shore')
+            p.text(54, y, BODIES[n - 1])
+            paras.append(BODIES[n - 1])
+            y -= 24
+            if n == 1:
+                # A table of contents: dot leaders up to page numbers set flush right.
+                for title, at in CONTENTS:
+                    entry = toc_entry(p, title, at)
+                    p.text(54, y, entry)
+                    paras.append(entry)
+                    y -= 14
+                y -= 10
+            if n in (8, 9, 10, 11):
+                if n == 8:
+                    p.text(54, y, TABLE2, 'F3', 10)
+                    paras.append(TABLE2)
+                    y -= 18
+                for site, level in LEVELS:
+                    p.text(54, y, site)
+                    p.text(260 - p.width(level), y, level)
+                    y -= 14
+                paras.append('\n'.join('\t'.join(r) for r in LEVELS))
+            foot = 'Chapter %d: %s' % (ch, name)
+            left, right = (foot, str(n)) if n % 2 else (str(n), foot)
+            p.text(54, 30, left, 'F2', 8)
+            p.text(558 - p.width(right, 'F2', 8), 30, right, 'F2', 8)
+            pages.append(p)
+    write_std(pages, 'chapters.pdf')
+    expected['chapters'] = {'paragraphs': paras, 'foot': 'Chapter 1: Rivers 1'}
+
+
 # ---------- What other programs make of these files ----------
 def others_for(name, password=None, pages=None):
     args = ['pdftotext', '-enc', 'UTF-8']
@@ -628,12 +942,19 @@ def main():
     make_spacing()
     make_scripts()
     make_symbols()
+    make_unreadable()
     make_scans()
     make_form()
     make_locked()
+    make_locked_pages()
     make_structures()
     make_sample()
-    for name in ['columns.pdf', 'spacing.pdf', 'scripts.pdf', 'symbols.pdf', 'form.pdf', 'sample.pdf', 'rotated.pdf', 'incremental.pdf']:
+    make_rtl()
+    make_caseless()
+    make_statement()
+    make_chapters()
+    make_log()
+    for name in ['columns.pdf', 'spacing.pdf', 'scripts.pdf', 'symbols.pdf', 'form.pdf', 'sample.pdf', 'rotated.pdf', 'incremental.pdf', 'rtl.pdf', 'caseless.pdf', 'statement.pdf', 'chapters.pdf']:
         others[name] = others_for(name)
     expected['others'] = others
     with open(out('expected.json'), 'w', encoding='utf8') as f:
