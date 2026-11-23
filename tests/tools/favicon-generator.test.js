@@ -2,8 +2,9 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const http = require('http');
 const { execFileSync } = require('child_process');
-const { devices } = require('playwright');
+const { devices, chromium } = require('playwright');
 
 // ---------- Independent readers ----------
 
@@ -258,6 +259,18 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     assert.deepEqual([pm.size, pm.mode, pm.alpha_min], [[512, 512], 'RGBA', 255]);
   }
 
+  // ---------- Pair kerning: "AV" is set as the font sets it (Inter keeps its kerning in GPOS Extension lookups) ----------
+  const setLetters = v => page.$eval('#fav-text', (e, v) => { e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+  await setLetters('AV');
+  await summaryIs('Icon from the letters “AV” in Inter.');
+  const [ax0, ay0, ax1, ay1] = expected.inter_AV.bounds;
+  const ka = 60 / Math.max(ax1 - ax0, ay1 - ay0), aw = (ax1 - ax0) * ka, ah = (ay1 - ay0) * ka;
+  const bAV = pathBox((await get('icon.svg')).toString().match(/<path class="fav-ink" style="fill:#ffffff" d="([^"]+)"\/>/)[1]);
+  assert.ok(near([bAV.x1, bAV.x2, bAV.y1, bAV.y2], [50 - aw / 2, 50 + aw / 2, 50 - ah / 2, 50 + ah / 2], 0.011),
+    `"AV" is kerned by the font's ${expected.inter_AV.kern} units: ${JSON.stringify(bAV)}, expected y ${(50 - ah / 2).toFixed(2)} to ${(50 + ah / 2).toFixed(2)}`);
+  await setLetters('F');
+  await summaryIs('Icon from the letters “F” in Inter.');
+
   // ---------- Dark style: icon.svg switches colours, the PNGs keep the light ones ----------
   await page.check('#fav-dark');
   assert.ok(await page.isVisible('#fav-dark-ink') && await page.isVisible('#fav-dark-bg'), 'the dark colours appear');
@@ -304,6 +317,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.fill('#fav-text', 'Éa');
   await summaryIs('Icon from the letters “Éa” in Fraunces.');
   assert.equal(await text('#fav-font-note'), '', 'Latin letters with accents have outlines');
+  // An accent typed as a separate mark (q with a combining tilde has no single character) needs the font's mark
+  // positioning: the device's font draws it, rather than outlines with the tilde beside the q.
+  await page.fill('#fav-text', 'q\u0303');
+  await summaryIs('Icon from the letters “q\u0303” in your device’s font.');
+  assert.match(await text('#fav-font-note'), /^An accent typed as a separate mark cannot be placed on its letter here, so your device’s serif font draws these letters\./);
+  assert.match((await get('icon.svg')).toString(), />q\u0303<\/text>/);
+  await page.fill('#fav-text', '\u00c9a');
+  await summaryIs('Icon from the letters \u201c\u00c9a\u201d in Fraunces.');
   await page.selectOption('#fav-font', 'inter');
   // Letters that barely show on the background get a warning.
   await page.fill('#fav-ink', '#2050d0');
@@ -422,6 +443,10 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match((await get('icon.svg')).toString(), />❤️<\/text>/, 'and drawn as the emoji');
   assert.equal(await emoji('🇬🇧'), '', 'a flag is one emoji');
   await summaryIs('Icon from the emoji 🇬🇧.');
+  // Some emoji are grey by design (© in Noto Color Emoji): that is no sign of a missing colour emoji font.
+  assert.equal(await emoji('©'), '');
+  await summaryIs('Icon from the emoji ©️.');
+  assert.match(await text('#fav-emoji-note'), /^Your device’s emoji font draws the emoji\./, 'the rocket was drawn in colour, so the device has a colour emoji font');
 
   // ---------- Image: a logo with transparent edges, every file solid blue ----------
   await page.click('label:has(#fav-src-image)');
@@ -440,6 +465,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#fav-snippet'), SNIPPET.split('\n').filter(l => !l.includes('icon.svg')).join('\n'), 'no icon.svg from a bitmap');
   assert.ok(await page.isHidden('.fav-file[data-file="icon.svg"] button'), 'nor its button');
   assert.ok(await page.isDisabled('#fav-dark'), 'nor a dark style');
+  assert.equal(await text('#fav-dark-caption'), 'Browser tab, dark. A bitmap picture has no dark style, so dark tabs show the same icon.');
   const zipL = unzip(await get('zip'));
   assert.deepEqual([...zipL.keys()], [...FILES.filter(f => f !== 'icon.svg'), 'favicon-snippet.html']);
   const solid = (p, c, what) => assert.deepEqual(p.colours(), [c.join()], `${what} is solid ${c}`);
@@ -482,6 +508,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   h = await png('favicon-96x96.png');
   assert.equal(h.count(c => c[3] !== 255), 0, 'cropped: the square is filled');
   assert.deepEqual([h.at(10, 10), h.at(90, 90)], [RED, BLUE2]);
+  // Filled into a circle on green, the maskable icon's circle is shrunk into the safe zone and clips the picture.
+  await page.selectOption('#fav-shape', 'circle');
+  await page.fill('#fav-bg', '#00ff00');
+  const mC = await png('icon-maskable-512.png'), GREEN = [0, 255, 0, 255], r0 = (x, y) => Math.hypot(x + 0.5 - 256, y + 0.5 - 256);
+  assert.equal(mC.count((c, x, y) => !near(c, GREEN, 24) && r0(x, y) > 204.8 + 0.75), 0, 'nothing but the background outside the safe zone');
+  assert.ok(mC.count((c, x, y) => !near(c, GREEN, 24) && r0(x, y) > 200) > 100, 'the picture fills the safe zone');
+  await page.selectOption('#fav-shape', 'none');
   assert.equal(await attr('#fav-stage', 'role'), 'application');
   assert.equal(await attr('#fav-stage', 'tabindex'), '0');
   await page.focus('#fav-centre');
@@ -529,6 +562,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#fav-snippet'), SNIPPET);
   let svgS = (await get('icon.svg')).toString();
   assert.doesNotMatch(svgS, /script|onload|example\.com|alert/i, 'no script, handler or link in icon.svg');
+  assert.doesNotMatch(svgS, /srcdoc|\ssrc=/, 'its HTML keeps no frame content and no address of another file');
   assert.match(svgS, /<svg [^>]*viewBox="0 0 200 100" x="0" y="25" width="100" height="50">/);
   let v = await png('icon-512.png');
   assert.deepEqual(v.colours().sort(), ['0,0,0,0', '0,255,0,255', '255,0,255,255'], 'drawn from the vector: no blended pixels');
@@ -543,6 +577,20 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.check('#fav-dark');
   assert.equal(await text('#fav-dark-hint'), 'Without a background there is nothing to change in dark mode: choose a shape first.');
   await page.uncheck('#fav-dark');
+
+  // ---------- An SVG with its own dark style, opened while the page is dark: the files take its light colours ----------
+  // Browsers draw an SVG picture in the page's colour scheme; Google Search and phones show the PNGs on light backgrounds.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  r = await openImage(fx('duo.svg'));
+  assert.match(r.note, /Its own dark-mode colours stay in icon\.svg; the PNG and ICO files and the previews here use its light colours\./);
+  const duo = await png('favicon-96x96.png');
+  assert.deepEqual([duo.at(30, 48), duo.at(66, 48)], [RED, RED], 'light colours from @media (prefers-color-scheme) and from light-dark()');
+  assert.deepEqual(parseIco(await get('favicon.ico'), assert)[0].at(4, 8), RED, 'in favicon.ico too');
+  const duoSvg = (await get('icon.svg')).toString();
+  assert.match(duoSvg, /@media \(prefers-color-scheme: dark\) \{ #a \{ fill: #00ff00 \} \}/, 'icon.svg keeps the dark style');
+  assert.match(duoSvg, /#b \{ color-scheme: light dark; fill: light-dark\(#ff0000, #00ff00\) \}/);
+  assert.equal(await text('#fav-dark-caption'), 'Browser tab, dark. Chrome and Firefox switch to the SVG’s own dark colours, which icon.svg keeps; this preview shows its light ones.');
+  await page.emulateMedia({ colorScheme: null });
 
   // ---------- Every format the site reads ----------
   const formats = [
@@ -600,6 +648,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => document.querySelector('#fav-status').textContent === 'Opened pasted.png.');
   assert.ok(await page.isChecked('#fav-src-image'), 'a pasted picture opens');
   await summaryIs('Icon from pasted.png, fitted inside the square.');
+  // Several files dropped at once: the first opens, and the note says so.
+  await page.evaluate(([a, b]) => {
+    const dt = new DataTransfer();
+    for (const [n, b64] of [['one.png', a], ['two.png', b]]) dt.items.add(new File([Uint8Array.from(atob(b64), c => c.charCodeAt(0))], n, { type: 'image/png' }));
+    document.querySelector('#fav-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [fs.readFileSync(fx('halves.png')).toString('base64'), fs.readFileSync(fx('dot.png')).toString('base64')]);
+  await page.waitForFunction(() => document.querySelector('#fav-status').textContent === 'Opened one.png.');
+  assert.match(await text('#fav-file-note'), /^Of the 2 files, only the first, one\.png, is used\./);
 
   // ---------- Large pictures: a 20,000 px panorama and a 12 MP photo ----------
   r = await openImage(fx('panorama.png'));
@@ -618,20 +674,33 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // ---------- Cancel, and a picture that never finishes opening ----------
   await page.evaluate(() => {
     const real = TTImage.decode;
+    const release = TTImage.release;
     window.__release = null;
+    window.__finished = false;
     TTImage.decode = function (f, o) { TTImage.decode = real; return new Promise((res, rej) => { window.__release = () => real(f, o).then(res, rej); }); };
+    // The opening job releases its decoded picture as its last step.
+    TTImage.release = function (x) { TTImage.release = release; release.call(this, x); window.__finished = true; };
   });
   await page.setInputFiles('#fav-file', fx('halves.png'));
   await page.waitForFunction(() => window.__release && document.querySelector('#fav-status').textContent === 'Opening halves.png…');
   assert.ok(await page.isVisible('#fav-cancel'), 'Cancel shows while a picture opens');
   await page.click('#fav-zip');
   await page.waitForFunction(() => document.querySelector('#fav-dl-error').textContent === 'Wait until the image has opened.');
+  // The wait is for the Image source only: the letters can be saved meanwhile.
+  await page.click('label:has(#fav-src-text)');
+  await page.waitForFunction(() => document.querySelector('#fav-dl-error').textContent === '', null, { timeout: 10000 })
+    .catch(async () => assert.fail(`the Text source still says "${await text('#fav-dl-error')}"`));
+  await ready();
+  assert.equal(parseIco(await get('favicon.ico'), assert).length, 3, 'the letters are saved while a picture opens');
+  await page.click('label:has(#fav-src-image)');
+  assert.ok(await page.isVisible('#fav-cancel'), 'the picture is still opening');
   await page.click('#fav-cancel');
   assert.equal(await text('#fav-status'), 'Stopped opening halves.png.');
   assert.ok(await page.isHidden('#fav-cancel'));
   assert.equal(await page.evaluate(() => document.activeElement.id), 'fav-file', 'focus goes back to the file field');
   await page.evaluate(() => window.__release());
-  await page.waitForTimeout(300);
+  await page.waitForFunction(() => window.__finished);
+  await page.evaluate(() => new Promise(r => setTimeout(r, 50)));
   assert.equal(await text('#fav-drop-title'), 'photo-12mp.heic', 'the cancelled picture never replaces the open one');
   await summaryIs('Icon from photo-12mp.heic, fitted inside the square.');
   await ready();
@@ -795,5 +864,53 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await de.textContent('#fav-text-size-out'), '60%');
   assert.ok(parseIco(await get('favicon.ico', de), assert).length === 3);
   await dctx.close();
+
+  // ---------- The files in a real page: the full Chromium build fetches favicons, as a browser window does ----------
+  let full = null;
+  try { full = await chromium.launch({ channel: 'chromium' }); } catch (e) { console.log('  (favicon-generator: no full Chromium build here: the real-page check is skipped)'); }
+  if (full) {
+    const site = fs.mkdtempSync(path.join(require('os').tmpdir(), 'favsite-'));
+    const head = zipF.get('favicon-snippet.html').toString();
+    for (const [n, b] of zipF) fs.writeFileSync(path.join(site, n), b);
+    const pageWith = lines => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Test</title>\n${lines}</head><body><p>Test</p></body></html>`;
+    fs.writeFileSync(path.join(site, 'index.html'), pageWith(head));
+    fs.writeFileSync(path.join(site, 'bitmap.html'), pageWith(head.split('\n').filter(l => !l.includes('icon.svg')).join('\n')));
+    const asked = [];
+    const TYPES = { '.html': 'text/html; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
+    const server = http.createServer((req, res) => {
+      const p = new URL(req.url, 'http://x').pathname, f = path.join(site, p === '/' ? 'index.html' : p.slice(1));
+      asked.push(p);
+      if (!f.startsWith(site + path.sep) || !fs.existsSync(f)) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': TYPES[path.extname(f)] || 'application/octet-stream' });
+      res.end(fs.readFileSync(f));
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const until = async (test, what) => {
+      for (let i = 0; i < 300 && !test(); i++) await new Promise(r => setTimeout(r, 50));
+      assert.ok(test(), what());
+    };
+    try {
+      const fctx = await full.newContext();
+      const fp = await fctx.newPage();
+      await fp.goto(origin + '/');
+      await until(() => asked.includes('/icon.svg'), () => `the browser fetches icon.svg for the tab: ${asked}`);
+      const cdp = await fctx.newCDPSession(fp);
+      const man = await cdp.send('Page.getAppManifest');
+      assert.equal(man.url, origin + '/site.webmanifest');
+      assert.deepEqual(man.errors, [], 'Chromium reads site.webmanifest without errors');
+      const inst = (await cdp.send('Page.getInstallabilityErrors')).installabilityErrors.map(e => e.errorId);
+      assert.deepEqual(inst.filter(e => e !== 'in-incognito'), [], 'nothing in the files stops the site from being installed');
+      assert.ok(!asked.includes('/favicon.ico'), `with sizes="32x32" on the ICO, Chrome takes the SVG alone: ${asked}`);
+      asked.length = 0;
+      await fp.goto(origin + '/bitmap.html');
+      await until(() => asked.includes('/favicon.ico'), () => `without icon.svg the browser takes favicon.ico: ${asked}`);
+      await fctx.close();
+    } finally {
+      server.close();
+      await full.close();
+      fs.rmSync(site, { recursive: true, force: true });
+    }
+  }
   fs.rmSync(tmp, { recursive: true, force: true });
 };
