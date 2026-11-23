@@ -459,7 +459,7 @@ window.TTPdfPages = (function () {
   var renderQueued = false;
 
   // ---------- thumbnails, drawn when they scroll into view ----------
-  var thumbQueue = [], thumbBusy = 0;
+  var thumbQueue = [], thumbBusy = 0, thumbWaiters = [];
   var observer = 'IntersectionObserver' in window ? new IntersectionObserver(function (entries) {
     entries.forEach(function (en) {
       if (!en.isIntersecting) return;
@@ -479,8 +479,18 @@ window.TTPdfPages = (function () {
       var job = thumbQueue.shift();
       if (job.d !== doc) continue;
       thumbBusy++;
-      drawThumb(job).catch(function () { /* the placeholder stays */ }).then(function () { thumbBusy--; pumpThumbs(); });
+      drawThumb(job).catch(function () { /* the placeholder stays */ }).then(function () {
+        thumbBusy--;
+        if (!thumbBusy) thumbWaiters.splice(0).forEach(function (done) { done(); });
+        pumpThumbs();
+      });
     }
+  }
+  // Resolves once no thumbnail is being drawn; none starts while converting. A drawn thumbnail
+  // cleans its page up, which drops the images PDF.js decoded for that page, also those a
+  // conversion reading the same page's pictures is about to take (see thumbsIdle in the API).
+  function thumbsIdle() {
+    return thumbBusy ? new Promise(function (done) { thumbWaiters.push(done); }) : Promise.resolve();
   }
   function drawThumb(job) {
     var d = job.d, c = job.c;
@@ -1009,7 +1019,7 @@ window.TTPdfPages = (function () {
   }
 
   return {
-    refresh: refresh, render: render, convert: convert, cancel: cancel, renderPage: renderPage, noteSize: noteSize,
+    refresh: refresh, render: render, convert: convert, cancel: cancel, renderPage: renderPage, noteSize: noteSize, thumbsIdle: thumbsIdle,
     doc: function () { return doc; }, result: function (i) { return done[i]; }, isBusy: function () { return busy; },
     pdfjs: function () { return pdfjs; }, cards: function () { return cards; },
     say: say, setError: setError, friendly: friendly, fmtBytes: fmtBytes, plural: plural, listText: listText,

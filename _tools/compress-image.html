@@ -438,6 +438,7 @@ faq:
     const lossless = await losslessPng(it, d, w, h);
     if (level >= LOSSLESS) return { blob: lossless, lossless: true };
     if (typeof CompressionStream !== 'function') throw fail('This browser cannot make smaller PNG files. Choose JPG or WebP, or All (lossless) colours.');
+    if (!window.TTPng) throw fail('Part of this page did not load. Reload the page and try again.');
     const r = await TTPng.quantize(it.id + ':' + w + 'x' + h, lossless, LEVELS[level - 1], dither);
     return { blob: new Blob([r.bytes], { type: 'image/png' }), colours: r.colours, exact: r.exact };
   }
@@ -631,7 +632,7 @@ faq:
         if (e !== CANCEL && g === gen && items.indexOf(it) >= 0) { it.state = 'error'; it.out = null; it.error = message(e); }
       }
       if (items.indexOf(it) >= 0 && it.state !== 'working') paint(it);
-      if (pngCache.key.indexOf(it.id + ':') === 0 && it !== selected) { pngCache = { key: '', blob: null }; TTPng.quantFree(); }
+      if (pngCache.key.indexOf(it.id + ':') === 0 && it !== selected) { pngCache = { key: '', blob: null }; if (window.TTPng) TTPng.quantFree(); }
     }
     running = false;
     summary();
@@ -866,7 +867,7 @@ faq:
     items = [];
     selected = null;
     pngCache = { key: '', blob: null };
-    TTPng.quantFree();
+    if (window.TTPng) TTPng.quantFree();
     before.removeAttribute('src');
     after.removeAttribute('src');
     result.hidden = true;

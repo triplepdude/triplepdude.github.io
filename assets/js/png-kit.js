@@ -26,7 +26,8 @@
  *     (a pixel is blank when it is almost white, or with alpha almost clear); colours
  *     'exact' gives the browser's own PNG, the others an indexed PNG from quantKit:
  *     256 colours, greys (ITU-R 601 luma, as Pillow's convert('L')) or black and white
- *     (luma below 128 is black). rects are [x0, y0, x1, y1] areas, in pixels, holding
+ *     (luma below 128 is black; with white, the luma of the pixel as it looks on white, and
+ *     what is not black is clear). rects are [x0, y0, x1, y1] areas, in pixels, holding
  *     pictures: only they are dithered. width makes the trimmed box that many pixels wide,
  *     centred on the content. With boundsOnly only box is worked out. The canvas is read at
  *     once and not changed.
@@ -447,19 +448,23 @@
 
     // Black and white: a grey value of 128 or more is white. Inside the mask (the pictures) the error
     // is spread to the next pixels (Floyd-Steinberg), so a photo keeps its shading as dots, while the
-    // plain threshold keeps text sharp. Alpha becomes all or nothing.
-    function bw(px, w, h, mask) {
+    // plain threshold keeps text sharp. Alpha becomes all or nothing. With clear (white made
+    // transparent) each pixel is judged as it looks on white, and what comes out white is clear: black
+    // on nothing, never an opaque white patch where the page had yellow or another pale colour.
+    function bw(px, w, h, mask, clear) {
       let cur = new Float32Array(w + 2), nxt = new Float32Array(w + 2);
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-          const i = y * w + x, p = i * 4;
-          if (px[p + 3] < 128) { px[p] = px[p + 1] = px[p + 2] = px[p + 3] = 0; continue; }
+          const i = y * w + x, p = i * 4, a = px[p + 3];
+          if (!clear && a < 128) { px[p] = px[p + 1] = px[p + 2] = px[p + 3] = 0; continue; }
           let v = luma(px[p], px[p + 1], px[p + 2]);
+          if (clear && a < 255) v = (v * a + 255 * (255 - a)) / 255;
           if (mask && mask[i]) {
             const t = v + cur[x + 1], o = t >= 128 ? 255 : 0, e = t - o;
             cur[x + 2] += e * 7 / 16; nxt[x] += e * 3 / 16; nxt[x + 1] += e * 5 / 16; nxt[x + 2] += e / 16;
             v = o;
           } else v = v >= 128 ? 255 : 0;
+          if (clear && v) { px[p] = px[p + 1] = px[p + 2] = px[p + 3] = 0; continue; }
           px[p] = px[p + 1] = px[p + 2] = v;
           px[p + 3] = 255;
         }
@@ -496,7 +501,7 @@
       }
       const mask = m.colours === 'grey' ? null : maskOf((m.rects || []).map(r => [r[0] - ox, r[1] - oy, r[2] - ox, r[3] - oy]), w, h);
       if (m.colours === 'grey') grey(px);
-      else if (m.colours === 'bw') bw(px, w, h, mask);
+      else if (m.colours === 'bw') bw(px, w, h, mask, !!m.white);
       const img = { w, h, px };
       if (m.colours === '256' && mask) img.mask = mask;
       const r = await K.png(img, 256, !!img.mask);

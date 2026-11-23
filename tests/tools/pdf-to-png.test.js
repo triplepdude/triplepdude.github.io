@@ -295,6 +295,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(count, 1, 'a double click on Convert saves once');
   assert.equal(await page.evaluate(() => { window.__undo(); return window.__drawn; }), 0, 'pages converted with the same settings are not drawn again');
   page.off('download', counter);
+  // Other settings drop the images at once: no page offers to download or copy one made with the old
+  // settings, also once the old settings are chosen again.
+  const offered = () => page.$$eval('.p2p-dl, .p2p-page .p2p-copy', l => l.filter(b => !b.hidden).length);
+  assert.ok(await offered() >= 4, 'each converted page offers its image');
+  await page.selectOption('#p2p-colours', 'grey');
+  assert.equal(await offered(), 0, 'nothing made with the old colours is offered');
+  await page.selectOption('#p2p-colours', 'exact');
+  assert.equal(await offered(), 0, 'and it is not kept for when they come back');
 
   // A width: every page gets it, and its DPI goes into pHYs.
   await page.selectOption('#p2p-size', 'w1920');
@@ -446,6 +454,34 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual([img.w, img.h], [200, 100]);
   assert.match(await text('#p2p-status'), /^Saved blank-page-1\.png: 200 × 100 pixels, [\d.]+\u00a0B\. Page 1 is blank, so it was not trimmed\.$/);
   await page.uncheck('#p2p-trim');
+  // Black and white with white made transparent is black on nothing: what Black and white makes white,
+  // here a page painted white and boxes of yellow, cyan and orange, is see-through, never an opaque
+  // white patch, and the black is the black of Black and white on a white background.
+  const paleInk = '1 g 0 0 300 200 re f 1 1 0 rg 20 120 60 60 re f 0 1 1 rg 100 120 60 60 re f 1 0.8 0 rg 180 120 60 60 re f 0 g 20 20 100 40 re f BT /F1 30 Tf 140 30 Td (Ink) Tj ET';
+  await openPdf({ name: 'pale.pdf', mimeType: 'application/pdf', buffer: rawPdf(['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${paleInk.length} >>\nstream\n${paleInk}\nendstream`]) }, 1);
+  await page.selectOption('#p2p-colours', 'bw');
+  const bwOnWhite = png((await save()).buf);
+  await background('nowhite');
+  assert.equal(await plan(), 'The page to PNG at 72 DPI, black and white, white made transparent. Page 1 becomes 300 × 200 pixels.');
+  const bwClear = png((await save()).buf);
+  assert.deepEqual([bwClear.w, bwClear.h], [bwOnWhite.w, bwOnWhite.h]);
+  let opaqueWhite = 0, other = 0, notAsOnWhite = 0, inkPixels = 0;
+  for (let i = 0; i < bwClear.px.length; i += 4) {
+    const [r, g, b, a] = bwClear.px.subarray(i, i + 4), ink = a === 255 && r === 0 && g === 0 && b === 0;
+    if (a === 255 && r === 255 && g === 255 && b === 255) opaqueWhite++;
+    else if (!ink && a !== 0) other++;
+    if (ink) inkPixels++;
+    if (ink !== (bwOnWhite.px[i] === 0)) notAsOnWhite++;
+  }
+  assert.equal(opaqueWhite, 0, 'white made transparent leaves no opaque white pixel in black and white');
+  assert.equal(other, 0, 'every pixel is black or clear');
+  assert.ok(inkPixels > 4000, `the black box and the text are kept (${inkPixels} pixels)`);
+  assert.ok(notAsOnWhite <= 30, `the black is that of black and white on white (${notAsOnWhite} pixels differ)`);
+  assert.deepEqual(bwClear.at(50, 50), [0, 0, 0, 0], 'the yellow box is see-through');
+  await page.selectOption('#p2p-colours', 'exact');
+  await background('white');
 
   // ---- Colours: Exact, 256, greyscale, black and white, on a page with pictures and text ----
   await openPdf(fx('pictures.pdf'), 3);
@@ -565,7 +601,137 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(img.type, 3);
   const rgb = Buffer.from(exp.pictures[0].rgba, 'base64');
   for (let i = 0; i < rgb.length; i += 4) assert.equal(img.px[i], luma(rgb[i], rgb[i + 1], rgb[i + 2]), 'a greyscale picture');
+  // In 256 colours a picture is a photo, so all of it is dithered: in the gradient (the JPEG, 2,400
+  // colours), many pixels take a palette colour other than the nearest one, which spreads the error
+  // (about 18% here, 5% without dithering).
+  await page.selectOption('#p2p-colours', '256');
+  const exactJpeg = png(unzip(out.buf)[1].data), jpeg256 = png(unzip((await save()).buf)[1].data);
+  assert.deepEqual([jpeg256.w, jpeg256.h, jpeg256.type], [exactJpeg.w, exactJpeg.h, 3]);
+  const used = [...new Set(Array.from({ length: jpeg256.w * jpeg256.h }, (_, k) => jpeg256.px.readUInt32BE(k * 4)))].map(v => [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255]);
+  let notNearest = 0;
+  for (let i = 0; i < exactJpeg.px.length; i += 4) {
+    const d = c => (c[0] - exactJpeg.px[i]) ** 2 + (c[1] - exactJpeg.px[i + 1]) ** 2 + (c[2] - exactJpeg.px[i + 2]) ** 2;
+    const best = Math.min(...used.map(d));
+    if (d([jpeg256.px[i], jpeg256.px[i + 1], jpeg256.px[i + 2]]) > best) notNearest++;
+  }
+  assert.ok(notNearest > exactJpeg.w * exactJpeg.h * 0.1, `the gradient picture is dithered (${notNearest} of ${exactJpeg.w * exactJpeg.h} pixels not the nearest colour)`);
+  assert.ok(psnr(exactJpeg.px, jpeg256.px) > 30, 'and close to the picture');
   await page.selectOption('#p2p-colours', 'exact');
+  const firstPictures = unzip(out.buf);
+  // Pictures read while the page's thumbnail is still being drawn. A drawn thumbnail cleans its page
+  // up, and with it the images PDF.js decoded for the page, which the pictures are taken from. Here it
+  // happens at the worst moment every time, in two ways: (1) the thumbnail's own page list is held back
+  // until the list of the pictures has been asked for, and that list until the thumbnail is drawn;
+  // (2) the thumbnail is held back until the first picture is being saved, and that until the
+  // thumbnail is drawn. Either is let go 1.5 s after Save. Every picture must still come out, at once,
+  // not after a minute's wait for each.
+  await page.evaluate(() => {
+    const post = Worker.prototype.postMessage, toBlob = HTMLCanvasElement.prototype.toBlob;
+    const race = window.__race = { way: 0, thumb: false, list: false, saving: false, until: Infinity };
+    const drawn = () => !!document.querySelector('.p2p-page:first-child .p2p-thumb img[src]');
+    const later = (ready, go) => { if (ready()) return go(); const timer = setInterval(() => { if (ready()) { clearInterval(timer); go(); } }, 10); return undefined; };
+    Worker.prototype.postMessage = function (msg, transfer) {
+      if (race.way && msg && msg.action === 'GetOperatorList' && msg.data && msg.data.pageIndex === 0) {
+        // PDF.js's OPLIST flag (256): the list getOperatorList asks for, not one for drawing.
+        const list = (msg.data.intent & 256) !== 0;
+        if (list) race.list = true; else race.thumb = true;
+        const ready = list ? (race.way === 1 ? drawn : () => true) : () => (race.way === 1 ? race.list : race.saving) || Date.now() > race.until;
+        return later(ready, () => post.call(this, msg, transfer));
+      }
+      return post.call(this, msg, transfer);
+    };
+    HTMLCanvasElement.prototype.toBlob = function (done, type, q) {
+      if (race.way === 2 && type === 'image/png') {
+        race.saving = true;
+        return later(() => drawn() || Date.now() > race.until, () => toBlob.call(this, done, type, q));
+      }
+      return toBlob.call(this, done, type, q);
+    };
+    window.__unrace = () => { race.way = 0; Worker.prototype.postMessage = post; HTMLCanvasElement.prototype.toBlob = toBlob; };
+  });
+  for (const way of [1, 2]) {
+    await page.evaluate(way => Object.assign(window.__race, { way, thumb: false, list: false, saving: false, until: Infinity }), way);
+    await page.$eval('#p2p-grid', el => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    await openPdf({ name: 'pictures.pdf', mimeType: 'application/pdf', buffer: fs.readFileSync(fx('pictures.pdf')) }, 3);
+    await page.waitForFunction(() => window.__race.thumb);
+    assert.equal(await page.$$eval('.p2p-page:first-child .p2p-thumb img[src]', l => l.length), 0, 'the first thumbnail is still being drawn');
+    await page.fill('#p2p-pages', '1');
+    const [raced] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }),
+      page.click('#p2p-go').then(() => page.evaluate(() => { window.__race.until = Date.now() + 1500; }))]);
+    const racedEntries = unzip(fs.readFileSync(await raced.path()));
+    assert.deepEqual(racedEntries.map(e => e.name), [1, 2, 3, 4, 5].map(k => `pictures-page-1-picture-${k}.png`), `way ${way}`);
+    assert.ok(racedEntries.every((e, k) => e.data.equals(firstPictures[k].data)), `way ${way}: the same pictures as without the thumbnail`);
+    assert.match(await text('#p2p-status'), /^Saved pictures-pictures\.zip with 5 pictures from 1 page, [\d.]+ KB\.$/, `way ${way}: none is unreadable`);
+  }
+  await page.evaluate(() => window.__unrace());
+  // Cancel while the pictures are read, then save them again at once. The images PDF.js sends are held
+  // back here, as a large one takes a while to decode, so the first conversion is cancelled while it
+  // waits for one: when they come, the cancelled one must not clean the page up under the new one,
+  // which would lose every picture after the first, each after a minute's wait.
+  const slow = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
+  await slow.addInitScript(() => {
+    const add = Worker.prototype.addEventListener;
+    window.__held = null;
+    Worker.prototype.addEventListener = function (type, fn, options) {
+      if (type !== 'message' || typeof fn !== 'function') return add.call(this, type, fn, options);
+      return add.call(this, type, function (e) {
+        if (window.__held && e.data && (e.data.action === 'obj' || e.data.action === 'commonobj')) { window.__held.push(() => fn.call(this, e)); return undefined; }
+        return fn.call(this, e);
+      }, options);
+    };
+    window.__release = () => { const held = window.__held || []; window.__held = null; held.forEach(f => f()); };
+  });
+  const p3 = await slow.newPage();
+  const slowErrors = [];
+  p3.on('pageerror', e => slowErrors.push(e.message));
+  p3.on('console', m => { if (m.type() === 'error') slowErrors.push(m.text()); });
+  await p3.goto(url);
+  await openPdf(fx('pictures.pdf'), 3, p3);
+  await p3.waitForFunction(() => document.querySelectorAll('.p2p-thumb img[src]').length === 3);
+  await p3.click('.p2p-seg label:has(input[value="pictures"])');
+  await p3.fill('#p2p-pages', '1');
+  await p3.evaluate(() => { window.__held = []; document.getElementById('p2p-go').click(); });
+  await p3.waitForFunction(() => window.__held.length > 0);
+  await p3.click('#p2p-cancel');
+  assert.match(await p3.textContent('#p2p-status'), /^Cancelled\./);
+  const [resumed] = await Promise.all([p3.waitForEvent('download', { timeout: 30000 }), p3.click('#p2p-go').then(() => p3.evaluate(() => window.__release()))]);
+  const resumedEntries = unzip(fs.readFileSync(await resumed.path()));
+  assert.ok(resumedEntries.length === 5 && resumedEntries.every((e, k) => e.data.equals(firstPictures[k].data)), 'every picture, as before');
+  assert.match(await p3.textContent('#p2p-status'), /^Saved pictures-pictures\.zip with 5 pictures from 1 page, [\d.]+ KB\.$/);
+  // The list of a cancelled conversion still on its way when the page's thumbnail is drawn: the
+  // thumbnail's cleanup waits for that list and then drops the pictures, also those of the next
+  // conversion, which asked for the same list. Here the page is out of view until the first conversion
+  // is cancelled, and its list is held back until the next one has started.
+  const tile = 'ff0000'.repeat(8).concat('0000ff'.repeat(8)).repeat(16), tileDraw = 'q 160 0 0 160 20 20 cm /Im Do Q';
+  await p3.setViewportSize({ width: 1280, height: 300 });
+  await p3.evaluate(() => {
+    const post = Worker.prototype.postMessage;
+    window.__lists = [];
+    window.__holdLists = false;
+    Worker.prototype.postMessage = function (msg, transfer) {
+      if (window.__holdLists && msg && msg.action === 'GetOperatorList' && msg.data && (msg.data.intent & 256)) { window.__lists.push(() => post.call(this, msg, transfer)); return undefined; }
+      return post.call(this, msg, transfer);
+    };
+    window.__sendLists = () => { window.__holdLists = false; window.__lists.splice(0).forEach(f => f()); };
+    window.scrollTo(0, 0);
+  });
+  await openPdf({ name: 'tile.pdf', mimeType: 'application/pdf', buffer: rawPdf(['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /XObject << /Im 4 0 R >> >> /Contents 5 0 R >>',
+    `<< /Type /XObject /Subtype /Image /Width 16 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length ${tile.length + 1} >>\nstream\n${tile}>\nendstream`,
+    `<< /Length ${tileDraw.length} >>\nstream\n${tileDraw}\nendstream`]) }, 1, p3);
+  await p3.evaluate(() => { window.__holdLists = true; document.getElementById('p2p-go').click(); });
+  await p3.waitForFunction(() => window.__lists.length === 1);
+  assert.equal(await p3.$$eval('.p2p-thumb img[src]', l => l.length), 0, 'no thumbnail is drawn yet');
+  await p3.evaluate(() => document.getElementById('p2p-cancel').click());
+  await p3.$eval('.p2p-page', el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  await p3.waitForFunction(() => document.querySelector('.p2p-thumb img[src]'));
+  const [tiled] = await Promise.all([p3.waitForEvent('download', { timeout: 30000 }),
+    p3.evaluate(() => { document.getElementById('p2p-go').click(); setTimeout(() => window.__sendLists(), 300); })]);
+  assert.equal(tiled.suggestedFilename(), 'tile-page-1-picture-1.png');
+  const tilePng = png(fs.readFileSync(await tiled.path()));
+  assert.deepEqual([tilePng.w, tilePng.h, tilePng.at(0, 0), tilePng.at(15, 15)], [16, 16, [255, 0, 0, 255], [0, 0, 255, 255]]);
+  assert.deepEqual(slowErrors, []);
+  await slow.close();
   await what('pages');
   assert.equal(await page.inputValue('#p2p-size'), '72', 'the page settings are kept while pictures are chosen');
 
@@ -620,17 +786,34 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(during.off, during.all, 'the controls are disabled while converting');
   await page.waitForFunction(() => /^Cancelled\./.test(document.getElementById('p2p-status').textContent));
   assert.equal(await page.isDisabled('#p2p-go'), false);
-  // In a tab that is hidden the conversion carries on and ends.
+  // In a hidden tab the browser runs no animation frames, and PDF.js draws a page in frames: the
+  // conversion waits while the tab is hidden, counts nothing as failed, and carries on with every page
+  // once the tab is shown again.
+  await page.selectOption('#p2p-size', '72');
+  await page.selectOption('#p2p-colours', '256');
   await page.evaluate(() => {
+    const raf = window.requestAnimationFrame, frames = [];
+    window.requestAnimationFrame = f => frames.push(f);
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     document.dispatchEvent(new Event('visibilitychange'));
+    window.__frames = () => frames.length;
+    window.__show = () => {
+      delete document.hidden;
+      delete document.visibilityState;
+      window.requestAnimationFrame = raf;
+      document.dispatchEvent(new Event('visibilitychange'));
+      frames.splice(0).forEach(f => raf(f));
+    };
   });
-  await page.selectOption('#p2p-size', '72');
-  await page.selectOption('#p2p-colours', '256');
-  out = await save();
-  assert.equal(unzip(out.buf).length, 4, 'a hidden tab still converts every page');
-  await page.evaluate(() => { delete document.hidden; delete document.visibilityState; });
+  const hiddenDownload = page.waitForEvent('download', { timeout: 60000 });
+  await page.click('#p2p-go');
+  await page.waitForFunction(() => window.__frames() > 0 && /Converting page 1 /.test(document.getElementById('p2p-pct').textContent));
+  assert.equal(await text('#p2p-error'), '', 'nothing has failed while hidden');
+  await page.evaluate(() => window.__show());
+  out = { buf: fs.readFileSync(await (await hiddenDownload).path()) };
+  assert.equal(unzip(out.buf).length, 4, 'shown again, the tab converts every page');
+  assert.match(await text('#p2p-status'), /^Saved pages-png\.zip with 4 PNG images/);
   await page.selectOption('#p2p-colours', 'exact');
   // The images of one conversion are kept in memory: past 1.5 GB (simulated by their reported size)
   // the rest are left, with a message, and what was made is saved.
@@ -722,7 +905,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await phone.addInitScript(() => {
     window.__shared = [];
     navigator.canShare = data => !!(data && data.files && data.files.every(f => f instanceof File));
-    navigator.share = data => { window.__shared.push(data.files.map(f => [f.name, f.type, f.size])); return Promise.resolve(); };
+    // As the Web Share spec has it: while a share is open, another one is refused (InvalidStateError).
+    navigator.share = data => {
+      if (window.__sharePending) return Promise.reject(new DOMException('An earlier share has not yet completed.', 'InvalidStateError'));
+      window.__shared.push(data.files.map(f => [f.name, f.type, f.size]));
+      window.__sharePending = true;
+      return new Promise(done => setTimeout(() => { window.__sharePending = false; done(); }, 300));
+    };
   });
   const p2 = await phone.newPage();
   const errors = [];
@@ -797,6 +986,20 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await p2.textContent('#p2p-share'), 'Share 2 images');
   await p2.tap('#p2p-share');
   assert.deepEqual(await p2.evaluate(() => window.__shared), [zipped.map(e => [e.name, 'image/png', e.data.length])], 'the files shared are the files saved');
+  // Two quick taps share once and report nothing: the browser refuses a second share while the first
+  // is open, which is no failure of the first.
+  await p2.waitForFunction(() => !window.__sharePending);
+  await p2.evaluate(() => { const b = document.getElementById('p2p-share'); b.click(); b.click(); });
+  await p2.waitForFunction(() => !window.__sharePending);
+  assert.equal((await p2.evaluate(() => window.__shared)).length, 2, 'a double tap shares once');
+  assert.equal(await p2.textContent('#p2p-error'), '', 'and shows no error');
+  // Other pages chosen: Share is not offered, so it never sends the pages of the last conversion
+  // instead of those now chosen; with the same pages chosen again it is.
+  const sharedPages = await p2.inputValue('#p2p-pages');
+  await p2.fill('#p2p-pages', '1');
+  assert.equal(await p2.isVisible('#p2p-share'), false, 'Share is not offered for pages other than those saved');
+  await p2.fill('#p2p-pages', sharedPages);
+  assert.equal(await p2.isVisible('#p2p-share'), true, 'the pages that were saved can be shared again');
   await p2.selectOption('#p2p-colours', 'grey');
   assert.equal(await p2.isVisible('#p2p-share'), false, 'images made with other settings are not offered');
   // A touch screen device gets at most 36 million pixels a page.

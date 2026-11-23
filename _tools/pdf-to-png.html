@@ -1,6 +1,6 @@
 ---
 title: "PDF to PNG Converter: High-Quality PNG Pages"
-description: Convert PDF pages to PNG at any DPI or width, with a transparent background, trimmed margins or fewer colours, or save its pictures. Runs in your browser.
+description: Convert PDF pages to PNG at any DPI or width, with a transparent background, trimmed margins or fewer colours, or extract the images. Runs in your browser.
 category: Image & PDF
 keywords: [pdf to png, convert pdf to png, pdf to png converter, how to convert pdf to png, pdf to transparent png, pdf to png high resolution, pdf page to png, extract images from pdf]
 howto: |
@@ -40,7 +40,7 @@ howto: |
   choose **Make white transparent**: every pixel becomes the most see-through
   colour that looks the same on white. Black text keeps its soft edges, grey
   becomes half-transparent black, and pale colours turn partly see-through
-  too.
+  too. In black and white, only the black is kept.
 
   **Trim margins** cuts away the blank edges and keeps only what is drawn, for
   logos, signatures and figures. With a pixel width, the trimmed image gets
@@ -57,9 +57,9 @@ howto: |
   | Colours | Compared with Exact | Good for |
   |---|---|---|
   | Exact | The browser's own PNG | Everything |
-  | 256 colours | Usually 60% to 75% smaller | Charts, slides, text |
-  | Greyscale | Usually 60% to 70% smaller | Documents without colour |
-  | Black and white | 85% to 98% smaller | Text and line drawings |
+  | 256 colours | Usually 55% to 75% smaller | Charts, slides, text |
+  | Greyscale | Usually 55% to 70% smaller | Documents without colour |
+  | Black and white | Usually 85% to 98% smaller | Text and line drawings |
 
   With 256 colours and in black and white, the pictures on a page are
   dithered (mixed from dots of the colours there are), so photos show no
@@ -186,7 +186,8 @@ faq:
   })();
   var COLOURS = { exact: '', '256': ', 256 colours', grey: ', greyscale', bw: ', black and white' };
   var BACKS = { white: '', clear: ', transparent background', nowhite: ', white made transparent' };
-  var lastSaved = null, copying = false, zipping = false;
+  var lastSaved = null, copying = false, zipping = false, sharing = false;
+  var picked = ''; // the pages chosen at the last redraw, as "1,2,5" ('' while the list has a mistake)
   var lastClick = new Map(); // page -> time of its last Download press: a double click saves once
 
   function radio(name) { var r = $('input[name="' + name + '"]:checked'); return r ? r.value : ''; }
@@ -417,11 +418,18 @@ faq:
       return blob.arrayBuffer().then(function (buf) { return { blob: blob, w: w, h: h, sig: 'c' + w + 'x' + h + ':' + buf.byteLength + ':' + TTPng.crc32(new Uint8Array(buf)) }; });
     });
   }
+  // The pictures are the images PDF.js decoded for the page's list of operations (page.objs). A
+  // cleanup of the page drops them: one a thumbnail asks for once drawn (so drawing ones are waited
+  // for, and none starts while converting), and one asked for earlier, which happens when the list
+  // is complete (asking for the list again then has them sent again; otherwise it is the same list).
+  // A cancelled conversion leaves the page as it is, as the next one may be reading it.
   function picturesOf(d, index, st, job) {
-    return d.pdf.getPage(index + 1).then(function (page) {
-      if (job.cancelled) return null;
+    return E.thumbsIdle().then(function () {
+      return job.cancelled ? null : d.pdf.getPage(index + 1);
+    }).then(function (page) {
+      if (!page || job.cancelled) return null;
       E.noteSize(d, index, page);
-      return page.getOperatorList().then(function (ops) {
+      return page.getOperatorList().then(function () { return page.getOperatorList(); }).then(function (ops) {
         var OPS = E.pdfjs().OPS, seen = new Set(), list = [];
         for (var i = 0; i < ops.fnArray.length; i++) {
           var f = ops.fnArray[i], a = ops.argsArray[i];
@@ -442,10 +450,10 @@ faq:
           });
         });
         return chain.then(function () {
-          page.cleanup();
           if (job.cancelled) return null;
+          page.cleanup();
           return { key: st.key, pictures: pics, size: size, broken: broken, reduced: false };
-        }, function (err) { page.cleanup(); throw err; });
+        }, function (err) { if (!job.cancelled) page.cleanup(); throw err; });
       });
     });
   }
@@ -503,19 +511,23 @@ faq:
     var pic = r.pictures ? r.pictures[0] : r;
     copyImage(pic.blob, b, function () { return 'Copied ' + (r.pictures ? 'the picture on page ' : 'page ') + (i + 1) + ' as an image of ' + pic.w + ' × ' + pic.h + ' pixels.'; });
   });
-  // Share offers the images of the last conversion while the settings that made them are chosen.
+  // Share offers the images of the last conversion while the settings and the pages that made them
+  // are chosen, so it never sends other pages than those Convert would make now.
+  function shareable(st) { return CAN_SHARE && !!lastSaved && lastSaved.key === st.key && lastSaved.pages === picked; }
   function showShare(st) {
-    var share = CAN_SHARE && !!lastSaved && lastSaved.key === st.key;
+    var share = shareable(st);
     shareBtn.hidden = !share;
     if (!share) return;
     var label = lastSaved.items.length === 1 ? 'Share the image' : 'Share ' + E.plural(lastSaved.items.length, 'image', 'images');
     if (shareBtn.textContent !== label) shareBtn.textContent = label;
   }
+  // A second tap while the share sheet is open is ignored: the browser would refuse that share.
   shareBtn.addEventListener('click', function () {
-    var st = settings();
-    if (!lastSaved || lastSaved.key !== st.key || E.isBusy()) return;
+    if (sharing || !shareable(settings()) || E.isBusy()) return;
     var files = lastSaved.items.map(function (it) { return new File([it.blob], it.name, { type: 'image/png' }); });
-    navigator.share({ files: files }).then(function () {}, function (err) {
+    sharing = true;
+    navigator.share({ files: files }).then(function () { sharing = false; }, function (err) {
+      sharing = false;
       if (err && err.name === 'AbortError') return;
       E.setError('The images could not be shared. Download them instead.');
     });
@@ -594,13 +606,14 @@ faq:
       put(c, 'copyBusy', function (v) { c.copy.disabled = v; }, E.isBusy());
     },
     drawn: function (st, pk) {
+      picked = pk.error ? '' : pk.pages.join(',');
       var one = st.what === 'pages' && !st.errors.length && !pk.error && pk.pages.length === 1;
       copyBtn.hidden = !(CAN_COPY && one);
       if (one) copyBtn.setAttribute('aria-label', 'Copy image of page ' + pk.pages[0]);
       showShare(st);
     },
     saved: function (r, st) {
-      lastSaved = CAN_SHARE ? { key: st.key, items: r.items.slice() } : null;
+      lastSaved = CAN_SHARE ? { key: st.key, pages: picked, items: r.items.slice() } : null;
       showShare(st);
     },
     closed: function () { lastSaved = null; }
