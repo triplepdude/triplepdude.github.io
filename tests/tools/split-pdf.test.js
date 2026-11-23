@@ -62,6 +62,9 @@ function rawPdf(objs, trailer = '') {
   return Buffer.from(body + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R' + trailer + ' >>\nstartxref\n' + xref + '\n%%EOF\n', 'latin1');
 }
 const CATALOG = '<< /Type /Catalog /Pages 2 0 R >>', A_PAGE = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] >>';
+// Added to pdf-lib as a test page loads it: each time pdf-lib reads a file (PDFDocument.load reads
+// through the same function), it logs how many objects it reads between pauses: "pdf-lib parse: 400".
+const PARSE_SPY = '\n;(function () { var P = self.PDFLib.PDFParser, f = P.forBytesWithOptions; P.forBytesWithOptions = function (b, n) { console.log("pdf-lib parse: " + n); return f.apply(this, arguments); }; })();\n';
 
 module.exports = async ({ page, open, assert, fixtures, url }) => {
   const fx = n => path.join(fixtures, n);
@@ -812,4 +815,51 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(await p2.evaluate(() => document.documentElement.scrollWidth <= 320), 'the results fit at 320px');
   assert.deepEqual(errors, []);
   await phone.close();
+
+  // ---- A new tab whose first request for the PDF reader fails, as a dropped connection leaves it ----
+  // The browser keeps a module that failed to load as failed for the page, so asking for the same
+  // address again cannot work: the next try must ask for it under another one.
+  const fresh = await browser.newContext({ acceptDownloads: true });
+  const p3 = await fresh.newPage();
+  const p3errors = [], parses = [];
+  p3.on('pageerror', e => p3errors.push(e.message));
+  p3.on('console', m => {
+    if (m.text().startsWith('pdf-lib parse: ')) parses.push(m.text().slice(15));
+    else if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) p3errors.push(m.text());
+  });
+  let readerAsks = 0;
+  await p3.route(/\/pdfjs\/pdf\.min\.js(\?.*)?$/, route => (readerAsks++ ? route.fallback() : route.abort('connectionreset')));
+  await p3.route('**/assets/vendor/pdf-lib/pdf-lib.min.js', async route => {
+    const r = await route.fetch();
+    await route.fulfill({ response: r, body: (await r.text()) + PARSE_SPY });
+  });
+  await p3.goto(url);
+  await p3.setInputFiles('#spl-file', fx('ten.pdf'));
+  await p3.waitForFunction(() => document.getElementById('spl-error').textContent);
+  assert.equal(await p3.textContent('#spl-error'), 'The PDF reader could not load. Check your connection and try again.');
+  await p3.setInputFiles('#spl-file', fx('ten.pdf'));
+  await p3.waitForFunction(() => document.querySelectorAll('.spl-page').length === 10 || document.getElementById('spl-error').textContent);
+  assert.equal(await p3.textContent('#spl-error'), '', 'the reader loads on the next try');
+  assert.match(await p3.textContent('#spl-status'), /^ten\.pdf is open: 10 pages/);
+  assert.equal(readerAsks, 2);
+
+  // ---- pdf-lib reads a file once, and without pausing: it runs in a worker ----
+  // It used to read a file that is not encrypted twice, the second time 100 objects at a time, each
+  // pause at least 4 ms: about 3 s for the 71,000 objects of a large tax guide.
+  const parsed = async n => {
+    for (let i = 0; i < 100 && parses.length < n; i++) await p3.waitForTimeout(20);
+    return parses.splice(0);
+  };
+  await p3.fill('#spl-ranges', '1');
+  await Promise.all([p3.waitForEvent('download'), p3.click('#spl-split')]);
+  assert.deepEqual(await parsed(1), ['Infinity'], 'a file that is not encrypted is read once');
+  // An encrypted file is read once to find its encryption and key, then once more to decrypt it.
+  await p3.setInputFiles('#spl-file', fx('restricted.pdf'));
+  await p3.waitForFunction(() => /^restricted\.pdf is open/.test(document.getElementById('spl-status').textContent));
+  await p3.fill('#spl-ranges', '2');
+  const [dlRestricted] = await Promise.all([p3.waitForEvent('download'), p3.click('#spl-split')]);
+  assert.equal(dlRestricted.suggestedFilename(), 'restricted-page-2.pdf');
+  assert.deepEqual(await parsed(2), ['Infinity', 'Infinity'], 'an encrypted file is read twice, without pausing');
+  assert.deepEqual(p3errors, []);
+  await fresh.close();
 };
