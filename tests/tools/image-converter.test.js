@@ -165,13 +165,6 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.match((await page.textContent('.prose')).replace(/\s+/g, ' '),
     /Orientation\. A photo tagged as rotated is saved upright, so it looks the same everywhere; Flip Image turns or mirrors pictures any other way\./);
   assert.ok(guideLinks.includes('/flip-image/'), 'the guide links to /flip-image/');
-  // WebP is made by libwebp, loaded from this site on the first WebP save: the FAQ names it.
-  const faqText = (await page.textContent('.faq')).replace(/\s+/g, ' ');
-  assert.match(faqText, /The only extra downloads are the HEIC and TIFF decoders and the WebP and AVIF encoders, each fetched from this site the first time it is needed\./);
-  assert.match(faqText, /Browsers create JPG and PNG files themselves, and WebP comes from libwebp, a small encoder \(about 140 KB\) compiled to WebAssembly\./);
-  // "About 140 KB": the loader and the wasm file, gzipped as GitHub Pages serves them.
-  const webpKB = ['webp_enc_simd.js', 'webp_enc_simd.wasm'].reduce((n, f) => n + zlib.gzipSync(fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'vendor', 'webp', f))).length, 0) / 1000;
-  assert.ok(webpKB > 120 && webpKB < 160, 'the WebP encoder is ' + webpKB + ' KB gzipped');
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '_tools', 'flip-image.html')), '_tools/flip-image.html exists');
 
   const summary = () => page.textContent('#imc-summary');
@@ -631,31 +624,11 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   await page.fill('#imc-resize-val', '0');
   await page.waitForFunction(() => /Enter a size above 0/.test(document.querySelector('#imc-note').textContent));
 
-  // Safari's canvas cannot encode WebP: libwebp (TTImage's { wasm: true }) writes it instead, so
-  // WebP stays on offer and is never replaced by a JPG.
+  // A browser that cannot encode WebP (Safari): the option is disabled and explained.
   await page.addInitScript(() => {
     const toBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
   });
-  await open();
-  assert.deepEqual(await page.evaluate(async () => [await TTImage.canEncode('webp'), await TTImage.canEncode('webp', { wasm: true })]), [false, true]);
-  assert.deepEqual(await page.$eval('#imc-format option[value="webp"]', o => [o.disabled, o.textContent]), [false, 'WebP']);
-  await page.selectOption('#imc-format', 'webp');
-  await page.setInputFiles('#imc-file', [fx('alpha.png')]);
-  await page.waitForFunction(() => document.querySelector('#imc-summary').textContent === '1 of 1 converted.', null, { timeout: 30000 });
-  assert.match(await rowText(0), /^alpha\.webp PNG 64×48, 207 B → WebP 64×48, /);
-  const sw = await download(0);
-  assert.equal(sw.name, 'alpha.webp');
-  const swChunks = [];
-  for (let o = 12; o + 8 <= sw.data.length; o += 8 + sw.data.readUInt32LE(o + 4) + (sw.data.readUInt32LE(o + 4) & 1)) swChunks.push(sw.data.toString('latin1', o, o + 4).trim());
-  assert.deepEqual(swChunks, ['VP8X', 'ALPH', 'VP8'], 'lossy WebP with exact alpha, from libwebp (no canvas sRGB profile)');
-  const swPx = await pixels(sw.data, [[50, 40], [10, 10], [50, 10]]);
-  assert.equal(swPx[0][3], 0, 'WebP keeps transparency');
-  near(swPx[1], [200, 30, 60, 255], 12, 'WebP colour');
-  assert.equal(swPx[2][3], 128, 'alpha 128 kept exactly');
-
-  // A browser with neither (no WebAssembly, and no canvas WebP): the option is disabled and explained.
-  await page.addInitScript(() => { delete window.WebAssembly; delete window.OffscreenCanvas; });
   await open();
   await page.waitForFunction(() => document.querySelector('#imc-format option[value="webp"]').disabled);
   assert.equal(await page.textContent('#imc-format option[value="webp"]'), 'WebP (this browser cannot save it)');

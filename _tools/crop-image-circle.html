@@ -650,8 +650,7 @@ faq:
     syncBg();
   });
   if (window.TTImage) {
-    // WebP is encoded by libwebp (TTImage's { wasm: true }), so Safari can save it too.
-    TTImage.canEncode('webp', { wasm: true }).then(ok => {
+    TTImage.canEncode('webp').then(ok => {
       if (ok) return;
       const o = fmtSel.querySelector('option[value="webp"]');
       o.disabled = true;
@@ -676,8 +675,6 @@ faq:
         src = await createImageBitmap(m.file, opt);
         if (src.width !== w || src.height !== h) throw new Error('SIZE');
         const c = K.renderCircle(new OffscreenCanvas(1, 1), o.n, src, v, o);
-        // For WebP the drawn pixels go back to the page, which encodes them with libwebp.
-        if (o.pixels) { const bitmap = c.transferToImageBitmap(); self.postMessage({ id: m.id, bitmap }, [bitmap]); return; }
         const blob = await c.convertToBlob({ type: o.mime, quality: o.quality });
         if (blob.type !== o.mime) throw new Error('FORMAT');
         self.postMessage({ id: m.id, blob });
@@ -709,28 +706,16 @@ faq:
     if (!worker) return Promise.reject(new Error('NO_WORKER'));
     return new Promise((resolve, reject) => {
       const id = ++jobId;
-      waiting.set(id, d => (d.error ? reject(new Error(d.error)) : resolve(d.blob || d.bitmap)));
+      waiting.set(id, d => (d.error ? reject(new Error(d.error)) : resolve(d.blob)));
       worker.postMessage({ id, file, v, o });
     });
-  }
-  // WebP is encoded by libwebp through TTImage in every browser (Safari's canvas
-  // cannot write WebP at all); the other formats by the canvas.
-  async function libwebp(src, o) {
-    try { return await TTImage.encode(src, 'webp', { quality: o.quality, wasm: true }); }
-    catch (e) { throw fail(e && e.friendly ? e.message : 'Your browser could not create the WebP file. Choose PNG instead.'); }
   }
   // The image as a file in format fmt (default: the chosen one).
   async function exportBlob(fmt) {
     const o = opts(), v = view(), img = st.img, file = st.file;
     if (fmt) { o.fmt = fmt; o.mime = FMT[fmt].mime; }
-    o.pixels = o.fmt === 'webp' && !!window.TTImage;
     if (file) {
-      let r = null;
-      try { r = await exportInWorker(file, v, o); } catch (e) { /* draw it on the page instead */ }
-      if (r && !o.pixels) return r;
-      if (r) {
-        try { return await libwebp(r, o); } finally { if (r.close) r.close(); }
-      }
+      try { return await exportInWorker(file, v, o); } catch (e) { /* draw it on the page instead */ }
       if (st.img !== img) throw fail('The image changed while it was being saved. Try again.');
     }
     // Output pixels per image pixel. When the photo is much bigger than the output, shrink it
@@ -745,7 +730,6 @@ faq:
     try {
       let c;
       try { c = kit.renderCircle(document.createElement('canvas'), o.n, src, v, o); } catch (e) { throw fail('Your browser could not create the image.'); }
-      if (o.pixels) return await libwebp(c, o);
       const blob = await new Promise(resolve => c.toBlob(resolve, o.mime, o.quality));
       if (!blob || blob.type !== o.mime) throw fail('Your browser could not create the ' + FMT[o.fmt].label + ' file. Choose PNG instead.');
       return blob;
