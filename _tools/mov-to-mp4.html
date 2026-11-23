@@ -1,0 +1,869 @@
+---
+title: "MOV to MP4 Converter: iPhone and HEVC Videos"
+description: "Convert MOV and iPhone videos to MP4 in your browser without re-encoding: quality, rotation and recording date kept, many files at once, nothing uploaded."
+category: Video
+keywords: [mov to mp4, convert mov to mp4, mov to mp4 converter, hevc to mp4, iphone video to mp4, quicktime to mp4, mov to mp4 without losing quality]
+howto: |
+  ## How to convert MOV to MP4
+
+  1. Press **Choose videos**, or drop MOV, M4V or MP4 files on the box, as
+     many as you like.
+  2. Each file shows what it holds and what will happen to it: *Copy,
+     quality unchanged*, *re-encode the sound to AAC*, or why it cannot be
+     converted.
+  3. Press **Convert to MP4**, then **Download** under each file, or
+     **Download all** for a ZIP.
+
+  ## Does converting MOV to MP4 lose quality?
+
+  Not when the video is copied. MP4 was standardised from Apple's QuickTime
+  format, so the H.264 or HEVC video and AAC sound of a MOV move into the
+  MP4 packet for packet, byte for byte. That takes seconds: an hour-long,
+  4.6 GB test file took 15 seconds in Chrome on a 4-core computer.
+
+  | In the MOV | In the MP4 |
+  |---|---|
+  | H.264, HEVC, VP9 or AV1 video; AAC or Opus sound | Copied as they are |
+  | Rotation, HDR colour, trims, recording date and time | Kept |
+  | Uncompressed (PCM) sound | Re-encoded to AAC |
+  | ProRes video | Re-encoded to H.264 |
+  | Location, camera make and model, time zone | Left out |
+  | Timecode, subtitles, Spatial Audio, Apple Lossless sound | Left out |
+  | Motion JPEG video | Cannot be converted |
+
+  Keeping the date means photo apps sort the MP4 where the MOV was. Leaving
+  out the location means the MP4 no longer says where it was filmed.
+
+  ## Why won't my iPhone video play on Windows?
+
+  iPhones from the iPhone 7 on record HEVC (H.265) when the camera format is
+  High Efficiency. Windows' own Photos and Media Player apps,
+  and Edge, play HEVC only with Microsoft's HEVC Video Extensions ($0.99 in
+  the Microsoft Store, November 2026). Chrome plays it on computers whose
+  graphics chip decodes HEVC, and VLC plays it anywhere.
+
+  A new container does not change the codec, so choose **Plays everywhere**
+  to re-encode HEVC to H.264, which every device plays. That works where the
+  browser can decode HEVC: Safari, Chrome on most Windows PCs and Macs, and
+  Edge on a Mac, or on Windows with the HEVC Video Extensions. It takes longer
+  than a copy: a 4-core computer re-encoded 1080p at 65
+  to 80 frames a second, more than twice as fast as the video plays; phones
+  and 4K take longer. HDR becomes standard range.
+
+  To film H.264 from the start, choose **Most Compatible** in Settings >
+  Camera > Formats. When you copy videos to a PC with a cable, the iPhone may
+  convert them to H.264 itself, unless **Keep Originals** is chosen in
+  Settings > Apps > Photos.
+
+  ## On an iPhone, Android phone or Mac
+
+  The page works in Safari on iPhone and iPad, Chrome on Android, and any
+  browser on a computer. On an iPhone, pick the video in Files rather than
+  Photos, which may hand over a compressed copy. Keep the page on screen
+  while it converts: phones pause pages in the background.
+
+  To keep only the sound of a video, use [MP4 to MP3](/mp4-to-mp3/); to make
+  a short clip into an animation, use [Video to GIF](/video-to-gif/).
+faq:
+  - q: Is my video uploaded anywhere?
+    a: "No. Your browser reads the video and writes the MP4 on your own device, with a converter loaded from this site ([mediabunny](/assets/vendor/mediabunny/README.txt), MPL-2.0). Nothing is sent anywhere or stored, and closing the tab discards everything."
+  - q: Can I just rename a .mov file to .mp4?
+    a: Often it plays, because both store video the same way. But the file still says it is a QuickTime movie inside, so apps and websites that check may refuse it, and it keeps anything MP4 players reject, such as uncompressed sound or ProRes video. Converting rewrites it as a real MP4 in seconds, without touching the video.
+  - q: Is there a size limit?
+    a: The page sets none. Chrome and Edge on a computer, and Chrome on Android, ask where to save an MP4 over 512 MB and write it straight to disk. Other browsers build the MP4 in the tab first, Firefox in a temporary file and Safari probably in memory, so a very large file can fail on an iPhone; the page warns before converting one over 1 GB there.
+  - q: Is MOV or MP4 better?
+    a: The video inside is the same. MP4 is the international standard that phones, computers, TVs and websites all play, while MOV is Apple's format, which editing software prefers for ProRes, timecode and uncompressed sound. To share or upload a video, use MP4.
+---
+<style>
+.mvp-drop { display: grid; justify-items: center; gap: 10px; margin: 0 0 16px; padding: 20px 14px; border: 2px dashed var(--field-border); border-radius: 12px; background: var(--surface-2); text-align: center; }
+.mvp-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.mvp-drop .actions { justify-content: center; margin: 0; }
+.mvp-drop p { margin: 0; max-width: 62ch; }
+.mvp-drop-title { font-weight: 600; }
+.mvp-fs { min-width: 0; margin: 0 0 16px; padding: 0; border: 0; }
+.mvp-fs legend { margin-bottom: 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.mvp-choices { flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 6px; }
+.mvp-choices .check { align-items: flex-start; }
+.mvp-choices .check input { flex: none; margin-top: 3px; }
+.mvp-fs .hint { margin: 0; }
+.mvp-h { margin: 24px 0 10px; font-size: 1.1rem; }
+.mvp-files { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.mvp-file { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.mvp-file.is-busy { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.mvp-file p { margin: 0; }
+.mvp-file-name { font-weight: 600; overflow-wrap: anywhere; }
+.mvp-file-info, .mvp-file-tracks { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mvp-file-plan { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.mvp-file-plan.is-refused { color: var(--danger); }
+.mvp-file-notes { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.mvp-file-notes:empty { display: none; }
+.mvp-file-notes li + li { margin-top: 2px; }
+.mvp-file-state { font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mvp-file-state.is-done { font-weight: 600; }
+.mvp-file .msg { margin: 0; }
+.mvp-file-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.mvp-ask { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
+.mvp-ask p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.mvp-ask .actions { margin: 0; }
+.mvp-progress { display: grid; gap: 6px; margin: 0 0 16px; }
+.mvp-progress progress { width: 100%; height: 12px; accent-color: var(--accent); }
+.mvp-progress span { font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mvp-note { margin: 0 0 16px; }
+@media (max-width: 480px) {
+  .mvp-drop { padding: 16px 10px; }
+  .mvp-file { padding: 10px; }
+}
+</style>
+
+<div class="mvp" id="mvp">
+  <div class="mvp-drop" id="mvp-drop">
+    <p class="mvp-drop-title">Drop MOV videos here</p>
+    <div class="actions">
+      <button class="btn" type="button" id="mvp-open" aria-describedby="mvp-drop-hint mvp-file-error">Choose videos…</button>
+    </div>
+    <input type="file" id="mvp-file" hidden multiple accept="video/*,.mov,.qt,.m4v,.mp4,.3gp,.webm,.mkv">
+    <p class="hint" id="mvp-drop-hint">MOV, M4V or MP4 from an iPhone, a Mac or a camera, as many as you like and of any size. Video and sound are copied into the MP4 as they are wherever they can be, so nothing is lost.</p>
+  </div>
+  <p class="msg error" id="mvp-file-error" role="alert"></p>
+
+  <fieldset class="mvp-fs" id="mvp-opts">
+    <legend>Video</legend>
+    <div class="checks mvp-choices">
+      <label class="check"><input type="radio" name="mvp-video" id="mvp-v-copy" value="copy" checked> Keep it as it is: quality unchanged, takes seconds</label>
+      <label class="check"><input type="radio" name="mvp-video" id="mvp-v-h264" value="h264"> Plays everywhere: re-encode HEVC, VP9 and AV1 to H.264 (slower)</label>
+    </div>
+    <p class="hint" id="mvp-video-hint">H.264 video is always copied. ProRes, which MP4 players do not show, is always re-encoded to H.264.</p>
+  </fieldset>
+
+  <section id="mvp-files-sec" aria-labelledby="mvp-files-h" hidden>
+    <h2 class="mvp-h" id="mvp-files-h">Files</h2>
+    <ul class="mvp-files" id="mvp-files"></ul>
+    <div class="actions" id="mvp-list-actions" hidden>
+      <button class="btn secondary small" type="button" id="mvp-clear">Remove all files</button>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button class="btn" type="button" id="mvp-convert" disabled>Convert to MP4</button>
+    <button class="btn secondary" type="button" id="mvp-cancel" hidden>Cancel</button>
+  </div>
+  <div class="mvp-ask" id="mvp-ask" hidden>
+    <p id="mvp-ask-text"></p>
+    <div class="actions">
+      <button class="btn" type="button" id="mvp-ask-save">Choose where to save…</button>
+      <button class="btn secondary" type="button" id="mvp-ask-skip">Skip this file</button>
+    </div>
+  </div>
+  <div class="mvp-progress" id="mvp-progress" hidden>
+    <progress id="mvp-bar" max="100" value="0" aria-labelledby="mvp-progress-text"></progress>
+    <span id="mvp-progress-text"></span>
+  </div>
+  <p class="msg error" id="mvp-error" role="alert"></p>
+  <p class="visually-hidden" id="mvp-status" role="status"></p>
+  <div class="actions" id="mvp-results" hidden>
+    <button class="btn" type="button" id="mvp-zip">Download all (.zip)</button>
+  </div>
+  <p class="hint mvp-note" id="mvp-zip-note" hidden></p>
+  <p class="hint mvp-note">Keep this page open and on screen until converting ends: phones pause pages in the background.</p>
+</div>
+
+<script src="{{ '/assets/js/video-convert.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+
+  var ZIP_URL = new URL({{ '/assets/js/zip.js' | relative_url | jsonify }}, location.href).href;
+  var MP3_PAGE = {{ '/mp4-to-mp3/' | relative_url | jsonify }};
+  var PHOTO_PAGES = { heic: [{{ '/heic-to-jpg/' | relative_url | jsonify }}, 'HEIC to JPG'], avif: [{{ '/avif-to-jpg/' | relative_url | jsonify }}, 'AVIF to JPG'] };
+  function $(id) { return document.getElementById(id); }
+  var V = window.TTVideo;
+  var PHONE = V.isPhone;
+  var BIG = 512e6;                       // outputs from this size are saved straight to a file where the browser can
+  var ZIP_LIMIT = PHONE ? 300e6 : 1e9;   // bytes put in one ZIP (it is built in memory)
+  var MEMORY_WARN = V.isIOS ? 1e9 : 3e9; // where Safari or an old browser keeps the MP4 in memory
+
+  var dom = {
+    root: $('mvp'), drop: $('mvp-drop'), open: $('mvp-open'), file: $('mvp-file'), fileErr: $('mvp-file-error'),
+    opts: $('mvp-opts'), vCopy: $('mvp-v-copy'), vH264: $('mvp-v-h264'), videoHint: $('mvp-video-hint'),
+    filesSec: $('mvp-files-sec'), list: $('mvp-files'), listActions: $('mvp-list-actions'), clear: $('mvp-clear'),
+    convert: $('mvp-convert'), cancel: $('mvp-cancel'), ask: $('mvp-ask'), askText: $('mvp-ask-text'), askSave: $('mvp-ask-save'), askSkip: $('mvp-ask-skip'),
+    progress: $('mvp-progress'), bar: $('mvp-bar'), progressText: $('mvp-progress-text'), error: $('mvp-error'), status: $('mvp-status'),
+    results: $('mvp-results'), zip: $('mvp-zip'), zipNote: $('mvp-zip-note')
+  };
+
+  var entries = [];
+  var nextId = 1;
+  var busy = false;
+  var job = null;
+  var cancelRequested = false;
+  var asking = null;
+  var choice = { video: 'copy' };
+  var resultSeq = 0;
+
+  // ---------- Small helpers ----------
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  // m:ss, h:mm:ss, or m:ss.s under a minute when the tenths matter.
+  function fmtTime(s) {
+    s = Math.max(0, s || 0);
+    if (s < 59.95 && Math.round(s * 10) % 10) return '0:' + (s < 9.95 ? '0' : '') + s.toFixed(1);
+    var whole = Math.round(s), h = Math.floor(whole / 3600), m = Math.floor(whole / 60) % 60, sec = whole % 60;
+    return h ? h + ':' + pad(m) + ':' + pad(sec) : m + ':' + pad(sec);
+  }
+  function fmtBytes(n) {
+    if (n < 1000) return n + ' bytes';
+    if (n < 1e6) return (n / 1000).toFixed(n < 1e4 ? 1 : 0) + ' KB';
+    if (n < 1e9) return (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + ' MB';
+    return (n / 1e9).toFixed(2) + ' GB';
+  }
+  function fmtWait(seconds) {
+    if (seconds < 50) return 'under a minute';
+    var m = Math.round(seconds / 60);
+    if (m < 60) return 'about ' + m + ' min';
+    var h = Math.floor(m / 60);
+    return 'about ' + h + ' h ' + pad(m % 60) + ' min';
+  }
+  function cut(s, n) {
+    s = String(s == null ? '' : s);
+    if (s.length <= n) return s;
+    var i = n;
+    if (/[\uD800-\uDBFF]/.test(s.charAt(i - 1))) i--;
+    return s.slice(0, i) + '…';
+  }
+  var lastSaid = '';
+  function say(text) {
+    if (text === lastSaid) return;
+    lastSaid = text;
+    dom.status.textContent = text;
+  }
+  function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+  function el(tag, cls, text) {
+    var x = document.createElement(tag);
+    if (cls) x.className = cls;
+    if (text != null) x.textContent = text;
+    return x;
+  }
+  // A second press on the same button for the same thing within 1.5 s is a double click.
+  function tooSoon(btn, what) {
+    var now = Date.now();
+    if (btn._mvpWhat === what && now - btn._mvpAt < 1500) return true;
+    btn._mvpWhat = what;
+    btn._mvpAt = now;
+    return false;
+  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many || one + 's'); }
+  function listText(items) {
+    return items.length < 2 ? items.join('') : items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+  }
+
+  // ---------- What the page says about a file ----------
+  var ERRORS = {
+    empty: 'This file is empty (0 bytes).',
+    'not-video': 'This is not a video this page can read. It reads MOV, M4V, MP4, WebM and MKV files.',
+    'no-index': 'This file is incomplete: it ends before its index, the part that says where every frame is, so it cannot be read. This happens when a recording, copy or download did not finish.',
+    'no-tracks': 'No video or sound was found in this file. It may be damaged or incomplete.',
+    protected: 'This video is protected with DRM, like films bought or rented from the iTunes Store, so it cannot be converted.',
+    damaged: 'This file is damaged: its index cannot be read, so it cannot be converted.',
+    library: 'The converter could not be loaded. Check the connection and reload the page.'
+  };
+  function refusalText(e) {
+    var r = e.plan.refuse;
+    if (r.code === 'error' && e.info.error.code === 'photo') {
+      return e.info.error.detail === 'avif' ? 'This is an AVIF image, not a video.' : 'This is a HEIC photo, not a video. The video of a Live Photo is a separate MOV file.';
+    }
+    if (r.code === 'error') return ERRORS[e.info.error.code] || ERRORS.damaged;
+    if (r.code === 'no-video') return 'This file has sound but no video.';
+    var t = r.track;
+    if (r.code === 'video-codec') {
+      return 'Its video is ' + t.label + ', which this page cannot convert: browsers have no decoder for it.' +
+        (/MJPEG/.test(t.label) ? ' Free desktop programs such as HandBrake can convert Motion JPEG.' : '');
+    }
+    if (r.code === 'prores') {
+      if (t.loadFailed) return ERRORS.library;
+      if (typeof VideoEncoder === 'undefined') return 'Its video is ' + t.label + ', which MP4 players do not show, and this browser cannot re-encode video. Open this page in Chrome, Edge, Firefox or Safari on a computer to turn it into H.264.';
+      return 'Its video is ' + t.label + ' at ' + t.width + ' × ' + t.height + ', and this browser’s H.264 encoder does not take that size, so it cannot be turned into an MP4 that plays.';
+    }
+    return 'This browser cannot convert its ' + t.label + ' video.';
+  }
+  function trackText(e) {
+    var bits = [];
+    e.info.videos.forEach(function (v, i) {
+      var b = (i ? 'Video ' + (i + 1) : 'Video') + ': ' + v.label;
+      if (v.hdr) b += ', HDR' + (v.colour && v.colour.transfer === 'hlg' ? ' (HLG)' : v.colour && v.colour.transfer === 'pq' ? ' (PQ)' : '');
+      if (v.rotation) b += ', rotated ' + v.rotation + '°';
+      bits.push(b);
+    });
+    if (e.info.audios.length) {
+      bits.push((e.info.audios.length > 1 ? 'Sound: ' : 'Sound: ') + e.info.audios.map(function (a) {
+        var ch = a.channels === 1 ? 'mono' : a.channels === 2 ? 'stereo' : a.channels ? a.channels + ' channels' : '';
+        return a.label + (a.codec && ch ? ' ' + ch : '');
+      }).join(', '));
+    } else bits.push('No sound');
+    return bits.join(' · ');
+  }
+  function infoText(e) {
+    var info = e.info;
+    if (info.error) return fmtBytes(info.size);
+    var v = info.videos[0];
+    var bits = [fmtTime(info.duration)];
+    if (v) bits.push(v.width + ' × ' + v.height);
+    bits.push(fmtBytes(info.size));
+    if (info.created && info.createdFrom !== 'modified') {
+      bits.push('recorded ' + info.created.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
+    }
+    return bits.join(' · ');
+  }
+  function planText(e) {
+    var p = e.plan;
+    if (!p) return '';
+    if (!p.ok) return 'Not supported';
+    var v = p.video[0].action, audio = p.audio.filter(function (s) { return s.action !== 'drop'; });
+    var aac = audio.some(function (s) { return s.action === 'aac'; });
+    var text;
+    var silent = p.audio.length && !audio.length;
+    if (v === 'h264') text = 'Re-encode the video to H.264' + (aac ? ' and the sound to AAC' : audio.length ? ', copy the sound' : silent ? ', without its sound' : '');
+    else if (aac) text = 'Copy the video, re-encode the sound to AAC';
+    else if (silent) text = 'Copy the video, without its sound';
+    else text = 'Copy, quality unchanged';
+    if (p.bytes > 0) text += ' · about ' + fmtBytes(p.bytes);
+    if (p.reencode && p.seconds >= 20) text += ' · ' + fmtWait(p.seconds);
+    return text;
+  }
+  function noteTexts(e) {
+    var p = e.plan, out = [];
+    if (!p || !p.ok) return out;
+    var canH264 = e.info.videos[0] && e.info.videos[0].canH264;
+    p.notes.forEach(function (n) {
+      var t = n.track;
+      switch (n.code) {
+        case 'hevc':
+          out.push('HEVC plays on iPhones, Macs and Android phones, in VLC, and in Chrome on most computers. Windows’ own Photos and Media Player apps, and Edge, need Microsoft’s HEVC Video Extensions ($0.99 in the Microsoft Store).' +
+            (canH264 && choice.video === 'copy' ? ' Choose “Plays everywhere” for an H.264 MP4 that needs no extension.' : ''));
+          break;
+        case 'h264-unavailable':
+          out.push(t.codec === 'hevc' && !n.decode
+            ? 'This browser cannot decode HEVC, so the video is copied as HEVC. Safari on a Mac, iPhone or iPad, and Chrome on most Windows PCs and Macs, can make H.264 from it.'
+            : 'This browser cannot re-encode this video to H.264, so it is copied as it is.');
+          break;
+        case 'h264-webm':
+          out.push('Re-encoding is not offered for WebM and MKV files here: the video is copied as it is.');
+          break;
+        case 'odd-size':
+          out.push('H.264 needs an even width and height, so the H.264 video is ' + n.width + ' × ' + n.height + ': it loses the last column or row of pixels.');
+          break;
+        case 'hdr-sdr':
+          out.push('HDR becomes standard range (SDR) in H.264, so the picture can look duller.');
+          break;
+        case 'hdr-kept':
+          out.push(n.dolbyVision ? 'HDR is kept. The Dolby Vision information is not, so players show it as ordinary HLG HDR.' : 'HDR is kept: the colour information is copied.');
+          break;
+        case 'alpha':
+          out.push('Transparency is lost: H.264 has no alpha channel.');
+          break;
+        case 'video-dropped':
+          out.push('Left out: a second video track in ' + t.label + ', which this page cannot convert.');
+          break;
+        case 'audio-dropped':
+          var others = p.audio.some(function (s) { return s.action !== 'drop'; });
+          out.push(n.spatial
+            ? 'Left out: the Spatial Audio track (APAC), which this page cannot read.' + (others ? ' The other sound track is kept.' : '')
+            : 'Left out: a sound track in ' + t.label + ', which this page cannot read.');
+          break;
+        case 'audio-aac':
+          out.push(/^PCM|law$/.test(t.label)
+            ? 'The sound is uncompressed (' + t.label + '), which many MP4 players refuse: it becomes AAC at ' + Math.round(stepFor(p.audio, t.id).bitrate / 1000) + ' kbps.'
+            : 'The ' + t.label + ' sound becomes AAC at ' + Math.round(stepFor(p.audio, t.id).bitrate / 1000) + ' kbps.');
+          break;
+        case 'audio-copied':
+          out.push('The ' + t.label + ' sound is copied as it is. Some players and video editors do not play it in an MP4' +
+            (e.info.isobmff && t.canAac ? ': “Plays everywhere” turns it into AAC.' : '.'));
+          break;
+        case 'aac-unavailable':
+          out.push(n.dropped ? 'Left out: the ' + t.label + ' sound, which this browser cannot re-encode.' : 'This browser cannot encode AAC, so the ' + t.label + ' sound is copied as it is. Chrome and VLC play it; some other players do not.');
+          break;
+        case 'no-sound-left':
+          out.push('The MP4 will have no sound.');
+          break;
+        case 'track-dropped':
+          out.push(n.kind === 'timecode' ? 'Left out: the timecode track, used by editing software.'
+            : n.kind === 'subtitles' ? 'Left out: ' + (n.count > 1 ? n.count + ' subtitle tracks.' : 'the subtitle track.')
+            : n.kind === 'metadata' ? 'Left out: ' + (n.count > 1 ? n.count + ' camera metadata tracks.' : 'a camera metadata track.')
+            : 'Left out: ' + plural(n.count, 'other track') + '.');
+          break;
+        case 'truncated':
+          out.push('This file is incomplete: it should run ' + fmtTime(n.listed) + ', but its data stops at ' + fmtTime(n.at) + '. That part is converted.');
+          break;
+        case 'metadata':
+          var names = { location: 'the location', make: 'the camera maker', model: 'the camera model', software: 'the software version', localDate: 'the local time and time zone of the recording' };
+          out.push('Not kept: ' + listText(n.lost.map(function (k) { return names[k]; })) + '.' +
+            (n.lost.indexOf('localDate') >= 0 && e.info.created ? ' The date and time stay, in universal time.' : ''));
+          break;
+      }
+    });
+    if (!V.canSaveToFile() && p.bytes > MEMORY_WARN) {
+      out.push('The MP4 will be about ' + fmtBytes(p.bytes) + '. This browser builds it in memory, which may run out on files this large' +
+        (V.isIOS ? ' on an iPhone or iPad' : '') + '. Chrome or Edge on a computer save it straight to disk instead.');
+    }
+    return out;
+  }
+  function stepFor(steps, id) { return steps.filter(function (s) { return s.id === id; })[0] || {}; }
+  function failureText(err, e) {
+    var c = err && err.code;
+    if (c === 'lost-track' || c === 'check') {
+      return 'The converter could not copy all of this file' + (err.kind === 'video' || /vide/.test(err.message || '') ? ' (its video)' : '') +
+        ': the file may be damaged. Nothing was saved.';
+    }
+    if (c === 'library') return ERRORS.library;
+    if (c === 'stalled') return 'The conversion stopped making progress, so it was stopped: the file may be damaged.';
+    if (c === 'memory') return 'The browser ran out of memory. Close other tabs and try again, or convert this file on a computer.';
+    if (c === 'write') return 'The MP4 could not be saved' + (err.message ? ' (' + cut(err.message, 100) + ')' : '') + '. Check the free space and try again.';
+    // The library's own words when the file points it outside its data.
+    if (/^Tried reading|internal error/i.test((err && err.message) || '')) return 'Part of this file could not be read: the file may be damaged. Nothing was saved.';
+    return 'The conversion failed (' + cut((err && err.message) || String(err), 120) + '). The file may be damaged.';
+  }
+
+  // ---------- File list ----------
+  function stateText(e) {
+    if (e.status === 'reading') return 'Reading…';
+    if (e.status === 'converting') return e.progressText || 'Converting…';
+    if (e.status === 'waiting') return 'Waiting for a place to save it…';
+    if (e.result) return e.result.saved ? 'Saved as ' + e.result.name + ', ' + fmtBytes(e.result.bytes) : 'Done: ' + e.result.name + ', ' + fmtBytes(e.result.bytes);
+    if (e.skipped) return 'Skipped: no place to save it was chosen.';
+    if (e.convError) return 'Not converted';
+    if (e.plan && e.plan.ok) return 'Ready';
+    return '';
+  }
+  function renderEntry(e) {
+    if (!e.li) {
+      var li = e.li = el('li', 'mvp-file');
+      li.appendChild(e.nameEl = el('p', 'mvp-file-name'));
+      li.appendChild(e.infoEl = el('p', 'mvp-file-info'));
+      li.appendChild(e.tracksEl = el('p', 'mvp-file-tracks'));
+      li.appendChild(e.planEl = el('p', 'mvp-file-plan'));
+      li.appendChild(e.notesEl = el('ul', 'mvp-file-notes'));
+      li.appendChild(e.stateEl = el('p', 'mvp-file-state'));
+      // Not a live region: a summary that names the file goes to the status line.
+      li.appendChild(e.msgEl = el('p', 'msg error mvp-file-msg'));
+      var acts = el('div', 'mvp-file-actions');
+      e.dlBtn = el('button', 'btn small mvp-dl', 'Download');
+      e.rmBtn = el('button', 'btn secondary small mvp-remove', 'Remove');
+      [e.dlBtn, e.rmBtn].forEach(function (b) { b.type = 'button'; acts.appendChild(b); });
+      li.appendChild(acts);
+      e.dlBtn.addEventListener('click', function () { downloadEntry(e); });
+      e.rmBtn.addEventListener('click', function () { removeEntry(e); });
+      dom.list.appendChild(li);
+    }
+    setText(e.nameEl, e.name);
+    var ready = e.status !== 'reading' && e.info;
+    setText(e.infoEl, ready ? infoText(e) : '');
+    e.infoEl.hidden = !ready;
+    var tracks = ready && !e.info.error ? trackText(e) : '';
+    setText(e.tracksEl, tracks);
+    e.tracksEl.hidden = !tracks;
+    setText(e.planEl, ready ? planText(e) : '');
+    e.planEl.hidden = !ready || !e.plan;
+    e.planEl.classList.toggle('is-refused', !!(e.plan && !e.plan.ok));
+    var notes = ready ? noteTexts(e) : [];
+    var key = notes.join('\n');
+    if (e.notesKey !== key) {
+      e.notesKey = key;
+      e.notesEl.textContent = '';
+      notes.forEach(function (t) { e.notesEl.appendChild(el('li', null, t)); });
+    }
+    setText(e.stateEl, stateText(e));
+    e.stateEl.hidden = !stateText(e);
+    e.stateEl.classList.toggle('is-done', !!e.result);
+    var msg = e.convError || (e.plan && !e.plan.ok ? refusalText(e) : '');
+    if (e.msgEl._text !== msg) {
+      e.msgEl._text = msg;
+      e.msgEl.textContent = msg;
+      var refuse = !e.convError && e.plan && e.plan.refuse, link = null;
+      if (refuse && refuse.code === 'no-video') link = [' To save its sound, use ', MP3_PAGE, 'MP4 to MP3'];
+      if (refuse && refuse.code === 'error' && e.info.error.code === 'photo') {
+        var to = PHOTO_PAGES[e.info.error.detail === 'avif' ? 'avif' : 'heic'];
+        link = [' To turn it into a JPG, use ', to[0], to[1]];
+      }
+      if (link) {
+        e.msgEl.appendChild(document.createTextNode(link[0]));
+        var a = el('a', null, link[2]);
+        a.href = link[1];
+        e.msgEl.appendChild(a);
+        e.msgEl.appendChild(document.createTextNode('.'));
+      }
+    }
+    e.dlBtn.hidden = !(e.result && e.result.blob);
+    if (e.result) e.dlBtn.setAttribute('aria-label', 'Download ' + e.result.name);
+    e.rmBtn.setAttribute('aria-label', 'Remove ' + e.name);
+    e.rmBtn.disabled = busy && (e.status === 'converting' || e.status === 'waiting');
+    e.li.classList.toggle('is-busy', e.status === 'converting' || e.status === 'waiting');
+  }
+  function updateUI() {
+    dom.filesSec.hidden = !entries.length;
+    dom.listActions.hidden = entries.length < 2;
+    dom.clear.disabled = busy;
+    dom.opts.disabled = busy;
+    var pending = pendingEntries().length;
+    dom.convert.disabled = busy || !pending;
+    setText(dom.convert, busy ? 'Converting…' : pending > 1 ? 'Convert ' + pending + ' files to MP4' : 'Convert to MP4');
+    dom.cancel.hidden = !busy;
+    updateResults();
+  }
+  function renderAll() { entries.forEach(renderEntry); updateUI(); }
+  function convertible(e) { return e.status === 'ready' && e.plan && e.plan.ok; }
+  function pendingEntries() { return entries.filter(function (e) { return convertible(e) && !e.result; }); }
+
+  function dropResult(e) {
+    if (e.result && e.result.url) URL.revokeObjectURL(e.result.url);
+    e.result = null;
+  }
+  // A new setting gives each file a new plan; a result made under the old
+  // plan no longer matches what the page shows, so it goes.
+  function replan(e) {
+    if (!e.info) return false;
+    var before = e.plan && JSON.stringify([e.plan.video, e.plan.audio]);
+    e.plan = V.plan(e.info, choice);
+    if (e.result && JSON.stringify([e.plan.video, e.plan.audio]) !== before) { dropResult(e); return true; }
+    return false;
+  }
+
+  // ---------- Adding files ----------
+  async function addFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []).filter(function (f) { return f && typeof f.size === 'number'; });
+    if (!files.length) return;
+    setText(dom.fileErr, '');
+    var added = files.map(function (f) {
+      var e = { id: nextId++, file: f, name: cut(f.name || 'video', 200), status: 'reading', info: null, plan: null, result: null, convError: '', skipped: false };
+      entries.push(e);
+      renderEntry(e);
+      return e;
+    });
+    updateUI();
+    for (var i = 0; i < added.length; i++) {
+      var e = added[i];
+      if (entries.indexOf(e) < 0) continue;
+      var info = await V.probe(e.file);
+      if (entries.indexOf(e) < 0) { V.dispose(info); continue; }
+      e.info = info;
+      e.plan = V.plan(info, choice);
+      e.status = 'ready';
+      renderEntry(e);
+      updateUI();
+    }
+    var kept = added.filter(function (e) { return entries.indexOf(e) >= 0; });
+    if (!kept.length) return;
+    var bad = kept.filter(function (e) { return !e.plan.ok; }).length;
+    if (kept.length === 1) {
+      var one = kept[0];
+      say(one.plan.ok ? 'Added ' + one.name + ': ' + planText(one) + '.' : one.name + ': ' + refusalText(one));
+    } else {
+      say('Added ' + kept.length + ' files' + (bad ? ', ' + bad + ' of them cannot be converted: see the message under each.' : '.'));
+    }
+  }
+
+  function removeEntry(e) {
+    if (busy && (e.status === 'converting' || e.status === 'waiting')) return;
+    var i = entries.indexOf(e);
+    if (i < 0) return;
+    entries.splice(i, 1);
+    dropResult(e);
+    if (e.info) V.dispose(e.info);
+    var focusNext = e.li && e.li.contains(document.activeElement);
+    if (e.li) e.li.remove();
+    if (focusNext) (entries[Math.min(i, entries.length - 1)] ? entries[Math.min(i, entries.length - 1)].rmBtn : dom.open).focus();
+    say('Removed ' + e.name + '.');
+    updateUI();
+  }
+  dom.clear.addEventListener('click', function () {
+    if (busy) return;
+    entries.forEach(function (e) { dropResult(e); if (e.info) V.dispose(e.info); if (e.li) e.li.remove(); });
+    entries = [];
+    updateUI();
+    dom.open.focus();
+    say('All files removed.');
+  });
+
+  // ---------- Settings ----------
+  function readChoice() {
+    var next = dom.vH264.checked ? 'h264' : 'copy';
+    if (next === choice.video && entries.every(function (e) { return e.plan || e.status === 'reading'; })) return;
+    choice = { video: next };
+    var stale = 0;
+    entries.forEach(function (e) { if (e.info && replan(e)) stale++; });
+    renderAll();
+    if (stale) say('The video setting changed, so ' + plural(stale, 'file needs', 'files need') + ' converting again.');
+  }
+  [dom.vCopy, dom.vH264].forEach(function (r) { r.addEventListener('change', readChoice); });
+
+  // ---------- Converting ----------
+  function waitForChoice(e) {
+    return new Promise(function (resolve) {
+      asking = { entry: e, resolve: resolve };
+      setText(dom.askText, e.name + ' will be about ' + fmtBytes(e.plan.bytes) + '. Choose where to save the MP4, so that it is written straight to disk.');
+      dom.ask.hidden = false;
+      dom.askSave.focus();
+      say('Choose where to save ' + e.name + '.');
+    });
+  }
+  function endAsk(value) {
+    if (!asking) return;
+    var a = asking;
+    asking = null;
+    dom.ask.hidden = true;
+    a.resolve(value);
+  }
+  dom.askSave.addEventListener('click', async function () {
+    if (!asking || tooSoon(dom.askSave, asking.entry.id)) return;
+    var a = asking;
+    try {
+      var handle = await V.chooseFile(a.entry.outName);
+      if (asking === a) endAsk(handle ? { handle: handle } : { skip: true });
+    } catch (err) {
+      if (asking === a) endAsk({ memory: true });
+    }
+  });
+  dom.askSkip.addEventListener('click', function () { endAsk({ skip: true }); });
+
+  // A save dialog needs a click. The click on Convert counts only for the
+  // first file of the batch; for the others the page asks first.
+  var clickCounts = false;
+
+  // Where an entry's MP4 goes: straight to a file for big outputs where the
+  // browser can, else built in this tab.
+  async function sinkFor(e) {
+    var fresh = clickCounts;
+    clickCounts = false;
+    if (!(V.canSaveToFile() && e.plan.bytes >= BIG)) return { sink: V.memorySink() };
+    var answer = null;
+    if (fresh && (!navigator.userActivation || navigator.userActivation.isActive)) {
+      try {
+        var h = await V.chooseFile(e.outName);
+        answer = h ? { handle: h } : { skip: true };
+      } catch (err) { answer = null; }
+    }
+    if (!answer) {
+      e.status = 'waiting';
+      renderEntry(e);
+      answer = await waitForChoice(e);
+      e.status = 'ready';
+    }
+    if (answer.skip || cancelRequested) return { skip: true };
+    if (answer.memory) return { sink: V.memorySink() };
+    try {
+      return { sink: await V.fileSink(answer.handle) };
+    } catch (err) {
+      return { sink: V.memorySink() };
+    }
+  }
+
+  async function convertAll() {
+    if (busy) return;
+    var list = pendingEntries();
+    if (!list.length) return;
+    setText(dom.error, '');
+    busy = true;
+    cancelRequested = false;
+    clickCounts = true;
+    V.wake(true);
+    dom.progress.hidden = false;
+    dom.bar.value = 0;
+    setText(dom.progressText, '');
+    updateUI();
+    renderAll();
+    dom.cancel.focus();
+    // One announcement now and one with the result: the line under the bar names each file.
+    say('Converting ' + (list.length > 1 ? list.length + ' files' : list[0].name) + '.');
+    var used = new Set();
+    entries.forEach(function (x) { if (x.result) used.add(x.result.name.toLowerCase()); });
+    var done = 0, failed = 0, skipped = 0;
+    try {
+      await V.load();
+    } catch (err) {
+      setText(dom.error, ERRORS.library);
+      list = [];
+    }
+    for (var i = 0; i < list.length && !cancelRequested; i++) {
+      var e = list[i];
+      if (entries.indexOf(e) < 0 || e.result || !convertible(e)) continue;
+      e.convError = '';
+      e.skipped = false;
+      e.outName = V.outputName(e.file.name, used);
+      used.delete(e.outName.toLowerCase());
+      setText(dom.progressText, (list.length > 1 ? 'File ' + (i + 1) + ' of ' + list.length + ': ' : '') + e.name);
+      var where = await sinkFor(e);
+      if (cancelRequested) break;
+      if (where.skip) { e.skipped = true; skipped++; renderEntry(e); continue; }
+      used.add(e.outName.toLowerCase());
+      e.status = 'converting';
+      e.progressText = 'Converting… 0%';
+      renderEntry(e);
+      var started = performance.now(), lastPaint = 0;
+      var onProgress = (function (i, e) {
+        return function (f) {
+          var now = performance.now();
+          if (now - lastPaint < 150 && f < 1) return;
+          lastPaint = now;
+          var pct = Math.floor(f * 100);
+          var left = '';
+          var spent = (now - started) / 1000;
+          if (e.plan.reencode && f > 0.03 && spent > 3) {
+            var rest = spent / f * (1 - f);
+            if (rest >= 5) left = ', ' + fmtWait(rest) + ' left';
+          }
+          e.progressText = 'Converting… ' + pct + '%' + left;
+          dom.bar.value = Math.floor((i + f) / list.length * 100);
+          setText(dom.progressText, (list.length > 1 ? 'File ' + (i + 1) + ' of ' + list.length + ': ' : '') + e.name + ', ' + pct + '%' + left);
+          renderEntry(e);
+        };
+      })(i, e);
+      job = V.convert(e.info, e.plan, { sink: where.sink, onProgress: onProgress });
+      try {
+        var r = await job.promise;
+        e.result = { id: ++resultSeq, name: where.sink.kind === 'file' ? (r.name || e.outName) : e.outName, bytes: r.bytes, blob: r.blob || null, saved: r.saved, url: '' };
+        done++;
+      } catch (err) {
+        used.delete(e.outName.toLowerCase());
+        if (err && err.code === 'canceled') { cancelRequested = true; }
+        else { e.convError = failureText(err, e); failed++; }
+      } finally {
+        job = null;
+        e.status = 'ready';
+        e.progressText = '';
+        renderEntry(e);
+      }
+    }
+    // A file removed while the batch ran is not counted.
+    list = list.filter(function (x) { return entries.indexOf(x) >= 0; });
+    done = list.filter(function (x) { return x.result; }).length;
+    failed = list.filter(function (x) { return x.convError; }).length;
+    skipped = list.filter(function (x) { return x.skipped; }).length;
+    var hadFocus = document.activeElement === dom.cancel || document.activeElement === document.body || document.activeElement === dom.askSave || document.activeElement === dom.askSkip;
+    endAsk({ skip: true });
+    busy = false;
+    V.wake(false);
+    dom.progress.hidden = true;
+    renderAll();
+    var withResult = entries.filter(function (x) { return x.result; });
+    if (cancelRequested) say('Conversion cancelled.' + (done ? ' ' + plural(done, 'file was', 'files were') + ' converted before that.' : ''));
+    else if (list.length === 1 && done === 1) say(list[0].result.saved ? list[0].result.name + ' is saved, ' + fmtBytes(list[0].result.bytes) + '.' : list[0].result.name + ' is ready to download, ' + fmtBytes(list[0].result.bytes) + '.');
+    else if (done) say(done + ' of ' + list.length + ' files converted' + (failed ? ', ' + failed + ' failed' : '') + (skipped ? ', ' + skipped + ' skipped' : '') + '.' + (withResult.some(function (x) { return x.result.blob; }) ? ' Download them with the buttons under each file' + (dom.results.hidden ? '.' : ' or all as a ZIP.') : ''));
+    else if (list.length === 1 && failed) say(list[0].name + ': ' + list[0].convError);
+    else if (skipped && !failed) say('Nothing was converted: no place to save was chosen.');
+    else if (list.length) say('Nothing was converted: see the message under each file.');
+    else if (!dom.error.textContent) say('Nothing was converted: the files were removed.');
+    if (hadFocus) {
+      var first = list.filter(function (x) { return x.result && x.result.blob; })[0];
+      if (first) (withResult.length > 1 && !dom.results.hidden ? dom.zip : first.dlBtn).focus();
+      else if (!dom.convert.disabled) dom.convert.focus();
+      else dom.open.focus();
+    }
+  }
+  dom.convert.addEventListener('click', convertAll);
+  dom.cancel.addEventListener('click', function () {
+    if (!busy) return;
+    cancelRequested = true;
+    endAsk({ skip: true });
+    if (job) job.cancel();
+    setText(dom.progressText, 'Cancelling…');
+  });
+
+  // ---------- Downloads ----------
+  function save(name, blob, holder) {
+    if (!holder.url) holder.url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = holder.url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  function downloadEntry(e) {
+    if (!e.result || !e.result.blob || tooSoon(e.dlBtn, e.result.id)) return;
+    save(e.result.name, e.result.blob, e.result);
+  }
+  function zippable() { return entries.filter(function (e) { return e.result && e.result.blob; }); }
+  function updateResults() {
+    var res = zippable();
+    var total = res.reduce(function (n, e) { return n + e.result.bytes; }, 0);
+    dom.results.hidden = busy || res.length < 2 || total > ZIP_LIMIT;
+    var note = !busy && res.length > 1 && total > ZIP_LIMIT ? 'Together the MP4s take ' + fmtBytes(total) + ', too much for one ZIP on this device, so download them one by one.' : '';
+    setText(dom.zipNote, note);
+    dom.zipNote.hidden = !note;
+  }
+  var zipHolder = { url: '' };
+  dom.zip.addEventListener('click', async function () {
+    var res = zippable();
+    if (res.length < 2 || dom.zip.getAttribute('aria-busy') === 'true' || tooSoon(dom.zip, res.map(function (e) { return e.result.id; }).join())) return;
+    dom.zip.setAttribute('aria-busy', 'true');
+    setText(dom.zip, 'Making the ZIP…');
+    try {
+      await loadScript(ZIP_URL);
+      var blob = await window.TTZip.create(res.map(function (e) {
+        // TTZip cleans each name, so that Windows, macOS and Linux can all extract it.
+        return { name: e.result.name, data: e.result.blob, date: e.info.created || undefined };
+      }), { compress: 'store' });
+      if (zipHolder.url) URL.revokeObjectURL(zipHolder.url);
+      zipHolder.url = '';
+      save('converted-videos.zip', blob, zipHolder);
+      setText(dom.error, '');
+    } catch (err) {
+      setText(dom.error, 'The ZIP could not be made: ' + cut(String(err && err.message || err), 160) + ' Download the files one by one.');
+    } finally {
+      dom.zip.removeAttribute('aria-busy');
+      setText(dom.zip, 'Download all (.zip)');
+    }
+  });
+  function loadScript(url) {
+    loadScript.cache = loadScript.cache || new Map();
+    if (loadScript.cache.has(url)) return loadScript.cache.get(url);
+    var p = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = url;
+      s.onload = function () { resolve(); };
+      s.onerror = function () { loadScript.cache.delete(url); reject(new Error('Could not load the ZIP maker.')); };
+      document.head.appendChild(s);
+    });
+    loadScript.cache.set(url, p);
+    return p;
+  }
+
+  // ---------- Choosing and dropping files ----------
+  var LINK_TEXT = 'Links cannot be converted: this page only reads files on your device. Save the video to your device first, then choose it here.';
+  dom.open.addEventListener('click', function () { dom.file.click(); });
+  dom.file.addEventListener('change', function () {
+    var files = Array.prototype.slice.call(dom.file.files || []);
+    dom.file.value = '';
+    addFiles(files);
+  });
+  function hasFiles(dt) { return dt && Array.prototype.indexOf.call(dt.types || [], 'Files') >= 0; }
+  var depth = 0;
+  document.addEventListener('dragenter', function (ev) { if (hasFiles(ev.dataTransfer)) { depth++; dom.drop.classList.add('is-over'); } });
+  document.addEventListener('dragleave', function (ev) {
+    if (!hasFiles(ev.dataTransfer)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) dom.drop.classList.remove('is-over');
+  });
+  document.addEventListener('dragover', function (ev) { if (ev.dataTransfer) ev.preventDefault(); });
+  document.addEventListener('drop', function (ev) {
+    var dt = ev.dataTransfer;
+    if (!dt) return;
+    depth = 0;
+    dom.drop.classList.remove('is-over');
+    if (dt.files && dt.files.length) { ev.preventDefault(); addFiles(dt.files); return; }
+    ev.preventDefault();
+    var text = '';
+    try { text = dt.getData('text/uri-list') || dt.getData('text/plain') || ''; } catch (x) { text = ''; }
+    if (/^\s*(https?:|www\.)/i.test(text.slice(0, 2000))) setText(dom.fileErr, LINK_TEXT);
+  });
+  document.addEventListener('paste', function (ev) {
+    var cd = ev.clipboardData;
+    if (!cd) return;
+    if (cd.files && cd.files.length) { ev.preventDefault(); addFiles(cd.files); return; }
+    var text = (cd.getData('text/plain') || '').slice(0, 2000);
+    if (/^\s*(https?:\/\/|www\.)/i.test(text)) setText(dom.fileErr, LINK_TEXT);
+  });
+
+  // Fields the browser restores after the script ran (Back, reload) are read again.
+  window.addEventListener('pageshow', readChoice);
+  readChoice();
+  updateUI();
+})();
+</script>
