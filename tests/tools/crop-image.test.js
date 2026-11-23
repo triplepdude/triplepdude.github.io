@@ -911,4 +911,31 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.deepEqual([gp.w, gp.h], [240, 160], 'grid.png is saved at full size, not from a smaller copy');
   checkGrid(gp, null, (i, j) => [30 + i, 20 + j], 'grid.png after a canvas too wide');
   await lctx.close();
+
+  // ---------- Safari: its canvas cannot write WebP, so libwebp (TTImage's { wasm: true }) does ----------
+  await page.addInitScript(() => {
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
+    if (typeof OffscreenCanvas === 'function') {
+      const c2b = OffscreenCanvas.prototype.convertToBlob;
+      OffscreenCanvas.prototype.convertToBlob = function (o) { return c2b.call(this, o && o.type === 'image/webp' ? Object.assign({}, o, { type: 'image/png' }) : o); };
+    }
+  });
+  await open();
+  assert.deepEqual(await page.evaluate(async () => [await TTImage.canEncode('webp'), await TTImage.canEncode('webp', { wasm: true })]), [false, true]);
+  await openFile('grid.png');
+  await page.selectOption('#crp-format', 'png');
+  const safPng = await download();
+  await page.selectOption('#crp-format', 'webp');
+  assert.deepEqual(await page.$eval('#crp-format option[value="webp"]', o => [o.disabled, o.textContent]), [false, 'WebP']);
+  assert.equal(await page.textContent('#crp-download'), 'Download WebP');
+  const safWebp = await download();
+  assert.equal(safWebp.name, 'grid-cropped.webp');
+  const safChunks = [];
+  for (let o = 12; o + 8 <= safWebp.buf.length; o += 8 + safWebp.buf.readUInt32LE(o + 4) + (safWebp.buf.readUInt32LE(o + 4) & 1)) safChunks.push(safWebp.buf.toString('latin1', o, o + 4).trim());
+  assert.ok(safChunks.includes('VP8'), 'a lossy WebP made without the canvas: ' + safChunks);
+  const safPts = [[2, 2], [40, 30], [120, 80], [200, 130]];
+  const [safW, safP] = [await pixels(safWebp.buf, safPts), await pixels(safPng.buf, safPts)];
+  assert.deepEqual([safW.w, safW.h], [safP.w, safP.h], 'the WebP has the PNG’s size');
+  safPts.forEach((_, i) => assert.ok(near(safW.px[i], safP.px[i], 14), `WebP ${safW.px[i]} against PNG ${safP.px[i]} at ${safPts[i]}`));
 };

@@ -24,7 +24,20 @@
  *              exif = false     also return the EXIF block,
  *              canvas = true    false keeps the pixels in a worker: use
  *                               encode(result) / toCanvas(result); fastest for
- *                               converters, as the page never touches the pixels }
+ *                               converters, as the page never touches the pixels,
+ *              keepProfile = false   true keeps the colours of a JPEG, PNG or
+ *                               WebP whose ICC profile is an RGB matrix profile
+ *                               other than sRGB (Display P3, Adobe RGB):
+ *                               the browser decodes it with colorSpaceConversion
+ *                               'none', colorProfile is 'kept' and icc holds the
+ *                               profile, which encode() writes into WebP, JPEG
+ *                               and PNG files (other formats are converted to
+ *                               sRGB as they are saved). Only where a worker
+ *                               decodes and this browser is seen to honour
+ *                               'none' (a 1 x 1 test image, once); elsewhere,
+ *                               and for CMYK or LUT profiles, the colours are
+ *                               converted to sRGB as without the option.
+ *                               toCanvas() then gives the unconverted pixels. }
  *   An ICO whose largest picture is a PNG is decoded from that PNG (format stays
  *   'ico'), since Chromium draws one whose size differs from the directory's blank.
  *   result:  { canvas,       an upright <canvas> (see options.canvas); the EXIF
@@ -42,7 +55,11 @@
  *              colorProfile, 'converted' when the file's colour profile is not
  *                            sRGB, so its colours were converted to sRGB: by this
  *                            decoder for HEIC and TIFF, by the browser for JPEG,
- *                            PNG and WebP (an RGB matrix profile, such as Display P3)
+ *                            PNG and WebP (an RGB matrix profile, such as Display P3);
+ *                            'kept' with options.keepProfile (see above)
+ *              icc, iccName, with colorProfile 'kept': the profile (Uint8Array)
+ *                            and the name in its description tag ('' if none)
+ *              cmyk,         true for a CMYK or YCCK JPEG (the browser makes RGB of it)
  *              decoder,      'browser' | 'libheif' | 'utif' | 'svg'
  *              warnings }    'truncated' when a PNG, WebP or JPEG ends early (the rest
  *                            is blank; data after a JPEG's EOI marker is not a cut);
@@ -65,7 +82,8 @@
  *
  * TTImage.canEncode(formatOrMime, { wasm }) -> Promise<boolean>
  *   PNG, BMP, ICO, TIFF and GIF always; JPEG/WebP/AVIF by trying canvas.toBlob. With
- *   { wasm: true }, AVIF also counts where the WebAssembly encoder can run.
+ *   { wasm: true }, AVIF and WebP also count where their WebAssembly encoders can
+ *   run (WebAssembly and module workers: Chrome 80, Firefox 114, Safari 15).
  * TTImage.encode(source, format, options) -> Promise<Blob>
  *   source:  a decode() result (best), a canvas, an ImageBitmap or an <img>
  *   format:  'png' | 'jpeg' | 'webp' | 'avif' | 'bmp' | 'ico' | 'tiff' | 'gif' (or a MIME type)
@@ -84,13 +102,54 @@
  *                   TIFF XResolution; TIFF defaults to 72),
  *              wasm: true lets AVIF use the libavif encoder in /assets/vendor/avif/
  *                    (3.5 MB, loaded on first use, in a module worker) where the
- *                    browser's canvas cannot encode AVIF; up to 50 megapixels,
- *              speed: 0..10 for that encoder (default 6, or 8 above 2.5 MP) }
+ *                    browser's canvas cannot encode AVIF; up to 50 megapixels.
+ *                    For WebP, true means libwebp in every browser (see WEBP below),
+ *              lossless: true for lossless WebP (libwebp, or the canvas at
+ *                    quality 1 without wasm),
+ *              signal: an AbortSignal; aborting stops a libwebp encode (its
+ *                    worker is closed once no other job wants it) and rejects
+ *                    with code ABORTED; other formats finish regardless,
+ *              speed: 0..10 for the AVIF encoder (default 6, or 8 above 2.5 MP) }
  *   BMP is written as 24-bit; ICO holds one PNG per size; TIFF is 8-bit RGB (RGBA
  *   when any pixel is transparent), LZW-compressed with the horizontal predictor;
  *   GIF keeps up to 256 colours exactly, else a median-cut palette with
  *   Floyd-Steinberg dithering, and pixels under half opacity become transparent.
- *   Rejects like decode().
+ *   A source decoded with keepProfile keeps its ICC profile in WebP (ICCP
+ *   chunk), JPEG (APP2) and PNG (iCCP); for the other formats its colours are
+ *   converted to sRGB first.
+ *   Rejects like decode(); a WebP over 16,383 pixels a side (the format's
+ *   limit, where Chrome's canvas crops silently) with TOO_BIG.
+ *
+ * WEBP (libwebp 1.1.0 from /assets/vendor/webp/, in a module worker loaded on the
+ *   first WebP save: 136 KB gzipped with WebAssembly SIMD, else a build without
+ *   it, 124 KB, chosen with WebAssembly.validate). Used with { wasm: true } in
+ *   every browser, and without it where the canvas cannot encode WebP (Safari).
+ *   Never replaced by another format: if the encoder fails, encode() rejects.
+ *   Chrome's canvas makes lossless files 1.1 to 12 times larger, Firefox's
+ *   moves semi-transparent pixels, and Safari's cannot encode WebP at all.
+ *   - Alpha is lossless in both modes (alpha_quality 100). Lossless keeps every
+ *     visible pixel exactly; the colour under fully transparent pixels may change.
+ *   - A PNG decode() result saved at its own size is read from the file's bytes
+ *     in that worker (not through a canvas, whose premultiplied alpha changes
+ *     the colour of semi-transparent pixels), when the browser would show its
+ *     pixels unchanged: no gAMA other than 1/2.2, and no cHRM with a gAMA,
+ *     unless an sRGB or iCCP chunk overrides them (browsers ignore cHRM
+ *     without gAMA, as ImageMagick writes it), no cICP, not both sRGB and
+ *     iCCP, no profile of lookup tables alone (the browser converts through
+ *     them), no EXIF rotation, an animation's first frame is its default image,
+ *     and its colours were not converted (no profile, or keepProfile: the
+ *     profile then goes into the WebP).
+ *   - Lossless always uses libwebp's default effort (quality 75, method 4, as
+ *     cwebp -lossless does): its faster settings save little time on
+ *     screenshots and make them 24 to 62% larger.
+ *   - Limits (TTImage.webpLimits(lossless) -> { side, pixels, phone, wasm }: wasm
+ *     is whether libwebp can run here; the pixel limits apply to it): 16,383
+ *     pixels a side; lossless up to 30 megapixels and lossy up to 50, or 13
+ *     and 25 on a phone (a coarse pointer, or navigator.deviceMemory of 4 GB
+ *     or less; 25 takes a recent iPhone's 24 MP photo, 5712 x 4284, whole):
+ *     lossless needs about 35 bytes of encoder memory per pixel (12 MP:
+ *     440 MB), lossy about 13. Beyond them encode() rejects with
+ *     TOO_BIG; a page scales to fit first and says so.
  * TTImage.resize(canvasOrImage, width, height) -> canvas   (on the page); throws
  *   TOO_BIG where a canvas it needs is over this browser's size limit.
  * TTImage.exif.orientation(tiffBytes), TTImage.exif.prepare(tiffBytes, {width,
@@ -441,6 +500,122 @@
     var out = new Response(new Blob([raw.subarray(z + 2)]).stream().pipeThrough(new DecompressionStream('deflate')));
     return new Uint8Array(await out.arrayBuffer());
   }
+  // The colour space of an ICC profile (bytes 16 to 19: 'RGB ', 'CMYK', 'GRAY')
+  // and the name in its description tag: a v2 'desc' or the first record of a
+  // v4 'mluc'.
+  function iccInfo(p) {
+    var out = { space: p.length >= 132 ? ascii(p, 16, 4) : '', name: '' };
+    try {
+      for (var i = 0, n = u32be(p, 128); i < n && i < 100 && 144 + 12 * i <= p.length; i++) {
+        if (ascii(p, 132 + 12 * i, 4) !== 'desc') continue;
+        var o = u32be(p, 136 + 12 * i), t = ascii(p, o, 4), s = '';
+        if (t === 'desc') s = ascii(p, o + 12, Math.min(u32be(p, o + 8), 200));
+        else if (t === 'mluc' && u32be(p, o + 8) > 0) {
+          for (var k = 0, at = o + u32be(p, o + 24), len = u32be(p, o + 20); k + 1 < len && k < 400; k += 2) s += String.fromCharCode(u16be(p, at + k));
+        }
+        out.name = s.replace(/\0[\s\S]*$/, '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, 80);
+        break;
+      }
+    } catch (e) { /* no name */ }
+    return out;
+  }
+  // The number of colour components in a JPEG's frame header (4 for CMYK or YCCK), or 0.
+  function jpegComponents(b) {
+    var i = 2;
+    while (i + 10 <= b.length && b[i] === 0xFF) {
+      var m = b[i + 1];
+      if (m === 0xD8 || (m >= 0xD0 && m <= 0xD7) || m === 0xFF) { i += m === 0xFF ? 1 : 2; continue; }
+      if (m === 0xDA || m === 0xD9) break;
+      if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) return b[i + 9];
+      i += 2 + u16be(b, i + 2);
+    }
+    return 0;
+  }
+  function be32(v) { return new Uint8Array([v >>> 24, (v >> 16) & 255, (v >> 8) & 255, v & 255]); }
+  function le32(v) { return new Uint8Array([v & 255, (v >> 8) & 255, (v >> 16) & 255, v >>> 24]); }
+  // A zlib stream of stored (uncompressed) deflate blocks, for a PNG's iCCP chunk.
+  function zlibStored(d) {
+    var blocks = Math.max(1, Math.ceil(d.length / 65535)), out = new Uint8Array(6 + d.length + 5 * blocks), o = 2, a = 1, b = 0;
+    out[0] = 0x78;
+    out[1] = 0x01;
+    for (var i = 0; i < blocks; i++) {
+      var s = i * 65535, n = Math.min(65535, d.length - s);
+      out.set([i === blocks - 1 ? 1 : 0, n & 255, n >> 8, ~n & 255, (~n >> 8) & 255], o);
+      out.set(d.subarray(s, s + n), o + 5);
+      o += 5 + n;
+    }
+    for (var k = 0; k < d.length; k++) { a = (a + d[k]) % 65521; b = (b + a) % 65521; }
+    out.set([b >> 8, b & 255, a >> 8, a & 255], o);
+    return out;
+  }
+  // An ICC profile written into an encoded JPEG (APP2 ICC_PROFILE segments of up
+  // to 65,519 bytes, after JFIF and EXIF, in place of any there: Chrome's
+  // canvas writes its own sRGB one) or PNG (an iCCP chunk after IHDR, in place
+  // of any sRGB, iCCP, gAMA or cHRM chunk).
+  function withIcc(b, fmt, icc) {
+    if (fmt === 'jpeg') {
+      var max = 65519, count = Math.ceil(icc.length / max), head = [b.subarray(0, 2)], tail = [], at = 2, segs = [];
+      if (count > 255 || b[0] !== 0xFF || b[1] !== 0xD8) return b;
+      // The segments before the image data, without ICC profiles; the profile goes after APP0 and APP1.
+      while (at + 4 <= b.length && b[at] === 0xFF && b[at + 1] >= 0xE0 && b[at + 1] <= 0xEF) {
+        var sl = 2 + u16be(b, at + 2), seg = b.subarray(at, at + sl);
+        if (!(b[at + 1] === 0xE2 && ascii(b, at + 4, 12) === 'ICC_PROFILE\0')) (b[at + 1] <= 0xE1 && !tail.length ? head : tail).push(seg);
+        at += sl;
+      }
+      for (var i = 0; i < count; i++) {
+        var part = icc.subarray(i * max, (i + 1) * max), len = 16 + part.length, h = new Uint8Array(18);
+        h.set([0xFF, 0xE2, len >> 8, len & 255]);
+        h.set(bytesOf('ICC_PROFILE\0'), 4);
+        h[16] = i + 1;
+        h[17] = count;
+        segs.push(h, part);
+      }
+      return concat(head.concat(segs, tail, [b.subarray(at)]));
+    }
+    if (fmt === 'png') {
+      var data = concat([bytesOf('ICC Profile\0\0'), zlibStored(icc)]), type = bytesOf('iCCP'), parts = [b.subarray(0, 8)], o = 8;
+      while (o + 12 <= b.length) {
+        var n = u32be(b, o), t = ascii(b, o + 4, 4);
+        if (t !== 'iCCP' && t !== 'sRGB' && t !== 'gAMA' && t !== 'cHRM') parts.push(b.subarray(o, o + 12 + n));
+        if (t === 'IHDR') parts.push(be32(data.length), type, data, be32(crc32([type, data])));
+        o += 12 + n;
+      }
+      return concat(parts);
+    }
+    return b;
+  }
+  // A WebP file rebuilt with an ICC profile and/or EXIF, in the order of the
+  // container specification (RFC 9649): VP8X with its flags and the canvas
+  // size, ICCP, the image chunks as they are (ALPH, then VP8 or VP8L), EXIF.
+  // o.icc replaces an ICCP chunk already there (Chrome's canvas writes its own
+  // sRGB one); without it that chunk stays. Null for an animation or a file
+  // that is not a WebP.
+  function webpMux(b, o) {
+    if (b.length < 20 || ascii(b, 0, 4) !== 'RIFF' || ascii(b, 8, 4) !== 'WEBP') return null;
+    var end = Math.min(b.length, 8 + u32le(b, 4)), p = 12, flags = 0, icc = null, exif = null, img = [];
+    while (p + 8 <= end) {
+      var t = ascii(b, p, 4), len = u32le(b, p + 4), body = b.subarray(p + 8, Math.min(end, p + 8 + len));
+      if (t === 'VP8X') flags = b[p + 8];
+      else if (t === 'ICCP') icc = body;
+      else if (t === 'EXIF') exif = body;
+      else if (t === 'ALPH' || t === 'VP8 ' || t === 'VP8L') img.push([t, body]);
+      else if (t === 'ANIM' || t === 'ANMF') return null;
+      p += 8 + len + (len & 1);
+    }
+    if (!img.length) return null;
+    if (o.icc) icc = o.icc;
+    if (o.exif) exif = o.exif;
+    var alpha = (flags & 0x10) || img.some(function (c) { return c[0] === 'ALPH'; }) || (img[0][0] === 'VP8L' && img[0][1].length > 4 && (img[0][1][4] & 0x10));
+    var w = o.w - 1, h = o.h - 1;
+    var x = new Uint8Array([(icc ? 0x20 : 0) | (alpha ? 0x10 : 0) | (exif ? 0x08 : 0), 0, 0, 0, w & 255, (w >> 8) & 255, (w >> 16) & 255, h & 255, (h >> 8) & 255, (h >> 16) & 255]);
+    var parts = [], chunk = function (type, data) { parts.push(bytesOf(type), le32(data.length), data); if (data.length & 1) parts.push(new Uint8Array(1)); };
+    chunk('VP8X', x);
+    if (icc) chunk('ICCP', icc);
+    img.forEach(function (c) { chunk(c[0], c[1]); });
+    if (exif) chunk('EXIF', exif);
+    var bodyOut = concat(parts);
+    return concat([bytesOf('RIFF'), le32(bodyOut.length + 4), bytesOf('WEBP'), bodyOut]);
+  }
   // An IEND chunk: length 0, type, CRC AE 42 60 82.
   function hasIend(b) {
     for (var i = b.length - 12; i >= 0; i--) {
@@ -551,29 +726,7 @@
       var c = crc32([type, exif]), tail = new Uint8Array([c >>> 24, (c >> 16) & 255, (c >> 8) & 255, c & 255]);
       return concat([b.subarray(0, after), head, exif, tail, b.subarray(after)]);
     }
-    if (fmt === 'webp') {
-      var chunk = new Uint8Array(8 + exif.length + (exif.length & 1));
-      chunk.set(bytesOf('EXIF'));
-      chunk.set([exif.length & 255, (exif.length >> 8) & 255, (exif.length >> 16) & 255, exif.length >>> 24], 4);
-      chunk.set(exif, 8);
-      var first = ascii(b, 12, 4), body;
-      if (first === 'VP8X') {
-        body = concat([b.subarray(12), chunk]);
-        body[8] |= 0x08;
-      } else {
-        var alpha = first === 'VP8L' && (b[24] & 0x10) ? 0x10 : 0;
-        var x = new Uint8Array(18);
-        x.set(bytesOf('VP8X'));
-        x.set([10, 0, 0, 0, 0x08 | alpha, 0, 0, 0], 4);
-        x.set([(w - 1) & 255, ((w - 1) >> 8) & 255, ((w - 1) >> 16) & 255, (h - 1) & 255, ((h - 1) >> 8) & 255, ((h - 1) >> 16) & 255], 12);
-        body = concat([x, b.subarray(12), chunk]);
-      }
-      var riff = new Uint8Array(12), size = body.length + 4;
-      riff.set(bytesOf('RIFF'));
-      riff.set([size & 255, (size >> 8) & 255, (size >> 16) & 255, size >>> 24], 4);
-      riff.set(bytesOf('WEBP'), 8);
-      return concat([riff, body]);
-    }
+    if (fmt === 'webp') return webpMux(b, { exif: exif, w: w, h: h });
     return null;
   }
 
@@ -1026,8 +1179,12 @@
     function canvasOk() {
       try { return typeof OffscreenCanvas === 'function' && !!new OffscreenCanvas(1, 1).getContext('2d'); } catch (e) { return false; }
     }
-    async function nativeDecode(file) {
+    // raw: the colours as stored, not converted through the file's profile.
+    async function nativeDecode(file, raw) {
       if (typeof g.createImageBitmap !== 'function') return null;
+      if (raw) {
+        try { return await g.createImageBitmap(file, { imageOrientation: 'from-image', colorSpaceConversion: 'none' }); } catch (e) { return null; }
+      }
       try { return await g.createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* try without options */ }
       try { return await g.createImageBitmap(file); } catch (e) { return null; }
     }
@@ -1039,8 +1196,16 @@
         try { it = colourTransform({ icc: m.icc }); } catch (x) { it = null; }
         return { ok: true, converts: !!it };
       }
+      // The first pixel of an image decoded without colour conversion.
+      if (m.cmd === 'probe') {
+        if (!canvasOk()) return { ok: false };
+        var pb = await g.createImageBitmap(m.file, { colorSpaceConversion: 'none' }), pc = new OffscreenCanvas(1, 1), pg = pc.getContext('2d');
+        pg.drawImage(pb, 0, 0);
+        pb.close();
+        return { ok: true, px: Array.prototype.slice.call(pg.getImageData(0, 0, 1, 1).data) };
+      }
       if (m.cmd === 'native') {
-        var nb = await nativeDecode(m.file);
+        var nb = await nativeDecode(m.file, m.raw);
         if (!nb) return { ok: false, code: 'NATIVE_FAILED' };
         if (nb.width * nb.height > m.maxPixels) { var big = { ok: false, code: 'TOO_BIG', w: nb.width, h: nb.height }; nb.close(); return big; }
         keep(m.key, nb);
@@ -1059,7 +1224,7 @@
       }
       if (m.cmd === 'alpha' || m.cmd === 'encode' || m.cmd === 'orient') {
         if (!canvasOk()) return { ok: false, code: 'NO_CANVAS' };
-        var src = image(m);
+        var src = image(m), conv = null;
         try {
           if (m.cmd === 'alpha') return { ok: true, alpha: ops.alpha(src) };
           if (m.cmd === 'orient') {
@@ -1068,9 +1233,23 @@
             keep(m.key, ob);
             return { ok: true, w: ob.width, h: ob.height };
           }
-          var bytes = await ops.encode(src, m);
+          // Pixels kept in their own colour space (decode's keepProfile), saved in a
+          // format that cannot carry the profile: converted to sRGB first, on a copy.
+          var ctf = null;
+          if (m.toSrgb) { try { ctf = colourTransform({ icc: m.toSrgb }); } catch (x) { ctf = null; } }
+          if (ctf) {
+            conv = new OffscreenCanvas(src.width, src.height);
+            var cg = conv.getContext('2d', { willReadFrequently: true });
+            if (!cg) throw err('TOO_BIG');
+            cg.drawImage(src, 0, 0);
+            var cd = cg.getImageData(0, 0, conv.width, conv.height);
+            applyColour(cd.data, ctf);
+            cg.putImageData(cd, 0, 0);
+          }
+          var bytes = await ops.encode(conv || src, m);
           return { ok: true, buffer: bytes.buffer, transfer: [bytes.buffer] };
         } finally {
+          if (conv) conv.width = 0;
           if (m.key == null && m.bitmap && m.bitmap.close) m.bitmap.close();
         }
       }
@@ -1720,6 +1899,22 @@
   // 1x1 AVIF (305 bytes): an AVIF it rejects is then damaged, not unsupported.
   var AVIF_BAD = 'The AVIF file could not be decoded. It may be damaged or use a feature this browser does not support.';
   var AVIF_1PX = 'AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADrbWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAAAAAAAOcGl0bQAAAAAAAQAAAB5pbG9jAAAAAEQAAAEAAQAAAAEAAAETAAAAHgAAAChpaW5mAAAAAAABAAAAGmluZmUCAAAAAAEAAGF2MDFDb2xvcgAAAABqaXBycAAAAEtpcGNvAAAAFGlzcGUAAAAAAAAAAQAAAAEAAAAQcGl4aQAAAAADCAgIAAAADGF2MUOBAAwAAAAAE2NvbHJuY2x4AAEADQAGgAAAABdpcG1hAAAAAAAAAAEAAQQBAoMEAAAAJm1kYXQSAAoIGAAGiAhoNCAyEBlHh4Yhh5555oJAAJBAzeg=';
+  // Does this browser decode without converting colours when asked to
+  // (createImageBitmap's colorSpaceConversion 'none')? Tested once, in a worker,
+  // with a 1 x 1 PNG of grey 128 tagged with a linear-light profile, which a
+  // colour-managing browser shows as 188. Only then is a profile kept.
+  var PROBE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAArGlDQ1B0AAB42mNgYFzBAARMAgwMuXklRUHuTgoRkVEKDEggMbm4gAEv+HaNgRFEX9ZlIB1wpKQWJwPpJyCryksKShgYGD2AbJEioEOA7BgQOx3CBrlDJAnCbgGrCQlyBrJnANkC6UjsJCQ21HwQYPfJzEtNLGKgOkCEGSIsEGL5SxgYLL4xMDD3I8SSpjEwbG9nYJC4gxBTWcTAwN/MwLDtfHJpURnUaEaQcQDLHjAhAbl5MQAAAAxJREFUeNpjaGhoAAADBAGBdS4BvAAAAABJRU5ErkJggg==';
+  var profileOk = null;
+  function profileTest() {
+    if (!profileOk) {
+      profileOk = (async function () {
+        if (!useWorker) return false;
+        var r = await runWorker({ cmd: 'probe', file: new Blob([bytesOf(atob(PROBE_PNG))], { type: 'image/png' }) });
+        return !!(r.ok && Math.abs(r.px[0] - 128) <= 3 && Math.abs(r.px[2] - 128) <= 3);
+      })().catch(function () { return false; });
+    }
+    return profileOk;
+  }
   var avifTest = null;
   function browserReadsAvif() {
     if (!avifTest) {
@@ -1899,7 +2094,7 @@
     var fmt = sniffBytes(head);
     if (!fmt) throw fail('UNSUPPORTED', notImage(head));
     var res = { format: fmt, orientation: 1, exif: null, animated: false, frames: null, images: 1, colorProfile: null, decoder: 'browser', warnings: [] };
-    var dims = headerSize(head, fmt), src = null, canvas = null, h = null, inWorker = false, W = 0, H = 0, i, opaqueAvif = false, opaquePng = false;
+    var dims = headerSize(head, fmt), src = null, canvas = null, h = null, inWorker = false, W = 0, H = 0, i, opaqueAvif = false, opaquePng = false, keep = false;
     if (dims && dims[0] * dims[1] > maxPixels) throw tooBig(dims[0], dims[1], maxPixels);
     // An ICO whose largest picture is a PNG is decoded from that PNG. Chromium
     // draws an embedded PNG whose size is not the one the icon's directory
@@ -2019,16 +2214,31 @@
                 if (t === 'VP8 ' || t === 'VP8L' || t === 'ALPH' || t === 'ANMF') return false;
               });
             }
-            if (profile && profile.length >= 132 && (await runOn(h.w, { cmd: 'icc', icc: profile })).converts) res.colorProfile = 'converted';
+            if (profile && profile.length >= 132 && (await runOn(h.w, { cmd: 'icc', icc: profile })).converts) {
+              res.colorProfile = 'converted';
+              // Kept instead: decoded as stored, the profile goes with the pixels.
+              var pinfo = iccInfo(profile);
+              if (o.keepProfile && pinfo.space === 'RGB ' && await profileTest()) {
+                keep = true;
+                res.colorProfile = 'kept';
+                res.icc = profile.slice();
+                res.iccName = pinfo.name;
+              }
+            }
           } catch (e) { /* no note */ }
         }
+        if (fmt === 'jpeg' && jpegComponents(head) === 4) res.cmyk = true;
 
         // The browser's own decoder (Safari also reads HEIC and TIFF), in the worker if there is one.
         if (h) {
-          var nr = await runOn(h.w, { cmd: 'native', file: file, key: h.key, maxPixels: maxPixels });
+          var nr = await runOn(h.w, { cmd: 'native', file: file, key: h.key, maxPixels: maxPixels, raw: keep });
           if (nr.ok) { inWorker = true; W = nr.w; H = nr.h; } else if (nr.code === 'TOO_BIG') throw tooBig(nr.w, nr.h, maxPixels);
-          // The page's decoder also draws damaged files partially (with a warning above).
-          else if (fmt !== 'heic' && fmt !== 'tiff') src = await nativeImage(file);
+          // The page's decoder also draws damaged files partially (with a warning above),
+          // converting their colours: so a kept profile is given up.
+          else if (fmt !== 'heic' && fmt !== 'tiff') {
+            if (keep) { keep = false; res.colorProfile = 'converted'; delete res.icc; delete res.iccName; }
+            src = await nativeImage(file);
+          }
         } else if (fmt !== 'heic' && fmt !== 'tiff') {
           src = await nativeImage(file);
         } else {
@@ -2118,6 +2328,8 @@
     }
     for (i in res) if (res[i] === undefined) delete res[i];
     Object.defineProperty(res, '_h', { configurable: true, value: inWorker ? h : null });
+    // A PNG's own bytes, which a WebP encode can read its pixels from exactly (see WEBP above).
+    Object.defineProperty(res, '_file', { configurable: true, value: fmt === 'png' ? file : null });
     Object.defineProperty(res, '_release', {
       configurable: true,
       value: function () {
@@ -2127,6 +2339,7 @@
         bitmap = canvas = null;
         res.bitmap = null;
         Object.defineProperty(res, '_h', { configurable: true, value: null });
+        Object.defineProperty(res, '_file', { configurable: true, value: null });
       }
     });
     // Not enumerable, so copying or logging the result never draws it by accident.
@@ -2239,7 +2452,7 @@
         return !!b && b.type === FORMATS[fmt].mime && b.size > 0;
       })().catch(function () { return false; });
     }
-    if (fmt === 'avif' && opts && opts.wasm) return encTests.avif.then(function (ok) { return ok || avifWasmPossible(); });
+    if ((fmt === 'avif' || fmt === 'webp') && opts && opts.wasm) return encTests[fmt].then(function (ok) { return ok || wasmWorkers(); });
     return encTests[fmt];
   }
 
@@ -2247,18 +2460,19 @@
   // Most browsers cannot encode AVIF from a canvas. The libavif/libaom encoder in
   // /assets/vendor/avif/ (3.5 MB, loaded on first use) runs in its own module
   // worker; the image worker hands it the resized pixels.
-  var AVIF_MAX = 50e6, avifState = null, avifPossible = null;
-  function avifWasmPossible() {
-    if (avifPossible === null) {
-      avifPossible = false;
+  var AVIF_MAX = 50e6, avifState = null, wasmPossible = null;
+  // Can WebAssembly run in a module worker here (both the AVIF and the WebP encoder need it)?
+  function wasmWorkers() {
+    if (wasmPossible === null) {
+      wasmPossible = false;
       if (typeof WebAssembly === 'object' && typeof Worker === 'function') {
         // Browsers without module workers never read the "type" option.
         var url = URL.createObjectURL(new Blob([''], { type: 'text/javascript' }));
-        try { new Worker(url, { get type() { avifPossible = true; return 'module'; } }).terminate(); } catch (e) { /* none */ }
+        try { new Worker(url, { get type() { wasmPossible = true; return 'module'; } }).terminate(); } catch (e) { /* none */ }
         URL.revokeObjectURL(url);
       }
     }
-    return avifPossible;
+    return wasmPossible;
   }
   function avifWorker() {
     if (avifState) return avifState;
@@ -2331,6 +2545,268 @@
       }, [rgba.buffer]);
     });
   }
+  // ---------- WebP through WebAssembly (libwebp; see WEBP in the notes at the top) ----------
+  var WEBP_SIDE = 16383, webpState = null;
+  var WEBP_SIMD = (function () {
+    try {
+      return typeof WebAssembly === 'object' && WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]));
+    } catch (e) { return false; }
+  })();
+  function phoneLike() {
+    try { if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true; } catch (e) { /* no media queries */ }
+    return !!(navigator.deviceMemory && navigator.deviceMemory <= 4);
+  }
+  function webpLimits(lossless) {
+    var phone = phoneLike();
+    // Lossy 25 MP on a phone: a recent iPhone's default photo (5712 x 4284, 24.5 MP) fits whole.
+    return { side: WEBP_SIDE, pixels: lossless ? (phone ? 13e6 : 30e6) : (phone ? 25e6 : 50e6), phone: phone, wasm: wasmWorkers() };
+  }
+  // The libwebp worker, a module worker: serialised, so it uses nothing from outside.
+  // A message holds RGBA pixels (buffer) or a PNG file (png) to read them from.
+  function webpWorkerMain(g, encoder, pngPixels) {
+    var mod = null;
+    function load(url) {
+      return fetch(url).then(function (res) {
+        if (!res.ok) throw new Error('load');
+        return res.arrayBuffer();
+      }).then(function (buf) {
+        return encoder({ wasmBinary: buf, noInitialRun: true, print: function () {}, printErr: function () {} });
+      });
+    }
+    g.onmessage = async function (e) {
+      var m = e.data, M = null, px = null, icc = null;
+      try {
+        if (!mod) { mod = load(m.wasm); mod.catch(function () { mod = null; }); }
+        try { M = await mod; } catch (x) { g.postMessage({ id: m.id, ok: false, code: 'LOAD_FAILED' }); return; }
+        if (m.png) {
+          var r = null;
+          try { r = await pngPixels(m.png); } catch (x) { r = null; }
+          if (!r || r.w !== m.w || r.h !== m.h) { g.postMessage({ id: m.id, ok: false, code: 'RAW' }); return; }
+          px = r.data;
+          icc = r.icc;
+        } else px = new Uint8Array(m.buffer);
+        var out = M.encode(px, m.w, m.h, m.opts);
+        px = null;
+        if (!out || !out.length) { g.postMessage({ id: m.id, ok: false, code: 'CORRUPT', heap: M.HEAP8.buffer.byteLength }); return; }
+        var copy = out.slice();
+        g.postMessage({ id: m.id, ok: true, buffer: copy.buffer, icc: icc, heap: M.HEAP8.buffer.byteLength }, [copy.buffer]);
+      } catch (x) {
+        // Out of memory (an abort or a RuntimeError): this module cannot be used again.
+        var fatal = x instanceof WebAssembly.RuntimeError || /memory|abort/i.test(String(x && x.message));
+        g.postMessage({ id: m.id, ok: false, code: fatal ? 'MEMORY' : 'CORRUPT', fatal: fatal });
+      }
+    };
+  }
+  // Straight (not premultiplied) 8-bit RGBA of a PNG read from its bytes, as
+  // { w, h, data, icc } (icc: its RGB iCCP profile, or null), or null where the
+  // browser would show other colours than those stored (gAMA other than 1/2.2,
+  // cHRM with a gAMA, a grey profile, a profile of lookup tables alone) or where
+  // this reader does not follow the file (a damaged stream, a palette index past
+  // the palette, an animation whose first frame is not the default image): the
+  // canvas is used then. 16-bit samples keep their high byte, as Chrome and
+  // Pillow do. Runs in the WebP worker.
+  async function pngPixels(blob) {
+    if (typeof DecompressionStream !== 'function') return null;
+    var b = new Uint8Array(await blob.arrayBuffer()), n = b.length;
+    var u32of = function (a, o) { return ((a[o] << 24) >>> 0) + (a[o + 1] << 16) + (a[o + 2] << 8) + a[o + 3]; };
+    var u32 = function (o) { return u32of(b, o); };
+    var tag = function (o) { return String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]); };
+    var inflate = function (parts) { return new Response(new Blob(parts).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer(); };
+    if (n < 45 || u32(0) !== 0x89504E47 || u32(4) !== 0x0D0A1A0A || tag(12) !== 'IHDR') return null;
+    var w = u32(16), h = u32(20), depth = b[24], ct = b[25], il = b[28];
+    var ch = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ct], depths = ct === 0 ? [1, 2, 4, 8, 16] : ct === 3 ? [1, 2, 4, 8] : [8, 16];
+    if (!ch || depths.indexOf(depth) < 0 || b[26] || b[27] || il > 1 || !w || !h || w * h > 4e8) return null;
+    var o = 8, idat = [], plte = null, trns = null, iccp = null, srgb = false, gama = 0, chrm = false, actl = false, fctl = false, after = false;
+    while (o + 12 <= n) {
+      var len = u32(o), t = tag(o + 4), d = o + 8;
+      if (d + len + 4 > n) return null;
+      if (t === 'IDAT') {
+        if (after || (actl && !fctl)) return null;
+        idat.push(b.subarray(d, d + len));
+      } else if (t === 'IEND') break;
+      else if (idat.length) after = true;
+      else if (t === 'PLTE') plte = b.subarray(d, d + len);
+      else if (t === 'tRNS') trns = b.subarray(d, d + len);
+      else if (t === 'iCCP') iccp = b.subarray(d, d + len);
+      else if (t === 'sRGB') srgb = true;
+      else if (t === 'cICP') return null;
+      else if (t === 'gAMA' && len >= 4) gama = u32(d);
+      else if (t === 'cHRM') chrm = true;
+      else if (t === 'acTL') actl = true;
+      else if (t === 'fcTL') fctl = true;
+      o += 12 + len;
+    }
+    if (!idat.length || (ct === 3 && !plte)) return null;
+    var icc = null;
+    if (srgb && iccp) return null;
+    if (iccp) {
+      var z = iccp.indexOf(0);
+      if (z < 1 || z > 79 || iccp[z + 1] !== 0) return null;
+      icc = new Uint8Array(await inflate([iccp.subarray(z + 2)]));
+      if (icc.length < 132 || String.fromCharCode(icc[16], icc[17], icc[18], icc[19]) !== 'RGB ' || ct === 0 || ct === 4) return null;
+      // Only a matrix profile (rXYZ ... bTRC) is one decode() reads, as sRGB or as kept with the
+      // pixels; with lookup tables alone the browser converts the colours in its own way.
+      for (var tn = u32of(icc, 128), tags = {}, ti = 0; ti < tn && ti < 100 && 144 + 12 * ti <= icc.length; ti++) tags[String.fromCharCode(icc[132 + 12 * ti], icc[133 + 12 * ti], icc[134 + 12 * ti], icc[135 + 12 * ti])] = 1;
+      if (!(tags.rXYZ && tags.gXYZ && tags.bXYZ && tags.rTRC && tags.gTRC && tags.bTRC)) return null;
+    } else if (!srgb && gama && (chrm || Math.abs(gama - 45455) > 1)) return null;
+    var raw = new Uint8Array(await inflate(idat));
+    var bits = ch * depth, bpp = Math.max(1, bits >> 3), out = new Uint8Array(w * h * 4), at = 0;
+    var passes = il ? [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] : [[0, 0, 1, 1]];
+    var np = ct === 3 ? Math.min(256, Math.floor(plte.length / 3)) : 0, pal = new Uint8Array(1024), i, k;
+    for (i = 0; i < np; i++) pal.set([plte[3 * i], plte[3 * i + 1], plte[3 * i + 2], trns && i < trns.length ? trns[i] : 255], 4 * i);
+    var key = trns && ct === 0 && trns.length >= 2 ? (trns[0] << 8) | trns[1] : -1;
+    var kr = -1, kg = -1, kb = -1;
+    if (trns && ct === 2 && trns.length >= 6) { kr = (trns[0] << 8) | trns[1]; kg = (trns[2] << 8) | trns[3]; kb = (trns[4] << 8) | trns[5]; }
+    var maxV = (1 << depth) - 1, scale = depth < 8 ? 255 / maxV : 1, bad = false;
+    for (var p = 0; p < passes.length; p++) {
+      var P = passes[p], pw = Math.ceil((w - P[0]) / P[2]), ph = Math.ceil((h - P[1]) / P[3]);
+      if (pw <= 0 || ph <= 0) continue;
+      var stride = Math.ceil(pw * bits / 8), prev = new Uint8Array(stride);
+      if (at + ph * (stride + 1) > raw.length) return null;
+      for (var y = 0; y < ph; y++) {
+        var f = raw[at], cur = raw.subarray(at + 1, at + 1 + stride);
+        at += stride + 1;
+        if (f === 1) for (k = bpp; k < stride; k++) cur[k] = (cur[k] + cur[k - bpp]) & 255;
+        else if (f === 2) for (k = 0; k < stride; k++) cur[k] = (cur[k] + prev[k]) & 255;
+        else if (f === 3) for (k = 0; k < stride; k++) cur[k] = (cur[k] + (((k >= bpp ? cur[k - bpp] : 0) + prev[k]) >> 1)) & 255;
+        else if (f === 4) {
+          for (k = 0; k < stride; k++) {
+            var A = k >= bpp ? cur[k - bpp] : 0, B = prev[k], C = k >= bpp ? prev[k - bpp] : 0;
+            var pa = Math.abs(B - C), pb = Math.abs(A - C), pc = Math.abs(A + B - 2 * C);
+            cur[k] = (cur[k] + (pa <= pb && pa <= pc ? A : pb <= pc ? B : C)) & 255;
+          }
+        } else if (f !== 0) return null;
+        prev = cur;
+        var row = (P[1] + y * P[3]) * w, step = 4 * P[2], q = (row + P[0]) * 4, x, s, v;
+        if (ct === 6 && depth === 8 && !il) { out.set(cur, q); continue; }
+        for (x = 0; x < pw; x++, q += step) {
+          if (depth === 16) {
+            s = x * ch * 2;
+            if (ct === 0 || ct === 4) {
+              out[q] = out[q + 1] = out[q + 2] = cur[s];
+              out[q + 3] = ct === 4 ? cur[s + 2] : ((cur[s] << 8) | cur[s + 1]) === key ? 0 : 255;
+            } else {
+              out[q] = cur[s]; out[q + 1] = cur[s + 2]; out[q + 2] = cur[s + 4];
+              out[q + 3] = ct === 6 ? cur[s + 6] : ((cur[s] << 8) | cur[s + 1]) === kr && ((cur[s + 2] << 8) | cur[s + 3]) === kg && ((cur[s + 4] << 8) | cur[s + 5]) === kb ? 0 : 255;
+            }
+          } else if (depth === 8) {
+            s = x * ch;
+            if (ct === 3) {
+              v = cur[x];
+              if (v >= np) bad = true;
+              out[q] = pal[4 * v]; out[q + 1] = pal[4 * v + 1]; out[q + 2] = pal[4 * v + 2]; out[q + 3] = pal[4 * v + 3];
+            } else if (ct === 0 || ct === 4) {
+              out[q] = out[q + 1] = out[q + 2] = cur[s];
+              out[q + 3] = ct === 4 ? cur[s + 1] : cur[s] === key ? 0 : 255;
+            } else {
+              out[q] = cur[s]; out[q + 1] = cur[s + 1]; out[q + 2] = cur[s + 2];
+              out[q + 3] = ct === 6 ? cur[s + 3] : cur[s] === kr && cur[s + 1] === kg && cur[s + 2] === kb ? 0 : 255;
+            }
+          } else {
+            var bit = x * depth;
+            v = (cur[bit >> 3] >> (8 - depth - (bit & 7))) & maxV;
+            if (ct === 3) {
+              if (v >= np) bad = true;
+              out[q] = pal[4 * v]; out[q + 1] = pal[4 * v + 1]; out[q + 2] = pal[4 * v + 2]; out[q + 3] = pal[4 * v + 3];
+            } else {
+              out[q] = out[q + 1] = out[q + 2] = v * scale;
+              out[q + 3] = v === key ? 0 : 255;
+            }
+          }
+        }
+      }
+    }
+    return bad ? null : { w: w, h: h, data: out, icc: icc };
+  }
+  function webpError(code) {
+    if (code === 'LOAD_FAILED') return fail('LOAD_FAILED', 'The WebP encoder could not be loaded. Check your connection and try again.');
+    if (code === 'MEMORY') return fail('TOO_BIG', 'The WebP encoder ran out of memory on this image. Try a smaller size.');
+    if (code === 'GONE') return fail('CORRUPT', 'The WebP encoder was stopped before it finished. Try again.');
+    return fail('CORRUPT', 'The WebP encoder could not encode this image. It may be too large for this browser: try a smaller size.');
+  }
+  function webpWorker() {
+    if (webpState) return webpState;
+    var name = 'webp/' + (WEBP_SIMD ? 'webp_enc_simd' : 'webp_enc');
+    var src = 'import encoder from ' + JSON.stringify(VENDOR + name + '.js') + ';\n(' + webpWorkerMain + ')(self, encoder, ' + pngPixels + ');\n';
+    var st = { pending: new Map(), seq: 0, wasm: VENDOR + name + '.wasm' };
+    var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    var stop = function (code) {
+      if (webpState === st) webpState = null;
+      st.pending.forEach(function (p) { clearTimeout(p.timer); if (!p.done) p.reject(webpError(code)); });
+      st.pending.clear();
+      try { st.worker.terminate(); } catch (e) { /* gone */ }
+      URL.revokeObjectURL(url);
+    };
+    try {
+      st.worker = new Worker(url, { type: 'module' });
+    } catch (e) {
+      URL.revokeObjectURL(url);
+      throw webpError('LOAD_FAILED');
+    }
+    st.worker.onmessage = function (e) {
+      var p = st.pending.get(e.data.id);
+      if (!p) return;
+      st.pending.delete(e.data.id);
+      clearTimeout(p.timer);
+      if (!p.done) {
+        p.done = true;
+        if (e.data.ok || e.data.code === 'RAW') p.resolve(e.data); else p.reject(webpError(e.data.code));
+      }
+      if (e.data.fatal) stop('MEMORY');
+      // The encoder's memory only grows: after a big image it is let go once idle.
+      else if (!st.pending.size && e.data.heap > 268435456) stop('GONE');
+    };
+    st.worker.onerror = function (e) { if (e && e.preventDefault) e.preventDefault(); stop('LOAD_FAILED'); };
+    st.stop = stop;
+    webpState = st;
+    return st;
+  }
+  function webpCall(msg, transfer, signal) {
+    if (signal && signal.aborted) return Promise.reject(fail('ABORTED', 'Stopped.'));
+    var st;
+    try { st = webpWorker(); } catch (e) { return Promise.reject(e); }
+    return new Promise(function (resolve, reject) {
+      var id = ++st.seq, p = { resolve: resolve, reject: reject, done: false };
+      // A safety net for an encoder that never answers. Time in a background tab,
+      // where the browser may slow the worker down, is not counted.
+      var expire = function () {
+        if (!st.pending.has(id) || p.done) return;
+        if (document.hidden) { p.timer = setTimeout(expire, 300000); return; }
+        p.done = true;
+        reject(fail('CORRUPT', 'Encoding the WebP took too long and was stopped.'));
+        st.stop('GONE');
+      };
+      p.timer = setTimeout(expire, 300000);
+      if (signal) {
+        signal.addEventListener('abort', function () {
+          if (!st.pending.has(id) || p.done) return;
+          p.done = true;
+          clearTimeout(p.timer);
+          reject(fail('ABORTED', 'Stopped.'));
+          // Once no job the worker holds is wanted, closing it stops the one running.
+          var wanted = false;
+          st.pending.forEach(function (q) { if (!q.done) wanted = true; });
+          if (!wanted) st.stop('GONE');
+        });
+      }
+      st.pending.set(id, p);
+      msg.id = id;
+      msg.wasm = st.wasm;
+      st.worker.postMessage(msg, transfer || []);
+    });
+  }
+  // WebPConfig for the encode binding, which needs every field. Lossless uses
+  // libwebp's default effort at every size (see WEBP above).
+  function webpOptions(lossless, quality) {
+    return {
+      quality: lossless ? 75 : Math.round(quality * 100), target_size: 0, target_PSNR: 0, method: 4,
+      sns_strength: 50, filter_strength: 60, filter_sharpness: 0, filter_type: 1, partitions: 0, segments: 4, pass: 1,
+      show_compressed: 0, preprocessing: 0, autofilter: 0, partition_limit: 0, alpha_compression: 1, alpha_filtering: 1,
+      alpha_quality: 100, lossless: lossless ? 1 : 0, exact: 0, image_hint: 0, emulate_jpeg_size: 0, thread_level: 0,
+      low_memory: 0, near_lossless: 100, use_delta_palette: 0, use_sharp_yuv: 0
+    };
+  }
+
   async function encode(source, format, options) {
     var o = options || {}, fmt = norm(format);
     var src = source && (isBitmap(source) || source.getContext || source.naturalWidth) ? source : null;
@@ -2356,21 +2832,49 @@
         .filter(function (x, i, a) { return x >= 1 && x <= 256 && a.indexOf(x) === i; }).sort(function (a, b) { return a - b; });
       if (!sizes.length) throw fail('UNSUPPORTED', 'Choose at least one icon size between 1 and 256 pixels.');
     }
-    var mime = FORMATS[fmt].mime;
+    var mime = FORMATS[fmt].mime, lossless = fmt === 'webp' && !!o.lossless;
     var job = { fmt: fmt, mime: mime, quality: o.quality == null ? 0.92 : Math.min(1, Math.max(0, +o.quality)), background: bg, width: W, height: H, sizes: sizes, dpi: o.dpi > 0 ? +o.dpi : 0 };
+    if (lossless) job.quality = 1;
+    // WebP's own limit, where Chrome's canvas would crop the picture without a word.
+    if (fmt === 'webp' && (W > WEBP_SIDE || H > WEBP_SIDE)) throw fail('TOO_BIG', 'A WebP image can be at most 16,383 pixels wide and high; this one would be ' + W + ' × ' + H + '. Choose a smaller size.');
+    // Pixels decoded in their own colour space (keepProfile) keep their profile in
+    // WebP, JPEG and PNG, and are converted to sRGB for the other formats.
+    var kept = source && source._release && source.colorProfile === 'kept' && source.icc ? source.icc : null, icc = null;
+    if (kept && (fmt === 'webp' || fmt === 'jpeg' || fmt === 'png')) icc = kept;
+    else if (kept) job.toSrgb = kept;
     var bytes;
-    if (fmt === 'avif' && o.wasm && !(await canEncode('avif'))) {
-      if (!avifWasmPossible()) throw fail('NO_SUPPORT', 'This browser cannot save AVIF images.');
+    if (fmt === 'webp' && wasmWorkers() && (o.wasm || !(await canEncode('webp')))) {
+      var lim = webpLimits(lossless);
+      if (W * H > lim.pixels) throw fail('TOO_BIG', (lossless ? 'Lossless WebP' : 'WebP') + ' files can be made here up to ' + lim.pixels / 1e6 + ' megapixels' + (lim.phone ? ' on a phone' : '') + '; this image is ' + (W * H / 1e6).toFixed(1) + '. Choose a smaller size.');
+      var wo = webpOptions(lossless, job.quality), r = null;
+      // A PNG at its own size: its pixels come from its bytes, exactly. Not when its
+      // colours were converted to sRGB (a profile decoded without keepProfile):
+      // those come from the canvas. A kept profile goes with its stored colours.
+      if (source && source._file && W === source.width && H === source.height && (source.orientation || 1) === 1 && !bg &&
+        source.colorProfile !== 'converted' && !(source.warnings || []).some(function (x) { return x === 'truncated' || x === 'damaged'; })) {
+        r = await webpCall({ png: source._file, w: W, h: H, opts: wo }, null, o.signal);
+        if (!r.ok) r = null;
+      }
+      if (!r) {
+        var px = new Uint8Array((await pixelWork('encode', src, Object.assign({}, job, { fmt: 'rgba' }))).buffer);
+        r = await webpCall({ buffer: px.buffer, w: W, h: H, opts: wo }, [px.buffer], o.signal);
+      }
+      bytes = new Uint8Array(r.buffer);
+    } else if (fmt === 'avif' && o.wasm && !(await canEncode('avif'))) {
+      if (!wasmWorkers()) throw fail('NO_SUPPORT', 'This browser cannot save AVIF images.');
       if (W * H > AVIF_MAX) throw fail('TOO_BIG', 'AVIF files can be made here up to ' + AVIF_MAX / 1e6 + ' megapixels; this image is ' + (W * H / 1e6).toFixed(1) + '. Choose a smaller size.');
       var rgba = new Uint8Array((await pixelWork('encode', src, Object.assign({}, job, { fmt: 'rgba' }))).buffer);
       bytes = await avifEncode(rgba, W, H, job.quality, o.speed != null ? +o.speed : W * H > 2.5e6 ? 8 : 6);
     } else {
       bytes = new Uint8Array((await pixelWork('encode', src, job)).buffer);
     }
-    if ((o.exif && (fmt === 'jpeg' || fmt === 'png' || fmt === 'webp')) || (job.dpi && (fmt === 'png' || fmt === 'jpeg'))) {
-      var ex = o.exif && fmt !== 'avif' ? prepareExif(o.exif, { width: W, height: H, stripGps: !!o.stripGps }) : null;
-      if (job.dpi) bytes = withDpi(bytes, fmt, job.dpi) || bytes;
+    var ex = o.exif && (fmt === 'jpeg' || fmt === 'png' || fmt === 'webp') ? prepareExif(o.exif, { width: W, height: H, stripGps: !!o.stripGps }) : null;
+    if (job.dpi && (fmt === 'png' || fmt === 'jpeg')) bytes = withDpi(bytes, fmt, job.dpi) || bytes;
+    if (fmt === 'webp') {
+      if (ex || icc) bytes = webpMux(bytes, { icc: icc, exif: ex, w: W, h: H }) || bytes;
+    } else {
       if (ex) bytes = withExif(bytes, fmt, ex, W, H) || bytes;
+      if (icc) bytes = withIcc(bytes, fmt, icc);
     }
     return new Blob([bytes], { type: mime });
   }
@@ -2388,6 +2892,7 @@
     release: release,
     toCanvas: toCanvas,
     exif: { orientation: exifOrientation, prepare: prepareExif },
+    webpLimits: webpLimits,
     _parseHeif: parseHeif
   };
 })();

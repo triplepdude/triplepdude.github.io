@@ -335,14 +335,24 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.evaluate(() => window.__decodes), 2, 'decoded once each');
   assert.deepEqual([(await download(0)).name, (await download(1)).name], ['quadrants.png', 'burst.png']);
 
-  // A browser that cannot encode WebP (Safari): the option is disabled and explained.
+  // Safari's canvas cannot encode WebP: libwebp (TTImage's { wasm: true }) writes the file instead.
   await page.addInitScript(() => {
     const toBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
   });
   await open();
-  await page.waitForFunction(() => document.querySelector('#h2j-format option[value="webp"]').disabled);
-  assert.equal(await page.textContent('#h2j-format option[value="webp"]'), 'WebP (this browser cannot save it)');
+  assert.deepEqual(await page.evaluate(async () => [await TTImage.canEncode('webp'), await TTImage.canEncode('webp', { wasm: true })]), [false, true]);
+  assert.deepEqual(await page.$eval('#h2j-format option[value="webp"]', o => [o.disabled, o.textContent]), [false, 'WebP (smaller)']);
+  await page.selectOption('#h2j-format', 'webp');
+  await page.setInputFiles('#h2j-file', [fx('quadrants.heic')]);
+  await page.waitForFunction(() => /^1 of 1 converted\.$/.test(document.querySelector('#h2j-summary').textContent), null, { timeout: 30000 });
+  f = await download(0);
+  assert.equal(f.name, 'quadrants.webp');
+  assert.ok(riffChunks(f.data)['VP8 '], 'a lossy WebP made without the canvas');
+  px = await pixels(f.data, [[60, 40], [180, 40], [60, 120], [180, 120]]);
+  [[220, 40, 40, 255], [40, 180, 60, 255], [40, 60, 200, 255], [240, 240, 240, 255]].forEach((c, i) => near(px[i], c, 14, 'WebP quadrant ' + i));
+  await page.selectOption('#h2j-format', 'jpeg');
+  await page.click('#h2j-clear');
 
   // AVIF is the other common HEIF image (AV1 instead of HEVC); the guide sends those
   // files to their own converter. The converter applies only the rotation saved with the photo,
@@ -386,4 +396,10 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   ex = exifTags(jpegInfo(f.data).exif);
   assert.deepEqual([ex.gps && ex.gps[1], ex.ifd0[0x013B], ex.exif[0xA431]], ['N', 'Jane Example', '012345678901']);
   assert.ok(!f.data.includes('http://ns.adobe.com/xap/1.0/'), 'XMP is not copied');
+
+  // A browser with neither (no WebAssembly, and no canvas WebP): the option is disabled and explained.
+  await page.addInitScript(() => { delete window.WebAssembly; delete window.OffscreenCanvas; });
+  await open();
+  await page.waitForFunction(() => document.querySelector('#h2j-format option[value="webp"]').disabled);
+  assert.equal(await page.textContent('#h2j-format option[value="webp"]'), 'WebP (this browser cannot save it)');
 };
