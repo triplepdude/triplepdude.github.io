@@ -432,19 +432,17 @@ faq:
     } finally { T.release(d); }
   }
 
-  let pdfjsP = null, pdfWorker = null;
+  // The PDF.js loader shared by the PDF tools (_includes/pdfjs-loader.js): after a failed try it asks
+  // for the module under another address, which the browser would otherwise refuse until a reload.
+  // Then the standard security handler they share (_includes/pdf-unlocker.js), for its pdfjsPasswords.
+{% include pdfjs-loader.js %}
+{% include pdf-unlocker.js %}
+  let pdfWorker = null;
+  const importPdfjs = pdfjsLoader(PDFJS_URL, PDFJS_WORKER, lib => { pdfWorker = new lib.PDFWorker({ verbosity: 0 }); });
   function loadPdfjs() {
-    if (!pdfjsP) {
-      pdfjsP = import(PDFJS_URL).then(lib => {
-        lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
-        pdfWorker = new lib.PDFWorker({ verbosity: 0 });
-        return lib;
-      }, () => {
-        pdfjsP = null;
-        throw friendly('The PDF reader could not be loaded. Check your connection and try again.');
-      });
-    }
-    return pdfjsP;
+    return importPdfjs().catch(() => {
+      throw friendly('The PDF reader could not be loaded. Check your connection and try again.');
+    });
   }
   function isPdf(head) {
     for (let i = 0; i + 4 < head.length; i++) {
@@ -452,14 +450,27 @@ faq:
     }
     return false;
   }
+  // PDF.js reads an RC4 or AES-128 password as the low byte of each character, so a password with
+  // the euro sign or another character outside Latin-1 is tried again as the other bytes the shared
+  // unlocker tries (PDFDocEncoding, UTF-8, Windows-1252), as Split PDF does. A last refusal still
+  // reads as a wrong password. An ASCII password is tried once.
   async function openPdf(file, password) {
     const lib = await loadPdfjs();
     const buf = await file.arrayBuffer();
-    return lib.getDocument({
-      data: new Uint8Array(buf), password: password || undefined, worker: pdfWorker, verbosity: 0,
+    const tries = password ? pdfUnlocker(null).pdfjsPasswords(password) : [];
+    const task = lib.getDocument({
+      data: new Uint8Array(buf), password: tries[0] || undefined, worker: pdfWorker, verbosity: 0,
       wasmUrl: PDFJS_WASM, cMapUrl: PDFJS_RES + 'cmaps/', cMapPacked: true,
       standardFontDataUrl: PDFJS_RES + 'standard_fonts/', iccUrl: PDFJS_RES + 'iccs/'
-    }).promise;
+    });
+    let next = 1;
+    if (tries.length > 1) {
+      task.onPassword = (retry, reason) => {
+        if (reason === lib.PasswordResponses.INCORRECT_PASSWORD && next < tries.length) { retry(tries[next++]); return; }
+        retry(Object.assign(new Error('Incorrect password'), { name: 'PasswordException', code: lib.PasswordResponses.INCORRECT_PASSWORD }));
+      };
+    }
+    return task.promise;
   }
   // A PDF locked with a password waits here until the visitor types it or skips the file.
   let pwWait = null;

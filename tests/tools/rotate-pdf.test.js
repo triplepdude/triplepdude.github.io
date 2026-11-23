@@ -20,6 +20,10 @@ const { execFileSync } = require('child_process');
 // libqpdf's check, each page's rotation read by pikepdf and by pdfinfo, and the outline, links,
 // fields, tags, attachments, encryption and page strings compared with the original.
 
+// Added to pdf-lib as a test page loads it: each time pdf-lib reads a file (PDFDocument.load reads
+// through the same function), it logs how many objects it reads between pauses: "pdf-lib parse: 400".
+const PARSE_SPY = '\n;(function () { var P = self.PDFLib.PDFParser, f = P.forBytesWithOptions; P.forBytesWithOptions = function (b, n) { console.log("pdf-lib parse: " + n); return f.apply(this, arguments); }; })();\n';
+
 function rawPdf(objs, trailer = '') {
   const parts = [Buffer.from('%PDF-1.7\n%\xe2\xe3\xcf\xd3\n', 'latin1')], offs = [];
   let len = parts[0].length;
@@ -186,7 +190,7 @@ function sectionEntries(buf, sec, assert, label) {
   return out;
 }
 
-module.exports = async ({ page, open, assert, fixtures, base }) => {
+module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   const fx = n => path.join(fixtures, n);
   const expected = JSON.parse(fs.readFileSync(fx('expected.json'), 'utf8'));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-pdf-test-'));
@@ -988,6 +992,48 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     assert.deepEqual(outside, [], 'no request to another host on the phone');
     assert.deepEqual(phoneErrors, []);
     await phoneCtx.close();
+
+
+    // ---------- pdf-lib reads without pausing: it runs in a worker ----------
+    // A file that is not encrypted is read once, by this page itself. The shared unlocker read an
+    // encrypted file 400 objects at a time, with a pause of at least 4 ms after each 400: once to find
+    // its key, once more to decrypt it, when the file is added and again when it is saved.
+    {
+      const fresh = await page.context().browser().newContext({ acceptDownloads: true });
+      const p3 = await fresh.newPage();
+      const p3errors = [], parses = [];
+      p3.on('pageerror', e => p3errors.push(e.message));
+      p3.on('console', m => {
+        if (m.text().startsWith('pdf-lib parse: ')) parses.push(m.text().slice(15));
+        else if (m.type() === 'error') p3errors.push(m.text());
+      });
+      await p3.route('**/assets/vendor/pdf-lib/pdf-lib.min.js', async route => {
+        const r = await route.fetch();
+        await route.fulfill({ response: r, body: (await r.text()) + PARSE_SPY });
+      });
+      const parsed = async n => {
+        for (let i = 0; i < 100 && parses.length < n; i++) await p3.waitForTimeout(20);
+        return parses.splice(0);
+      };
+      await p3.goto(url);
+      await p3.setInputFiles('#rot-file', fx('restricted.pdf'));
+      await p3.waitForFunction(() => document.querySelectorAll('.rot-page').length === 3 && !document.querySelector('.rot-pages[data-reading]') &&
+        !document.querySelector('.rot-wait-file:not([hidden])'), null, { timeout: 60000 });
+      assert.deepEqual(await parsed(2), ['Infinity', 'Infinity'], 'restricted.pdf, encrypted, is read twice when it is added');
+      await p3.click('.rot-page:nth-child(1) .rot-tb[data-q="1"]');
+      const [dlTurned] = await Promise.all([p3.waitForEvent('download', { timeout: 60000 }), p3.click('#rot-go')]);
+      assert.equal(dlTurned.suggestedFilename(), 'restricted-rotated.pdf');
+      assert.deepEqual(await parsed(2), ['Infinity', 'Infinity'], 'and twice when it is saved');
+      await p3.click('#rot-clear');
+      await p3.waitForFunction(() => !document.querySelector('.rot-file'));
+      await p3.setInputFiles('#rot-file', fx('mixed.pdf'));
+      await p3.waitForFunction(() => document.querySelectorAll('.rot-page').length === 6 && !document.querySelector('.rot-pages[data-reading]'), null, { timeout: 60000 });
+      await p3.click('.rot-page:nth-child(1) .rot-tb[data-q="1"]');
+      await Promise.all([p3.waitForEvent('download', { timeout: 60000 }), p3.click('#rot-go')]);
+      assert.deepEqual(await parsed(1), ['Infinity'], 'mixed.pdf, not encrypted, is read once, when it is saved');
+      assert.deepEqual(p3errors, []);
+      await fresh.close();
+    }
 
     await page.evaluate(() => document.getElementById('t-read').remove());
   } finally {

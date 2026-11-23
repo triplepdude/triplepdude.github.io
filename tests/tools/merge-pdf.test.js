@@ -50,7 +50,11 @@ function unzip(buf) {
   return out;
 }
 
-module.exports = async ({ page, open, assert, fixtures }) => {
+// Added to pdf-lib as a test page loads it: each time pdf-lib reads a file (PDFDocument.load reads
+// through the same function), it logs how many objects it reads between pauses: "pdf-lib parse: 400".
+const PARSE_SPY = '\n;(function () { var P = self.PDFLib.PDFParser, f = P.forBytesWithOptions; P.forBytesWithOptions = function (b, n) { console.log("pdf-lib parse: " + n); return f.apply(this, arguments); }; })();\n';
+
+module.exports = async ({ page, open, assert, fixtures, url }) => {
   const fx = n => path.join(fixtures, n);
   // PDF.js fetches CMaps, fonts and the CMYK profile from the site only when a PDF needs them.
   const fetched = [];
@@ -436,4 +440,43 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   pdf = await inspect(fs.readFileSync(await dl.path()));
   assert.equal(pdf.encrypted, false);
   assert.deepEqual(pdf.pages.map(p => p.text), ['PDFDoc 1 PDFDOC-MARK-01', 'PDFDoc 2 PDFDOC-MARK-02', 'Unicode 1 UNICODE-MARK-01', 'Unicode 2 UNICODE-MARK-02']);
+
+  // ---- A new tab whose first request for the PDF reader fails, as a dropped connection leaves it ----
+  // The browser keeps a module that failed to load as failed for the page, so asking for the same
+  // address again cannot work: the next try must ask for it under another one.
+  const fresh = await page.context().browser().newContext({ acceptDownloads: true });
+  const p3 = await fresh.newPage();
+  const p3errors = [], parses = [];
+  p3.on('pageerror', e => p3errors.push(e.message));
+  p3.on('console', m => {
+    if (m.text().startsWith('pdf-lib parse: ')) parses.push(m.text().slice(15));
+    else if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) p3errors.push(m.text());
+  });
+  let readerAsks = 0;
+  await p3.route(/\/pdfjs\/pdf\.min\.js(\?.*)?$/, route => (readerAsks++ ? route.fallback() : route.abort('connectionreset')));
+  await p3.route('**/assets/vendor/pdf-lib/pdf-lib.min.js', async route => {
+    const r = await route.fetch();
+    await route.fulfill({ response: r, body: (await r.text()) + PARSE_SPY });
+  });
+  await p3.goto(url);
+  await p3.setInputFiles('#mpdf-file', fx('alpha.pdf'));
+  await p3.waitForFunction(() => document.getElementById('mpdf-error').textContent);
+  assert.equal(await p3.textContent('#mpdf-error'), 'alpha.pdf could not be opened: The PDF reader could not load. Check your connection and try again.');
+  await p3.setInputFiles('#mpdf-file', [fx('alpha.pdf'), fx('restricted.pdf')]);
+  await p3.waitForFunction(() => (document.querySelectorAll('.mpdf-file').length === 2 && !/Reading/.test(document.getElementById('mpdf-files').textContent)) ||
+    document.getElementById('mpdf-error').textContent);
+  assert.equal(await p3.textContent('#mpdf-error'), '', 'the reader loads on the next try');
+  assert.deepEqual(await p3.$$eval('.mpdf-file-meta', l => l.map(e => e.textContent)), ['3 pages · 3.2 KB', '1 page · 1.6 KB · unlocked']);
+  assert.equal(readerAsks, 2);
+
+  // ---- pdf-lib reads each file once, and without pausing: it runs in a worker ----
+  // It used to read a file that is not encrypted twice, the second time 100 objects at a time, each
+  // pause at least 4 ms. An encrypted file is read once to find its encryption and key, then once
+  // more to decrypt it.
+  const [dlMerged] = await Promise.all([p3.waitForEvent('download'), p3.click('#mpdf-merge')]);
+  assert.equal(dlMerged.suggestedFilename(), 'merged.pdf');
+  for (let i = 0; i < 100 && parses.length < 3; i++) await p3.waitForTimeout(20);
+  assert.deepEqual(parses, ['Infinity', 'Infinity', 'Infinity'], 'alpha.pdf read once, restricted.pdf twice');
+  assert.deepEqual(p3errors, []);
+  await fresh.close();
 };

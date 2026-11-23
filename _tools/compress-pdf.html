@@ -1338,13 +1338,13 @@ faq:
       var bytes = holder.bytes, head = latin(bytes.subarray(0, Math.min(1024, bytes.length)));
       var vm = /%PDF-(\d)\.(\d)/.exec(head), version = vm ? vm[1] + '.' + vm[2] : '1.4';
       io.progress({ stage: 'read' });
-      var ctx = await L.PDFParser.forBytesWithOptions(bytes, Infinity, false, false).parseDocument();
-      var security = null, encrypted = false;
-      if (ctx.trailerInfo.Encrypt) {
+      // The shared unlocker reads a file that is not encrypted once, as pdf-lib's parser does, and
+      // decrypts one that is; in this worker it reads without pausing.
+      var opened = await unlocker.open(bytes, password || '', { objectsPerTick: Infinity });
+      var ctx = opened.doc.context, security = null, encrypted = false;
+      // A trailer whose /Encrypt names no encryption dictionary is refused as a password problem.
+      if (opened.encrypted || ctx.trailerInfo.Encrypt) {
         encrypted = true;
-        ctx = null;
-        var opened = await unlocker.open(bytes, password || '');
-        ctx = opened.doc.context;
         security = opened.security;
         if (!security || !security.access) throw fail('PASSWORD');
         if (security.access !== 'owner' && !security.permissions.modify) throw fail('OWNER', { restrictions: security.restrictions });
@@ -1635,17 +1635,14 @@ faq:
   }
 
   // ---------- PDF.js, on the page: CMYK pictures, the check of each copy and the preview ----------
-  var pdfjs = null, pdfjsWorker = null, pdfjsLoading = null;
-  function loadPdfjs() {
-    if (pdfjsLoading) return pdfjsLoading;
-    pdfjsLoading = import(PDFJS_URL).then(function (lib) {
-      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
-      pdfjs = lib;
-      pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
-      return lib;
-    }, function (err) { pdfjsLoading = null; throw err; });
-    return pdfjsLoading;
-  }
+  // The loader shared by the PDF tools (_includes/pdfjs-loader.js) asks for the module under another
+  // address after a failed try, which the browser would otherwise refuse again until a reload.
+{% endraw %}{% include pdfjs-loader.js %}{% raw %}
+  var pdfjs = null, pdfjsWorker = null;
+  var loadPdfjs = pdfjsLoader(PDFJS_URL, PDFJS_WORKER, function (lib) {
+    pdfjs = lib;
+    pdfjsWorker = new lib.PDFWorker({ verbosity: 0 });
+  });
   function openWithPdfjs(data, password) {
     return loadPdfjs().then(function (lib) {
       var tries = password ? pdfUnlocker(null).pdfjsPasswords(password) : [''], at = 0;

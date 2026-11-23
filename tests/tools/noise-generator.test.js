@@ -226,6 +226,11 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     }
     return { blocks, sr: g.sr };
   }
+  // Waits until the audio clock is secs past now, or past an audio time given with at.
+  const audioWait = (secs, at, p = page) => (at === undefined ? p.evaluate(() => window.__tap.ctx.currentTime) : Promise.resolve(at))
+    .then(t => p.waitForFunction(t => window.__tap.ctx.currentTime >= t, t + secs, { timeout: 10000 }));
+  // The audio time at which the last ramp booked on the envelope or the volume ends.
+  const rampsEnd = (p = page) => p.evaluate(() => Math.max(...['env', 'vol'].map(w => window.__calls(w).filter(c => /Ramp/.test(c[0])).reduce((t, c) => Math.max(t, c[2]), 0))));
   let R = null; // expected values for the page's sample rate
   async function measure(n = 6) {
     const c = await capture(n);
@@ -233,9 +238,18 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     assert.ok(R, `no expected values for a ${c.sr} Hz audio context (expected.py covers 44,100 and 48,000 Hz)`);
     return Object.assign(analyse(c.blocks, c.sr, R.kweight, X.centres), { blocks: c.blocks });
   }
-  // Waits until a colour or tone change has cross-faded and settled.
-  // (0.4 s cross-fade, then a whole 0.74 s block of the new sound).
-  const settle = () => page.waitForTimeout(1300);
+  // Waits until a colour or tone change has cross-faded and settled: until
+  // the sound engine has been sent the colour and tone the controls show,
+  // then for its 0.4 s cross-fade and a whole 0.74 s block of the new sound
+  // on the audio clock (a busy machine can hold the page back, not the sound).
+  const settle = async () => {
+    await page.waitForFunction(() => {
+      const l = window.__log, p = l.posts.length ? l.posts[l.posts.length - 1] : (l.workletOptions || {}).processorOptions;
+      const r = document.querySelector('input[name="ng-colour"]:checked');
+      return !!(p && r) && p.colour === r.value && p.tone === +document.getElementById('ng-tone').value;
+    }, null, { timeout: 5000 }).catch(async () => assert.fail(`the sound engine was not sent the colour and tone on screen; it was last sent ${JSON.stringify(await page.evaluate(() => window.__log.posts.slice(-1)[0]))}`));
+    await audioWait(1.2);
+  };
 
   // ---- Defaults: nothing plays and no audio engine starts until Play ----
   assert.equal(await text('#ng-big'), 'White noise');
@@ -357,8 +371,41 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   assert.ok(ramp >= 2 && env[ramp - 2][0] === 'cancelScheduledValues' && env[ramp - 1][0] === 'setValueAtTime' && env[ramp - 1][2] === env[ramp - 2][1], `fade-in calls: ${JSON.stringify(env)}`);
   near(env[ramp][2] - env[ramp - 1][2], 2, 0.001, 'fade-in length (s)');
   assert.equal(env[ramp - 1][1], 0, 'the fade-in starts from silence');
-  await page.waitForFunction(() => window.__tap.ctx.currentTime > 0, null);
-  await page.waitForTimeout(2300);
+  // Measured from a block that starts after the fade-in has ended (audio clock).
+  await audioWait(0.75, env[ramp][2]);
+
+  // ---- How long each sound is measured ----
+  // Noise measured for a few seconds varies from run to run, and the more of
+  // its power lies at low frequencies, the more it varies: 4 s of sound hold
+  // thousands of independent cycles at 1 kHz but only about a hundred around
+  // 20 Hz, where most of brown noise's power is (6 blocks once measured brown
+  // at -18.61 dBFS RMS, against -18 ± 0.6). The spread (one standard
+  // deviation) of each measurement over 6 blocks, from 1,800 to 7,800 blocks
+  // per sound of the page's own engine rendered offline at 44,100 and
+  // 48,000 Hz, the wider of the two (a block is shorter at 48 kHz), and
+  // matched by 180 blocks per sound captured from this page:
+  //                      RMS (each channel)  LUFS   63 Hz and 125 Hz bands re 1 kHz
+  //   white                     0.01         0.01     0.33   0.24
+  //   pink                      0.14         0.02     0.32   0.25
+  //   brown                     0.21         0.10     0.35   0.27
+  //   green                     0.06         0.04     0.33   0.25
+  //   grey                      0.02         0.01     0.32   0.25
+  //   blue                      0.01         0.01     0.33   0.26
+  //   violet                    0.01         0.01     0.35   0.25
+  //   white, tone -12           0.02         0.01       -    0.25
+  //   brown, tone -12           0.21         0.11       -    0.27
+  //   pink, tone +12            0.03         0.01       -    0.23
+  // Every slope: 0.03 dB per octave. The spread falls with the square root of
+  // the time measured, so each sound is measured for long enough that every
+  // tolerance below is at least 4 standard deviations away, beyond any known
+  // offset (grey's filter is 1 dB under its ISO 226 target at 125 Hz): brown
+  // over 14 blocks (RMS 0.14 dB, against ± 0.6), green 14 (63 Hz band 0.22,
+  // against ± 1), grey 8 (125 Hz band 0.22, against the 1 dB left of ± 2),
+  // white and pink with a tone 8 (125 Hz band 0.22), brown with a tone 16
+  // (RMS 0.13), the rest 6 (pink's RMS: 4.3 standard deviations). The 20 ms
+  // swings, the cross-fade dip and the treble rise further down were measured
+  // the same way: each limit is 8 or more standard deviations away.
+  const BLOCKS = { white: 6, pink: 6, brown: 14, green: 14, grey: 8, blue: 6, violet: 6, 'white-12': 8, 'brown-12': 16, 'pink+12': 8 };
 
   // ---- Levels: 20% start, then every colour at the same loudness ----
   let m = await measure(3);
@@ -375,7 +422,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await page.keyboard.press(key);
     assert.equal(await page.isChecked(`input[name="ng-colour"][value="${c}"]`), true, `key ${key}`);
     await settle();
-    m = await measure(6);
+    m = await measure(BLOCKS[c]);
     const e = R.colours[c];
     lufs[c] = m.lufs;
     // The level the page asks its engine for, against expected.py's (0.5%).
@@ -409,8 +456,9 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await setRange('#ng-tone', t);
     assert.equal(await attr('#ng-tone', 'aria-valuetext'), valuetext);
     await settle();
-    m = await measure(6);
-    const e = R.tones[`${c}${t > 0 ? '+' : ''}${t}`];
+    const tk = `${c}${t > 0 ? '+' : ''}${t}`;
+    m = await measure(BLOCKS[tk]);
+    const e = R.tones[tk];
     near(m.lufs, e.lufs, 0.5, `${c} tone ${t}: loudness`);
     near(m.rmsL, e.rms_db, 0.6, `${c} tone ${t}: RMS`);
     X.centres.forEach((f, i) => { if (f >= 125) near(m.bands[i], e.bands_rel_1k[i], 1, `${c} tone ${t}: ${f} Hz band`); });
@@ -607,7 +655,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
   // ...and comes back when the device resumes the keep-alive.
   await page.evaluate(() => document.getElementById('ng-keep').play());
   await playing();
-  await page.waitForTimeout(2000); // a 1 s fade-in, then a whole block
+  await audioWait(0.75, await rampsEnd()); // a 1 s fade-in, then a whole block
   m = await measure(1);
   near(m.rmsL, R.colours.white.rms_db, 1, 'white back after the interruption');
   // A call on an iPhone stops the audio context and pauses the keep-alive too:
@@ -927,7 +975,7 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     await p.click('#ng-play');
     await p.waitForFunction(() => document.getElementById('ng-live').textContent === 'Playing');
     await setRangeOn(p, '#ng-vol', 100);
-    await p.waitForTimeout(2300);
+    await audioWait(0.75, await rampsEnd(p), p); // the 2 s fade-in, then a whole block
     const grab = async n => {
       const blocks = [];
       let g;
@@ -944,7 +992,8 @@ module.exports = async ({ page, open, assert, fixtures, base, url }) => {
     near(slope(X.slope_bands.map(f => a.bands[X.centres.indexOf(f)]), X.slope_bands), -3, 0.4, 'buffers: pink slope');
     near(a.lufs, Rf.colours.pink.lufs, 0.5, 'buffers: pink loudness');
     await p.keyboard.press('3');
-    await p.waitForTimeout(1300);
+    // The new buffers cross-fade in over 0.4 s from 0.05 s ahead, then a whole block (audio clock).
+    await audioWait(1.25, undefined, p);
     a = await grab(5);
     near(slope(X.slope_bands.map(f => a.bands[X.centres.indexOf(f)]), X.slope_bands), -6, 0.4, 'buffers: brown slope after a change');
     near(a.lufs, Rf.colours.brown.lufs, 0.5, 'buffers: brown loudness');
