@@ -47,10 +47,10 @@ howto: |
 
   A higher bitrate keeps more of what the source has, but cannot bring back
   what the video's own compression removed. When a file states its bitrate,
-  it is shown under the file name. 5.1 surround sound is mixed down to
-  stereo; other layouts, such as 7.1, keep only their first two channels,
-  while **Original audio** keeps them all. **Mono** averages the two
-  channels, which halves the size of a WAV.
+  it is shown under the file name. Quad and 5.1 surround sound are mixed
+  down to stereo; other layouts, such as 7.1, keep only their first two
+  channels, while **Original audio** keeps them all. **Mono** averages the
+  two channels, which halves the size of a WAV.
 
   ## On iPhone and Android
 
@@ -1030,8 +1030,14 @@ faq:
     dom.vol.setAttribute('aria-valuetext', e.vol + '%, ' + fmtDb(g));
     updatePeakUI();
   }
-  function selectionPeak(e) {
+  // The levels the result will have: surround sound mixed to mono can be
+  // louder than either side of its stereo mix, so it has levels of its own.
+  function levels(e) {
     var p = e.peaks;
+    return p && settings.mono && p.monoMin ? { min: p.monoMin, max: p.monoMax, done: p.done } : p;
+  }
+  function selectionPeak(e) {
+    var p = levels(e);
     if (!p) return -1;
     var b0 = Math.floor(e.sel.start / e.durMs * BUCKETS), b1 = Math.ceil(e.sel.end / e.durMs * BUCKETS), m = 0;
     for (var b = Math.max(0, b0); b < Math.min(BUCKETS, b1); b++) {
@@ -1101,8 +1107,8 @@ faq:
   }
   // The channels as the result will have them, for the waveform and the peak:
   // quad and 5.1 mixed down the way the converter mixes them (the Web Audio
-  // rules; for 5.1 the mono mix too, which can be louder), other layouts cut
-  // to their first two channels.
+  // rules), as stereo and as mono, other layouts cut to their first two
+  // channels.
   var planes = [];
   function heard(s, n) {
     var ch = s.numberOfChannels, k = ch === 4 || ch === 6 ? ch : Math.min(ch, 2), P = planes;
@@ -1139,16 +1145,20 @@ faq:
         if (token !== e.scanToken) { s.close(); break; }
         var n = s.numberOfFrames, sr = s.sampleRate, t = s.timestamp - src.base, lines = heard(s, n);
         for (var c = 0; c < lines.length; c++) {
-          var scratch = lines[c], i = 0;
+          var scratch = lines[c], i = 0, mins = p.min, maxs = p.max;
+          if (c === 2) {
+            if (!p.monoMin) { p.monoMin = new Float32Array(BUCKETS).fill(Infinity); p.monoMax = new Float32Array(BUCKETS).fill(-Infinity); }
+            mins = p.monoMin; maxs = p.monoMax;
+          }
           while (i < n) {
             var b = Math.floor((t + i / sr) / dur * BUCKETS);
             if (b >= BUCKETS) break;
             var iEnd = b < 0 ? Math.ceil(-t * sr) : Math.min(n, Math.ceil(((b + 1) * dur / BUCKETS - t) * sr));
             if (iEnd <= i) iEnd = i + 1;
             if (b >= 0) {
-              var lo = p.min[b], hi = p.max[b];
+              var lo = mins[b], hi = maxs[b];
               for (var k = i; k < iEnd; k++) { var v = scratch[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
-              p.min[b] = lo; p.max[b] = hi;
+              mins[b] = lo; maxs[b] = hi;
             }
             i = iEnd;
           }
@@ -1191,7 +1201,7 @@ faq:
     var mid = H / 2, amp = H / 2 * 0.92;
     g.fillStyle = css('--border');
     g.fillRect(0, Math.floor(mid), W, Math.max(1, Math.round(dpr)));
-    var p = e.peaks;
+    var p = levels(e);
     if (!p) return;
     var fx = effects(e), len = lenMs(e) / 1000, gain = gainFn(fx.vol, fx.fadeIn, fx.fadeOut, len);
     var wave = css('--accent'), dim = css('--muted'), danger = css('--danger');
@@ -1386,9 +1396,13 @@ faq:
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     session('playback');
+    // Stop from here on, so anything that stops the sound while the audio
+    // context wakes up (which can take a while on a phone) also puts the
+    // button and the audio session back.
+    dom.play.textContent = 'Stop';
     if (!ac) ac = new AC();
     if (ac.state !== 'running') { try { await ac.resume(); } catch (x) { /* blocked */ } }
-    dom.play.textContent = 'Stop';
+    if (token !== playToken) return;
     var src;
     try { src = await decodeSource(e); } catch (err) { if (token === playToken) { stopPlay(); setMsg(dom.waveMsg, messageFor(err, e)); } return; }
     if (token !== playToken) return;
@@ -1455,10 +1469,12 @@ faq:
     };
     if (next.format === 'mp3' && !SIMD) { next.format = 'wav'; $('m2m-f-wav').checked = true; }
     var changed = next.format !== settings.format || next.kbps !== settings.kbps || next.mono !== settings.mono;
-    var newFormat = next.format !== settings.format;
+    var newFormat = next.format !== settings.format, newMono = next.mono !== settings.mono;
     settings = next;
     if (changed) entries.forEach(invalidate);
     updateAll();
+    // Surround sound has levels of its own as mono.
+    if (newMono) draw();
     if (newFormat) {
       var n = entries.filter(function (e) { return e.status !== 'error' && e.t && !convertible(e); }).length;
       if (n) say((n === 1 ? 'One file' : n + ' files') + ' cannot be ' + formatWord() + ': see the message under ' + (n === 1 ? 'it.' : 'each.'));
@@ -1590,6 +1606,10 @@ faq:
     var trim = {};
     if (e.sel.start > 0) trim.start = src.base + e.sel.start / 1000;
     if (e.sel.end < e.durMs) trim.end = src.base + e.sel.end / 1000;
+    // Sound decoded a piece at a time ends where the file says it does,
+    // without the padding an AAC encoder adds after the last sample (up to
+    // about 46 ms). A whole-track decode is kept as the browser made it.
+    else if (fmt !== 'copy' && e.t.decodable) trim.end = e.t.end;
     var out = new MB.Output({ format: format, target: new MB.BufferTarget() });
     var conv = await MB.Conversion.init({
       input: src.input, output: out, showWarnings: false, trim: trim, copy: copy,

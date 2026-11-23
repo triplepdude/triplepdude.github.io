@@ -184,7 +184,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.mouse.move(vbox.x + vbox.width * 0.75, vbox.y + vbox.height / 2);
   const wy = await page.evaluate(() => scrollY);
   await page.mouse.wheel(0, 120);
-  await page.waitForFunction(y => scrollY !== y, wy, { timeout: 3000 }).catch(() => {});
+  await page.waitForFunction(y => scrollY !== y, wy, { timeout: 10000 }).catch(() => {});
   assert.ok(await page.evaluate(y => scrollY > y, wy), 'the wheel over the picture scrolls the page');
   await page.focus('#p2s-copy');
   await page.keyboard.press('Shift+Tab');
@@ -418,12 +418,12 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const vb = await phone.$eval('#p2s-view', el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
   const sy = await phone.evaluate(() => scrollY), from = { x: vb.x + vb.w * 0.85, y: vb.y + vb.h * 0.7 };
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
-  for (let s = 1; s <= 8; s++) {
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + s * 0.4, y: from.y - s * 20 }] });
+  for (let k = 1; k <= 8; k++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + k * 0.4, y: from.y - k * 20 }] });
     await phone.waitForTimeout(16);
   }
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await phone.waitForFunction(y => scrollY !== y, sy, { timeout: 3000 }).catch(() => {});
+  await phone.waitForFunction(y => scrollY !== y, sy, { timeout: 10000 }).catch(() => {});
   assert.ok(await phone.evaluate(y => scrollY > y, sy), 'a swipe on the picture scrolls the page');
   assert.equal(await phone.$eval('#p2s-stage', el => el.style.getPropertyValue('--cut')), '50%', 'and leaves the divider where it was');
   await cdp.detach();

@@ -247,6 +247,16 @@ module.exports = async ({ page, open, assert, fixtures }) => {
     return body.subarray(q);
   };
   const mmss = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
+  // Pixels of the waveform drawn in the colour that marks distortion.
+  const redPixels = (p = page) => p.evaluate(() => {
+    const cv = document.getElementById('m2m-canvas'), probe = document.createElement('canvas').getContext('2d');
+    probe.fillStyle = getComputedStyle(document.getElementById('m2m')).getPropertyValue('--danger').trim();
+    probe.fillRect(0, 0, 1, 1);
+    const [r, g, b] = probe.getImageData(0, 0, 1, 1).data, d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] === r && d[i + 1] === g && d[i + 2] === b) n++;
+    return n;
+  });
   // A RIFF WAVE file of 16-bit PCM made from one function per channel.
   const dropWav = (name, sr, seconds, chans, p = page) => p.evaluate(([name, sr, seconds, chans]) => {
     const fns = chans.map(src => new Function('t', 'return ' + src));
@@ -535,6 +545,28 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   c = await card('clip.mp4');
   assert.equal(c.download, false, 'the old MP3 is dropped when the volume changes');
   assert.equal(c.state, 'Ready, from 0:02.500 to 0:03.500');
+  // Play pressed while the audio context is still waking up (a phone can take
+  // a while, for example after a call), then the channels are changed: the
+  // button and the audio session go back at once, and stay back.
+  await page.evaluate(() => {
+    const state = Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'state'), resume = AudioContext.prototype.resume;
+    let release;
+    const gate = new Promise(r => { release = r; });
+    Object.defineProperty(BaseAudioContext.prototype, 'state', { configurable: true, get() { return 'suspended'; } });
+    AudioContext.prototype.resume = function () { return gate.then(() => resume.call(this)).then(() => { window.__resumed = true; }); };
+    window.__wakeContext = () => { Object.defineProperty(BaseAudioContext.prototype, 'state', state); AudioContext.prototype.resume = resume; release(); };
+    window.__session = []; window.__starts = []; window.__resumed = false;
+  });
+  await page.click('#m2m-play');
+  assert.equal(await text('#m2m-play'), 'Stop', 'the button offers Stop while the sound is starting');
+  await page.selectOption('#m2m-channels', 'mono');
+  assert.equal(await text('#m2m-play'), 'Play selection');
+  await page.evaluate(() => window.__wakeContext());
+  await page.waitForFunction(() => window.__resumed);
+  assert.equal(await text('#m2m-play'), 'Play selection', 'the button is not left on Stop once the context wakes up');
+  assert.deepEqual(await page.evaluate(() => window.__session), ['playback', 'auto'], 'the sound is given back to other apps');
+  assert.equal(await page.evaluate(() => window.__starts.length), 0, 'nothing plays');
+  await page.selectOption('#m2m-channels', 'keep');
 
   // ---------- Original audio: AAC packets copied byte for byte ----------
   await page.check('#m2m-f-copy');
@@ -803,6 +835,7 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.equal(await page.isChecked('#m2m-cover'), true, 'the cover is kept by default');
   await convert();
   const coverWav = parseWav((await download(() => row('cover.m4a').locator('.m2m-dl').click())).bytes);
+  assert.equal(coverWav.data.length, 44100, 'the WAV ends with the 1 s of sound the file holds, not with the AAC encoder\'s padding after it');
   assert.ok(coverWav.id3 && coverWav.id3.APIC, 'a WAV keeps the cover too (in an ID3 chunk, as RIFF INFO holds no pictures)');
   assert.equal(sha(apicImage(coverWav.id3.APIC)), exp['cover.m4a'].jpeg_sha256, 'the cover picture, byte for byte');
   assert.equal(coverWav.id3.TIT2, 'Cover test');
@@ -840,6 +873,22 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   const loudest = mixed.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0);
   assert.equal(mixed.channels, 2);
   assert.ok(loudest > 0.95 * 32767 && loudest < 32767, `at 80% the stereo mix peaks just below full scale: ${loudest}`);
+  // The tone in left, right and centre alike: the stereo mix (L + 0.707 C)
+  // peaks at 0.854, the mono mix (0.707 (L + R) + C) at 1.207, so the readout
+  // follows the Channels setting.
+  await dropWav('front.wav', 48000, 1, [tone, tone, tone, '0', '0', '0']);
+  await waitRead();
+  await row('front.wav').locator('.m2m-edit').click();
+  await waitWave();
+  assert.equal(await text('#m2m-peak'), 'Loudest point at this volume: −1.4 dB of full scale. Up to 115% stays clear of distortion.', 'the stereo result does not distort');
+  assert.equal(await redPixels(), 0, 'nothing on the waveform is marked as distorting');
+  await convert();
+  const front = parseWav((await download(() => row('front.wav').locator('.m2m-dl').click())).bytes);
+  near(front.data.reduce((a, v) => Math.max(a, Math.abs(v)), 0) / 32767, 0.854, 0.01, 'peak of the stereo mix');
+  await page.selectOption('#m2m-channels', 'mono');
+  assert.equal(await text('#m2m-peak'), 'At this volume the loudest parts go above full scale and will distort. 80% is the most without distortion.', 'the mono mix does');
+  assert.ok(await redPixels() > 1000, 'and the waveform marks it');
+  await page.selectOption('#m2m-channels', 'keep');
   // A quiet file: the readout stops at the slider's 400%; at 0% it says silent.
   await dropWav('quiet.wav', 48000, 1, ['0.1 * Math.sin(2 * Math.PI * 440 * t)', '0.1 * Math.sin(2 * Math.PI * 440 * t)']);
   await waitRead();

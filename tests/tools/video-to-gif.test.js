@@ -78,6 +78,28 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
       return out;
     }, { b64: buf.toString('base64'), points });
   }
+  // The mean colour [r, g, b] of the 8 x 8 square around a point, in each decoded frame.
+  async function colourAt(p, buf, [x, y]) {
+    return p.evaluate(async ({ b64, x, y }) => {
+      const bin = atob(b64), data = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
+      const dec = new ImageDecoder({ data, type: 'image/gif' });
+      await dec.tracks.ready;
+      const out = [];
+      let ctx = null;
+      for (let i = 0; i < dec.tracks.selectedTrack.frameCount; i++) {
+        const { image } = await dec.decode({ frameIndex: i });
+        if (!ctx) ctx = new OffscreenCanvas(image.displayWidth, image.displayHeight).getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(image, 0, 0);
+        image.close();
+        const d = ctx.getImageData(x - 4, y - 4, 8, 8).data, sum = [0, 0, 0];
+        for (let k = 0; k < d.length; k += 4) { sum[0] += d[k]; sum[1] += d[k + 1]; sum[2] += d[k + 2]; }
+        out.push(sum.map(v => Math.round(v / 64)));
+      }
+      dec.close();
+      return out;
+    }, { b64: buf.toString('base64'), x, y });
+  }
   const toCodes = rows => rows.map(r => r.reduce((n, v, i) => n | ((v > 128 ? 1 : 0) << i), 0));
   async function codesOf(p, buf, points) { return toCodes(await probe(p, buf, points)); }
   // Mean difference per colour channel between the frames of two GIFs of the same size.
@@ -273,13 +295,16 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(await codesOf(page, gifR, exp.blocks.coded), scen.reverse.codes, 'reverse: video frames shown');
   assert.match(await text('#v2g-result-info'), / · 15 frames · 1\.00 s · plays 3 times$/);
 
-  // ---------- Boomerang, played once (no NETSCAPE2.0 block) ----------
+  // ---------- Boomerang, played once (no NETSCAPE2.0 block), 128 colours ----------
   await configure(page, scen.boomerang);
+  await page.selectOption('#v2g-colors', '128');
   const gifB = await make(page);
   const gB = parseGif(gifB);
   checkTiming(gB, scen.boomerang, 'boomerang');
+  assert.equal(gB.gctSize, 128, 'boomerang: a palette of 128 colours');
   assert.deepEqual(await codesOf(page, gifB, exp.blocks.coded), scen.boomerang.codes, 'boomerang: forward, then back without repeating the ends');
   assert.match(await text('#v2g-result-info'), / · 22 frames · 1\.83 s · plays once$/);
+  await page.selectOption('#v2g-colors', '256');
 
   // ---------- Half speed at 30 fps: every video frame is used twice ----------
   await configure(page, scen.slow);
@@ -335,6 +360,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await text('#v2g-zoom-out'), '200%');
   assert.equal(await page.getAttribute('#v2g-zoom', 'aria-valuetext'), '200%');
   assert.match(await text('#v2g-summary'), /^10 frames · 90 × 90 px · /);
+  // Zoomed in, the frame moves up and down too: at the bottom left it shows the red end of the
+  // band along the bottom of the video (rows 130 to 179), not the grey above it.
+  await page.focus('#v2g-crop');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('Shift+ArrowLeft');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowDown');
+  const gifZ = await make(page);
+  assert.deepEqual([parseGif(gifZ).width, parseGif(gifZ).height], [90, 90]);
+  const bottomLeft = await colourAt(page, gifZ, [45, 62]); // video pixel (45, 152)
+  assert.ok(bottomLeft.every(([r, , b]) => r > 170 && b < 80), `crop at the bottom left: ${JSON.stringify(bottomLeft.slice(0, 3))}`);
   await setZoom('100');
   await page.selectOption('#v2g-aspect', 'orig');
   assert.ok(await page.isHidden('#v2g-crop'));
@@ -420,11 +454,17 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await cdp.detach();
 
   // ---------- A long video: m:ss times and the frame limit ----------
+  assert.ok(await page.isVisible('#v2g-result'));
   await openVideo(page, 'long.webm');
+  // Nothing of the last video stays on screen: its GIF goes too.
+  assert.ok(await page.isHidden('#v2g-result'), 'the GIF of the last video goes when another opens');
+  assert.equal(await page.getAttribute('#v2g-gif', 'src'), null);
   assert.equal(await text('#v2g-info'), 'long.webm · 64 × 36 px · 2:30.00');
   assert.equal(await page.inputValue('#v2g-start'), '0:00.00');
   assert.equal(await page.inputValue('#v2g-end'), '0:10.00', 'the first 10 seconds are selected');
   assert.match(await text('#v2g-status'), /The first 10 seconds are selected\.$/);
+  await make(page);
+  assert.match(await text('#v2g-result-info'), / · 64 × 36 px · 100 frames · 10\.00 s · /);
   await page.selectOption('#v2g-fps', '30');
   await page.selectOption('#v2g-speed', '0.25');
   await page.selectOption('#v2g-dir', 'forward');
@@ -455,6 +495,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
       delete document.visibilityState;
     }
     document.dispatchEvent(new Event('visibilitychange'));
+    return document.querySelector('#v2g-progress-text').textContent;
   }, on);
   await hide(true);
   await page.waitForFunction(() => /^Paused/.test(document.querySelector('#v2g-progress-text').textContent));
@@ -462,7 +503,8 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   const pausedAt = await page.evaluate(() => document.querySelector('#v2g-bar').value);
   await page.waitForTimeout(800);
   assert.equal(await page.evaluate(() => document.querySelector('#v2g-bar').value), pausedAt, 'no frames are read while the page is hidden');
-  await hide(false);
+  // Back in front, the progress line says at once what it said before the pause.
+  assert.match(await hide(false), /^Frame [\d,]+ of 1,000/, 'the progress line no longer says paused');
   await page.waitForFunction(v => document.querySelector('#v2g-bar').value > v, pausedAt, { timeout: 30000 });
   assert.ok((await frameNo()) < 1000);
   // Cancel while paused in the background (a phone's task switcher, say) ends the job at once.
@@ -479,8 +521,13 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(await page.evaluate(() => document.querySelector('#v2g-part').inert), false);
   // Cancelled while the colours are still being chosen (Make GIF straight after a change), the
   // size estimate still arrives.
-  await page.selectOption('#v2g-fps', '12');
-  assert.equal(await text('#v2g-summary'), '1,200 frames · 64 × 36 px · 1 min 40.00 s · estimating the file size… The video is only 64 px wide, so the GIF is not enlarged.');
+  // (The summary is read in the same step as the change, before the estimate can arrive.)
+  assert.equal(await page.evaluate(() => {
+    const fps = document.querySelector('#v2g-fps');
+    fps.value = '12';
+    fps.dispatchEvent(new Event('change', { bubbles: true }));
+    return document.querySelector('#v2g-summary').textContent;
+  }), '1,200 frames · 64 × 36 px · 1 min 40.00 s · estimating the file size… The video is only 64 px wide, so the GIF is not enlarged.');
   await page.evaluate(() => { document.querySelector('#v2g-make').click(); document.querySelector('#v2g-cancel').click(); });
   await page.waitForFunction(() => !document.querySelector('#v2g-make').disabled);
   assert.equal(await text('#v2g-status'), 'Cancelled. No GIF was made.');
@@ -540,8 +587,15 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.equal(fadeErr.length, 15);
   assert.ok(Math.max(...fadeErr) < 3, `fade: colour error per frame ${fadeErr.map(d => d.toFixed(1)).join(' ')}`);
   await page.selectOption('#v2g-colors', '64');
-  const fadeErr64 = await fadeError(page, await make(page));
+  const gifF64 = await make(page);
+  const fadeErr64 = await fadeError(page, gifF64);
   assert.ok(Math.max(...fadeErr64) < 3, `fade, 64 colours: colour error per frame ${fadeErr64.map(d => d.toFixed(1)).join(' ')}`);
+  // Dithering changes the pixels whose colour the palette lacks (here 4 to 14% of them, a mean
+  // change of 0.2 to 0.8 per channel); without it they take the nearest colour.
+  await page.uncheck('#v2g-dither');
+  const ditherDiff = await frameDiff(page, gifF64, await make(page));
+  await page.check('#v2g-dither');
+  assert.ok(Math.min(...ditherDiff) > 0.05, `dithering on and off differ in every frame: ${ditherDiff.map(d => d.toFixed(2)).join(' ')}`);
   await page.selectOption('#v2g-colors', '256');
   await page.check('#v2g-skip');
   const gifF1 = await make(page);
@@ -652,11 +706,22 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
 
   // A GIF under 1 KB gives its size once ("739 bytes", not "739 bytes (739 bytes)"):
   // a 64 x 36 px, 1-second video made by tests/fixtures/mp4-to-mp3/make_fixtures.py.
-  await openVideo(page, { name: 'tiny.mp4', mimeType: 'video/mp4', buffer: fs.readFileSync(path.join(fixtures, '..', 'mp4-to-mp3', 'silent-video.mp4')) });
+  // Its long name is cut to 120 characters for the GIF without splitting the emoji at the cut.
+  const longName = 'a'.repeat(119) + '😀 tiny';
+  await openVideo(page, { name: longName + '.mp4', mimeType: 'video/mp4', buffer: fs.readFileSync(path.join(fixtures, '..', 'mp4-to-mp3', 'silent-video.mp4')) });
   await estimated(page);
   const tiny = await text('#v2g-summary');
   assert.match(tiny, / · \d{3} bytes\./, tiny);
   assert.doesNotMatch(tiny, /bytes \(/, tiny);
+  // (The browser here may save names that are not plain ASCII as "download", so the name is read
+  // where the page hands it over.)
+  await page.evaluate(() => {
+    window.savedAs = [];
+    const save = TT.download;
+    TT.download = (name, ...rest) => { window.savedAs.push(name); return save(name, ...rest); };
+  });
+  await make(page);
+  assert.deepEqual(await page.evaluate(() => window.savedAs), ['a'.repeat(119) + '😀.gif']);
 
   // ---------- Times past an hour (a 62-minute still picture) ----------
   await openVideo(page, 'hour.webm');
@@ -758,6 +823,54 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.match(await bp.textContent('#v2g-result-info'), / · 100 frames · 10\.00 s · plays forever$/);
   await bp.context().close();
   assert.deepEqual(bgProblems, [], 'background pages: errors');
+
+  // ---------- A GIF over the size limit ----------
+  // A GIF that passes 250 MB is stopped. The size estimate shows that in advance, so such a GIF is
+  // refused before any work, with the reason. Here the page is served with the limit lowered to
+  // 100 KB, so that the 3-second clip, about 235 KB at 480 px, is over it.
+  const limited = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
+  const lp = await limited.newPage();
+  const limitProblems = [];
+  lp.on('pageerror', e => limitProblems.push(e.message));
+  await lp.route(url, async route => {
+    const res = await route.fetch(), body = await res.text();
+    assert.ok(body.includes('const MAX_BYTES = 250e6;'), 'the page sets its size limit');
+    await route.fulfill({ response: res, body: body.replace('const MAX_BYTES = 250e6;', 'const MAX_BYTES = 1e5;') });
+  });
+  await lp.goto(url);
+  await openVideo(lp, 'frames.webm');
+  await estimated(lp);
+  const overLimit = /^That is about [\d.]+ KB; a GIF can be at most 100 KB here\. Make it shorter, narrower or slower \(fewer frames per second\)\.$/;
+  assert.match(await lp.textContent('#v2g-error'), overLimit);
+  const opened = await lp.textContent('#v2g-status');
+  await lp.click('#v2g-make');
+  assert.ok(await lp.isHidden('#v2g-progress'), 'nothing starts above the size limit');
+  assert.equal(await lp.textContent('#v2g-status'), opened, 'no GIF is announced');
+  assert.ok(await lp.isHidden('#v2g-result'));
+  await lp.selectOption('#v2g-width', '160');
+  await estimated(lp);
+  assert.equal(await lp.textContent('#v2g-error'), '', 'the message goes once the GIF fits');
+  await lp.click('#v2g-make');
+  await lp.waitForFunction(() => !document.querySelector('#v2g-result').hidden && !document.querySelector('#v2g-make').disabled, null, { timeout: 60000 });
+  const smallGif = await lp.textContent('#v2g-result-info');
+  assert.match(smallGif, / · 160 × 90 px · 30 frames · /);
+  // Make GIF pressed straight after a change, before the estimate: the job finds the GIF too big
+  // once it has chosen the colours, and stops there, before reading a single frame.
+  await lp.evaluate(() => {
+    const progress = document.querySelector('#v2g-progress-text');
+    window.progressTexts = [];
+    new MutationObserver(() => window.progressTexts.push(progress.textContent)).observe(progress, { childList: true, characterData: true, subtree: true });
+    const w = document.querySelector('#v2g-width');
+    w.value = '480';
+    w.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('#v2g-make').click();
+  });
+  await lp.waitForFunction(() => !document.querySelector('#v2g-make').disabled, null, { timeout: 30000 });
+  assert.match(await lp.textContent('#v2g-error'), overLimit);
+  assert.deepEqual(await lp.evaluate(() => window.progressTexts.filter(t => /^Frame/.test(t))), [], 'no frame is read');
+  assert.equal(await lp.textContent('#v2g-result-info'), smallGif, 'the GIF made before stays');
+  await limited.close();
+  assert.deepEqual(limitProblems, [], 'size limit page: errors');
 
   // ---------- A phone: touch drags and taps ----------
   // A German phone: the comma is the decimal mark there.

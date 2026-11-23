@@ -85,7 +85,7 @@ faq:
   - q: Can I make a GIF from a YouTube link?
     a: No. The tool only converts video files on your device and never fetches links. YouTube's terms forbid downloading videos except where YouTube itself offers a download or with written permission, so use videos you made or have permission to use.
   - q: How long can a GIF be?
-    a: The GIF format sets no limit on the number of frames, and one frame can last up to 655.35 seconds. This tool makes up to 3,000 frames, which is 5 minutes at 10 fps, and tells you the expected file size before you start.
+    a: The GIF format sets no limit on the number of frames, and one frame can last up to 655.35 seconds. This tool makes GIFs of up to 3,000 frames (5 minutes at 10 fps) and 250 MB, and tells you the expected file size before you start.
   - q: Why is my GIF bigger than the video?
     a: A video format stores most frames as small changes from the frame before, while a GIF stores each frame as a picture of its own with at most 256 colours. A 6-second test clip at 480 × 270 pixels and 10 fps took 89 KB as an MP4 and 4.4 MB as a GIF.
 ---
@@ -744,6 +744,7 @@ faq:
   // film strip and the size estimate too, which have no job).
   function whileVisible(job) {
     if (!document.hidden || (job && job.cancelled)) return Promise.resolve();
+    const before = progText.textContent;
     if (job) {
       showProgressText('Paused: bring this page back to the front to carry on.');
       announce('Paused while the page is in the background.');
@@ -752,7 +753,7 @@ faq:
       const wake = function () {
         if (document.hidden && !(job && job.cancelled)) return;
         document.removeEventListener('visibilitychange', wake);
-        if (job) job.wake = null;
+        if (job) { job.wake = null; showProgressText(before); } // "Choosing colours…" may last a while yet
         resolve();
       };
       if (job) job.wake = wake;
@@ -813,6 +814,13 @@ faq:
     bytes += a.fullMean + (s.total - 1) * (s.skip ? a.deltaMean : a.fullMean);
     return { bytes: Math.round(bytes), exact: false };
   }
+  // The estimate of a GIF that would pass the size limit, else 0. Not with "skip unchanged
+  // pixels": there a few sampled pairs of frames cannot tell how much of a recording moves.
+  function overLimit(s, a) {
+    if (!a || a.failed || s.skip) return 0;
+    const bytes = estimate(s, a).bytes;
+    return bytes > MAX_BYTES ? bytes : 0;
+  }
   let anaGen = 0, anaTimer = 0;
   function scheduleAnalysis() {
     clearTimeout(anaTimer);
@@ -862,7 +870,9 @@ faq:
     if (s.limited) text += stop + 'The width is reduced to keep each frame under 2.1 megapixels.';
     else if (s.upscaleCap) text += stop + 'The ' + (s.crop.whole ? 'video' : 'cropped part') + ' is only ' + s.upscaleCap + ' px wide, so the GIF is not enlarged.';
     summary.innerHTML = text;
+    const over = s.total > MAX_FRAMES ? 0 : overLimit(s, a);
     if (s.total > MAX_FRAMES) setError('That is ' + nf.format(s.total) + ' frames; a GIF can have at most ' + nf.format(MAX_FRAMES) + ' here. Shorten the selection, lower the frame rate or raise the speed.');
+    else if (over) setError('That is about ' + fmtBytes(over) + '; a GIF can be at most ' + fmtBytes(MAX_BYTES) + ' here. Make it shorter, narrower or slower (fewer frames per second).');
     else if (errBox.dataset.kind === 'frames') setError('');
     clearTimeout(liveTimer);
     // Read out once the size is known, so that one change is not announced twice.
@@ -1250,7 +1260,7 @@ faq:
   }
   function baseName(name) {
     const b = String(name || '').replace(/\.[^.]{1,5}$/, '').replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, '').trim();
-    return (b || 'video').slice(0, 120);
+    return Array.from(b || 'video').slice(0, 120).join(''); // whole characters: an emoji is not cut in two
   }
   function videoMessage(kind, name) {
     if (kind === 'nopicture') return 'No picture could be read from ' + name + '. It may hold only sound, or its video may be in a format this browser cannot decode, such as HEVC on some computers.';
@@ -1274,6 +1284,7 @@ faq:
     anaGen++;
     clearTimeout(anaTimer);
     editor.hidden = true;
+    clearResult(); // nothing of the last video stays on screen
     setError('');
     announce('Opening ' + name + '…');
     const url = URL.createObjectURL(f);
@@ -1405,7 +1416,7 @@ faq:
     if (badTimes()) { (startIn.hasAttribute('aria-invalid') ? startIn : endIn).focus(); return; }
     const s = settings();
     if (!s.n) return;
-    if (s.total > MAX_FRAMES) { refreshSummary(); return; }
+    if (s.total > MAX_FRAMES || overLimit(s, S.analysis && S.analysis.key === contentKey(s) ? S.analysis : null)) { refreshSummary(); return; }
     stopPlay();
     setError('');
     const job = { cancelled: false, wake: null, room: null };
@@ -1422,6 +1433,7 @@ faq:
       let a = S.analysis && S.analysis.key === contentKey(s) ? S.analysis : null;
       if (!a || a.failed) { a = await analyse(s, () => job.cancelled, job); S.analysis = a; }
       if (job.cancelled) throw CANCELLED;
+      if (overLimit(s, a)) return; // as the estimate now shows; refreshSummary (below) says so
       const out = await encode(s, a, job);
       showResult(out, s);
     } catch (e) {
@@ -1480,6 +1492,14 @@ faq:
     const r = await done;
     if (r.bytes > MAX_BYTES) throw encoderError('TOO_BIG');
     return r;
+  }
+  function clearResult() {
+    if (S.gif) URL.revokeObjectURL(S.gif.url);
+    S.gif = null;
+    result.hidden = true;
+    gifImg.removeAttribute('src');
+    gifImg.alt = '';
+    resultInfo.textContent = '';
   }
   function showResult(r, s) {
     if (S.gif) URL.revokeObjectURL(S.gif.url);
