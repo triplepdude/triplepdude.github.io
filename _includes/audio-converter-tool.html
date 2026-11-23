@@ -1,0 +1,1608 @@
+{%- comment -%}
+  The audio converter: drop zone, file list, waveform editor, output options
+  and script. It is the whole body of /mp4-to-mp3/ and of each page for one
+  conversion (M4A to MP3, WAV to MP3 and so on). A page includes it once,
+  after its front matter:
+
+    {% raw %}{% include audio-converter-tool.html format="mp3" source="audio" trim="folded" hint="M4A, M4B or AAC files, as many as you like. Nothing is uploaded." %}{% endraw %}
+
+  The sound is read, decoded and written by assets/js/audio-engine.js
+  (window.TTAudio; its header comment documents what it does and throws);
+  this file is the page around it.
+
+  Every parameter is optional. With none, the page is exactly MP4 to MP3.
+  Text values are plain text (no HTML or Markdown). Put each value in double
+  quotes, or in single quotes when the text contains a double quote.
+
+  format       Output format selected when the page opens: mp3, wav or copy
+               (the AAC sound copied unchanged into .m4a, "Original audio").
+               Default mp3; a value that is unknown or not in formats gives
+               the first of formats. Options that do not apply to it start
+               hidden, so nothing moves when the script runs.
+  formats      The formats offered and their order, separated by spaces, such
+               as "wav mp3". Default "mp3 wav copy". Unknown words are
+               ignored; none left gives the default. Messages that suggest
+               another format name only formats on offer. Without SIMD (no
+               MP3 encoder) the first other format is chosen instead of MP3.
+  hint         The small line in the drop zone. Default "MP4, MOV, WebM,
+               MKV, M4A, MP3, WAV, OGG or FLAC. Only the audio is read, so
+               long phone videos of several GB work. Links and protected
+               (DRM) files cannot be converted." Every input format is still
+               accepted, whatever the hint names.
+  drop_title   The drop zone's first line. Default "Drop videos or audio
+               files here".
+  source       video or audio: what the page expects the visitor's files to
+               be, for the few sentences that name them. Default video. With
+               audio, a dropped link is answered "Save the file to your
+               device first" (not "the video"), and a file that cannot be
+               read is "not an audio file" (not "a video or audio file").
+  trim         open or folded. open (the default) shows the waveform editor
+               (waveform, start and end, play, fades and volume) as soon as
+               a file is added; folded puts it inside a closed "Trim, fades
+               and volume" section the visitor can open, and the editor's
+               heading reads "Edit" instead of "Trim". Either way the sound
+               is scanned for its peak, so the volume readout is ready.
+  kbps         Starting MP3 bitrate: 64, 96, 128, 160, 192, 224, 256 or 320.
+               Default 192; another value also gives 192.
+  channels     Starting channel choice: keep (as in the file) or mono.
+               Default keep.
+
+  Adding parameters (pair pages). Follow the pattern above: read the value
+  into an acv_ variable below (strip, downcase, a default for unknown
+  values), render the starting state into the HTML so nothing moves when the
+  script runs, put it into CONF in the script, and document it here. The
+  places are marked "Pair-page options": WAV bit depth and sample rate (add
+  sampleFormat and sampleRate to convertOptions(), which the size estimate
+  and TTAudio.convert both read; the engine writes 16 and 24-bit, float,
+  µ-law and A-law and resamples), presets (beside the Speech button, which
+  is the hub's one preset), and a switch that writes no tags (pass tags:
+  null to TTAudio.convert in convertOne()).
+
+  The element ids (m2m-...) are fixed, so a page holds one converter.
+  Liquid runs over this file: the script must not contain a double opening
+  brace or a brace followed by a percent sign outside Liquid tags.
+{%- endcomment -%}
+{%- assign acv_known = 'mp3 wav copy' | split: ' ' -%}
+{%- assign acv_raw = include.formats | default: 'mp3 wav copy' | strip | downcase | split: ' ' -%}
+{%- assign acv_list = '' -%}
+{%- for acv_f in acv_raw -%}
+  {%- if acv_known contains acv_f -%}
+    {%- unless acv_list contains acv_f -%}{%- assign acv_list = acv_list | append: acv_f | append: ' ' -%}{%- endunless -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- if acv_list == '' -%}{%- assign acv_list = 'mp3 wav copy' -%}{%- endif -%}
+{%- assign acv_offer = acv_list | strip | split: ' ' -%}
+{%- assign acv_fmt = include.format | default: acv_offer[0] | strip | downcase -%}
+{%- unless acv_offer contains acv_fmt -%}{%- assign acv_fmt = acv_offer[0] -%}{%- endunless -%}
+{%- assign acv_rates = '64 96 128 160 192 224 256 320' | split: ' ' -%}
+{%- assign acv_kbps = include.kbps | default: '192' | append: '' | strip -%}
+{%- unless acv_rates contains acv_kbps -%}{%- assign acv_kbps = '192' -%}{%- endunless -%}
+{%- assign acv_mono = false -%}
+{%- assign acv_ch = include.channels | default: 'keep' | strip | downcase -%}
+{%- if acv_ch == 'mono' -%}{%- assign acv_mono = true -%}{%- endif -%}
+{%- assign acv_trim = include.trim | default: 'open' | strip | downcase -%}
+{%- unless acv_trim == 'folded' -%}{%- assign acv_trim = 'open' -%}{%- endunless -%}
+{%- assign acv_source = include.source | default: 'video' | strip | downcase -%}
+{%- unless acv_source == 'audio' -%}{%- assign acv_source = 'video' -%}{%- endunless -%}
+{%- assign acv_hint = include.hint | default: 'MP4, MOV, WebM, MKV, M4A, MP3, WAV, OGG or FLAC. Only the audio is read, so long phone videos of several GB work. Links and protected (DRM) files cannot be converted.' -%}
+{%- assign acv_title = include.drop_title | default: 'Drop videos or audio files here' -%}
+<style>
+.m2m-drop { display: grid; justify-items: center; gap: 10px; margin: 0 0 16px; padding: 20px 14px; border: 2px dashed var(--field-border); border-radius: 12px; background: var(--surface-2); text-align: center; }
+.m2m-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.m2m-drop .actions { justify-content: center; margin: 0; }
+.m2m-drop p { margin: 0; max-width: 62ch; }
+.m2m-drop-title { font-weight: 600; }
+.m2m-h { margin: 24px 0 10px; font-size: 1.1rem; overflow-wrap: anywhere; }
+.m2m-files { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.m2m-file { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.m2m-file[aria-current="true"] { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.m2m-file-name { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.m2m-file-info, .m2m-file-state { margin: 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.m2m-file-state.is-done { color: var(--text); font-weight: 600; }
+.m2m-file .msg { margin: 0; }
+.m2m-file-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.m2m-file-actions:empty { display: none; }
+.m2m .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.m2m-wave { position: relative; margin: 0; padding: 0 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); overflow: hidden; touch-action: pan-y; -webkit-user-select: none; user-select: none; cursor: pointer; }
+.m2m-track { position: relative; height: 128px; }
+.m2m-track canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.m2m-handle { position: absolute; top: 0; bottom: 0; z-index: 2; width: 44px; margin-left: -22px; cursor: ew-resize; touch-action: none; outline: none; }
+.m2m-handle::before { content: ""; position: absolute; top: 0; bottom: 0; left: 21px; width: 2px; background: var(--text); }
+.m2m-grip { position: absolute; top: 50%; left: 14px; width: 16px; height: 36px; margin-top: -18px; border: 2px solid var(--surface); border-radius: 6px; background: var(--text); }
+.m2m-handle:focus-visible .m2m-grip { outline: 3px solid var(--accent); outline-offset: 2px; }
+.m2m-playhead { position: absolute; top: 0; bottom: 0; z-index: 1; width: 2px; margin-left: -1px; background: var(--danger); pointer-events: none; }
+.m2m-wave-msg { position: absolute; top: 6px; right: 16px; left: 16px; z-index: 1; margin: 0; color: var(--muted); font-size: 13px; text-align: center; pointer-events: none; }
+.m2m-wave-msg:empty { display: none; }
+.m2m-scale { display: flex; justify-content: space-between; margin: 4px 0 8px; padding: 0 16px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.m2m .row > .field { flex: 1 1 150px; }
+.m2m-len { display: flex; align-items: center; min-height: 44px; font-variant-numeric: tabular-nums; }
+.m2m-vol { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.m2m-vol input { flex: 1 1 180px; }
+.m2m-vol output { min-width: 13ch; font-variant-numeric: tabular-nums; }
+.m2m-fs { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
+.m2m-fs legend { margin-bottom: 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.m2m-fs .checks { margin-bottom: 0; }
+.m2m-tracks { flex-direction: column; align-items: flex-start; gap: 0; }
+.m2m-tags { margin: 0 0 16px; }
+.m2m-tags summary { padding: 6px 0; font-weight: 600; cursor: pointer; }
+.m2m-tags[open] summary { margin-bottom: 8px; }
+.m2m-progress { display: grid; gap: 6px; margin: 0 0 16px; }
+.m2m-progress progress { width: 100%; height: 12px; accent-color: var(--accent); }
+.m2m-progress span { font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.m2m-results { margin: 0 0 16px; }
+.m2m-note { margin: 0 0 16px; }
+.m2m fieldset:disabled .hint { opacity: 0.8; }
+{%- if acv_trim == 'folded' %}
+.m2m-trim { margin: 0 0 16px; }
+.m2m-trim summary { padding: 6px 0; font-weight: 600; cursor: pointer; }
+.m2m-trim[open] summary { margin-bottom: 8px; }
+{%- endif %}
+@media (pointer: coarse) {
+  .m2m-tags summary{% if acv_trim == 'folded' %}, .m2m-trim summary{% endif %} { padding-block: 10px; }
+}
+@media (max-width: 480px) {
+  .m2m-track { height: 112px; }
+  .m2m-drop { padding: 16px 10px; }
+}
+</style>
+
+<div class="m2m" id="m2m">
+  <div class="m2m-drop" id="m2m-drop">
+    <p class="m2m-drop-title">{{ acv_title | escape }}</p>
+    <div class="actions">
+      <button class="btn" type="button" id="m2m-open" aria-describedby="m2m-drop-hint m2m-file-error">Choose files…</button>
+      <button class="btn secondary" type="button" id="m2m-sample">Try a sample sound</button>
+    </div>
+    <input type="file" id="m2m-file" hidden multiple accept="video/*,audio/*,.mp4,.m4v,.mov,.qt,.webm,.mkv,.mka,.m4a,.m4b,.mp3,.wav,.ogg,.oga,.opus,.flac,.aac,.ts,.mts,.m2ts,.3gp">
+    <p class="hint" id="m2m-drop-hint">{{ acv_hint | escape }}</p>
+  </div>
+  <p class="msg error" id="m2m-file-error" role="alert"></p>
+
+  <section id="m2m-files-sec" aria-labelledby="m2m-files-h" hidden>
+    <h2 class="m2m-h" id="m2m-files-h">Files</h2>
+    <ul class="m2m-files" id="m2m-files"></ul>
+    <div class="actions" id="m2m-list-actions" hidden>
+      <button class="btn secondary small" type="button" id="m2m-clear">Remove all files</button>
+    </div>
+  </section>
+
+  <section id="m2m-edit" aria-labelledby="m2m-edit-h" hidden>
+    <h2 class="m2m-h" id="m2m-edit-h">{% if acv_trim == 'folded' %}Edit{% else %}Trim{% endif %} <span id="m2m-edit-name"></span></h2>
+    <fieldset class="m2m-fs" id="m2m-edit-fs">
+    <fieldset class="m2m-fs" id="m2m-track-field" hidden>
+      <legend>Audio track</legend>
+      <div class="checks m2m-tracks" id="m2m-tracks"></div>
+    </fieldset>
+{%- if acv_trim == 'folded' %}
+    <details class="m2m-trim" id="m2m-trim">
+    <summary>Trim, fades and volume</summary>
+{%- endif %}
+    <div class="m2m-wave" id="m2m-wave">
+      <div class="m2m-track" id="m2m-trackbox">
+        <canvas id="m2m-canvas" role="img" aria-label="Waveform"></canvas>
+        <div class="m2m-playhead" id="m2m-playhead" hidden></div>
+        <div class="m2m-handle" id="m2m-h-start" role="slider" tabindex="0" aria-label="Start of the selection" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span class="m2m-grip"></span></div>
+        <div class="m2m-handle" id="m2m-h-end" role="slider" tabindex="0" aria-label="End of the selection" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span class="m2m-grip"></span></div>
+        <p class="m2m-wave-msg" id="m2m-wave-msg"></p>
+      </div>
+    </div>
+    <div class="m2m-scale" aria-hidden="true"><span>0:00</span><span id="m2m-scale-end"></span></div>
+    <p class="hint m2m-note">Drag the handles or tap the waveform. A focused handle moves 0.1 s with ← and → (1 s with Shift, 10 s with Page Up and Page Down).</p>
+    <div class="row">
+      <div class="field">
+        <label for="m2m-start">Start</label>
+        <input type="text" id="m2m-start" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="40" aria-describedby="m2m-time-hint m2m-time-error">
+      </div>
+      <div class="field">
+        <label for="m2m-end">End</label>
+        <input type="text" id="m2m-end" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="40" aria-describedby="m2m-time-hint m2m-time-error">
+      </div>
+      <div class="field">
+        <span class="label" id="m2m-len-label">Length</span>
+        <output class="m2m-len" id="m2m-len" aria-labelledby="m2m-len-label">0:00.000</output>
+      </div>
+    </div>
+    <p class="hint m2m-note" id="m2m-time-hint">Type minutes:seconds or seconds: 1:23.5, 83.5 and 83,5 all mean 83.5 seconds. ↑ and ↓ change a time by 0.1 s.</p>
+    <p class="msg error" id="m2m-time-error"></p>
+    <div class="actions">
+      <button class="btn secondary" type="button" id="m2m-play">Play selection</button>
+      <button class="btn secondary" type="button" id="m2m-all">Select all</button>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="m2m-fadein">Fade in (seconds)</label>
+        <input type="text" id="m2m-fadein" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="12" value="0" aria-describedby="m2m-fade-error">
+      </div>
+      <div class="field">
+        <label for="m2m-fadeout">Fade out (seconds)</label>
+        <input type="text" id="m2m-fadeout" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="12" value="0" aria-describedby="m2m-fade-error">
+      </div>
+    </div>
+    <p class="msg error" id="m2m-fade-error"></p>
+    <div class="field">
+      <label for="m2m-vol">Volume</label>
+      <div class="m2m-vol">
+        <input type="range" id="m2m-vol" min="0" max="400" step="5" value="100" aria-describedby="m2m-peak">
+        <output id="m2m-vol-out" for="m2m-vol">100% (0.0 dB)</output>
+      </div>
+      <span class="hint" id="m2m-peak"></span>
+    </div>
+    <p class="hint m2m-note" id="m2m-copy-note"{% unless acv_fmt == 'copy' %} hidden{% endunless %}>Original audio is copied as it is, so fades, volume and mono are not applied.</p>
+{%- if acv_trim == 'folded' %}
+    </details>
+{%- endif %}
+    <details class="m2m-tags" id="m2m-tags">
+      <summary>Tags: title, artist and album</summary>
+      <div class="row">
+        <div class="field"><label for="m2m-title">Title</label><input type="text" id="m2m-title" autocomplete="off" maxlength="200"></div>
+        <div class="field"><label for="m2m-artist">Artist</label><input type="text" id="m2m-artist" autocomplete="off" maxlength="200"></div>
+        <div class="field"><label for="m2m-album">Album</label><input type="text" id="m2m-album" autocomplete="off" maxlength="200"></div>
+      </div>
+      <label class="check" id="m2m-cover-row" hidden><input type="checkbox" id="m2m-cover" checked> Keep the cover art from the file</label>
+      <p class="hint m2m-note">Saved as ID3 tags in MP3, iTunes tags in M4A, and RIFF INFO or ID3 tags in WAV. Only what you see here is written.</p>
+    </details>
+    <p class="hint m2m-note" id="m2m-estimate"></p>
+    </fieldset>
+  </section>
+
+  <section aria-labelledby="m2m-out-h">
+    <h2 class="m2m-h" id="m2m-out-h">Output</h2>
+    <fieldset class="m2m-fs" id="m2m-out-fs">
+      <fieldset class="m2m-fs">
+        <legend>Format</legend>
+        <div class="checks">
+{%- for acv_f in acv_offer %}
+{%- case acv_f %}
+{%- when 'mp3' %}
+          <label class="check"><input type="radio" name="m2m-format" id="m2m-f-mp3" value="mp3"{% if acv_fmt == 'mp3' %} checked{% endif %}> MP3</label>
+{%- when 'wav' %}
+          <label class="check"><input type="radio" name="m2m-format" id="m2m-f-wav" value="wav"{% if acv_fmt == 'wav' %} checked{% endif %}> WAV</label>
+{%- when 'copy' %}
+          <label class="check"><input type="radio" name="m2m-format" id="m2m-f-copy" value="copy"{% if acv_fmt == 'copy' %} checked{% endif %}> Original audio, no re-encoding (.m4a)</label>
+{%- endcase %}
+{%- endfor %}
+        </div>
+      </fieldset>
+      <div class="row" id="m2m-opts">
+        <div class="field" id="m2m-bitrate-field"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>
+          <label for="m2m-bitrate">MP3 bitrate</label>
+          <select id="m2m-bitrate">
+{%- for acv_r in acv_rates %}
+            <option value="{{ acv_r }}"{% if acv_r == acv_kbps %} selected{% endif %}>{{ acv_r }} kbps</option>
+{%- endfor %}
+          </select>
+        </div>
+        <div class="field" id="m2m-channels-field"{% if acv_fmt == 'copy' %} hidden{% endif %}>
+          <label for="m2m-channels">Channels</label>
+          <select id="m2m-channels">
+            <option value="keep"{% unless acv_mono %} selected{% endunless %}>As in the file</option>
+            <option value="mono"{% if acv_mono %} selected{% endif %}>Mono</option>
+          </select>
+        </div>
+        {%- comment -%} Pair-page options: WAV bit depth and sample rate fields go here, shown only for WAV, and presets beside the Speech button. {%- endcomment %}
+        <button class="btn secondary" type="button" id="m2m-speech"{% unless acv_fmt == 'mp3' %} hidden{% endunless %}>Speech: 96 kbps mono</button>
+      </div>
+      <p class="hint m2m-note" id="m2m-format-hint"></p>
+    </fieldset>
+    <div class="actions">
+      <button class="btn" type="button" id="m2m-convert" disabled>{% case acv_fmt %}{% when 'wav' %}Convert to WAV{% when 'copy' %}Save original audio{% else %}Convert to MP3{% endcase %}</button>
+      <button class="btn secondary" type="button" id="m2m-cancel" hidden>Cancel</button>
+    </div>
+    <div class="m2m-progress" id="m2m-progress" hidden>
+      <progress id="m2m-bar" max="100" value="0" aria-labelledby="m2m-progress-text"></progress>
+      <span id="m2m-progress-text"></span>
+    </div>
+    <p class="msg error" id="m2m-error" role="alert"></p>
+    <p class="visually-hidden" id="m2m-status" role="status"></p>
+    <div class="m2m-results actions" id="m2m-results" hidden>
+      <button class="btn" type="button" id="m2m-zip">Download all (.zip)</button>
+    </div>
+    <p class="hint m2m-note" id="m2m-zip-note" hidden></p>
+    <p class="hint m2m-note">Keep this page open and on screen until converting ends: phones pause pages in the background.</p>
+  </section>
+</div>
+
+<script src="{{ '/assets/js/audio-engine.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+
+  var A = window.TTAudio;
+  var ZIP_URL = new URL({{ '/assets/js/zip.js' | relative_url | jsonify }}, location.href).href;
+  // The include's parameters (see its header). Pair-page options join here.
+  var CONF = {
+    formats: {{ acv_offer | jsonify }},
+    source: {{ acv_source | jsonify }},
+    trim: {{ acv_trim | jsonify }}
+  };
+
+  function $(id) { return document.getElementById(id); }
+  var WAV_LIMIT = A.limits.wav;               // bytes of WAV built in memory
+  var ZIP_LIMIT = A.limits.zip;               // bytes put in one ZIP
+  var MIN_SEL = 100;                          // shortest selection, ms
+  var BUCKETS = 4000;                         // waveform resolution
+  var MAX_TAG = 200;                          // characters in a tag
+  var SIMD = A.simd;
+  var LINK_TEXT = 'Links cannot be converted: this page only reads files on your device. Save the ' + (CONF.source === 'audio' ? 'file' : 'video') +
+    ' to your device first, if you own it or may use it, then choose it here.';
+  if (CONF.source === 'audio') {
+    A.text.unreadable = 'This is not an audio file that this page can read. It reads M4A, MP3, WAV, FLAC, OGG and AAC files, and the sound of MP4, MOV, WebM, MKV and MPEG-TS videos.';
+  }
+  var LABELS = { mp3: 'MP3', wav: 'WAV', copy: 'Original audio' };
+
+  var dom = {
+    root: $('m2m'), drop: $('m2m-drop'), open: $('m2m-open'), file: $('m2m-file'), sample: $('m2m-sample'), fileErr: $('m2m-file-error'),
+    filesSec: $('m2m-files-sec'), list: $('m2m-files'), listActions: $('m2m-list-actions'), clear: $('m2m-clear'),
+    editFs: $('m2m-edit-fs'), edit: $('m2m-edit'), editName: $('m2m-edit-name'), trackField: $('m2m-track-field'), tracks: $('m2m-tracks'),
+    trim: $('m2m-trim'), wave: $('m2m-wave'), box: $('m2m-trackbox'), canvas: $('m2m-canvas'), playhead: $('m2m-playhead'), hStart: $('m2m-h-start'), hEnd: $('m2m-h-end'),
+    waveMsg: $('m2m-wave-msg'), scaleEnd: $('m2m-scale-end'), start: $('m2m-start'), end: $('m2m-end'), len: $('m2m-len'), timeErr: $('m2m-time-error'),
+    play: $('m2m-play'), all: $('m2m-all'), fadeIn: $('m2m-fadein'), fadeOut: $('m2m-fadeout'), fadeErr: $('m2m-fade-error'),
+    vol: $('m2m-vol'), volOut: $('m2m-vol-out'), peak: $('m2m-peak'), copyNote: $('m2m-copy-note'),
+    title: $('m2m-title'), artist: $('m2m-artist'), album: $('m2m-album'), coverRow: $('m2m-cover-row'), cover: $('m2m-cover'), estimate: $('m2m-estimate'),
+    outFs: $('m2m-out-fs'), bitrate: $('m2m-bitrate'), bitrateField: $('m2m-bitrate-field'), channels: $('m2m-channels'), channelsField: $('m2m-channels-field'),
+    speech: $('m2m-speech'), fCopy: $('m2m-f-copy'), fMp3: $('m2m-f-mp3'), formatHint: $('m2m-format-hint'),
+    convert: $('m2m-convert'), cancel: $('m2m-cancel'), progress: $('m2m-progress'), bar: $('m2m-bar'), progressText: $('m2m-progress-text'),
+    error: $('m2m-error'), status: $('m2m-status'), results: $('m2m-results'), zip: $('m2m-zip'), zipNote: $('m2m-zip-note')
+  };
+
+  var entries = [];
+  var current = null;
+  var nextId = 1;
+  var busy = false;
+  var cancelRequested = false;
+  var activeJob = null;
+  var resultSeq = 0;
+  var settings = { format: CONF.formats[0], kbps: 192, mono: false };
+
+  // ---------- Small helpers ----------
+  function pad(n, w) { n = String(n); while (n.length < w) n = '0' + n; return n; }
+  function fmtTime(ms) {
+    ms = Math.max(0, Math.round(ms));
+    var h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60, f = ms % 1000;
+    var tail = pad(s, 2) + '.' + pad(f, 3);
+    return h ? h + ':' + pad(m, 2) + ':' + tail : m + ':' + tail;
+  }
+  function fmtShort(ms) {
+    var s = Math.round(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    return h ? h + ':' + pad(m, 2) + ':' + pad(s % 60, 2) : m + ':' + pad(s % 60, 2);
+  }
+  function fmtBytes(n) {
+    if (n < 1000) return n + ' bytes';
+    if (n < 1e6) return (n / 1000).toFixed(n < 1e4 ? 1 : 0) + ' KB';
+    if (n < 1e9) return (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + ' MB';
+    return (n / 1e9).toFixed(2) + ' GB';
+  }
+  function fmtDb(gain) {
+    if (gain <= 0) return 'silent';
+    var db = 20 * Math.log10(gain);
+    var t = Math.abs(db).toFixed(1);
+    return (t === '0.0' ? '' : db > 0 ? '+' : '−') + t + ' dB';
+  }
+  function fmtKhz(hz) { return (hz / 1000).toLocaleString('en-GB', { maximumFractionDigits: 3 }) + ' kHz'; }
+  // Cuts text to n characters without splitting a surrogate pair.
+  function cut(s, n) {
+    s = String(s == null ? '' : s);
+    if (s.length <= n) return s;
+    var i = n;
+    if (/[\uD800-\uDBFF]/.test(s.charAt(i - 1))) i--;
+    return s.slice(0, i);
+  }
+  function clean(s) { return cut(String(s == null ? '' : s).slice(0, MAX_TAG * 4).replace(/[\u0000-\u001F\u007F]+/g, ' ').trim(), MAX_TAG); }
+  // A value set by a script or an input method can be longer than maxlength.
+  // It is cut at once, so neither the patterns nor the layout see a megabyte.
+  function capField(f) {
+    var max = f.maxLength;
+    if (max > 0 && f.value.length > max) f.value = cut(f.value, max);
+  }
+  function baseName(name) {
+    var b = String(name || '').replace(/\.[^.\/\\]{1,8}$/, '').trim();
+    return cut(b || 'audio', 120);
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  var lastSaid = '';
+  function say(text) {
+    if (text === lastSaid) return;
+    lastSaid = text;
+    dom.status.textContent = text;
+  }
+  function setMsg(el, text) { if (el.textContent !== text) el.textContent = text; }
+  // A second press on the same button for the same thing within 1.5 s is a
+  // double click. A new result can be saved at once.
+  function tooSoon(btn, what) {
+    var now = Date.now();
+    if (btn._m2mWhat === what && now - btn._m2mAt < 1500) return true;
+    btn._m2mWhat = what;
+    btn._m2mAt = now;
+    return false;
+  }
+  function offered(f) { return CONF.formats.indexOf(f) >= 0; }
+  // The formats on offer other than `but`, in a fixed order: "WAV or Original audio".
+  function others(but, word) {
+    var l = ['mp3', 'wav', 'copy'].filter(function (f) { return f !== but && offered(f); }).map(function (f) { return LABELS[f]; });
+    return l.length > 1 ? l.slice(0, -1).join(', ') + ' ' + (word || 'or') + ' ' + l[l.length - 1] : l.join('');
+  }
+
+  // Times: [[h:]m:]s with a dot or a comma before the decimals. There are no
+  // thousands separators in a time. Digits typed in Arabic-Indic, Persian or
+  // full-width form (a phone set to those digits types them) count as 0-9;
+  // other look-alikes, such as a raised ², do not.
+  function normDigits(s) {
+    return s.replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFF10 + 48); })
+      .replace(/[٠-٩]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x0660 + 48); })
+      .replace(/[۰-۹]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x06F0 + 48); })
+      .replace(/：/g, ':').replace(/[．٫]/g, '.').replace(/，/g, ',');
+  }
+  function fracMs(f) {
+    if (!f) return 0;
+    var ms = +(f + '00').slice(0, 3);
+    return f.length > 3 && +f.charAt(3) >= 5 ? ms + 1 : ms;
+  }
+  function parseTime(text) {
+    var s = normDigits(String(text).slice(0, 40)).trim();
+    if (!s) return { error: 'empty' };
+    if (/\s/.test(s)) return { error: 'format' };
+    var parts = s.split(':');
+    if (parts.length > 3) return { error: 'format' };
+    var m = /^(\d{0,7})(?:[.,](\d{0,9}))?$/.exec(parts.pop());
+    if (!m || (m[1] === '' && !m[2])) return { error: 'format' };
+    for (var i = 0; i < parts.length; i++) if (!/^\d{1,4}$/.test(parts[i])) return { error: 'format' };
+    var sec = +(m[1] || '0');
+    var ms = sec * 1000 + fracMs(m[2] || '');
+    if (parts.length) {
+      var mins = +parts[parts.length - 1];
+      if (sec >= 60 || (parts.length === 2 && mins >= 60)) return { error: 'sixty' };
+      ms += mins * 60000 + (parts.length === 2 ? +parts[0] * 3600000 : 0);
+    }
+    return { ms: ms };
+  }
+  function parseSeconds(text) {
+    var s = normDigits(String(text).slice(0, 20)).trim();
+    if (!s) return { ms: 0 };
+    var m = /^(\d{0,5})(?:[.,](\d{0,9}))?$/.exec(s);
+    if (!m || (m[1] === '' && !m[2])) return { error: 'format' };
+    return { ms: +(m[1] || '0') * 1000 + fracMs(m[2] || '') };
+  }
+
+  // ---------- Wake lock ----------
+  var lock = null;
+  function wake(on) {
+    if (!navigator.wakeLock) return;
+    if (on && !lock && document.visibilityState === 'visible') {
+      lock = 'pending';
+      navigator.wakeLock.request('screen').then(function (l) {
+        if (!busy) { l.release().catch(function () {}); lock = null; return; }
+        lock = l;
+        l.addEventListener('release', function () { if (lock === l) lock = null; });
+      }, function () { lock = null; });
+    } else if (!on && lock && lock !== 'pending') {
+      var l = lock;
+      lock = null;
+      l.release().catch(function () {});
+    }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && busy) wake(true);
+    if (document.visibilityState === 'hidden') stopPlay();
+  });
+
+  // ---------- Adding files ----------
+  function trackLabel(t, i) {
+    var bits = [String(i + 1)];
+    if (t.lang && t.lang !== 'und') {
+      var name = t.lang;
+      try { name = new Intl.DisplayNames(['en'], { type: 'language' }).of(t.lang) || t.lang; } catch (e) { /* keep the code */ }
+      bits.push(name);
+    }
+    if (t.name) bits.push(cut(t.name, 40));
+    bits.push(A.codecName(t), A.channelsText(t.ch));
+    return bits.join(', ');
+  }
+
+  async function addFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []).filter(function (f) { return f && typeof f.size === 'number'; });
+    if (!files.length) return;
+    setMsg(dom.fileErr, '');
+    var added = files.map(function (f) {
+      var e = {
+        id: nextId++, file: f, name: cut(f.name || 'audio', 200), base: baseName(f.name), status: 'reading', error: '',
+        media: null, tracks: [], ti: 0, t: null, durMs: 0, sel: { start: 0, end: 0 }, fadeIn: 0, fadeOut: 0, vol: 100,
+        tags: { title: '', artist: '', album: '' }, images: [], keepCover: true, peaks: null, scanToken: 0,
+        result: null, convError: '', progress: 0, li: null
+      };
+      entries.push(e);
+      renderEntry(e);
+      return e;
+    });
+    dom.filesSec.hidden = false;
+    updateListUI();
+    try {
+      await A.load();
+    } catch (err) {
+      added.forEach(function (e) { e.status = 'error'; e.error = A.text.load; renderEntry(e); });
+      updateAll();
+      return;
+    }
+    for (var i = 0; i < added.length; i++) {
+      var e = added[i];
+      if (entries.indexOf(e) < 0) continue;
+      await probe(e);
+      if (entries.indexOf(e) < 0) { A.close(e.media); continue; }
+      if (!current || current.status === 'error') { if (e.status !== 'error') selectEntry(e); }
+      else if (current === e) syncEditor();
+      renderEntry(e);
+      updateAll();
+    }
+    var kept = added.filter(function (e) { return entries.indexOf(e) >= 0; }), one = kept[0];
+    var bad = kept.filter(function (e) { return !convertible(e); }).length;
+    var warned = kept.filter(function (e) { return convertible(e) && entryMsg(e); }).length, has = warned === 1 ? ' has' : ' have';
+    if (added.length === 1 && one) {
+      say(one.status === 'error' ? one.name + ': ' + one.error : 'Added ' + one.name + ': ' + fmtTime(one.durMs) + ', ' + A.codecName(one.t) + ' ' + A.channelsText(one.t.ch) + '.' +
+        (entryMsg(one) ? ' ' + entryMsg(one) : ''));
+    } else if (added.length > 1) {
+      say('Added ' + added.length + ' files' + (bad ? ', ' + bad + ' of them cannot be ' + formatWord() : '') +
+        (warned ? (bad ? ' and ' + warned + ' more' + has : ', ' + warned + ' of them' + has) + ' a warning' : '') + (bad || warned ? ': see the message under each.' : '.'));
+    }
+  }
+
+  async function probe(e) {
+    try {
+      var m = await A.open(e.file);
+      e.media = m;
+      e.tracks = m.tracks;
+      useTrack(e, m.primary);
+      e.tags = { title: clean(m.tags.title) || e.base, artist: clean(m.tags.artist), album: clean(m.tags.album) };
+      e.images = m.tags.images;
+      e.status = 'ready';
+    } catch (err) {
+      e.status = 'error';
+      e.error = messageFor(err, e);
+      e.media = null;
+    }
+  }
+
+  function shortText(e) {
+    return 'This file is incomplete, perhaps a copy or download that did not finish: it should hold ' + fmtTime((e.t.listed - e.t0) * 1000) +
+      ' of sound, but its data stops at ' + fmtTime(e.durMs) + '. That part can still be converted.';
+  }
+
+  function useTrack(e, i) {
+    e.ti = i;
+    e.t = e.tracks[i];
+    e.t0 = e.t.t0;
+    e.durMs = e.t.durMs;
+    e.sel = { start: 0, end: e.durMs };
+    e.peaks = null;
+    e.scanToken++;
+  }
+
+  // "MP3 or WAV", as far as they are on offer.
+  function madeWord() { return ['mp3', 'wav'].filter(offered).map(function (f) { return LABELS[f]; }).join(' or ') || 'MP3 or WAV'; }
+  function noDecodeText(e) {
+    var t = e.t;
+    if (!t.codec) return 'Its audio uses ' + A.codecName(t) + ', which this page cannot read.';
+    return 'This browser cannot decode ' + A.codecName(t) + ' audio, so it cannot make ' + madeWord() + ' from this file.' +
+      (t.codec === 'aac' && offered('copy') ? ' Choose Original audio to save it without re-encoding.' : '');
+  }
+  function canDecode(e) { return e.t && !e.t.drm && (e.t.decodable || e.t.whole); }
+
+  // The sentence for an error: the engine's, or the page's own where it
+  // suggests other formats.
+  function messageFor(err, e) {
+    var code = err && err.code, t = e && e.t;
+    if (code === 'NO_DECODE' && t) return noDecodeText(e);
+    if (code === 'TOO_LONG') {
+      return 'This browser has to decode the whole sound track at once, which works up to ' + (err.limit / 60) + ' minutes on this device. ' +
+        (offered('copy') ? 'Choose Original audio, or use' : 'Use') + ' a current version of Chrome, Edge, Firefox (on a computer) or Safari (26 or later).';
+    }
+    if (code === 'NOT_AAC' && t) return copyText(e);
+    if (code === 'TOO_BIG') {
+      return 'As WAV this would be about ' + fmtBytes(err.bytes) + ', more than the ' + fmtBytes(err.limit) + ' this device can build in memory. Choose ' +
+        (offered('mp3') ? 'MP3, ' : '') + 'mono or a shorter selection.';
+    }
+    if (code === 'NO_ENCODER') {
+      return err.format === 'mp3' && others('mp3') ? 'This browser cannot write MP3 here. Choose ' + others('mp3') + '.' : 'This browser cannot write this format. Choose another one.';
+    }
+    if (code === 'CANNOT_COPY') return 'This sound cannot be copied without re-encoding.' + (others('copy') ? ' Choose ' + others('copy') + '.' : '');
+    return A.describe(err, e && e.media ? e.media.drm : '');
+  }
+
+  // ---------- File list ----------
+  function el(tag, cls, text) {
+    var x = document.createElement(tag);
+    if (cls) x.className = cls;
+    if (text != null) x.textContent = text;
+    return x;
+  }
+  function fileInfo(e) {
+    if (!e.t) return '';
+    var t = e.t, bits = [fmtTime(e.durMs), A.codecName(t)];
+    if (t.sr) bits.push(fmtKhz(t.sr));
+    bits.push(A.channelsText(t.ch));
+    if (t.bitrate >= 1000 && t.codec && !/^pcm-/.test(t.codec)) bits.push(Math.round(t.bitrate / 1000) + ' kbps');
+    if (e.tracks.length > 1) bits.push(e.tracks.length + ' audio tracks');
+    return bits.join(' · ');
+  }
+  function stateText(e) {
+    if (e.status === 'reading') return 'Reading…';
+    if (e.status === 'error') return '';
+    if (e.status === 'converting') return 'Converting… ' + Math.floor(e.progress * 100) + '%';
+    if (e.result) return 'Converted: ' + e.result.name + ', ' + fmtBytes(e.result.blob.size);
+    if (e.status === 'failed' || !convertible(e)) return '';
+    var trimmed = e.sel.start > 0 || e.sel.end < e.durMs;
+    return 'Ready' + (trimmed ? ', from ' + fmtTime(e.sel.start) + ' to ' + fmtTime(e.sel.end) : '');
+  }
+  function renderEntry(e) {
+    if (!e.li) {
+      var li = e.li = el('li', 'm2m-file');
+      li.appendChild(e.nameEl = el('p', 'm2m-file-name'));
+      li.appendChild(e.infoEl = el('p', 'm2m-file-info'));
+      li.appendChild(e.stateEl = el('p', 'm2m-file-state'));
+      // Not a live region: a summary that names the files goes to the status line.
+      e.msgEl = el('p', 'msg error m2m-file-msg');
+      li.appendChild(e.msgEl);
+      var acts = el('div', 'm2m-file-actions');
+      e.dlBtn = el('button', 'btn small m2m-dl', 'Download');
+      e.editBtn = el('button', 'btn secondary small m2m-edit', 'Edit');
+      e.rmBtn = el('button', 'btn secondary small m2m-remove', 'Remove');
+      [e.dlBtn, e.editBtn, e.rmBtn].forEach(function (b) { b.type = 'button'; acts.appendChild(b); });
+      li.appendChild(acts);
+      e.dlBtn.addEventListener('click', function () { downloadEntry(e, e.dlBtn); });
+      e.editBtn.addEventListener('click', function () { if (current !== e) selectEntry(e); });
+      e.rmBtn.addEventListener('click', function () { removeEntry(e); });
+      dom.list.appendChild(li);
+    }
+    setMsg(e.nameEl, e.name);
+    setMsg(e.infoEl, fileInfo(e));
+    e.infoEl.hidden = !e.t;
+    setMsg(e.stateEl, stateText(e));
+    e.stateEl.hidden = !stateText(e);
+    e.stateEl.classList.toggle('is-done', !!e.result);
+    setMsg(e.msgEl, entryMsg(e));
+    e.dlBtn.hidden = !e.result;
+    if (e.result) e.dlBtn.setAttribute('aria-label', 'Download ' + e.result.name);
+    e.editBtn.hidden = entries.length < 2 || e.status === 'error' || e.status === 'reading';
+    e.editBtn.setAttribute('aria-label', 'Edit ' + e.name);
+    e.editBtn.setAttribute('aria-pressed', current === e ? 'true' : 'false');
+    e.rmBtn.setAttribute('aria-label', 'Remove ' + e.name);
+    e.rmBtn.disabled = busy && e.status === 'converting';
+    if (current === e) e.li.setAttribute('aria-current', 'true'); else e.li.removeAttribute('aria-current');
+  }
+  function entryMsg(e) {
+    if (e.status === 'error') return e.error;
+    if (e.convError) return e.convError;
+    if (!e.t) return '';
+    if (e.t.drm) return A.describe(null, e.t.drm);
+    var copy = settings.format === 'copy';
+    if (!copy && !canDecode(e)) return noDecodeText(e);
+    if (copy && e.t.codec !== 'aac') return copyText(e);
+    var notes = [];
+    if (e.t.listed > e.t.end) notes.push(shortText(e));
+    if (!copy && e.t.ch > 2 && e.t.ch !== 4 && e.t.ch !== 6) notes.push(layoutText(e));
+    return notes.join(' ');
+  }
+  // The converter mixes quad and 5.1 down to stereo; of other layouts it keeps
+  // the first channels as they are.
+  function layoutText(e) {
+    return 'Its sound has ' + e.t.ch + ' channels, and ' + madeWord().replace(' or ', ' and ') + ' keep' + (madeWord().indexOf(' or ') > 0 ? '' : 's') +
+      ' only the first two (usually front left and right; with Mono only the first), ' +
+      'so sound that is only in the others, such as speech in a centre channel, is lost.' + (e.t.codec === 'aac' && offered('copy') ? ' Original audio keeps every channel.' : '');
+  }
+  function formatWord() { return settings.format === 'copy' ? 'saved as original audio' : 'converted to ' + (settings.format === 'mp3' ? 'MP3' : 'WAV'); }
+  function copyText(e) {
+    return 'Its audio is ' + A.codecName(e.t) + ', not AAC, so it cannot be copied into an .m4a file.' +
+      (offered('mp3') || offered('wav') ? ' Choose ' + madeWord() + ' for this file.' : '');
+  }
+  function updateListUI() {
+    dom.filesSec.hidden = !entries.length;
+    dom.listActions.hidden = entries.length < 2;
+    dom.clear.disabled = busy;
+  }
+  function renderAll() { entries.forEach(renderEntry); updateListUI(); }
+
+  function removeEntry(e) {
+    if (busy && e.status === 'converting') return;
+    var i = entries.indexOf(e);
+    if (i < 0) return;
+    entries.splice(i, 1);
+    e.scanToken++;
+    A.close(e.media);
+    var focusNext = e.li && e.li.contains(document.activeElement);
+    if (e.li) e.li.remove();
+    if (current === e) {
+      stopPlay();
+      current = null;
+      var next = entries.filter(function (x) { return x.status !== 'error'; })[Math.min(i, entries.length - 1)] || entries.filter(function (x) { return x.status !== 'error'; })[0];
+      if (next) selectEntry(next);
+    }
+    if (focusNext) (entries[Math.min(i, entries.length - 1)] ? entries[Math.min(i, entries.length - 1)].rmBtn : dom.open).focus();
+    say('Removed ' + e.name + '.');
+    updateAll();
+  }
+
+  function selectEntry(e) {
+    stopPlay();
+    if (current && current !== e) { current.scanToken++; if (current.peaks && !current.peaks.done) current.peaks = null; }
+    current = e;
+    renderAll();
+    syncEditor();
+    ensureScan(e);
+  }
+
+  // ---------- Editor ----------
+  function editorOn() { return current && current.status !== 'error' && current.status !== 'reading'; }
+  function syncEditor() {
+    var e = current;
+    dom.edit.hidden = !editorOn();
+    if (!editorOn()) return;
+    setMsg(dom.editName, e.name);
+    dom.trackField.hidden = e.tracks.length < 2;
+    if (e.tracks.length > 1) {
+      // Built once per file, so a radio that has the focus is never replaced.
+      if (dom.tracks._m2mFor !== e) {
+        dom.tracks._m2mFor = e;
+        dom.tracks.textContent = '';
+        e.tracks.forEach(function (t, i) {
+          var row = el('label', 'check'), r = document.createElement('input');
+          r.type = 'radio'; r.name = 'm2m-track'; r.value = String(i); r.id = 'm2m-track-' + i;
+          row.appendChild(r);
+          row.appendChild(document.createTextNode(' ' + trackLabel(t, i)));
+          dom.tracks.appendChild(row);
+        });
+      }
+      dom.tracks.querySelectorAll('input').forEach(function (r) { r.checked = +r.value === e.ti; });
+    }
+    dom.start.value = fmtTime(e.sel.start);
+    dom.end.value = fmtTime(e.sel.end);
+    showTimeError(null, '');
+    dom.fadeIn.value = msText(e.fadeIn);
+    dom.fadeOut.value = msText(e.fadeOut);
+    showFadeError(null, '');
+    dom.vol.value = String(e.vol);
+    dom.title.value = e.tags.title;
+    dom.artist.value = e.tags.artist;
+    dom.album.value = e.tags.album;
+    dom.coverRow.hidden = !e.images.length;
+    dom.cover.checked = e.keepCover;
+    setMsg(dom.scaleEnd, fmtShort(e.durMs));
+    updateSelectionUI();
+    updateVolumeUI();
+    updateModeUI();
+    draw();
+  }
+  function msText(ms) {
+    if (!ms) return '0';
+    return String(ms / 1000);
+  }
+
+  function updateSelectionUI() {
+    var e = current;
+    if (!editorOn()) return;
+    var d = e.durMs || 1;
+    dom.hStart.style.left = (e.sel.start / d * 100) + '%';
+    dom.hEnd.style.left = (e.sel.end / d * 100) + '%';
+    [[dom.hStart, e.sel.start, 0, e.sel.end - MIN_SEL], [dom.hEnd, e.sel.end, e.sel.start + MIN_SEL, e.durMs]].forEach(function (h) {
+      h[0].setAttribute('aria-valuemin', String(Math.max(0, h[2]) / 1000));
+      h[0].setAttribute('aria-valuemax', String(Math.max(0, h[3]) / 1000));
+      h[0].setAttribute('aria-valuenow', String(h[1] / 1000));
+      h[0].setAttribute('aria-valuetext', fmtTime(h[1]));
+    });
+    setMsg(dom.len, fmtTime(e.sel.end - e.sel.start));
+    dom.canvas.setAttribute('aria-label', 'Waveform of ' + e.name + ', ' + fmtTime(e.durMs) + ' long, selected from ' + fmtTime(e.sel.start) + ' to ' + fmtTime(e.sel.end));
+    updatePeakUI();
+    updateEstimate();
+    renderEntry(e);
+  }
+
+  function setEdge(which, ms, fromField) {
+    var e = current;
+    if (!editorOn()) return;
+    ms = Math.round(ms);
+    if (which === 'start') ms = Math.max(0, Math.min(ms, e.sel.end - MIN_SEL));
+    else ms = Math.min(e.durMs, Math.max(ms, e.sel.start + MIN_SEL));
+    if (ms === e.sel[which]) { if (!fromField) (which === 'start' ? dom.start : dom.end).value = fmtTime(ms); return; }
+    e.sel[which] = ms;
+    if (!fromField) {
+      (which === 'start' ? dom.start : dom.end).value = fmtTime(ms);
+      showTimeError(null, '');
+    }
+    checkFades(false);
+    invalidate(e);
+    updateSelectionUI();
+    draw();
+    if (play && play.e === e) stopPlay();
+  }
+
+  function showTimeError(field, text) {
+    setMsg(dom.timeErr, text);
+    [dom.start, dom.end].forEach(function (f) {
+      if (f === field && text) f.setAttribute('aria-invalid', 'true'); else f.removeAttribute('aria-invalid');
+    });
+  }
+  function timeMessage(which, r) {
+    var label = which === 'start' ? 'start' : 'end';
+    if (r.error === 'sixty') return 'Minutes and seconds go up to 59: write 1:15 rather than 0:75.';
+    return 'Type the ' + label + ' as minutes:seconds, such as 1:05.5, or as seconds, such as 65.5.';
+  }
+  function onTimeInput(which, alone) {
+    var e = current;
+    if (!editorOn()) return;
+    var field = which === 'start' ? dom.start : dom.end;
+    var r = parseTime(field.value);
+    if (r.error) { showTimeError(field, timeMessage(which, r)); return false; }
+    if (r.ms > e.durMs) { showTimeError(field, 'The file is only ' + fmtTime(e.durMs) + ' long, so the ' + which + ' cannot be later than that.'); return false; }
+    var other = which === 'start' ? e.sel.end : e.sel.start;
+    if (which === 'start' ? r.ms > other - MIN_SEL : r.ms < other + MIN_SEL) {
+      showTimeError(field, which === 'start' ? 'The start must be at least 0.1 seconds before the end (' + fmtTime(e.sel.end) + ').'
+        : 'The end must be at least 0.1 seconds after the start (' + fmtTime(e.sel.start) + ').');
+      return false;
+    }
+    showTimeError(null, '');
+    setEdge(which, r.ms, true);
+    // The other field may hold text that was refused, or a time that only now
+    // fits: check it again, so its message stays (or it takes effect).
+    var ow = which === 'start' ? 'end' : 'start', ro = parseTime((ow === 'start' ? dom.start : dom.end).value);
+    if (!alone && (ro.error || ro.ms !== e.sel[ow])) onTimeInput(ow, true);
+    return true;
+  }
+  function timesValid() {
+    var e = current;
+    if (!editorOn()) return true;
+    var ok = true;
+    ['start', 'end'].forEach(function (w) {
+      if (!ok) return;
+      var f = w === 'start' ? dom.start : dom.end;
+      var r = parseTime(f.value);
+      if (r.error || r.ms !== e.sel[w]) ok = onTimeInput(w);
+    });
+    return ok;
+  }
+
+  function lenMs(e) { return e.sel.end - e.sel.start; }
+  function showFadeError(field, text) {
+    setMsg(dom.fadeErr, text);
+    [dom.fadeIn, dom.fadeOut].forEach(function (f) {
+      if ((f === field || field === 'both') && text) f.setAttribute('aria-invalid', 'true'); else f.removeAttribute('aria-invalid');
+    });
+  }
+  // Reads both fade fields; returns false (and shows why) when they are wrong.
+  function checkFades(fromTyping) {
+    var e = current;
+    if (!editorOn()) return true;
+    var a = parseSeconds(dom.fadeIn.value), b = parseSeconds(dom.fadeOut.value);
+    if (a.error || b.error) {
+      showFadeError(a.error ? dom.fadeIn : dom.fadeOut, 'Type the ' + (a.error ? 'fade-in' : 'fade-out') + ' length in seconds, such as 2 or 0.5.');
+      return false;
+    }
+    if (a.ms + b.ms > lenMs(e)) {
+      showFadeError('both', 'The fades together (' + ((a.ms + b.ms) / 1000) + ' s) are longer than the selection (' + (lenMs(e) / 1000) + ' s). Shorten them or the selection.');
+      return false;
+    }
+    showFadeError(null, '');
+    if (a.ms !== e.fadeIn || b.ms !== e.fadeOut) {
+      e.fadeIn = a.ms;
+      e.fadeOut = b.ms;
+      invalidate(e);
+      if (fromTyping) { draw(); retunePlay(); }
+    }
+    return true;
+  }
+
+  function effects(e) {
+    var copy = settings.format === 'copy';
+    return { vol: copy ? 1 : e.vol / 100, fadeIn: copy ? 0 : e.fadeIn / 1000, fadeOut: copy ? 0 : e.fadeOut / 1000, mono: !copy && settings.mono };
+  }
+
+  function updateVolumeUI() {
+    var e = current;
+    if (!editorOn()) return;
+    var g = e.vol / 100;
+    setMsg(dom.volOut, e.vol + '% (' + fmtDb(g) + ')');
+    dom.vol.setAttribute('aria-valuetext', e.vol + '%, ' + fmtDb(g));
+    updatePeakUI();
+  }
+  // The levels the result will have: as stereo, or as the Mono mix.
+  function levels(e) {
+    var p = e.peaks;
+    return p && settings.mono ? { min: p.monoMin, max: p.monoMax, done: p.done } : p;
+  }
+  function selectionPeak(e) {
+    return A.peak(e.peaks, e.sel.start / e.durMs, e.sel.end / e.durMs, settings.mono);
+  }
+  function updatePeakUI() {
+    var e = current;
+    if (!editorOn()) return;
+    var text = '';
+    if (settings.format !== 'copy' && e.peaks && e.peaks.done) {
+      var peak = selectionPeak(e), g = e.vol / 100;
+      if (peak <= 0) text = 'The selection is silent.';
+      else if (g === 0) text = 'At 0% the result is silent.';
+      else if (peak * g > 1.0001) {
+        var safe = Math.floor(100 / peak / 5) * 5;
+        text = 'At this volume the loudest parts go above full scale and will distort. ' + safe + '% is the most without distortion.';
+      } else {
+        text = 'Loudest point at this volume: ' + dbFs(peak * g) + '. Up to ' + Math.min(400, Math.floor(100 / peak / 5) * 5) + '% stays clear of distortion.';
+      }
+    }
+    setMsg(dom.peak, text);
+  }
+  function dbFs(x) { var d = 20 * Math.log10(x); return (Math.abs(d) < 0.05 ? '0.0' : '−' + Math.abs(d).toFixed(1)) + ' dB of full scale'; }
+
+  function convertOptions(e) {
+    var fx = effects(e);
+    return { format: settings.format, kbps: settings.kbps, mono: fx.mono, sel: e.sel, volume: fx.vol, fadeIn: fx.fadeIn, fadeOut: fx.fadeOut };
+  }
+  function updateEstimate() {
+    var e = current;
+    if (!editorOn()) return;
+    var bytes = estimateBytes(e);
+    var ext = settings.format === 'mp3' ? 'mp3' : settings.format === 'wav' ? 'wav' : 'm4a';
+    var text = bytes > 0 ? 'Estimated size: about ' + fmtBytes(bytes) + ' as ' + e.base + '.' + ext + '.' : '';
+    // MP3 at 8 to 24 kHz holds less than the bitrate asked for.
+    var plan = A.mp3Plan(e.t.sr, settings.kbps);
+    if (text && settings.format === 'mp3' && plan.kbps < settings.kbps) {
+      text += ' Its sound is at ' + fmtKhz(plan.sampleRate) + ', where MP3 goes up to ' + plan.kbps + ' kbps, so it is saved at ' + plan.kbps + ' kbps.';
+    }
+    setMsg(dom.estimate, text);
+  }
+  function estimateBytes(e) { return A.estimate(e.media, e.ti, convertOptions(e)); }
+
+  function updateModeUI() {
+    var copy = settings.format === 'copy';
+    [dom.fadeIn, dom.fadeOut, dom.vol].forEach(function (f) { f.disabled = copy || busy; });
+    dom.copyNote.hidden = !copy;
+    var e = current;
+    dom.play.disabled = !editorOn() || !canDecode(e);
+    updatePeakUI();
+    updateEstimate();
+  }
+
+  // ---------- Waveform ----------
+  function ensureScan(e) {
+    if (!editorOn() || e !== current) return;
+    if (e.peaks || !canDecode(e)) { waveMessage(); draw(); return; }
+    scan(e);
+  }
+  function waveMessage() {
+    var e = current, text = '';
+    if (editorOn()) {
+      if (e.t.drm) text = 'No waveform: this sound track is protected.';
+      else if (!canDecode(e)) text = 'No waveform: this browser cannot decode ' + A.codecName(e.t) + ' audio. You can still type the start and end.';
+      else if (!e.peaks) text = 'Reading the sound…';
+      else if (!e.peaks.done) text = 'Reading the sound… ' + Math.floor(e.peaks.filled / (e.durMs / 1000 || 1) * 100) + '%';
+    }
+    setMsg(dom.waveMsg, text);
+  }
+  async function scan(e) {
+    var token = ++e.scanToken;
+    waveMessage();
+    var src;
+    try { src = await A.decodeSource(e.media, e.ti); } catch (err) {
+      if (token === e.scanToken && e === current) setMsg(dom.waveMsg, messageFor(err, e));
+      return;
+    }
+    if (token !== e.scanToken) return;
+    var p = e.peaks = A.levels(BUCKETS);
+    try {
+      var done = await A.scan(src, p, {
+        dur: e.durMs / 1000 || 0.001,
+        stopped: function () { return token !== e.scanToken; },
+        onUpdate: function () { if (e === current) { draw(); waveMessage(); } }
+      });
+      if (!done) return;
+    } catch (err) {
+      if (token === e.scanToken) {
+        e.peaks = null;
+        if (e === current) setMsg(dom.waveMsg, messageFor(err, e));
+      }
+      return;
+    }
+    if (token !== e.scanToken) return;
+    if (e === current) { waveMessage(); draw(); updatePeakUI(); }
+  }
+
+  function css(name) { return getComputedStyle(dom.root).getPropertyValue(name).trim(); }
+  function draw() {
+    var e = current;
+    if (!editorOn()) return;
+    var cv = dom.canvas, dpr = window.devicePixelRatio || 1;
+    var W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
+    if (cv.width !== W) cv.width = W;
+    if (cv.height !== H) cv.height = H;
+    var g = cv.getContext('2d');
+    var x0 = Math.round(e.sel.start / (e.durMs || 1) * W), x1 = Math.round(e.sel.end / (e.durMs || 1) * W);
+    g.fillStyle = css('--surface-2');
+    g.fillRect(0, 0, W, H);
+    g.fillStyle = css('--accent-soft');
+    g.fillRect(x0, 0, Math.max(1, x1 - x0), H);
+    var mid = H / 2, amp = H / 2 * 0.92;
+    g.fillStyle = css('--border');
+    g.fillRect(0, Math.floor(mid), W, Math.max(1, Math.round(dpr)));
+    var p = levels(e);
+    if (!p) return;
+    var fx = effects(e), len = lenMs(e) / 1000, gain = A.gainFn(fx.vol, fx.fadeIn, fx.fadeOut, len);
+    var wave = css('--accent'), dim = css('--muted'), danger = css('--danger');
+    for (var x = 0; x < W; x++) {
+      var b0 = Math.floor(x * BUCKETS / W), b1 = Math.max(b0 + 1, Math.floor((x + 1) * BUCKETS / W));
+      var lo = Infinity, hi = -Infinity;
+      for (var b = b0; b < b1 && b < BUCKETS; b++) { if (p.min[b] < lo) lo = p.min[b]; if (p.max[b] > hi) hi = p.max[b]; }
+      if (lo > hi) continue;
+      var inside = x >= x0 && x < x1, clip = false;
+      if (inside) {
+        var k = gain(((x + 0.5) / W * e.durMs - e.sel.start) / 1000);
+        lo *= k; hi *= k;
+        if (hi > 1 || lo < -1) clip = true;
+        lo = Math.max(-1, lo); hi = Math.min(1, hi);
+      }
+      var y0 = mid - hi * amp, y1 = mid - lo * amp;
+      g.fillStyle = clip ? danger : inside ? wave : dim;
+      g.fillRect(x, y0, 1, Math.max(1, y1 - y0));
+    }
+  }
+
+  // ---------- Handles, pointer and keys ----------
+  var drag = null;
+  function msAt(clientX) {
+    var r = dom.box.getBoundingClientRect();
+    var f = r.width ? (clientX - r.left) / r.width : 0;
+    return Math.round(Math.max(0, Math.min(1, f)) * current.durMs / 10) * 10;
+  }
+  function nearer(ms) {
+    if (ms < current.sel.start) return 'start';
+    if (ms > current.sel.end) return 'end';
+    return Math.abs(ms - current.sel.start) <= Math.abs(ms - current.sel.end) ? 'start' : 'end';
+  }
+  function startDrag(ev, which, ms) {
+    drag = { which: which, id: ev.pointerId };
+    try { dom.wave.setPointerCapture(ev.pointerId); } catch (x) { /* not capturable */ }
+    (which === 'start' ? dom.hStart : dom.hEnd).focus({ preventScroll: true });
+    if (ms != null) setEdge(which, ms);
+  }
+  dom.wave.addEventListener('pointerdown', function (ev) {
+    if (!editorOn() || ev.button > 0 || dom.editFs.disabled) return;
+    var handle = ev.target.closest('.m2m-handle');
+    // A finger put down on the waveform may be starting to scroll the page,
+    // which the waveform allows: nothing moves until it lifts without
+    // scrolling (a tap) or moves sideways.
+    if (!handle && ev.pointerType !== 'mouse') { drag = { pending: true, id: ev.pointerId, x: ev.clientX, y: ev.clientY }; return; }
+    var ms = msAt(ev.clientX);
+    startDrag(ev, handle ? (handle === dom.hStart ? 'start' : 'end') : nearer(ms), handle ? null : ms);
+    ev.preventDefault();
+  });
+  dom.wave.addEventListener('pointermove', function (ev) {
+    if (!drag || ev.pointerId !== drag.id) return;
+    if (drag.pending) {
+      var dx = Math.abs(ev.clientX - drag.x);
+      if (dx >= 10 && dx > Math.abs(ev.clientY - drag.y)) startDrag(ev, nearer(msAt(drag.x)), msAt(ev.clientX));
+      return;
+    }
+    setEdge(drag.which, msAt(ev.clientX));
+  });
+  function endDrag(ev) { if (drag && ev.pointerId === drag.id) drag = null; }
+  dom.wave.addEventListener('pointerup', function (ev) {
+    if (drag && drag.pending && ev.pointerId === drag.id && editorOn() && !dom.editFs.disabled &&
+        Math.abs(ev.clientX - drag.x) < 10 && Math.abs(ev.clientY - drag.y) < 10) {
+      var ms = msAt(drag.x);
+      startDrag(ev, nearer(ms), ms);
+    }
+    endDrag(ev);
+  });
+  dom.wave.addEventListener('pointercancel', endDrag);
+  [dom.hStart, dom.hEnd].forEach(function (h) {
+    h.addEventListener('keydown', function (ev) {
+      if (!editorOn() || dom.editFs.disabled) return;
+      var which = h === dom.hStart ? 'start' : 'end', e = current, v = e.sel[which];
+      var step = ev.shiftKey ? 1000 : 100;
+      switch (ev.key) {
+        case 'ArrowLeft': case 'ArrowDown': v -= step; break;
+        case 'ArrowRight': case 'ArrowUp': v += step; break;
+        case 'PageDown': v -= 10000; break;
+        case 'PageUp': v += 10000; break;
+        case 'Home': v = which === 'start' ? 0 : e.sel.start + MIN_SEL; break;
+        case 'End': v = which === 'start' ? e.sel.end - MIN_SEL : e.durMs; break;
+        default: return;
+      }
+      ev.preventDefault();
+      setEdge(which, v);
+    });
+  });
+
+  [['start', dom.start], ['end', dom.end]].forEach(function (pair) {
+    var which = pair[0], f = pair[1];
+    f.addEventListener('input', function () { capField(f); onTimeInput(which); });
+    f.addEventListener('change', function () { if (onTimeInput(which)) f.value = fmtTime(current.sel[which]); });
+    f.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+      ev.preventDefault();
+      var step = (ev.shiftKey ? 1000 : 100) * (ev.key === 'ArrowUp' ? 1 : -1);
+      var r = parseTime(f.value);
+      setEdge(which, (r.error ? current.sel[which] : r.ms) + step);
+    });
+  });
+  dom.all.addEventListener('click', function () {
+    var e = current;
+    if (!editorOn()) return;
+    if (e.sel.start !== 0 || e.sel.end !== e.durMs) {
+      e.sel = { start: 0, end: e.durMs };
+      invalidate(e);
+    }
+    dom.start.value = fmtTime(0);
+    dom.end.value = fmtTime(e.durMs);
+    showTimeError(null, '');
+    checkFades(true);
+    updateSelectionUI();
+    draw();
+  });
+  [dom.fadeIn, dom.fadeOut].forEach(function (f) {
+    f.addEventListener('input', function () { capField(f); checkFades(true); });
+  });
+  dom.vol.addEventListener('input', function () {
+    if (!editorOn()) return;
+    current.vol = Math.max(0, Math.min(400, Math.round(+dom.vol.value || 0)));
+    invalidate(current);
+    updateVolumeUI();
+    draw();
+    retunePlay();
+  });
+  [['title', dom.title], ['artist', dom.artist], ['album', dom.album]].forEach(function (pair) {
+    pair[1].addEventListener('input', function () {
+      capField(pair[1]);
+      if (!editorOn()) return;
+      var v = clean(pair[1].value);
+      if (v !== current.tags[pair[0]]) { current.tags[pair[0]] = v; invalidate(current); }
+    });
+  });
+  dom.cover.addEventListener('change', function () {
+    if (!editorOn()) return;
+    current.keepCover = dom.cover.checked;
+    invalidate(current);
+  });
+  dom.tracks.addEventListener('change', function (ev) {
+    var e = current;
+    if (!editorOn() || !ev.target || ev.target.name !== 'm2m-track') return;
+    var i = +ev.target.value;
+    if (!(i >= 0 && i < e.tracks.length) || i === e.ti) return;
+    stopPlay();
+    A.release(e.media);
+    useTrack(e, i);
+    invalidate(e);
+    syncEditor();
+    renderEntry(e);
+    ensureScan(e);
+    updateAll();
+  });
+
+  // ---------- Playing the selection ----------
+  var ac = null, play = null, playToken = 0;
+  // Safari 16.4+: iOS mutes web audio in silent mode unless it is media
+  // playback; 'auto' gives the sound back to other apps afterwards.
+  function session(type) {
+    try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch (x) { /* not offered */ }
+  }
+  function stopPlay() {
+    playToken++;
+    // Also while the sound is still being read (before anything plays), so
+    // the button never stays on Stop.
+    if (dom.play.textContent !== 'Play selection') { dom.play.textContent = 'Play selection'; session('auto'); }
+    if (!play) return;
+    var p = play;
+    play = null;
+    p.nodes.forEach(function (n) { try { n.stop(); } catch (x) { /* not started */ } });
+    try { p.gain.disconnect(); } catch (x) { /* ignore */ }
+    cancelAnimationFrame(p.raf);
+    dom.playhead.hidden = true;
+  }
+  // The gain follows the volume and fades; for 5.1 it also carries the
+  // engine's scaling of the mix, which Web Audio makes without it.
+  function envelope(p, from) {
+    var e = p.e, fx = effects(e), g = p.gain.gain, T = p.startAt, L = p.len, vol = fx.vol * A.mixGain(e.t.ch, fx.mono);
+    var now = Math.max(from, T);
+    var f = A.gainFn(vol, fx.fadeIn, fx.fadeOut, L);
+    g.cancelScheduledValues(0);
+    g.setValueAtTime(f(now - T), now);
+    if (fx.fadeIn > 0 && now < T + fx.fadeIn) g.linearRampToValueAtTime(vol, T + fx.fadeIn);
+    if (fx.fadeOut > 0) {
+      if (now < T + L - fx.fadeOut) g.setValueAtTime(vol, T + L - fx.fadeOut);
+      g.linearRampToValueAtTime(0, T + L);
+    }
+  }
+  function retunePlay() { if (play && play.startAt) envelope(play, ac.currentTime); }
+  async function startPlay() {
+    var e = current;
+    stopPlay();
+    if (!editorOn() || !canDecode(e)) return;
+    var token = playToken;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    session('playback');
+    // Stop from here on, so anything that stops the sound while the audio
+    // context wakes up (which can take a while on a phone) also puts the
+    // button and the audio session back.
+    dom.play.textContent = 'Stop';
+    if (!ac) ac = new AC();
+    if (ac.state !== 'running') { try { await ac.resume(); } catch (x) { /* blocked */ } }
+    if (token !== playToken) return;
+    var src;
+    try { src = await A.decodeSource(e.media, e.ti); } catch (err) { if (token === playToken) { stopPlay(); setMsg(dom.waveMsg, messageFor(err, e)); } return; }
+    if (token !== playToken) return;
+    var fx = effects(e);
+    var gain = ac.createGain();
+    if (fx.mono) { gain.channelCount = 1; gain.channelCountMode = 'explicit'; gain.channelInterpretation = 'speakers'; }
+    gain.connect(ac.destination);
+    var p = play = { e: e, nodes: [], gain: gain, a: src.base + e.sel.start / 1000, len: lenMs(e) / 1000, startAt: 0, raf: 0, base: src.base };
+    var queue = [];
+    function sched(wb) {
+      var off = Math.max(0, p.a - wb.timestamp), rel = wb.timestamp + off - p.a;
+      var dur = Math.min(wb.duration - off, p.len - rel);
+      var when = p.startAt + rel, now = ac.currentTime;
+      if (when < now) { off += now - when; dur -= now - when; when = now; }
+      if (dur <= 0.0005) return;
+      var node = ac.createBufferSource();
+      node.buffer = wb.buffer;
+      node.connect(gain);
+      node.start(when, off, dur);
+      p.nodes.push(node);
+      if (p.nodes.length > 64) p.nodes.splice(0, p.nodes.length - 64);
+    }
+    function begin() {
+      p.startAt = ac.currentTime + 0.06;
+      envelope(p, 0);
+      queue.forEach(sched);
+      queue = [];
+      dom.playhead.hidden = false;
+      var tick = function () {
+        if (play !== p) return;
+        var pos = ac.currentTime - p.startAt;
+        if (pos >= p.len) { stopPlay(); return; }
+        dom.playhead.style.left = ((p.a - p.base + Math.max(0, pos)) * 1000 / e.durMs * 100) + '%';
+        p.raf = requestAnimationFrame(tick);
+      };
+      p.raf = requestAnimationFrame(tick);
+    }
+    try {
+      for await (var wb of A.buffers(src, p.a, p.a + p.len)) {
+        if (token !== playToken) break;
+        if (!p.startAt) {
+          queue.push(wb);
+          if (wb.timestamp + wb.duration - p.a >= 0.4) begin();
+          continue;
+        }
+        sched(wb);
+        while (token === playToken && (wb.timestamp + wb.duration - p.a) - (ac.currentTime - p.startAt) > 3) await sleep(150);
+      }
+      if (token === playToken && !p.startAt) begin();
+    } catch (err) {
+      if (token === playToken) { stopPlay(); setMsg(dom.waveMsg, messageFor(err, e)); }
+    }
+  }
+  dom.play.addEventListener('click', function () { if (play || dom.play.textContent === 'Stop') stopPlay(); else startPlay(); });
+
+  // ---------- Output settings ----------
+  function readSettings() {
+    var f = document.querySelector('input[name="m2m-format"]:checked');
+    var next = {
+      format: f ? f.value : CONF.formats[0],
+      kbps: Math.max(64, Math.min(320, +dom.bitrate.value || 192)),
+      mono: dom.channels.value === 'mono'
+    };
+    if (next.format === 'mp3' && !SIMD) {
+      // No MP3 encoder here: the next format on offer instead.
+      var alt = CONF.formats.filter(function (x) { return x !== 'mp3'; })[0];
+      if (alt) { next.format = alt; $('m2m-f-' + alt).checked = true; }
+    }
+    var changed = next.format !== settings.format || next.kbps !== settings.kbps || next.mono !== settings.mono;
+    var newFormat = next.format !== settings.format, newMono = next.mono !== settings.mono;
+    settings = next;
+    if (changed) entries.forEach(invalidate);
+    updateAll();
+    // The Mono mix has levels of its own.
+    if (newMono) draw();
+    if (newFormat) {
+      var n = entries.filter(function (e) { return e.status !== 'error' && e.t && !convertible(e); }).length;
+      if (n) say((n === 1 ? 'One file' : n + ' files') + ' cannot be ' + formatWord() + ': see the message under ' + (n === 1 ? 'it.' : 'each.'));
+    }
+  }
+  function formatHint() {
+    var s = settings;
+    if (s.format === 'mp3') {
+      return 'MP3 at ' + s.kbps + ' kbps' + (s.mono ? ' mono' : '') + ' takes about ' + (s.kbps * 60 / 8000).toFixed(2) + ' MB a minute. A higher bitrate cannot add detail that the source does not have.';
+    }
+    if (s.format === 'wav') {
+      return '16-bit WAV stores the decoded sound without compressing it again, but takes about ' + (s.mono ? '5.3' : '10.6') +
+        ' MB a minute (' + (s.mono ? 'mono' : 'stereo') + ', 44.1 kHz). Limit on this device: ' + fmtBytes(WAV_LIMIT) + ' per file.';
+    }
+    return 'Copies the AAC sound of MP4, MOV and M4A files as it is into an .m4a file: no further loss and a small file. The cut is rounded out to whole AAC frames (about 21 ms), and fades, volume and mono are not applied.';
+  }
+  function updateAll() {
+    var copy = settings.format === 'copy';
+    dom.bitrateField.hidden = settings.format !== 'mp3';
+    dom.speech.hidden = settings.format !== 'mp3';
+    dom.channelsField.hidden = copy;
+    var rest = others('mp3', 'and');
+    setMsg(dom.formatHint, formatHint() + (SIMD || !offered('mp3') ? '' : ' MP3 needs a newer browser (with WebAssembly SIMD, such as Safari 16.4 or later)' +
+      (rest ? '; ' + rest + (/ and /.test(rest) ? ' work' : ' works') + ' here.' : '.')));
+    if (dom.fMp3) dom.fMp3.disabled = !SIMD;
+    var pending = pendingEntries(), n = pending.length;
+    var label = settings.format === 'copy' ? 'Save original audio' + (n > 1 ? ' of ' + n + ' files' : '')
+      : 'Convert ' + (n > 1 ? n + ' files ' : '') + 'to ' + (settings.format === 'mp3' ? 'MP3' : 'WAV');
+    if (!busy) setMsg(dom.convert, label);
+    dom.convert.disabled = busy || !pending.length;
+    dom.cancel.hidden = !busy;
+    dom.outFs.disabled = busy;
+    dom.editFs.disabled = busy;
+    updateModeUI();
+    updateResults();
+    renderAll();
+  }
+  function convertible(e) {
+    if (!e.t || e.t.drm || (e.status !== 'ready' && e.status !== 'failed')) return false;
+    return settings.format === 'copy' ? e.t.codec === 'aac' : canDecode(e);
+  }
+  function pendingEntries() {
+    return entries.filter(function (e) { return convertible(e) && !e.result; });
+  }
+  function invalidate(e) {
+    var changed = false;
+    if (e.result) { e.result = null; changed = true; }
+    if (e.convError) { e.convError = ''; changed = true; }
+    if (e.status === 'failed') { e.status = 'ready'; changed = true; }
+    if (changed) { renderEntry(e); updateAll(); }
+  }
+  document.querySelectorAll('input[name="m2m-format"]').forEach(function (r) { r.addEventListener('change', function () { stopPlay(); readSettings(); draw(); }); });
+  dom.bitrate.addEventListener('change', readSettings);
+  dom.channels.addEventListener('change', function () { stopPlay(); readSettings(); });
+  dom.speech.addEventListener('click', function () {
+    dom.bitrate.value = '96';
+    dom.channels.value = 'mono';
+    readSettings();
+    say('Speech settings: MP3 at 96 kbps, mono.');
+  });
+
+  // ---------- Converting ----------
+  function uniqueName(name, used) {
+    var key = name.toLowerCase();
+    if (!used.has(key)) { used.add(key); return name; }
+    var dot = name.lastIndexOf('.'), stem = name.slice(0, dot), ext = name.slice(dot);
+    for (var i = 2; ; i++) {
+      var n = stem + ' (' + i + ')' + ext;
+      if (!used.has(n.toLowerCase())) { used.add(n.toLowerCase()); return n; }
+    }
+  }
+  // The tags written: what the Tags fields show, and the cover when kept.
+  // (Pair-page options: a switch that writes no tags returns null here.)
+  function tagsFor(e) {
+    var t = A.emptyTags();
+    t.title = e.tags.title;
+    t.artist = e.tags.artist;
+    t.album = e.tags.album;
+    if (e.keepCover) t.images = e.images;
+    return t;
+  }
+
+  async function convertOne(e, onProgress) {
+    var o = convertOptions(e);
+    o.tags = tagsFor(e);
+    o.onProgress = onProgress;
+    var job = activeJob = A.convert(e.media, e.ti, o);
+    if (cancelRequested) job.cancel();
+    var r;
+    try { r = await job.promise; } finally { if (activeJob === job) activeJob = null; }
+    var used = new Set();
+    entries.forEach(function (x) { if (x.result) used.add(x.result.name.toLowerCase()); });
+    return { id: ++resultSeq, blob: r.blob, name: uniqueName(e.base + '.' + r.ext, used) };
+  }
+
+  async function convertAll() {
+    if (busy) return;
+    setMsg(dom.error, '');
+    if (editorOn() && settings.format !== 'copy' && (!timesValid() || !checkFades(true))) {
+      if (dom.trim) dom.trim.open = true;
+      (dom.start.getAttribute('aria-invalid') ? dom.start : dom.end.getAttribute('aria-invalid') ? dom.end : dom.fadeIn.getAttribute('aria-invalid') ? dom.fadeIn : dom.fadeOut).focus();
+      return;
+    }
+    if (editorOn() && settings.format === 'copy' && !timesValid()) {
+      if (dom.trim) dom.trim.open = true;
+      (dom.start.getAttribute('aria-invalid') ? dom.start : dom.end).focus();
+      return;
+    }
+    var list = pendingEntries();
+    if (!list.length) return;
+    try { await A.load(); } catch (err) { setMsg(dom.error, A.text.load); return; }
+    busy = true;
+    cancelRequested = false;
+    stopPlay();
+    wake(true);
+    dom.progress.hidden = false;
+    dom.bar.value = 0;
+    setMsg(dom.convert, 'Converting…');
+    updateAll();
+    dom.cancel.focus();
+    var done = 0, failed = 0, lastPaint = 0;
+    for (var i = 0; i < list.length && !cancelRequested; i++) {
+      var e = list[i];
+      if (entries.indexOf(e) < 0) continue;
+      e.status = 'converting';
+      e.progress = 0;
+      e.convError = '';
+      renderEntry(e);
+      say('Converting ' + (list.length > 1 ? (i + 1) + ' of ' + list.length + ': ' : '') + e.name + '.');
+      var paint = (function (i, e) {
+        return function (p) {
+          e.progress = p;
+          var now = performance.now();
+          if (now - lastPaint < 100 && p < 1) return;
+          lastPaint = now;
+          dom.bar.value = Math.floor((i + p) / list.length * 100);
+          setMsg(dom.progressText, (list.length > 1 ? 'File ' + (i + 1) + ' of ' + list.length + ': ' : '') + e.name + ', ' + Math.floor(p * 100) + '%');
+          renderEntry(e);
+        };
+      })(i, e);
+      paint(0);
+      try {
+        e.result = await convertOne(e, paint);
+        e.status = 'ready';
+        done++;
+      } catch (err) {
+        e.status = 'ready';
+        if (A.isCancel(err) || cancelRequested) { cancelRequested = true; renderEntry(e); break; }
+        e.status = 'failed';
+        e.convError = messageFor(err, e);
+        failed++;
+      }
+      if (e !== current) A.release(e.media);
+      renderEntry(e);
+    }
+    var hadFocus = document.activeElement === dom.cancel || document.activeElement === document.body;
+    busy = false;
+    wake(false);
+    dom.progress.hidden = true;
+    updateAll();
+    var withResult = entries.filter(function (x) { return x.result; });
+    if (cancelRequested) say('Conversion cancelled.' + (done ? ' ' + done + ' file' + (done > 1 ? 's were' : ' was') + ' converted before that.' : ''));
+    else if (list.length === 1 && done === 1) say(list[0].result.name + ' is ready to download, ' + fmtBytes(list[0].result.blob.size) + '.');
+    else if (done) say(done + ' of ' + list.length + ' files converted' + (failed ? ', ' + failed + ' could not be' : '') + '. Download them one by one' + (withResult.length > 1 ? ' or all as a ZIP.' : '.'));
+    else if (list.length === 1 && failed) say(list[0].name + ': ' + list[0].convError);
+    else say('Nothing was converted: see the message under each file.');
+    var first = list.filter(function (x) { return x.result; })[0];
+    if (hadFocus) {
+      if (first) (withResult.length > 1 && !dom.results.hidden ? dom.zip : first.dlBtn).focus();
+      else if (!dom.convert.disabled) dom.convert.focus();
+      else dom.open.focus();
+    }
+  }
+  dom.convert.addEventListener('click', convertAll);
+  dom.cancel.addEventListener('click', function () {
+    if (!busy) return;
+    cancelRequested = true;
+    if (activeJob) activeJob.cancel();
+    setMsg(dom.progressText, 'Cancelling…');
+  });
+
+  // ---------- Downloads ----------
+  function downloadEntry(e, btn) {
+    if (!e.result || tooSoon(btn, e.result)) return;
+    TT.download(e.result.name, e.result.blob);
+  }
+  function updateResults() {
+    var res = entries.filter(function (e) { return e.result; });
+    var total = res.reduce(function (n, e) { return n + e.result.blob.size; }, 0);
+    dom.results.hidden = res.length < 2 || total > ZIP_LIMIT;
+    dom.zipNote.hidden = !(res.length > 1 && total > ZIP_LIMIT);
+    setMsg(dom.zipNote, res.length > 1 && total > ZIP_LIMIT ? 'Together the files take ' + fmtBytes(total) + ', too much for one ZIP on this device, so download them one by one.' : '');
+  }
+  dom.zip.addEventListener('click', async function () {
+    var res = entries.filter(function (e) { return e.result; });
+    if (tooSoon(dom.zip, res.map(function (e) { return e.result.id; }).join()) || dom.zip.getAttribute('aria-busy') === 'true') return;
+    if (res.length < 2) return;
+    dom.zip.setAttribute('aria-busy', 'true');
+    setMsg(dom.zip, 'Making the ZIP…');
+    try {
+      await A.loadScript(ZIP_URL);
+      var blob = await window.TTZip.create(res.map(function (e) { return { name: e.result.name, data: e.result.blob }; }), { compress: 'store' });
+      TT.download('converted-audio.zip', blob);
+      setMsg(dom.error, '');
+    } catch (err) {
+      setMsg(dom.error, 'The ZIP could not be made: ' + cut(String(err && err.message || err), 160) + ' Download the files one by one.');
+    } finally {
+      dom.zip.removeAttribute('aria-busy');
+      setMsg(dom.zip, 'Download all (.zip)');
+    }
+  });
+
+  // ---------- Choosing, dropping and pasting files ----------
+  dom.open.addEventListener('click', function () { dom.file.click(); });
+  dom.file.addEventListener('change', function () {
+    var files = Array.prototype.slice.call(dom.file.files || []);
+    dom.file.value = '';
+    addFiles(files);
+  });
+  function hasFiles(dt) { return dt && Array.prototype.indexOf.call(dt.types || [], 'Files') >= 0; }
+  var depth = 0;
+  document.addEventListener('dragenter', function (ev) { if (hasFiles(ev.dataTransfer)) { depth++; dom.drop.classList.add('is-over'); } });
+  document.addEventListener('dragleave', function (ev) {
+    if (!hasFiles(ev.dataTransfer)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) dom.drop.classList.remove('is-over');
+  });
+  document.addEventListener('dragover', function (ev) { if (ev.dataTransfer) ev.preventDefault(); });
+  document.addEventListener('drop', function (ev) {
+    var dt = ev.dataTransfer;
+    if (!dt) return;
+    depth = 0;
+    dom.drop.classList.remove('is-over');
+    if (dt.files && dt.files.length) { ev.preventDefault(); addFiles(dt.files); return; }
+    var target = ev.target;
+    if (target && target.closest && target.closest('input, select')) return;
+    ev.preventDefault();
+    var text = '';
+    try { text = dt.getData('text/uri-list') || dt.getData('text/plain') || ''; } catch (x) { text = ''; }
+    if (/^\s*(https?:|www\.)/i.test(text.slice(0, 2000))) setMsg(dom.fileErr, LINK_TEXT);
+  });
+  document.addEventListener('paste', function (ev) {
+    var cd = ev.clipboardData;
+    if (!cd) return;
+    if (cd.files && cd.files.length) { ev.preventDefault(); addFiles(cd.files); return; }
+    var t = ev.target;
+    if (t && t.closest && t.closest('input, select, [contenteditable]')) return;
+    var text = (cd.getData('text/plain') || '').slice(0, 2000);
+    if (/^\s*(https?:\/\/|www\.)/i.test(text)) setMsg(dom.fileErr, LINK_TEXT);
+  });
+  dom.clear.addEventListener('click', function () {
+    if (busy) return;
+    entries.slice().forEach(function (e) {
+      e.scanToken++;
+      A.close(e.media);
+      if (e.li) e.li.remove();
+    });
+    stopPlay();
+    entries = [];
+    current = null;
+    syncEditor();
+    updateAll();
+    dom.open.focus();
+    say('All files removed.');
+  });
+
+  // An 8-second sample: a C major arpeggio and chord, made here as a WAV file.
+  function sampleFile() {
+    var sr = 44100, n = sr * 8, buf = new ArrayBuffer(44 + n * 4), v = new DataView(buf), pcm = new Int16Array(buf, 44);
+    var w = function (o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n * 4, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, 2, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 4, true); v.setUint16(32, 4, true); v.setUint16(34, 16, true);
+    w(36, 'data'); v.setUint32(40, n * 4, true);
+    var notes = [261.63, 329.63, 392, 523.25, 392, 329.63, 261.63, 196];
+    var L = new Float32Array(n), R = new Float32Array(n);
+    function note(f, t0, dur, amp, pan) {
+      var i0 = Math.round(t0 * sr), i1 = Math.min(n, Math.round((t0 + dur) * sr));
+      for (var i = i0; i < i1; i++) {
+        var t = (i - i0) / sr, env = Math.min(1, t / 0.01) * Math.exp(-3 * t);
+        var x = amp * env * (Math.sin(2 * Math.PI * f * t) + 0.3 * Math.sin(4 * Math.PI * f * t));
+        L[i] += x * (1 - pan); R[i] += x * (1 + pan);
+      }
+    }
+    notes.forEach(function (f, k) { note(f, k * 0.75, 1.4, 0.3, k % 2 ? 0.3 : -0.3); });
+    [261.63, 329.63, 392].forEach(function (f) { note(f, 6, 2, 0.18, 0); });
+    for (var i = 0; i < n; i++) {
+      pcm[2 * i] = Math.max(-32768, Math.min(32767, Math.round(L[i] * 32767)));
+      pcm[2 * i + 1] = Math.max(-32768, Math.min(32767, Math.round(R[i] * 32767)));
+    }
+    return new File([buf], 'sample.wav', { type: 'audio/wav' });
+  }
+  dom.sample.addEventListener('click', function () {
+    if (tooSoon(dom.sample, 'sample')) return;
+    addFiles([sampleFile()]);
+  });
+
+  // ---------- Page events ----------
+  var redraw = TT.debounce(function () { draw(); }, 60);
+  if (window.ResizeObserver) new ResizeObserver(redraw).observe(dom.box);
+  else window.addEventListener('resize', redraw);
+  if (window.matchMedia) {
+    var dark = window.matchMedia('(prefers-color-scheme: dark)');
+    if (dark.addEventListener) dark.addEventListener('change', draw);
+  }
+  // Fields the browser restores after the script ran (Back, reload) are read
+  // again here, so the labels and estimates match what is shown.
+  window.addEventListener('pageshow', function () { readSettings(); });
+  readSettings();
+})();
+</script>

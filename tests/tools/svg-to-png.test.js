@@ -415,11 +415,27 @@ module.exports = async ({ page, open, assert, fixtures, base }) => {
     }
   }
 
-  // A browser that cannot encode WebP (Safari): the option is disabled and explained.
+  // Safari's canvas cannot encode WebP: libwebp (TTImage's { wasm: true }) writes the file instead.
   await page.addInitScript(() => {
     const toBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = function (cb, type, q) { return toBlob.call(this, cb, type === 'image/webp' ? 'image/png' : type, q); };
   });
+  await open();
+  assert.deepEqual(await page.evaluate(async () => [await TTImage.canEncode('webp'), await TTImage.canEncode('webp', { wasm: true })]), [false, true]);
+  assert.deepEqual(await page.$eval('#s2p-format option[value="webp"]', o => [o.disabled, o.textContent]), [false, 'WebP']);
+  await page.selectOption('#s2p-format', 'webp');
+  await expectOut(/^Output: 560 × 240 px WebP/);
+  f = await download();
+  assert.equal(f.name, 'example.webp');
+  assert.equal(f.data.toString('latin1', 0, 4) + f.data.toString('latin1', 8, 12), 'RIFFWEBP');
+  const chunks = [];
+  for (let o = 12; o + 8 <= f.data.length; o += 8 + f.data.readUInt32LE(o + 4) + (f.data.readUInt32LE(o + 4) & 1)) chunks.push(f.data.toString('latin1', o, o + 4).trim());
+  assert.deepEqual(chunks, ['VP8X', 'ALPH', 'VP8'], 'lossy WebP with exact alpha, made without the canvas');
+  const [corner] = await pixels(f.data, [[0, 0]]);
+  assert.equal(corner[3], 0, 'the transparent corners stay transparent');
+
+  // A browser with neither (no WebAssembly, and no canvas WebP): the option is disabled and explained.
+  await page.addInitScript(() => { delete window.WebAssembly; delete window.OffscreenCanvas; });
   await open();
   await page.waitForFunction(() => document.querySelector('#s2p-format option[value="webp"]').disabled);
   assert.equal(await page.textContent('#s2p-format option[value="webp"]'), 'WebP (this browser cannot save it)');

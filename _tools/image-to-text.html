@@ -19,8 +19,8 @@ howto: |
      the next line follows it without a space.
 
   The reading is done by Tesseract, the open-source OCR engine first written
-  at Hewlett-Packard and developed by Google from 2006 to 2017, here compiled
-  to run inside your browser.
+  at Hewlett-Packard and later developed by Google, compiled to run in your
+  browser.
 
   ## Getting better results
 
@@ -49,15 +49,16 @@ howto: |
 
   ## Scanned PDFs
 
-  Each page of a PDF is read on its own, up to 100 pages per file. With **Use
-  the text stored in PDFs** ticked, a page that already holds text, such as a
-  PDF saved from Word or a scan made searchable by the scanner, has its text
-  copied from the file. Scanned pages are drawn at up to 300 dpi and read as
-  pictures, including a scan with only a little typed text on it, such as a
-  page number or a reference stamped on each page. If text copied from a PDF
+  PDF pages are read one by one, up to 100 per file. With **Use the text
+  stored in PDFs** ticked, a page that already holds text, such as a PDF
+  saved from Word or a scan made searchable by the scanner, has its text
+  copied from the file; [PDF to Text](/pdf-to-text/) does that for every
+  page, keeping paragraphs, columns and tables. Scanned pages are drawn at
+  up to 300 dpi and read as pictures, including a scan with only a little
+  typed text on it, such as a stamped page number. If text copied from a PDF
   comes out as nonsense, untick the option to read every page as a picture.
-  A PDF that is locked with a password asks for it, and the password stays on
-  your device. To read a few pages of a long PDF, take them out first with
+  A PDF locked with a password asks for it, and the password stays on your
+  device. To read a few pages of a long PDF, take them out first with
   [Split PDF](/split-pdf/).
 
   Paste the text into the [word counter](/word-counter/) to count it, or
@@ -277,32 +278,23 @@ faq:
 </div>
 
 <script>
+{% include ocr-engine.js %}
+</script>
+<script>
 (function () {
   'use strict';
   const $ = TT.$;
-  const VENDOR = new URL({{ '/assets/vendor/tesseract/' | relative_url | jsonify }}, location.href).href;
   const IMAGE_JS = {{ '/assets/js/image-decode.js' | relative_url | jsonify }};
   const PDFJS_URL = new URL({{ '/assets/vendor/pdfjs/pdf.min.js' | relative_url | jsonify }}, location.href).href;
   const PDFJS_WORKER = new URL({{ '/assets/vendor/pdfjs/pdf.worker.min.js' | relative_url | jsonify }}, location.href).href;
   const PDFJS_WASM = new URL({{ '/assets/vendor/pdfjs/wasm/' | relative_url | jsonify }}, location.href).href;
   const PDFJS_RES = new URL({{ '/assets/vendor/pdfjs-resources/' | relative_url | jsonify }}, location.href).href;
 
-  // Download sizes as this site serves them: the engine's script is sent compressed (about
-  // 1.5 MB of its 3.9 MB); each .traineddata.gz is already compressed (its file size).
-  const ENGINE_BYTES = 1.5e6;
-  const LANGS = {
-    eng: ['English', 2952873], ara: ['Arabic', 1661906], chi_sim: ['Chinese (Simplified)', 1718768],
-    chi_tra: ['Chinese (Traditional)', 1656239], nld: ['Dutch', 3005696], fra: ['French', 707406],
-    deu: ['German', 1333102], hin: ['Hindi', 1389692], ind: ['Indonesian', 1194182], ita: ['Italian', 1660998],
-    jpn: ['Japanese', 2030256], kor: ['Korean', 1572336], pol: ['Polish', 2642356], por: ['Portuguese', 1392239],
-    rus: ['Russian', 2679598], spa: ['Spanish', 2100190], tur: ['Turkish', 2141291], ukr: ['Ukrainian', 2114206],
-    vie: ['Vietnamese', 1423003]
-  };
   const PSMS = ['3', '6', '7', '11'];
   const MAX_FILES = 50, MAX_PDF_PAGES = 100, MAX_FILE_BYTES = 500e6;
   // LOW: a line under this confidence is marked Check; LOW_PAGE: a page under this average
   // gets the hint to turn it.
-  const MAX_PX = 16e6, MAX_SIDE = 16000, THUMB = 1400, LOW = 80, LOW_PAGE = 50, PDF_DPI = 300;
+  const THUMB = 1400, LOW = 80, LOW_PAGE = 50;
 
   const openBtn = $('#i2t-open'), pasteBtn = $('#i2t-paste'), camBtn = $('#i2t-camera'), fileIn = $('#i2t-file');
   const errEl = $('#i2t-error'), statusEl = $('#i2t-status');
@@ -327,13 +319,12 @@ faq:
   function say(t) { setText(statusEl, t); }
   function showError(t) { setText(errEl, t); }
   function plural(n, one, many) { return NUM.format(n) + ' ' + (n === 1 ? one : many || one + 's'); }
-  function mb(bytes) { return (Math.round(bytes / 1e5) / 10).toFixed(1) + ' MB'; }
   // Cut by code points, so an emoji is never split in half.
   function clip(s, n) { const cps = Array.from(String(s)); return cps.length > n ? cps.slice(0, n - 1).join('') + '\u2026' : String(s); }
-  function listText(items) { return items.length < 2 ? items.join('') : items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1]; }
-  function median(a) { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
-  function friendly(message, extra) { const e = new Error(message); e.friendly = true; return Object.assign(e, extra || {}); }
-  function stopError() { return Object.assign(new Error('stopped'), { stopped: true }); }
+  // The OCR engine, its languages and the reading of a picture, shared with PDF to Text
+  // (_includes/ocr-engine.js).
+  const ocr = TTOcr({ status: t => say(t), progress: v => setBar(v), sizes: () => updateSize() });
+  const LANGS = ocr.LANGS, MAX_PX = ocr.MAX_PX, MAX_SIDE = ocr.MAX_SIDE, friendly = ocr.friendly, stopError = ocr.stopError, release = ocr.release;
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
@@ -344,203 +335,12 @@ faq:
     });
   }
 
-  // ---------- Picture clean-up (runs in a worker) ----------
-  // Grey from RGB (the canvas is painted white first, so there is no transparency); a mostly
-  // dark picture is inverted, the lighting is evened out, and Black and white applies Otsu's
-  // threshold. The result is a Netpbm file (P5 grey, or P6 colour when nothing is changed),
-  // which Tesseract reads without the cost of PNG encoding.
-  function prepPixels(rgba, w, h, o) {
-    const n = w * h;
-    let i, j;
-    if (!o.clean && !o.bw) {
-      const head = 'P6\n' + w + ' ' + h + '\n255\n', out = new Uint8Array(head.length + n * 3);
-      for (i = 0; i < head.length; i++) out[i] = head.charCodeAt(i);
-      for (i = 0, j = head.length; i < n * 4; i += 4) { out[j++] = rgba[i]; out[j++] = rgba[i + 1]; out[j++] = rgba[i + 2]; }
-      return { buf: out.buffer, inverted: false, view: viewOf(out, head.length, 3, w, h) };
-    }
-    const head = 'P5\n' + w + ' ' + h + '\n255\n', out = new Uint8Array(head.length + n);
-    for (i = 0; i < head.length; i++) out[i] = head.charCodeAt(i);
-    const g = out.subarray(head.length);
-    for (i = 0, j = 0; i < n; i++, j += 4) g[i] = (rgba[j] * 299 + rgba[j + 1] * 587 + rgba[j + 2] * 114 + 500) / 1000;
-    let inverted = false;
-    if (o.clean) {
-      const hist = new Uint32Array(256);
-      for (i = 0; i < n; i++) hist[g[i]]++;
-      if (levelAt(hist, n, 0.5) < 100) {
-        inverted = true;
-        for (i = 0; i < n; i++) g[i] = 255 - g[i];
-      }
-      evenLight(g, w, h);
-    }
-    if (o.bw) {
-      const t = otsuLevel(g);
-      for (i = 0; i < n; i++) g[i] = g[i] > t ? 255 : 0;
-    }
-    return { buf: out.buffer, inverted, view: viewOf(out, head.length, 1, w, h) };
-  }
-  // A small copy of the picture as Tesseract gets it (RGBA, at most 1400 pixels a side),
-  // each pixel the average of the block it covers.
-  function viewOf(src, off, ch, w, h) {
-    const k = Math.min(1, 1400 / Math.max(w, h)), tw = Math.max(1, Math.round(w * k)), th = Math.max(1, Math.round(h * k));
-    const sum = new Float64Array(tw * th * 3), cnt = new Uint32Array(tw * th);
-    for (let y = 0; y < h; y++) {
-      const row = Math.min(th - 1, Math.floor(y * k)) * tw;
-      for (let x = 0; x < w; x++) {
-        const t = row + Math.min(tw - 1, Math.floor(x * k)), i = off + (y * w + x) * ch;
-        sum[t * 3] += src[i];
-        sum[t * 3 + 1] += src[i + (ch === 3 ? 1 : 0)];
-        sum[t * 3 + 2] += src[i + (ch === 3 ? 2 : 0)];
-        cnt[t]++;
-      }
-    }
-    const px = new Uint8ClampedArray(tw * th * 4);
-    for (let t = 0; t < tw * th; t++) {
-      const c = cnt[t] || 1;
-      px[t * 4] = sum[t * 3] / c;
-      px[t * 4 + 1] = sum[t * 3 + 1] / c;
-      px[t * 4 + 2] = sum[t * 3 + 2] / c;
-      px[t * 4 + 3] = 255;
-    }
-    return { w: tw, h: th, px };
-  }
-  function levelAt(hist, count, q) {
-    const want = count * q;
-    let acc = 0;
-    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= want) return v; }
-    return 255;
-  }
-  // The paper's brightness is measured in blocks (the 90th percentile, so ink does not count),
-  // smoothed, and each pixel is divided by it. Blocks darker than 40% of the paper are not paper
-  // (a dark title bar, a photo, a thick letter): they take the level of the paper around them,
-  // so text inside them keeps its contrast instead of being washed out.
-  function evenLight(g, w, h) {
-    const n = w * h, all = new Uint32Array(256);
-    for (let i = 0; i < n; i++) all[g[i]]++;
-    const paper = levelAt(all, n, 0.9);
-    if (paper < 16) return;
-    const floor = paper * 0.4, b = Math.max(8, Math.round(Math.max(w, h) / 48));
-    const gw = Math.ceil(w / b), gh = Math.ceil(h / b), m = gw * gh;
-    let grid = new Float32Array(m);
-    const ok = new Uint8Array(m), hist = new Uint32Array(256);
-    for (let by = 0; by < gh; by++) {
-      for (let bx = 0; bx < gw; bx++) {
-        hist.fill(0);
-        const x0 = bx * b, y0 = by * b, x1 = Math.min(w, x0 + b), y1 = Math.min(h, y0 + b);
-        for (let y = y0; y < y1; y++) for (let k = y * w + x0, e = y * w + x1; k < e; k++) hist[g[k]]++;
-        const v = levelAt(hist, (x1 - x0) * (y1 - y0), 0.9);
-        if (v > floor) { grid[by * gw + bx] = v; ok[by * gw + bx] = 1; }
-      }
-    }
-    let left = 0;
-    for (let k = 0; k < m; k++) if (!ok[k]) left++;
-    for (let pass = 0; left && pass < gw + gh; pass++) {
-      const next = grid.slice(), got = [];
-      for (let y = 0; y < gh; y++) {
-        for (let x = 0; x < gw; x++) {
-          const k = y * gw + x;
-          if (ok[k]) continue;
-          let s = 0, c = 0;
-          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-            const yy = y + dy, xx = x + dx;
-            if (yy >= 0 && yy < gh && xx >= 0 && xx < gw && ok[yy * gw + xx]) { s += grid[yy * gw + xx]; c++; }
-          }
-          if (c) { next[k] = s / c; got.push(k); }
-        }
-      }
-      if (!got.length) break;
-      got.forEach(k => { ok[k] = 1; });
-      left -= got.length;
-      grid = next;
-    }
-    if (left) for (let k = 0; k < m; k++) if (!ok[k]) grid[k] = paper;
-    for (let pass = 0; pass < 2; pass++) {
-      const next = new Float32Array(m);
-      for (let y = 0; y < gh; y++) {
-        for (let x = 0; x < gw; x++) {
-          let s = 0, c = 0;
-          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-            const yy = y + dy, xx = x + dx;
-            if (yy >= 0 && yy < gh && xx >= 0 && xx < gw) { s += grid[yy * gw + xx]; c++; }
-          }
-          next[y * gw + x] = s / c;
-        }
-      }
-      grid = next;
-    }
-    for (let y = 0; y < h; y++) {
-      const fy = Math.min(gh - 1, Math.max(0, (y + 0.5) / b - 0.5)), ya = Math.floor(fy), yb = Math.min(gh - 1, ya + 1), ty = fy - ya;
-      for (let x = 0; x < w; x++) {
-        const fx = Math.min(gw - 1, Math.max(0, (x + 0.5) / b - 0.5)), xa = Math.floor(fx), xb = Math.min(gw - 1, xa + 1), tx = fx - xa;
-        const top = grid[ya * gw + xa] * (1 - tx) + grid[ya * gw + xb] * tx, bot = grid[yb * gw + xa] * (1 - tx) + grid[yb * gw + xb] * tx;
-        const bg = top * (1 - ty) + bot * ty, k = y * w + x;
-        g[k] = bg < 1 ? 255 : Math.min(255, Math.round(g[k] * 255 / bg));
-      }
-    }
-  }
-  function otsuLevel(g) {
-    const hist = new Float64Array(256), n = g.length;
-    for (let i = 0; i < n; i++) hist[g[i]]++;
-    let sum = 0;
-    for (let v = 0; v < 256; v++) sum += v * hist[v];
-    let wB = 0, sumB = 0, best = -1, t = 127;
-    for (let v = 0; v < 256; v++) {
-      wB += hist[v];
-      if (!wB) continue;
-      const wF = n - wB;
-      if (!wF) break;
-      sumB += v * hist[v];
-      const mB = sumB / wB, mF = (sum - sumB) / wF, between = wB * wF * (mB - mF) * (mB - mF);
-      if (between > best) { best = between; t = v; }
-    }
-    return t;
-  }
-  function prepWorkerMain() {
-    self.onmessage = function (e) {
-      const m = e.data;
-      try {
-        const r = prepPixels(new Uint8ClampedArray(m.buf), m.w, m.h, m.o);
-        self.postMessage({ id: m.id, buf: r.buf, inverted: r.inverted, view: r.view }, [r.buf, r.view.px.buffer]);
-      } catch (err) { self.postMessage({ id: m.id, error: String(err && err.message || err) }); }
-    };
-  }
-  let prepWorker = null, prepN = 0;
-  const prepWaiting = new Map();
-  function prepRun(buf, w, h, o) {
-    if (prepWorker === null) {
-      try {
-        const src = [prepPixels, viewOf, levelAt, evenLight, otsuLevel].map(f => f.toString()).join('\n') + '\n(' + prepWorkerMain.toString() + ')();';
-        const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
-        prepWorker = new Worker(url);
-        URL.revokeObjectURL(url);
-        prepWorker.onmessage = e => {
-          const p = prepWaiting.get(e.data.id);
-          if (!p) return;
-          prepWaiting.delete(e.data.id);
-          if (e.data.error) p.reject(new Error(e.data.error)); else p.resolve(e.data);
-        };
-        prepWorker.onerror = e => {
-          if (e && e.preventDefault) e.preventDefault();
-          prepWaiting.forEach(p => p.reject(new Error('The picture could not be prepared.')));
-          prepWaiting.clear();
-          prepWorker.terminate();
-          prepWorker = false;
-        };
-      } catch (e) { prepWorker = false; }
-    }
-    if (!prepWorker) return Promise.resolve(prepPixels(new Uint8ClampedArray(buf), w, h, o));
-    return new Promise((resolve, reject) => {
-      const id = ++prepN;
-      prepWaiting.set(id, { resolve, reject });
-      prepWorker.postMessage({ id, buf, w, h, o }, [buf]);
-    });
-  }
-
   // ---------- State ----------
   // A page is one picture, or one page of a PDF:
   // { id, kind: 'image'|'pdf', file, doc, no, label, rotation, key, result, hasText, scan, notes, thumb, seen, tw, th }
   let pages = [], selected = null, nextId = 1, photoN = 0, pasteN = 0;
   let generated = '', edited = false, stash = null;
-  let running = false, stopRequested = false, cancelRun = null, cancelP = null, readingNow = false;
+  let running = false, stopRequested = false, cancelRun = null, cancelP = null;
   let noteErrors = [], focusAfterStop = false;
 
   function settings() {
@@ -562,111 +362,11 @@ faq:
   }
   function stale(s, pg) { return pg.key !== keyOf(s, pg); }
 
-  // ---------- The OCR engine ----------
-  let engine = null;            // { worker, langs }
-  const loaded = new Set();     // 'core' and the language codes loaded into the current engine
-  let loadingLangs = [];
-  function sizeHint() {
-    const s = settings(), need = [];
-    if (!loaded.has('core')) need.push(['the OCR engine', ENGINE_BYTES]);
-    s.langs.forEach(l => { if (!loaded.has(l)) need.push([LANGS[l][0] + ' data', LANGS[l][1]]); });
-    if (!need.length) return 'The OCR engine is loaded, with ' + listText(s.langs.map(l => LANGS[l][0])) + ' data. Nothing is uploaded.';
-    const total = need.reduce((a, x) => a + x[1], 0);
-    return 'Before reading, the page downloads about ' + mb(total) + ' from this site: ' +
-      listText(need.map(x => x[0] + ' (' + mb(x[1]) + ')')) + '. Nothing is uploaded.';
-  }
-  function updateSize() { setText(sizeEl, sizeHint()); }
+  // ---------- The OCR engine (see ocr above) ----------
+  function updateSize() { setText(sizeEl, ocr.sizeHint(settings().langs)); }
   function setBar(v) { bar.value = Math.max(0, Math.min(100, Math.round(v))); }
-  function onLog(m) {
-    if (!m || typeof m.status !== 'string') return;
-    const p = typeof m.progress === 'number' ? m.progress : 0;
-    if (m.status === 'recognizing text') { if (readingNow) setBar(15 + 85 * p); return; }
-    if (p >= 1) return;
-    if (m.status === 'loading tesseract core') { setBar(5); say('Downloading the OCR engine (' + mb(ENGINE_BYTES) + ')\u2026'); }
-    else if (m.status === 'loading language traineddata' && loadingLangs.length) {
-      setBar(30);
-      say('Downloading ' + listText(loadingLangs.map(l => LANGS[l][0])) + ' data (' + mb(loadingLangs.reduce((a, l) => a + LANGS[l][1], 0)) + ')\u2026');
-    } else if (m.status === 'initializing api') { setBar(80); say('Starting the OCR engine\u2026'); }
-  }
-  function engineFailure() {
-    return friendly('The OCR engine could not be loaded. Check your connection and try again.', { engine: true });
-  }
   function guard(p) { return cancelP ? Promise.race([p, cancelP]) : p; }
-  // tesseract.js hands over its worker only once it is ready, and never answers at all when a
-  // language file fails to download. The Worker it creates (synchronously, at the start of
-  // createWorker) is caught here, so a start that fails or is stopped is ended at once.
-  let starting = null;
-  function createEngine(langs) {
-    const job = { dropped: false, raw: null };
-    starting = job;
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const fail = () => {
-        if (settled) return;
-        settled = true;
-        if (job.raw) job.raw.terminate();
-        reject(engineFailure());
-      };
-      let made;
-      const Native = window.Worker;
-      try {
-        window.Worker = function (src, opts) { job.raw = new Native(src, opts); return job.raw; };
-        window.Worker.prototype = Native.prototype;
-        made = window.Tesseract.createWorker(langs, 1, {
-          workerPath: VENDOR + 'worker.min.js', corePath: VENDOR + 'core', langPath: VENDOR + 'lang',
-          cacheMethod: 'none', workerBlobURL: false, gzip: true, logger: onLog, errorHandler: fail
-        });
-      } catch (e) { window.Worker = Native; fail(); return; }
-      window.Worker = Native;
-      made.then(w => {
-        if (settled || job.dropped) {
-          try { w.terminate(); } catch (e) { /* already gone */ }
-          if (!settled) { settled = true; reject(stopError()); }
-          return;
-        }
-        settled = true;
-        resolve(w);
-      }, fail);
-    }).finally(() => { if (starting === job) starting = null; });
-  }
-  function dropEngine() {
-    if (starting) {
-      starting.dropped = true;
-      if (starting.raw) starting.raw.terminate();
-    }
-    if (engine) { try { engine.worker.terminate(); } catch (e) { /* already gone */ } }
-    engine = null;
-    loaded.clear();
-    updateSize();
-  }
-  async function getEngine(langs) {
-    const want = langs.join('+');
-    if (engine && engine.langs === want) return engine.worker;
-    loadingLangs = langs.filter(l => !loaded.has(l));
-    try {
-      if (!window.Tesseract) {
-        setBar(2);
-        say('Downloading the OCR engine (' + mb(ENGINE_BYTES) + ')\u2026');
-        await guard(loadScript(VENDOR + 'tesseract.min.js').catch(() => { throw engineFailure(); }));
-      }
-      if (!engine) {
-        const w = await guard(createEngine(langs));
-        engine = { worker: w, langs: want };
-      } else {
-        await guard(engine.worker.reinitialize(langs, 1).catch(() => { throw engineFailure(); }));
-        engine.langs = want;
-      }
-      // Tesseract writes notes such as "Estimating resolution as 300" to the console; send them nowhere.
-      await guard(engine.worker.setParameters({ debug_file: '/dev/null' }));
-    } catch (e) {
-      if (!(e && e.stopped)) dropEngine();
-      throw e && (e.stopped || e.engine) ? e : engineFailure();
-    } finally { loadingLangs = []; }
-    loaded.add('core');
-    langs.forEach(l => loaded.add(l));
-    updateSize();
-    return engine.worker;
-  }
+  const dropEngine = () => ocr.dropEngine();
 
   // ---------- Opening pictures and PDFs ----------
   let decoderP = null;
@@ -839,6 +539,17 @@ faq:
       errors.push(clip(name, 60) + ' has no pages, so there is nothing to read. It may be damaged; try saving it again from the app that made it.');
       return null;
     }
+    // A PDF whose author forbids copying its text is not read, from its text or its pictures: as on
+    // Unlock PDF, that is lifted only with the permissions password, which PDF to Text accepts.
+    let perms = null;
+    try { perms = await pdf.getPermissions(); } catch (e) { perms = null; }
+    const lib = await loadPdfjs();
+    if (perms && !(typeof perms.has === 'function' ? perms : new Set(Array.from(perms))).has(lib.PermissionFlag.COPY)) {
+      try { pdf.loadingTask.destroy(); } catch (e) { /* closed */ }
+      errors.push(clip(name, 60) + ' was not read: its author does not allow copying its text. With its permissions password, PDF to Text can read it.');
+      return null;
+    }
+    if (gen !== addGen) { try { pdf.loadingTask.destroy(); } catch (e) { /* closed */ } return null; }
     const use = Math.min(n, MAX_PDF_PAGES), doc = { pdf, name, left: use };
     if (n > use) errors.push('Only the first ' + MAX_PDF_PAGES + ' of the ' + NUM.format(n) + ' pages of ' + clip(name, 60) + ' were added. To read others, take them out first with Split PDF.');
     let first = null;
@@ -915,7 +626,6 @@ faq:
     g.drawImage(src, -src.width / 2, -src.height / 2);
     return c;
   }
-  function release(c) { if (c && c.width !== undefined) { c.width = 0; c.height = 0; } }
   async function makeThumb(pg, src) {
     const k = Math.min(1, THUMB / Math.max(src.width, src.height));
     const c = document.createElement('canvas');
@@ -943,17 +653,6 @@ faq:
     if (pg.seen) URL.revokeObjectURL(pg.seen);
     pg.seen = blob ? URL.createObjectURL(blob) : null;
   }
-  async function renderPdf(page, maxPx) {
-    const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(PDF_DPI / 72, Math.sqrt(maxPx / (base.width * base.height)), MAX_SIDE / Math.max(base.width, base.height));
-    const vp = page.getViewport({ scale });
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.floor(vp.width));
-    c.height = Math.max(1, Math.floor(vp.height));
-    const ctx = c.getContext('2d');
-    await page.render({ canvasContext: ctx, canvas: c, viewport: vp, background: '#ffffff', transform: [c.width / vp.width, 0, 0, c.height / vp.height, 0, 0] }).promise;
-    return c;
-  }
   // The text a PDF page holds, line by line, or '' when it has none worth using (a scan, or
   // a font without a character map, which comes out as symbols).
   async function pdfText(page) {
@@ -971,111 +670,6 @@ faq:
     const bad = out.replace(/[^\ufffd\ue000-\uf8ff\u0000-\u0008\u000e-\u001f]/g, '').length;
     return good >= 3 && bad * 10 <= good ? out : '';
   }
-  // Whether a page is a scan that holds only a little typed text, such as a reference number
-  // or a page number stamped on it later: pictures cover at least half the page, with less
-  // than one stored letter or digit per square inch of picture. Its text is then read from
-  // the picture, as copying would leave out everything scanned.
-  async function mostlyPicture(page, text) {
-    try {
-      const lib = await loadPdfjs(), O = lib.OPS, v = page.view, pageArea = (v[2] - v[0]) * (v[3] - v[1]);
-      if (!(pageArea > 0)) return false;
-      const ops = await page.getOperatorList({ annotationMode: lib.AnnotationMode.DISABLE });
-      const mul = (p, q) => [p[0] * q[0] + p[2] * q[1], p[1] * q[0] + p[3] * q[1], p[0] * q[2] + p[2] * q[3], p[1] * q[2] + p[3] * q[3],
-        p[0] * q[4] + p[2] * q[5] + p[4], p[1] * q[4] + p[3] * q[5] + p[5]];
-      let m = [1, 0, 0, 1, 0, 0], area = 0;
-      const stack = [];
-      // A picture fills the unit square of the current transform; its box is clipped to the page.
-      const paint = t => {
-        const xs = [t[4], t[0] + t[4], t[2] + t[4], t[0] + t[2] + t[4]], ys = [t[5], t[1] + t[5], t[3] + t[5], t[1] + t[3] + t[5]];
-        const w = Math.min(v[2], Math.max(...xs)) - Math.max(v[0], Math.min(...xs));
-        const h = Math.min(v[3], Math.max(...ys)) - Math.max(v[1], Math.min(...ys));
-        if (w > 0 && h > 0) area += w * h;
-      };
-      for (let i = 0; i < ops.fnArray.length; i++) {
-        const fn = ops.fnArray[i], a = ops.argsArray[i];
-        if (fn === O.save) stack.push(m);
-        else if (fn === O.restore) { if (stack.length) m = stack.pop(); }
-        else if (fn === O.transform) m = mul(m, a);
-        else if (fn === O.paintFormXObjectBegin) { stack.push(m); if (a && a[0] && a[0].length === 6) m = mul(m, Array.from(a[0])); }
-        else if (fn === O.paintFormXObjectEnd) { if (stack.length) m = stack.pop(); }
-        else if (fn === O.paintImageXObject || fn === O.paintInlineImageXObject || fn === O.paintImageMaskXObject) paint(m);
-        else if (fn === O.paintImageXObjectRepeat && a && a[3]) for (let k = 0; k + 1 < a[3].length; k += 2) paint(mul(m, [a[1], 0, 0, a[2], a[3][k], a[3][k + 1]]));
-      }
-      area = Math.min(area, pageArea);
-      return area >= pageArea / 2 && text.replace(/[^\p{L}\p{N}]/gu, '').length < area / 5184;
-    } catch (e) { return false; }
-  }
-
-  // The picture at a scale, painted on white, then cleaned up in the worker.
-  async function prepare(src, scale, s) {
-    const w = Math.max(1, Math.round(src.width * scale)), h = Math.max(1, Math.round(src.height * scale));
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    const g = c.getContext('2d', { willReadFrequently: true });
-    g.fillStyle = '#fff';
-    g.fillRect(0, 0, w, h);
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(src, 0, 0, w, h);
-    const data = g.getImageData(0, 0, w, h);
-    release(c);
-    const r = await prepRun(data.data.buffer, w, h, { clean: s.clean, bw: s.bw });
-    return { blob: new Blob([r.buf]), w, h, inverted: r.inverted, view: r.view };
-  }
-  // Tesseract straightens a tilted page by rotateRadians about its centre, and gives boxes in
-  // that straightened picture; each corner is turned back, as a fraction of the picture's size.
-  function ocrResult(d, p) {
-    const rot = d.rotateRadians || 0, cx = p.w / 2, cy = p.h / 2, c = Math.cos(-rot), sn = Math.sin(-rot);
-    const at = (x, y) => [(cx + (x - cx) * c - (y - cy) * sn) / p.w, (cy + (x - cx) * sn + (y - cy) * c) / p.h];
-    const lines = [];
-    (d.blocks || []).forEach(b => (b.paragraphs || []).forEach(par => (par.lines || []).forEach(l => {
-      const text = tidy(l.text), bb = l.bbox;
-      if (!text || !bb) return;
-      lines.push({ text, b: bb, conf: Math.max(0, Math.min(100, Math.round(l.confidence))), poly: [at(bb.x0, bb.y0), at(bb.x1, bb.y0), at(bb.x1, bb.y1), at(bb.x0, bb.y1)] });
-    })));
-    const conf = lines.length ? Math.round(lines.reduce((a, l) => a + l.conf * l.text.length, 0) / lines.reduce((a, l) => a + l.text.length, 0)) : null;
-    const blocks = layout(lines).map(bl => bl.map(par => par.map(i => lines[i].text)));
-    lines.forEach(l => { delete l.b; });
-    return { method: 'ocr', lines, blocks, conf, rot };
-  }
-  // The lines, in Tesseract's reading order, grouped as they look on the page. A block ends
-  // where the picture has a gap of about a blank line or a new column starts; it is a blank
-  // line in the text. Inside a block, a paragraph ends where a line stops well short of the
-  // others or the next line is indented; Join lines into paragraphs joins only within one.
-  const RTL = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/;
-  function layout(ls) {
-    if (!ls.length) return [];
-    const h = median(ls.map(l => l.b.y1 - l.b.y0)) || 1;
-    const newColumn = (a, b) => b.y0 < a.y0 - h / 4 || Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) < 0.3 * Math.min(a.x1 - a.x0, b.x1 - b.x0);
-    const gaps = [];
-    for (let i = 1; i < ls.length; i++) if (!newColumn(ls[i - 1].b, ls[i].b)) gaps.push(Math.max(0, ls[i].b.y0 - ls[i - 1].b.y1));
-    const big = Math.max(0.8 * h, 1.8 * (gaps.length ? Math.min.apply(null, gaps) : 0));
-    const blocks = [];
-    let cur = [0];
-    for (let i = 1; i < ls.length; i++) {
-      const a = ls[i - 1].b, b = ls[i].b;
-      if (newColumn(a, b) || b.y0 - a.y1 > big) { blocks.push(cur); cur = [i]; } else cur.push(i);
-    }
-    blocks.push(cur);
-    return blocks.map(idx => {
-      const left = Math.min.apply(null, idx.map(i => ls[i].b.x0)), right = Math.max.apply(null, idx.map(i => ls[i].b.x1));
-      const width = right - left, rtl = idx.some(i => RTL.test(ls[i].text)), paras = [];
-      let par = [idx[0]];
-      for (let k = 1; k < idx.length; k++) {
-        const a = ls[idx[k - 1]].b, b = ls[idx[k]].b;
-        const short = idx.length > 2 && (rtl ? a.x0 > left + width / 4 : a.x1 < right - width / 4);
-        const indent = rtl ? b.x1 < a.x1 - 0.8 * h : b.x0 > a.x0 + 0.8 * h;
-        if (short || indent) { paras.push(par); par = [idx[k]]; } else par.push(idx[k]);
-      }
-      paras.push(par);
-      return paras;
-    });
-  }
-  // Tesseract puts spaces between Chinese and Japanese characters; they do not belong there.
-  const CJK = '[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\u3000-\\u303f\\uff00-\\uffef]';
-  const CJK_GAP = new RegExp('(' + CJK + ') +(?=' + CJK + ')', 'gu'), CJK_ONE = new RegExp(CJK, 'u');
-  function tidy(t) { return String(t || '').replace(/[\r\n]+/g, ' ').trim().replace(CJK_GAP, '$1'); }
   function textResult(t) {
     const blocks = t.split(/\n{2,}/).map(p => p.split('\n').map(l => l.trim()).filter(Boolean)).filter(p => p.length).map(p => [p]);
     return { method: 'pdf', lines: [], blocks, conf: null, rot: 0 };
@@ -1098,10 +692,10 @@ faq:
       page = await guard(pg.doc.pdf.getPage(pg.no));
       if (s.pdfText && pg.hasText !== false) {
         const t = await guard(pdfText(page));
-        pg.scan = !!t && await guard(mostlyPicture(page, t));
+        pg.scan = !!t && await guard(loadPdfjs().then(lib => ocr.mostlyPicture(lib, page, t), () => false));
         pg.hasText = !!t && !pg.scan;
         if (pg.hasText) {
-          if (!pg.thumb) { const c = await guard(renderPdf(page, THUMB * THUMB)), r = rotated(c, rot); await makeThumb(pg, r); release(c); release(r); }
+          if (!pg.thumb) { const c = await guard(ocr.renderPdf(page, THUMB * THUMB)), r = rotated(c, rot); await makeThumb(pg, r); release(c); release(r); }
           page.cleanup();
           if (pg.seen) { URL.revokeObjectURL(pg.seen); pg.seen = null; }
           finishPage(pg, 'text', textResult(t), ['The text was copied from the PDF file, not read from the picture.']);
@@ -1109,7 +703,7 @@ faq:
         }
       }
       if (s.pdfText && pg.scan) notes.push(SCAN_NOTE);
-      src = await guard(renderPdf(page, MAX_PX));
+      src = await guard(ocr.renderPdf(page, MAX_PX));
       page.cleanup();
     } else {
       const d = await guard(decodeImage(pg));
@@ -1125,47 +719,11 @@ faq:
     await makeThumb(pg, src);
     if (pg === selected) showSelected();
     setBar(4);
-    const worker = await getEngine(s.langs);
-    say('Reading ' + what + '\u2026');
-    setBar(8);
-    const W = src.width, H = src.height;
-    const base = Math.min(1, Math.sqrt(MAX_PX / (W * H)), MAX_SIDE / Math.max(W, H));
-    if (base < 1) notes.push('Reduced from ' + W + ' \u00d7 ' + H + ' to ' + Math.round(W * base) + ' \u00d7 ' + Math.round(H * base) + ' pixels to keep reading quick.');
-    let prep = await guard(prepare(src, base, s));
-    let factor = 1, why = '';
-    if (s.enlarge === 'auto') {
-      readingNow = false;
-      const r = await guard(worker.recognize(prep.blob, { tessedit_pageseg_mode: s.psm }, { text: false, layoutBlocks: true }));
-      const heights = [];
-      (r.data.layoutBlocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l => { if (l.bbox) heights.push(l.bbox.y1 - l.bbox.y0); })));
-      const lh = median(heights);
-      if (lh && lh < 22) { factor = Math.min(4, Math.max(2, Math.round(36 / lh))); why = 'small'; }
-      else if (!heights.length && W * H * base * base < 2e6) { factor = 2; why = 'none'; }
-    } else factor = Number(s.enlarge) || 1;
-    const room = Math.min(Math.sqrt(MAX_PX / (W * H * base * base)), MAX_SIDE / (Math.max(W, H) * base));
-    if (factor > room) factor = room >= 1.5 ? Math.floor(room * 10) / 10 : 1;
-    let enlarged = '';
-    if (factor > 1) {
-      prep = await guard(prepare(src, base * factor, s));
-      enlarged = 'Enlarged ' + NUM.format(factor) + '\u00d7' + (why === 'small' ? ' because the text is small.' : why === 'none' ? ' because no text was found at its own size.' : '.');
-    }
-    release(src);
-    setBar(15);
-    readingNow = true;
-    let r;
-    try {
-      r = await guard(worker.recognize(prep.blob, { rotateAuto: true, tessedit_pageseg_mode: s.psm }, { text: false, blocks: true }));
-    } catch (e) {
-      if (e && e.stopped) throw e;
-      dropEngine();
-      throw friendly('the OCR engine stopped while reading it (the picture may be too large for this device).');
-    } finally { readingNow = false; }
+    const read = await ocr.read(src, s, guard, { engineReady: () => { say('Reading ' + what + '\u2026'); setBar(8); } });
     if (!pages.includes(pg)) return;
-    const result = ocrResult(r.data, prep);
-    await keepView(pg, prep.view);
-    if (enlarged && (why !== 'none' || result.lines.length)) notes.push(enlarged);
-    if (prep.inverted) notes.push('Light text on a dark background: the picture was inverted before reading.');
-    if (Math.abs(result.rot) >= 0.005) notes.push('Straightened by ' + NUM.format(Math.round(Math.abs(result.rot) * 1800 / Math.PI) / 10) + '\u00b0.');
+    const result = read.result;
+    await keepView(pg, read.prep.view);
+    notes.push(...read.notes);
     result.langs = s.langs;
     if (uncertain(result)) notes.push('Little of this page was read with confidence. ' + unsureHint(s.langs));
     finishPage(pg, key, result, notes);
@@ -1218,7 +776,6 @@ faq:
       running = false;
       cancelRun = null;
       cancelP = null;
-      readingNow = false;
       setBusy(false);
     }
     noteErrors = noteErrors.concat(errors);
@@ -1278,24 +835,11 @@ faq:
   continueBtn.addEventListener('click', () => { continueRow.hidden = true; noteErrors = []; showError(''); pump(); });
 
   // ---------- The text ----------
-  // A line that ends in a hyphen after a letter runs on into the next without a space (the
-  // hyphen stays: it may belong to a word such as well-known); Chinese and Japanese lines join
-  // without a space too.
-  function joinPara(lines) {
-    let out = '';
-    for (const l of lines) {
-      if (!out) { out = l; continue; }
-      const a = Array.from(out.slice(-2)).pop(), b = Array.from(l.slice(0, 2))[0];
-      if (/[\p{L}\p{N}]-$/u.test(out) || (CJK_ONE.test(a) && CJK_ONE.test(b))) out += l;
-      else out += ' ' + l;
-    }
-    return out;
-  }
   function buildText() {
     const join = joinIn.checked, heads = pages.length > 1 && headsIn.checked, parts = [];
     for (const pg of pages) {
       if (!pg.result) continue;
-      const body = pg.result.blocks.map(bl => bl.map(p => (join ? joinPara(p) : p.join('\n'))).join('\n')).join('\n\n');
+      const body = pg.result.blocks.map(bl => bl.map(p => (join ? ocr.joinPara(p) : p.join('\n'))).join('\n')).join('\n\n');
       if (heads) parts.push('--- ' + pg.label + ' ---' + (body ? '\n' + body : ''));
       else if (body) parts.push(body);
     }
@@ -1459,7 +1003,7 @@ faq:
     const job = ++thumbJob;
     try {
       const page = await pg.doc.pdf.getPage(pg.no);
-      const c = rotated(await renderPdf(page, THUMB * THUMB), pg.rotation);
+      const c = rotated(await ocr.renderPdf(page, THUMB * THUMB), pg.rotation);
       page.cleanup();
       if (!pg.thumb) await makeThumb(pg, c);
       release(c);
