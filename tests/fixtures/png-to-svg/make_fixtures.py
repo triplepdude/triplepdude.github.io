@@ -14,8 +14,16 @@ lettering-mask.png  the ink as Otsu's threshold splits it (255 = ink), with the
               luminance L = (299 R + 587 G + 114 B + 500) // 1000, ink L <= t.
 photo.jpg     640 x 480 synthetic photo (sky gradient, hills, sun, noise).
 dots.png      400 x 400 white with 6,400 black 3 x 3 squares, 5 px apart.
+signature.png 1200 x 450 white (traced at its own size) with a 2 px navy scribble
+              (20, 30, 90) and a 1.5 px red line (200, 30, 40) at y = 400, drawn at
+              4x and box-filtered: no pixel of either line is flat.
+badge.png     240 x 120 white (traced enlarged 4 times) with soft edges: a black ring
+              (20, 20, 20; centre 60,60, radii 50 and 32), a black slanted bar, a grey
+              rounded block (128; 175..230, 20..60) and a red disc (210, 40, 50;
+              centre 200,83, radius 15).
 expected.json the Otsu threshold of lettering.png, its ink pixels at that threshold
-              and at 60, and the pixels of logo.png at least half opaque.
+              and at 60, the pixels of logo.png at least half opaque, and the pixels
+              of signature.png further than 64 a channel from white on average.
 """
 import json, os, random
 import numpy as np
@@ -97,6 +105,29 @@ for j in range(80):
         d.rectangle([i * 5 + 1, j * 5 + 1, i * 5 + 3, j * 5 + 3], fill=(0, 0, 0))
 dots.save(out('dots.png'))
 
-json.dump({'otsu': int(t), 'logo_opaque': opaque, 'ink_pixels': int((mask > 0).sum()), 'ink_at_60': int((L <= 60).sum())},
+# signature.png
+big = Image.new('RGB', (1200 * S, 450 * S), (255, 255, 255))
+d = ImageDraw.Draw(big)
+pts = []
+for k in range(1201):
+    u = k / 1200
+    pts.append(((100 + 1000 * u) * S, (225 + 110 * np.sin(u * 23) * np.cos(u * 5) + 30 * np.sin(u * 61)) * S))
+d.line(pts, fill=(20, 30, 90), width=2 * S, joint='curve')
+d.line([(150 * S, 400 * S), (1050 * S, 400 * S)], fill=(200, 30, 40), width=6)
+sig = big.resize((1200, 450), Image.BOX)
+sig.save(out('signature.png'))
+sig_ink = int((np.abs(np.asarray(sig).astype(np.int64) - 255).sum(axis=2) > 3 * 64).sum())
+
+# badge.png
+big = Image.new('RGB', (240 * S, 120 * S), (255, 255, 255))
+d = ImageDraw.Draw(big)
+d.ellipse([10 * S, 10 * S, 110 * S, 110 * S], fill=(20, 20, 20))
+d.ellipse([28 * S, 28 * S, 92 * S, 92 * S], fill=(255, 255, 255))
+d.polygon([(125 * S, 100 * S), (150 * S, 15 * S), (165 * S, 15 * S), (140 * S, 100 * S)], fill=(20, 20, 20))
+d.rounded_rectangle([175 * S, 20 * S, 230 * S, 60 * S], 8 * S, fill=(128, 128, 128))
+d.ellipse([185 * S, 68 * S, 215 * S, 98 * S], fill=(210, 40, 50))
+big.resize((240, 120), Image.BOX).save(out('badge.png'))
+
+json.dump({'otsu': int(t), 'logo_opaque': opaque, 'ink_pixels': int((mask > 0).sum()), 'ink_at_60': int((L <= 60).sum()), 'signature_ink': sig_ink},
           open(out('expected.json'), 'w'), indent=1)
 print('otsu', t, 'logo opaque', opaque, 'ink', int((mask > 0).sum()))

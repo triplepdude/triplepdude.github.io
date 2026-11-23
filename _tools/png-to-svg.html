@@ -298,6 +298,25 @@ faq:
     };
     function progress(m, v) { self.postMessage({ type: 'progress', id: m.id, value: v }); }
     function d2(a, r, g, b) { var x = a[0] - r, y = a[1] - g, z = a[2] - b; return x * x + y * y + z * z; }
+    // Squared distance from a colour to the blends of colours a and b (the line between them).
+    function dBlend(a, b, r, g, bl) {
+      var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], L = ux * ux + uy * uy + uz * uz;
+      var t = L ? ((r - a[0]) * ux + (g - a[1]) * uy + (bl - a[2]) * uz) / L : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      var x = a[0] + t * ux - r, y = a[1] + t * uy - g, z = a[2] + t * uz - bl;
+      return x * x + y * y + z * z;
+    }
+    // Whether a colour is within 48 of one of the colours (those of cols whose bit is set in mask; -1 for
+    // all) or of a blend of two of them, as the edge pixels between them are.
+    var FAR2 = 48 * 48;
+    function blendOf(cols, mask, r, g, b) {
+      for (var j = 0; j < cols.length; j++) {
+        if (!(mask & (1 << j))) continue;
+        if (d2(cols[j], r, g, b) <= FAR2) return true;
+        for (var k = j + 1; k < cols.length; k++) if ((mask & (1 << k)) && dBlend(cols[j], cols[k], r, g, b) <= FAR2) return true;
+      }
+      return false;
+    }
     function nearest(cols, r, g, b) {
       var best = 0, bd = Infinity;
       for (var j = 0; j < cols.length; j++) { var d = d2(cols[j], r, g, b); if (d < bd) { bd = d; best = j; } }
@@ -319,20 +338,22 @@ faq:
       }
       return bestT;
     }
-    // Flat pixels: opaque, and no opaque neighbour differs by more than 16 in any channel.
-    // Their colours make the palette, so blended edge pixels do not become colours of their own.
-    function flatMask(px, op, w, h) {
-      var f = new Uint8Array(w * h), T = 16;
+    // Flat pixels: opaque, and no opaque pixel s steps away differs by more than 16 in any channel, s
+    // being the pixels of the traced copy per pixel of the picture (enlarging turns a hard edge into a
+    // smooth ramp that looks flat up close). Their colours make the palette, so blended edge pixels do
+    // not become colours of their own.
+    function flatMask(px, op, w, h, s) {
+      var f = new Uint8Array(w * h), T = 16, sw = s * w;
       function close(o, p) { return Math.abs(px[o] - px[p]) <= T && Math.abs(px[o + 1] - px[p + 1]) <= T && Math.abs(px[o + 2] - px[p + 2]) <= T; }
       for (var y = 0; y < h; y++) {
         for (var x = 0; x < w; x++) {
           var i = y * w + x;
           if (!op[i]) continue;
           var o = 4 * i, ok = true;
-          if (x > 0 && op[i - 1] && !close(o, o - 4)) ok = false;
-          else if (x < w - 1 && op[i + 1] && !close(o, o + 4)) ok = false;
-          else if (y > 0 && op[i - w] && !close(o, o - 4 * w)) ok = false;
-          else if (y < h - 1 && op[i + w] && !close(o, o + 4 * w)) ok = false;
+          if (x >= s && op[i - s] && !close(o, o - 4 * s)) ok = false;
+          else if (x < w - s && op[i + s] && !close(o, o + 4 * s)) ok = false;
+          else if (y >= s && op[i - sw] && !close(o, o - 4 * sw)) ok = false;
+          else if (y < h - s && op[i + sw] && !close(o, o + 4 * sw)) ok = false;
           if (ok) f[i] = 1;
         }
       }
@@ -419,39 +440,97 @@ faq:
           cen.splice(pb, 1);
         }
       }
-      return cen.map(function (c) { return [Math.round(c[0]), Math.round(c[1]), Math.round(c[2])]; });
+      var out = cen.map(function (c) { return [Math.round(c[0]), Math.round(c[1]), Math.round(c[2])]; });
+      if (logo && useFlat) addThin(px, op, flat, out, m);
+      return out;
+    }
+    // Lines and dots too thin to have flat pixels (a signature, a line drawing, small text): opaque
+    // pixels unlike every colour of the palette and unlike any blend of two of them. When there are
+    // some, their colours are added, the most distinct first and leaving out blends of colours already
+    // in, up to the number of colours asked for.
+    function addThin(px, op, flat, out, m) {
+      if (out.length >= m.colours) return;
+      var n = op.length, thin = new Uint8Array(n), seen = new Uint8Array(1 << 24), nThin = 0, nOp = 0, i;
+      for (i = 0; i < n; i++) {
+        if (!op[i]) continue;
+        nOp++;
+        if (flat[i]) continue;
+        var o = 4 * i, key = (px[o] << 16) | (px[o + 1] << 8) | px[o + 2], v = seen[key];
+        if (!v) v = seen[key] = blendOf(out, -1, px[o], px[o + 1], px[o + 2]) ? 1 : 2;
+        if (v === 2) { thin[i] = 1; nThin++; }
+      }
+      if (nThin < Math.max(16, nOp * 0.0005)) return;
+      var more = quantise(px, thin, null, m).map(function (c) {
+        var bd = Infinity;
+        for (var j = 0; j < out.length; j++) bd = Math.min(bd, d2(out[j], c[0], c[1], c[2]));
+        return { c: c, d: bd };
+      }).sort(function (a, b) { return b.d - a.d; });
+      for (var k = 0; k < more.length && out.length < m.colours; k++) {
+        var c = more[k].c;
+        if (!blendOf(out, -1, c[0], c[1], c[2])) out.push(c);
+      }
     }
     // Every opaque pixel gets its nearest palette colour. In logos, a blended edge pixel may only take
-    // a colour that a flat pixel within 2 px of it has, so no thin rims of a third colour appear.
-    function assign(px, op, flat, w, h, cols, idx) {
-      var n = w * h, cache = new Uint8Array(1 << 24), i, o;
+    // a colour that a flat pixel within 3 pixels of the picture (3 s here) has, so no thin rims of a third
+    // colour appear. One unlike those colours and their blends, or with no flat pixel that near, is the
+    // edge of a line or dot too thin for flat pixels: see mixed.
+    function assign(px, op, flat, w, h, cols, idx, s) {
+      var n = w * h, cache = new Uint8Array(1 << 24), mixes = flat ? new Uint8Array(1 << 24) : null, i, o, x, y;
       function near(o2) {
         var k = (px[o2] << 16) | (px[o2 + 1] << 8) | px[o2 + 2], v = cache[k];
         if (!v) { v = nearest(cols, px[o2], px[o2 + 1], px[o2 + 2]) + 1; cache[k] = v; }
         return v - 1;
       }
+      // A pixel close to a colour gets that colour. One unlike every colour is taken as a blend of two
+      // (one of them among those in mask, -1 for any) and gets the nearer of the two, so the edge of a
+      // blue line on white stays blue or white, not the paler blue of another shape.
+      function mixed(o2, mask) {
+        var r = px[o2], g = px[o2 + 1], b = px[o2 + 2], k0 = near(o2);
+        if (d2(cols[k0], r, g, b) <= FAR2) return k0;
+        var bq = -1, bj = -1, bd2 = FAR2;
+        for (var q = 0; q < cols.length; q++) {
+          if (!(mask & (1 << q))) continue;
+          for (var j = 0; j < cols.length; j++) {
+            if (j === q) continue;
+            var d = dBlend(cols[q], cols[j], r, g, b);
+            if (d < bd2) { bd2 = d; bq = q; bj = j; }
+          }
+        }
+        return bj < 0 ? k0 : d2(cols[bj], r, g, b) < d2(cols[bq], r, g, b) ? bj : bq;
+      }
+      function mixedAny(o2) {
+        var k = (px[o2] << 16) | (px[o2 + 1] << 8) | px[o2 + 2], v = mixes[k];
+        if (!v) { v = mixed(o2, -1) + 1; mixes[k] = v; }
+        return v - 1;
+      }
       for (i = 0; i < n; i++) if (op[i] && (!flat || flat[i])) idx[i] = near(4 * i);
       if (!flat) return;
-      for (var y = 0; y < h; y++) {
-        for (var x = 0; x < w; x++) {
+      // The colours of the flat pixels within R, a bit each: first across, then up and down.
+      var R = 3 * s, bits = new Uint32Array(n), across = new Uint32Array(n);
+      for (i = 0; i < n; i++) if (flat[i]) bits[i] = 1 << idx[i];
+      for (y = 0; y < h; y++) {
+        var row = y * w;
+        for (x = 0; x < w; x++) {
+          var mk = 0;
+          for (var xx = Math.max(0, x - R), xe = Math.min(w - 1, x + R); xx <= xe; xx++) mk |= bits[row + xx];
+          across[row + x] = mk;
+        }
+      }
+      for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
           i = y * w + x;
           if (!op[i] || flat[i]) continue;
           var mask = 0;
-          for (var yy = Math.max(0, y - 2); yy <= Math.min(h - 1, y + 2); yy++) {
-            for (var xx = Math.max(0, x - 2); xx <= Math.min(w - 1, x + 2); xx++) {
-              var q = yy * w + xx;
-              if (flat[q]) mask |= 1 << idx[q];
-            }
-          }
+          for (var yy = Math.max(0, y - R), ye = Math.min(h - 1, y + R); yy <= ye; yy++) mask |= across[yy * w + x];
           o = 4 * i;
-          if (!mask) { idx[i] = near(o); continue; }
+          if (!mask) { idx[i] = mixedAny(o); continue; }
           var best = 0, bd = Infinity;
           for (var j = 0; j < cols.length; j++) {
             if (!(mask & (1 << j))) continue;
             var d = d2(cols[j], px[o], px[o + 1], px[o + 2]);
             if (d < bd) { bd = d; best = j; }
           }
-          idx[i] = best;
+          idx[i] = bd > FAR2 && !blendOf(cols, mask, px[o], px[o + 1], px[o + 2]) ? mixed(o, mask) : best;
         }
       }
     }
@@ -521,10 +600,10 @@ faq:
         // Pixels at least half opaque count as solid; fainter ones are left out (faint: there are some).
         var op = new Uint8Array(n);
         for (i = 0; i < n; i++) { var a0 = px[4 * i + 3]; if (a0 >= 128) op[i] = 1; else if (a0) faint = true; }
-        var flat = m.mode === 'logo' ? flatMask(px, op, w, h) : null;
+        var sc = Math.max(1, Math.round(m.scale || 1)), flat = m.mode === 'logo' ? flatMask(px, op, w, h, sc) : null;
         var cols = m.palette || quantise(px, op, flat, m);
         progress(m, 0.15);
-        if (cols.length) assign(px, op, flat, w, h, cols, idx);
+        if (cols.length) assign(px, op, flat, w, h, cols, idx, sc);
         pal = cols.map(function (c) { return { rgb: c, count: 0, removed: false }; });
         for (i = 0; i < n; i++) if (idx[i] !== 255) pal[idx[i]].count++;
         (m.removed || []).forEach(function (c) {
@@ -585,11 +664,12 @@ faq:
     thrIn.setAttribute('aria-valuetext', t + (auto ? ', automatic' : ''));
   }
   // Speck size is in pixels of the picture as opened; the trace may run on an enlarged or reduced
-  // copy, and a speck s pixels across has an outline of about 4 s points there.
+  // copy (scale: its pixels per pixel of the picture), and a speck s pixels across has an outline of
+  // about 4 s points there.
   function jobOptions() {
     var v = st.vals[st.mode], s = v.speck, k = st.work && st.src ? st.work.w / st.src.w0 : 1;
     return {
-      mode: st.mode, colours: v.colours, pathomit: s ? Math.max(1, Math.round(4 * s * k)) + 1 : 0,
+      mode: st.mode, colours: v.colours, scale: k, pathomit: s ? Math.max(1, Math.round(4 * s * k)) + 1 : 0,
       ltres: LINE_ERR[v.smooth], qtres: CURVE_ERR[v.smooth], corners: v.smooth <= 5,
       threshold: st.mode === 'bw' && !v.auto ? v.threshold : null, invert: !!v.invert
     };
@@ -746,11 +826,15 @@ faq:
   // The colours drawn in the SVG (a colour whose shapes were all dropped as specks is not), then the
   // removed ones. Focus in a list stays there: on the same colour, or, when that colour moved to the
   // other list, on the one that took its place (or on the moved colour when its list is now empty).
+  // The page scrolls to it only if the list was in view: someone who pressed Remove and scrolled up to
+  // the picture stays there.
   function renderColours() {
     var r = st.res, a = document.activeElement, keep = null, shown = [], gone = [];
     [listEl, removedEl].forEach(function (ul) {
       var li = a && a !== ul && ul.contains(a) ? a.closest('li') : null;
-      if (li) keep = { ul: ul, hex: li.dataset.hex, kind: a.dataset.kind, pos: Array.prototype.indexOf.call(ul.children, li) };
+      if (!li) return;
+      var box = a.getBoundingClientRect();
+      keep = { ul: ul, hex: li.dataset.hex, kind: a.dataset.kind, pos: Array.prototype.indexOf.call(ul.children, li), seen: box.bottom > 0 && box.top < innerHeight };
     });
     listEl.textContent = ''; removedEl.textContent = '';
     if (r) {
@@ -768,7 +852,9 @@ faq:
     var sel = '[data-kind="' + keep.kind + '"]', items = keep.ul.children;
     var to = keep.ul.querySelector('li[data-hex="' + keep.hex + '"] ' + sel) || (items.length ? items[Math.min(keep.pos, items.length - 1)].querySelector(sel) : null) ||
       (keep.ul === listEl ? removedEl : listEl).querySelector('li[data-hex="' + keep.hex + '"] button') || listEl.querySelector('[data-kind]');
-    if (to) to.focus();
+    if (!to) return;
+    to.focus({ preventScroll: true });
+    if (keep.seen) to.scrollIntoView({ block: 'nearest' });
   }
   function sameRgb(a, b) { return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]; }
   function removeColour(rgb) {

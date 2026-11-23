@@ -91,21 +91,33 @@ function jpegInfo(buf) {
         p += 1 + size;
       }
     }
-    if (m === 0xe1 && buf.toString('latin1', i + 4, i + 10) === 'Exif\0\0') {
-      const t = i + 10, le = buf.toString('latin1', t, t + 2) === 'II';
-      const u16 = o => (le ? buf.readUInt16LE(t + o) : buf.readUInt16BE(t + o)), u32 = o => (le ? buf.readUInt32LE(t + o) : buf.readUInt32BE(t + o));
-      const ifd = u32(4), count = u16(ifd), tags = {};
-      for (let k = 0; k < count; k++) {
-        const e = ifd + 2 + k * 12, tag = u16(e), type = u16(e + 2), n = u32(e + 4);
-        if (type === 2) tags[tag] = buf.toString('latin1', n > 4 ? t + u32(e + 8) : t + e + 8, (n > 4 ? t + u32(e + 8) : t + e + 8) + n - 1);
-        else if (type === 5) tags[tag] = [u32(u32(e + 8)), u32(u32(e + 8) + 4)]; // a rational: numerator, denominator
-        else tags[tag] = type === 3 ? u16(e + 8) : u32(e + 8);
-      }
-      info.exif = tags;
-    }
+    if (m === 0xe1 && buf.toString('latin1', i + 4, i + 10) === 'Exif\0\0') info.exif = tiffTags(buf, i + 10);
     i += 2 + len;
   }
   return info;
+}
+
+// The IFD0 tags of an EXIF block (TIFF layout) that starts at offset t of buf.
+function tiffTags(buf, t) {
+  const le = buf.toString('latin1', t, t + 2) === 'II';
+  const u16 = o => (le ? buf.readUInt16LE(t + o) : buf.readUInt16BE(t + o)), u32 = o => (le ? buf.readUInt32LE(t + o) : buf.readUInt32BE(t + o));
+  const ifd = u32(4), count = u16(ifd), tags = {};
+  for (let k = 0; k < count; k++) {
+    const e = ifd + 2 + k * 12, tag = u16(e), type = u16(e + 2), n = u32(e + 4);
+    if (type === 2) tags[tag] = buf.toString('latin1', n > 4 ? t + u32(e + 8) : t + e + 8, (n > 4 ? t + u32(e + 8) : t + e + 8) + n - 1);
+    else if (type === 5) tags[tag] = [u32(u32(e + 8)), u32(u32(e + 8) + 4)]; // a rational: numerator, denominator
+    else tags[tag] = type === 3 ? u16(e + 8) : u32(e + 8);
+  }
+  return tags;
+}
+
+// The EXIF IFD0 tags of a WebP file, from its EXIF chunk (RIFF), or null.
+function webpExif(buf) {
+  for (let o = 12; o + 8 <= buf.length; o += 8 + buf.readUInt32LE(o + 4) + (buf.readUInt32LE(o + 4) & 1)) {
+    if (buf.toString('latin1', o, o + 4) !== 'EXIF') continue;
+    return tiffTags(buf, buf.toString('latin1', o + 8, o + 14) === 'Exif\0\0' ? o + 14 : o + 8);
+  }
+  return null;
 }
 
 module.exports = async ({ page, open, assert, fixtures, url, base }) => {
@@ -305,6 +317,15 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Shift+ArrowDown');
   assert.equal(await fields(), '21,30,40,40');
+  // Keys pressed in a row give a screen reader one summary, once they pause, not one for each key.
+  const keys = k => page.$eval('#crp-editor', (el, k) => { for (let i = 0; i < 3; i++) el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }, k);
+  await page.evaluate(() => { window.__live = 0; });
+  await keys('ArrowRight');
+  assert.equal(await fields(), '24,30,40,40');
+  await page.waitForFunction(() => / at 24, 30\./.test(document.querySelector('#crp-info').textContent));
+  assert.equal(await page.evaluate(() => window.__live), 1, 'the live summary is written once for three keys in a row');
+  await keys('ArrowLeft');
+  assert.equal(await fields(), '21,30,40,40');
   const prevented = await page.$eval('#crp-editor', el => {
     const e = new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true, cancelable: true });
     el.dispatchEvent(e);
@@ -324,8 +345,22 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.doesNotMatch(await page.textContent('#crp-zoom-val'), /Fit/);
   await page.keyboard.press('0');
   assert.match(await page.textContent('#crp-zoom-val'), /^Fit/);
-  // The keyboard alone: Tab from the editor reaches the zoom buttons, and Enter presses them.
-  await type('#crp-x', '10'); await type('#crp-y', '20'); await type('#crp-w', '30'); await type('#crp-h', '40');
+  // The mouse wheel zooms in too.
+  const eb = await ed.boundingBox();
+  await page.mouse.move(eb.x + eb.width / 2, eb.y + eb.height / 2);
+  await page.mouse.wheel(0, -240);
+  await page.waitForFunction(() => !/Fit/.test(document.querySelector('#crp-zoom-val').textContent));
+  await page.keyboard.press('0');
+  assert.match(await page.textContent('#crp-zoom-val'), /^Fit/);
+  // With a ratio, Alt + arrow keys resize the box and keep the ratio.
+  await page.selectOption('#crp-ratio', '4:3');
+  assert.equal(await fields(), '0,0,267,200');
+  await ed.focus();
+  await page.keyboard.press('Alt+Shift+ArrowLeft');
+  await page.keyboard.press('Alt+ArrowUp');
+  assert.equal(await fields(), '0,0,256,192', 'ten narrower, then one less tall, at 4:3');
+  await page.selectOption('#crp-ratio', 'free');
+  await type('#crp-w', '30'); await type('#crp-h', '40'); await type('#crp-x', '10'); await type('#crp-y', '20');
 
   // ---------- Turning and mirroring ----------
   await page.click('#crp-rotate');
@@ -399,6 +434,7 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   await type('#crp-x', '0'); await type('#crp-y', '0');
   await page.selectOption('#crp-format', 'jpeg');
   assert.equal(await page.textContent('#crp-download'), 'Download JPG');
+  assert.equal(await page.textContent('#crp-out-hint'), 'JPG has no transparency, so see-through areas turn white.');
   assert.equal(await page.isVisible('#crp-q-field'), true);
   let d = await download();
   assert.equal(d.name, 'grid-cropped.jpg');
@@ -437,6 +473,20 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   d = await download();
   assert.equal(jpegInfo(d.buf).exif, null, 'no EXIF at all once unticked');
   await page.check('#crp-exif');
+  // A WebP has no DPI field: the DPI goes into the resolution of the camera details it keeps.
+  await page.selectOption('#crp-format', 'webp');
+  await type('#crp-dpi', '300');
+  d = await download();
+  const we = webpExif(d.buf);
+  assert.deepEqual([we[0x010f], we[0x011a], we[0x011b], we[0x0128]], ['TestCam', [300, 1], [300, 1], 2], 'the WebP’s camera details say 300 dpi');
+  assert.equal(await page.textContent('#crp-out-hint'), '');
+  // Camera details without a resolution (image-converter/rotated.jpg has none) cannot hold it.
+  await openFile('../image-converter/rotated.jpg', 'rotated.jpg');
+  assert.equal(await page.isVisible('#crp-exif'), true);
+  assert.equal(await page.textContent('#crp-out-hint'), 'WebP files have no DPI setting, so the DPI is not saved.');
+  await page.selectOption('#crp-format', 'same');
+  await type('#crp-dpi', '');
+  await openFile('photo.jpg');
   // The quality slider, once moved, applies.
   await page.$eval('#crp-quality', el => { el.value = '50'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   assert.equal(await page.textContent('#crp-q-out'), '50');
@@ -636,7 +686,12 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.textContent('#crp-error'), '', 'the message goes once the picture is open');
   assert.equal(await page.textContent('#crp-download'), 'Download PNG');
   assert.equal((await download()).name, 'small-cropped.png', 'then the new picture is saved');
-  await openFile(['grid.png', 'small.png'], 'grid.png and 1 more');
+  // A camera RAW file among the pictures opened is left out of the batch, and the page says so.
+  const payload = n => ({ name: n, mimeType: 'image/png', buffer: fs.readFileSync(path.join(fixtures, n)) });
+  await page.setInputFiles('#crp-file', [payload('grid.png'), { name: 'IMG_0002.NEF', mimeType: 'image/x-nikon-nef', buffer: Buffer.from('MM\0*fake raw') }, payload('small.png')]);
+  await page.waitForFunction(() => document.querySelector('#crp-drop-title').textContent.startsWith('grid.png'));
+  assert.equal(await page.textContent('#crp-drop-title'), 'grid.png and 1 more');
+  assert.equal(await page.textContent('#crp-error'), 'Skipped IMG_0002.NEF (camera RAW files are not supported).');
 
   // ---------- Files that cannot be cropped ----------
   await page.setInputFiles('#crp-file', { name: 'oops.png', mimeType: 'image/png', buffer: Buffer.from('not an image at all') });
@@ -815,9 +870,10 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   const lctx = await page.context().browser().newContext({ acceptDownloads: true });
   await lctx.addInitScript(() => {
     const real = HTMLCanvasElement.prototype.getContext;
-    // Like Safari: a 2D canvas over the limit draws nothing and reads back transparent.
+    // Like Safari: a 2D canvas over the limit draws nothing and reads back transparent. Firefox
+    // also limits each side (to 32,767 pixels), here to 4,000.
     HTMLCanvasElement.prototype.getContext = function (type, options) {
-      if (type !== '2d' || this.width * this.height <= 1.2e6) return real.call(this, type, options);
+      if (type !== '2d' || (this.width * this.height <= 1.2e6 && this.width <= 4000 && this.height <= 4000)) return real.call(this, type, options);
       return real.call(Object.assign(document.createElement('canvas'), { width: 1, height: 1 }), type, options);
     };
   });
@@ -834,5 +890,25 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   // The quadrants of big.png meet at 800, 500: here at (800 - 160) * 0.79 = 506 and (500 - 100) * 0.79 = 316.
   assert.deepEqual([bp.px(250, 150), bp.px(760, 150), bp.px(250, 480), bp.px(760, 480)], [[230, 30, 30, 255], [30, 200, 40, 255], [30, 60, 220, 255], [240, 220, 20, 255]]);
   assert.match(await lp.textContent('#crp-status'), /^Saved big-cropped\.png: 1011 × 632 px, [\d.]+ KB\. It was made from a smaller copy/);
+  // Set to the full crop's size, the copy's pixels are enlarged, and the page says whose pixels they are.
+  await lp.selectOption('#crp-size', 'set');
+  await lp.$eval('#crp-ow', el => { el.value = '1280'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await lp.waitForFunction(() => /enlarged/.test(document.querySelector('#crp-out-hint').textContent));
+  assert.equal(await lp.textContent('#crp-out-hint'), 'The crop covers 1011 × 632 px of the smaller copy, so it is enlarged and may look soft. Saved from a 1264 × 790 px copy, the largest this browser can hold.');
+  await lp.selectOption('#crp-size', 'crop');
+  // A canvas too wide for the browser says nothing about pictures of a smaller area: after a
+  // 6,000 px wide drawing cannot be saved at full size, grid.png still is.
+  await lp.setInputFiles('#crp-file', { name: 'wide.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="6000" height="10"><rect width="6000" height="10" fill="#00f"/></svg>') });
+  await lp.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'wide.svg');
+  await lp.selectOption('#crp-format', 'png');
+  await lp.click('#crp-download');
+  await lp.waitForFunction(() => document.querySelector('#crp-error').textContent);
+  assert.match(await lp.textContent('#crp-error'), /^This browser cannot make a picture of 4,800 × 8 px\./);
+  await lp.setInputFiles('#crp-file', path.join(fixtures, 'grid.png'));
+  await lp.waitForFunction(() => document.querySelector('#crp-drop-title').textContent === 'grid.png');
+  const [gdl] = await Promise.all([lp.waitForEvent('download'), lp.click('#crp-download')]);
+  const gp = decodePng(fs.readFileSync(await gdl.path()), assert);
+  assert.deepEqual([gp.w, gp.h], [240, 160], 'grid.png is saved at full size, not from a smaller copy');
+  checkGrid(gp, null, (i, j) => [30 + i, 20 + j], 'grid.png after a canvas too wide');
   await lctx.close();
 };

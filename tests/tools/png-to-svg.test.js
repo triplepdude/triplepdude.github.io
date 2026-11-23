@@ -47,6 +47,32 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   };
   const colourList = () => page.$$eval('#p2s-list li .p2s-hex', l => l.map(x => x.firstChild.textContent));
   const setRange = (sel, v) => page.$eval(sel, (el, v) => { el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+  // Holds the messages of each tracing worker started from now on (window.p2sW[k], k from 0) until it
+  // is released, so that a trace is still running, or finishes late, exactly when a test needs it.
+  const holdWorkers = () => page.evaluate(() => {
+    const W = window.p2sWorker = window.Worker;
+    window.p2sW = [];
+    window.Worker = function (url) {
+      const w = new W(url), rec = { held: [], hold: true, done: false, handler: null };
+      rec.release = () => { rec.hold = false; rec.held.splice(0).forEach(e => rec.handler && rec.handler.call(w, e)); };
+      w.addEventListener('message', e => {
+        if (e.data.type !== 'progress') rec.done = true;
+        if (rec.hold) rec.held.push(e); else if (rec.handler) rec.handler.call(w, e);
+      });
+      Object.defineProperty(w, 'onmessage', { get: () => rec.handler, set: f => { rec.handler = f; } });
+      window.p2sW.push(rec);
+      return w;
+    };
+  });
+  const releaseWorker = k => page.evaluate(k => window.p2sW[k].release(), k);
+  const unholdWorkers = () => page.evaluate(() => { window.Worker = window.p2sWorker; window.p2sW.forEach(r => r.release()); });
+  // A fixture handed to the page as a File: dropped on the drop area, or pasted.
+  const handOver = (how, name) => page.evaluate(([how, data, name]) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(data), c => c.charCodeAt(0))], name, { type: 'image/png' }));
+    if (how === 'paste') document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    else for (const type of ['dragenter', 'dragover', 'drop']) document.querySelector('#p2s-drop').dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [how, b64(name), name]);
 
   // ---------- The sample logo: four colours, the small red sun included ----------
   await page.waitForFunction(() => /SVG\.$/.test(document.querySelector('#p2s-info').textContent), null, { timeout: 30000 });
@@ -133,7 +159,28 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => /^3 colours/.test(document.querySelector('#p2s-info').textContent));
   assert.equal(await focused(), 'Remove colour #14286e', 'with no removed colour left, the focus goes to the colour put back');
+  // Remove pressed with the mouse, then a scroll up to the picture while it is traced: the page stays
+  // there, though the focus still moves on. (Reduced motion, so that any scroll happens at once.)
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await holdWorkers();
+  await page.click('button[aria-label="Remove colour #14286e"]');
+  await page.waitForFunction(() => window.p2sW.length === 1);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  assert.ok(await page.$eval('#p2s-list', el => el.getBoundingClientRect().top > innerHeight), 'the colour list is out of view');
+  await releaseWorker(0);
+  await page.waitForFunction(() => /^2 colours/.test(document.querySelector('#p2s-info').textContent));
+  assert.equal(await page.evaluate(() => scrollY), 0, 'the page does not jump back to the colour list');
+  assert.equal(await focused(), `Remove colour ${green}`);
+  await unholdWorkers();
+  await page.emulateMedia({ reducedMotion: null });
+  await page.click('button[aria-label="Restore colour #14286e"]');
+  await page.waitForFunction(() => /^3 colours/.test(document.querySelector('#p2s-info').textContent));
 
+  // Escape ends pick mode.
+  await page.click('#p2s-pickbtn');
+  await page.keyboard.press('Escape');
+  assert.deepEqual(await page.evaluate(() => [document.querySelector('#p2s-pickbtn').getAttribute('aria-pressed'), document.querySelector('#p2s-view').classList.contains('is-picking')]),
+    ['false', false], 'Escape ends picking');
   // Pick mode: a click on the picture removes the colour under it.
   await page.click('#p2s-pickbtn');
   assert.equal(await page.getAttribute('#p2s-pickbtn', 'aria-pressed'), 'true');
@@ -151,6 +198,37 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await page.waitForFunction(() => /Copied/.test(document.querySelector('#p2s-copy').textContent));
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), svg.text);
 
+  // ---------- Quick changes: a trace overtaken by a newer one is never shown or saved ----------
+  // At Speck size 20 the 8 px accent goes; at 0 it stays. The first trace ends after the second began.
+  await holdWorkers();
+  await setRange('#p2s-speck', 20);
+  await page.waitForFunction(() => window.p2sW.length === 1 && window.p2sW[0].done);
+  await setRange('#p2s-speck', 0);
+  await page.waitForFunction(() => window.p2sW.length === 2);
+  const shownBefore = [await info(), await shown()];
+  await releaseWorker(0);
+  assert.deepEqual([await info(), await shown()], shownBefore, 'the overtaken trace is not shown');
+  // Download pressed twice from the keyboard while the newest trace runs: one file, from that trace.
+  let saves = 0;
+  const onSave = () => saves++;
+  page.on('download', onSave);
+  const newest = page.waitForEvent('download', { timeout: 60000 });
+  await page.focus('#p2s-download');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.p2sW[1].done);
+  await releaseWorker(1);
+  const newestText = fs.readFileSync(await (await newest).path(), 'utf8');
+  assert.equal((await structure(newestText)).groups.length, 3, 'the newest trace (Speck size 0, the accent kept) is saved');
+  assert.equal(newestText, await shown());
+  await page.waitForFunction(() => /^Saved /.test(document.querySelector('#p2s-progress').textContent));
+  await page.waitForTimeout(1000);
+  page.off('download', onSave);
+  assert.equal(saves, 1, 'pressed twice while tracing, it saves once');
+  await unholdWorkers();
+  await setRange('#p2s-speck', 2);
+  await downloadSvg();
+
   // ---------- Keyboard ----------
   await page.focus('#p2s-cut');
   for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowLeft');
@@ -159,6 +237,14 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   // Each side shows only its own picture, so transparent parts of the SVG look transparent.
   assert.deepEqual(await page.evaluate(() => [getComputedStyle(document.querySelector('#p2s-orig')).clipPath, getComputedStyle(document.querySelector('#p2s-svg')).clipPath]),
     ['inset(0px 55% 0px 0px)', 'inset(0px 0px 0px 45%)']);
+  // With a mouse, a drag anywhere on the picture moves the divider.
+  await page.locator('#p2s-view').scrollIntoViewIfNeeded();
+  const sb = await page.locator('#p2s-stage').boundingBox();
+  await page.mouse.move(sb.x + sb.width * 0.45, sb.y + sb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sb.x + sb.width * 0.7, sb.y + sb.height / 2, { steps: 4 });
+  await page.mouse.up();
+  assert.deepEqual([await page.$eval('#p2s-stage', el => el.style.getPropertyValue('--cut')), await page.$eval('#p2s-cut', el => el.value)], ['70%', '70'], 'a mouse drag moves the divider');
   // The zoom is a percentage of the picture's own size (240 px wide), which
   // the SVG keeps, not of the copy enlarged four times for tracing.
   const zoomLabel = () => page.evaluate(() => {
@@ -287,6 +373,63 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.deepEqual(px.px, [[192, 57, 43, 255], [31, 111, 74, 255], [255, 255, 255, 255], [255, 255, 255, 255]]);
   [label, pct] = await page.evaluate(() => [document.querySelector('#p2s-zoom-val').textContent, Math.round(parseFloat(document.querySelector('#p2s-stage').style.width) / 2400 * 100)]);
   assert.equal(label, `Fit (${pct}%)`, 'the zoom is of the picture\'s own size');
+
+  // ---------- Lines too thin for flat pixels, and a small logo on white ----------
+  const near3 = (fill, rgb, tol) => near(rgbOf(fill), rgb, tol);
+  // A signature traced at its own size (dropped on the drop area): no pixel of its lines is flat, yet
+  // they are drawn, each in its own colour.
+  await handOver('drop', 'signature.png');
+  await page.waitForFunction(() => document.querySelector('#p2s-drop-title').textContent === 'signature.png');
+  svg = await downloadSvg();
+  assert.equal(await page.textContent('#p2s-note'), '', 'traced at its own size');
+  assert.match(await info(), /^3 colours, \d shapes, /, 'white, the navy scribble and the red line');
+  let fl = (await structure(svg.text)).groups.map(g => g.fill);
+  assert.ok(fl.includes('#ffffff') && fl.some(f => near3(f, [20, 30, 90], 10)) && fl.some(f => near3(f, [200, 30, 40], 4)), `the lines' own colours: ${fl}`);
+  const inkMatch = await page.evaluate(async ([text, data]) => {
+    async function ink(src) {
+      const img = new Image(); img.src = src; await img.decode();
+      const c = Object.assign(document.createElement('canvas'), { width: 1200, height: 450 }), g = c.getContext('2d');
+      g.drawImage(img, 0, 0, 1200, 450);
+      const d = g.getImageData(0, 0, 1200, 450).data, m = new Uint8Array(540000);
+      for (let i = 0; i < 540000; i++) m[i] = 765 - d[4 * i] - d[4 * i + 1] - d[4 * i + 2] > 192 ? 1 : 0;
+      return m;
+    }
+    const a = await ink(URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }))), b = await ink('data:image/png;base64,' + data);
+    let both = 0, svgOnly = 0, srcOnly = 0;
+    for (let i = 0; i < 540000; i++) { if (a[i] && b[i]) both++; else if (a[i]) svgOnly++; else if (b[i]) srcOnly++; }
+    return { both, svgOnly, srcOnly };
+  }, [svg.text, b64('signature.png')]);
+  assert.ok(inkMatch.both > 0.65 * expected.signature_ink && inkMatch.svgOnly < 0.15 * expected.signature_ink, `the lines are where the picture has them: ${JSON.stringify(inkMatch)}`);
+  // A small logo on white, enlarged 4 times to be traced (pasted): its soft edges add no in-between
+  // shades as colours, and leave no slivers of grey around the black shapes.
+  await handOver('paste', 'badge.png');
+  await page.waitForFunction(() => document.querySelector('#p2s-drop-title').textContent === 'badge.png');
+  svg = await downloadSvg();
+  assert.equal(await page.textContent('#p2s-note'), 'Enlarged 4 times, to 960 × 480 px, so the curves come out smooth.');
+  const counts = (await info()).match(/^(\d+) colours, (\d+) shapes, /);
+  assert.ok(counts && counts[1] === '4' && Number(counts[2]) <= 12, `four colours and few shapes: ${await info()}`);
+  fl = (await structure(svg.text)).groups.map(g => g.fill);
+  assert.ok([[255, 255, 255], [20, 20, 20], [128, 128, 128], [210, 40, 50]].every(c => fl.some(f => near3(f, c, 3))), `the badge's own colours: ${fl}`);
+  px = await pixels(svg.text, 240, 120, [[19, 60], [60, 60], [145, 57], [200, 40], [200, 83], [235, 110]]);
+  assert.deepEqual(px.px.map(p => fl.findIndex(f => near(rgbOf(f), p.slice(0, 3), 3))), [[20, 20, 20], [255, 255, 255], [20, 20, 20], [128, 128, 128], [210, 40, 50], [255, 255, 255]].map(c => fl.findIndex(f => near3(f, c, 3))),
+    'ring, hole, bar, grey block, red disc, ground');
+  // Drawn at 4 times the size without smoothing, so that only the SVG's own colours show.
+  const slivers = await page.evaluate(async text => {
+    const img = new Image();
+    img.src = URL.createObjectURL(new Blob([text.replace('<svg ', '<svg shape-rendering="crispEdges" ')], { type: 'image/svg+xml' }));
+    await img.decode();
+    const c = Object.assign(document.createElement('canvas'), { width: 960, height: 480 }), g = c.getContext('2d');
+    g.drawImage(img, 0, 0, 960, 480);
+    const d = g.getImageData(0, 0, 960, 480).data;
+    let n = 0;
+    for (let y = 0; y < 480; y++) for (let x = 0; x < 960; x++) {
+      const o = 4 * (y * 960 + x);
+      if (x >= 4 * 173 && x < 4 * 232 && y >= 4 * 18 && y < 4 * 62) continue;
+      if (Math.abs(d[o] - 128) + Math.abs(d[o + 1] - 128) + Math.abs(d[o + 2] - 128) <= 9) n++;
+    }
+    return n;
+  }, svg.text);
+  assert.equal(slivers, 0, 'no grey outside the grey block (drawn at 4 times the size)');
 
   // ---------- Thousands of shapes: a warning ----------
   await page.check('input[name="p2s-mode"][value="logo"]');
@@ -426,7 +569,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await phone.waitForFunction(y => scrollY !== y, sy, { timeout: 10000 }).catch(() => {});
   assert.ok(await phone.evaluate(y => scrollY > y, sy), 'a swipe on the picture scrolls the page');
   assert.equal(await phone.$eval('#p2s-stage', el => el.style.getPropertyValue('--cut')), '50%', 'and leaves the divider where it was');
-  await cdp.detach();
   await phone.tap('#p2s-pickbtn');
   await phone.locator('#p2s-view').scrollIntoViewIfNeeded();
   const pb = await phone.locator('#p2s-stage').boundingBox();
@@ -436,5 +578,17 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(removed.startsWith('#1f6f4a'), `the green badge was removed: ${removed}`);
   const knobH = await phone.$eval('#p2s-pickbtn', el => el.getBoundingClientRect().height);
   assert.ok(knobH >= 44, `touch targets are 44 px tall: ${knobH}`);
+  // A finger on the knob drags the divider, and the page stays put. (Last: in this emulation a tap
+  // straight after a drag is not clicked, which a real finger is too slow to meet.)
+  const settled = () => phone.waitForFunction(() => new Promise(r => { const y = scrollY; setTimeout(() => r(scrollY === y), 200); }), null, { timeout: 10000 });
+  await phone.$eval('#p2s-view', el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  await settled();
+  const kn = await phone.$eval('#p2s-knob', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  const stw = await phone.$eval('#p2s-stage', el => el.getBoundingClientRect().width), ky = await phone.evaluate(() => scrollY);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [kn] });
+  for (let k = 1; k <= 6; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: kn.x - k * stw * 0.05, y: kn.y + k }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  assert.deepEqual([await phone.$eval('#p2s-stage', el => el.style.getPropertyValue('--cut')), await phone.evaluate(() => scrollY)], ['20%', ky], 'the knob follows the finger');
+  await cdp.detach();
   await ctx.close();
 };
