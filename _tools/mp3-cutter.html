@@ -1,0 +1,1822 @@
+---
+title: "MP3 Cutter: Trim Audio and Make Ringtones"
+description: "Cut an MP3 without re-encoding, cut out the middle or split it at markers, and make iPhone or Android ringtones. Runs in your browser; nothing is uploaded."
+category: Audio
+keywords: [mp3 cutter, cut mp3, audio trimmer, mp3 trimmer, ringtone cutter, ringtone maker, split mp3, cut mp3 without losing quality, remove part of a song]
+howto: |
+  ## How to cut an MP3
+
+  1. Press **Choose a file** or drop an MP3 on the box. M4A, WAV, FLAC, OGG
+     and the sound of MP4 or MOV videos work too.
+  2. Drag the two handles on the waveform, or type the start and end:
+     *1:23.5*, *83.5* and *83,5* all mean 83.5 seconds. To find a moment by
+     ear, press **Play**, then **I** where the cut should start and **O**
+     where it should end. **Zoom in** to place a handle to the millisecond.
+  3. Choose what to save, press **Cut**, then **Download**.
+
+  ## Cutting without losing quality
+
+  An MP3 is a chain of frames of 1,152 samples, 26 ms at 44.1 kHz, and most
+  frames borrow bytes from the frames before them. **Exact copy** copies the
+  frames you selected as they are, with the two or three before your start
+  that the first ones need, and writes a new LAME tag that tells the player
+  how many samples to skip at each end. Nothing is decoded and encoded again,
+  so the sound is the original's, bit for bit, from your start to your end.
+  Players that read the LAME tag, such as Chrome and ffmpeg, start and stop
+  on the exact sample. Players that ignore it also play the frames before
+  your start: at 44.1 kHz, up to about a tenth of a second.
+
+  Fades, a change of volume, mono and cutting out a part all change the
+  sound, so they are re-encoded, at the bitrate you choose (the file's own to
+  begin with). Re-encoded MP3s and WAVs keep the exact length too.
+
+  ## Cutting out a part, or splitting
+
+  | What to save | You get |
+  |---|---|
+  | The selection | the part between the handles |
+  | Everything but the selection | the file without that part, the join crossfaded over 20 ms |
+  | The selection split at the markers | one file a part, and a ZIP of them all |
+
+  To split a long recording, such as a concert or an audiobook, play it and
+  press **M** wherever a new part begins, or use **Split every** with *5:00*
+  for parts of five minutes. Each part keeps the file's tags and cover, with
+  "(part 2)" and so on after the title.
+
+  ## Making a ringtone
+
+  **Make it a ringtone** keeps 29.5 seconds from the start handle, adds a
+  1-second fade-out and picks MP3. Move the handles to choose the part, then
+  cut and download it.
+
+  | Phone | How to set it |
+  |---|---|
+  | iPhone with iOS 26 or later | In Files, touch and hold the MP3, tap **Share**, then **Use as Ringtone** (files under 30 seconds) |
+  | Older iPhone | Open the MP3 in GarageBand and share it as a **Ringtone** ([Apple's steps](https://support.apple.com/en-us/120692), up to 30 seconds), or copy an **M4R** from a Mac by dragging it onto the iPhone in the Finder |
+  | Android | Open the MP3 in Files by Google, tap **More**, then **Set as ringtone** |
+
+  Apple's Logic Pro help gives 40 seconds as the longest ringtone, so the page
+  warns when an M4R is longer than that.
+
+  ## Other formats
+
+  An M4A (AAC) file can be copied without re-encoding too, cut between its
+  frames of about 23 ms. A cut of a WAV or FLAC file is encoded as MP3 or
+  M4A, or saved as WAV with nothing lost. To turn a cut into another format,
+  use
+  [MP3 to WAV](/mp3-to-wav/) or [M4A to MP3](/m4a-to-mp3/); for the sound of
+  a video, [MP4 to MP3](/mp4-to-mp3/).
+faq:
+  - q: Why does my cut MP3 start a moment early in some players?
+    a: "An exact copy starts with a few frames from before your start, because MP3 frames borrow data from the frames before them, and its LAME tag tells the player to skip those samples. A player that ignores the tag plays them: at 44.1 kHz, up to about a tenth of a second. If that matters, untick Exact copy: the re-encoded file then starts with about 25 ms of silence in such a player instead."
+  - q: Can I cut a song from Apple Music?
+    a: Not one you have through an Apple Music subscription. Its downloads are protected with Apple's FairPlay DRM, which this page cannot read, and it says so when you open one. Songs bought from the iTunes Store since early 2009 carry no DRM and can be cut as M4A files.
+  - q: How long can an iPhone ringtone be?
+    a: Thirty seconds. GarageBand shortens a longer ringtone, and iOS 26's Use as Ringtone is for files under 30 seconds, which is why the ringtone preset stops at 29.5.
+  - q: Is there a file size limit?
+    a: No fixed one. An exact copy reads the whole MP3 into memory, up to 2 GB on a computer and 300 MB on a phone (over 5 hours at 128 kbps); larger files are re-encoded instead. The waveform of an hour-long file takes a little while to read.
+  - q: Are my files uploaded anywhere?
+    a: No. The file is read, cut and saved by your browser on your own device, and the cutter's code is loaded from this site. Nothing you open or type is sent anywhere or stored, and closing the tab discards it all.
+---
+<style>
+.mc-drop { display: grid; justify-items: center; gap: 10px; margin: 0 0 16px; padding: 20px 14px; border: 2px dashed var(--field-border); border-radius: 12px; background: var(--surface-2); text-align: center; }
+.mc-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.mc-drop .actions { justify-content: center; margin: 0; }
+.mc-drop p { margin: 0; max-width: 62ch; }
+.mc-drop-title { font-weight: 600; }
+.mc-h { margin: 24px 0 6px; font-size: 1.1rem; overflow-wrap: anywhere; }
+.mc-info { margin: 0 0 12px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mc-fs { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
+.mc-fs > legend { margin-bottom: 6px; padding: 0; font-size: 14px; font-weight: 600; }
+.mc-fs .checks { margin-bottom: 0; }
+.mc-modes { flex-direction: column; align-items: flex-start; gap: 0; }
+.mc-wave { position: relative; margin: 0; padding: 0 16px; border: 1px solid var(--border); border-radius: 10px 10px 0 0; background: var(--surface-2); overflow: hidden; touch-action: pan-y; -webkit-user-select: none; user-select: none; cursor: text; }
+.mc-track { position: relative; height: 140px; }
+.mc-track canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.mc-handle, .mc-mark, .mc-cursor { position: absolute; top: 0; bottom: 0; z-index: 2; width: 44px; margin-left: -22px; cursor: ew-resize; touch-action: none; outline: none; }
+.mc-handle::before { content: ""; position: absolute; top: 0; bottom: 0; left: 21px; width: 2px; background: var(--text); }
+.mc-grip { position: absolute; top: 50%; left: 14px; width: 16px; height: 36px; margin-top: -18px; border: 2px solid var(--surface); border-radius: 6px; background: var(--text); }
+.mc-mark { z-index: 3; }
+.mc-mark::before { content: ""; position: absolute; top: 0; bottom: 0; left: 21px; width: 0; border-left: 2px dashed var(--text); }
+.mc-flag { position: absolute; bottom: 4px; left: 12px; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 4px; background: var(--text); color: var(--surface); font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; }
+.mc-mark.is-out .mc-flag { opacity: 0.55; }
+.mc-cursor { z-index: 4; }
+.mc-cursor::before { content: ""; position: absolute; top: 0; bottom: 0; left: 21px; width: 2px; background: var(--danger); }
+.mc-cursor::after { content: ""; position: absolute; top: 0; left: 14px; border: 8px solid transparent; border-top: 12px solid var(--danger); }
+.mc-handle:focus-visible .mc-grip, .mc-mark:focus-visible .mc-flag { outline: 3px solid var(--accent); outline-offset: 2px; }
+.mc-cursor:focus-visible::before { width: 4px; left: 20px; box-shadow: 0 0 0 3px var(--accent); }
+.mc-wave-msg { position: absolute; top: 6px; right: 16px; left: 16px; z-index: 1; margin: 0; color: var(--muted); font-size: 13px; text-align: center; pointer-events: none; }
+.mc-wave-msg:empty { display: none; }
+.mc-ruler { position: relative; height: 22px; margin: 0; padding: 0 16px; border: 1px solid var(--border); border-top: 0; background: var(--surface); overflow: hidden; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mc-ruler-in { position: relative; height: 100%; }
+.mc-tick { position: absolute; top: 0; padding-left: 3px; border-left: 1px solid var(--border); line-height: 22px; white-space: nowrap; }
+.mc-over { position: relative; margin: 0 0 12px; padding: 0 16px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 10px 10px; background: var(--surface-2); overflow: hidden; touch-action: pan-y; -webkit-user-select: none; user-select: none; cursor: pointer; outline: none; }
+.mc-over-in { position: relative; height: 40px; }
+.mc-over canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.mc-view { position: absolute; top: 2px; bottom: 2px; min-width: 6px; border: 2px solid var(--text); border-radius: 4px; pointer-events: none; }
+.mc-over:focus-visible .mc-view { outline: 3px solid var(--accent); outline-offset: 1px; }
+.mc-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.mc-bar .btn { white-space: nowrap; }
+.mc-pos { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; font-variant-numeric: tabular-nums; }
+.mc-note { margin: 0 0 12px; }
+.mc .row > .field { flex: 1 1 150px; }
+.mc .mc-opts > .field { flex: 0 1 240px; }
+.mc-len { display: flex; align-items: center; min-height: 44px; font-variant-numeric: tabular-nums; }
+.mc-vol { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.mc-vol input { flex: 1 1 180px; }
+.mc-vol output { min-width: 13ch; font-variant-numeric: tabular-nums; }
+.mc-parts { margin: 0 0 12px; }
+.mc-parts table.data td, .mc-parts table.data th { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mc-parts table.data td:last-child { width: 1%; }
+.mc-every { align-items: flex-end; }
+.mc .mc-every > .field { flex: 0 1 180px; margin-bottom: 0; }
+.mc-ring { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.mc-ring > p { margin: 0 0 8px; }
+.mc-ring .actions { margin: 0; }
+.mc-tags { margin: 0 0 16px; }
+.mc-tags summary { padding: 6px 0; font-weight: 600; cursor: pointer; }
+.mc-tags[open] summary { margin-bottom: 8px; }
+.mc-progress { display: grid; gap: 6px; margin: 0 0 16px; }
+.mc-progress progress { width: 100%; height: 12px; accent-color: var(--accent); }
+.mc-progress span { font-size: 14px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mc-results { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.mc-result { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.mc-result-text { flex: 1 1 220px; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.mc-result-text b { display: block; }
+.mc-result-text span { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.mc .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.mc fieldset:disabled .hint { opacity: 0.8; }
+@media (pointer: coarse) {
+  .mc-tags summary { padding-block: 10px; }
+}
+@media (max-width: 480px) {
+  .mc-track { height: 120px; }
+  .mc-parts table.data { font-size: 13px; }
+  .mc-parts table.data th, .mc-parts table.data td { padding: 8px 4px; }
+  .mc-drop { padding: 16px 10px; }
+  .mc-bar .btn { flex: 1 1 auto; }
+}
+@media (max-width: 400px) {
+  /* The length follows from the start and end; without it the parts fit. */
+  .mc-parts th:nth-child(4), .mc-parts td:nth-child(4) { display: none; }
+  .mc-parts table.data th, .mc-parts table.data td { padding: 8px 3px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-progress progress { transition: none; }
+}
+</style>
+
+<div class="mc" id="mc">
+  <div class="mc-drop" id="mc-drop">
+    <p class="mc-drop-title">Drop an MP3 or another audio file here</p>
+    <div class="actions">
+      <button class="btn" type="button" id="mc-open" aria-describedby="mc-drop-hint mc-file-error">Choose a file…</button>
+      <button class="btn secondary" type="button" id="mc-sample">Try a sample song</button>
+    </div>
+    <input type="file" id="mc-file" hidden accept="audio/*,video/*,.mp3,.m4a,.m4b,.m4r,.aac,.wav,.flac,.ogg,.oga,.opus,.mp4,.mov,.webm,.mkv,.mka,.3gp">
+    <p class="hint" id="mc-drop-hint">MP3 files are cut without re-encoding. M4A, WAV, FLAC, OGG and the sound of videos work too. Nothing is uploaded.</p>
+  </div>
+  <p class="msg error" id="mc-file-error" role="alert"></p>
+
+  <section id="mc-edit" aria-labelledby="mc-edit-h" hidden>
+    <h2 class="mc-h" id="mc-edit-h">Cut <span id="mc-name"></span></h2>
+    <p class="mc-info" id="mc-info"></p>
+    <fieldset class="mc-fs" id="mc-edit-fs">
+    <div class="mc-wave" id="mc-wave">
+      <div class="mc-track" id="mc-box">
+        <canvas id="mc-canvas" role="img" aria-label="Waveform"></canvas>
+        <div id="mc-marks"></div>
+        <div class="mc-handle" id="mc-h-start" role="slider" tabindex="0" aria-label="Start of the selection" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span class="mc-grip"></span></div>
+        <div class="mc-handle" id="mc-h-end" role="slider" tabindex="0" aria-label="End of the selection" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span class="mc-grip"></span></div>
+        <div class="mc-cursor" id="mc-cursor" role="slider" tabindex="0" aria-label="Playhead" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>
+        <p class="mc-wave-msg" id="mc-wave-msg"></p>
+      </div>
+    </div>
+    <div class="mc-ruler" aria-hidden="true"><div class="mc-ruler-in" id="mc-ruler"></div></div>
+    <div class="mc-over" id="mc-over" role="slider" tabindex="0" aria-label="Part of the file shown" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+      <div class="mc-over-in" id="mc-over-in">
+        <canvas id="mc-over-canvas"></canvas>
+        <div class="mc-view" id="mc-view"></div>
+      </div>
+    </div>
+    <div class="mc-bar">
+      <button class="btn" type="button" id="mc-play">Play</button>
+      <button class="btn secondary" type="button" id="mc-play-sel">Play selection</button>
+      <span class="mc-pos" id="mc-pos">0:00.000</span>
+    </div>
+    <div class="mc-bar">
+      <button class="btn secondary" type="button" id="mc-set-start" aria-keyshortcuts="I">Start at playhead (I)</button>
+      <button class="btn secondary" type="button" id="mc-set-end" aria-keyshortcuts="O">End at playhead (O)</button>
+      <button class="btn secondary" type="button" id="mc-mark" aria-keyshortcuts="M">Add marker (M)</button>
+      <button class="btn secondary" type="button" id="mc-all">Select all</button>
+    </div>
+    <div class="mc-bar" role="group" aria-label="Zoom">
+      <button class="btn secondary small" type="button" id="mc-zin" aria-keyshortcuts="+">Zoom in</button>
+      <button class="btn secondary small" type="button" id="mc-zout" aria-keyshortcuts="-">Zoom out</button>
+      <button class="btn secondary small" type="button" id="mc-zsel">Zoom to selection</button>
+      <button class="btn secondary small" type="button" id="mc-zall">Whole file</button>
+    </div>
+    <p class="hint mc-note" id="mc-keys-hint">Tap or click the waveform to move the playhead, and drag the two handles to choose the part. Keys: Space plays and pauses, I and O set the start and end at the playhead, M adds a marker, + and − zoom. A focused handle moves 0.1 s with ← and → (1 s with Shift, 0.01 s with Alt).</p>
+    <div class="row">
+      <div class="field">
+        <label for="mc-start">Start</label>
+        <input type="text" id="mc-start" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="40" aria-describedby="mc-time-hint mc-time-error">
+      </div>
+      <div class="field">
+        <label for="mc-end">End</label>
+        <input type="text" id="mc-end" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="40" aria-describedby="mc-time-hint mc-time-error">
+      </div>
+      <div class="field">
+        <span class="label">Length</span>
+        <span class="mc-len" id="mc-len">0:00.000</span>
+      </div>
+    </div>
+    <p class="hint mc-note" id="mc-time-hint">Type minutes:seconds or seconds: 1:23.5, 83.5 and 83,5 all mean 83.5 seconds. ↑ and ↓ change a time by 0.1 s.</p>
+    <p class="msg error" id="mc-time-error"></p>
+
+    <fieldset class="mc-fs">
+      <legend>What to save</legend>
+      <div class="checks mc-modes">
+        <label class="check"><input type="radio" name="mc-mode" id="mc-m-keep" value="keep" checked> The selection</label>
+        <label class="check"><input type="radio" name="mc-mode" id="mc-m-remove" value="remove"> Everything but the selection (cut it out)</label>
+        <label class="check"><input type="radio" name="mc-mode" id="mc-m-split" value="split"> The selection split at the markers, one file a part</label>
+      </div>
+    </fieldset>
+    <div id="mc-split" hidden>
+      <div class="mc-parts table-wrap" id="mc-parts"></div>
+      <div class="row mc-every">
+        <div class="field">
+          <label for="mc-every">Split every</label>
+          <input type="text" id="mc-every" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="40" value="5:00" aria-describedby="mc-every-hint mc-every-error">
+        </div>
+        <button class="btn secondary" type="button" id="mc-every-add">Add markers</button>
+        <button class="btn secondary" type="button" id="mc-clear-marks">Remove all markers</button>
+      </div>
+      <p class="hint mc-note" id="mc-every-hint">Puts a marker every so often from the start of the selection, such as every 5:00 for parts of five minutes.</p>
+      <p class="msg error" id="mc-every-error"></p>
+    </div>
+    <label class="check mc-note" id="mc-join-row" hidden><input type="checkbox" id="mc-join" checked> Crossfade the join over 20 ms, so that it does not click</label>
+
+    <div class="row">
+      <div class="field">
+        <label for="mc-fadein">Fade in (seconds)</label>
+        <input type="text" id="mc-fadein" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="12" value="0" aria-describedby="mc-fade-error">
+      </div>
+      <div class="field">
+        <label for="mc-fadeout">Fade out (seconds)</label>
+        <input type="text" id="mc-fadeout" class="mono" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="12" value="0" aria-describedby="mc-fade-error">
+      </div>
+    </div>
+    <p class="msg error" id="mc-fade-error"></p>
+    <div class="field">
+      <label for="mc-vol">Volume</label>
+      <div class="mc-vol">
+        <input type="range" id="mc-vol" min="0" max="400" step="5" value="100" aria-describedby="mc-peak">
+        <span id="mc-vol-out">100% (0.0 dB)</span>
+      </div>
+      <span class="hint" id="mc-peak"></span>
+    </div>
+
+    <div class="mc-ring">
+      <p><b>Ringtone</b>: a part under 30 seconds with a 1-second fade-out, as an MP3 that iPhones and Android phones take.</p>
+      <div class="actions">
+        <button class="btn secondary" type="button" id="mc-ring">Make it a ringtone</button>
+        <button class="btn secondary" type="button" id="mc-undo" hidden>Undo ringtone</button>
+      </div>
+      <p class="hint mc-note" id="mc-ring-note" aria-live="polite"></p>
+    </div>
+    </fieldset>
+  </section>
+
+  <section aria-labelledby="mc-out-h">
+    <h2 class="mc-h" id="mc-out-h">Save</h2>
+    <fieldset class="mc-fs" id="mc-out-fs">
+      <fieldset class="mc-fs">
+        <legend>Format</legend>
+        <div class="checks">
+          <label class="check"><input type="radio" name="mc-format" id="mc-f-mp3" value="mp3" checked> MP3</label>
+          <label class="check"><input type="radio" name="mc-format" id="mc-f-m4r" value="m4r"> M4R (iPhone ringtone)</label>
+          <label class="check"><input type="radio" name="mc-format" id="mc-f-m4a" value="m4a"> M4A (AAC)</label>
+          <label class="check"><input type="radio" name="mc-format" id="mc-f-wav" value="wav"> WAV</label>
+        </div>
+      </fieldset>
+      <label class="check" id="mc-exact-row"><input type="checkbox" id="mc-exact" checked aria-describedby="mc-exact-note"> <span id="mc-exact-label">Exact copy: keep the MP3's frames as they are, without re-encoding</span></label>
+      <p class="hint mc-note" id="mc-exact-note"></p>
+      <div class="row mc-opts">
+        <div class="field" id="mc-kbps-field">
+          <label for="mc-kbps">Bitrate when re-encoding</label>
+          <select id="mc-kbps">
+            <option value="64">64 kbps</option>
+            <option value="96">96 kbps</option>
+            <option value="128">128 kbps</option>
+            <option value="160">160 kbps</option>
+            <option value="192" selected>192 kbps</option>
+            <option value="224">224 kbps</option>
+            <option value="256">256 kbps</option>
+            <option value="320">320 kbps</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="mc-channels">Channels</label>
+          <select id="mc-channels">
+            <option value="keep" selected>As in the file</option>
+            <option value="mono">Mono</option>
+          </select>
+        </div>
+      </div>
+      <details class="mc-tags" id="mc-tags">
+        <summary>Tags: title, artist and album</summary>
+        <div class="row">
+          <div class="field"><label for="mc-title">Title</label><input type="text" id="mc-title" autocomplete="off" maxlength="200"></div>
+          <div class="field"><label for="mc-artist">Artist</label><input type="text" id="mc-artist" autocomplete="off" maxlength="200"></div>
+          <div class="field"><label for="mc-album">Album</label><input type="text" id="mc-album" autocomplete="off" maxlength="200"></div>
+        </div>
+        <p class="hint mc-note" id="mc-tags-note">The file's other tags (album artist, composer, year, track number, genre, lyrics) and its cover art are kept. Split parts get "(part 2)" and so on after the title.</p>
+      </details>
+      <p class="hint mc-note" id="mc-estimate"></p>
+    </fieldset>
+    <div class="actions">
+      <button class="btn" type="button" id="mc-save" disabled>Cut</button>
+      <button class="btn secondary" type="button" id="mc-cancel" hidden>Cancel</button>
+    </div>
+    <div class="mc-progress" id="mc-progress" hidden>
+      <progress id="mc-pbar" max="100" value="0" aria-labelledby="mc-progress-text"></progress>
+      <span id="mc-progress-text"></span>
+    </div>
+    <p class="msg error" id="mc-error" role="alert"></p>
+    <p class="visually-hidden" id="mc-status" role="status"></p>
+    <ul class="mc-results" id="mc-results" hidden></ul>
+    <div class="actions" id="mc-zip-row" hidden>
+      <button class="btn" type="button" id="mc-zip">Download all (.zip)</button>
+    </div>
+    <p class="hint mc-note" id="mc-after" hidden></p>
+    <p class="hint mc-note">Keep this page open and on screen until saving ends: phones pause pages in the background.</p>
+  </section>
+</div>
+
+<script src="{{ '/assets/js/audio-wave.js' | relative_url }}"></script>
+<script src="{{ '/assets/js/audio-engine.js' | relative_url }}"></script>
+<script>
+(function () {
+  'use strict';
+
+  var A = window.TTAudio, WV = window.TTWave;
+  var ZIP_URL = new URL({{ '/assets/js/zip.js' | relative_url | jsonify }}, location.href).href;
+  function $(id) { return document.getElementById(id); }
+  var MIN_SEL = 100;          // shortest selection and part, ms
+  var MIN_VIEW = 100;         // narrowest view when zoomed in, ms
+  var BUCKETS = 4000;         // levels of the whole file
+  var MAX_TAG = 200;          // characters in a tag
+  var RING_MS = 29500;        // the ringtone preset: under 30 s
+  var M4R_MS = 40000;         // the longest ringtone Apple's tools make
+  var JOIN_S = 0.02;          // crossfade at a join, s
+  var MAX_MARKS = 99;         // markers, so at most 100 parts
+  var AROUND = 3000;          // what Play selection plays on each side of a part cut out, ms
+  var RATES = [64, 96, 128, 160, 192, 224, 256, 320];
+  var LINK_TEXT = 'Links cannot be cut: this page only reads files on your device. Save the file to your device first, if you own it or may use it, then choose it here.';
+  A.text.unreadable = 'This is not an audio file that this page can read. It reads MP3, M4A, WAV, FLAC, OGG and AAC files, and the sound of MP4, MOV, WebM and MKV videos.';
+
+  var dom = {
+    root: $('mc'), drop: $('mc-drop'), open: $('mc-open'), sample: $('mc-sample'), file: $('mc-file'), fileErr: $('mc-file-error'),
+    edit: $('mc-edit'), name: $('mc-name'), info: $('mc-info'), editFs: $('mc-edit-fs'),
+    wave: $('mc-wave'), box: $('mc-box'), canvas: $('mc-canvas'), marks: $('mc-marks'), hStart: $('mc-h-start'), hEnd: $('mc-h-end'),
+    cursor: $('mc-cursor'), waveMsg: $('mc-wave-msg'), ruler: $('mc-ruler'), over: $('mc-over'), overIn: $('mc-over-in'),
+    overCanvas: $('mc-over-canvas'), view: $('mc-view'), play: $('mc-play'), playSel: $('mc-play-sel'), pos: $('mc-pos'),
+    setStart: $('mc-set-start'), setEnd: $('mc-set-end'), mark: $('mc-mark'), all: $('mc-all'),
+    zin: $('mc-zin'), zout: $('mc-zout'), zsel: $('mc-zsel'), zall: $('mc-zall'),
+    start: $('mc-start'), end: $('mc-end'), len: $('mc-len'), timeErr: $('mc-time-error'),
+    split: $('mc-split'), parts: $('mc-parts'), every: $('mc-every'), everyAdd: $('mc-every-add'), clearMarks: $('mc-clear-marks'), everyErr: $('mc-every-error'),
+    joinRow: $('mc-join-row'), join: $('mc-join'), fadeIn: $('mc-fadein'), fadeOut: $('mc-fadeout'), fadeErr: $('mc-fade-error'),
+    vol: $('mc-vol'), volOut: $('mc-vol-out'), peak: $('mc-peak'), ring: $('mc-ring'), undo: $('mc-undo'), ringNote: $('mc-ring-note'),
+    outFs: $('mc-out-fs'), exactRow: $('mc-exact-row'), exact: $('mc-exact'), exactLabel: $('mc-exact-label'), exactNote: $('mc-exact-note'),
+    kbpsField: $('mc-kbps-field'), kbps: $('mc-kbps'), channels: $('mc-channels'),
+    title: $('mc-title'), artist: $('mc-artist'), album: $('mc-album'), estimate: $('mc-estimate'),
+    save: $('mc-save'), cancel: $('mc-cancel'), progress: $('mc-progress'), pbar: $('mc-pbar'), progressText: $('mc-progress-text'),
+    error: $('mc-error'), status: $('mc-status'), results: $('mc-results'), zipRow: $('mc-zip-row'), zip: $('mc-zip'), after: $('mc-after')
+  };
+
+  // The file being cut, or null: { file, name, base, media, ti, t, durMs, sel { start, end }, marks (ms, in order), head
+  // (the playhead, ms), view { from, to }, peaks (levels of the whole file), scanToken, detail (levels of the part
+  // shown when zoomed in), detailToken, tags, mp3 (a promise of TTAudio.readMp3()) }. Times are ms from the start
+  // of the sound (the track's t0).
+  var st = null;
+  // What the visitor chose; it outlives the file.
+  var opts = { mode: 'keep', format: 'mp3', exact: true, kbps: 192, kbpsSet: false, mono: false, join: true, fadeIn: 0, fadeOut: 0, vol: 100 };
+  var busy = false, job = null, saveToken = 0, openToken = 0, results = [], resultSeq = 0, undo = null;
+
+  // ---------- Small helpers ----------
+  var fmtTime = WV.fmtTime, parseTime = WV.parseTime, parseSeconds = WV.parseSeconds;
+  function pad(n, w) { n = String(n); while (n.length < w) n = '0' + n; return n; }
+  function fmtBytes(n) {
+    if (n < 1000) return n + ' bytes';
+    if (n < 1e6) return (n / 1000).toFixed(n < 1e4 ? 1 : 0) + ' KB';
+    if (n < 1e9) return (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + ' MB';
+    return (n / 1e9).toFixed(2) + ' GB';
+  }
+  // A limit such as 300 MB or 2 GB, without decimals that say nothing.
+  function fmtLimit(n) { return n % 1e9 === 0 ? n / 1e9 + ' GB' : n % 1e6 === 0 ? n / 1e6 + ' MB' : fmtBytes(n); }
+  function fmtDb(gain) {
+    if (gain <= 0) return 'silent';
+    var t = Math.abs(20 * Math.log10(gain)).toFixed(1);
+    return (t === '0.0' ? '' : gain > 1 ? '+' : '−') + t + ' dB';
+  }
+  function fmtKhz(hz) { return (hz / 1000).toLocaleString('en-GB', { maximumFractionDigits: 3 }) + ' kHz'; }
+  function fmtSec(ms) { return (Math.round(ms) / 1000).toLocaleString('en-GB', { maximumFractionDigits: 3 }) + ' s'; }
+  function fmtMs(s) { return Math.round(s * 1000) + ' ms'; }
+  // Cuts text to n characters without splitting a surrogate pair.
+  function cut(s, n) {
+    s = String(s == null ? '' : s);
+    if (s.length <= n) return s;
+    var i = n;
+    if (/[\uD800-\uDBFF]/.test(s.charAt(i - 1))) i--;
+    return s.slice(0, i);
+  }
+  function clean(s) { return cut(String(s == null ? '' : s).slice(0, MAX_TAG * 4).replace(/[\u0000-\u001F\u007F]+/g, ' ').trim(), MAX_TAG); }
+  // A value set by a script or an input method can be longer than maxlength:
+  // it is cut at once, so neither the patterns nor the layout see a megabyte.
+  function capField(f) {
+    var max = f.maxLength;
+    if (max > 0 && f.value.length > max) f.value = cut(f.value, max);
+  }
+  function baseName(name) {
+    var b = String(name || '').replace(/\.[^.\/\\]{1,8}$/, '').trim();
+    return cut(b || 'audio', 120);
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  var lastSaid = '';
+  function say(text) {
+    if (text === lastSaid) return;
+    lastSaid = text;
+    dom.status.textContent = text;
+  }
+  function setMsg(el, text) { if (el.textContent !== text) el.textContent = text; }
+  // A second press on the same button for the same thing within 1.5 s is a double click.
+  function tooSoon(btn, what) {
+    var now = Date.now();
+    if (btn._mcWhat === what && now - btn._mcAt < 1500) return true;
+    btn._mcWhat = what;
+    btn._mcAt = now;
+    return false;
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function userError(text) { var x = new Error(text); x.userText = text; return x; }
+  function errorText(err) {
+    if (err && err.code === 'NO_ENCODER' && err.format === 'aac') return 'This browser cannot write AAC (M4A or M4R) here. Choose MP3, which iPhones running iOS 26 or later also take as a ringtone, or WAV.';
+    if (err && err.code === 'NO_ENCODER') return 'This browser cannot write MP3 here, as it lacks WebAssembly SIMD (Safari before 16.4, for example). Choose M4A or WAV, or update the browser.';
+    if (err && err.code === 'LOAD') return 'The cutter could not be loaded. Check the connection and reload the page.';
+    return A.describe(err, st && st.t && st.t.drm);
+  }
+
+  // ---------- Wake lock ----------
+  var lock = null;
+  function wake(on) {
+    if (!navigator.wakeLock) return;
+    if (on && !lock && document.visibilityState === 'visible') {
+      lock = 'pending';
+      navigator.wakeLock.request('screen').then(function (l) {
+        if (!busy) { l.release().catch(function () {}); lock = null; return; }
+        lock = l;
+        l.addEventListener('release', function () { if (lock === l) lock = null; });
+      }, function () { lock = null; });
+    } else if (!on && lock && lock !== 'pending') {
+      var l = lock;
+      lock = null;
+      l.release().catch(function () {});
+    }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && busy) wake(true);
+    if (document.visibilityState === 'hidden') stopPlay();
+  });
+
+  // ---------- Opening a file ----------
+  function canDecode() { return !!st && !st.t.drm && (st.t.decodable || st.t.whole); }
+  function srcKind() {
+    if (!st) return '';
+    var t = st.t;
+    if (st.media.container === 'mp3' && t.codec === 'mp3' && t.mp3) return 'mp3';
+    if (t.codec === 'aac') return 'aac';
+    return '';
+  }
+  function lossless(t) { return t.codec === 'alac' || t.codec === 'flac' || /^pcm-|^ulaw$|^alaw$/.test(t.codec || ''); }
+  // The bitrate to re-encode at until the visitor picks one: the source's,
+  // rounded up to a step of the list; 320 kbps for lossless sound.
+  function defaultKbps(t) {
+    if (lossless(t)) return 320;
+    var k = t.bitrate > 0 ? t.bitrate / 1000 : 0;
+    if (!k) return 192;
+    return RATES.filter(function (r) { return r >= k - 2; })[0] || 320;
+  }
+  function infoText() {
+    var t = st.t, bits = [A.codecName(t)], m = t.mp3;
+    if (t.bitrate > 0) bits.push((m && m.tag !== 'Info' && m.tag ? 'VBR, about ' : '') + Math.round(t.bitrate / 1000) + ' kbps');
+    bits.push(A.channelsText(t.ch), fmtKhz(t.sr), fmtTime(st.durMs), fmtBytes(st.file.size));
+    if (m) bits.push(m.gapless ? 'gapless (LAME tag)' : 'no LAME tag');
+    return bits.join(' · ');
+  }
+  function tagModel(tags) {
+    var t = A.emptyTags();
+    if (tags) Object.keys(t).forEach(function (k) { if (tags[k] != null) t[k] = tags[k]; });
+    t.images = (tags && tags.images ? tags.images : []).slice(0, 4);
+    return t;
+  }
+  function fileErrorText(file, err) {
+    var name = cut(file && file.name || 'This file', 80);
+    if (err && err.code === 'EMPTY') return name + ' is empty (0 bytes).';
+    if (err && err.code === 'NO_SOUND') return name + ' is a video without a sound track, so there is nothing to cut.';
+    return name + ': ' + errorText(err);
+  }
+  function closeCurrent() {
+    if (!st) return;
+    stopPlay();
+    st.scanToken++;
+    st.detailToken++;
+    A.close(st.media);
+    st = null;
+  }
+  async function openFile(file) {
+    if (!file || typeof file.size !== 'number') return;
+    if (busy) { setMsg(dom.fileErr, 'Wait until saving ends, or press Cancel, before opening another file.'); return; }
+    var token = ++openToken;
+    setMsg(dom.fileErr, '');
+    dom.open.setAttribute('aria-busy', 'true');
+    say('Reading ' + cut(file.name, 80) + '…');
+    var m;
+    try {
+      m = await A.open(file);
+    } catch (err) {
+      if (token !== openToken) return;
+      dom.open.removeAttribute('aria-busy');
+      setMsg(dom.fileErr, fileErrorText(file, err));
+      say('');
+      return;
+    }
+    if (token !== openToken) { A.close(m); return; }
+    dom.open.removeAttribute('aria-busy');
+    var ti = m.primary, t = m.tracks[ti];
+    if (!(t.durMs >= MIN_SEL)) {
+      A.close(m);
+      setMsg(dom.fileErr, cut(file.name, 80) + (t.durMs > 0 ? ' is only ' + fmtSec(t.durMs) + ' long, too short to cut.' : ' holds no sound.'));
+      say('');
+      return;
+    }
+    closeCurrent();
+    st = {
+      file: file, name: file.name || 'audio', base: baseName(file.name), media: m, ti: ti, t: t, durMs: t.durMs,
+      sel: { start: 0, end: t.durMs }, marks: [], head: 0, view: { from: 0, to: t.durMs },
+      peaks: null, scanToken: 0, detail: null, detailToken: 0, tags: tagModel(m.tags), mp3: null
+    };
+    undo = null;
+    dom.undo.hidden = true;
+    setMsg(dom.ringNote, '');
+    dom.title.value = st.tags.title || '';
+    dom.artist.value = st.tags.artist || '';
+    dom.album.value = st.tags.album || '';
+    if (!opts.kbpsSet) { opts.kbps = defaultKbps(t); dom.kbps.value = String(opts.kbps); }
+    setMsg(dom.name, st.name);
+    setMsg(dom.info, infoText());
+    dom.edit.hidden = false;
+    setMsg(dom.open, 'Choose another file…');
+    showTimeError(null, '');
+    dom.start.value = fmtTime(0);
+    dom.end.value = fmtTime(st.durMs);
+    clearResults();
+    setMsg(dom.error, '');
+    checkFades(false);
+    updateAll();
+    scanAll();
+    say(st.name + ' is open: ' + infoText() + '.');
+  }
+
+  // ---------- The view: what part of the file the waveform shows ----------
+  function span() { return st.view.to - st.view.from; }
+  function zoomed() { return span() < st.durMs - 0.5; }
+  function setView(from, w) {
+    var min = Math.min(MIN_VIEW, st.durMs);
+    w = Math.max(min, Math.min(st.durMs, w));
+    from = Math.max(0, Math.min(st.durMs - w, from));
+    st.view = { from: from, to: from + w };
+    layout();
+    draw();
+    planDetail();
+  }
+  function zoomAt(f, ms) {
+    var v = st.view, w = span(), r = w ? (ms - v.from) / w : 0.5;
+    setView(ms - r * w * f, w * f);
+  }
+  function zoomCentre() { return st.head >= st.view.from && st.head <= st.view.to ? st.head : (st.view.from + st.view.to) / 2; }
+  function pct(ms) { return (ms - st.view.from) / (span() || 1) * 100; }
+  // Keeps ms in view, moving the view by a page when it is outside.
+  function follow(ms) {
+    if (!zoomed()) return;
+    var v = st.view, w = span();
+    if (ms < v.from || ms > v.to) setView(ms - w * 0.1, w);
+  }
+  function msAtX(clientX) {
+    var w = span(), step = w / (dom.box.clientWidth || 1) >= 10 ? 10 : 1;
+    return WV.msAt(dom.box, clientX, st.view.from, st.view.to, step);
+  }
+
+  // ---------- Layout: handles, playhead, markers, ruler, overview ----------
+  function sliderValues(h, now, lo, hi, text) {
+    h.setAttribute('aria-valuemin', String(Math.max(0, lo) / 1000));
+    h.setAttribute('aria-valuemax', String(Math.max(0, hi) / 1000));
+    h.setAttribute('aria-valuenow', String(now / 1000));
+    h.setAttribute('aria-valuetext', text);
+  }
+  function layout() {
+    if (!st) return;
+    var s = st.sel, len = s.end - s.start;
+    dom.hStart.style.left = pct(s.start) + '%';
+    dom.hEnd.style.left = pct(s.end) + '%';
+    dom.cursor.style.left = pct(st.head) + '%';
+    sliderValues(dom.hStart, s.start, 0, s.end - MIN_SEL, fmtTime(s.start) + ', selection ' + fmtTime(len) + ' long');
+    sliderValues(dom.hEnd, s.end, s.start + MIN_SEL, st.durMs, fmtTime(s.end) + ', selection ' + fmtTime(len) + ' long');
+    // While it plays, the playhead's value is not rewritten for every frame
+    // (a screen reader would read each one); it is when playback stops.
+    if (!(play && play.startAt)) sliderValues(dom.cursor, st.head, 0, st.durMs, fmtTime(st.head));
+    setMsg(dom.pos, fmtTime(st.head));
+    setMsg(dom.len, fmtTime(len));
+    Array.prototype.forEach.call(dom.marks.children, function (m) {
+      var i = +m.dataset.i, ms = st.marks[i];
+      m.style.left = pct(ms) + '%';
+      m.classList.toggle('is-out', opts.mode !== 'split' || ms <= s.start || ms >= s.end);
+      sliderValues(m, ms, i ? st.marks[i - 1] : 0, i < st.marks.length - 1 ? st.marks[i + 1] : st.durMs, fmtTime(ms));
+    });
+    var v = st.view, w = span();
+    dom.view.style.left = (v.from / st.durMs * 100) + '%';
+    dom.view.style.width = (w / st.durMs * 100) + '%';
+    sliderValues(dom.over, v.from, 0, st.durMs - w, zoomed() ? 'Showing ' + fmtTime(v.from) + ' to ' + fmtTime(v.to) + ' of ' + fmtTime(st.durMs) : 'Showing the whole file, ' + fmtTime(st.durMs));
+    dom.canvas.setAttribute('aria-label', 'Waveform of ' + st.name + (zoomed() ? ', zoomed in on ' + fmtTime(v.from) + ' to ' + fmtTime(v.to) : '') +
+      ', selected from ' + fmtTime(s.start) + ' to ' + fmtTime(s.end));
+    ruler();
+  }
+  var STEPS = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000, 600000, 900000, 1800000, 3600000];
+  function tickText(ms, step) {
+    var t = fmtTime(ms);
+    if (step >= 1000) return t.replace(/\.\d{3}$/, '');
+    if (step >= 100) return t.replace(/\d\d$/, '');
+    return t.replace(/\d$/, '');
+  }
+  function ruler() {
+    var v = st.view, w = span(), px = dom.ruler.clientWidth || 1, min = w * 72 / px;
+    var step = STEPS.filter(function (x) { return x >= min; })[0] || 7200000, html = [];
+    for (var t = Math.ceil(v.from / step) * step, n = 0; t <= v.to && n < 80; t += step, n++) {
+      var x = (t - v.from) / (w || 1);
+      // No label that would run off the right-hand end.
+      if (x * px > px - 8 * tickText(t, step).length) break;
+      html.push('<span class="mc-tick" style="left:' + (x * 100).toFixed(3) + '%">' + tickText(t, step) + '</span>');
+    }
+    var out = html.join('');
+    if (dom.ruler._html !== out) { dom.ruler.innerHTML = out; dom.ruler._html = out; }
+  }
+  function renderMarks() {
+    dom.marks.textContent = '';
+    st.marks.forEach(function (ms, i) {
+      var m = el('div', 'mc-mark');
+      m.dataset.i = String(i);
+      m.setAttribute('role', 'slider');
+      m.tabIndex = 0;
+      m.setAttribute('aria-label', 'Marker ' + (i + 1));
+      m.setAttribute('aria-keyshortcuts', 'Delete');
+      m.appendChild(el('span', 'mc-flag', String(i + 1))).setAttribute('aria-hidden', 'true');
+      m.addEventListener('keydown', markKey);
+      dom.marks.appendChild(m);
+    });
+  }
+
+  // ---------- The waveform ----------
+  function fxNow() { return { vol: opts.vol / 100, fadeIn: opts.fadeIn / 1000, fadeOut: opts.fadeOut / 1000 }; }
+  // The parts the result keeps, each with the gain it gets there (fades, volume).
+  function regions() {
+    var s = st.sel, fx = exactNow() ? { vol: 1, fadeIn: 0, fadeOut: 0 } : fxNow(), out = [];
+    function region(a, b, t0, len) {
+      var g = A.gainFn(fx.vol, fx.fadeIn, fx.fadeOut, len / 1000);
+      out.push({ start: a, end: b, gain: function (ms) { return g((t0 + ms - a) / 1000); } });
+    }
+    if (opts.mode === 'remove') {
+      var len = st.durMs - (s.end - s.start);
+      if (s.start > 0) region(0, s.start, 0, len);
+      if (s.end < st.durMs) region(s.end, st.durMs, s.start, len);
+    } else if (opts.mode === 'split') {
+      splitParts().forEach(function (p) { region(p.start, p.end, 0, p.end - p.start); });
+    } else region(s.start, s.end, 0, s.end - s.start);
+    return out;
+  }
+  function lines(lv) { return lv ? (opts.mono ? { min: lv.monoMin, max: lv.monoMax } : { min: lv.min, max: lv.max }) : null; }
+  function draw() {
+    if (!st) return;
+    var v = st.view, d = st.detail, c = WV.colors(dom.root), lv = lines(st.peaks), sp = [0, st.durMs];
+    if (d && d.lv.done && d.from <= v.from && d.to >= v.to) { lv = lines(d.lv); sp = [d.from, d.to]; }
+    var cuts = opts.mode === 'remove' ? [{ start: st.sel.start, end: st.sel.end }] : [];
+    var regs = canDecode() ? regions() : [];
+    WV.draw(dom.canvas, { dur: st.durMs, view: [v.from, v.to], levels: lv, span: sp, regions: regs, cuts: cuts, colors: c });
+    WV.draw(dom.overCanvas, { dur: st.durMs, levels: lines(st.peaks), regions: regs, cuts: cuts, colors: c });
+  }
+  function waveMessage() {
+    var text = '';
+    if (st) {
+      if (st.t.drm) text = 'No waveform: this sound track is protected.';
+      else if (!canDecode()) text = 'No waveform: this browser cannot decode ' + A.codecName(st.t) + ' audio. You can still type the start and end.';
+      else if (!st.peaks) text = 'Reading the sound…';
+      else if (!st.peaks.done) text = 'Reading the sound… ' + Math.floor(st.peaks.filled / (st.durMs / 1000 || 1) * 100) + '%';
+    }
+    setMsg(dom.waveMsg, text);
+  }
+  async function scanAll() {
+    var my = st;
+    if (!my || !canDecode()) { waveMessage(); draw(); return; }
+    var token = ++my.scanToken;
+    waveMessage();
+    var src;
+    try { src = await A.decodeSource(my.media, my.ti); } catch (err) {
+      if (my === st && token === my.scanToken) setMsg(dom.waveMsg, errorText(err));
+      return;
+    }
+    if (my !== st || token !== my.scanToken) return;
+    var p = my.peaks = A.levels(BUCKETS);
+    try {
+      var done = await A.scan(src, p, {
+        dur: my.durMs / 1000,
+        stopped: function () { return my !== st || token !== my.scanToken; },
+        onUpdate: function () { if (my === st) { draw(); waveMessage(); } }
+      });
+      if (!done) return;
+    } catch (err) {
+      if (my === st && token === my.scanToken) { my.peaks = null; setMsg(dom.waveMsg, errorText(err)); }
+      return;
+    }
+    if (my !== st) return;
+    waveMessage();
+    draw();
+    updatePeakUI();
+    planDetail();
+  }
+  // Zoomed in further than the whole file's levels go (a bucket a pixel), the
+  // part shown is scanned again into levels of its own, with half a view more
+  // on each side so that small moves need no new scan.
+  var detailTimer = 0;
+  function planDetail() {
+    clearTimeout(detailTimer);
+    detailTimer = setTimeout(scanDetail, 120);
+  }
+  async function scanDetail() {
+    var my = st;
+    if (!my || !my.peaks || !my.peaks.done || !canDecode()) return;
+    var v = my.view, w = v.to - v.from, px = Math.max(1, Math.round(dom.canvas.clientWidth * (window.devicePixelRatio || 1)));
+    if (w / px >= my.durMs / BUCKETS) return;
+    var d = my.detail;
+    if (d && d.from <= v.from && d.to >= v.to && (d.to - d.from) / d.lv.buckets <= w / px * 1.01) return;
+    var from = Math.max(0, v.from - w / 2), to = Math.min(my.durMs, v.to + w / 2);
+    var token = ++my.detailToken, lv = A.levels(Math.min(16384, Math.ceil((to - from) / (w / px))));
+    my.detail = { from: from, to: to, lv: lv };
+    try {
+      var src = await A.decodeSource(my.media, my.ti);
+      var ok = await A.scan(src, lv, { from: from / 1000, dur: (to - from) / 1000, stopped: function () { return my !== st || token !== my.detailToken; } });
+      if (ok && my === st && token === my.detailToken) draw();
+    } catch (err) {
+      if (my === st && token === my.detailToken) my.detail = null;
+    }
+  }
+
+  // ---------- The selection ----------
+  function changed() {
+    clearResults();
+    if (undo && !undo.applying) { undo = null; dom.undo.hidden = true; }
+  }
+  function setEdge(which, ms, fromField) {
+    if (!st) return;
+    ms = Math.round(ms);
+    if (which === 'start') ms = Math.max(0, Math.min(ms, st.sel.end - MIN_SEL));
+    else ms = Math.min(st.durMs, Math.max(ms, st.sel.start + MIN_SEL));
+    var f = which === 'start' ? dom.start : dom.end;
+    if (ms === st.sel[which]) { if (!fromField) f.value = fmtTime(ms); return; }
+    st.sel[which] = ms;
+    if (!fromField) { f.value = fmtTime(ms); showTimeError(null, ''); }
+    if (play && play.kind === 'sel') stopPlay();
+    changed();
+    checkFades(false);
+    updateAll();
+  }
+  function showTimeError(field, text) {
+    setMsg(dom.timeErr, text);
+    [dom.start, dom.end].forEach(function (f) {
+      if (f === field && text) f.setAttribute('aria-invalid', 'true'); else f.removeAttribute('aria-invalid');
+    });
+  }
+  function timeMessage(which, r) {
+    if (r.error === 'sixty') return 'Minutes and seconds go up to 59: write 1:15 rather than 0:75.';
+    return 'Type the ' + which + ' as minutes:seconds, such as 1:05.5, or as seconds, such as 65.5.';
+  }
+  function onTimeInput(which, alone) {
+    if (!st) return true;
+    var field = which === 'start' ? dom.start : dom.end, r = parseTime(field.value);
+    if (r.error) { showTimeError(field, timeMessage(which, r)); return false; }
+    if (r.ms > st.durMs) { showTimeError(field, 'The file is only ' + fmtTime(st.durMs) + ' long, so the ' + which + ' cannot be later than that.'); return false; }
+    var other = which === 'start' ? st.sel.end : st.sel.start;
+    if (which === 'start' ? r.ms > other - MIN_SEL : r.ms < other + MIN_SEL) {
+      showTimeError(field, which === 'start' ? 'The start must be at least 0.1 seconds before the end (' + fmtTime(st.sel.end) + ').'
+        : 'The end must be at least 0.1 seconds after the start (' + fmtTime(st.sel.start) + ').');
+      return false;
+    }
+    showTimeError(null, '');
+    setEdge(which, r.ms, true);
+    // The other field may hold text that was refused, or a time that only now
+    // fits: check it again, so its message stays (or it takes effect).
+    var ow = which === 'start' ? 'end' : 'start', ro = parseTime((ow === 'start' ? dom.start : dom.end).value);
+    if (!alone && (ro.error || ro.ms !== st.sel[ow])) onTimeInput(ow, true);
+    return true;
+  }
+  function timesValid() {
+    if (!st) return true;
+    var ok = true;
+    ['start', 'end'].forEach(function (w) {
+      if (!ok) return;
+      var r = parseTime((w === 'start' ? dom.start : dom.end).value);
+      if (r.error || r.ms !== st.sel[w]) ok = onTimeInput(w);
+    });
+    return ok;
+  }
+  function seek(ms) {
+    if (!st) return;
+    st.head = Math.max(0, Math.min(st.durMs, Math.round(ms)));
+    follow(st.head);
+    layout();
+  }
+
+  // ---------- Markers and parts ----------
+  function addMarker(ms) {
+    if (!st) return;
+    ms = Math.round(ms);
+    var near = st.marks.some(function (m) { return Math.abs(m - ms) < MIN_SEL; });
+    if (ms < MIN_SEL || ms > st.durMs - MIN_SEL || near) {
+      say('No marker added: markers must be at least 0.1 s from each other and from the ends of the file.');
+      return;
+    }
+    if (st.marks.length >= MAX_MARKS) { say('No marker added: 99 is the most.'); return; }
+    st.marks.push(ms);
+    st.marks.sort(function (a, b) { return a - b; });
+    renderMarks();
+    changed();
+    updateAll();
+    say('Marker ' + (st.marks.indexOf(ms) + 1) + ' added at ' + fmtTime(ms) + '.');
+  }
+  function removeMarker(i, focusNext) {
+    var ms = st.marks[i];
+    st.marks.splice(i, 1);
+    renderMarks();
+    changed();
+    updateAll();
+    say('Marker ' + (i + 1) + ' at ' + fmtTime(ms) + ' removed.');
+    if (focusNext) {
+      var next = dom.marks.children[Math.min(i, st.marks.length - 1)];
+      (next || dom.mark).focus({ preventScroll: true });
+    }
+  }
+  function moveMarker(i, ms) {
+    var lo = (i ? st.marks[i - 1] : 0) + MIN_SEL, hi = (i < st.marks.length - 1 ? st.marks[i + 1] : st.durMs) - MIN_SEL;
+    ms = Math.max(lo, Math.min(hi, Math.round(ms)));
+    if (ms === st.marks[i]) return;
+    st.marks[i] = ms;
+    changed();
+    updateAll();
+  }
+  function markKey(ev) {
+    if (!st || busy) return;
+    var i = +ev.currentTarget.dataset.i;
+    if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); removeMarker(i, true); return; }
+    var v = WV.keyValue(ev, st.marks[i], 0, st.durMs, { fine: 10 });
+    if (v == null) return;
+    ev.preventDefault();
+    moveMarker(i, v);
+    follow(st.marks[i]);
+  }
+  // The selection split at the markers inside it.
+  function splitParts() {
+    var s = st.sel, cuts = [s.start];
+    st.marks.forEach(function (m) { if (m > s.start && m < s.end) cuts.push(m); });
+    cuts.push(s.end);
+    var out = [];
+    for (var i = 0; i + 1 < cuts.length; i++) out.push({ start: cuts[i], end: cuts[i + 1] });
+    return out;
+  }
+  function partsError() {
+    if (opts.mode !== 'split') return '';
+    var short = splitParts().map(function (p, i) { return p.end - p.start < MIN_SEL ? i + 1 : 0; }).filter(Boolean);
+    return short.length ? 'Part ' + short[0] + ' is shorter than 0.1 seconds. Move or remove a marker, or move the start or end.' : '';
+  }
+  function renderParts() {
+    if (!st || opts.mode !== 'split') { dom.parts.textContent = ''; return; }
+    var parts = splitParts(), t = el('table', 'data'), cap = el('caption', 'visually-hidden', 'Parts the selection is split into'), head = el('tr');
+    t.appendChild(cap);
+    ['Part', 'Start', 'End', 'Length', 'Marker'].forEach(function (h, i) {
+      // The last column, of Remove buttons, is named for screen readers only.
+      var th = el('th', '', i === 4 ? null : h);
+      if (i === 4) th.appendChild(el('span', 'visually-hidden', h));
+      th.scope = 'col';
+      head.appendChild(th);
+    });
+    var thead = el('thead'); thead.appendChild(head); t.appendChild(thead);
+    var body = el('tbody');
+    parts.forEach(function (p, i) {
+      var tr = el('tr');
+      [String(i + 1), fmtTime(p.start), fmtTime(p.end), fmtTime(p.end - p.start)].forEach(function (x) { tr.appendChild(el('td', '', x)); });
+      var td = el('td'), k = st.marks.indexOf(p.start);
+      if (i > 0 && k >= 0) {
+        var b = el('button', 'btn secondary small', 'Remove');
+        b.type = 'button';
+        b.setAttribute('aria-label', 'Remove marker ' + (k + 1) + ' at ' + fmtTime(p.start));
+        b.addEventListener('click', function () { if (!busy) removeMarker(st.marks.indexOf(p.start), false); });
+        td.appendChild(b);
+      }
+      tr.appendChild(td);
+      body.appendChild(tr);
+    });
+    t.appendChild(body);
+    var note = parts.length < 2 ? el('p', 'hint mc-note', 'No markers inside the selection yet: play the file and press M (or Add marker) where a part should begin, or add markers at regular times below.') : null;
+    dom.parts.textContent = '';
+    dom.parts.appendChild(t);
+    if (note) dom.parts.appendChild(note);
+  }
+
+  // ---------- Fades and volume ----------
+  function showFadeError(field, text) {
+    setMsg(dom.fadeErr, text);
+    [dom.fadeIn, dom.fadeOut].forEach(function (f) {
+      if ((f === field || field === 'both') && text) f.setAttribute('aria-invalid', 'true'); else f.removeAttribute('aria-invalid');
+    });
+  }
+  // The shortest stretch the fades apply to: the result, or each part.
+  function fadeSpan() {
+    if (opts.mode === 'split') return Math.min.apply(null, splitParts().map(function (p) { return p.end - p.start; }));
+    if (opts.mode === 'remove') return st.durMs - (st.sel.end - st.sel.start);
+    return st.sel.end - st.sel.start;
+  }
+  function checkFades(fromTyping) {
+    var a = parseSeconds(dom.fadeIn.value), b = parseSeconds(dom.fadeOut.value);
+    if (a.error || b.error) {
+      showFadeError(a.error ? dom.fadeIn : dom.fadeOut, 'Type the ' + (a.error ? 'fade-in' : 'fade-out') + ' length in seconds, such as 2 or 0.5.');
+      return false;
+    }
+    if (st && a.ms + b.ms > fadeSpan()) {
+      showFadeError('both', 'The fades together (' + fmtSec(a.ms + b.ms) + ') are longer than ' + (opts.mode === 'split' ? 'the shortest part' : 'what is saved') +
+        ' (' + fmtSec(fadeSpan()) + '). Shorten them or the selection.');
+      return false;
+    }
+    showFadeError(null, '');
+    if (a.ms !== opts.fadeIn || b.ms !== opts.fadeOut) {
+      opts.fadeIn = a.ms;
+      opts.fadeOut = b.ms;
+      if (fromTyping) { changed(); updateAll(); retunePlay(); }
+    }
+    return true;
+  }
+  function updateVolumeUI() {
+    var g = opts.vol / 100, text = opts.vol + '% (' + fmtDb(g) + ')';
+    setMsg(dom.volOut, text);
+    dom.vol.setAttribute('aria-valuetext', text);
+  }
+  function selectionPeak() {
+    var p = st.peaks, s = st.sel, d = st.durMs;
+    if (opts.mode === 'remove') return Math.max(s.start > 0 ? A.peak(p, 0, s.start / d, opts.mono) : 0, s.end < d ? A.peak(p, s.end / d, 1, opts.mono) : 0);
+    return A.peak(p, s.start / d, s.end / d, opts.mono);
+  }
+  function dbFs(x) { var d = 20 * Math.log10(x); return (Math.abs(d) < 0.05 ? '0.0' : '−' + Math.abs(d).toFixed(1)) + ' dB of full scale'; }
+  function updatePeakUI() {
+    var text = '';
+    if (st && st.peaks && st.peaks.done && !exactNow()) {
+      var peak = selectionPeak(), g = opts.vol / 100;
+      if (peak <= 0) text = 'What is saved is silent.';
+      else if (g === 0) text = 'At 0% the result is silent.';
+      else if (peak * g > 1.0001) text = 'At this volume the loudest parts go above full scale and will distort. ' + Math.floor(100 / peak / 5) * 5 + '% is the most without distortion.';
+      else text = 'Loudest point at this volume: ' + dbFs(peak * g) + '. Up to ' + Math.min(400, Math.floor(100 / peak / 5) * 5) + '% stays clear of distortion.';
+    }
+    setMsg(dom.peak, text);
+  }
+
+  // ---------- What is saved, and how ----------
+  function readOptions() {
+    var m = document.querySelector('input[name="mc-mode"]:checked'), f = document.querySelector('input[name="mc-format"]:checked');
+    opts.mode = m ? m.value : 'keep';
+    opts.format = f ? f.value : 'mp3';
+    opts.exact = dom.exact.checked;
+    opts.kbps = +dom.kbps.value || 192;
+    opts.mono = dom.channels.value === 'mono';
+    opts.join = dom.join.checked;
+    opts.vol = Math.max(0, Math.min(400, Math.round(+dom.vol.value / 5) * 5));
+  }
+  // The parts kept when the selection is cut out: before and after it.
+  function keptParts() {
+    var s = st.sel, out = [];
+    if (s.start > 0) out.push({ start: 0, end: s.start });
+    if (s.end < st.durMs) out.push({ start: s.end, end: st.durMs });
+    return out;
+  }
+  // Why an exact copy cannot be made as things are set ('' when it can).
+  function exactBlock() {
+    var k = srcKind(), f = opts.format;
+    if (!k) return 'source';
+    if (k === 'mp3' ? f !== 'mp3' : f !== 'm4a' && f !== 'm4r') return 'format';
+    if (opts.mode === 'remove' && keptParts().length > 1) return 'remove';
+    if (opts.fadeIn || opts.fadeOut) return 'fades';
+    if (opts.vol !== 100) return 'volume';
+    if (opts.mono && st.t.ch > 1) return 'mono';
+    if (k === 'mp3' && st.file.size > A.limits.wav) return 'size';
+    return '';
+  }
+  function exactNow() { return !!st && opts.exact && !exactBlock(); }
+  function outLabel() { return { mp3: 'MP3', m4r: 'M4R', m4a: 'M4A', wav: 'WAV' }[opts.format]; }
+  function kbpsFor() { return opts.format === 'mp3' ? A.mp3Plan(st.t.sr, opts.kbps).kbps : opts.kbps; }
+  function howText() {
+    if (opts.format === 'wav') return 'saved as 16-bit WAV';
+    return 're-encoded as ' + outLabel() + ' at ' + kbpsFor() + ' kbps';
+  }
+  // What the save makes: [{ sel } or { parts }, n, of].
+  function outputs() {
+    if (opts.mode === 'split') {
+      var parts = splitParts();
+      if (parts.length > 1) return parts.map(function (p, i) { return { sel: p, n: i + 1, of: parts.length }; });
+    }
+    if (opts.mode === 'remove') {
+      var k = keptParts();
+      if (!k.length) return [];
+      return [k.length === 1 ? { sel: k[0] } : { parts: k }];
+    }
+    return [{ sel: { start: st.sel.start, end: st.sel.end } }];
+  }
+  function outMs(o) { return o.sel ? o.sel.end - o.sel.start : o.parts.reduce(function (n, p) { return n + p.end - p.start; }, 0); }
+  function convertOptions(o) {
+    var fx = fxNow(), f = opts.format, copy = exactNow() && srcKind() === 'aac';
+    return {
+      format: f === 'wav' ? 'wav' : f === 'mp3' ? 'mp3' : copy ? 'copy' : 'aac', kbps: opts.kbps, mono: opts.mono,
+      sel: o.sel, parts: o.parts, join: o.parts && opts.join ? JOIN_S : 0,
+      volume: fx.vol, fadeIn: fx.fadeIn, fadeOut: fx.fadeOut
+    };
+  }
+  function estimateBytes(o) {
+    if (exactNow() && srcKind() === 'mp3') return Math.round(st.file.size * outMs(o) / st.durMs);
+    return A.estimate(st.media, st.ti, convertOptions(o));
+  }
+  function updateNotes() {
+    if (!st) { setMsg(dom.estimate, ''); return; }
+    var k = srcKind(), f = opts.format, show = k === 'mp3' ? f === 'mp3' : k === 'aac' && (f === 'm4a' || f === 'm4r');
+    dom.exactRow.hidden = !show;
+    setMsg(dom.exactLabel, k === 'aac' ? 'Exact copy: keep the AAC sound as it is, without re-encoding' : "Exact copy: keep the MP3's frames as they are, without re-encoding");
+    var why = exactBlock(), note = '';
+    if (show && opts.exact) {
+      if (!why && k === 'mp3') note = 'The cut is exact to the sample in players that read its LAME tag. Players that ignore the tag also play a few hundredths of a second before the start and after the end.';
+      else if (!why) note = 'AAC is cut between its frames, every ' + fmtMs(1024 / st.t.sr) + ', so the copy can start and end up to ' + fmtMs(1024 / st.t.sr) + ' outside the selection.';
+      else {
+        var cause = { remove: 'Cutting out a part joins what is left', fades: 'Fades change the sound', volume: 'A volume change', mono: 'Mixing to mono' }[why];
+        note = why === 'size' ? 'This MP3 is over ' + fmtLimit(A.limits.wav) + ', more than this device can hold in memory to copy, so it is ' + howText() + '.'
+          : cause + ', which needs re-encoding: this file is ' + howText() + '.';
+      }
+    }
+    setMsg(dom.exactNote, note);
+    dom.exactNote.hidden = !note;
+    dom.kbpsField.hidden = f === 'wav' || exactNow();
+    // Size, and what happens to the sound.
+    var list = outputs(), text = '';
+    if (list.length) {
+      var bytes = list.reduce(function (n, o) { return n + estimateBytes(o); }, 0);
+      var how = exactNow() ? 'copied without re-encoding' : howText();
+      text = (list.length > 1 ? list.length + ' files, ' : '') + how + ': about ' + fmtBytes(bytes) + (list.length > 1 ? ' in all.' : '.');
+      text = text.charAt(0).toUpperCase() + text.slice(1);
+      if (f === 'mp3' && !exactNow() && A.mp3Plan(st.t.sr, opts.kbps).kbps < opts.kbps) {
+        text += ' The sound is at ' + fmtKhz(st.t.sr) + ', where MP3 goes up to ' + A.mp3Plan(st.t.sr, opts.kbps).kbps + ' kbps.';
+      }
+      if (f === 'm4r' && list.some(function (o) { return outMs(o) > M4R_MS; })) text += ' Ringtones made with Apple’s tools are 40 seconds long at most, so a longer M4R may not work as one: shorten the selection.';
+    } else if (opts.mode === 'remove') text = 'The selection covers the whole file, so nothing would be left.';
+    setMsg(dom.estimate, text);
+    setMsg(dom.save, saveLabel());
+    dom.save.disabled = busy || !list.length;
+  }
+  function saveLabel() {
+    if (busy) return 'Cutting…';
+    if (!st) return 'Cut';
+    if (opts.mode === 'split') { var n = splitParts().length; return n > 1 ? 'Cut into ' + n + ' parts' : 'Cut'; }
+    if (opts.mode === 'remove') return 'Cut out the selection';
+    return 'Cut';
+  }
+  function updateModeUI() {
+    dom.split.hidden = opts.mode !== 'split';
+    dom.joinRow.hidden = opts.mode !== 'remove';
+    playLabels();
+    [dom.play, dom.playSel].forEach(function (b) { b.disabled = !canDecode(); });
+  }
+  function updateAll() {
+    if (!st) { updateNotes(); return; }
+    updateModeUI();
+    layout();
+    renderParts();
+    updateVolumeUI();
+    updatePeakUI();
+    updateNotes();
+    draw();
+  }
+
+  // ---------- Pointer, wheel and keys ----------
+  var drag = null;
+  function dragTo(target, ms) {
+    if (target === dom.hStart) setEdge('start', ms);
+    else if (target === dom.hEnd) setEdge('end', ms);
+    else if (target === dom.cursor) seek(ms);
+    else if (target.classList.contains('mc-mark')) moveMarker(+target.dataset.i, ms);
+  }
+  WV.pointer(dom.wave, {
+    can: function () { return !!st && !busy; },
+    grab: function (ev) { return ev.target.closest('.mc-handle, .mc-mark, .mc-cursor'); },
+    start: function (ev, x, target, how) {
+      if (target) { drag = { el: target }; target.focus({ preventScroll: true }); return; }
+      // Elsewhere on the waveform: the playhead goes there, and follows a drag.
+      drag = { el: dom.cursor };
+      dom.cursor.focus({ preventScroll: true });
+      seek(msAtX(how === 'slide' ? ev.clientX : x));
+    },
+    move: function (ev) { if (drag) dragTo(drag.el, msAtX(ev.clientX)); },
+    end: function () {
+      var d = drag;
+      drag = null;
+      if (d && d.el === dom.cursor && play && play.kind === 'head') startPlay('head');
+    }
+  });
+  function overMs(clientX) { return WV.msAt(dom.overIn, clientX, 0, st.durMs, 1); }
+  function centreView(ms) { var w = span(); setView(ms - w / 2, w); }
+  WV.pointer(dom.over, {
+    can: function () { return !!st; },
+    start: function (ev, x, target, how) { dom.over.focus({ preventScroll: true }); centreView(overMs(how === 'slide' ? ev.clientX : x)); },
+    move: function (ev) { centreView(overMs(ev.clientX)); }
+  });
+  dom.over.addEventListener('keydown', function (ev) {
+    if (!st) return;
+    var w = span(), v = st.view.from, x = null;
+    switch (ev.key) {
+      case 'ArrowLeft': case 'ArrowDown': x = v - w / 10; break;
+      case 'ArrowRight': case 'ArrowUp': x = v + w / 10; break;
+      case 'PageDown': x = v - w; break;
+      case 'PageUp': x = v + w; break;
+      case 'Home': x = 0; break;
+      case 'End': x = st.durMs; break;
+    }
+    if (x == null) return;
+    ev.preventDefault();
+    setView(x, w);
+  });
+  function wheel(ev) {
+    if (!st) return;
+    if (ev.ctrlKey) {
+      ev.preventDefault();
+      zoomAt(ev.deltaY > 0 ? 1.25 : 0.8, ev.currentTarget === dom.over ? overMs(ev.clientX) : msAtX(ev.clientX));
+      return;
+    }
+    var dx = ev.shiftKey && !ev.deltaX ? ev.deltaY : ev.deltaX;
+    if (zoomed() && Math.abs(dx) > Math.abs(ev.shiftKey ? 0 : ev.deltaY)) {
+      ev.preventDefault();
+      setView(st.view.from + dx / (dom.box.clientWidth || 1) * span(), span());
+    }
+  }
+  dom.wave.addEventListener('wheel', wheel, { passive: false });
+  dom.over.addEventListener('wheel', wheel, { passive: false });
+  [dom.hStart, dom.hEnd].forEach(function (h) {
+    h.addEventListener('keydown', function (ev) {
+      if (!st || busy) return;
+      var which = h === dom.hStart ? 'start' : 'end', s = st.sel;
+      var v = which === 'start' ? WV.keyValue(ev, s.start, 0, s.end - MIN_SEL, { fine: 10 }) : WV.keyValue(ev, s.end, s.start + MIN_SEL, st.durMs, { fine: 10 });
+      if (v == null) return;
+      ev.preventDefault();
+      setEdge(which, v);
+      follow(st.sel[which]);
+    });
+    h.addEventListener('focus', function () { if (st) follow(st.sel[h === dom.hStart ? 'start' : 'end']); });
+  });
+  dom.cursor.addEventListener('keydown', function (ev) {
+    if (!st) return;
+    var v = WV.keyValue(ev, st.head, 0, st.durMs, { fine: 10 });
+    if (v == null) return;
+    ev.preventDefault();
+    seek(v);
+    if (play && play.kind === 'head') startPlay('head');
+  });
+  dom.marks.addEventListener('focusin', function (ev) {
+    var m = ev.target.closest('.mc-mark');
+    if (m && st) follow(st.marks[+m.dataset.i]);
+  });
+  // Shortcuts: anywhere but in a text field, list or with a modifier key.
+  document.addEventListener('keydown', function (ev) {
+    if (!st || dom.edit.hidden || ev.ctrlKey || ev.metaKey || ev.altKey || ev.defaultPrevented) return;
+    var t = ev.target;
+    if (t && t.closest && t.closest('input, select, textarea, [contenteditable]')) return;
+    var k = ev.key;
+    if (k === ' ') {
+      if (!t.closest || !t.closest('#mc-wave, #mc-over')) return;
+      ev.preventDefault();
+      togglePlay('head');
+      return;
+    }
+    if (busy) return;
+    if (k === 'i' || k === 'I') startHere(st.head);
+    else if (k === 'o' || k === 'O') endHere(st.head);
+    else if (k === 'm' || k === 'M') addMarker(st.head);
+    else if (k === '+' || k === '=') zoomAt(0.5, zoomCentre());
+    else if (k === '-' || k === '_' || k === '−') zoomAt(2, zoomCentre());
+    else return;
+    ev.preventDefault();
+  });
+
+  // ---------- Buttons and fields of the editor ----------
+  dom.setStart.addEventListener('click', function () { if (st && !busy) startHere(st.head); });
+  dom.setEnd.addEventListener('click', function () { if (st && !busy) endHere(st.head); });
+  dom.mark.addEventListener('click', function () { if (st && !busy) addMarker(st.head); });
+  // I and O: a start after the end (or an end before the start) moves the
+  // other edge to the end (or start) of the file first.
+  function startHere(ms) {
+    if (ms > st.sel.end - MIN_SEL && ms <= st.durMs - MIN_SEL) setEdge('end', st.durMs);
+    setEdge('start', ms);
+  }
+  function endHere(ms) {
+    if (ms < st.sel.start + MIN_SEL && ms >= MIN_SEL) setEdge('start', 0);
+    setEdge('end', ms);
+  }
+  dom.all.addEventListener('click', function () {
+    if (!st || busy) return;
+    showTimeError(null, '');
+    setEdge('end', st.durMs);
+    setEdge('start', 0);
+    say('Whole file selected: ' + fmtTime(st.durMs) + '.');
+  });
+  dom.zin.addEventListener('click', function () { if (st) zoomAt(0.5, zoomCentre()); });
+  dom.zout.addEventListener('click', function () { if (st) zoomAt(2, zoomCentre()); });
+  dom.zsel.addEventListener('click', function () {
+    if (!st) return;
+    var s = st.sel, w = (s.end - s.start) * 1.1;
+    setView(s.start - (s.end - s.start) * 0.05, w);
+  });
+  dom.zall.addEventListener('click', function () { if (st) setView(0, st.durMs); });
+  [['start', dom.start], ['end', dom.end]].forEach(function (pair) {
+    var which = pair[0], f = pair[1];
+    f.addEventListener('input', function () { capField(f); onTimeInput(which); });
+    f.addEventListener('change', function () { if (st && onTimeInput(which)) f.value = fmtTime(st.sel[which]); });
+    f.addEventListener('keydown', function (ev) {
+      if (!st || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
+      ev.preventDefault();
+      var r = parseTime(f.value);
+      setEdge(which, (r.error ? st.sel[which] : r.ms) + (ev.shiftKey ? 1000 : 100) * (ev.key === 'ArrowUp' ? 1 : -1));
+    });
+  });
+  [dom.fadeIn, dom.fadeOut].forEach(function (f) {
+    f.addEventListener('input', function () { capField(f); checkFades(true); });
+  });
+  dom.vol.addEventListener('input', function () {
+    var v = Math.max(0, Math.min(400, Math.round(+dom.vol.value / 5) * 5));
+    if (v === opts.vol) return;
+    opts.vol = v;
+    changed();
+    updateAll();
+    retunePlay();
+  });
+  document.querySelectorAll('input[name="mc-mode"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (play && play.kind === 'sel') stopPlay();
+      readOptions();
+      changed();
+      checkFades(false);
+      updateAll();
+    });
+  });
+  dom.join.addEventListener('change', function () { readOptions(); changed(); updateAll(); });
+  dom.everyAdd.addEventListener('click', function () {
+    if (!st || busy) return;
+    var r = parseTime(dom.every.value);
+    if (r.error || r.ms < 1000) {
+      setMsg(dom.everyErr, r.error === 'sixty' ? 'Minutes and seconds go up to 59: write 1:15 rather than 0:75.' : 'Type how often to split as minutes:seconds, such as 5:00, or seconds, at least 1.');
+      dom.every.setAttribute('aria-invalid', 'true');
+      dom.every.focus();
+      return;
+    }
+    setMsg(dom.everyErr, '');
+    dom.every.removeAttribute('aria-invalid');
+    var s = st.sel, added = 0;
+    for (var t = s.start + r.ms; t < s.end - MIN_SEL && st.marks.length < MAX_MARKS; t += r.ms) {
+      if (st.marks.some(function (m) { return Math.abs(m - t) < MIN_SEL; })) continue;
+      st.marks.push(Math.round(t));
+      added++;
+    }
+    st.marks.sort(function (a, b) { return a - b; });
+    renderMarks();
+    changed();
+    updateAll();
+    say(added ? added + (added === 1 ? ' marker' : ' markers') + ' added: the selection is now ' + splitParts().length + ' parts.' : 'No marker added: the selection is shorter than that.');
+  });
+  dom.every.addEventListener('input', function () {
+    capField(dom.every);
+    if (dom.everyErr.textContent) { setMsg(dom.everyErr, ''); dom.every.removeAttribute('aria-invalid'); }
+  });
+  dom.clearMarks.addEventListener('click', function () {
+    if (!st || busy || !st.marks.length) return;
+    var n = st.marks.length;
+    st.marks = [];
+    renderMarks();
+    changed();
+    updateAll();
+    say(n + (n === 1 ? ' marker' : ' markers') + ' removed.');
+  });
+  [['title', dom.title], ['artist', dom.artist], ['album', dom.album]].forEach(function (pair) {
+    pair[1].addEventListener('input', function () { capField(pair[1]); changed(); });
+  });
+
+  // ---------- Output options ----------
+  document.querySelectorAll('input[name="mc-format"]').forEach(function (r) {
+    r.addEventListener('change', function () { readOptions(); changed(); updateAll(); });
+  });
+  dom.exact.addEventListener('change', function () { readOptions(); changed(); updateAll(); });
+  dom.kbps.addEventListener('change', function () { opts.kbpsSet = true; readOptions(); changed(); updateAll(); });
+  dom.channels.addEventListener('change', function () { stopPlay(); readOptions(); changed(); updateAll(); });
+
+  // ---------- Playback ----------
+  var ac = null, play = null, playToken = 0;
+  // Safari 16.4+: iOS mutes web audio in silent mode unless it is media
+  // playback; 'auto' gives the sound back to other apps afterwards.
+  function session(type) {
+    try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch (x) { /* not offered */ }
+  }
+  function playLabels() {
+    setMsg(dom.play, play && play.kind === 'head' ? 'Pause' : 'Play');
+    setMsg(dom.playSel, play && play.kind === 'sel' ? 'Stop' : opts.mode === 'remove' ? 'Play the join' : 'Play selection');
+  }
+  function stopPlay() {
+    playToken++;
+    var p = play;
+    play = null;
+    playLabels();
+    if (!p) return;
+    session('auto');
+    if (p.nodes) p.nodes.forEach(function (n) { try { n.stop(); } catch (x) { /* not started */ } });
+    if (p.gain) { try { p.gain.disconnect(); } catch (x) { /* ignore */ } }
+    cancelAnimationFrame(p.raf);
+    if (st) layout();
+  }
+  function togglePlay(kind) { if (play && play.kind === kind) stopPlay(); else startPlay(kind); }
+  // What a kind of playback plays: from the playhead to the end, or what the
+  // save keeps of the selection (for a part cut out, the few seconds on
+  // either side of the join), with its fades and volume.
+  function plan(kind) {
+    var s = st.sel, fx = exactNow() ? { vol: 1, fadeIn: 0, fadeOut: 0 } : fxNow();
+    if (kind === 'head') {
+      var from = st.head >= st.durMs - 20 ? 0 : st.head;
+      return { segs: [{ from: from, to: st.durMs }], vol: 1, fadeIn: 0, fadeOut: 0, len: (st.durMs - from) / 1000, r0: 0 };
+    }
+    if (opts.mode === 'remove') {
+      var segs = [];
+      if (s.start > 0) segs.push({ from: Math.max(0, s.start - AROUND), to: s.start });
+      if (s.end < st.durMs) segs.push({ from: s.end, to: Math.min(st.durMs, s.end + AROUND) });
+      return { segs: segs, vol: fx.vol, fadeIn: fx.fadeIn, fadeOut: fx.fadeOut, len: (st.durMs - (s.end - s.start)) / 1000, r0: segs.length && s.start > 0 ? segs[0].from / 1000 : 0 };
+    }
+    if (opts.mode === 'split') return { segs: [{ from: s.start, to: s.end }], vol: fx.vol, fadeIn: 0, fadeOut: 0, len: (s.end - s.start) / 1000, r0: 0 };
+    return { segs: [{ from: s.start, to: s.end }], vol: fx.vol, fadeIn: fx.fadeIn, fadeOut: fx.fadeOut, len: (s.end - s.start) / 1000, r0: 0 };
+  }
+  // The gain follows the volume and fades from `from` (context time) on; for
+  // 5.1 it also carries the engine's scaling of the mix.
+  function envelope(p, from) {
+    var g = p.gain.gain, T = p.startAt, vol = p.vol * A.mixGain(st.t.ch, opts.mono), f = A.gainFn(vol, p.fadeIn, p.fadeOut, p.len);
+    var now = Math.max(from, T), r = p.r0 + (now - T), end = p.r0 + p.total;
+    g.cancelScheduledValues(0);
+    g.setValueAtTime(f(r), now);
+    [p.fadeIn, p.len - p.fadeOut].filter(function (b) { return b > r && b < end; }).sort(function (a, b) { return a - b; })
+      .forEach(function (b) { g.linearRampToValueAtTime(f(b), T + b - p.r0); });
+    g.linearRampToValueAtTime(f(end), T + p.total);
+  }
+  function retunePlay() {
+    if (!play || !play.startAt || play.kind !== 'sel') return;
+    var fx = exactNow() ? { vol: 1, fadeIn: 0, fadeOut: 0 } : fxNow();
+    play.vol = fx.vol;
+    if (opts.mode === 'keep') { play.fadeIn = fx.fadeIn; play.fadeOut = fx.fadeOut; }
+    envelope(play, ac.currentTime);
+  }
+  async function startPlay(kind) {
+    stopPlay();
+    if (!st || !canDecode()) return;
+    var my = st, token = playToken, AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    var p = play = plan(kind);
+    p.kind = kind;
+    p.nodes = [];
+    p.startAt = 0;
+    p.raf = 0;
+    p.total = p.segs.reduce(function (n, s) { return n + (s.to - s.from) / 1000; }, 0);
+    if (!p.segs.length || p.total <= 0) { stopPlay(); return; }
+    session('playback');
+    playLabels();
+    if (!ac) ac = new AC();
+    if (ac.state !== 'running') { try { await ac.resume(); } catch (x) { /* blocked */ } }
+    if (token !== playToken) return;
+    var src;
+    try { src = await A.decodeSource(my.media, my.ti); } catch (err) {
+      if (token === playToken) { stopPlay(); setMsg(dom.waveMsg, errorText(err)); }
+      return;
+    }
+    if (token !== playToken) return;
+    var gain = p.gain = ac.createGain();
+    if (opts.mono) { gain.channelCount = 1; gain.channelCountMode = 'explicit'; gain.channelInterpretation = 'speakers'; }
+    gain.connect(ac.destination);
+    var queue = [];
+    function sched(it) {
+      var wb = it.wb, off = Math.max(0, it.a - wb.timestamp), rel = wb.timestamp + off - it.a;
+      var dur = Math.min(wb.duration - off, it.len - rel), when = p.startAt + it.T + rel, now = ac.currentTime;
+      if (when < now) { off += now - when; dur -= now - when; when = now; }
+      if (dur <= 0.0005) return;
+      var node = ac.createBufferSource();
+      node.buffer = wb.buffer;
+      node.connect(gain);
+      node.start(when, off, dur);
+      p.nodes.push(node);
+      if (p.nodes.length > 64) p.nodes.splice(0, p.nodes.length - 64);
+    }
+    // Where on the track the playback is, from its time.
+    function at(elapsed) {
+      var T = 0;
+      for (var i = 0; i < p.segs.length; i++) {
+        var s = p.segs[i], len = (s.to - s.from) / 1000;
+        if (elapsed < T + len || i === p.segs.length - 1) return s.from + Math.max(0, Math.min(len, elapsed - T)) * 1000;
+        T += len;
+      }
+      return 0;
+    }
+    function begin() {
+      p.startAt = ac.currentTime + 0.06;
+      envelope(p, 0);
+      queue.forEach(sched);
+      queue = [];
+      var tick = function () {
+        if (play !== p || st !== my) return;
+        var elapsed = ac.currentTime - p.startAt;
+        if (!(drag && drag.el === dom.cursor)) {
+          st.head = Math.round(at(Math.max(0, elapsed)));
+          follow(st.head);
+          layout();
+        }
+        if (elapsed >= p.total) { stopPlay(); return; }
+        p.raf = requestAnimationFrame(tick);
+      };
+      p.raf = requestAnimationFrame(tick);
+    }
+    try {
+      var T = 0;
+      for (var i = 0; i < p.segs.length; i++) {
+        var s = p.segs[i], a = src.base + s.from / 1000, len = (s.to - s.from) / 1000;
+        for await (var wb of A.buffers(src, a, a + len)) {
+          if (token !== playToken) return;
+          var it = { wb: wb, a: a, len: len, T: T };
+          if (!p.startAt) {
+            queue.push(it);
+            if (T + wb.timestamp + wb.duration - a >= 0.4) begin();
+            continue;
+          }
+          sched(it);
+          while (token === playToken && (T + wb.timestamp + wb.duration - a) - (ac.currentTime - p.startAt) > 3) await sleep(150);
+        }
+        T += len;
+      }
+      if (token === playToken && !p.startAt) begin();
+    } catch (err) {
+      if (token === playToken) { stopPlay(); setMsg(dom.waveMsg, errorText(err)); }
+    }
+  }
+  dom.play.addEventListener('click', function () { togglePlay('head'); });
+  dom.playSel.addEventListener('click', function () { togglePlay('sel'); });
+
+  // ---------- Saving ----------
+  function tagsFor(o) {
+    var t = {};
+    Object.keys(st.tags).forEach(function (k) { t[k] = st.tags[k]; });
+    t.title = clean(dom.title.value);
+    t.artist = clean(dom.artist.value);
+    t.album = clean(dom.album.value);
+    if (o.n && t.title) t.title = cut(t.title, MAX_TAG - 12) + ' (part ' + o.n + ')';
+    return t;
+  }
+  function outName(o, ext) {
+    var tail = o.n ? ' (part ' + pad(o.n, String(o.of).length) + ')' : opts.mode === 'remove' ? ' (edited)' : opts.format === 'm4r' ? ' (ringtone)' : ' (cut)';
+    return st.base + tail + '.' + ext;
+  }
+  function mp3Data() {
+    var my = st;
+    if (!my.mp3) my.mp3 = A.readMp3(my.file).catch(function (err) { if (my.mp3) my.mp3 = null; throw err; });
+    return my.mp3;
+  }
+  async function exactMp3(o) {
+    var r = await mp3Data();
+    if (!r.frames || !r.frames.count) throw userError('The MP3 frames of this file could not be read, so it cannot be copied exactly. Untick Exact copy to re-encode it.');
+    var sr = r.frames.sampleRate, c = A.mp3Cut(r.bytes, r.frames, Math.round(o.sel.start * sr / 1000), Math.round(o.sel.end * sr / 1000));
+    if (!c) throw userError('Nothing to save: the selection is empty.');
+    var tags = tagsFor(o), head = A.id3v23(tags), tail = A.id3v1(tags), D = A.MP3_DECODER_DELAY;
+    return {
+      blob: new Blob(tail ? [head, c.bytes, tail] : [head, c.bytes], { type: 'audio/mpeg' }), ext: 'mp3', exact: true,
+      samples: c.end - c.start, sampleRate: sr, frames: c.frames, before: (c.delay + D) / sr, after: Math.max(0, c.padding - D) / sr
+    };
+  }
+  async function makeOne(o, onProgress) {
+    if (exactNow() && srcKind() === 'mp3') return exactMp3(o);
+    var co = convertOptions(o);
+    co.tags = tagsFor(o);
+    co.onProgress = onProgress;
+    job = A.convert(st.media, st.ti, co);
+    try {
+      var r = await job.promise;
+      return { blob: r.blob, ext: opts.format === 'm4r' ? 'm4r' : r.ext, exact: co.format === 'copy', samples: r.samples, sampleRate: r.sampleRate, kbps: r.kbps };
+    } finally {
+      job = null;
+    }
+  }
+  function clearResults() {
+    results = [];
+    dom.results.textContent = '';
+    dom.results.hidden = true;
+    dom.zipRow.hidden = true;
+    dom.after.hidden = true;
+    setMsg(dom.after, '');
+  }
+  function resultText(r) {
+    var bits = [fmtTime(r.samples > 0 && r.sampleRate ? r.samples / r.sampleRate * 1000 : r.ms), fmtBytes(r.blob.size)];
+    if (r.exact && r.ext === 'mp3') bits.push('exact copy, nothing re-encoded (players that ignore the LAME tag also play ' + fmtMs(r.before) + ' before and ' + fmtMs(r.after) + ' after)');
+    else if (r.exact) bits.push('AAC copied without re-encoding');
+    else if (r.ext === 'wav') bits.push('16-bit WAV');
+    else bits.push((r.ext === 'mp3' ? 'MP3' : 'AAC') + ' at ' + r.kbps + ' kbps');
+    return bits.join(' · ');
+  }
+  function afterText(list) {
+    var r = list[0];
+    if (r.ext === 'm4r') return 'To put an M4R on an iPhone from a Mac, connect the iPhone, select it in the Finder sidebar and drag the file onto its window. Ringtones are listed in Settings > Sounds & Haptics > Ringtone.';
+    if (list.length === 1 && (r.ext === 'mp3' || r.ext === 'm4a') && r.ms < 30000) {
+      return 'As a ringtone: on an iPhone with iOS 26 or later, save it to the Files app, touch and hold it there, tap Share and then Use as Ringtone. On Android, open it in Files by Google, tap More and then Set as ringtone.';
+    }
+    return '';
+  }
+  function renderResults() {
+    dom.results.textContent = '';
+    results.forEach(function (r) {
+      var li = el('li', 'mc-result'), p = el('p', 'mc-result-text');
+      p.appendChild(el('b', '', r.name));
+      p.appendChild(el('span', '', resultText(r)));
+      var b = el('button', 'btn small', 'Download');
+      b.type = 'button';
+      b.setAttribute('aria-label', 'Download ' + r.name);
+      b.addEventListener('click', function () { if (!tooSoon(b, r.id)) TT.download(r.name, r.blob); });
+      li.appendChild(p);
+      li.appendChild(b);
+      dom.results.appendChild(li);
+    });
+    dom.results.hidden = !results.length;
+    dom.zipRow.hidden = results.length < 2;
+    var after = results.length ? afterText(results) : '';
+    setMsg(dom.after, after);
+    dom.after.hidden = !after;
+  }
+  function setBusy(on) {
+    busy = on;
+    dom.editFs.disabled = on;
+    dom.outFs.disabled = on;
+    dom.cancel.hidden = !on;
+    dom.progress.hidden = !on;
+    [dom.open, dom.sample].forEach(function (b) { b.disabled = on; });
+    if (on) { dom.pbar.value = 0; setMsg(dom.progressText, ''); }
+    wake(on);
+    updateNotes();
+  }
+  function progress(i, n, f) {
+    var pc = Math.round((i + Math.max(0, Math.min(1, f))) / n * 100);
+    dom.pbar.value = pc;
+    setMsg(dom.progressText, (n > 1 ? 'Part ' + (i + 1) + ' of ' + n + ': ' : '') + pc + '%');
+  }
+  async function save() {
+    if (!st || busy) return;
+    if (!timesValid()) { (dom.start.getAttribute('aria-invalid') ? dom.start : dom.end).focus(); return; }
+    if (!checkFades(false)) { (dom.fadeIn.getAttribute('aria-invalid') ? dom.fadeIn : dom.fadeOut).focus(); return; }
+    var perr = partsError();
+    if (perr) { setMsg(dom.error, perr); return; }
+    var list = outputs();
+    if (!list.length) return;
+    var token = ++saveToken, my = st, made = [];
+    stopPlay();
+    clearResults();
+    setMsg(dom.error, '');
+    say('');
+    setBusy(true);
+    dom.cancel.focus({ preventScroll: true });
+    try {
+      for (var i = 0; i < list.length; i++) {
+        progress(i, list.length, 0);
+        var o = list[i], r = await makeOne(o, (function (k) { return function (f) { if (token === saveToken) progress(k, list.length, f); }; })(i));
+        if (token !== saveToken || my !== st) return;
+        r.name = outName(o, r.ext);
+        r.ms = outMs(o);
+        r.id = ++resultSeq;
+        made.push(r);
+      }
+      results = made;
+      renderResults();
+      var first = dom.results.querySelector('button');
+      say(made.length > 1 ? made.length + ' parts are ready: ' + made.map(function (r) { return r.name; }).join(', ') + '.' : made[0].name + ' is ready: ' + resultText(made[0]) + '.');
+      setBusy(false);
+      if (first && (document.activeElement === dom.cancel || document.activeElement === document.body)) first.focus({ preventScroll: true });
+    } catch (err) {
+      if (token !== saveToken) return;
+      setBusy(false);
+      if (A.isCancel(err)) say('Cancelled.');
+      else setMsg(dom.error, errorText(err));
+      if (document.activeElement === document.body) dom.save.focus({ preventScroll: true });
+    }
+  }
+  dom.save.addEventListener('click', save);
+  dom.cancel.addEventListener('click', function () {
+    if (!busy) return;
+    saveToken++;
+    if (job) job.cancel();
+    setBusy(false);
+    dom.save.focus({ preventScroll: true });
+    say('Cancelled.');
+  });
+  dom.zip.addEventListener('click', async function () {
+    if (results.length < 2 || dom.zip.getAttribute('aria-busy') === 'true' || tooSoon(dom.zip, results.map(function (r) { return r.id; }).join())) return;
+    var list = results.slice(), total = list.reduce(function (n, r) { return n + r.blob.size; }, 0);
+    if (total > A.limits.zip) { setMsg(dom.error, 'These files add up to ' + fmtBytes(total) + ', more than this device can put in one ZIP (' + fmtLimit(A.limits.zip) + '). Download them one by one.'); return; }
+    dom.zip.setAttribute('aria-busy', 'true');
+    setMsg(dom.zip, 'Making the ZIP…');
+    try {
+      await A.loadScript(ZIP_URL);
+      var blob = await window.TTZip.create(list.map(function (r) { return { name: r.name, data: r.blob }; }), { compress: 'store' });
+      if (list[0] === results[0]) TT.download(st.base + ' (parts).zip', blob);
+      setMsg(dom.error, '');
+    } catch (err) {
+      setMsg(dom.error, 'The ZIP could not be made: ' + cut(String(err && err.message || err), 160) + ' Download the files one by one.');
+    } finally {
+      dom.zip.removeAttribute('aria-busy');
+      setMsg(dom.zip, 'Download all (.zip)');
+    }
+  });
+
+  // ---------- Ringtone ----------
+  dom.ring.addEventListener('click', function () {
+    if (!st || busy) return;
+    var s = st.sel, before = { start: s.start, end: s.end, fadeIn: dom.fadeIn.value, fadeOut: dom.fadeOut.value, mode: opts.mode, format: opts.format };
+    // Pressed again with nothing changed since (a double click), Undo still
+    // goes back to what was there before the first press.
+    undo = { applying: true, state: undo ? undo.state : before };
+    if (s.end - s.start > RING_MS) setEdge('end', s.start + RING_MS);
+    var len = st.sel.end - st.sel.start;
+    dom.fadeOut.value = String(Math.min(1000, Math.floor(len / 2)) / 1000);
+    if ((parseSeconds(dom.fadeIn.value).ms || 0) + Math.min(1000, Math.floor(len / 2)) > len) dom.fadeIn.value = '0';
+    $('mc-m-keep').checked = true;
+    $('mc-f-mp3').checked = true;
+    readOptions();
+    checkFades(true);
+    changed();
+    updateAll();
+    undo.applying = false;
+    dom.undo.hidden = false;
+    dom.start.value = fmtTime(st.sel.start);
+    dom.end.value = fmtTime(st.sel.end);
+    var text = 'Ringtone: ' + fmtTime(st.sel.start) + ' to ' + fmtTime(st.sel.end) + ' (' + fmtSec(len) + '), with a ' + dom.fadeOut.value + ' s fade-out, as MP3. Move the handles to choose another part, then press Cut.';
+    setMsg(dom.ringNote, text);
+    follow(st.sel.start);
+  });
+  dom.undo.addEventListener('click', function () {
+    if (!st || busy || !undo) return;
+    var b = undo.state;
+    undo.applying = true;
+    showTimeError(null, '');
+    setEdge('end', st.durMs);
+    setEdge('start', b.start);
+    setEdge('end', b.end);
+    dom.fadeIn.value = b.fadeIn;
+    dom.fadeOut.value = b.fadeOut;
+    $('mc-m-' + b.mode).checked = true;
+    $('mc-f-' + b.format).checked = true;
+    readOptions();
+    checkFades(true);
+    changed();
+    updateAll();
+    undo = null;
+    dom.undo.hidden = true;
+    setMsg(dom.ringNote, 'Ringtone settings undone.');
+    dom.ring.focus({ preventScroll: true });
+  });
+
+  // ---------- A sample song ----------
+  // 32 seconds in four phrases (C, G, A minor and F), made here as a WAV and
+  // turned into an MP3 by the engine, so that an exact copy can be tried.
+  function sampleWav() {
+    var sr = 44100, n = sr * 32, buf = new ArrayBuffer(44 + n * 4), v = new DataView(buf), pcm = new Int16Array(buf, 44);
+    var w = function (o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n * 4, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, 2, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 4, true); v.setUint16(32, 4, true); v.setUint16(34, 16, true);
+    w(36, 'data'); v.setUint32(40, n * 4, true);
+    var L = new Float32Array(n), R = new Float32Array(n);
+    function note(f, t0, dur, amp, pan) {
+      var i0 = Math.round(t0 * sr), i1 = Math.min(n, Math.round((t0 + dur) * sr));
+      for (var i = i0; i < i1; i++) {
+        var t = (i - i0) / sr, env = Math.min(1, t / 0.01) * Math.exp(-2.5 * t) * Math.min(1, (i1 - i) / (0.02 * sr));
+        var x = amp * env * (Math.sin(2 * Math.PI * f * t) + 0.3 * Math.sin(4 * Math.PI * f * t));
+        L[i] += x * (1 - pan); R[i] += x * (1 + pan);
+      }
+    }
+    var chords = [[261.63, 329.63, 392], [196, 246.94, 293.66], [220, 261.63, 329.63], [174.61, 220, 261.63]];
+    chords.forEach(function (c, k) {
+      for (var b = 0; b < 16; b++) note(c[b % 3] * (b % 6 < 3 ? 1 : 2), k * 8 + b * 0.5, 0.9, 0.22, b % 2 ? 0.3 : -0.3);
+      for (var q = 0; q < 4; q++) note(c[0] / 2, k * 8 + q * 2, 1.9, 0.3, 0);
+    });
+    for (var i = 0; i < n; i++) {
+      pcm[2 * i] = Math.max(-32768, Math.min(32767, Math.round(L[i] * 32767)));
+      pcm[2 * i + 1] = Math.max(-32768, Math.min(32767, Math.round(R[i] * 32767)));
+    }
+    return new File([buf], 'sample.wav', { type: 'audio/wav' });
+  }
+  dom.sample.addEventListener('click', async function () {
+    if (busy || tooSoon(dom.sample, 'sample') || dom.sample.getAttribute('aria-busy') === 'true') return;
+    dom.sample.setAttribute('aria-busy', 'true');
+    setMsg(dom.sample, 'Making the sample…');
+    var file = sampleWav();
+    try {
+      await A.load();
+      if (A.canWriteMp3()) {
+        var m = await A.open(file), tags = A.emptyTags();
+        tags.title = 'Sample song';
+        try {
+          var r = await A.convert(m, m.primary, { format: 'mp3', kbps: 192, tags: tags }).promise;
+          file = new File([r.blob], 'sample.mp3', { type: 'audio/mpeg' });
+        } finally { A.close(m); }
+      }
+    } catch (err) { /* the WAV, then */ }
+    dom.sample.removeAttribute('aria-busy');
+    setMsg(dom.sample, 'Try a sample song');
+    openFile(file);
+  });
+
+  // ---------- Choosing, dropping and pasting files ----------
+  dom.open.addEventListener('click', function () { dom.file.click(); });
+  dom.file.addEventListener('change', function () {
+    var f = dom.file.files && dom.file.files[0];
+    dom.file.value = '';
+    openFile(f);
+  });
+  function hasFiles(dt) { return dt && Array.prototype.indexOf.call(dt.types || [], 'Files') >= 0; }
+  var depth = 0;
+  document.addEventListener('dragenter', function (ev) { if (hasFiles(ev.dataTransfer)) { depth++; dom.drop.classList.add('is-over'); } });
+  document.addEventListener('dragleave', function (ev) {
+    if (!hasFiles(ev.dataTransfer)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) dom.drop.classList.remove('is-over');
+  });
+  document.addEventListener('dragover', function (ev) { if (ev.dataTransfer) ev.preventDefault(); });
+  document.addEventListener('drop', function (ev) {
+    var dt = ev.dataTransfer;
+    if (!dt) return;
+    depth = 0;
+    dom.drop.classList.remove('is-over');
+    if (dt.files && dt.files.length) {
+      ev.preventDefault();
+      if (dt.files.length > 1) say('This page cuts one file at a time: ' + cut(dt.files[0].name, 80) + ' is opened.');
+      openFile(dt.files[0]);
+      return;
+    }
+    var target = ev.target;
+    if (target && target.closest && target.closest('input, select')) return;
+    ev.preventDefault();
+    var text = '';
+    try { text = dt.getData('text/uri-list') || dt.getData('text/plain') || ''; } catch (x) { text = ''; }
+    if (/^\s*(https?:|www\.)/i.test(text.slice(0, 2000))) setMsg(dom.fileErr, LINK_TEXT);
+  });
+  document.addEventListener('paste', function (ev) {
+    var cd = ev.clipboardData;
+    if (!cd) return;
+    if (cd.files && cd.files.length) { ev.preventDefault(); openFile(cd.files[0]); return; }
+    var t = ev.target;
+    if (t && t.closest && t.closest('input, select, textarea, [contenteditable]')) return;
+    var text = (cd.getData('text/plain') || '').slice(0, 2000);
+    if (/^\s*(https?:\/\/|www\.)/i.test(text)) setMsg(dom.fileErr, LINK_TEXT);
+  });
+
+  // ---------- Page events ----------
+  var redraw = TT.debounce(function () { if (st) { layout(); draw(); planDetail(); } }, 60);
+  if (window.ResizeObserver) new ResizeObserver(redraw).observe(dom.box);
+  else window.addEventListener('resize', redraw);
+  if (window.matchMedia) {
+    var dark = window.matchMedia('(prefers-color-scheme: dark)');
+    if (dark.addEventListener) dark.addEventListener('change', draw);
+  }
+  // Fields the browser restores after the script ran (Back, reload) are read
+  // again here, so what the page does matches what it shows.
+  window.addEventListener('pageshow', function () {
+    readOptions();
+    checkFades(false);
+    if (st) { changed(); updateAll(); } else updateNotes();
+  });
+  readOptions();
+  updateVolumeUI();
+  updateNotes();
+})();
+</script>

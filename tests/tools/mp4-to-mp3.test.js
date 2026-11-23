@@ -461,6 +461,31 @@ module.exports = async ({ page, open, assert, fixtures }) => {
   assert.deepEqual(viaEngine, { codec: 'alac', bits: 16, decodable: true, size: 44 + 66150 * 4, rate: 44100, samples: 66150, sampleFormat: 's16', wavBits: 16 },
     'TTAudio.open(file, { alac: true }) decodes Apple Lossless');
   await row('alac16.m4a').locator('.m2m-remove').click();
+  // A WAV of 16-bit sound that the browser decodes a piece at a time (FLAC,
+  // through WebCodecs) holds its very samples: the engine rounds the
+  // decoder's floats itself, as Chromium makes 16 bits of them one step low
+  // for every positive sample. decodeAudioData, another decoder, gives the
+  // same samples as floats.
+  const flacWav = await page.evaluate(async data => {
+    const u8 = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    const m = await TTAudio.open(new File([u8], 'tags.flac'));
+    const t = m.tracks[m.primary];
+    const r = await TTAudio.convert(m, m.primary, { format: 'wav', tags: null }).promise;
+    TTAudio.close(m);
+    const pcm = new Int16Array((await r.blob.arrayBuffer()).slice(44));
+    const ab = await new OfflineAudioContext(1, 1, t.sr).decodeAudioData(u8.buffer.slice(0));
+    let diff = 0, positive = 0;
+    for (let c = 0; c < ab.numberOfChannels; c++) {
+      const d = ab.getChannelData(c);
+      for (let i = 0; i < ab.length; i++) {
+        const want = Math.round(d[i] * 32768);
+        if (want > 0) positive++;
+        diff = Math.max(diff, Math.abs(pcm[i * ab.numberOfChannels + c] - want));
+      }
+    }
+    return { decodable: t.decodable, samples: r.samples === ab.length, positive: positive > 100, diff };
+  }, b64('tags.flac'));
+  assert.deepEqual(flacWav, { decodable: true, samples: true, positive: true, diff: 0 }, 'a WAV of a FLAC holds its samples, bit for bit');
 
   // ---------- RIFF INFO text in UTF-8 or in Windows-1252 ----------
   for (const [name, title, artist] of [['info-utf8.wav', exp['info-utf8.wav'].info.title, exp['info-utf8.wav'].info.artist],

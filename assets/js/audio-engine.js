@@ -76,6 +76,11 @@
  *   TTAudio.MB        the Mediabunny namespace once loaded (null before).
  *   TTAudio.simd      true when WebAssembly SIMD exists (the MP3 encoder needs it).
  *   TTAudio.canWriteMp3() -> true once the MP3 encoder is registered.
+ *   TTAudio.loadAac() -> Promise: registers @mediabunny/aac-encoder
+ *     (assets/vendor/mediabunny/mediabunny-aac-encoder.min.js, loaded then),
+ *     once; convert() calls it for format 'aac' only when the browser has
+ *     no AAC encoder of its own. Rejects with NO_ENCODER (no SIMD, or the
+ *     file did not load; the next call tries again).
  *   TTAudio.PHONE     true on phones and tablets (smaller memory limits).
  *   TTAudio.limits    { wav: bytes of WAV built in memory when no o.writable
  *     takes it (2 GB, 300 MB on a phone), mp3: bytes of MP3 built in memory
@@ -185,9 +190,11 @@
  *   TTAudio.levels(buckets) -> { min, max, monoMin, monoMax (Float32Arrays of
  *     `buckets`, min > max where nothing was read), filled: seconds read,
  *     done: false }.
- *   TTAudio.scan(src, lv, { dur, stopped, onUpdate }) -> Promise of true when
- *     done (lv.done is set), false when stopped() returned true. Reads the
- *     sound from src.base for dur seconds and keeps, per bucket, the lowest
+ *   TTAudio.scan(src, lv, { dur, from, stopped, onUpdate }) -> Promise of true
+ *     when done (lv.done is set), false when stopped() returned true. Reads the
+ *     sound from src.base + from (default 0; a page that zooms in scans the
+ *     part it shows into levels of its own) for dur seconds and keeps, per
+ *     bucket, the lowest
  *     and highest sample of the sound as convert() writes it: min/max as
  *     stereo (or mono for a mono file), monoMin/monoMax as Mono. Quad and 5.1
  *     are mixed down as convert() mixes them, other layouts keep their first
@@ -209,16 +216,38 @@
  *     (0 when it cannot be told: a copy of a track whose bitrate is unknown).
  *   TTAudio.convert(media, ti, options) -> job { promise, cancel() }.
  *     options:
- *       format    'mp3' | 'wav' | 'copy' (AAC packets copied unchanged
- *                 into .m4a; no effects, the cut rounded out to whole
- *                 packets)
- *       kbps      MP3 bitrate, 64 to 320 (default 192; see mp3Plan)
+ *       format    'mp3' | 'wav' | 'aac' | 'copy' (AAC packets copied
+ *                 unchanged into .m4a; no effects, the cut rounded out to
+ *                 whole packets). 'aac' encodes AAC-LC into .m4a, at 44.1
+ *                 kHz for sound of the 44.1 kHz family (11.025, 22.05, 88.2
+ *                 kHz ...) and 48 kHz for any other rate (resampled as for
+ *                 WAV), with the browser's own encoder (WebCodecs) where
+ *                 MB.canEncodeAudio('aac') says it has one, else with
+ *                 @mediabunny/aac-encoder (FFmpeg's AAC encoder, loaded
+ *                 then: loadAac()); NO_ENCODER when neither works. The
+ *                 movie and its edit list end at the last sample, as in
+ *                 ffmpeg's own M4A files (ffprobe gives the exact length;
+ *                 ffmpeg's decoder skips the encoder delay but keeps the
+ *                 last frame's padding, up to 1,023 samples).
+ *       kbps      MP3 bitrate, 64 to 320 (default 192; see mp3Plan); AAC
+ *                 bitrate, 32 to 320 (default 192)
  *       mono      true for one channel: the average of left and right, quad
  *                 and 5.1 mixed as in scan(), the first channel of others
  *       stereo    true for two channels also from a mono track (the same
  *                 sound in both, as CD audio is always stereo); a track of
  *                 more channels is mixed or cut to two as without it
  *       sel       { start, end } in ms from t0 (default the whole track)
+ *       parts     MP3, WAV and AAC: [{ start, end }, ...] in ms from t0, in
+ *                 place of sel: the sound of these parts joined in order
+ *                 (a part cut out of the middle, for /mp3-cutter/). The
+ *                 fades are those of the whole result, and samples counts
+ *                 the result's (the sum of the parts).
+ *       join      with parts: seconds of crossfade at each join (default 0:
+ *                 the parts are butted together sample to sample). The
+ *                 crossfade is centred on the join, the parts read that
+ *                 much further on each side, so the result keeps the length
+ *                 of the parts (shorter where a part or the track has no
+ *                 room for it: at most half of either part)
  *       volume    gain factor (default 1); fadeIn, fadeOut: seconds
  *       tags      a tag model (see TAGS) to write, or null to write no tags
  *       sampleFormat  WAV: 's16' (the default, but 's24' for 24-bit ALAC,
@@ -245,16 +274,17 @@
  *                 chunk in their place below that.
  *       onProgress(fraction)
  *     promise resolves { blob, ext ('mp3' | 'wav' | 'm4a'), mime, sampleRate,
- *     channels, samples (MP3, WAV: per channel, as written), kbps (MP3),
- *     sampleFormat (WAV) }; with writable, blob is null, streamed is true
+ *     channels, samples (MP3, WAV, AAC: per channel, as written), kbps (MP3,
+ *     AAC), sampleFormat (WAV) }; with writable, blob is null, streamed is true
  *     and size is the bytes written. Rejects with CANCELLED, NO_DECODE,
  *     TOO_LONG, NOT_AAC, TOO_BIG, NO_ENCODER, CANNOT_COPY, ALAC_FAILED or
  *     ALAC_CLOSED, or another error.
- *     MP3 and WAV are made by the engine's own pipeline: the sound decoded a
- *     piece at a time from the start of the selection, cut to the sample,
- *     mixed, shaped, resampled where the rate changes (the windowed-sinc
- *     resampler below, never mediabunny's linear one), then given to the
- *     LAME encoder or to wavWriter(). A WAV keeps the sample rate of the
+ *     MP3, WAV and AAC are made by the engine's own pipeline: the sound
+ *     decoded a piece at a time from the start of the selection (of each
+ *     part in turn), cut to the sample, mixed, joined, shaped, resampled
+ *     where the rate changes (the windowed-sinc resampler below, never
+ *     mediabunny's linear one), then given to the LAME encoder, the AAC
+ *     encoder or wavWriter(). A WAV keeps the sample rate of the
  *     sound unless sampleRate says otherwise; an MP3 gets mp3Plan()'s. Every
  *     MP3 is gapless (finishMp3): its LAME tag gives the number of samples
  *     encoded, so ffmpeg, Chromium and other gapless decoders give exactly
@@ -437,6 +467,7 @@
   var VENDOR = new URL('../vendor/mediabunny/', SCRIPT || new URL('/assets/js/audio-engine.js', location.href).href).href;
   var LIB_URL = VENDOR + 'mediabunny.min.js';
   var MP3_URL = VENDOR + 'mediabunny-mp3-encoder.min.js';
+  var AAC_URL = VENDOR + 'mediabunny-aac-encoder.min.js';
   var ALAC_WORKER_URL = new URL('alac-worker.js', SCRIPT || new URL('/assets/js/audio-engine.js', location.href).href).href;
 
   var UA = navigator.userAgent;
@@ -498,6 +529,8 @@
     mp3Free: 'This MP3 is in free format (its frames state no bitrate), which browsers cannot decode.',
     wavCodec: 'This WAV file holds {codec} sound, which this page cannot decode. An audio editor can save it again as ordinary (PCM) WAV, which this page reads.',
     tooBigMp3: 'As MP3 this would be about {size}, more than the {limit} this device can build in memory.',
+    tooBigAac: 'As M4A this would be about {size}, more than the {limit} this device can build in memory.',
+    noAac: 'This browser cannot write AAC (M4A) audio here.',
     alacBits: 'This Apple Lossless file holds {bits}-bit sound, which this page cannot decode: it decodes 16 and 24-bit Apple Lossless.',
     alacChannels: 'This Apple Lossless file has {channels} channels, which this page cannot decode: it decodes Apple Lossless in mono or stereo.',
     alacBig: 'This Apple Lossless file is {size}. This page decodes Apple Lossless files of up to {limit} on this device, as the whole file is held in memory while it is decoded.',
@@ -511,6 +544,7 @@
 
   var MB = null;
   var mp3Ok = false;
+  var aacPromise = null;
   var api;
 
   // ---------- Small helpers ----------
@@ -578,6 +612,19 @@
       }).catch(function (e) { libPromise = null; throw coded('LOAD', TEXT.load, { cause: e }); });
     }
     return libPromise;
+  }
+  // FFmpeg's AAC encoder (WebAssembly), for browsers without one of their own.
+  function loadAac() {
+    if (!aacPromise) {
+      aacPromise = load().then(function () {
+        if (!SIMD) throw new Error('no WebAssembly SIMD');
+        return loadScript(AAC_URL);
+      }).then(function () { window.MediabunnyAacEncoder.registerAacEncoder(); }).catch(function (e) {
+        aacPromise = null;
+        throw e && e.code === 'LOAD' ? e : coded('NO_ENCODER', TEXT.noAac, { format: 'aac', cause: e });
+      });
+    }
+    return aacPromise;
   }
 
   // ---------- Opening a file ----------
@@ -1754,8 +1801,8 @@
       }
     }
     // Frames sf to sf + n of an AudioSample as they are, when its channels
-    // are the WAV's and nothing changes them (16-bit only: mediabunny rounds
-    // to 16 bits as add() does).
+    // are the WAV's and nothing changes them (16-bit WAV of 16-bit sound:
+    // convert() passes floats to add(), which rounds them as x 32768).
     function addSample(s, sf, n) {
       for (var i = 0; i < n;) {
         var m = Math.min(n - i, (size - at) / block);
@@ -2212,12 +2259,12 @@
   async function scan(src, lv, opts) {
     opts = opts || {};
     var stopped = opts.stopped || function () { return false; };
-    var dur = opts.dur || 0.001, B = lv.buckets, lastDraw = 0;
+    var dur = opts.dur || 0.001, B = lv.buckets, lastDraw = 0, from = src.base + (opts.from > 0 ? opts.from : 0);
     var min = lv.min, max = lv.max, mmin = lv.monoMin, mmax = lv.monoMax;
     var sink = new MB.AudioSampleSink(src.track);
-    for await (var s of sink.samples(src.base, src.base + dur)) {
+    for await (var s of sink.samples(from, from + dur)) {
       if (stopped()) { s.close(); return false; }
-      var n = s.numberOfFrames, sr = s.sampleRate, t = s.timestamp - src.base, lines = heard(s, n);
+      var n = s.numberOfFrames, sr = s.sampleRate, t = s.timestamp - from, lines = heard(s, n);
       var L = lines[0], R = lines[1], M = lines[2], i = 0;
       // One pass over each bucket's share of the sample, for every line.
       while (i < n) {
@@ -2297,9 +2344,19 @@
     var e = sel && sel.end >= 0 && sel.end < t.durMs ? sel.end : t.durMs;
     return { start: s, end: Math.max(s, e) };
   }
+  // The parts of convert()'s o.parts, inside the track and in order; null without them.
+  function partsOf(t, parts) {
+    if (!parts || !parts.length) return null;
+    return parts.map(function (p) { return selOf(t, p); }).filter(function (p) { return p.end > p.start; });
+  }
+  function partsMs(parts) { return parts.reduce(function (n, p) { return n + p.end - p.start; }, 0); }
+  function aacRate(sr) { return sr > 0 && sr % 11025 === 0 ? 44100 : 48000; }
+  function aacKbps(kbps) { return Math.max(32, Math.min(320, Math.round(+kbps) || 192)); }
   function estimate(m, ti, o) {
-    var t = m.tracks[ti], sel = selOf(t, o.sel), sec = (sel.end - sel.start) / 1000;
+    var t = m.tracks[ti], sel = selOf(t, o.sel), parts = partsOf(t, o.parts), sec = (parts ? partsMs(parts) : sel.end - sel.start) / 1000;
     if (o.format === 'mp3') return Math.round(mp3Plan(t.sr, o.kbps).kbps * 125 * sec) + 300;
+    // AAC: the frames, and an MP4 index of about 4 bytes a frame.
+    if (o.format === 'aac') return Math.round((aacKbps(o.kbps) * 125 + aacRate(t.sr) / 256) * sec) + 2000;
     if (o.format === 'wav') {
       var rate = o.sampleRate > 0 ? Math.round(o.sampleRate) : t.sr, spec = WAV_OUT[o.sampleFormat] || WAV_OUT[wavDefault(t)];
       return Math.round(sec * rate) * outChannels(t, o.mono, o.stereo) * spec.bits / 8 + 44;
@@ -2359,7 +2416,7 @@
   }
   async function run(m, ti, o, job) {
     await load();
-    var t = m.tracks[ti], fmt = o.format === 'wav' || o.format === 'copy' ? o.format : 'mp3';
+    var t = m.tracks[ti], fmt = o.format === 'wav' || o.format === 'copy' || o.format === 'aac' ? o.format : 'mp3';
     var sel = selOf(t, o.sel), len = (sel.end - sel.start) / 1000, tags = o.tags || null;
     if (t.drm) throw drmError(t.drm);
     if (fmt !== 'copy') return transcode(m, ti, o, job, fmt, sel, len, tags);
@@ -2399,33 +2456,56 @@
   // does. Every MP3 goes through finishMp3() with the number of samples
   // encoded, and every WAV through wavWriter().
   async function transcode(m, ti, o, job, fmt, sel, len, tags) {
-    var t = m.tracks[ti], ch = outChannels(t, !!o.mono, !!o.stereo), plan = null, outRate, spec = null;
+    var t = m.tracks[ti], ch = outChannels(t, !!o.mono, !!o.stereo), plan = null, outRate, spec = null, aacK = 0;
     var fx = { vol: o.volume == null ? 1 : Math.max(0, +o.volume || 0), fadeIn: Math.max(0, +o.fadeIn || 0), fadeOut: Math.max(0, +o.fadeOut || 0) };
+    // The parts joined (o.parts), or the selection alone; len is the result's.
+    var parts = partsOf(t, o.parts) || [sel], P = parts.length;
+    if (o.parts) len = partsMs(parts) / 1000;
     if (!t.decodable && !t.whole) throw noDecode(t);
-    if (fmt === 'mp3') {
+    if (fmt === 'aac') {
+      outRate = aacRate(t.sr);
+      aacK = aacKbps(o.kbps);
+      var cfg = { numberOfChannels: ch, sampleRate: outRate, bitrate: aacK * 1000 };
+      // The browser's own encoder where it has one, else FFmpeg's.
+      if (!(await MB.canEncodeAudio('aac', cfg))) {
+        await loadAac();
+        if (!(await MB.canEncodeAudio('aac', cfg))) throw coded('NO_ENCODER', TEXT.noAac, { format: fmt });
+      }
+      var aacBytes = estimate(m, ti, { format: 'aac', kbps: aacK, sel: sel, parts: o.parts });
+      if (aacBytes > LIMITS.mp3) {
+        throw coded('TOO_BIG', fill(TEXT.tooBigAac, { size: fmtBytes(aacBytes), limit: fmtBytes(LIMITS.mp3) }), { bytes: aacBytes, limit: LIMITS.mp3, format: 'aac' });
+      }
+    } else if (fmt === 'mp3') {
       plan = mp3Plan(t.sr, o.kbps);
       outRate = plan.sampleRate;
       if (!mp3Ok || !(await MB.canEncodeAudio('mp3', { numberOfChannels: ch, sampleRate: outRate, bitrate: plan.kbps * 1000 }))) {
         throw coded('NO_ENCODER', TEXT.noEncoder, { format: fmt });
       }
       // An MP3 not written into o.writable is built in memory.
-      var mp3Bytes = o.writable ? 0 : estimate(m, ti, { format: 'mp3', kbps: o.kbps, sel: sel });
+      var mp3Bytes = o.writable ? 0 : estimate(m, ti, { format: 'mp3', kbps: o.kbps, sel: sel, parts: o.parts });
       if (mp3Bytes > LIMITS.mp3) {
         throw coded('TOO_BIG', fill(TEXT.tooBigMp3, { size: fmtBytes(mp3Bytes), limit: fmtBytes(LIMITS.mp3) }), { bytes: mp3Bytes, limit: LIMITS.mp3, format: 'mp3' });
       }
     } else {
       spec = WAV_OUT[o.sampleFormat] ? o.sampleFormat : wavDefault(t);
       outRate = o.sampleRate > 0 ? Math.round(o.sampleRate) : t.sr;
-      var bytes = estimate(m, ti, { format: 'wav', sel: sel, mono: o.mono, stereo: o.stereo, sampleRate: outRate, sampleFormat: spec });
+      var bytes = estimate(m, ti, { format: 'wav', sel: sel, parts: o.parts, mono: o.mono, stereo: o.stereo, sampleRate: outRate, sampleFormat: spec });
       // A WAV not written into o.writable is built in memory.
       if (!o.writable && bytes > LIMITS.wav) throw coded('TOO_BIG', fill(TEXT.tooBig, { size: fmtBytes(bytes), limit: fmtBytes(LIMITS.wav) }), { bytes: bytes, limit: LIMITS.wav, format: 'wav' });
     }
     var src = await decodeSource(m, ti);
     if (job.cancelled) throw coded('CANCELLED', 'Conversion cancelled.');
-    var a = src.base + sel.start / 1000, b = sel.end < t.durMs ? src.base + sel.end / 1000 : t.decodable ? t.end : Infinity;
+    var a = 0, b = 0;
     var span = len > 0 ? len : 0.001, out = null, enc = null, wav = null, rs = null, inRate = 0, inCh = 0, vol = fx.vol, gain = null;
     var kept = 0, outN = 0, lastYield = performance.now(), stream = null;
-    if (fmt === 'mp3') {
+    if (fmt === 'aac') {
+      out = new MB.Output({ format: new MB.Mp4OutputFormat({ fastStart: 'in-memory' }), target: new MB.BufferTarget() });
+      enc = new MB.AudioSampleSource({ codec: 'aac', quality: new MB.Quality({ bitrate: aacK * 1000 }) });
+      out.addAudioTrack(enc);
+      out.setMetadataTags(tags ? mbTags(tags) : { creationTime: null });
+      await out.start();
+      job.onCancel = function () { return out.cancel(); };
+    } else if (fmt === 'mp3') {
       // Into o.writable as it is made (mp3Stream), else into memory.
       if (o.writable) stream = job.stream = mp3Stream(o.writable, tags, outRate, ch, plan.kbps);
       out = stream ? new MB.Output({ format: new MB.Mp3OutputFormat({ xingHeader: false }), target: new MB.StreamTarget(stream.sink) })
@@ -2442,7 +2522,7 @@
     }
     // The encoder gets about a second at a time: each block is a round trip
     // to its worker, and small ones would leave it waiting.
-    var block = fmt === 'mp3' ? outRate : 0, pend = null, pendN = 0, sent = 0;
+    var block = fmt === 'mp3' || fmt === 'aac' ? outRate : 0, pend = null, pendN = 0, sent = 0;
     async function send() {
       if (!pendN) return;
       var d = pendN === block ? pend : pend.subarray(0, pendN * ch);
@@ -2476,7 +2556,65 @@
       kept += n;
       await emit(rs ? rs.process(planes, n) : planes);
     }
+    // Parts (o.parts) go through mix(): the head of a part after a join is
+    // crossfaded (linearly, so it never goes louder than either side) with
+    // the tail of the part before, which was held back: the last `hold`
+    // samples of each part that a join follows. Then volume and fades.
+    var half = [], got = 0, done = 0, hold = -1, fifo = null, fifoN = 0, tail = null, tailN = 0, mixed = 0, pi = 0;
+    for (var j = 0; j < P - 1; j++) {
+      half.push(Math.max(0, Math.min(Math.max(0, +o.join || 0) / 2, (t.durMs - parts[j].end) / 1000, parts[j + 1].start / 1000,
+        (parts[j].end - parts[j].start) / 2000, (parts[j + 1].end - parts[j + 1].start) / 2000)));
+    }
+    async function shaped(planes, n) {
+      if (!n) return;
+      shape(planes, n, kept / inRate, inRate, vol, gain, fx, len);
+      await feed(planes, n);
+    }
+    async function mix(planes, n) {
+      var c, i;
+      if (hold < 0) hold = pi < P - 1 ? Math.round(2 * half[pi] * inRate) : 0;
+      if (tail && mixed < tailN) {
+        var k = Math.min(n, tailN - mixed);
+        for (c = 0; c < ch; c++) {
+          var p = planes[c], q = tail[c];
+          for (i = 0; i < k; i++) { var w = (mixed + i + 0.5) / tailN; p[i] = q[mixed + i] * (1 - w) + p[i] * w; }
+        }
+        mixed += k;
+      }
+      if (!hold) { await shaped(planes, n); return; }
+      var all = fifoN + n, give = Math.max(0, all - hold), keepN = all - give, next = [], now = [];
+      for (c = 0; c < ch; c++) {
+        var x = new Float32Array(all);
+        if (fifoN) x.set(fifo[c].subarray(0, fifoN));
+        x.set(planes[c].subarray(0, n), fifoN);
+        now.push(x.subarray(0, give));
+        next.push(x.slice(give));
+      }
+      fifo = next; fifoN = keepN;
+      await shaped(now, give);
+    }
+    // The end of part pi: what is held becomes the tail for the next join.
+    async function mixEnd() {
+      if (tail && mixed < tailN) {
+        // A part shorter than its crossfade: the rest of the tail, fading out.
+        var rest = [], n = tailN - mixed;
+        for (var c = 0; c < ch; c++) {
+          var r = new Float32Array(n);
+          for (var i = 0; i < n; i++) r[i] = tail[c][mixed + i] * (1 - (mixed + i + 0.5) / tailN);
+          rest.push(r);
+        }
+        mixed = tailN;
+        await shaped(rest, n);
+      }
+      tail = fifoN ? fifo : null; tailN = fifoN; mixed = 0;
+      fifo = null; fifoN = 0; hold = -1;
+    }
     try {
+      for (pi = 0; pi < P && !job.cancelled; pi++) {
+      var part = parts[pi], hb = pi ? half[pi - 1] : 0, ha = pi < P - 1 ? half[pi] : 0;
+      a = src.base + part.start / 1000 - hb;
+      b = part.end < t.durMs || ha ? src.base + part.end / 1000 + ha : t.decodable ? t.end : Infinity;
+      got = 0;
       for await (var s of new MB.AudioSampleSink(src.track).samples(a, b)) {
         try {
           if (job.cancelled) break;
@@ -2490,35 +2628,53 @@
             gain = gainFn(vol, fx.fadeIn, fx.fadeOut, len);
             if (inRate !== outRate) rs = resampler(inRate, outRate, ch);
           } else if (sr !== inRate || s.numberOfChannels !== inCh) throw new Error('The sound changes its sample rate or channels partway through.');
-          // Silence for a gap before this sample (any gap at the start).
-          var gap = Math.round((s.timestamp + sf / sr - a) * sr) - kept;
-          while (gap >= (kept ? 64 : 1)) {
+          // Silence for a gap before this sample (any gap at the start of a part).
+          var gap = Math.round((s.timestamp + sf / sr - a) * sr) - got;
+          while (gap >= (got ? 64 : 1)) {
             var z = Math.min(gap, sr), zs = [];
             for (var c = 0; c < ch; c++) zs.push(new Float32Array(z));
-            await feed(zs, z);
+            got += z;
+            await (P > 1 ? mix(zs, z) : feed(zs, z));
             gap -= z;
           }
           // Sound that nothing changes goes on as it is decoded.
           var k0 = kept / inRate, m0 = ef - sf;
-          if (inCh === ch && !rs && vol === 1 && k0 >= fx.fadeIn && k0 + m0 / inRate <= len - fx.fadeOut && (enc || wav.addSample)) {
+          got += m0;
+          // A WAV takes 16-bit sound as it is (addSample), not a browser
+          // decoder's floats: Chromium turns those into 16 bits as x 32767,
+          // truncated, one step low for half of the samples of a FLAC.
+          if (P === 1 && inCh === ch && !rs && vol === 1 && k0 >= fx.fadeIn && k0 + m0 / inRate <= len - fx.fadeOut && (enc || (wav.addSample && /^s16/.test(s.format)))) {
             kept += m0;
             await emit(m0, s, sf);
           } else {
             var planes = mixDown(s, sf, m0, inCh, ch);
-            shape(planes, m0, k0, inRate, vol, gain, fx, len);
-            await feed(planes, m0);
+            if (P > 1) await mix(planes, m0);
+            else {
+              shape(planes, m0, k0, inRate, vol, gain, fx, len);
+              await feed(planes, m0);
+            }
           }
-          if (o.onProgress) o.onProgress(Math.max(0, Math.min(1, (s.timestamp + s.duration - a) / span)));
+          if (o.onProgress) o.onProgress(Math.max(0, Math.min(1, (done + s.timestamp + s.duration - a - hb) / span)));
           if (performance.now() - lastYield > 40) { await yieldNow(); lastYield = performance.now(); }
         } finally {
           s.close();
         }
       }
+      if (P > 1 && inRate) await mixEnd();
+      done += (part.end - part.start) / 1000;
+      }
       if (job.cancelled) throw coded('CANCELLED', 'Conversion cancelled.');
       if (rs) await emit(rs.flush());
       if (enc) await send();
       var result = { ext: fmt, mime: fmt === 'mp3' ? 'audio/mpeg' : 'audio/wav', channels: ch, sampleRate: outRate, samples: outN };
-      if (wav) {
+      if (fmt === 'aac') {
+        enc.close();
+        await out.finalize();
+        result.ext = 'm4a';
+        result.mime = 'audio/mp4';
+        result.kbps = aacK;
+        result.blob = new Blob([m4aExact(new Uint8Array(out.target.buffer), outN, outRate)], { type: 'audio/mp4' });
+      } else if (wav) {
         result.sampleFormat = spec;
         if (o.writable) {
           result.size = await wav.finish(tags);
@@ -2543,6 +2699,38 @@
       job.onCancel = null;
     }
   }
+  // An M4A whose movie, track and edit list end at its last sample: mediabunny
+  // ends them at the end of the last AAC frame, up to 1,023 samples of
+  // padding later. ffmpeg's own M4A files end them exactly, and ffprobe then
+  // gives the exact length. Only shortens; anything it cannot read stays.
+  function m4aExact(b, samples, rate) {
+    var kids = function (x) { return boxesIn(b, x[1] + x[2], x[1] + x[3]); };
+    var named = function (list, type) { return list.filter(function (x) { return x[0] === type; }); };
+    var moov = named(boxesIn(b, 0, b.length), 'moov')[0];
+    if (!moov || !(samples > 0) || !(rate > 0)) return b;
+    var top = kids(moov), mvhd = named(top, 'mvhd')[0];
+    if (!mvhd) return b;
+    var v1 = b[mvhd[1] + 8] === 1, want = Math.round(samples * u32be(b, mvhd[1] + (v1 ? 28 : 20)) / rate);
+    function put(p, wide) {
+      var have = wide ? u32be(b, p) * 4294967296 + u32be(b, p + 4) : u32be(b, p);
+      if (!(want < have)) return;
+      if (wide) { put32be(b, p, Math.floor(want / 4294967296)); put32be(b, p + 4, want % 4294967296); } else put32be(b, p, want);
+    }
+    put(mvhd[1] + (v1 ? 32 : 24), v1);
+    named(top, 'trak').forEach(function (trak) {
+      kids(trak).forEach(function (x) {
+        var w = b[x[1] + 8] === 1;
+        if (x[0] === 'tkhd') put(x[1] + (w ? 36 : 28), w);
+        if (x[0] === 'edts') {
+          named(kids(x), 'elst').forEach(function (e) {
+            var we = b[e[1] + 8] === 1;
+            if (u32be(b, e[1] + 12) === 1) put(e[1] + 16, we);
+          });
+        }
+      });
+    });
+    return b;
+  }
   function isCancel(err) {
     return !!err && (err.code === 'CANCELLED' || err.name === 'ConversionCanceledError' ||
       (MB && MB.ConversionCanceledError && err instanceof MB.ConversionCanceledError) || /cancel/i.test(err.message || ''));
@@ -2560,7 +2748,7 @@
 
   api = window.TTAudio = {
     MB: null, simd: SIMD, PHONE: PHONE, limits: LIMITS, text: TEXT,
-    load: load, loadScript: loadScript, canWriteMp3: function () { return mp3Ok; },
+    load: load, loadScript: loadScript, canWriteMp3: function () { return mp3Ok; }, loadAac: loadAac,
     open: open, close: close, codecName: codecName, channelsText: channelsText,
     decodeSource: decodeSource, release: release, buffers: buffers, mixGain: mixGain, gainFn: gainFn,
     levels: levels, scan: scan, peak: peak,
