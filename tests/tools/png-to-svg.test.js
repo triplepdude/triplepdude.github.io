@@ -519,7 +519,7 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
     ['compress-image', 'hdr-pq.heic', /This is an HDR picture\. It is traced in standard range/]]) {
     await page.setInputFiles('#p2s-file', { name: n, mimeType: n.endsWith('.heic') ? 'image/heic' : 'image/png', buffer: fs.readFileSync(path.join(fixtures, '..', dir, n)) });
     await page.waitForFunction(name => document.querySelector('#p2s-drop-title').textContent === name, n);
-    await page.waitForFunction(r => new RegExp(r).test(document.querySelector('#p2s-note').textContent), re.source);
+    assert.match(await page.textContent('#p2s-note'), re, `the note on ${n}`); // written before the name shows
   }
   // Nothing to draw: say why, and Copy refuses as Download does.
   const drawn = fill => page.evaluate(fill => {
@@ -576,6 +576,9 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   await phone.waitForFunction(y => scrollY !== y, sy, { timeout: 10000 }).catch(() => {});
   assert.ok(await phone.evaluate(y => scrollY > y, sy), 'a swipe on the picture scrolls the page');
   assert.equal(await phone.$eval('#p2s-stage', el => el.style.getPropertyValue('--cut')), '50%', 'and leaves the divider where it was');
+  // A tap while the swipe's fling still runs only stops the fling, so wait for the page to come to rest.
+  const settled = () => phone.waitForFunction(() => new Promise(r => { const y = scrollY; setTimeout(() => r(scrollY === y), 200); }), null, { timeout: 10000 });
+  await settled();
   await phone.tap('#p2s-pickbtn');
   await phone.locator('#p2s-view').scrollIntoViewIfNeeded();
   const pb = await phone.locator('#p2s-stage').boundingBox();
@@ -587,7 +590,6 @@ module.exports = async ({ page, open, assert, fixtures, url }) => {
   assert.ok(knobH >= 44, `touch targets are 44 px tall: ${knobH}`);
   // A finger on the knob drags the divider, and the page stays put. (Last: in this emulation a tap
   // straight after a drag is not clicked, which a real finger is too slow to meet.)
-  const settled = () => phone.waitForFunction(() => new Promise(r => { const y = scrollY; setTimeout(() => r(scrollY === y), 200); }), null, { timeout: 10000 });
   await phone.$eval('#p2s-view', el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
   await settled();
   const kn = await phone.$eval('#p2s-knob', el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
