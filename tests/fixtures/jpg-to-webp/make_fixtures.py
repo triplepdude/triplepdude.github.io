@@ -16,6 +16,13 @@
 #   tiny.jpg     1 x 1;  cut.jpg  camera.jpg cut off at 40%;  empty.jpg  0 bytes
 #   notes.jpg    a text file named .jpg;  png-named.jpg  a PNG named .jpg
 #   small.heic   a copy of tests/fixtures/image-converter/small.heic (64 x 48)
+#   p3.heic      a copy of tests/fixtures/heic-to-jpg/display-p3.heic (128 x 64,
+#                Display P3, as iPhones save HEIC)
+#   iphone.jpg   as an iPhone saves a portrait JPG: 600 x 450 stored sideways
+#                (Orientation 6) with an ICC v4 Display P3 profile like Apple's
+#                (p3v4.icc: parametric curves, a multi-language name), camera
+#                EXIF with the stored pixel size, and a GPS position; a patch of
+#                the most saturated P3 red, which sRGB cannot show
 # The WebP files the page makes are checked with ../png-to-webp/verify.py.
 import io, struct
 import numpy as np
@@ -45,6 +52,34 @@ def matrix_profile(name, r, g, b, gamma):
     hdr = (struct.pack('>I', 128 + len(body)) + b'\0' * 4 + bytes([2, 0x10, 0, 0]) + b'mntrRGB XYZ ' + b'\0' * 12 +
            b'acsp' + b'\0' * 28 + s15(0.9642) + s15(1.0) + s15(0.8249) + b'\0' * 48)
     assert len(hdr) == 128
+    return hdr + body
+
+# An ICC v4 matrix profile as Apple writes it: 'para' curves (the sRGB curve) and
+# 'mluc' text. Colorants are adapted to D50 with the Bradford matrix.
+def mluc(t):
+    u = t.encode('utf-16-be')
+    return b'mluc' + b'\0' * 4 + struct.pack('>II', 1, 12) + b'enUS' + struct.pack('>II', len(u), 28) + u
+
+def v4_profile(name, xy):
+    B = np.array([[0.8951, 0.2664, -0.1614], [-0.7502, 1.7135, 0.0367], [0.0389, -0.0685, 1.0296]])
+    cols = np.array([[x / y, 1, (1 - x - y) / y] for x, y in xy]).T
+    w65 = np.array([0.3127 / 0.3290, 1, (1 - 0.3127 - 0.3290) / 0.3290]); w50 = np.array([0.9642, 1.0, 0.8249])
+    M = cols * np.linalg.solve(cols, w65)
+    M = np.linalg.inv(B) @ np.diag((B @ w50) / (B @ w65)) @ B @ M
+    para = b'para' + b'\0' * 4 + struct.pack('>HH', 3, 0) + s15(2.4) + s15(1 / 1.055) + s15(0.055 / 1.055) + s15(1 / 12.92) + s15(0.04045)
+    tags = [(b'desc', mluc(name)), (b'cprt', mluc('No copyright, test profile')), (b'wtpt', xyz(0.9642, 1.0, 0.8249)),
+            (b'rXYZ', xyz(*M[:, 0])), (b'gXYZ', xyz(*M[:, 1])), (b'bXYZ', xyz(*M[:, 2])), (b'rTRC', para), (b'gTRC', para), (b'bTRC', para)]
+    table, blob, off, seen = struct.pack('>I', len(tags)), b'', 128 + 4 + 12 * len(tags), {}
+    for sig, d in tags:
+        if d not in seen:
+            while (off + len(blob)) % 4: blob += b'\0'
+            seen[d] = off + len(blob)
+            blob += d
+        table += sig + struct.pack('>II', seen[d], len(d))
+    body = table + blob
+    while (128 + len(body)) % 4: body += b'\0'
+    hdr = (struct.pack('>I', 128 + len(body)) + b'\0' * 4 + bytes([4, 0x30, 0, 0]) + b'mntrRGB XYZ ' + b'\0' * 12 +
+           b'acsp' + b'\0' * 28 + s15(0.9642) + s15(1.0) + s15(0.8249) + b'\0' * 48)
     return hdr + body
 
 # ---------- camera.jpg: stored sideways, Orientation 6 ----------
@@ -89,6 +124,23 @@ ramp[:, :, 1] = 120
 ramp[:, :, 2] = 255 - ramp[:, :, 0]
 Image.fromarray(ramp).save('pano.jpg', quality=85)
 Image.new('RGB', (1, 1), (10, 120, 200)).save('tiny.jpg', quality=95)
+
+# ---------- iphone.jpg: a portrait photo as an iPhone saves it ----------
+p3v4 = v4_profile('Display P3 (test, v4)', [(0.680, 0.320), (0.265, 0.690), (0.150, 0.060)])
+ImageCms.ImageCmsProfile(io.BytesIO(p3v4))      # littleCMS reads it
+open('p3v4.icc', 'wb').write(p3v4)
+srgb = ImageCms.createProfile('sRGB')
+up = Image.fromarray(data.astronaut()).resize((450, 600), Image.LANCZOS)   # upright, portrait
+up = ImageCms.profileToProfile(up, srgb, ImageCms.ImageCmsProfile(io.BytesIO(p3v4)))   # the same look, stored as P3
+a = np.asarray(up).copy()
+a[20:80, 20:80] = (255, 0, 0)                    # P3's own red, beyond sRGB
+ex = Image.Exif()
+ex[0x010F] = 'Apple'; ex[0x0110] = 'iPhone (test)'; ex[0x0112] = 6
+ex.get_ifd(0x8769)[0x9003] = '2026:11:02 09:08:07'
+ex.get_ifd(0x8769)[0xA002] = 600; ex.get_ifd(0x8769)[0xA003] = 450    # the stored size
+gps = ex.get_ifd(0x8825)
+gps[1] = 'N'; gps[2] = (40.0, 41.0, 21.25); gps[3] = 'W'; gps[4] = (74.0, 2.0, 40.75); gps[6] = 12.5
+Image.fromarray(a).transpose(Image.ROTATE_90).save('iphone.jpg', quality=90, icc_profile=p3v4, exif=ex.tobytes())
 
 # ---------- broken and odd files ----------
 b = open('camera.jpg', 'rb').read()

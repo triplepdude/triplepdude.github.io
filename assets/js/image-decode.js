@@ -472,23 +472,46 @@
     return null;
   }
   // The ICC colour profile of a JPEG: APP2 ICC_PROFILE segments, which a big
-  // profile spreads over several, joined in their order. Null without one.
+  // profile spreads over several, joined in their order. Null without one, and,
+  // as libjpeg (so browsers) reads it, when a part is missing, repeated or cut off.
   function jpegIcc(b) {
-    var i = 2, parts = [], n = 0;
+    var i = 2, parts = [], n = 0, count = 0;
     while (i + 4 <= b.length && b[i] === 0xFF) {
       var m = b[i + 1];
       if (m === 0xD8 || (m >= 0xD0 && m <= 0xD7) || m === 0xFF) { i += m === 0xFF ? 1 : 2; continue; }
       if (m === 0xDA || m === 0xD9) break;
       var len = u16be(b, i + 2);
-      if (m === 0xE2 && len > 16 && ascii(b, i + 4, 12) === 'ICC_PROFILE\0') parts.push({ seq: b[i + 16], data: b.subarray(i + 18, Math.min(b.length, i + 2 + len)) });
+      if (m === 0xE2 && len > 16 && ascii(b, i + 4, 12) === 'ICC_PROFILE\0') {
+        if (i + 2 + len > b.length) return null;
+        parts.push({ seq: b[i + 16], data: b.subarray(i + 18, i + 2 + len) });
+        count = b[i + 17];
+      }
       i += 2 + len;
     }
     if (!parts.length) return null;
     parts.sort(function (x, y) { return x.seq - y.seq; });
+    if (parts.length !== count || parts.some(function (p, k) { return p.seq !== k + 1; })) return null;
     parts.forEach(function (p) { n += p.data.length; });
     var out = new Uint8Array(n), at = 0;
     parts.forEach(function (p) { out.set(p.data, at); at += p.data.length; });
     return out;
+  }
+  // A JPEG's first bytes, read on until they hold every segment before the image
+  // data (EXIF, the ICC profile, the frame header): Photoshop embeds print
+  // profiles of 0.5 to 0.7 MB in CMYK JPEGs, past the first 256 KB.
+  async function jpegHead(file, b) {
+    var i = 2;
+    for (;;) {
+      while (i + 4 <= b.length && b[i] === 0xFF) {
+        var m = b[i + 1];
+        if (m === 0xD8 || (m >= 0xD0 && m <= 0xD7) || m === 0xFF) { i += m === 0xFF ? 1 : 2; continue; }
+        if (m === 0xDA || m === 0xD9) return b;
+        i += 2 + u16be(b, i + 2);
+      }
+      // Not a marker (damaged), or the whole file read: nothing more to find.
+      if (i + 4 <= b.length || b.length >= file.size) return b;
+      b = await readRange(file, 0, Math.min(file.size, Math.max(2 * b.length, i + 65540)));
+    }
   }
   // The ICC profile of a PNG (an iCCP chunk: a name, then the zlib-compressed profile).
   async function pngIcc(b) {
@@ -2093,6 +2116,7 @@
     var head = await readRange(file, 0, 262144);
     var fmt = sniffBytes(head);
     if (!fmt) throw fail('UNSUPPORTED', notImage(head));
+    if (fmt === 'jpeg') head = await jpegHead(file, head);
     var res = { format: fmt, orientation: 1, exif: null, animated: false, frames: null, images: 1, colorProfile: null, decoder: 'browser', warnings: [] };
     var dims = headerSize(head, fmt), src = null, canvas = null, h = null, inWorker = false, W = 0, H = 0, i, opaqueAvif = false, opaquePng = false, keep = false;
     if (dims && dims[0] * dims[1] > maxPixels) throw tooBig(dims[0], dims[1], maxPixels);
