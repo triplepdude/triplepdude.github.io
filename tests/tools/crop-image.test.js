@@ -368,6 +368,15 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
   assert.equal(await page.inputValue('#crp-oh'), '100');
   await type('#crp-ow', '100');
   assert.equal(await page.inputValue('#crp-oh'), '50');
+  // A wrong height is written over as soon as the box moves, and its message goes with it, so
+  // saving is not refused over a field that shows a right value.
+  await type('#crp-oh', 'abc');
+  assert.equal((await errOf('#crp-oh')).invalid, 'true');
+  await page.focus('#crp-editor');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.inputValue('#crp-oh'), '50');
+  assert.deepEqual(await errOf('#crp-oh'), { invalid: null, msg: '' }, 'the height shows a right value again, so it is no longer marked wrong');
   await type('#crp-dpi', '0');
   assert.deepEqual(await errOf('#crp-dpi'), { invalid: 'true', msg: 'Enter the DPI as a whole number from 1 to 65,535, such as 300, or leave it empty.' });
   await type('#crp-dpi', '300');
@@ -666,7 +675,13 @@ module.exports = async ({ page, open, assert, fixtures, url, base }) => {
 
   // ---------- A print size on a portrait photo turns with it, also when chosen before it was opened ----------
   const outSize = async () => [await page.inputValue('#crp-ow'), await page.inputValue('#crp-oh'), await page.inputValue('#crp-dpi')];
+  // A wrong custom ratio is left behind when a ready-made size of another ratio hides its field:
+  // it no longer counts, so saving is not refused over a field that cannot be seen.
+  await page.selectOption('#crp-ratio', 'custom');
+  await type('#crp-custom', 'abc');
   await page.selectOption('#crp-preset', 'print-4x6');
+  assert.equal(await page.isHidden('#crp-custom-field'), true);
+  assert.deepEqual(await errOf('#crp-custom'), { invalid: null, msg: '' }, 'the hidden custom ratio is not marked wrong');
   assert.deepEqual(await outSize(), ['1800', '1200', '300'], 'the square p3.jpg gets the landscape print');
   await openFile('photo.jpg');
   assert.equal(await page.getAttribute('#crp-file', 'aria-invalid'), null);

@@ -555,7 +555,7 @@ faq:
   }
   function followOut(changed) {
     if (sizeSel.value !== 'set') return;
-    var R = ratio(), b = st.box;
+    var R = ratio(), b = st.box, other = changed === 'h' ? owIn : ohIn;
     if (changed === 'h') {
       var oh = parseWhole(ohIn.value);
       if (oh >= 1) owIn.value = String(Math.max(1, Math.round(R ? oh * R : oh * b.w / b.h)));
@@ -563,6 +563,8 @@ faq:
       var ow = parseWhole(owIn.value);
       if (ow >= 1) ohIn.value = String(Math.max(1, Math.round(R ? ow / R : ow * b.h / b.w)));
     }
+    // A wrong field written over with a number is checked again, so its message goes.
+    if (other.getAttribute('aria-invalid') === 'true') checkOut();
   }
   function outError() {
     if (sizeSel.value === 'set') {
@@ -1055,7 +1057,9 @@ faq:
     if (!p) return;
     ratioSel.value = p.ratio;
     customField.hidden = p.ratio !== 'custom';
-    if (p.custom) { st.custom = p.custom.slice(); customIn.value = p.custom.join(':'); showError(ratioErr, [customIn], null, ''); }
+    if (p.custom) { st.custom = p.custom.slice(); customIn.value = p.custom.join(':'); }
+    // A custom ratio that was wrong is replaced, or hidden and no longer used.
+    showError(ratioErr, [customIn], null, '');
     st.swap = !!p.print && st.wh > st.ww;
     sizeSel.value = 'set';
     showOutFields();
@@ -1395,7 +1399,7 @@ faq:
   // ratio (a page kept whole by the back-forward cache) stays as it was.
   window.addEventListener('pageshow', function () {
     customField.hidden = ratioSel.value !== 'custom';
-    if (ratioSel.value === 'custom') readCustom();
+    if (ratioSel.value === 'custom') readCustom(); else showError(ratioErr, [customIn], null, '');
     showOutFields();
     var R = ratio(), b = st.box;
     if (R && b.h !== Math.max(1, Math.round(b.w / R)) && b.w !== Math.max(1, Math.round(b.h * R))) applyRatio(true);
